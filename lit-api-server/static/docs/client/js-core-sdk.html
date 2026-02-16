@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JavaScript Core SDK – Lit Node Simple API</title>
+  <link rel="stylesheet" href="doc.css">
+</head>
+<body>
+  <div class="doc-wrap">
+    <nav class="doc-breadcrumb">
+      <a href="js-core-sdk.html">SDK</a> / Core API
+    </nav>
+    <h1 class="doc-title">JavaScript Core SDK</h1>
+    <p class="doc-intro">
+      Wrapper for the Lit Node Simple API v1 core endpoints. Use <code>core_sdk.js</code> for API key management, PKP minting, signing, lit actions, encryption, and signature combination.
+    </p>
+
+    <div class="doc-tip">
+      <strong>Tip</strong>
+      Types match <code>core/v1/models</code> (request.rs, response.rs) and <code>core/v1/endpoints.rs</code>. All methods return Promises and throw on non-2xx HTTP responses.
+    </div>
+
+    <h2 id="prerequisites">Prerequisites</h2>
+    <div class="doc-note">
+      <strong>Note</strong>
+      <ul>
+        <li><strong>baseUrl</strong> — API server URL (default <code>http://localhost:8000</code>).</li>
+        <li><strong>apiKey</strong> — From <code>getApiKey()</code> for wallet-scoped operations (mint PKP, sign, encrypt, lit action).</li>
+      </ul>
+    </div>
+
+    <h2 id="quick-example">Quick Example</h2>
+    <pre><code>import { createClient, SIGNING_SCHEME_ECDSA_K256_SHA256 } from './core_sdk.js';
+
+const client = createClient('http://localhost:8000');
+
+const { api_key, wallet_address } = await client.getApiKey();
+const { pkp_public_key } = await client.mintPkp(api_key);
+
+const signResp = await client.signWithPkp({
+  apiKey: api_key,
+  pkpPublicKey: pkp_public_key,
+  message: 'hello world',
+});
+
+const { signature, r, s, recovery_id } = await client.combineSignatureShares({
+  apiKey: api_key,
+  shareData: signResp,
+});</code></pre>
+
+    <h2 id="client-and-factory">Client & factory</h2>
+
+    <div class="doc-method">
+      <div class="doc-method-name">createClient(baseUrl?)</div>
+      <div class="doc-method-desc">Factory that returns a <code>LitNodeSimpleApiClient</code>. Default base URL: <code>http://localhost:8000</code>.</div>
+      <div class="doc-method-endpoint">Export: <code>createClient</code></div>
+    </div>
+
+    <div class="doc-method">
+      <div class="doc-method-name">new LitNodeSimpleApiClient({ baseUrl })</div>
+      <div class="doc-method-desc">Construct client with optional <code>baseUrl</code>. Trailing slashes are stripped.</div>
+    </div>
+
+    <h2 id="api-key-and-handshake">API key & handshake</h2>
+
+    <div class="doc-method">
+      <div class="doc-method-name">getApiKey()</div>
+      <div class="doc-method-desc">Generates and returns a new API key (hex-encoded wallet secret) and wallet address.</div>
+      <div class="doc-method-endpoint">GET /get_api_key</div>
+      <p><strong>Returns:</strong> <code>Promise&lt;GetApiKeyResponse&gt;</code> — <code>{ api_key, wallet_address }</code></p>
+    </div>
+
+    <div class="doc-method">
+      <div class="doc-method-name">handshake()</div>
+      <div class="doc-method-desc">Performs handshake with validators and returns their responses.</div>
+      <div class="doc-method-endpoint">GET /handshake</div>
+      <p><strong>Returns:</strong> <code>Promise&lt;HandshakeResponse&gt;</code> — <code>{ responses }</code> (array of strings)</p>
+    </div>
+
+    <h2 id="pkp-mint-and-sign">PKP: mint & sign</h2>
+
+    <div class="doc-method">
+      <div class="doc-method-name">mintPkp(apiKey)</div>
+      <div class="doc-method-desc">Mints a new PKP for the wallet identified by the API key.</div>
+      <div class="doc-method-endpoint">GET /mint_pkp/&lt;api_key&gt;</div>
+      <p><strong>Parameters:</strong> <code>apiKey</code> (string) — Hex-encoded API key from <code>getApiKey()</code>.</p>
+      <p><strong>Returns:</strong> <code>Promise&lt;MintPkpResponse&gt;</code> — <code>{ pkp_public_key }</code></p>
+    </div>
+
+    <div class="doc-method">
+      <div class="doc-method-name">signWithPkp({ apiKey, pkpPublicKey, message, signingScheme? })</div>
+      <div class="doc-method-desc">Signs a message with the given PKP using the provided API key. Uses <code>EcdsaK256Sha256</code> by default. Pass the full response to <code>combineSignatureShares</code> as <code>shareData</code>.</div>
+      <div class="doc-method-endpoint">POST /sign_with_pkp</div>
+      <p><strong>Options:</strong></p>
+      <table>
+        <thead><tr><th>Property</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>apiKey</code></td><td>string</td><td>Hex-encoded API key</td></tr>
+          <tr><td><code>pkpPublicKey</code></td><td>string</td><td>PKP public key</td></tr>
+          <tr><td><code>message</code></td><td>string</td><td>Message to sign</td></tr>
+          <tr><td><code>signingScheme</code></td><td>string</td><td>Optional; default <code>EcdsaK256Sha256</code> (use <code>SIGNING_SCHEME_ECDSA_K256_SHA256</code>)</td></tr>
+        </tbody>
+      </table>
+      <p><strong>Returns:</strong> <code>Promise&lt;SignWithPkpResponse&gt;</code> — <code>{ signing_scheme, signed_digest, public_key, share_type, shares, ... }</code>. Pass the whole object as <code>shareData</code> to <code>combineSignatureShares</code>.</p>
+    </div>
+
+    <div class="doc-method">
+      <div class="doc-method-name">combineSignatureShares({ apiKey, shareData })</div>
+      <div class="doc-method-desc">Combines signature shares. <code>shareData</code> must be the full <code>SignWithPkpResponse</code> object returned by <code>signWithPkp</code>.</div>
+      <div class="doc-method-endpoint">POST /combine_signature_shares</div>
+      <p><strong>Returns:</strong> <code>Promise&lt;CombineSignatureSharesResponse&gt;</code> — <code>{ signature, signed_data, verifying_key, r, s, recovery_id }</code></p>
+    </div>
+
+    <h3>Signing scheme constant</h3>
+    <p>Export <code>SIGNING_SCHEME_ECDSA_K256_SHA256</code> = <code>'EcdsaK256Sha256'</code> (secp256k1 + SHA-256). Use when passing <code>signingScheme</code> explicitly.</p>
+
+    <h2 id="lit-action">Lit action</h2>
+
+    <div class="doc-method">
+      <div class="doc-method-name">litAction({ apiKey, code, jsParams? })</div>
+      <div class="doc-method-desc">Executes a lit action with the given JavaScript code and optional JSON params.</div>
+      <div class="doc-method-endpoint">POST /lit_action</div>
+      <p><strong>Options:</strong> <code>apiKey</code> (string), <code>code</code> (string — lit action JS source), <code>jsParams</code> (object, optional).</p>
+      <p><strong>Returns:</strong> <code>Promise&lt;LitActionResponses&gt;</code> — <code>{ responses }</code> (array of <code>{ signatures, response, logs }</code>)</p>
+    </div>
+
+    <h2 id="encrypt-decrypt">Encrypt & decrypt</h2>
+
+    <div class="doc-method">
+      <div class="doc-method-name">encrypt({ apiKey, message })</div>
+      <div class="doc-method-desc">Encrypts a message (time-lock encryption) for the wallet identified by the API key. Store <code>ciphertext</code> and <code>data_to_encrypt_hash</code> for decrypt.</div>
+      <div class="doc-method-endpoint">POST /encrypt</div>
+      <p><strong>Returns:</strong> <code>Promise&lt;EncryptResponse&gt;</code> — <code>{ ciphertext, data_to_encrypt_hash }</code></p>
+    </div>
+
+    <div class="doc-method">
+      <div class="doc-method-name">decrypt({ apiKey, shares, ciphertext, dataToEncryptHash })</div>
+      <div class="doc-method-desc">Decrypts ciphertext using decryption shares from the network/nodes. <code>dataToEncryptHash</code> is the hex SHA-256 hash of the original plaintext (from encrypt response).</div>
+      <div class="doc-method-endpoint">POST /decrypt</div>
+      <p><strong>Options:</strong> <code>apiKey</code>, <code>shares</code> (array of hex strings), <code>ciphertext</code> (base64), <code>dataToEncryptHash</code> (hex).</p>
+      <p><strong>Returns:</strong> <code>Promise&lt;DecryptResponse&gt;</code> — <code>{ decrypted_text }</code></p>
+    </div>
+
+    <h2 id="response-types">Response types (summary)</h2>
+    <table>
+      <thead><tr><th>Type</th><th>Fields</th></tr></thead>
+      <tbody>
+        <tr><td>GetApiKeyResponse</td><td><code>api_key</code>, <code>wallet_address</code></td></tr>
+        <tr><td>HandshakeResponse</td><td><code>responses</code></td></tr>
+        <tr><td>MintPkpResponse</td><td><code>pkp_public_key</code></td></tr>
+        <tr><td>SignWithPkpResponse</td><td><code>shares</code>, <code>curve_type</code></td></tr>
+        <tr><td>CombineSignatureSharesResponse</td><td><code>signature</code>, <code>signed_data</code>, <code>verifying_key</code>, <code>r</code>, <code>s</code>, <code>v</code>, <code>recovery_id</code></td></tr>
+        <tr><td>EncryptResponse</td><td><code>ciphertext</code>, <code>data_to_encrypt_hash</code></td></tr>
+        <tr><td>DecryptResponse</td><td><code>decrypted_text</code></td></tr>
+        <tr><td>LitActionResponses</td><td><code>responses</code> (LitActionResponse[])</td></tr>
+      </tbody>
+    </table>
+
+    <footer class="doc-footer">
+      <a href="js-transfer-sdk.html">JavaScript Transfer SDK →</a>
+      <a href="js-swap-sdk.html">JavaScript Swap SDK →</a>
+    </footer>
+  </div>
+</body>
+</html>

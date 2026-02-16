@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JavaScript Swap SDK – Lit Node Simple API</title>
+  <link rel="stylesheet" href="doc.css">
+</head>
+<body>
+  <div class="doc-wrap">
+    <nav class="doc-breadcrumb">
+      <a href="js-core-sdk.html">SDK</a> / Swap API
+    </nav>
+    <h1 class="doc-title">JavaScript Swap SDK</h1>
+    <p class="doc-intro">
+      Wrapper for the swap intents API: token list, quote requests, fill/accept quote, swap status, open requests and quotes, quote balances, and attempt swap. Use <code>swaps_sdk.js</code> when the server mounts swap routes at <code>/swaps/v1/</code>.
+    </p>
+
+    <div class="doc-tip">
+      <strong>Tip</strong>
+      Types match <code>abstractions/intents/swaps/models.rs</code> and <code>endpoints.rs</code>. All methods return Promises and throw on non-2xx HTTP responses. Request bodies use snake_case (e.g. <code>origin_chain</code>, <code>swap_request_id</code>).
+    </div>
+
+    <h2 id="prerequisites">Prerequisites</h2>
+    <div class="doc-note">
+      <strong>Note</strong>
+      <ul>
+        <li><strong>baseUrl</strong> — API server URL (default <code>http://localhost:8000</code>). Routes are requested at <code>baseUrl/swaps/v1/</code>.</li>
+        <li><strong>Swap routes</strong> — Server must mount swap endpoints (token_list, new_quote_request, fill_quote, get_open_swap_requests, get_open_quotes, get_quote_balances, attempt_swap_request, etc.).</li>
+        <li><strong>Chain keys</strong> — Use lowercase chain identifiers (e.g. <code>ethereum</code>, <code>yellowstone</code>) for origin/destination chain in quote requests.</li>
+      </ul>
+    </div>
+
+    <h2 id="quick-example">Quick Example</h2>
+    <pre><code>import { createSwapsClient, QUOTE_PRICING_ORIGIN } from './swaps_sdk.js';
+
+const client = createSwapsClient('http://localhost:8000');
+
+const contractAddress = await client.getContractAddress();
+const { swap_requests } = await client.getOpenSwapRequests();
+const { quotes } = await client.getOpenQuotes();
+
+const { swap_request_id, transaction_hash } = await client.newQuoteRequest({
+  from: '0x...',
+  originChain: 'ethereum',
+  originSymbol: 'ETH',
+  originAmount: 1e18,
+  destinationChain: 'yellowstone',
+  destinationSymbol: 'LIT',
+  destinationAmount: 1000,
+  slippage: 1,
+  pricingType: QUOTE_PRICING_ORIGIN,
+  quoteDeadlineSeconds: 60,
+  originAddress: '0x...',
+  refundAddress: '0x...',
+  transactionDeadlineSeconds: 0,
+});
+
+const { quote_id } = await client.fillQuote({
+  swapRequestId: swap_request_id,
+  quoteDeadlineSeconds: 60,
+  providerRefundAddress: '0x...',
+});
+
+const balances = await client.getQuoteBalances(quote_id);
+await client.attemptSwapRequest(quote_id);</code></pre>
+
+    <h2 id="client-and-factory">Client & factory</h2>
+
+    <div class="doc-method">
+      <div class="doc-method-name">createSwapsClient(baseUrl?)</div>
+      <div class="doc-method-desc">Factory that returns a <code>LitSwapsApiClient</code>. Default base URL: <code>http://localhost:8000</code>.</div>
+      <div class="doc-method-endpoint">Export: <code>createSwapsClient</code></div>
+    </div>
+
+    <div class="doc-method">
+      <div class="doc-method-name">new LitSwapsApiClient({ baseUrl })</div>
+      <div class="doc-method-desc">Construct swaps client with optional <code>baseUrl</code>. Trailing slashes are stripped. Requests go to <code>baseUrl/swaps/v1/</code>.</div>
+    </div>
+
+    <h2 id="pricing-constants">Pricing constants</h2>
+    <p>Use these when building a new quote request:</p>
+    <ul>
+      <li><code>QUOTE_PRICING_ORIGIN</code> = <code>0</code> — Fees taken from origin amount (destination amount fixed).</li>
+      <li><code>QUOTE_PRICING_DESTINATION</code> = <code>1</code> — Fees taken from destination amount (origin fixed).</li>
+    </ul>
+
+    <h2 id="token-list">Token list</h2>
+
+    <div class="doc-method">
+      <div class="doc-method-name">getTokenList()</div>
+      <div class="doc-method-desc">Returns the list of supported tokens for the swap UI.</div>
+      <div class="doc-method-endpoint">GET /token_list</div>
+      <p><strong>Returns:</strong> <code>Promise&lt;TokenListResponse&gt;</code> — <code>{ tokens: TokenListItem[] }</code></p>
+    </div>
+
+    <h2 id="quote-request">New quote request</h2>
+
+    <div class="doc-method">
+      <div class="doc-method-name">newQuoteRequest(options)</div>
+      <div class="doc-method-desc">Creates a new swap request on-chain and returns <code>swap_request_id</code> and <code>transaction_hash</code>. Options use camelCase; the SDK sends snake_case to the API.</div>
+      <div class="doc-method-endpoint">POST /new_quote_request</div>
+      <p><strong>Options (key fields):</strong></p>
+      <table>
+        <thead><tr><th>Property</th><th>Type</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>from</code></td><td>string</td><td>Message sender (hex address)</td></tr>
+          <tr><td><code>originChain</code></td><td>string</td><td>Origin chain key (e.g. "ethereum", "yellowstone")</td></tr>
+          <tr><td><code>originSymbol</code></td><td>string</td><td>Origin token symbol</td></tr>
+          <tr><td><code>originAmount</code></td><td>number</td><td>Origin amount (converted to number for JSON)</td></tr>
+          <tr><td><code>destinationChain</code></td><td>string</td><td>Destination chain key</td></tr>
+          <tr><td><code>destinationSymbol</code></td><td>string</td><td>Destination token symbol</td></tr>
+          <tr><td><code>destinationAmount</code></td><td>number</td><td>Destination amount</td></tr>
+          <tr><td><code>slippage</code></td><td>number</td><td>Acceptable slippage</td></tr>
+          <tr><td><code>pricingType</code></td><td>number</td><td>0 = Origin, 1 = Destination (use <code>QUOTE_PRICING_ORIGIN</code> / <code>QUOTE_PRICING_DESTINATION</code>)</td></tr>
+          <tr><td><code>quoteDeadlineSeconds</code></td><td>number</td><td>How long to wait for a quote (0–60)</td></tr>
+          <tr><td><code>originAddress</code></td><td>string</td><td>Origin address (hex)</td></tr>
+          <tr><td><code>refundAddress</code></td><td>string</td><td>Refund address if tx fails (hex)</td></tr>
+          <tr><td><code>transactionDeadlineSeconds</code></td><td>number</td><td>Optional; 0 if not set</td></tr>
+          <tr><td><code>message</code></td><td>string</td><td>Optional message</td></tr>
+        </tbody>
+      </table>
+      <p><strong>Returns:</strong> <code>Promise&lt;NewSwapResponse&gt;</code> — <code>{ swap_request_id, transaction_hash, swap_request_expiry, fees, signed_input_hash }</code></p>
+    </div>
+
+    <h2 id="fill-quote">Fill quote</h2>
+
+    <div class="doc-method">
+      <div class="doc-method-name">fillQuote(options)</div>
+      <div class="doc-method-desc">Solver fills a quote for a swap request (e.g. calls contract <code>newQuote</code>). Returns <code>quote_id</code> and transaction hash.</div>
+      <div class="doc-method-endpoint">POST /fill_quote</div>
+      <p><strong>Options:</strong> <code>swapRequestId</code> (string), <code>quoteDeadlineSeconds</code> (number), <code>providerRefundAddress</code> (string, hex), <code>message</code> (string, optional).</p>
+      <p><strong>Returns:</strong> <code>Promise&lt;FillQuoteResponse&gt;</code> — <code>{ quote_id, transaction_hash, pkp_address, swap_request_id, quote_expiry, fees, total_fees, signed_input_hash }</code></p>
+    </div>
+
+    <h2 id="accept-quote">Accept quote</h2>
+
+    <div class="doc-method">
+      <div class="doc-method-name">acceptQuote(options)</div>
+      <div class="doc-method-desc">User accepts a quote; returns the PKP address to send funds to.</div>
+      <div class="doc-method-endpoint">POST /accept_quote</div>
+      <p><strong>Options:</strong> <code>quoteId</code> (string).</p>
+      <p><strong>Returns:</strong> <code>Promise&lt;AcceptQuoteResponse&gt;</code> — <code>{ pkp_address }</code></p>
+    </div>
+
+    <h2 id="swap-status">Swap status</h2>
+
+    <div class="doc-method">
+      <div class="doc-method-name">getSwapStatus(quoteId)</div>
+      <div class="doc-method-desc">Gets the status of a swap by quote id.</div>
+      <div class="doc-method-endpoint">GET /get_swap_status/&lt;quote_id&gt;</div>
+      <p><strong>Returns:</strong> <code>Promise&lt;GetSwapStatusResponse&gt;</code> — <code>{ state, details? }</code>. <code>state</code> is one of: Pending, Processing, Success, Expired, Refunded, Other.</p>
+    </div>
+
+    <h2 id="contract-and-lists">Contract address & open lists</h2>
+
+    <div class="doc-method">
+      <div class="doc-method-name">getContractAddress()</div>
+      <div class="doc-method-desc">Returns the quote storage contract address (hex string). Use this when the front end needs to call the contract (e.g. MetaMask <code>newQuote</code>).</div>
+      <div class="doc-method-endpoint">GET /get_contract_address</div>
+      <p><strong>Returns:</strong> <code>Promise&lt;string&gt;</code></p>
+    </div>
+
+    <div class="doc-method">
+      <div class="doc-method-name">getOpenSwapRequests()</div>
+      <div class="doc-method-desc">Returns open swap requests from the contract (via <code>getRecentSwapRequests</code>).</div>
+      <div class="doc-method-endpoint">GET /get_open_swap_requests</div>
+      <p><strong>Returns:</strong> <code>Promise&lt;GetOpenSwapRequestsResponse&gt;</code> — <code>{ swap_requests: SwapRequestData[] }</code></p>
+    </div>
+
+    <div class="doc-method">
+      <div class="doc-method-name">getOpenQuotes()</div>
+      <div class="doc-method-desc">Returns open quotes from the contract (via <code>getRecentQuotes</code> + linked swap request data).</div>
+      <div class="doc-method-endpoint">GET /get_open_quotes</div>
+      <p><strong>Returns:</strong> <code>Promise&lt;GetOpenQuotesResponse&gt;</code> — <code>{ quotes: QuoteData[] }</code>. Each <code>QuoteData</code> includes <code>swap_request_data</code> (the linked swap request).</p>
+    </div>
+
+    <h2 id="quote-balances">Quote balances</h2>
+
+    <div class="doc-method">
+      <div class="doc-method-name">getQuoteBalances(quoteId)</div>
+      <div class="doc-method-desc">Fetches quote and swap request by quote id, then returns PKP address, source/destination chain, balances in wei on both chains, and whether each balance is sufficient for the swap amounts.</div>
+      <div class="doc-method-endpoint">GET /get_quote_balances/&lt;quote_id&gt;</div>
+      <p><strong>Parameters:</strong> <code>quoteId</code> (string — decimal, e.g. from <code>fillQuote</code> response).</p>
+      <p><strong>Returns:</strong> <code>Promise&lt;QuoteBalancesResponse&gt;</code> — <code>{ pkp_address, source_chain, destination_chain, source_balance_wei, destination_balance_wei, source_balance_sufficient, destination_balance_sufficient }</code></p>
+    </div>
+
+    <h2 id="attempt-swap">Attempt swap</h2>
+
+    <div class="doc-method">
+      <div class="doc-method-name">attemptSwapRequest(quoteId)</div>
+      <div class="doc-method-desc">Attempts to execute the swap for the given quote (sends origin and destination chain transfers). Fails with 402 Payment Required if PKP balance is insufficient on either chain.</div>
+      <div class="doc-method-endpoint">GET /attempt_swap_request/&lt;quote_id&gt;</div>
+      <p><strong>Parameters:</strong> <code>quoteId</code> (string).</p>
+      <p><strong>Returns:</strong> <code>Promise&lt;string&gt;</code> — Empty string on success.</p>
+      <p><strong>Throws:</strong> On non-OK response (e.g. 402 Payment Required).</p>
+    </div>
+
+    <h2 id="response-types">Response types (summary)</h2>
+    <table>
+      <thead><tr><th>Type</th><th>Fields</th></tr></thead>
+      <tbody>
+        <tr><td>TokenListResponse</td><td><code>tokens</code> (TokenListItem[])</td></tr>
+        <tr><td>NewSwapResponse</td><td><code>swap_request_id</code>, <code>transaction_hash</code>, <code>swap_request_expiry</code>, <code>fees</code>, <code>signed_input_hash</code></td></tr>
+        <tr><td>FillQuoteResponse</td><td><code>quote_id</code>, <code>transaction_hash</code>, <code>pkp_address</code>, <code>swap_request_id</code>, <code>quote_expiry</code>, <code>fees</code>, <code>total_fees</code>, <code>signed_input_hash</code></td></tr>
+        <tr><td>AcceptQuoteResponse</td><td><code>pkp_address</code></td></tr>
+        <tr><td>GetSwapStatusResponse</td><td><code>state</code>, <code>details?</code></td></tr>
+        <tr><td>GetOpenSwapRequestsResponse</td><td><code>swap_requests</code> (SwapRequestData[])</td></tr>
+        <tr><td>GetOpenQuotesResponse</td><td><code>quotes</code> (QuoteData[] — each has <code>swap_request_data</code>)</td></tr>
+        <tr><td>QuoteBalancesResponse</td><td><code>pkp_address</code>, <code>source_chain</code>, <code>destination_chain</code>, <code>source_balance_wei</code>, <code>destination_balance_wei</code>, <code>source_balance_sufficient</code>, <code>destination_balance_sufficient</code></td></tr>
+      </tbody>
+    </table>
+
+    <p>SwapRequestData and QuoteData mirror the contract structs (origin/destination amounts in wei, chain keys, addresses as hex strings, etc.).</p>
+
+    <footer class="doc-footer">
+      <a href="js-core-sdk.html">← JavaScript Core SDK</a>
+      <a href="js-transfer-sdk.html">← JavaScript Transfer SDK</a>
+    </footer>
+  </div>
+</body>
+</html>

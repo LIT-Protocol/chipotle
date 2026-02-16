@@ -1,0 +1,49 @@
+# This file contains a local developer's scoped logging configuration.
+# The file log_levels.example.toml is ignored by git, please copy or rename it to log_levels.toml to use it.
+
+# The general Log Levels are as follows:
+# ERROR : node function(s) will not work, and client requests will fail with error
+# WARN : unexpected but non-breaking issues; client request may fail gracefully
+# INFO : for general, important application events,
+# DEBUG :  developer-level details, but higher level ( a summary of  TRACE details ).  May be a good candidate for function level logging..
+# TRACE : the most granular, detailed data, that provides context for DEBUG or INFO statements, but often won’t be comprehensible on its own.   
+
+# See more defails in https://www.notion.so/litprotocol/Log-Level-Usage-2766f449b04180fdabfbcb72c394e4fc
+
+# For app debugging, you can set namespace based logging to DEBUG or TRACE to get more details.
+
+# Uncomment a namespace to set it's log level, or add a new namespace.   
+[lit_node]   
+_ = "debug" # default log level for lit_node
+# "functions" = "trace"   # lit actions "Functions"
+"payment" = "warn"     # payments
+# "p2p_comms" = "trace"   # p2p communications
+# "tss" = "info"         # Cryptography related
+# "node_state" = "trace"  # node state
+# "peers" = "trace"       # peers
+# "config" = "trace"      # chain configuration
+# "tasks::fsm" = "trace"  # tasks::fsm
+# "tss::dkg" = "trace" # DKG related
+#   "tasks::presign_manager" = "trace"  # tasks::fsm
+# "endpoints" = "trace" # endpoints
+# "tasks::endpoint_channels" = "trace"
+"tss" = "trace"
+"functions" = "trace"
+"pkp" = "trace"
+
+[lit_actions]
+_ = "trace" # default log level for lit_actions server
+
+[lit_core]
+_ = "warn" # default log level for lit_core
+
+[lit_attestation]
+_ = "warn"
+
+[lit_blockchain]
+_ = "warn"
+"resolver::rpc" = "error"
+
+#set to info or lower for debugging rocket startup, and checking raw endpoint requests
+[rocket] 
+_ = "warn" # default log level for rocket

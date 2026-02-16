@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Solver – Swap Intents</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.umd.min.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <a href="https://developer.litprotocol.com/" target="_blank" rel="noopener noreferrer" class="header-brand">
+        <span class="logo">LIT Solver</span>
+      </a>
+      <div class="header-actions">
+        <span id="wallet-address" class="wallet-address mono" style="display: none;"></span>
+        <button type="button" id="btn-connect-wallet" class="btn btn-primary">Connect Wallet</button>
+        <button type="button" id="btn-disconnect-wallet" class="btn btn-secondary" style="display: none;">Disconnect</button>
+      </div>
+    </header>
+
+    <nav class="nav">
+      <a href="#swap-requests" data-page="swap-requests" class="active">Swap requests</a>
+      <a href="#quotes" data-page="quotes">Quotes</a>
+      <a href="#fulfill" data-page="fulfill">Commit to Quote</a>
+      <a href="#attempt-swap" data-page="attempt-swap">Process Swap</a>
+    </nav>
+
+    <!-- Page 1: Open swap requests -->
+    <section id="page-swap-requests" class="page active">
+      <h1 class="page-title">Open swap requests</h1>
+      <p class="page-desc">Swap requests from the contract. Commit to one from the Commit to Quote page.</p>
+      <div id="swap-requests-status" class="status" style="display: none;"></div>
+      <div class="card">
+        <div class="card-title">List</div>
+        <div id="swap-requests-list-wrap">
+          <div id="swap-requests-table-wrap" class="swap-requests-table-wrap" style="display: none;">
+            <table id="swap-requests-table" class="swap-requests-table">
+              <thead><tr><th>#</th><th>From</th><th>Origin</th><th>Destination</th><th>Slippage</th><th></th></tr></thead>
+              <tbody id="swap-requests-tbody"></tbody>
+            </table>
+          </div>
+          <p id="swap-requests-empty" class="history-empty">Loading…</p>
+        </div>
+        <button type="button" id="btn-refresh-swap-requests" class="btn btn-secondary btn-block" style="margin-top: 0.75rem;">Refresh</button>
+      </div>
+    </section>
+
+    <!-- Page 2: Open quotes -->
+    <section id="page-quotes" class="page">
+      <h1 class="page-title">Open quotes</h1>
+      <p class="page-desc">Quotes created by solvers for swap requests.</p>
+      <div id="quotes-status" class="status" style="display: none;"></div>
+      <div class="card">
+        <div class="card-title">List</div>
+        <div id="quotes-list-wrap">
+          <div id="quotes-table-wrap" class="quotes-table-wrap" style="display: none;">
+            <table id="quotes-table" class="quotes-table">
+              <thead><tr><th>#</th><th>From</th><th>PKP address</th><th>Origin</th><th>Destination</th><th>Provider refund</th><th>Quote expiry</th><th></th></tr></thead>
+              <tbody id="quotes-tbody"></tbody>
+            </table>
+          </div>
+          <p id="quotes-empty" class="history-empty">Loading…</p>
+        </div>
+        <button type="button" id="btn-refresh-quotes" class="btn btn-secondary btn-block" style="margin-top: 0.75rem;">Refresh</button>
+      </div>
+    </section>
+
+    <!-- Page 3: Commit to Quote (MetaMask signs newQuote tx) -->
+    <section id="page-fulfill" class="page">
+      <h1 class="page-title">Commit to Quote</h1>
+      <p class="page-desc">Create a new quote by signing a transaction with MetaMask. Connect your wallet above first.</p>
+      <div id="fulfill-status" class="status" style="display: none;"></div>
+      <div class="card">
+        <form id="fulfill-form" class="fulfill-form">
+          <div class="form-group">
+            <label for="fulfill-contract-address">Quote storage contract address</label>
+            <input type="text" id="fulfill-contract-address" class="input" placeholder="Loaded from API when you open this page">
+          </div>
+          <div class="form-group">
+            <label for="fulfill-swap-request-id">Swap request ID</label>
+            <input type="text" id="fulfill-swap-request-id" class="input" placeholder="e.g. 1" required>
+          </div>
+          <div class="form-group">
+            <label for="fulfill-provider-refund">Provider refund address</label>
+            <input type="text" id="fulfill-provider-refund" class="input" placeholder="0x... (defaults to your wallet)">
+          </div>
+          <button type="submit" id="btn-fulfill" class="btn btn-primary btn-block">Commit to Quote</button>
+        </form>
+      </div>
+    </section>
+
+    <!-- Page 4: Process Swap (calls attempt_swap_request) -->
+    <section id="page-attempt-swap" class="page">
+      <h1 class="page-title">Process Swap</h1>
+      <p class="page-desc">Execute the swap for a quote. Uses the API <code>attempt_swap_request</code> endpoint.</p>
+      <div id="attempt-swap-status" class="status" style="display: none;"></div>
+      <div class="card">
+        <form id="attempt-swap-form" class="fulfill-form">
+          <div class="form-group">
+            <label for="attempt-swap-quote-id">Quote ID</label>
+            <input type="text" id="attempt-swap-quote-id" class="input" placeholder="Quote id from fill_quote (e.g. 1)" required>
+          </div>
+          <div class="form-group">
+            <button type="button" id="btn-get-quote-balances" class="btn btn-secondary btn-block">Get quote balances</button>
+          </div>
+          <div id="attempt-swap-balances" class="quote-balances-result" style="display: none;"></div>
+          <button type="submit" id="btn-attempt-swap" class="btn btn-primary btn-block">Process Swap</button>
+        </form>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div class="api-url-wrap">
+        <label for="baseUrl">API</label>
+        <input type="text" id="baseUrl" class="api-url" value="http://localhost:8000" placeholder="http://localhost:8000">
+      </div>
+    </footer>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

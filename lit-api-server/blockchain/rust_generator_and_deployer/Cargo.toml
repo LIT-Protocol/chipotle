@@ -1,0 +1,21 @@
+[package]
+name = "lit-contracts-minimal-generator"
+description = "Lit Blockchain"
+authors = ["David Radunz <david.radunz@litprotocol.com>"]
+version = "0.1.0"
+edition = "2024"
+
+[features]
+default = []
+env-override = []
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+ethers = { version = "2.0.14", features = [
+    # "celo",
+    "abigen",
+    "legacy",
+] }
+serde_json = "1.0"
+
+[workspace]
