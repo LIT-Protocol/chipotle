@@ -1,0 +1,66 @@
+[workspace]
+members = [
+    "lit-api-core",
+    "lit-core",
+    "lit-core-derive",
+    "lit-logging",
+    "lit-observability",
+]
+resolver = "2" 
+
+
+[workspace.package]
+edition = "2024"
+
+[workspace.dependencies]
+alloy = { version = "0.12.5", features = ["eip712", "sol-types"]}
+arc-swap = { version = "1.7" }
+async-std = { version = "1.13" }
+async-trait = { version = "0.1" }
+bulletproofs = { git = "https://github.com/LIT-Protocol/bulletproofs.git", branch = "pallas" }
+bytes = { version = "1.10" }
+derive_more = { version = "2", features = ["display"] }
+elliptic-curve-tools = { version = "0.1", features = ["std"] }
+ethers = { version = "2.0", features = ["abigen", "legacy"] }
+futures = { version = "0.3" }
+generic-array = "=1.1.1"
+hex = "0.4"
+http-body-util = { version = "0.1.2" }
+hyper = { version = "1" }
+hyper-util = { version = "0.1", features = ["client-legacy", "server", "service"] }
+hyperlocal = { version = "0.9" }
+once_cell = { version = "1.20" }
+opentelemetry = "0.24"
+opentelemetry-otlp = { version = "0.17", features = ["metrics"] }
+opentelemetry_sdk = { version = "0.24.1", features = ["rt-tokio", "metrics"] }
+opentelemetry-semantic-conventions = "0.15.0"
+rand = "0.8"
+rand_chacha = "0.3.1"
+reqwest = { version = "0.11.12", default-features = false, features = ["rustls-tls"] }
+scc = "3"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+sha3 = "0.10"
+thiserror = "2.0"
+tokio = { version = "1", features = ["full"] }
+tracing = { version = "0.1" }
+tracing-opentelemetry = { version = "0.25" }
+zeroize = { version = "1.8", features = ["derive"] }
+
+lit-rust-crypto = { version = "0.6.0", features = [
+    "arithmetic",
+    "bits",
+    "digest",
+    "ecdsa",
+    "ecdsa-core",
+    "hash2curve",
+    "hex",
+    "rand_core",
+    "serde",
+    "sha",
+    "std",
+    "zeroize",
+] }
+
+hd-keys-curves-wasm = { version = "1.0.5", default-features = false }

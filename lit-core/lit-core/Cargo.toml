@@ -1,0 +1,50 @@
+[package]
+name = "lit-core"
+description = "Lit Core"
+authors = ["David Radunz <david.radunz@litprotocol.com>"]
+version = "0.1.0"
+edition.workspace = true
+exclude = ["resources/test/"]
+
+[features]
+default = []
+ipfs = ["ipfs-api-backend-hyper", "ipfs-hasher", "ipfs-unixfs", "fs4", "bytes", "bs58"]
+pinata = ["pinata-sdk"]
+asn1 = ["asn1-rs"]
+cli = ["termion"]
+logging-core = ["env_logger"]
+unix = ["libc"]
+
+[dependencies]
+arc-swap.workspace = true
+asn1-rs = { version = "0.7", optional = true }
+async-std.workspace = true
+base64 = { version = "0.22" }
+bs58 = { version = "0.5.0", optional = true }
+bytes = { version = "1", optional = true }
+chrono = { version = "0.4", optional = true }
+clap = { version = "4.5", features = ["derive"] }
+config = { version = "0.15" }
+derive_more.workspace = true
+env_logger = { git = "https://github.com/LIT-Protocol/env_logger.git", optional = true }
+flate2 = "1.0"
+fs4 = { version = "0.13", features = ["async-std"], optional = true }
+hex.workspace = true
+ipfs-api-backend-hyper = { git = "https://github.com/LIT-Protocol/rust-ipfs-api", branch = "lit-remote-pinning", features = ["with-send-sync"], optional = true }
+ipfs-hasher = { version =  "0.13.0", optional = true }
+ipfs-unixfs = { version = "0.2.0", optional = true }
+libc = { version = "0.2", optional = true }
+log = { version = "0.4.17", features = ["kv_unstable", "kv_unstable_serde"] }
+once_cell.workspace = true
+pinata-sdk = { version = "1.1.0", optional = true }
+regex = { version = "1" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+tar_file = { version = "0.4", package = "tar" }
+termion = { version = "4", optional = true }
+toml = { version = "0.8" }
+tracing.workspace = true
+
+[dependencies.lit-core-derive]
+path = "../lit-core-derive"

@@ -1,0 +1,15 @@
+[package]
+name = "lit-core-derive"
+description = "Lit Core - Derive"
+authors = ["David Radunz <david.radunz@litprotocol.com>"]
+version = "0.1.0"
+edition.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "1.0", features = ["full"] }
+quote = "1.0"
+proc-macro2 = "1.0"
+proc-macro-error = "1"

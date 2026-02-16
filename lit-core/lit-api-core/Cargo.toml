@@ -1,0 +1,70 @@
+[package]
+name = "lit-api-core"
+description = "Lit API Core"
+authors = ["Lit Protocol Developers"]
+version = "0.1.0"
+edition.workspace = true
+
+[features]
+default = ["server"]
+server = ["tokio", "rocket", "zerossl"]
+server-hyper = ["tokio", "hyper", "hyperlocal", "arc-swap"]
+client = []
+client-hyper = ["client", "http-body-util", "hyper", "hyperlocal", "hyper-util"]
+client-reqwest = ["client", "reqwest"]
+rocket-helper = ["tokio", "tokio-util", "async-compression", "bytes"]
+
+[dependencies]
+ahash = "0.8.12"
+arc-swap = { workspace = true, optional = true }
+async-std.workspace = true
+async-trait.workspace = true
+async-compression = { version = "0.4", features = ["gzip", "tokio"], optional = true }
+bytes = { workspace = true, optional = true }
+derive_more.workspace = true
+futures.workspace = true
+http-body-util = { workspace = true, optional = true }
+hyper = { workspace = true, optional = true }
+hyper-util = { workspace = true, optional = true }
+hyperlocal = { workspace = true, optional = true }
+ip_rfc = { version = "0.1.0" }
+num_cpus = { version = "1.16" }
+once_cell.workspace = true
+openssl = { version = "0.10.71" }
+opentelemetry.workspace = true
+opentelemetry-semantic-conventions.workspace = true
+opentelemetry_sdk.workspace = true
+reqwest = { workspace = true, optional = true }
+rocket = { version = "0.5", features = ["tls", "json"], optional = true }
+sd-notify = { version = "0.4" }
+scc.workspace = true
+semver = { version = "1.0" }
+serde.workspace = true
+serde_json.workspace = true
+temp-file = { version = "0.1.7" }
+tokio = { workspace = true, features = ["io-util"], optional = true }
+tokio-util = { version = "0.7", features = ["io"], optional = true }
+tracing.workspace = true
+tracing-opentelemetry.workspace = true
+
+[dependencies.lit-core]
+path = "../lit-core"
+
+[dependencies.lit-core-derive]
+path = "../lit-core-derive"
+
+[dependencies.lit-observability]
+path = "../lit-observability"
+
+[dependencies.zerossl]
+git = "https://github.com/LIT-Protocol/zerossl"
+branch = "main"
+optional = true
+
+[dependencies.uuid]
+version = "1.15"
+features = [
+    "v4",
+    "fast-rng",
+    "macro-diagnostics",
+]

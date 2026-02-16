@@ -1,0 +1,27 @@
+{
+  "name": "@lit-protocol/naga-la-types",
+  "version": "0.1.0",
+  "description": "Type declarations for Lit Actions globals and namespaces.",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "types.d.ts",
+    "global.d.ts",
+    "README.md"
+  ],
+  "types": "./types.d.ts",
+  "exports": {
+    ".": "./types.d.ts",
+    "./globals": "./global.d.ts"
+  },
+  "keywords": [
+    "lit-protocol",
+    "lit-actions",
+    "types",
+    "declarations"
+  ],
+  "sideEffects": false,
+  "publishConfig": {
+    "access": "public"
+  }
+}
