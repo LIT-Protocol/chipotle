@@ -1,4 +1,4 @@
-# lit-node-ultra
+# lit-node-express
 
 Monorepo for the Lit Protocol node stack: shared core libraries, the Lit Actions execution engine, and the HTTP API server.
 
