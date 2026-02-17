@@ -8,6 +8,9 @@ use std::ops::Deref;
 use std::str::FromStr as _;
 use std::time::Duration;
 
+use crate::error::Error;
+
+
 use anyhow::Result;
 use apalis::{layers::tracing::TraceLayer, prelude::*};
 use apalis_sql::{
@@ -80,14 +83,14 @@ impl ActionJob {
         }
     }
 
-    pub async fn run(&mut self) -> Result<ExecutionState, crate::error::Error> {
+    pub async fn run(&mut self) -> Result<ExecutionState, Error> {
         self.client.execute_js(self.opts.clone()).await
     }
 
     pub async fn run_with_env(
         &mut self,
         env: DenoExecutionEnv,
-    ) -> Result<ExecutionState, crate::error::Error> {
+    ) -> Result<ExecutionState, Error> {
         self.client.js_env = env;
         self.run().await
     }
@@ -102,7 +105,7 @@ impl ActionJob {
     }
 }
 
-pub type ActionStore = JobStore<ActionJob, core::result::Result<ExecutionState, String>>;
+pub type ActionStore = JobStore<ActionJob, Result<ExecutionState, Error>>;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Job<T, R> {
@@ -216,20 +219,6 @@ where
         self.inner
     }
 }
-
-#[derive(Serialize)]
-struct SerializableError {
-    message: String,
-}
-
-impl From<anyhow::Error> for SerializableError {
-    fn from(err: anyhow::Error) -> Self {
-        Self {
-            message: format!("{:?}", err), // Use debug for full context/backtrace
-        }
-    }
-}
-
 pub struct ActionWorker {
     monitor: Monitor,
 }
@@ -239,7 +228,7 @@ impl ActionWorker {
         async fn run_job(
             mut job: ActionJob,
             env: Data<DenoExecutionEnv>,
-        ) -> Result<ExecutionState, SerializableError> {
+        ) -> Result<ExecutionState, Error> {
             job.run_with_env(env.deref().clone()).await
         }
 

@@ -1,16 +1,21 @@
+use crate::actions::ActionStore;
 use crate::core::internal;
 use crate::core::models::ApiResult;
 use crate::core::models::ErrMessage;
 use crate::core::v1::models::request::{
     DecryptRequest, EncryptRequest, LitActionRequest, SignWithPKPRequest,
 };
+use crate::core::v1::models::response::LitActionResponse;
 use crate::core::v1::models::response::{
-    DecryptResponse, EncryptResponse, GetApiKeyResponse, HandshakeResponse, LitActionResponses,
+    DecryptResponse, EncryptResponse, GetApiKeyResponse, HandshakeResponse,
     MintPkpResponse, SignWithPkpResponse,
 };
+use rocket::State;
 use rocket::serde::json::Json;
 use rocket::{Route, get, post, routes};
 use rocket_responder::ApiResponse;
+use crate::actions::grpc_client_pool::GrpcClientPool;
+use moka::future::Cache;
 
 pub fn routes() -> Vec<Route> {
     routes![
@@ -49,9 +54,19 @@ async fn sign_with_pkp(
 
 #[post("/lit_action", format = "json", data = "<lit_action_request>")]
 async fn lit_action(
+    grpc_client_pool: &State<GrpcClientPool<tonic::transport::Channel>>,
+    ipfs_cache: &State<Cache<String, String>>,
+    // action_store: &State<ActionStore>,
+    http_client: &State<reqwest::Client>,
     lit_action_request: Json<LitActionRequest>,
-) -> ApiResponse<LitActionResponses, ErrMessage> {
-    ApiResult(internal::lit_action(lit_action_request).await).into()
+) -> ApiResponse<LitActionResponse, ErrMessage> {
+    ApiResult(internal::lit_action(
+        grpc_client_pool.inner(), 
+        ipfs_cache.inner(), 
+        // action_store.inner(),
+        http_client.inner(), 
+        lit_action_request
+    ).await).into()
 }
 
 #[post("/encrypt", format = "json", data = "<encrypt_request>")]

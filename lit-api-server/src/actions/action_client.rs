@@ -3,30 +3,13 @@
 //! It holds all configuration data (including secrets) and manages state; none of
 //! which are shared with lit_actions, enabling a secure execution environment.
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, bail, anyhow};
+use crate::error::{Error, unexpected_err};
 use crate::actions::grpc_client_pool::GrpcClientPool;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::actions::job::{ActionJob, ActionStore, JobId};
-// use super::{ActionJob, ActionStore, JobId};
-// use crate::access_control::rpc_url;
-// use crate::error::{connect_err, conversion_err, memory_limit_err, timeout_err, unexpected_err};
-// use crate::models::{self, RequestConditions, UnifiedConditionCheckResult};
-// use crate::p2p_comms::CommsManager;
-// use crate::payment::dynamic::DynamicPayment;
-// use crate::peers::{grpc_client_pool::GrpcClientPool, peer_state::models::SimplePeerCollection};
-// use crate::pkp;
-// use crate::tasks::utils::generate_hash;
-// use crate::tss::common::curve_state::CurveState;
-// use crate::tss::common::hd_keys::get_derived_keyshare;
-// use crate::tss::common::tss_state::TssState;
-// use crate::utils::encoding;
-// use crate::utils::keysets::get_default_keyset_id;
-// use crate::utils::tracing::inject_tracing_metadata;
-// use crate::utils::web::{
-//     get_bls_root_pubkey, get_default_bls_root_pubkey, hash_access_control_conditions,
-// };
 use derive_builder::Builder;
 // use ecdsa::SignatureSize;
 use futures::{FutureExt as _, TryFutureExt};
@@ -36,23 +19,6 @@ use lit_actions_grpc::tonic::{
 };
 
 use lit_actions_grpc::{proto::*, unix};
-// use lit_blockchain::resolver::rpc::{ENDPOINT_MANAGER, RpcHealthcheckPoller};
-// // use lit_node_common::config::LitNodeConfig as _;
-// use lit_node_core::{
-//     AccessControlConditionResource, AuthSigItem, BeHex, CompressedBytes, EndpointVersion,
-//     JsonAuthSig, LitActionPriceComponent, LitResource, NodeSet, PeerId, SignableOutput, SignedData,
-//     SigningScheme, UnifiedAccessControlConditionItem,
-//     hd_keys_curves_wasm::{HDDerivable, HDDeriver},
-//     response,
-// };
-// use lit_rust_crypto::{
-//     blsful::{self, Bls12381G2Impl, SignatureShare},
-//     decaf377, ed448_goldilocks,
-//     elliptic_curve::{CurveArithmetic, PrimeCurve, generic_array::ArrayLength},
-//     group::GroupEncoding,
-//     jubjub, k256, p256, p384, vsss_rs,
-// };
-// use lit_sdk::signature::{SignedDataOutput, combine_and_verify_signature_shares};
 use moka::future::Cache;
 use serde::{Deserialize, Serialize};
 use tokio::time::Duration;
@@ -293,7 +259,7 @@ impl Client {
     pub async fn execute_js(
         &mut self,
         opts: impl Into<ExecutionOptions>,
-    ) -> Result<ExecutionState, String> {
+    ) -> Result<ExecutionState, Error> {
         self.reset_state();
         // self.dynamic_payment
             // .add(LitActionPriceComponent::BaseAmount, 1)?;
@@ -320,9 +286,9 @@ impl Client {
             let execution_result =
                 tokio::time::timeout(timeout, execution)
                     .await
-                    .map_err(|_| {
-                        anyhow::Error::msg(
-                            format!("lit_actions didn't respond within {timeout:?}")
+                    .map_err(|e| {
+                        unexpected_err(e, 
+                            Some(format!("lit_actions didn't respond within {timeout:?}"))
                         )
                     })?;
             match execution_result {
@@ -332,40 +298,40 @@ impl Client {
                         let msg = status.message().to_string();
                         match status.code() {
                             Code::DeadlineExceeded => {
-                                return Err(anyhow!("tonic deadline exceeded error".to_string()));
+                                return  Err(unexpected_err(e, Some("tonic deadline exceeded error".to_string())));
                             }
                             Code::ResourceExhausted => {
-                                return Err(anyhow!("tonic resource exhausted error".to_string()));
+                                return Err(unexpected_err(e, Some("tonic resource exhausted error".to_string())));
                             }
                             Code::Unavailable => {
                                 // This error occurs when NGINX can't connect to any healthy
                                 // lit_actions instance and returns the gRPC status code 14
-                                return Err(anyhow!("tonic unavailable error".to_string()));
+                                return Err(unexpected_err(e, Some("tonic unavailable error".to_string())));
                             }
                             // NB: We could also retry on `Code::Internal if msg == "h2 protocol error: error reading a body from connection"`.
                             // However, that likely means lit_actions has crashed *while* executing JS, which we can't recover from.
-                            _ => return Err(anyhow!(msg.clone())),
+                            _ => return Err(unexpected_err(e, Some(msg.to_string()))),
                         }
                     } else if let Some(te) = e.downcast_ref::<TransportError>() {
                         // This error occurs when the socket file is missing or lit_actions is down
                         // - connection error: No such file or directory (os error 2)
                         // - connection error: Connection refused (os error 61)
-                        anyhow!("tonic transport error: {:?}", te.clone()) // te.source().unwrap_or(te).to_string())
+                        anyhow!("tonic transport error: {:?}", te) // te.source().unwrap_or(te).to_string())
                     } else if let Some(se) = e.downcast_ref::<flume::SendError<ExecuteJsRequest>>()
                     {
                         // This error occurs when NGINX can't connect to any healthy lit_actions instance
                         // - connection error: sending on a closed channel
                         anyhow!(
-                            "tonic send error: {:?}", se.clone()
+                            "tonic send error: {:?}", se
                             // se.source().unwrap_or(se).to_string()
                         )
                     } else {
-                            return Err(anyhow!(e.to_string()));
+                            return Err(unexpected_err( e, None));
                     };
 
                     // Never retry in-flight requests, which may have modified state
                     if retry >= self.max_retries || self.state.ops_count != 0 {
-                        return Err(last_error);
+                        return Err(unexpected_err(last_error, None));
                     }
                     let backoff = Duration::from_secs(2u64.pow(retry));
                     tracing::error!("Retrying execute_js in {backoff:?}, cause: {last_error:?}");
@@ -395,11 +361,12 @@ impl Client {
         let (outbound_tx, outbound_rx) = flume::bounded(0);
 
         let socket_path = self.socket_path();
+        let socket_path = PathBuf::from("/tmp/lit_actions.sock");
         let channel = self
             .client_grpc_channels
             .create_or_get_connection(&socket_path.display().to_string(), || {
                 unix::connect_to_socket(socket_path).map_err(|e| {
-                    anyhow!("Error creating connection to lit-action server: {}", e.to_string())
+                    anyhow!("Error creating connection to lit-action server: {:?}", e)
                 })
             })
             .await?;
@@ -472,12 +439,13 @@ impl Client {
         &mut self,
         op: UnionResponse,
         // auth_context: &models::AuthContext,
-        mut call_depth: u32,
+        // call_depth should be mutable
+        call_depth: u32,
     ) -> Result<ExecuteJsRequest> {
         trace!("handle_op: {:?}", op);
         self.state.ops_count += 1;
 
-        let action_ipfs_id = "".to_string(); // auth_context.action_ipfs_id_stack.last().cloned();
+        // let action_ipfs_id = "".to_string(); // auth_context.action_ipfs_id_stack.last().cloned();
 
         Ok(match op {
             UnionResponse::SetResponse(SetResponseRequest { response }) => {

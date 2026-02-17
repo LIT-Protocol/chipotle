@@ -3,8 +3,8 @@ use super::models::{GetBalanceResponse, TransferRequest, TransferResponse};
 use crate::core::models::ApiStatus;
 use rocket::serde::json::Json;
 
-const TPRV: &str = "prv8ZgxMBicQKsPfEr2kLSUC5JG5UcFQvgFpYd3ntCUk4QUb35DdZTpQZmHPcMdD9kERXjCoT5Pw7WEJwNxRD1o6ZecamNFokodcnoPRHpaRS4";
-const SECRET_KEY: &str = "WEJwNxRD1o6ZecamNFokodcnoPRHpaRS4";
+// const TPRV: &str = "prv8ZgxMBicQKsPfEr2kLSUC5JG5UcFQvgFpYd3ntCUk4QUb35DdZTpQZmHPcMdD9kERXjCoT5Pw7WEJwNxRD1o6ZecamNFokodcnoPRHpaRS4";
+// const SECRET_KEY: &str = "WEJwNxRD1o6ZecamNFokodcnoPRHpaRS4";
 
 fn not_configured() -> ApiStatus {
     ApiStatus::internal_server_error(

@@ -15,6 +15,7 @@ apalis-sql = { version = "0.6.0", features = ["sqlite", "tokio-comp"] }
 anyhow = "1.0"
 base64_light = "0.1"
 derive_builder = "0.12.0"
+derive_more = { version = "2" , features = ["display"] }
 futures = "0.3.31"
 moka = { version = "0.12.7", features = ["future"] }
 flume = "0.11.0"
@@ -57,6 +58,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rand = "0.8"
 # rand_core = "0.6"
 lit-core = { path = "../lit-core/lit-core" }
+lit-core-derive = { path = "../lit-core/lit-core-derive" }
+
+# lit-api-core = { path = "../lit-core/lit-api-core" }
 lit-actions-grpc = { path = "../lit-actions/grpc" }
 # lit-actions-server = { path = "../lit-actions/server" }
 url = "2"
