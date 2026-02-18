@@ -12,7 +12,7 @@ cargo:rerun-if-env-changed=CARGO_CFG_TARGET_OS
 cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ENV
 cargo:rerun-if-env-changed=CARGO_CFG_TARGET_ENDIAN
 OPT_LEVEL = Some(0)
-OUT_DIR = Some(/Users/brendonpaul/Documents/GitHub/lit-node-ultra/lit-core/target/debug/build/ring-bcd226089ee9fe1a/out)
+OUT_DIR = Some(/Users/brendonpaul/Documents/GitHub/lit-node-express/lit-core/target/debug/build/ring-bcd226089ee9fe1a/out)
 TARGET = Some(aarch64-apple-darwin)
 HOST = Some(aarch64-apple-darwin)
 cargo:rerun-if-env-changed=CC_aarch64-apple-darwin
@@ -41,7 +41,7 @@ CFLAGS_aarch64-apple-darwin = None
 CARGO_ENCODED_RUSTFLAGS = Some()
 cargo:rustc-link-lib=static=ring_core_0_17_14_
 OPT_LEVEL = Some(0)
-OUT_DIR = Some(/Users/brendonpaul/Documents/GitHub/lit-node-ultra/lit-core/target/debug/build/ring-bcd226089ee9fe1a/out)
+OUT_DIR = Some(/Users/brendonpaul/Documents/GitHub/lit-node-express/lit-core/target/debug/build/ring-bcd226089ee9fe1a/out)
 TARGET = Some(aarch64-apple-darwin)
 HOST = Some(aarch64-apple-darwin)
 cargo:rerun-if-env-changed=CC_aarch64-apple-darwin
@@ -69,7 +69,7 @@ cargo:rerun-if-env-changed=CFLAGS_aarch64-apple-darwin
 CFLAGS_aarch64-apple-darwin = None
 CARGO_ENCODED_RUSTFLAGS = Some()
 cargo:rustc-link-lib=static=ring_core_0_17_14__test
-cargo:rustc-link-search=native=/Users/brendonpaul/Documents/GitHub/lit-node-ultra/lit-core/target/debug/build/ring-bcd226089ee9fe1a/out
+cargo:rustc-link-search=native=/Users/brendonpaul/Documents/GitHub/lit-node-express/lit-core/target/debug/build/ring-bcd226089ee9fe1a/out
 cargo:rerun-if-changed=crypto/perlasm/x86_64-xlate.pl
 cargo:rerun-if-changed=crypto/perlasm/x86gas.pl
 cargo:rerun-if-changed=crypto/perlasm/x86nasm.pl

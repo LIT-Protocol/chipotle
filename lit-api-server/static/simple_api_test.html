@@ -40,11 +40,25 @@
 </head>
 <body>
   <h1>Lit Node Simple API – Tests</h1>
-  <p>Runs: get API key → mint PKP → sign "hello world" with that PKP.</p>
+  <p>Runs: get API key → create wallet → lit action.</p>
   <label for="baseUrl">API base URL</label>
   <input type="text" id="baseUrl" value="http://localhost:8000" placeholder="http://localhost:8000">
   <button type="button" id="run">Run tests</button>
   <pre id="output"></pre>
+
+  <section class="section accordion">
+    <button type="button" class="accordion-header" aria-expanded="true">
+      <span class="accordion-title">Create wallet</span>
+      <span class="accordion-icon" aria-hidden="true">▼</span>
+    </button>
+    <div class="accordion-body">
+    <p>Create a wallet for the given API key (from get_api_key).</p>
+    <label for="createWalletApiKey">API key</label>
+    <input type="text" id="createWalletApiKey" placeholder="Hex-encoded API key (from get_api_key)">
+    <button type="button" id="createWalletBtn">Create wallet</button>
+    <pre id="createWalletOutput" class="api-output"></pre>
+    </div>
+  </section>
 
   <section class="section accordion">
     <button type="button" class="accordion-header" aria-expanded="true">
@@ -56,7 +70,7 @@
     <label for="signApiKey">API key</label>
     <input type="text" id="signApiKey" placeholder="Hex-encoded API key (from get_api_key)">
     <label for="signPkpPublicKey">PKP public key</label>
-    <input type="text" id="signPkpPublicKey" placeholder="PKP public key (e.g. from mint_pkp)">
+    <input type="text" id="signPkpPublicKey" placeholder="PKP public key">
     <label for="signMessage">Message</label>
     <textarea id="signMessage" placeholder="Message to sign (e.g. hello world)">hello world</textarea>
     <button type="button" id="signBtn">Sign with PKP</button>
@@ -82,56 +96,6 @@ go();</textarea>
     <textarea id="litActionJsParams" placeholder='Optional JSON, e.g. {"key": "value"} or leave empty'>{"testParam": "hello"}</textarea>
     <button type="button" id="litActionBtn">Execute lit action</button>
     <pre id="litActionOutput"></pre>
-    </div>
-  </section>
-
-  <section class="section accordion">
-    <button type="button" class="accordion-header" aria-expanded="true">
-      <span class="accordion-title">Encrypt</span>
-      <span class="accordion-icon" aria-hidden="true">▼</span>
-    </button>
-    <div class="accordion-body">
-    <p>Encrypt a message (time-lock) for the wallet identified by the API key.</p>
-    <label for="encryptApiKey">API key</label>
-    <input type="text" id="encryptApiKey" placeholder="Hex-encoded API key (from get_api_key)">
-    <label for="encryptMessage">Message</label>
-    <textarea id="encryptMessage" placeholder="Plaintext to encrypt">secret message</textarea>
-    <button type="button" id="encryptBtn">Encrypt</button>
-    <pre id="encryptOutput" class="api-output"></pre>
-    </div>
-  </section>
-
-  <section class="section accordion">
-    <button type="button" class="accordion-header" aria-expanded="true">
-      <span class="accordion-title">Decrypt</span>
-      <span class="accordion-icon" aria-hidden="true">▼</span>
-    </button>
-    <div class="accordion-body">
-    <p>Decrypt ciphertext (server fetches decryption shares). Use ciphertext and data_to_encrypt_hash from the Encrypt result.</p>
-    <label for="decryptApiKey">API key</label>
-    <input type="text" id="decryptApiKey" placeholder="Hex-encoded API key (same as used for encrypt)">
-    <label for="decryptCiphertext">Ciphertext (base64)</label>
-    <input type="text" id="decryptCiphertext" placeholder="Base64 ciphertext from encrypt">
-    <label for="decryptDataHash">data_to_encrypt_hash (from encrypt response)</label>
-    <input type="text" id="decryptDataHash" placeholder="Hex hash from encrypt">
-    <button type="button" id="decryptBtn">Decrypt</button>
-    <pre id="decryptOutput" class="api-output"></pre>
-    </div>
-  </section>
-
-  <section class="section accordion">
-    <button type="button" class="accordion-header" aria-expanded="true">
-      <span class="accordion-title">Combine signature shares</span>
-      <span class="accordion-icon" aria-hidden="true">▼</span>
-    </button>
-    <div class="accordion-body">
-    <p>Combine signature shares. Paste the <strong>full response object</strong> from Sign with PKP as JSON.</p>
-    <label for="combineApiKey">API key</label>
-    <input type="text" id="combineApiKey" placeholder="Hex-encoded API key">
-    <label for="combineShareData">SignWithPkp response (full JSON from signWithPkp)</label>
-    <textarea id="combineShareData" placeholder='Paste full signWithPkp response (object with signing_scheme, signed_digest, public_key, share_type, shares, ...)'>{"signing_scheme":"","signed_digest":"","public_key":"","share_type":"Ecdsa","shares":[]}</textarea>
-    <button type="button" id="combineBtn">Combine signature shares</button>
-    <pre id="combineOutput" class="api-output"></pre>
     </div>
   </section>
 
@@ -325,108 +289,33 @@ go();</textarea>
       }
     });
 
-    // Encrypt
-    const encryptApiKeyInput = document.getElementById('encryptApiKey');
-    const encryptMessageInput = document.getElementById('encryptMessage');
-    const encryptBtn = document.getElementById('encryptBtn');
-    const encryptOutput = document.getElementById('encryptOutput');
+    // Create wallet
+    const createWalletApiKeyInput = document.getElementById('createWalletApiKey');
+    const createWalletBtn = document.getElementById('createWalletBtn');
+    const createWalletOutput = document.getElementById('createWalletOutput');
 
-    encryptBtn.addEventListener('click', async () => {
-      const apiKey = encryptApiKeyInput.value.trim();
-      const message = encryptMessageInput.value;
+    createWalletBtn.addEventListener('click', async () => {
+      const apiKey = createWalletApiKeyInput.value.trim();
       if (!apiKey) {
-        encryptOutput.textContent = 'Please fill in API key.';
-        encryptOutput.className = 'api-output error';
+        createWalletOutput.textContent = 'Please fill in API key.';
+        createWalletOutput.className = 'api-output error';
         return;
       }
-      encryptOutput.textContent = 'Encrypting…';
-      encryptOutput.className = 'api-output';
-      encryptBtn.disabled = true;
+      createWalletOutput.textContent = 'Creating wallet…';
+      createWalletOutput.className = 'api-output';
+      createWalletBtn.disabled = true;
       try {
         const { createClient } = await import('./core_sdk.js');
         const baseUrl = baseUrlInput.value.trim() || 'http://localhost:8000';
         const client = createClient(baseUrl);
-        const result = await client.encrypt({ apiKey, message });
-        encryptOutput.textContent = JSON.stringify(result, null, 2);
-        encryptOutput.className = 'api-output success';
+        const result = await client.createWallet(apiKey);
+        createWalletOutput.textContent = JSON.stringify(result, null, 2);
+        createWalletOutput.className = 'api-output success';
       } catch (err) {
-        encryptOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
-        encryptOutput.className = 'api-output error';
+        createWalletOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+        createWalletOutput.className = 'api-output error';
       } finally {
-        encryptBtn.disabled = false;
-      }
-    });
-
-    // Decrypt
-    const decryptApiKeyInput = document.getElementById('decryptApiKey');
-    const decryptCiphertextInput = document.getElementById('decryptCiphertext');
-    const decryptDataHashInput = document.getElementById('decryptDataHash');
-    const decryptBtn = document.getElementById('decryptBtn');
-    const decryptOutput = document.getElementById('decryptOutput');
-
-    decryptBtn.addEventListener('click', async () => {
-      const apiKey = decryptApiKeyInput.value.trim();
-      const ciphertext = decryptCiphertextInput.value.trim();
-      const dataToEncryptHash = decryptDataHashInput.value.trim();
-      if (!apiKey || !ciphertext || !dataToEncryptHash) {
-        decryptOutput.textContent = 'Please fill in API key, Ciphertext, and data_to_encrypt_hash.';
-        decryptOutput.className = 'api-output error';
-        return;
-      }
-      decryptOutput.textContent = 'Decrypting…';
-      decryptOutput.className = 'api-output';
-      decryptBtn.disabled = true;
-      try {
-        const { createClient } = await import('./core_sdk.js');
-        const baseUrl = baseUrlInput.value.trim() || 'http://localhost:8000';
-        const client = createClient(baseUrl);
-        const result = await client.decrypt({ apiKey, ciphertext, dataToEncryptHash });
-        decryptOutput.textContent = JSON.stringify(result, null, 2);
-        decryptOutput.className = 'api-output success';
-      } catch (err) {
-        decryptOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
-        decryptOutput.className = 'api-output error';
-      } finally {
-        decryptBtn.disabled = false;
-      }
-    });
-
-    // Combine signature shares
-    const combineApiKeyInput = document.getElementById('combineApiKey');
-    const combineShareDataInput = document.getElementById('combineShareData');
-    const combineBtn = document.getElementById('combineBtn');
-    const combineOutput = document.getElementById('combineOutput');
-
-    combineBtn.addEventListener('click', async () => {
-      const apiKey = combineApiKeyInput.value.trim();
-      let shareData;
-      try {
-        shareData = JSON.parse(combineShareDataInput.value.trim() || '{}');
-      } catch (e) {
-        combineOutput.textContent = 'Invalid JSON in SignWithPkp response: ' + (e && e.message ? e.message : String(e));
-        combineOutput.className = 'api-output error';
-        return;
-      }
-      if (!apiKey || !shareData || !Array.isArray(shareData.shares) || shareData.shares.length === 0) {
-        combineOutput.textContent = 'Please fill in API key and a valid SignWithPkp response (object with shares array).';
-        combineOutput.className = 'api-output error';
-        return;
-      }
-      combineOutput.textContent = 'Combining…';
-      combineOutput.className = 'api-output';
-      combineBtn.disabled = true;
-      try {
-        const { createClient } = await import('./core_sdk.js');
-        const baseUrl = baseUrlInput.value.trim() || 'http://localhost:8000';
-        const client = createClient(baseUrl);
-        const result = await client.combineSignatureShares({ apiKey, shareData });
-        combineOutput.textContent = JSON.stringify(result, null, 2);
-        combineOutput.className = 'api-output success';
-      } catch (err) {
-        combineOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
-        combineOutput.className = 'api-output error';
-      } finally {
-        combineBtn.disabled = false;
+        createWalletBtn.disabled = false;
       }
     });
 

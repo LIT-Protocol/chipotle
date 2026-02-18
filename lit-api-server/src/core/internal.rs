@@ -4,10 +4,10 @@ use moka::future::Cache;
 use crate::actions::grpc_client_pool::GrpcClientPool;
 use crate::core::models::ApiStatus;
 use crate::core::v1::models::request::{
-    DecryptRequest, EncryptRequest, LitActionRequest, SignWithPKPRequest,    
+    LitActionRequest, SignWithPKPRequest,    
 };
 use crate::core::v1::models::response::{
-    DecryptResponse, EncryptResponse, GetApiKeyResponse, HandshakeResponse, LitActionResponse, MintPkpResponse, SignWithPkpResponse
+    CreateWalletResponse, GetApiKeyResponse, LitActionResponse, SignWithPkpResponse
 };
 use rocket::serde::json::Json;
 
@@ -22,16 +22,7 @@ pub async fn get_api_key() -> Result<GetApiKeyResponse, ApiStatus> {
     Err(not_configured())
 }
 
-pub async fn handshake() -> Result<HandshakeResponse, ApiStatus> {
-    Err(not_configured())
-}
-
-pub async fn get_ledger_balance(api_key: &str) -> Result<String, ApiStatus> {
-    let _ = api_key;
-    Err(not_configured())
-}
-
-pub async fn mint_pkp(api_key: &str) -> Result<MintPkpResponse, ApiStatus> {
+pub async fn create_wallet(api_key: &str) -> Result<CreateWalletResponse, ApiStatus> {
     let _ = api_key;
     Err(not_configured())
 }
@@ -72,7 +63,7 @@ pub async fn lit_action(
         }) {
         Ok(client) => client,
         Err(e) => {
-            return Err(anyhow::anyhow!("failed").into())
+            return Err(anyhow::anyhow!("failed to build client: {:?}", e).into())
         }
     };
 
@@ -126,12 +117,3 @@ pub async fn lit_action(
     Ok(lit_action_response)
 }
 
-pub async fn encrypt(encrypt_request: Json<EncryptRequest>) -> Result<EncryptResponse, ApiStatus> {
-    let _ = encrypt_request;
-    Err(not_configured())
-}
-
-pub async fn decrypt(decrypt_request: Json<DecryptRequest>) -> Result<DecryptResponse, ApiStatus> {
-    let _ = decrypt_request;
-    Err(not_configured())
-}

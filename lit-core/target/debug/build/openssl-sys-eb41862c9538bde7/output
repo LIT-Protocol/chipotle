@@ -61,7 +61,7 @@ cargo:rustc-link-search=native=/opt/homebrew/opt/openssl@3/lib
 cargo:include=/opt/homebrew/opt/openssl@3/include
 cargo:rerun-if-changed=build/expando.c
 OPT_LEVEL = Some(0)
-OUT_DIR = Some(/Users/brendonpaul/Documents/GitHub/lit-node-ultra/lit-core/target/debug/build/openssl-sys-eb41862c9538bde7/out)
+OUT_DIR = Some(/Users/brendonpaul/Documents/GitHub/lit-node-express/lit-core/target/debug/build/openssl-sys-eb41862c9538bde7/out)
 TARGET = Some(aarch64-apple-darwin)
 HOST = Some(aarch64-apple-darwin)
 cargo:rerun-if-env-changed=CC_aarch64-apple-darwin

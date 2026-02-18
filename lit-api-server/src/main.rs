@@ -2,6 +2,7 @@ pub mod abstractions;
 pub mod core;
 pub mod actions;
 pub mod error;
+pub mod accounts;
 
 use rocket::fs::{FileServer, relative};
 use rocket_cors::{AllowedOrigins, Method};

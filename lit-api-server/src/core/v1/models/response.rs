@@ -31,8 +31,8 @@ pub struct HandshakeResponse {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct MintPkpResponse {
-    pub pkp_public_key: String,
+pub struct CreateWalletResponse {
+    pub wallet_address: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
