@@ -27,7 +27,7 @@ pub async fn get_pkp_balance(
     pkp_public_key: &str,
     chain: Chain,
 ) -> Result<GetBalanceResponse, ApiStatus> {
-    let pkp_address = get_pkp_address(pkp_public_key).await?;
+    let pkp_address = evm_address(pkp_public_key).await?;
     get_balance(pkp_address, chain).await
 }
 
@@ -56,8 +56,8 @@ async fn get_balance(address: H160, chain: Chain) -> Result<GetBalanceResponse, 
     })
 }
 
-async fn get_pkp_address(pkp_public_key: &str) -> Result<H160, ApiStatus> {
-    let pkp_address = hex::decode(&pkp_public_key.replace("0x", "")[2..])?;
+async fn evm_address(public_key: &str) -> Result<H160, ApiStatus> {
+    let pkp_address = hex::decode(&public_key.replace("0x", "")[2..])?;
     let pkp_address = keccak256(&pkp_address);
     let pkp_address = H160::from_slice(&pkp_address[12..]);
 

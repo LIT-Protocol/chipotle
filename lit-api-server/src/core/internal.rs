@@ -1,6 +1,11 @@
+use crate::accounts;
 use crate::actions::action_client::DenoExecutionEnv;
 use crate::actions:: action_client;
+use lit_core::utils::binary::bytes_to_hex;
+use lit_rust_crypto::group::GroupEncoding;
+use lit_rust_crypto::k256::SecretKey;
 use moka::future::Cache;
+use rand::Rng;
 use crate::actions::grpc_client_pool::GrpcClientPool;
 use crate::core::models::ApiStatus;
 use crate::core::v1::models::request::{
@@ -18,20 +23,47 @@ fn not_configured() -> ApiStatus {
     )
 }
 
+fn get_random_secret() -> [u8; 32] {
+    let mut secret: [u8; 32] = [0; 32];
+
+    // Get a thread-local random number generator and fill the array.
+    rand::thread_rng().fill(&mut secret);
+    secret
+}
+
+fn get_new_wallet() -> (String, String, [u8; 32]) {
+    let secret = get_random_secret();
+    let secret_key = SecretKey::from_slice(&secret).unwrap();
+    let public_key = secret_key.public_key();
+    let public_key_bytes = public_key.as_affine().to_bytes();
+    let wallet_address = bytes_to_hex(&public_key_bytes);
+    let public_key = bytes_to_hex(&public_key_bytes);
+    (public_key, wallet_address, secret)
+}
+
 pub async fn get_api_key() -> Result<GetApiKeyResponse, ApiStatus> {
-    Err(not_configured())
+    let (_public_key, wallet_address, secret) = get_new_wallet();
+    let api_key = base64_light::base64_encode_bytes(&secret);
+
+    if let Err(e) = accounts::new_account(&api_key).await {
+        return Err(e.into());
+    }
+
+    Ok(GetApiKeyResponse {
+        api_key: api_key,
+        wallet_address: wallet_address,
+    })
 }
 
 pub async fn create_wallet(api_key: &str) -> Result<CreateWalletResponse, ApiStatus> {
-    let _ = api_key;
-    Err(not_configured())
+    let (_public_key, wallet_address, _secret) = get_new_wallet();
+    Ok(CreateWalletResponse {
+        wallet_address: wallet_address,
+    })
 }
 
-pub async fn sign_with_pkp(
-    sign_request: Json<SignWithPKPRequest>,
-) -> Result<SignWithPkpResponse, ApiStatus> {
-    let _ = sign_request;
-    Err(not_configured())
+pub async fn sign_with_pkp(sign_request: Json<SignWithPKPRequest>) -> Result<SignWithPkpResponse, ApiStatus> {
+  Err(not_configured())
 }
 
 pub async fn lit_action(

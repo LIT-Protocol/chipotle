@@ -55,7 +55,7 @@ tonic = { version = "0.12", features = [
     "tls-webpki-roots",
 ] }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-rand = "0.8"
+rand = { version = "0.8" }
 # rand_core = "0.6"
 lit-core = { path = "../lit-core/lit-core" }
 lit-core-derive = { path = "../lit-core/lit-core-derive" }
