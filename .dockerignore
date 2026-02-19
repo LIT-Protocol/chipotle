@@ -1,0 +1,27 @@
+# Build artifacts
+**/target/
+**/.cargo/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# CI (not needed in image)
+.github/
+
+# Trunk
+.trunk/
+
+# Docker
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# Docs and tests (reduce image size)
+**/*.md
+**/tests/
+**/benches/

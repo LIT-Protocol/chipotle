@@ -1,0 +1,55 @@
+# Deploy lit-api-server + lit-actions to Phala CVM (smallest instance)
+#
+# Required secrets:
+#   PHALA_CLOUD_API_KEY  - From Phala Cloud Dashboard > API Tokens
+#   DOCKER_REGISTRY_USERNAME - Docker Hub or GHCR username
+#   DOCKER_REGISTRY_PASSWORD - Docker Hub token or GHCR PAT
+#   DOCKER_IMAGE - Full image path, e.g. docker.io/username/lit-node-express or ghcr.io/owner/lit-node-express
+#   PHALA_APP_NAME - CVM name, e.g. lit-api-server
+
+name: Deploy to Phala CVM
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to Docker Registry
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_REGISTRY_USERNAME }}
+          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+
+      - name: Build and Push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.phala
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_IMAGE }}:${{ github.sha }}
+            ${{ secrets.DOCKER_IMAGE }}:latest
+
+      - name: Prepare docker-compose for deployment
+        run: |
+          IMAGE="${{ secrets.DOCKER_IMAGE }}:${{ github.sha }}"
+          sed "s|\${DOCKER_IMAGE}|${IMAGE}|g" docker-compose.phala.yml > docker-compose.deploy.yml
+          cat docker-compose.deploy.yml
+
+      - name: Install Phala CLI
+        run: npm install -g phala
+
+      - name: Deploy to Phala Cloud (smallest CVM)
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+        run: |
+          phala deploy \
+            -c docker-compose.deploy.yml \
+            -n ${{ secrets.PHALA_APP_NAME }} \
+            --instance-type tdx.small

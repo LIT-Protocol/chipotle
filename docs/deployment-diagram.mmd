@@ -1,0 +1,35 @@
+flowchart TB
+    subgraph CVM["Phala CVM (tdx.small)"]
+        subgraph containers["Docker Compose"]
+            API["lit-api-server<br/>:8000"]
+            Actions["lit-actions<br/>gRPC server"]
+            eRPC["eRPC (future)<br/>EVM RPC proxy<br/>:4000"]
+            Vol["lit-socket volume<br/>/tmp/lit_actions.sock"]
+        end
+        Dstack["/var/run/dstack.sock<br/>TEE"]
+    end
+
+    Client["HTTP Client"] -->|"POST /core/v1/lit_action"| API
+    API -->|"Unix socket"| Actions
+    API -.->|"shared volume"| Vol
+    Actions -.->|"creates socket"| Vol
+    API -.->|"chain RPCs (future)"| eRPC
+    API --> Dstack
+    Actions --> Dstack
+
+    subgraph CI["GitHub Actions"]
+        Checkout["Checkout"] --> Build["Build image"]
+        Build --> Push["Push to registry"]
+        Push --> Deploy["phala deploy"]
+    end
+
+    Push -.->|"image:tag"| containers
+
+    subgraph future["Future (production)"]
+        DeRoT["DeRoT on Base<br/>orchestrate upgrades"]
+    end
+
+    Deploy -.->|"govern (future)"| DeRoT
+
+    style eRPC stroke-dasharray: 5 5
+    style DeRoT stroke-dasharray: 5 5

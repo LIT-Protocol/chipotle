@@ -1,0 +1,45 @@
+# Multi-stage build for lit-api-server + lit-actions (Phala CVM deployment)
+# Builds both binaries in a single image for docker-compose deployment
+
+FROM rust:1-bookworm AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    clang \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy entire repo (needed for workspace dependencies)
+COPY . .
+
+# Build lit-actions binary first (Deno/V8 runtime - longest build)
+RUN cd lit-actions && cargo build --release --bin lit_actions
+
+# Build lit-api-server binary (with phala feature for TDX attestation)
+RUN cd lit-api-server && cargo build --release --bin lit-api-server --features phala
+
+# Runtime stage
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy both binaries from builder
+COPY --from=builder /build/lit-actions/target/release/lit_actions /usr/local/bin/
+COPY --from=builder /build/lit-api-server/target/release/lit-api-server /usr/local/bin/
+
+# Copy static assets for API server
+COPY --from=builder /build/lit-api-server/static /app/static
+COPY --from=builder /build/lit-api-server/Rocket.toml /app/
+COPY --from=builder /build/lit-api-server/rpc-config.yaml /app/
+COPY --from=builder /build/lit-api-server/log_levels.toml /app/
+
+# Default: run lit-api-server (lit-actions runs as separate service in compose)
+CMD ["lit-api-server"]
