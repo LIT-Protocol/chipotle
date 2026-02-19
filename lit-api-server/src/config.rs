@@ -4,6 +4,33 @@ use std::path::Path;
 use std::{env, fs};
 use toml_edit::DocumentMut;
 
+pub struct ObservabilityConfig {
+    pub log_level: String,
+    #[cfg(feature = "otlp")]
+    pub telemetry_endpoint: String,
+}
+
+/// Reads observability settings from environment variables.
+///
+/// - `log_level`: `RUST_LOG` env var, defaults to `"trace"`.
+/// - `telemetry_endpoint` (otlp builds only): `LIT_TELEMETRY_ENDPOINT` env var, required.
+///
+/// Returns an error if a required value is absent.
+pub fn read_observability_config() -> Result<ObservabilityConfig> {
+    let log_level = env::var("RUST_LOG").unwrap_or_else(|_| "trace".to_string());
+
+    #[cfg(feature = "otlp")]
+    let telemetry_endpoint = env::var("LIT_TELEMETRY_ENDPOINT").map_err(|_| {
+        anyhow::anyhow!("LIT_TELEMETRY_ENDPOINT is not set")
+    })?;
+
+    Ok(ObservabilityConfig {
+        log_level,
+        #[cfg(feature = "otlp")]
+        telemetry_endpoint,
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct NodeConfig {
     pub chain: Chain,

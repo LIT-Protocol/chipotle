@@ -13,15 +13,73 @@ use rocket_cors::{AllowedOrigins, Method};
 use rocket_okapi::okapi::openapi3::{OpenApi, Server};
 use rocket_okapi::swagger_ui::{SwaggerUIConfig, make_swagger_ui};
 use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
-use tracing::Level;
-use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 // The default signer count for a new instance when contracts are deployed.
 // Note that if the signers aren't funded, nothing will work until an admin sets the default api payer.
 #[rocket::main]
 #[allow(clippy::result_large_err)]
 async fn main() -> Result<(), rocket::Error> {
-    setup_tracing().expect("Failed to setup tracing.");
+    let obs = match config::read_observability_config() {
+        Ok(obs) => obs,
+        Err(e) => {
+            eprintln!("Failed to read observability config: {e}. Exiting.");
+            std::process::exit(1);
+        }
+    };
+
+    // Initialize the primary tracing subscriber (stdout + privacy filtering).
+    // When built with --features otlp, also initializes OTLP providers and wires
+    // tracing events into the OTel log pipeline via ContextAwareOtelLogLayer.
+    #[cfg(not(feature = "otlp"))]
+    {
+        let subscriber =
+            lit_observability::init_subscriber(&obs.log_level).expect("Failed to setup tracing");
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("setting default subscriber failed");
+    }
+
+    #[cfg(feature = "otlp")]
+    let _otlp_providers = {
+        use lit_observability::{
+            logging::ContextAwareOtelLogLayer,
+            opentelemetry::{KeyValue, global},
+            opentelemetry_sdk::{Resource, propagation::TraceContextPropagator, trace as sdktrace},
+            opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+        };
+        use tracing_subscriber::layer::SubscriberExt;
+
+        let otel_resource = Resource::new(vec![KeyValue::new(SERVICE_NAME, "lit-api-server")]);
+        match lit_observability::create_providers(
+            &obs.telemetry_endpoint,
+            otel_resource.clone(),
+            sdktrace::Config::default().with_resource(otel_resource),
+        )
+        .await
+        {
+            Ok((tracing_provider, metrics_provider, logger_provider)) => {
+                global::set_text_map_propagator(TraceContextPropagator::new());
+                global::set_tracer_provider(tracing_provider.clone());
+                global::set_meter_provider(metrics_provider.clone());
+
+                let otel_log_layer = ContextAwareOtelLogLayer::new(&logger_provider);
+                let subscriber = lit_observability::init_subscriber(&obs.log_level)
+                    .expect("Failed to setup tracing")
+                    .with(otel_log_layer);
+                tracing::subscriber::set_global_default(subscriber)
+                    .expect("setting default subscriber failed");
+
+                Some((tracing_provider, metrics_provider, logger_provider))
+            }
+            Err(e) => {
+                eprintln!("OTLP init failed ({e}), falling back to stdout-only logging");
+                let subscriber = lit_observability::init_subscriber(&obs.log_level)
+                    .expect("Failed to setup tracing");
+                tracing::subscriber::set_global_default(subscriber)
+                    .expect("setting default subscriber failed");
+                None
+            }
+        }
+    };
 
     if !cfg!(feature = "production") {
         tracing::warn!(
@@ -76,22 +134,6 @@ async fn main() -> Result<(), rocket::Error> {
     .to_cors()
     .expect("CORS failed to build");
 
-    // let local_rt = tokio::runtime::Builder::new_multi_thread()
-    //     .thread_name("tasks")
-    //     // .worker_threads(32 * num_cpus::get_physical())
-    //     .worker_threads(32 * 2)
-    //     .enable_all()
-    //     .build()
-    //     .expect("create tokio runtime");
-
-    // for lit-actions jobs.
-    // let action_store = local_rt.block_on(async {
-    //     let db_path = format!("actions_queue.db");
-    //     crate::actions::ActionStore::new(&db_path) // or new_in_memory() for file-less SQLite
-    //         .await
-    //         .expect("failed to create action store")
-    // });
-
     // 1gb max capacity
     let ipfs_cache: Cache<String, String> = Cache::builder()
         .weigher(|_key, value: &String| -> u32 { value.len().try_into().unwrap_or(u32::MAX) })
@@ -129,21 +171,20 @@ async fn main() -> Result<(), rocket::Error> {
     }
 
     r.launch().await?;
-    Ok(())
-}
 
-fn setup_tracing() -> Result<(), anyhow::Error> {
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("trace"))
-        .add_directive("hyper=warn".parse()?)
-        .add_directive("h2=warn".parse()?) // protobuf
-        .add_directive("ethers_providers::rpc::provider=warn".parse()?); // listeners
+    #[cfg(feature = "otlp")]
+    if let Some((tracing_provider, metrics_provider, logger_provider)) = _otlp_providers {
+        if let Err(e) = tracing_provider.shutdown() {
+            eprintln!("Failed to shutdown tracing provider: {e}");
+        }
+        if let Err(e) = metrics_provider.shutdown() {
+            eprintln!("Failed to shutdown metrics provider: {e}");
+        }
+        if let Err(e) = logger_provider.shutdown() {
+            eprintln!("Failed to shutdown logger provider: {e}");
+        }
+    }
 
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::TRACE)
-        .with_env_filter(env_filter)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
     Ok(())
 }
 
@@ -162,7 +203,6 @@ fn openapi_json(spec: &State<OpenApi>) -> Json<OpenApi> {
 
 pub fn default_http_client() -> reqwest::Client {
     reqwest::Client::builder()
-        // .use_rustls_tls()
         .timeout(Duration::from_secs(30))
         .pool_idle_timeout(Duration::from_secs(30))
         .pool_max_idle_per_host(30)

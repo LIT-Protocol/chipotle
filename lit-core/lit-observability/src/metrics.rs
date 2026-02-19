@@ -1,14 +1,20 @@
+#[cfg(feature = "otlp")]
 use std::time::Duration;
 
+#[cfg(feature = "otlp")]
 use lit_core::error::Result;
+#[cfg(feature = "otlp")]
 use opentelemetry_otlp::TonicExporterBuilder;
+#[cfg(feature = "otlp")]
 use opentelemetry_sdk::{
     Resource,
     metrics::reader::{DefaultAggregationSelector, DefaultTemporalitySelector},
 };
 
+#[cfg(feature = "otlp")]
 use crate::error::unexpected_err;
 
+#[cfg(feature = "otlp")]
 pub(crate) fn init_metrics_provider(
     tonic_exporter_builder: TonicExporterBuilder, resource: Resource,
 ) -> Result<opentelemetry_sdk::metrics::SdkMeterProvider> {
