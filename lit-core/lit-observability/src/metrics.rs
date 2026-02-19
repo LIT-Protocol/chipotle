@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use lit_core::error::Result;
+#[cfg(feature = "otlp")]
 use opentelemetry_otlp::TonicExporterBuilder;
 use opentelemetry_sdk::{
     Resource,
@@ -9,6 +10,7 @@ use opentelemetry_sdk::{
 
 use crate::error::unexpected_err;
 
+#[cfg(feature = "otlp")]
 pub(crate) fn init_metrics_provider(
     tonic_exporter_builder: TonicExporterBuilder, resource: Resource,
 ) -> Result<opentelemetry_sdk::metrics::SdkMeterProvider> {

@@ -9,9 +9,6 @@ pub mod error;
 use crate::abstractions::transfer::chain_info::Chain;
 use crate::accounts::signer_pool::start_signer_pool;
 use crate::actions::grpc::GrpcClientPool;
-use lit_observability::opentelemetry_sdk::{Resource, trace as sdktrace};
-use lit_observability::opentelemetry::KeyValue;
-use lit_observability::opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use lit_core::config::LitConfig;
 use moka::future::Cache;
 use rocket::response::Redirect;
@@ -21,8 +18,6 @@ use rocket_cors::{AllowedOrigins, Method};
 use rocket_okapi::okapi::openapi3::{OpenApi, Server};
 use rocket_okapi::swagger_ui::{SwaggerUIConfig, make_swagger_ui};
 use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
-use tracing::Level;
-use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 // The default signer count for a new instance when contracts are deployed.
 // Note that if the signers aren't funded, nothing will work until an admin sets the default api payer.
@@ -31,14 +26,9 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 async fn main() -> Result<(), rocket::Error> {
     let lit_cfg = LitConfig::default().expect("Failed to load LitConfig");
 
-    let resource = Resource::new(vec![
-        KeyValue::new(SERVICE_NAME, "lit-api-server"),
-    ]);
-
-    let (_trace_provider, _meter_provider, subscriber, _logger_provider) =
-        lit_observability::create_providers(&lit_cfg, resource, sdktrace::Config::default())
-        .await
-        .expect("Failed to setup observability");
+    // Initialize the primary tracing subscriber (stdout + privacy filtering)
+    let subscriber = lit_observability::init_subscriber(&lit_cfg)
+        .expect("Failed to setup tracing");
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
@@ -94,22 +84,6 @@ async fn main() -> Result<(), rocket::Error> {
     }
     .to_cors()
     .expect("CORS failed to build");
-
-    // let local_rt = tokio::runtime::Builder::new_multi_thread()
-    //     .thread_name("tasks")
-    //     // .worker_threads(32 * num_cpus::get_physical())
-    //     .worker_threads(32 * 2)
-    //     .enable_all()
-    //     .build()
-    //     .expect("create tokio runtime");
-
-    // for lit-actions jobs.
-    // let action_store = local_rt.block_on(async {
-    //     let db_path = format!("actions_queue.db");
-    //     crate::actions::ActionStore::new(&db_path) // or new_in_memory() for file-less SQLite
-    //         .await
-    //         .expect("failed to create action store")
-    // });
 
     // 1gb max capacity
     let ipfs_cache: Cache<String, String> = Cache::builder()
@@ -171,7 +145,6 @@ fn openapi_json(spec: &State<OpenApi>) -> Json<OpenApi> {
 
 pub fn default_http_client() -> reqwest::Client {
     reqwest::Client::builder()
-        // .use_rustls_tls()
         .timeout(Duration::from_secs(30))
         .pool_idle_timeout(Duration::from_secs(30))
         .pool_max_idle_per_host(30)

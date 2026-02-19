@@ -11,26 +11,25 @@ testing = ["ansi", "tracing-log"]
 ansi = []
 tracing-log = []
 channels = ["dep:flume"]
+otlp = ["opentelemetry-otlp"]
 
 [dependencies]
 dashmap = "6"
 derive_more.workspace = true
 flume = { version = "0.11", optional = true }
-hyper-util.workspace = true
 nu-ansi-term = { version = "0.50.1" }
 opentelemetry.workspace = true
-opentelemetry-otlp = { workspace = true, features = ["logs"] }
+opentelemetry-otlp = { workspace = true, features = ["logs"], optional = true }
 opentelemetry-semantic-conventions.workspace = true
-opentelemetry_sdk = { workspace = true, features = ["logs"] }
+opentelemetry_sdk = { workspace = true, features = ["logs"], optional = true }
 tokio.workspace = true
 tonic = "0.12"
 tonic-middleware = "0.2"
 tower = "0.5"
 tracing = { workspace = true, features = ["std"] }
 tracing-appender = "0.2"
-tracing-log = { version = "0.2" }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry", "std"] }
-tracing-opentelemetry.workspace = true
+tracing-opentelemetry = { workspace = true, optional = true }
 
 [dependencies.lit-core]
 path = "../lit-core"

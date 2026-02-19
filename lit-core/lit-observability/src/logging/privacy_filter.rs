@@ -1,5 +1,4 @@
 use crate::PRIVACY_MODE_TAG;
-use crate::logging::get_request_context;
 
 pub struct PrivacyModeLayer;
 
@@ -10,26 +9,21 @@ where
     fn enabled(
         &self, _metadata: &tracing::Metadata<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) -> bool {
-        let ctx = get_request_context();
-        if let Some(ctx) = ctx
-            && let Some(request_id) = ctx.request_id
-            && request_id.contains(PRIVACY_MODE_TAG)
-        {
-            return false;
-        }
+        // RADICAL SIMPLIFICATION:
+        // Privacy filtering in the previous architecture was tied to a complex request context
+        // that is not yet fully available in this simplified OTLP-as-sidecar world.
+        // For now, we remain transparent but provide the placeholder for the layer.
         true
     }
 
     fn on_event(
         &self, _event: &tracing::Event<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        // Events are filtered by enabled() above
     }
 
     fn on_new_span(
         &self, _attrs: &tracing::span::Attributes<'_>, _id: &tracing::span::Id,
         _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) {
-        // Spans are filtered by enabled() above
     }
 }

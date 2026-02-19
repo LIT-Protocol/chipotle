@@ -2172,7 +2172,6 @@ dependencies = [
  "dashmap",
  "derive_more",
  "flume",
- "hyper-util",
  "lit-core",
  "lit-core-derive",
  "lit-logging",
