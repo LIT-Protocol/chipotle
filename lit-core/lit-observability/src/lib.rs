@@ -38,58 +38,22 @@ pub use tonic_middleware;
 
 pub async fn create_providers(
     cfg: &LitConfig, resource: Resource, trace_config: sdktrace::Config,
-    #[cfg(feature = "proxy-collector")] proxy_collector_name: &'static str,
 ) -> Result<(sdktrace::TracerProvider, SdkMeterProvider, impl Subscriber, LoggerProvider)> {
+    // Initialize standard OTLP tonic exporter
+    let tonic_exporter_builder = init_tonic_exporter_builder(cfg)?;
+    
     // Initialize the tracing pipeline
-    let tonic_exporter_builder = {
-        #[cfg(feature = "proxy-collector")]
-        {
-            init_tonic_exporter_builder(cfg, proxy_collector_name).await?
-        }
-        #[cfg(not(feature = "proxy-collector"))]
-        {
-            init_tonic_exporter_builder(cfg).await?
-        }
-    };
-    let tracing_provider = init_tracing_provider(tonic_exporter_builder, trace_config)?;
+    let tracing_provider = init_tracing_provider(tonic_exporter_builder.clone(), trace_config)?;
     let tracer = tracing_provider.tracer("lit-tracer");
 
     // Initialize the metrics pipeline
-    let tonic_exporter_builder = {
-        #[cfg(feature = "proxy-collector")]
-        {
-            init_tonic_exporter_builder(cfg, proxy_collector_name).await?
-        }
-        #[cfg(not(feature = "proxy-collector"))]
-        {
-            init_tonic_exporter_builder(cfg).await?
-        }
-    };
-    let meter_provider = init_metrics_provider(tonic_exporter_builder, resource.clone())?;
+    let meter_provider = init_metrics_provider(tonic_exporter_builder.clone(), resource.clone())?;
 
     // Initialize the logs pipeline
-    let tonic_exporter_builder = {
-        #[cfg(feature = "proxy-collector")]
-        {
-            init_tonic_exporter_builder(cfg, proxy_collector_name).await?
-        }
-        #[cfg(not(feature = "proxy-collector"))]
-        {
-            init_tonic_exporter_builder(cfg).await?
-        }
-    };
     let logger_provider = init_logger_provider(tonic_exporter_builder, resource.clone())?;
 
     let context_aware_log_layer = ContextAwareOtelLogLayer::new(&logger_provider);
 
-    // Add a tracing filter to filter events from crates used by opentelemetry-otlp.
-    // The filter levels are set as follows:
-    // - Allow the configured level and above by default.
-    // - Restrict `hyper`, `tonic`, and `reqwest` to `error` level logs only.
-    // This ensures events generated from these crates within the OTLP Exporter are not looped back,
-    // thus preventing infinite event generation.
-    // Note: This will also drop events from these crates used outside the OTLP Exporter.
-    // For more details, see: https://github.com/open-telemetry/opentelemetry-rust/issues/761
     let cfg_log_level = cfg.logging_level()?;
     let level_filter = EnvFilter::try_from_default_env()
         .or_else(|_e| EnvFilter::from_str(cfg_log_level.as_str()))

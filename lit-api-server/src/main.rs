@@ -9,6 +9,10 @@ pub mod error;
 use crate::abstractions::transfer::chain_info::Chain;
 use crate::accounts::signer_pool::start_signer_pool;
 use crate::actions::grpc::GrpcClientPool;
+use lit_observability::opentelemetry_sdk::{Resource, trace as sdktrace};
+use lit_observability::opentelemetry::KeyValue;
+use lit_observability::opentelemetry_semantic_conventions::resource::SERVICE_NAME;
+use lit_core::config::LitConfig;
 use moka::future::Cache;
 use rocket::response::Redirect;
 use rocket::serde::json::Json;
@@ -25,7 +29,18 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 #[rocket::main]
 #[allow(clippy::result_large_err)]
 async fn main() -> Result<(), rocket::Error> {
-    setup_tracing().expect("Failed to setup tracing.");
+    let lit_cfg = LitConfig::default().expect("Failed to load LitConfig");
+
+    let resource = Resource::new(vec![
+        KeyValue::new(SERVICE_NAME, "lit-api-server"),
+    ]);
+
+    let (_trace_provider, _meter_provider, subscriber, _logger_provider) =
+        lit_observability::create_providers(&lit_cfg, resource, sdktrace::Config::default())
+        .await
+        .expect("Failed to setup observability");
+
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     if !cfg!(feature = "production") {
         tracing::warn!(
@@ -138,21 +153,6 @@ async fn main() -> Result<(), rocket::Error> {
     }
 
     r.launch().await?;
-    Ok(())
-}
-
-fn setup_tracing() -> Result<(), anyhow::Error> {
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("trace"))
-        .add_directive("hyper=warn".parse()?)
-        .add_directive("h2=warn".parse()?) // protobuf
-        .add_directive("ethers_providers::rpc::provider=warn".parse()?); // listeners
-
-    let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::TRACE)
-        .with_env_filter(env_filter)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
     Ok(())
 }
 

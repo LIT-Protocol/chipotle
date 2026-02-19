@@ -10,7 +10,6 @@ default = []
 testing = ["ansi", "tracing-log"]
 ansi = []
 tracing-log = []
-proxy-collector = []
 channels = ["dep:flume"]
 
 [dependencies]
