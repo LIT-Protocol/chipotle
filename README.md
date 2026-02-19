@@ -69,4 +69,6 @@ Build and run the API server from the repo root (ensure Lit Actions server is av
 cd lit-api-server && cargo run
 ```
 
-By default the API is at `http://localhost:8000`; static files and dApps are served from `/`.
+By default the API is at `http://localhost:8000`; static files and dApps are served from `/`.-e 
+---
+*Last updated: 2026-02-19 21:30:33 UTC by cl4wb0t*
