@@ -10,7 +10,6 @@ use std::time::Duration;
 
 use crate::error::Error;
 
-
 use anyhow::Result;
 use apalis::{layers::tracing::TraceLayer, prelude::*};
 use apalis_sql::{
@@ -87,10 +86,7 @@ impl ActionJob {
         self.client.execute_js(self.opts.clone()).await
     }
 
-    pub async fn run_with_env(
-        &mut self,
-        env: DenoExecutionEnv,
-    ) -> Result<ExecutionState, Error> {
+    pub async fn run_with_env(&mut self, env: DenoExecutionEnv) -> Result<ExecutionState, Error> {
         self.client.js_env = env;
         self.run().await
     }

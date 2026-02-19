@@ -12,6 +12,12 @@
 export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
 
 /**
+ * @typedef {Object} NewAccountOptions
+ * @property {string} accountName - Name for the account
+ * @property {string} accountDescription - Description for the account
+ */
+
+/**
  * @typedef {Object} SignWithPkpOptions
  * @property {string} apiKey - Hex-encoded API key (from getApiKey)
  * @property {string} pkpPublicKey - PKP public key
@@ -24,6 +30,74 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @property {string} apiKey - Hex-encoded API key (from getApiKey)
  * @property {string} code - Lit action JavaScript code
  * @property {Object} [jsParams] - Optional JSON params passed to the lit action
+ */
+
+/**
+ * @typedef {Object} AddGroupOptions
+ * @property {string} apiKey - Account API key
+ * @property {string} groupName - Name of the group (Group.groupName in AccountConfig.sol)
+ * @property {string} [groupDescription=''] - Description of the group (Group.groupDescription in AccountConfig.sol)
+ * @property {string[]} permittedActions - Keccak256 hashes of action IPFS CIDs (hex strings, with or without 0x)
+ * @property {string[]} pkps - Keccak256 hashes of PKP public keys (hex strings)
+ */
+
+/**
+ * @typedef {Object} AddActionToGroupOptions
+ * @property {string} apiKey - Account API key
+ * @property {string} groupId - Group ID (decimal or hex string)
+ * @property {string} actionIpfsCid - IPFS CID for the action (keccak256-hashed on server)
+ * @property {string} [name] - Optional name for the action (stored in contract metadata)
+ * @property {string} [description] - Optional description for the action (stored in contract metadata)
+ */
+
+/**
+ * @typedef {Object} AddPkpToGroupOptions
+ * @property {string} apiKey - Account API key
+ * @property {string} groupId - Group ID (decimal or hex string)
+ * @property {string} pkpPublicKey - PKP public key (will be hashed on server)
+ */
+
+/**
+ * @typedef {Object} RemovePkpFromGroupOptions
+ * @property {string} apiKey - Account API key
+ * @property {string} groupId - Group ID (decimal or hex string)
+ * @property {string} pkpPublicKey - PKP public key (must match value used when adding)
+ */
+
+/**
+ * @typedef {Object} AddUsageApiKeyOptions
+ * @property {string} apiKey - Account API key
+ * @property {string} usageApiKey - Usage API key to add
+ * @property {string} expiration - Expiration (e.g. unix timestamp as decimal string)
+ * @property {string} balance - Balance (e.g. wei as decimal string)
+ */
+
+/**
+ * @typedef {Object} RemoveUsageApiKeyOptions
+ * @property {string} apiKey - Account API key
+ * @property {string} usageApiKey - Usage API key to remove
+ */
+
+/**
+ * @typedef {Object} ListPageOptions
+ * @property {string} apiKey - Account API key
+ * @property {string} [pageNumber='0'] - Page number (0-based)
+ * @property {string} [pageSize='10'] - Page size
+ */
+
+/**
+ * @typedef {Object} ListPageWithGroupOptions
+ * @property {string} apiKey - Account API key
+ * @property {string} groupId - Group ID (decimal or hex string)
+ * @property {string} [pageNumber='0'] - Page number (0-based)
+ * @property {string} [pageSize='10'] - Page size
+ */
+
+/**
+ * @typedef {Object} ListMetadataItem - One item from list_groups, list_wallets, list_wallets_in_group, or list_actions
+ * @property {string} id - ID (decimal string from contract)
+ * @property {string} name - Name
+ * @property {string} description - Description
  */
 
 /** Share type enum (response.rs ShareType). */
@@ -45,6 +119,12 @@ export const SHARE_TYPE_BLS = 'Bls';
  * @typedef {Object} GetApiKeyResponse
  * @property {string} api_key - Hex-encoded API key
  * @property {string} wallet_address - Wallet address for the API key
+ */
+
+/**
+ * @typedef {Object} NewAccountResponse
+ * @property {string} api_key - Generated API key for the new account
+ * @property {string} wallet_address - Wallet address for the new account
  */
 
 /**
@@ -72,6 +152,11 @@ export const SHARE_TYPE_BLS = 'Bls';
  * @property {string} response - Action response payload
  * @property {string} logs - Action logs
  * @property {boolean} has_error - Whether the action reported an error
+ */
+
+/**
+ * @typedef {Object} AccountOpResponse - Response for account config operations (add_group, add_pkp_to_group, etc.)
+ * @property {boolean} success
  */
 
 /**
@@ -139,6 +224,25 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
+   * POST /core/v1/new_account
+   * Creates a new account; server generates API key and wallet. Returns api_key and wallet_address.
+   * @param {NewAccountOptions} options
+   * @returns {Promise<NewAccountResponse>}
+   */
+  async newAccount({ accountName, accountDescription }) {
+    const body = {
+      account_name: accountName,
+      account_description: accountDescription ?? '',
+    };
+    const res = await fetch(`${this.baseUrl}/new_account`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'new_account');
+  }
+
+  /**
    * GET /core/v1/create_wallet/<api_key>
    * Creates a wallet for the given API key and returns the wallet address.
    * @param {string} apiKey - Hex-encoded API key (from getApiKey)
@@ -189,6 +293,196 @@ export class LitNodeSimpleApiClient {
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'lit_action');
+  }
+
+  /**
+   * POST /core/v1/add_group
+   * Add a group to an account with permitted action hashes and PKP hashes.
+   * @param {AddGroupOptions} options
+   * @returns {Promise<AccountOpResponse>}
+   */
+  async addGroup({ apiKey, groupName, groupDescription = '', permittedActions, pkps }) {
+    const body = {
+      api_key: apiKey,
+      group_name: groupName ?? '',
+      group_description: groupDescription ?? '',
+      permitted_actions: permittedActions ?? [],
+      pkps: pkps ?? [],
+    };
+    const res = await fetch(`${this.baseUrl}/add_group`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'add_group');
+  }
+
+  /**
+   * POST /core/v1/add_action_to_group
+   * Add an action (IPFS CID) to a group with optional name and description.
+   * @param {AddActionToGroupOptions} options
+   * @returns {Promise<AccountOpResponse>}
+   */
+  async addActionToGroup({ apiKey, groupId, actionIpfsCid, name, description }) {
+    const body = {
+      api_key: apiKey,
+      group_id: groupId,
+      action_ipfs_cid: actionIpfsCid,
+      name: name ?? null,
+      description: description ?? null,
+    };
+    const res = await fetch(`${this.baseUrl}/add_action_to_group`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'add_action_to_group');
+  }
+
+  /**
+   * POST /core/v1/add_pkp_to_group
+   * Add a PKP to a group.
+   * @param {AddPkpToGroupOptions} options
+   * @returns {Promise<AccountOpResponse>}
+   */
+  async addPkpToGroup({ apiKey, groupId, pkpPublicKey }) {
+    const body = {
+      api_key: apiKey,
+      group_id: groupId,
+      pkp_public_key: pkpPublicKey,
+    };
+    const res = await fetch(`${this.baseUrl}/add_pkp_to_group`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'add_pkp_to_group');
+  }
+
+  /**
+   * POST /core/v1/remove_pkp_from_group
+   * Remove a PKP from a group.
+   * @param {RemovePkpFromGroupOptions} options
+   * @returns {Promise<AccountOpResponse>}
+   */
+  async removePkpFromGroup({ apiKey, groupId, pkpPublicKey }) {
+    const body = {
+      api_key: apiKey,
+      group_id: groupId,
+      pkp_public_key: pkpPublicKey,
+    };
+    const res = await fetch(`${this.baseUrl}/remove_pkp_from_group`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'remove_pkp_from_group');
+  }
+
+  /**
+   * POST /core/v1/add_usage_api_key
+   * Add a usage API key to an account.
+   * @param {AddUsageApiKeyOptions} options
+   * @returns {Promise<AccountOpResponse>}
+   */
+  async addUsageApiKey({ apiKey, usageApiKey, expiration, balance }) {
+    const body = {
+      api_key: apiKey,
+      usage_api_key: usageApiKey,
+      expiration,
+      balance,
+    };
+    const res = await fetch(`${this.baseUrl}/add_usage_api_key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'add_usage_api_key');
+  }
+
+  /**
+   * POST /core/v1/remove_usage_api_key
+   * Remove a usage API key from an account.
+   * @param {RemoveUsageApiKeyOptions} options
+   * @returns {Promise<AccountOpResponse>}
+   */
+  async removeUsageApiKey({ apiKey, usageApiKey }) {
+    const body = {
+      api_key: apiKey,
+      usage_api_key: usageApiKey,
+    };
+    const res = await fetch(`${this.baseUrl}/remove_usage_api_key`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'remove_usage_api_key');
+  }
+
+  /**
+   * GET /core/v1/list_groups
+   * List groups for an account (paginated). Returns metadata (id, name, description) per group.
+   * @param {ListPageOptions} options
+   * @returns {Promise<ListMetadataItem[]>}
+   */
+  async listGroups({ apiKey, pageNumber = '0', pageSize = '10' }) {
+    const params = new URLSearchParams({
+      api_key: apiKey,
+      page_number: String(pageNumber),
+      page_size: String(pageSize),
+    });
+    const res = await fetch(`${this.baseUrl}/list_groups?${params}`);
+    return parseResponse(res, 'list_groups');
+  }
+
+  /**
+   * GET /core/v1/list_wallets
+   * List wallets (wallet derivation metadata) for an account (paginated).
+   * @param {ListPageOptions} options
+   * @returns {Promise<ListMetadataItem[]>}
+   */
+  async listWallets({ apiKey, pageNumber = '0', pageSize = '10' }) {
+    const params = new URLSearchParams({
+      api_key: apiKey,
+      page_number: String(pageNumber),
+      page_size: String(pageSize),
+    });
+    const res = await fetch(`${this.baseUrl}/list_wallets?${params}`);
+    return parseResponse(res, 'list_wallets');
+  }
+
+  /**
+   * GET /core/v1/list_wallets_in_group
+   * List wallets in a group (paginated). Returns metadata for each wallet in the group.
+   * @param {ListPageWithGroupOptions} options
+   * @returns {Promise<ListMetadataItem[]>}
+   */
+  async listWalletsInGroup({ apiKey, groupId, pageNumber = '0', pageSize = '10' }) {
+    const params = new URLSearchParams({
+      api_key: apiKey,
+      group_id: groupId,
+      page_number: String(pageNumber),
+      page_size: String(pageSize),
+    });
+    const res = await fetch(`${this.baseUrl}/list_wallets_in_group?${params}`);
+    return parseResponse(res, 'list_wallets_in_group');
+  }
+
+  /**
+   * GET /core/v1/list_actions
+   * List actions in a group (paginated). Returns metadata (id, name, description) per action.
+   * @param {ListPageWithGroupOptions} options
+   * @returns {Promise<ListMetadataItem[]>}
+   */
+  async listActions({ apiKey, groupId, pageNumber = '0', pageSize = '10' }) {
+    const params = new URLSearchParams({
+      api_key: apiKey,
+      group_id: groupId,
+      page_number: String(pageNumber),
+      page_size: String(pageSize),
+    });
+    const res = await fetch(`${this.baseUrl}/list_actions?${params}`);
+    return parseResponse(res, 'list_actions');
   }
 }
 

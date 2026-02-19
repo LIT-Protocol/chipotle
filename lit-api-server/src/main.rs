@@ -1,16 +1,16 @@
 pub mod abstractions;
-pub mod core;
-pub mod actions;
-pub mod error;
 pub mod accounts;
+pub mod actions;
+pub mod core;
+pub mod error;
 
+use crate::actions::grpc_client_pool::GrpcClientPool;
+use moka::future::Cache;
 use rocket::fs::{FileServer, relative};
 use rocket_cors::{AllowedOrigins, Method};
 use std::{collections::HashSet, str::FromStr, time::Duration};
 use tracing::Level;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
-use crate::actions::grpc_client_pool::GrpcClientPool;
-use moka::future::Cache;
 
 #[rocket::main]
 async fn main() -> Result<(), rocket::Error> {
@@ -48,7 +48,6 @@ async fn main() -> Result<(), rocket::Error> {
     //         .expect("failed to create action store")
     // });
 
-
     // 1gb max capacity
     let ipfs_cache: Cache<String, String> = Cache::builder()
         .weigher(|_key, value: &String| -> u32 { value.len().try_into().unwrap_or(u32::MAX) })
@@ -64,6 +63,13 @@ async fn main() -> Result<(), rocket::Error> {
             abstractions::intents::swaps::endpoints::routes(),
         )
         .mount("/", FileServer::from(relative!("static")))
+        // .mount(
+        //     "/swagger-ui/",
+        //     make_swagger_ui(&SwaggerUIConfig {
+        //         url: "../openapi.json".to_owned(),
+        //         ..Default::default()
+        //     }),
+        // )
         .manage(ipfs_cache)
         .manage(default_http_client())
         // .manage(action_store)

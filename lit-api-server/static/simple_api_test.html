@@ -17,10 +17,6 @@
     .section { margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid #e5e5e5; }
     .section h2 { font-size: 1rem; margin: 0 0 1rem; }
     textarea { width: 100%; padding: 0.5rem; margin-top: 0.25rem; box-sizing: border-box; min-height: 4rem; font-family: ui-monospace, monospace; font-size: 0.875rem; resize: vertical; }
-    #signOutput { margin-top: 0.5rem; padding: 1rem; background: #f5f5f5; border-radius: 6px; font-family: ui-monospace, monospace; font-size: 0.875rem; white-space: pre-wrap; word-break: break-all; min-height: 4rem; }
-    #signOutput:empty::before { content: 'Result will appear here.'; color: #888; }
-    #signOutput.error { background: #fef2f2; color: #991b1b; }
-    #signOutput.success { background: #f0fdf4; color: #166534; }
     #litActionOutput { margin-top: 0.5rem; padding: 1rem; background: #f5f5f5; border-radius: 6px; font-family: ui-monospace, monospace; font-size: 0.875rem; white-space: pre-wrap; word-break: break-all; min-height: 4rem; }
     #litActionOutput:empty::before { content: 'Result will appear here.'; color: #888; }
     #litActionOutput.error { background: #fef2f2; color: #991b1b; }
@@ -40,7 +36,7 @@
 </head>
 <body>
   <h1>Lit Node Simple API – Tests</h1>
-  <p>Runs: get API key → create wallet → lit action.</p>
+  <p>Run tests runs a generic check (no API calls). Use the sections below to exercise endpoints (new account, create wallet, lit action, add group, etc.).</p>
   <label for="baseUrl">API base URL</label>
   <input type="text" id="baseUrl" value="http://localhost:8000" placeholder="http://localhost:8000">
   <button type="button" id="run">Run tests</button>
@@ -48,33 +44,31 @@
 
   <section class="section accordion">
     <button type="button" class="accordion-header" aria-expanded="true">
-      <span class="accordion-title">Create wallet</span>
+      <span class="accordion-title">New account</span>
       <span class="accordion-icon" aria-hidden="true">▼</span>
     </button>
     <div class="accordion-body">
-    <p>Create a wallet for the given API key (from get_api_key).</p>
-    <label for="createWalletApiKey">API key</label>
-    <input type="text" id="createWalletApiKey" placeholder="Hex-encoded API key (from get_api_key)">
-    <button type="button" id="createWalletBtn">Create wallet</button>
-    <pre id="createWalletOutput" class="api-output"></pre>
+    <p>Create a new account. Server generates and returns api_key and wallet_address.</p>
+    <label for="newAccountName">Account name</label>
+    <input type="text" id="newAccountName" placeholder="e.g. My Account">
+    <label for="newAccountDescription">Account description</label>
+    <input type="text" id="newAccountDescription" placeholder="Optional description">
+    <button type="button" id="newAccountBtn">New account</button>
+    <pre id="newAccountOutput" class="api-output"></pre>
     </div>
   </section>
 
   <section class="section accordion">
     <button type="button" class="accordion-header" aria-expanded="true">
-      <span class="accordion-title">Sign with PKP</span>
+      <span class="accordion-title">Create wallet</span>
       <span class="accordion-icon" aria-hidden="true">▼</span>
     </button>
     <div class="accordion-body">
-    <p>Provide API key, PKP public key, and message to sign.</p>
-    <label for="signApiKey">API key</label>
-    <input type="text" id="signApiKey" placeholder="Hex-encoded API key (from get_api_key)">
-    <label for="signPkpPublicKey">PKP public key</label>
-    <input type="text" id="signPkpPublicKey" placeholder="PKP public key">
-    <label for="signMessage">Message</label>
-    <textarea id="signMessage" placeholder="Message to sign (e.g. hello world)">hello world</textarea>
-    <button type="button" id="signBtn">Sign with PKP</button>
-    <pre id="signOutput"></pre>
+    <p>Create a wallet for the given API key (from New Account).</p>
+    <label for="createWalletApiKey">API key</label>
+    <input type="text" id="createWalletApiKey" placeholder="Base-64 encoded API key (from New Account)">
+    <button type="button" id="createWalletBtn">Create wallet</button>
+    <pre id="createWalletOutput" class="api-output"></pre>
     </div>
   </section>
 
@@ -86,7 +80,7 @@
     <div class="accordion-body">
     <p>Execute a lit action with API key, JavaScript code, and optional JSON params.</p>
     <label for="litActionApiKey">API key</label>
-    <input type="text" id="litActionApiKey" placeholder="Hex-encoded API key (from get_api_key)">
+    <input type="text" id="litActionApiKey" placeholder="Base-64 encoded API key (from New Account)">
     <label for="litActionCode">Code</label>
     <textarea id="litActionCode" placeholder="Lit action JavaScript code (e.g. const go = async () => ({ message: 'hello' }); go();">const go = async () => {
   Lit.Actions.setResponse({ response: JSON.stringify("Hello from lit action!") });
@@ -101,58 +95,195 @@ go();</textarea>
 
   <section class="section accordion">
     <button type="button" class="accordion-header" aria-expanded="true">
-      <span class="accordion-title">Transfer: Get API key balance</span>
+      <span class="accordion-title">Add group</span>
       <span class="accordion-icon" aria-hidden="true">▼</span>
     </button>
     <div class="accordion-body">
-    <p>Get balance for the wallet (from API key) on a chain. Uses transfer_sdk.js; requires transfer routes mounted.</p>
-    <label for="getBalanceApiKey">API key</label>
-    <input type="text" id="getBalanceApiKey" placeholder="Hex-encoded API key (from get_api_key)">
-    <label for="getBalanceChain">Chain</label>
-    <input type="text" id="getBalanceChain" placeholder="e.g. Ethereum, Solana" value="Ethereum">
-    <button type="button" id="getBalanceBtn">Get API key balance</button>
-    <pre id="getBalanceOutput" class="api-output"></pre>
+    <p>Add a group to an account. Group has name and description (AccountConfig.sol Group). permitted_actions and pkps are keccak256 hashes as hex strings (JSON array).</p>
+    <label for="addGroupApiKey">API key</label>
+    <input type="text" id="addGroupApiKey" placeholder="Account API key">
+    <label for="addGroupName">Group name</label>
+    <input type="text" id="addGroupName" placeholder="e.g. My Group">
+    <label for="addGroupDescription">Group description</label>
+    <input type="text" id="addGroupDescription" placeholder="Optional description">
+    <label for="addGroupPermittedActions">permitted_actions (JSON array of hex strings)</label>
+    <textarea id="addGroupPermittedActions" placeholder='e.g. ["0x..."]' rows="2">[]</textarea>
+    <label for="addGroupPkps">pkps (JSON array of hex strings)</label>
+    <textarea id="addGroupPkps" placeholder='e.g. ["0x..."]' rows="2">[]</textarea>
+    <button type="button" id="addGroupBtn">Add group</button>
+    <pre id="addGroupOutput" class="api-output"></pre>
     </div>
   </section>
 
   <section class="section accordion">
     <button type="button" class="accordion-header" aria-expanded="true">
-      <span class="accordion-title">Transfer: Get PKP balance</span>
+      <span class="accordion-title">Add action to group</span>
       <span class="accordion-icon" aria-hidden="true">▼</span>
     </button>
     <div class="accordion-body">
-    <p>Get balance for a PKP (programmable key pair) address on a chain. Uses transfer_sdk.js.</p>
-    <label for="getPkpBalancePkpKey">PKP public key</label>
-    <input type="text" id="getPkpBalancePkpKey" placeholder="PKP public key (e.g. from mint_pkp)">
-    <label for="getPkpBalanceChain">Chain</label>
-    <input type="text" id="getPkpBalanceChain" placeholder="e.g. Ethereum, Solana" value="Ethereum">
-    <button type="button" id="getPkpBalanceBtn">Get PKP balance</button>
-    <pre id="getPkpBalanceOutput" class="api-output"></pre>
+    <p>Add an action (IPFS CID) to a group. Optional name and description are stored in contract metadata.</p>
+    <label for="addActionApiKey">API key</label>
+    <input type="text" id="addActionApiKey" placeholder="Account API key">
+    <label for="addActionGroupId">Group ID</label>
+    <input type="text" id="addActionGroupId" placeholder="e.g. 0 or 1">
+    <label for="addActionIpfsCid">Action IPFS CID</label>
+    <input type="text" id="addActionIpfsCid" placeholder="IPFS CID for the action">
+    <label for="addActionName">Name (optional)</label>
+    <input type="text" id="addActionName" placeholder="Action name">
+    <label for="addActionDescription">Description (optional)</label>
+    <input type="text" id="addActionDescription" placeholder="Action description">
+    <button type="button" id="addActionBtn">Add action to group</button>
+    <pre id="addActionOutput" class="api-output"></pre>
     </div>
   </section>
 
   <section class="section accordion">
     <button type="button" class="accordion-header" aria-expanded="true">
-      <span class="accordion-title">Transfer: Send</span>
+      <span class="accordion-title">Add PKP to group</span>
       <span class="accordion-icon" aria-hidden="true">▼</span>
     </button>
     <div class="accordion-body">
-    <p>Send funds to a destination address on a chain (PKP-signed). Uses transfer_sdk.js; requires transfer routes mounted.</p>
-    <label for="sendApiKey">API key</label>
-    <input type="text" id="sendApiKey" placeholder="Hex-encoded API key">
-    <label for="sendPkpPublicKey">PKP public key</label>
-    <input type="text" id="sendPkpPublicKey" placeholder="PKP public key">
-    <label for="sendChain">Chain</label>
-    <input type="text" id="sendChain" placeholder="e.g. Ethereum, Solana" value="Ethereum">
-    <label for="sendDestinationAddress">Destination address</label>
-    <input type="text" id="sendDestinationAddress" placeholder="0x... or address">
-    <label for="sendAmount">Amount (string)</label>
-    <input type="text" id="sendAmount" placeholder="e.g. 1000000000000000000" value="0">
-    <button type="button" id="sendBtn">Send</button>
-    <pre id="sendOutput" class="api-output"></pre>
+    <p>Add a PKP to an existing group. group_id is the group ID (decimal or hex).</p>
+    <label for="addPkpApiKey">API key</label>
+    <input type="text" id="addPkpApiKey" placeholder="Account API key">
+    <label for="addPkpGroupId">Group ID</label>
+    <input type="text" id="addPkpGroupId" placeholder="e.g. 0 or 1">
+    <label for="addPkpPublicKey">PKP public key</label>
+    <input type="text" id="addPkpPublicKey" placeholder="PKP public key">
+    <button type="button" id="addPkpBtn">Add PKP to group</button>
+    <pre id="addPkpOutput" class="api-output"></pre>
     </div>
   </section>
 
+  <section class="section accordion">
+    <button type="button" class="accordion-header" aria-expanded="true">
+      <span class="accordion-title">Remove PKP from group</span>
+      <span class="accordion-icon" aria-hidden="true">▼</span>
+    </button>
+    <div class="accordion-body">
+    <p>Remove a PKP from a group. group_id and pkp_public_key must match the values used when adding.</p>
+    <label for="removePkpApiKey">API key</label>
+    <input type="text" id="removePkpApiKey" placeholder="Account API key">
+    <label for="removePkpGroupId">Group ID</label>
+    <input type="text" id="removePkpGroupId" placeholder="e.g. 0 or 1">
+    <label for="removePkpPublicKey">PKP public key</label>
+    <input type="text" id="removePkpPublicKey" placeholder="PKP public key">
+    <button type="button" id="removePkpBtn">Remove PKP from group</button>
+    <pre id="removePkpOutput" class="api-output"></pre>
+    </div>
+  </section>
+
+  <section class="section accordion">
+    <button type="button" class="accordion-header" aria-expanded="true">
+      <span class="accordion-title">Add usage API key</span>
+      <span class="accordion-icon" aria-hidden="true">▼</span>
+    </button>
+    <div class="accordion-body">
+    <p>Add a usage API key to an account. expiration = unix timestamp (decimal), balance = wei (decimal string).</p>
+    <label for="addUsageApiKey">API key</label>
+    <input type="text" id="addUsageApiKey" placeholder="Account API key">
+    <label for="addUsageUsageApiKey">Usage API key</label>
+    <input type="text" id="addUsageUsageApiKey" placeholder="Usage API key to add">
+    <label for="addUsageExpiration">Expiration (unix timestamp)</label>
+    <input type="text" id="addUsageExpiration" placeholder="e.g. 9999999999" value="9999999999">
+    <label for="addUsageBalance">Balance (wei, decimal string)</label>
+    <input type="text" id="addUsageBalance" placeholder="e.g. 1000000000000000000" value="1000000000000000000">
+    <button type="button" id="addUsageBtn">Add usage API key</button>
+    <pre id="addUsageOutput" class="api-output"></pre>
+    </div>
+  </section>
+
+  <section class="section accordion">
+    <button type="button" class="accordion-header" aria-expanded="true">
+      <span class="accordion-title">Remove usage API key</span>
+      <span class="accordion-icon" aria-hidden="true">▼</span>
+    </button>
+    <div class="accordion-body">
+    <p>Remove a usage API key from an account.</p>
+    <label for="removeUsageApiKey">API key</label>
+    <input type="text" id="removeUsageApiKey" placeholder="Account API key">
+    <label for="removeUsageUsageApiKey">Usage API key to remove</label>
+    <input type="text" id="removeUsageUsageApiKey" placeholder="Usage API key">
+    <button type="button" id="removeUsageBtn">Remove usage API key</button>
+    <pre id="removeUsageOutput" class="api-output"></pre>
+    </div>
+  </section>
+
+  <section class="section accordion">
+    <button type="button" class="accordion-header" aria-expanded="true">
+      <span class="accordion-title">List groups</span>
+      <span class="accordion-icon" aria-hidden="true">▼</span>
+    </button>
+    <div class="accordion-body">
+    <p>List groups for an account (paginated). Returns id, name, description per group.</p>
+    <label for="listGroupsApiKey">API key</label>
+    <input type="text" id="listGroupsApiKey" placeholder="Account API key">
+    <label for="listGroupsPageNumber">Page number</label>
+    <input type="text" id="listGroupsPageNumber" placeholder="0" value="0">
+    <label for="listGroupsPageSize">Page size</label>
+    <input type="text" id="listGroupsPageSize" placeholder="10" value="10">
+    <button type="button" id="listGroupsBtn">List groups</button>
+    <pre id="listGroupsOutput" class="api-output"></pre>
+    </div>
+  </section>
+
+  <section class="section accordion">
+    <button type="button" class="accordion-header" aria-expanded="true">
+      <span class="accordion-title">List wallets</span>
+      <span class="accordion-icon" aria-hidden="true">▼</span>
+    </button>
+    <div class="accordion-body">
+    <p>List wallets (wallet derivation metadata) for an account (paginated).</p>
+    <label for="listWalletsApiKey">API key</label>
+    <input type="text" id="listWalletsApiKey" placeholder="Account API key">
+    <label for="listWalletsPageNumber">Page number</label>
+    <input type="text" id="listWalletsPageNumber" placeholder="0" value="0">
+    <label for="listWalletsPageSize">Page size</label>
+    <input type="text" id="listWalletsPageSize" placeholder="10" value="10">
+    <button type="button" id="listWalletsBtn">List wallets</button>
+    <pre id="listWalletsOutput" class="api-output"></pre>
+    </div>
+  </section>
+
+  <section class="section accordion">
+    <button type="button" class="accordion-header" aria-expanded="true">
+      <span class="accordion-title">List wallets in group</span>
+      <span class="accordion-icon" aria-hidden="true">▼</span>
+    </button>
+    <div class="accordion-body">
+    <p>List wallets in a group (paginated).</p>
+    <label for="listWalletsInGroupApiKey">API key</label>
+    <input type="text" id="listWalletsInGroupApiKey" placeholder="Account API key">
+    <label for="listWalletsInGroupGroupId">Group ID</label>
+    <input type="text" id="listWalletsInGroupGroupId" placeholder="e.g. 0 or 1">
+    <label for="listWalletsInGroupPageNumber">Page number</label>
+    <input type="text" id="listWalletsInGroupPageNumber" placeholder="0" value="0">
+    <label for="listWalletsInGroupPageSize">Page size</label>
+    <input type="text" id="listWalletsInGroupPageSize" placeholder="10" value="10">
+    <button type="button" id="listWalletsInGroupBtn">List wallets in group</button>
+    <pre id="listWalletsInGroupOutput" class="api-output"></pre>
+    </div>
+  </section>
+
+  <section class="section accordion">
+    <button type="button" class="accordion-header" aria-expanded="true">
+      <span class="accordion-title">List actions</span>
+      <span class="accordion-icon" aria-hidden="true">▼</span>
+    </button>
+    <div class="accordion-body">
+    <p>List actions in a group (paginated). Returns id, name, description per action.</p>
+    <label for="listActionsApiKey">API key</label>
+    <input type="text" id="listActionsApiKey" placeholder="Account API key">
+    <label for="listActionsGroupId">Group ID</label>
+    <input type="text" id="listActionsGroupId" placeholder="e.g. 0 or 1">
+    <label for="listActionsPageNumber">Page number</label>
+    <input type="text" id="listActionsPageNumber" placeholder="0" value="0">
+    <label for="listActionsPageSize">Page size</label>
+    <input type="text" id="listActionsPageSize" placeholder="10" value="10">
+    <button type="button" id="listActionsBtn">List actions</button>
+    <pre id="listActionsOutput" class="api-output"></pre>
+    </div>
+  </section>
   <script>
     // Accordion: toggle collapse on header click
     document.querySelectorAll('.accordion').forEach((accordion) => {
@@ -204,40 +335,35 @@ go();</textarea>
 
     runBtn.addEventListener('click', runTests);
 
-    // Sign with PKP
-    const signApiKeyInput = document.getElementById('signApiKey');
-    const signPkpPublicKeyInput = document.getElementById('signPkpPublicKey');
-    const signMessageInput = document.getElementById('signMessage');
-    const signBtn = document.getElementById('signBtn');
-    const signOutput = document.getElementById('signOutput');
+    // New account
+    const newAccountNameInput = document.getElementById('newAccountName');
+    const newAccountDescriptionInput = document.getElementById('newAccountDescription');
+    const newAccountBtn = document.getElementById('newAccountBtn');
+    const newAccountOutput = document.getElementById('newAccountOutput');
 
-    signBtn.addEventListener('click', async () => {
-      const apiKey = signApiKeyInput.value.trim();
-      const pkpPublicKey = signPkpPublicKeyInput.value.trim();
-      const message = signMessageInput.value;
-
-      if (!apiKey || !pkpPublicKey) {
-        signOutput.textContent = 'Please fill in API key and PKP public key.';
-        signOutput.className = 'error';
+    newAccountBtn.addEventListener('click', async () => {
+      const accountName = newAccountNameInput.value.trim();
+      const accountDescription = newAccountDescriptionInput.value.trim();
+      if (!accountName) {
+        newAccountOutput.textContent = 'Please fill in Account name.';
+        newAccountOutput.className = 'api-output error';
         return;
       }
-
-      signOutput.textContent = 'Signing…';
-      signOutput.className = '';
-      signBtn.disabled = true;
-
+      newAccountOutput.textContent = 'Creating account…';
+      newAccountOutput.className = 'api-output';
+      newAccountBtn.disabled = true;
       try {
         const { createClient } = await import('./core_sdk.js');
         const baseUrl = baseUrlInput.value.trim() || 'http://localhost:8000';
         const client = createClient(baseUrl);
-        const result = await client.signWithPkp({ apiKey, pkpPublicKey, message });
-        signOutput.textContent = JSON.stringify(result, null, 2);
-        signOutput.className = 'success';
+        const result = await client.newAccount({ accountName, accountDescription });
+        newAccountOutput.textContent = JSON.stringify(result, null, 2);
+        newAccountOutput.className = 'api-output success';
       } catch (err) {
-        signOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
-        signOutput.className = 'error';
+        newAccountOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+        newAccountOutput.className = 'api-output error';
       } finally {
-        signBtn.disabled = false;
+        newAccountBtn.disabled = false;
       }
     });
 
@@ -319,111 +445,372 @@ go();</textarea>
       }
     });
 
-    // Transfer: Get balance (transfer_sdk.js)
-    const getBalanceApiKeyInput = document.getElementById('getBalanceApiKey');
-    const getBalanceChainInput = document.getElementById('getBalanceChain');
-    const getBalanceBtn = document.getElementById('getBalanceBtn');
-    const getBalanceOutput = document.getElementById('getBalanceOutput');
+    // Add group
+    const addGroupApiKeyInput = document.getElementById('addGroupApiKey');
+    const addGroupNameInput = document.getElementById('addGroupName');
+    const addGroupDescriptionInput = document.getElementById('addGroupDescription');
+    const addGroupPermittedInput = document.getElementById('addGroupPermittedActions');
+    const addGroupPkpsInput = document.getElementById('addGroupPkps');
+    const addGroupBtn = document.getElementById('addGroupBtn');
+    const addGroupOutput = document.getElementById('addGroupOutput');
 
-    getBalanceBtn.addEventListener('click', async () => {
-      const apiKey = getBalanceApiKeyInput.value.trim();
-      const chain = getBalanceChainInput.value.trim();
-      if (!apiKey || !chain) {
-        getBalanceOutput.textContent = 'Please fill in API key and Chain.';
-        getBalanceOutput.className = 'api-output error';
+    addGroupBtn.addEventListener('click', async () => {
+      const apiKey = addGroupApiKeyInput.value.trim();
+      const groupName = addGroupNameInput.value.trim();
+      const groupDescription = addGroupDescriptionInput.value.trim();
+      let permittedActions, pkps;
+      try {
+        permittedActions = JSON.parse(addGroupPermittedInput.value.trim() || '[]');
+        pkps = JSON.parse(addGroupPkpsInput.value.trim() || '[]');
+      } catch (e) {
+        addGroupOutput.textContent = 'Invalid JSON in permitted_actions or pkps: ' + (e && e.message ? e.message : String(e));
+        addGroupOutput.className = 'api-output error';
         return;
       }
-      getBalanceOutput.textContent = 'Loading…';
-      getBalanceOutput.className = 'api-output';
-      getBalanceBtn.disabled = true;
+      if (!apiKey || !groupName || !Array.isArray(permittedActions) || !Array.isArray(pkps)) {
+        addGroupOutput.textContent = 'Please fill in API key, Group name, and use JSON arrays for permitted_actions and pkps.';
+        addGroupOutput.className = 'api-output error';
+        return;
+      }
+      addGroupOutput.textContent = 'Adding group…';
+      addGroupOutput.className = 'api-output';
+      addGroupBtn.disabled = true;
       try {
-        const { createTransferClient } = await import('./transfer_sdk.js');
+        const { createClient } = await import('./core_sdk.js');
         const baseUrl = baseUrlInput.value.trim() || 'http://localhost:8000';
-        const client = createTransferClient(baseUrl);
-        const result = await client.getApiKeyBalance(apiKey, chain);
-        getBalanceOutput.textContent = JSON.stringify(result, null, 2);
-        getBalanceOutput.className = 'api-output success';
+        const client = createClient(baseUrl);
+        const result = await client.addGroup({ apiKey, groupName, groupDescription, permittedActions, pkps });
+        addGroupOutput.textContent = JSON.stringify(result, null, 2);
+        addGroupOutput.className = 'api-output success';
       } catch (err) {
-        getBalanceOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
-        getBalanceOutput.className = 'api-output error';
+        addGroupOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+        addGroupOutput.className = 'api-output error';
       } finally {
-        getBalanceBtn.disabled = false;
+        addGroupBtn.disabled = false;
       }
     });
 
-    // Transfer: Get PKP balance (transfer_sdk.js)
-    const getPkpBalancePkpKeyInput = document.getElementById('getPkpBalancePkpKey');
-    const getPkpBalanceChainInput = document.getElementById('getPkpBalanceChain');
-    const getPkpBalanceBtn = document.getElementById('getPkpBalanceBtn');
-    const getPkpBalanceOutput = document.getElementById('getPkpBalanceOutput');
+    // Add PKP to group
+    const addPkpApiKeyInput = document.getElementById('addPkpApiKey');
+    const addPkpGroupIdInput = document.getElementById('addPkpGroupId');
+    const addPkpPublicKeyInput = document.getElementById('addPkpPublicKey');
+    const addPkpBtn = document.getElementById('addPkpBtn');
+    const addPkpOutput = document.getElementById('addPkpOutput');
 
-    getPkpBalanceBtn.addEventListener('click', async () => {
-      const pkpPublicKey = getPkpBalancePkpKeyInput.value.trim();
-      const chain = getPkpBalanceChainInput.value.trim();
-      if (!pkpPublicKey || !chain) {
-        getPkpBalanceOutput.textContent = 'Please fill in PKP public key and Chain.';
-        getPkpBalanceOutput.className = 'api-output error';
+    addPkpBtn.addEventListener('click', async () => {
+      const apiKey = addPkpApiKeyInput.value.trim();
+      const groupId = addPkpGroupIdInput.value.trim();
+      const pkpPublicKey = addPkpPublicKeyInput.value.trim();
+      if (!apiKey || !groupId || !pkpPublicKey) {
+        addPkpOutput.textContent = 'Please fill in API key, Group ID, and PKP public key.';
+        addPkpOutput.className = 'api-output error';
         return;
       }
-      getPkpBalanceOutput.textContent = 'Loading…';
-      getPkpBalanceOutput.className = 'api-output';
-      getPkpBalanceBtn.disabled = true;
+      addPkpOutput.textContent = 'Adding PKP to group…';
+      addPkpOutput.className = 'api-output';
+      addPkpBtn.disabled = true;
       try {
-        const { createTransferClient } = await import('./transfer_sdk.js');
+        const { createClient } = await import('./core_sdk.js');
         const baseUrl = baseUrlInput.value.trim() || 'http://localhost:8000';
-        const client = createTransferClient(baseUrl);
-        const result = await client.getPkpBalance(pkpPublicKey, chain);
-        getPkpBalanceOutput.textContent = JSON.stringify(result, null, 2);
-        getPkpBalanceOutput.className = 'api-output success';
+        const client = createClient(baseUrl);
+        const result = await client.addPkpToGroup({ apiKey, groupId, pkpPublicKey });
+        addPkpOutput.textContent = JSON.stringify(result, null, 2);
+        addPkpOutput.className = 'api-output success';
       } catch (err) {
-        getPkpBalanceOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
-        getPkpBalanceOutput.className = 'api-output error';
+        addPkpOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+        addPkpOutput.className = 'api-output error';
       } finally {
-        getPkpBalanceBtn.disabled = false;
+        addPkpBtn.disabled = false;
       }
     });
 
-    // Transfer: Send (transfer_sdk.js)
-    const sendApiKeyInput = document.getElementById('sendApiKey');
-    const sendPkpPublicKeyInput = document.getElementById('sendPkpPublicKey');
-    const sendChainInput = document.getElementById('sendChain');
-    const sendDestinationAddressInput = document.getElementById('sendDestinationAddress');
-    const sendAmountInput = document.getElementById('sendAmount');
-    const sendBtn = document.getElementById('sendBtn');
-    const sendOutput = document.getElementById('sendOutput');
+    // Remove PKP from group
+    const removePkpApiKeyInput = document.getElementById('removePkpApiKey');
+    const removePkpGroupIdInput = document.getElementById('removePkpGroupId');
+    const removePkpPublicKeyInput = document.getElementById('removePkpPublicKey');
+    const removePkpBtn = document.getElementById('removePkpBtn');
+    const removePkpOutput = document.getElementById('removePkpOutput');
 
-    sendBtn.addEventListener('click', async () => {
-      const apiKey = sendApiKeyInput.value.trim();
-      const pkpPublicKey = sendPkpPublicKeyInput.value.trim();
-      const chain = sendChainInput.value.trim();
-      const destinationAddress = sendDestinationAddressInput.value.trim();
-      const amount = sendAmountInput.value.trim();
-      if (!apiKey || !pkpPublicKey || !chain || !destinationAddress) {
-        sendOutput.textContent = 'Please fill in API key, PKP public key, Chain, and Destination address.';
-        sendOutput.className = 'api-output error';
+    removePkpBtn.addEventListener('click', async () => {
+      const apiKey = removePkpApiKeyInput.value.trim();
+      const groupId = removePkpGroupIdInput.value.trim();
+      const pkpPublicKey = removePkpPublicKeyInput.value.trim();
+      if (!apiKey || !groupId || !pkpPublicKey) {
+        removePkpOutput.textContent = 'Please fill in API key, Group ID, and PKP public key.';
+        removePkpOutput.className = 'api-output error';
         return;
       }
-      sendOutput.textContent = 'Sending…';
-      sendOutput.className = 'api-output';
-      sendBtn.disabled = true;
+      removePkpOutput.textContent = 'Removing PKP from group…';
+      removePkpOutput.className = 'api-output';
+      removePkpBtn.disabled = true;
       try {
-        const { createTransferClient } = await import('./transfer_sdk.js');
+        const { createClient } = await import('./core_sdk.js');
         const baseUrl = baseUrlInput.value.trim() || 'http://localhost:8000';
-        const client = createTransferClient(baseUrl);
-        const result = await client.send({
+        const client = createClient(baseUrl);
+        const result = await client.removePkpFromGroup({ apiKey, groupId, pkpPublicKey });
+        removePkpOutput.textContent = JSON.stringify(result, null, 2);
+        removePkpOutput.className = 'api-output success';
+      } catch (err) {
+        removePkpOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+        removePkpOutput.className = 'api-output error';
+      } finally {
+        removePkpBtn.disabled = false;
+      }
+    });
+
+    // Add usage API key
+    const addUsageApiKeyInput = document.getElementById('addUsageApiKey');
+    const addUsageUsageApiKeyInput = document.getElementById('addUsageUsageApiKey');
+    const addUsageExpirationInput = document.getElementById('addUsageExpiration');
+    const addUsageBalanceInput = document.getElementById('addUsageBalance');
+    const addUsageBtn = document.getElementById('addUsageBtn');
+    const addUsageOutput = document.getElementById('addUsageOutput');
+
+    addUsageBtn.addEventListener('click', async () => {
+      const apiKey = addUsageApiKeyInput.value.trim();
+      const usageApiKey = addUsageUsageApiKeyInput.value.trim();
+      const expiration = addUsageExpirationInput.value.trim();
+      const balance = addUsageBalanceInput.value.trim();
+      if (!apiKey || !usageApiKey || !expiration || !balance) {
+        addUsageOutput.textContent = 'Please fill in API key, Usage API key, Expiration, and Balance.';
+        addUsageOutput.className = 'api-output error';
+        return;
+      }
+      addUsageOutput.textContent = 'Adding usage API key…';
+      addUsageOutput.className = 'api-output';
+      addUsageBtn.disabled = true;
+      try {
+        const { createClient } = await import('./core_sdk.js');
+        const baseUrl = baseUrlInput.value.trim() || 'http://localhost:8000';
+        const client = createClient(baseUrl);
+        const result = await client.addUsageApiKey({ apiKey, usageApiKey, expiration, balance });
+        addUsageOutput.textContent = JSON.stringify(result, null, 2);
+        addUsageOutput.className = 'api-output success';
+      } catch (err) {
+        addUsageOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+        addUsageOutput.className = 'api-output error';
+      } finally {
+        addUsageBtn.disabled = false;
+      }
+    });
+
+    // Remove usage API key
+    const removeUsageApiKeyInput = document.getElementById('removeUsageApiKey');
+    const removeUsageUsageApiKeyInput = document.getElementById('removeUsageUsageApiKey');
+    const removeUsageBtn = document.getElementById('removeUsageBtn');
+    const removeUsageOutput = document.getElementById('removeUsageOutput');
+
+    removeUsageBtn.addEventListener('click', async () => {
+      const apiKey = removeUsageApiKeyInput.value.trim();
+      const usageApiKey = removeUsageUsageApiKeyInput.value.trim();
+      if (!apiKey || !usageApiKey) {
+        removeUsageOutput.textContent = 'Please fill in API key and Usage API key.';
+        removeUsageOutput.className = 'api-output error';
+        return;
+      }
+      removeUsageOutput.textContent = 'Removing usage API key…';
+      removeUsageOutput.className = 'api-output';
+      removeUsageBtn.disabled = true;
+      try {
+        const { createClient } = await import('./core_sdk.js');
+        const baseUrl = baseUrlInput.value.trim() || 'http://localhost:8000';
+        const client = createClient(baseUrl);
+        const result = await client.removeUsageApiKey({ apiKey, usageApiKey });
+        removeUsageOutput.textContent = JSON.stringify(result, null, 2);
+        removeUsageOutput.className = 'api-output success';
+      } catch (err) {
+        removeUsageOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+        removeUsageOutput.className = 'api-output error';
+      } finally {
+        removeUsageBtn.disabled = false;
+      }
+    });
+
+    // Add action to group
+    const addActionApiKeyInput = document.getElementById('addActionApiKey');
+    const addActionGroupIdInput = document.getElementById('addActionGroupId');
+    const addActionIpfsCidInput = document.getElementById('addActionIpfsCid');
+    const addActionNameInput = document.getElementById('addActionName');
+    const addActionDescriptionInput = document.getElementById('addActionDescription');
+    const addActionBtn = document.getElementById('addActionBtn');
+    const addActionOutput = document.getElementById('addActionOutput');
+
+    addActionBtn.addEventListener('click', async () => {
+      const apiKey = addActionApiKeyInput.value.trim();
+      const groupId = addActionGroupIdInput.value.trim();
+      const actionIpfsCid = addActionIpfsCidInput.value.trim();
+      const name = addActionNameInput.value.trim() || undefined;
+      const description = addActionDescriptionInput.value.trim() || undefined;
+      if (!apiKey || !groupId || !actionIpfsCid) {
+        addActionOutput.textContent = 'Please fill in API key, Group ID, and Action IPFS CID.';
+        addActionOutput.className = 'api-output error';
+        return;
+      }
+      addActionOutput.textContent = 'Adding action to group…';
+      addActionOutput.className = 'api-output';
+      addActionBtn.disabled = true;
+      try {
+        const { createClient } = await import('./core_sdk.js');
+        const baseUrl = baseUrlInput.value.trim() || 'http://localhost:8000';
+        const client = createClient(baseUrl);
+        const result = await client.addActionToGroup({ apiKey, groupId, actionIpfsCid, name, description });
+        addActionOutput.textContent = JSON.stringify(result, null, 2);
+        addActionOutput.className = 'api-output success';
+      } catch (err) {
+        addActionOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+        addActionOutput.className = 'api-output error';
+      } finally {
+        addActionBtn.disabled = false;
+      }
+    });
+
+    // List groups
+    const listGroupsApiKeyInput = document.getElementById('listGroupsApiKey');
+    const listGroupsPageNumberInput = document.getElementById('listGroupsPageNumber');
+    const listGroupsPageSizeInput = document.getElementById('listGroupsPageSize');
+    const listGroupsBtn = document.getElementById('listGroupsBtn');
+    const listGroupsOutput = document.getElementById('listGroupsOutput');
+
+    listGroupsBtn.addEventListener('click', async () => {
+      const apiKey = listGroupsApiKeyInput.value.trim();
+      if (!apiKey) {
+        listGroupsOutput.textContent = 'Please fill in API key.';
+        listGroupsOutput.className = 'api-output error';
+        return;
+      }
+      listGroupsOutput.textContent = 'Loading…';
+      listGroupsOutput.className = 'api-output';
+      listGroupsBtn.disabled = true;
+      try {
+        const { createClient } = await import('./core_sdk.js');
+        const baseUrl = baseUrlInput.value.trim() || 'http://localhost:8000';
+        const client = createClient(baseUrl);
+        const result = await client.listGroups({
           apiKey,
-          pkpPublicKey,
-          chain,
-          destinationAddress,
-          amount: amount || '0',
+          pageNumber: listGroupsPageNumberInput.value.trim() || '0',
+          pageSize: listGroupsPageSizeInput.value.trim() || '10',
         });
-        sendOutput.textContent = JSON.stringify(result, null, 2);
-        sendOutput.className = 'api-output success';
+        listGroupsOutput.textContent = JSON.stringify(result, null, 2);
+        listGroupsOutput.className = 'api-output success';
       } catch (err) {
-        sendOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
-        sendOutput.className = 'api-output error';
+        listGroupsOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+        listGroupsOutput.className = 'api-output error';
       } finally {
-        sendBtn.disabled = false;
+        listGroupsBtn.disabled = false;
+      }
+    });
+
+    // List wallets
+    const listWalletsApiKeyInput = document.getElementById('listWalletsApiKey');
+    const listWalletsPageNumberInput = document.getElementById('listWalletsPageNumber');
+    const listWalletsPageSizeInput = document.getElementById('listWalletsPageSize');
+    const listWalletsBtn = document.getElementById('listWalletsBtn');
+    const listWalletsOutput = document.getElementById('listWalletsOutput');
+
+    listWalletsBtn.addEventListener('click', async () => {
+      const apiKey = listWalletsApiKeyInput.value.trim();
+      if (!apiKey) {
+        listWalletsOutput.textContent = 'Please fill in API key.';
+        listWalletsOutput.className = 'api-output error';
+        return;
+      }
+      listWalletsOutput.textContent = 'Loading…';
+      listWalletsOutput.className = 'api-output';
+      listWalletsBtn.disabled = true;
+      try {
+        const { createClient } = await import('./core_sdk.js');
+        const baseUrl = baseUrlInput.value.trim() || 'http://localhost:8000';
+        const client = createClient(baseUrl);
+        const result = await client.listWallets({
+          apiKey,
+          pageNumber: listWalletsPageNumberInput.value.trim() || '0',
+          pageSize: listWalletsPageSizeInput.value.trim() || '10',
+        });
+        listWalletsOutput.textContent = JSON.stringify(result, null, 2);
+        listWalletsOutput.className = 'api-output success';
+      } catch (err) {
+        listWalletsOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+        listWalletsOutput.className = 'api-output error';
+      } finally {
+        listWalletsBtn.disabled = false;
+      }
+    });
+
+    // List wallets in group
+    const listWalletsInGroupApiKeyInput = document.getElementById('listWalletsInGroupApiKey');
+    const listWalletsInGroupGroupIdInput = document.getElementById('listWalletsInGroupGroupId');
+    const listWalletsInGroupPageNumberInput = document.getElementById('listWalletsInGroupPageNumber');
+    const listWalletsInGroupPageSizeInput = document.getElementById('listWalletsInGroupPageSize');
+    const listWalletsInGroupBtn = document.getElementById('listWalletsInGroupBtn');
+    const listWalletsInGroupOutput = document.getElementById('listWalletsInGroupOutput');
+
+    listWalletsInGroupBtn.addEventListener('click', async () => {
+      const apiKey = listWalletsInGroupApiKeyInput.value.trim();
+      const groupId = listWalletsInGroupGroupIdInput.value.trim();
+      if (!apiKey || !groupId) {
+        listWalletsInGroupOutput.textContent = 'Please fill in API key and Group ID.';
+        listWalletsInGroupOutput.className = 'api-output error';
+        return;
+      }
+      listWalletsInGroupOutput.textContent = 'Loading…';
+      listWalletsInGroupOutput.className = 'api-output';
+      listWalletsInGroupBtn.disabled = true;
+      try {
+        const { createClient } = await import('./core_sdk.js');
+        const baseUrl = baseUrlInput.value.trim() || 'http://localhost:8000';
+        const client = createClient(baseUrl);
+        const result = await client.listWalletsInGroup({
+          apiKey,
+          groupId,
+          pageNumber: listWalletsInGroupPageNumberInput.value.trim() || '0',
+          pageSize: listWalletsInGroupPageSizeInput.value.trim() || '10',
+        });
+        listWalletsInGroupOutput.textContent = JSON.stringify(result, null, 2);
+        listWalletsInGroupOutput.className = 'api-output success';
+      } catch (err) {
+        listWalletsInGroupOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+        listWalletsInGroupOutput.className = 'api-output error';
+      } finally {
+        listWalletsInGroupBtn.disabled = false;
+      }
+    });
+
+    // List actions
+    const listActionsApiKeyInput = document.getElementById('listActionsApiKey');
+    const listActionsGroupIdInput = document.getElementById('listActionsGroupId');
+    const listActionsPageNumberInput = document.getElementById('listActionsPageNumber');
+    const listActionsPageSizeInput = document.getElementById('listActionsPageSize');
+    const listActionsBtn = document.getElementById('listActionsBtn');
+    const listActionsOutput = document.getElementById('listActionsOutput');
+
+    listActionsBtn.addEventListener('click', async () => {
+      const apiKey = listActionsApiKeyInput.value.trim();
+      const groupId = listActionsGroupIdInput.value.trim();
+      if (!apiKey || !groupId) {
+        listActionsOutput.textContent = 'Please fill in API key and Group ID.';
+        listActionsOutput.className = 'api-output error';
+        return;
+      }
+      listActionsOutput.textContent = 'Loading…';
+      listActionsOutput.className = 'api-output';
+      listActionsBtn.disabled = true;
+      try {
+        const { createClient } = await import('./core_sdk.js');
+        const baseUrl = baseUrlInput.value.trim() || 'http://localhost:8000';
+        const client = createClient(baseUrl);
+        const result = await client.listActions({
+          apiKey,
+          groupId,
+          pageNumber: listActionsPageNumberInput.value.trim() || '0',
+          pageSize: listActionsPageSizeInput.value.trim() || '10',
+        });
+        listActionsOutput.textContent = JSON.stringify(result, null, 2);
+        listActionsOutput.className = 'api-output success';
+      } catch (err) {
+        listActionsOutput.textContent = 'Error: ' + (err && err.message ? err.message : String(err));
+        listActionsOutput.className = 'api-output error';
+      } finally {
+        listActionsBtn.disabled = false;
       }
     });
   </script>

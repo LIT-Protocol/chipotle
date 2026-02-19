@@ -3,9 +3,12 @@
 //! It holds all configuration data (including secrets) and manages state; none of
 //! which are shared with lit_actions, enabling a secure execution environment.
 
-use anyhow::{Context, Result, bail, anyhow};
-use crate::error::{Error, unexpected_err};
 use crate::actions::grpc_client_pool::GrpcClientPool;
+use crate::error::{Error, unexpected_err};
+use anyhow::{Context, Result, anyhow, bail};
+use lit_core::utils::binary::bytes_to_hex;
+use lit_rust_crypto::k256::SecretKey;
+use lit_rust_crypto::k256::ecdsa::SigningKey;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -22,7 +25,7 @@ use lit_actions_grpc::{proto::*, unix};
 use moka::future::Cache;
 use serde::{Deserialize, Serialize};
 use tokio::time::Duration;
-use tracing::{ instrument,trace};
+use tracing::{instrument, trace};
 
 const DEFAULT_TIMEOUT_MS: u64 = 30_000; // 30s
 const DEFAULT_ASYNC_TIMEOUT_MS: u64 = 300_000; // 5m
@@ -47,9 +50,10 @@ pub struct DenoExecutionEnv {
     pub http_client: Option<reqwest::Client>,
 }
 
-
 #[derive(Debug, Default, Clone, Builder, Serialize, Deserialize)]
 pub struct Client {
+    #[builder(default, setter(into))]
+    api_key: String,
     // Config
     #[builder(default, setter(into, strip_option))]
     socket_path: Option<PathBuf>,
@@ -262,7 +266,7 @@ impl Client {
     ) -> Result<ExecutionState, Error> {
         self.reset_state();
         // self.dynamic_payment
-            // .add(LitActionPriceComponent::BaseAmount, 1)?;
+        // .add(LitActionPriceComponent::BaseAmount, 1)?;
         let opts = opts.into();
         let timeout = self.client_timeout();
 
@@ -283,14 +287,14 @@ impl Client {
                 // &auth_context,
                 0,
             ));
-            let execution_result =
-                tokio::time::timeout(timeout, execution)
-                    .await
-                    .map_err(|e| {
-                        unexpected_err(e, 
-                            Some(format!("lit_actions didn't respond within {timeout:?}"))
-                        )
-                    })?;
+            let execution_result = tokio::time::timeout(timeout, execution)
+                .await
+                .map_err(|e| {
+                    unexpected_err(
+                        e,
+                        Some(format!("lit_actions didn't respond within {timeout:?}")),
+                    )
+                })?;
             match execution_result {
                 Ok(state) => return Ok(state),
                 Err(e) => {
@@ -298,15 +302,24 @@ impl Client {
                         let msg = status.message().to_string();
                         match status.code() {
                             Code::DeadlineExceeded => {
-                                return  Err(unexpected_err(e, Some("tonic deadline exceeded error".to_string())));
+                                return Err(unexpected_err(
+                                    e,
+                                    Some("tonic deadline exceeded error".to_string()),
+                                ));
                             }
                             Code::ResourceExhausted => {
-                                return Err(unexpected_err(e, Some("tonic resource exhausted error".to_string())));
+                                return Err(unexpected_err(
+                                    e,
+                                    Some("tonic resource exhausted error".to_string()),
+                                ));
                             }
                             Code::Unavailable => {
                                 // This error occurs when NGINX can't connect to any healthy
                                 // lit_actions instance and returns the gRPC status code 14
-                                return Err(unexpected_err(e, Some("tonic unavailable error".to_string())));
+                                return Err(unexpected_err(
+                                    e,
+                                    Some("tonic unavailable error".to_string()),
+                                ));
                             }
                             // NB: We could also retry on `Code::Internal if msg == "h2 protocol error: error reading a body from connection"`.
                             // However, that likely means lit_actions has crashed *while* executing JS, which we can't recover from.
@@ -322,11 +335,11 @@ impl Client {
                         // This error occurs when NGINX can't connect to any healthy lit_actions instance
                         // - connection error: sending on a closed channel
                         anyhow!(
-                            "tonic send error: {:?}", se
-                            // se.source().unwrap_or(se).to_string()
+                            "tonic send error: {:?}",
+                            se // se.source().unwrap_or(se).to_string()
                         )
                     } else {
-                            return Err(unexpected_err( e, None));
+                        return Err(unexpected_err(e, None));
                     };
 
                     // Never retry in-flight requests, which may have modified state
@@ -365,9 +378,8 @@ impl Client {
         let channel = self
             .client_grpc_channels
             .create_or_get_connection(&socket_path.display().to_string(), || {
-                unix::connect_to_socket(socket_path).map_err(|e| {
-                    anyhow!("Error creating connection to lit-action server: {:?}", e)
-                })
+                unix::connect_to_socket(socket_path)
+                    .map_err(|e| anyhow!("Error creating connection to lit-action server: {:?}", e))
             })
             .await?;
         let mut stream = ActionClient::new(channel)
@@ -412,15 +424,12 @@ impl Client {
                 }
                 // Handle op requests
                 Some(op) => {
-                    let resp = self
-                        .handle_op(op, call_depth)
-                        .await
-                        .unwrap_or_else(|e| {
-                            ErrorResponse {
-                                error: e.to_string(),
-                            }
-                            .into()
-                        });
+                    let resp = self.handle_op(op, call_depth).await.unwrap_or_else(|e| {
+                        ErrorResponse {
+                            error: e.to_string(),
+                        }
+                        .into()
+                    });
                     outbound_tx
                         .send_async(resp)
                         .await
@@ -525,14 +534,28 @@ impl Client {
                 bail!("PubkeyToTokenId is not implemented");
             }
             UnionResponse::SignEcdsa(SignEcdsaRequest {
-                to_sign: _,
-                public_key: _,
-                sig_name: _,
-                eth_personal_sign: _,
-                key_set_id: _,
+                to_sign ,
+                public_key ,
+                sig_name ,
+                eth_personal_sign ,
+                key_set_id ,
             }) => {
-                bail!("SignEcdsa is not implemented");
-            
+                let api_key = self.api_key.clone();
+                let secret_u256 = crate::accounts::get_wallet_derivation(&api_key, &public_key).await?;
+                let mut secret_bytes = [0; 32];
+                secret_u256.to_big_endian(&mut secret_bytes);
+
+                let signing_key = SigningKey::from_slice(&secret_bytes)?;
+
+                let signature = signing_key.sign_recoverable(&to_sign)?;
+
+                let hex_signature = bytes_to_hex(&signature.0.to_vec());
+
+                self.state.sign_count += 1;
+                
+                // let recovery_id = signature.1.to_string();
+
+                SignEcdsaResponse { success: hex_signature }.into()                
             }
             UnionResponse::Sign(SignRequest {
                 to_sign: _,
@@ -549,7 +572,10 @@ impl Client {
             }) => {
                 bail!("AesDecrypt is not implemented");
             }
-            UnionResponse::GetLatestNonce(GetLatestNonceRequest { address: _, chain: _ }) => {
+            UnionResponse::GetLatestNonce(GetLatestNonceRequest {
+                address: _,
+                chain: _,
+            }) => {
                 bail!("GetLatestNonce is not implemented");
             }
             UnionResponse::CheckConditions(CheckConditionsRequest {
@@ -565,7 +591,10 @@ impl Client {
             UnionResponse::CallContract(CallContractRequest { chain: _, txn: _ }) => {
                 bail!("CallContract is not implemented");
             }
-            UnionResponse::CallChild(CallChildRequest { ipfs_id: _, params: _ }) => {
+            UnionResponse::CallChild(CallChildRequest {
+                ipfs_id: _,
+                params: _,
+            }) => {
                 // self.pay(LitActionPriceComponent::CallDepth, 1).await?;
 
                 // info!(
@@ -609,7 +638,10 @@ impl Client {
                 // .into()
                 bail!("CallChild is not implemented");
             }
-            UnionResponse::BroadcastAndCollect(BroadcastAndCollectRequest { name: _, value: _ }) => {
+            UnionResponse::BroadcastAndCollect(BroadcastAndCollectRequest {
+                name: _,
+                value: _,
+            }) => {
                 // self.pay(LitActionPriceComponent::Broadcasts, 1).await?;
 
                 // self.increment_broad_and_collect_counter()?;
@@ -676,17 +708,14 @@ impl Client {
 
             UnionResponse::P2pBroadcast(P2pBroadcastRequest { name: _, value: _ }) => {
                 bail!("P2pBroadcast is not implemented");
-             
             }
 
             UnionResponse::P2pCollectFromLeader(P2pCollectFromLeaderRequest { name: _ }) => {
                 bail!("P2pCollectFromLeader is not implemented");
-               
             }
 
             UnionResponse::IsLeader(IsLeaderRequest {}) => {
                 bail!("IsLeader is not implemented");
-               
             }
 
             UnionResponse::EncryptBls(EncryptBlsRequest {
@@ -696,7 +725,10 @@ impl Client {
             }) => {
                 bail!("EncryptBls is not implemented");
             }
-            UnionResponse::UpdateResourceUsage(UpdateResourceUsageRequest { tick: _, used_kb: _ }) => {
+            UnionResponse::UpdateResourceUsage(UpdateResourceUsageRequest {
+                tick: _,
+                used_kb: _,
+            }) => {
                 // // For now, we'll just return a success response
                 // let r = self
                 //     .dynamic_payment
@@ -715,7 +747,6 @@ impl Client {
                 signing_scheme: _,
             }) => {
                 bail!("SignAsAction is not implemented");
-
             }
             UnionResponse::GetActionPublicKey(GetActionPublicKeyRequest {
                 signing_scheme: _,
@@ -730,7 +761,7 @@ impl Client {
                 sign_output: _,
             }) => {
                 bail!("VerifyActionSignature is not implemented");
-            }        
+            }
         })
     }
 
@@ -740,7 +771,6 @@ impl Client {
     //     }
     //     Ok(())
     // }
-
 
     fn increment_broad_and_collect_counter(&mut self) -> Result<()> {
         self.state.broadcast_and_collect_count += 1;
@@ -752,5 +782,4 @@ impl Client {
         };
         Ok(())
     }
-
 }

@@ -1,10 +1,16 @@
 /**
- * Simple test: get API key → create wallet → execute lit action.
- * - Node: node test.js (API_BASE_URL env optional). Ensure the simple API server is running.
- * - Browser: load from index.html; set window.LIT_SIMPLE_API_BASE_URL or use the page input.
+ * Simple generic test (no API calls). Use manual test sections in simple_api_test.html to exercise endpoints.
+ * - Node: node test.js (API_BASE_URL env optional).
+ * - Browser: load from simple_api_test.html; set window.LIT_SIMPLE_API_BASE_URL or use the page input.
+ *
+ * API endpoints (core_sdk.js / simple_api_test.html):
+ * - new_account, create_wallet, lit_action, sign_with_pkp
+ * - add_group (group_name, group_description, permitted_actions, pkps)
+ * - add_action_to_group (api_key, group_id, action_ipfs_cid, name?, description?)
+ * - add_pkp_to_group, remove_pkp_from_group
+ * - add_usage_api_key, remove_usage_api_key
+ * - list_groups, list_wallets, list_wallets_in_group, list_actions (GET, paginated: api_key, page_number, page_size; list_wallets_in_group and list_actions also require group_id)
  */
-
-import { createClient } from './core_sdk.js';
 
 function getBaseUrl() {
   if (typeof process !== 'undefined' && process.env && process.env.API_BASE_URL) return process.env.API_BASE_URL;
@@ -13,39 +19,13 @@ function getBaseUrl() {
 }
 
 /**
- * Run the test flow. Exported for use from index.html.
+ * Run the generic test flow. Exported for use from index.html.
+ * No API calls are made; use the manual test sections in the page to exercise endpoints.
  * @param {string} [baseUrl] - Override base URL (default: getBaseUrl())
  * @returns {Promise<void>}
  */
 export async function runTests(baseUrl = getBaseUrl()) {
-  const client = createClient(baseUrl);
-
-  console.log('1. Getting API key...');
-  const { api_key, wallet_address } = await client.getApiKey();
-  console.log('   api_key:', api_key);
-  console.log('   wallet_address:', wallet_address ?? '(none)');
-
-  console.log('2. Creating wallet...');
-  const { wallet_address: createdWalletAddress } = await client.createWallet(api_key);
-  console.log('   wallet_address:', createdWalletAddress ?? '(none)');
-
-  console.log('3. Executing lit action...');
-  const litActionCode = `
-    const go = async () => {
-      Lit.Actions.setResponse({ response: JSON.stringify("Hello from lit action!") });
-    };
-    go();
-  `;
-  const litResult = await client.litAction({
-    apiKey: api_key,
-    code: litActionCode,
-    jsParams: { testParam: 'hello' },
-  });
-  console.log('   response:', litResult?.response ?? '(none)');
-  console.log('   logs (first 80 chars):', (litResult?.logs ?? '').slice(0, 80) + (litResult?.logs?.length > 80 ? '...' : ''));
-  console.log('   has_error:', litResult?.has_error ?? '(none)');
-  console.log('   signatures count:', litResult?.signatures?.length ?? 0);
-
+  console.log('Generic test (no API calls). Use the manual test sections below to exercise endpoints.');
   console.log('Done.');
 }
 

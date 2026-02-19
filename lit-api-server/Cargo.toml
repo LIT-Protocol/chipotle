@@ -65,6 +65,9 @@ lit-actions-grpc = { path = "../lit-actions/grpc" }
 # lit-actions-server = { path = "../lit-actions/server" }
 url = "2"
 
+rocket_okapi = "=0.9.0"
+schemars = "0.8"
+
 [dev-dependencies]
 rand_chacha = "0.3.1"
 rand_core = "0.6"

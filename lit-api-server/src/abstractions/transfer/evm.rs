@@ -2,7 +2,7 @@ use super::chain_info::Chain;
 use super::models::{GetBalanceResponse, TransferRequest, TransferResponse};
 use crate::core::models::ApiStatus;
 use ethers::providers::{Http, Middleware, Provider};
-use ethers::types::H160;    
+use ethers::types::H160;
 use ethers::utils::{format_ether, keccak256};
 use lit_core::utils::binary::{bytes_to_hex, hex_to_bytes};
 use rocket::serde::json::Json;

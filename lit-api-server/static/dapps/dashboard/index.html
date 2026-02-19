@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AccountConfig Dashboard – Lit Node Express</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <span class="header-brand">AccountConfig Dashboard</span>
+      <div class="header-actions">
+        <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+        <button type="button" class="logout-btn requires-auth" id="logout-btn">Log out</button>
+      </div>
+    </header>
+
+    <nav class="nav">
+      <a href="#login" data-page="login" class="active login-only">Login</a>
+      <a href="#wallets" data-page="wallets" class="requires-auth">Wallets</a>
+      <a href="#groups" data-page="groups" class="requires-auth">Groups</a>
+      <a href="#actions" data-page="actions" class="requires-auth">IPFS Actions</a>
+    </nav>
+
+    <main class="main">
+      <!-- Page 1: Login / Create account -->
+      <section id="page-login" class="page active">
+        <h1 class="page-title">Login or create account</h1>
+        <p class="page-desc">Use an existing API key or create a new account to manage AccountConfig.</p>
+        <div id="login-status" class="status info" style="display: none;"></div>
+        <div class="card">
+          <div class="card-title">Use existing API key</div>
+          <div class="form-group">
+            <label for="login-api-key">API key</label>
+            <input type="password" id="login-api-key" class="input" placeholder="Paste your API key (hex or base64)">
+          </div>
+          <div class="form-group">
+            <label for="api-base-url">API base URL</label>
+            <input type="text" id="api-base-url" class="input" value="http://localhost:8000" placeholder="http://localhost:8000">
+          </div>
+          <button type="button" id="btn-login" class="btn btn-primary btn-block">Log in</button>
+        </div>
+        <div class="card">
+          <div class="card-title">Create new account</div>
+          <p class="page-desc" style="margin-bottom: 1rem;">Creates an account on AccountConfig and returns a new API key. Store it securely.</p>
+          <div class="form-group">
+            <label for="new-account-name">Account name</label>
+            <input type="text" id="new-account-name" class="input" placeholder="My account">
+          </div>
+          <div class="form-group">
+            <label for="new-account-desc">Account description</label>
+            <input type="text" id="new-account-desc" class="input" placeholder="Optional">
+          </div>
+          <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account</button>
+        </div>
+      </section>
+
+      <!-- Page 2: Wallets -->
+      <section id="page-wallets" class="page">
+        <h1 class="page-title">Wallets</h1>
+        <p class="page-desc">Create new wallets (usage API key + wallet address) or add existing PKPs to a group.</p>
+        <div id="wallets-status" class="status" style="display: none;"></div>
+        <div class="card">
+          <div class="card-title">Create new wallet</div>
+          <p class="page-desc" style="margin-bottom: 1rem;">Creates a wallet and adds it as a usage API key for this account.</p>
+          <div class="form-group">
+            <label for="create-wallet-group">Add to group (optional, group ID)</label>
+            <input type="text" id="create-wallet-group" class="input" placeholder="e.g. 0 or leave empty">
+          </div>
+          <button type="button" id="btn-create-wallet" class="btn btn-primary btn-block">Create wallet</button>
+          <div id="create-wallet-result" class="mono" style="margin-top: 1rem; font-size: 0.875rem; display: none;"></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Add existing PKP to group</div>
+          <div class="form-group">
+            <label for="add-pkp-group">Group ID</label>
+            <input type="text" id="add-pkp-group" class="input" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label for="add-pkp-public-key">PKP public key</label>
+            <input type="text" id="add-pkp-public-key" class="input" placeholder="PKP public key (hex or base64)">
+          </div>
+          <button type="button" id="btn-add-pkp" class="btn btn-primary btn-block">Add PKP to group</button>
+        </div>
+      </section>
+
+      <!-- Page 3: Groups -->
+      <section id="page-groups" class="page">
+        <h1 class="page-title">Groups</h1>
+        <p class="page-desc">Groups are created on AccountConfig. New groups get the next ID (tracked below).</p>
+        <div id="groups-status" class="status" style="display: none;"></div>
+        <div class="card">
+          <div class="card-title">Add new group</div>
+          <div class="form-group">
+            <label for="new-group-name">Group name</label>
+            <input type="text" id="new-group-name" class="input" placeholder="My group">
+          </div>
+          <div class="form-group">
+            <label for="new-group-desc">Description</label>
+            <input type="text" id="new-group-desc" class="input" placeholder="Optional">
+          </div>
+          <button type="button" id="btn-add-group" class="btn btn-primary btn-block">Create group</button>
+        </div>
+        <div class="card">
+          <div class="card-title">Groups (this session)</div>
+          <p class="page-desc" style="margin-bottom: 1rem;">Groups you created this session. IDs match creation order (0, 1, 2…).</p>
+          <ul id="groups-list" class="list"></ul>
+          <p id="groups-empty" class="page-desc">No groups created yet. Create one above.</p>
+        </div>
+      </section>
+
+      <!-- Page 4: IPFS Actions (CIDs) -->
+      <section id="page-actions" class="page">
+        <h1 class="page-title">IPFS actions per group</h1>
+        <p class="page-desc">Add IPFS CIDs (permitted actions) to a group. Listed by group for this session.</p>
+        <div id="actions-status" class="status" style="display: none;"></div>
+        <div class="card">
+          <div class="card-title">Add IPFS CID to group</div>
+          <div class="form-group">
+            <label for="action-group-id">Group ID</label>
+            <input type="text" id="action-group-id" class="input" placeholder="0">
+          </div>
+          <div class="form-group">
+            <label for="action-ipfs-cid">IPFS CID</label>
+            <input type="text" id="action-ipfs-cid" class="input" placeholder="Qm... or bafy...">
+          </div>
+          <button type="button" id="btn-add-action" class="btn btn-primary btn-block">Add action to group</button>
+        </div>
+        <div class="card">
+          <div class="card-title">IPFS CIDs by group (this session)</div>
+          <div id="actions-by-group"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

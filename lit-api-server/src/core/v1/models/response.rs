@@ -1,8 +1,8 @@
 use std::fmt::{Display, Formatter};
-
+use rocket_okapi::okapi::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub enum ShareType {
     Ecdsa,
     Frost,
@@ -20,7 +20,7 @@ impl Display for ShareType {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct GetApiKeyResponse {
+pub struct NewAccountResponse {
     pub api_key: String,
     pub wallet_address: String,
 }
@@ -30,19 +30,19 @@ pub struct HandshakeResponse {
     pub responses: Vec<String>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct CreateWalletResponse {
     pub wallet_address: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SignatureShare {
     pub share_id: String,
     pub peer_id: String,
     pub signature_share: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SignWithPkpResponse {
     pub signing_scheme: String,
     pub signed_digest: String,
@@ -55,12 +55,12 @@ pub struct SignWithPkpResponse {
     pub shares: Vec<SignatureShare>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LitActionResponses {
     pub responses: Vec<LitActionResponse>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LitActionResponse {
     pub signatures: Vec<SignWithPkpResponse>,
     pub response: String,
@@ -68,18 +68,18 @@ pub struct LitActionResponse {
     pub has_error: bool,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct EncryptResponse {
     pub ciphertext: String,
     pub data_to_encrypt_hash: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DecryptResponse {
     pub decrypted_text: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct CombineSignatureSharesResponse {
     pub signature: String,
     pub signed_data: String,
@@ -87,4 +87,26 @@ pub struct CombineSignatureSharesResponse {
     pub r: String,
     pub s: String,
     pub recovery_id: u8,
+}
+
+/// Response for account config operations (add_group, add_pkp_to_group, remove_pkp_from_group, add_usage_api_key, remove_usage_api_key).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AccountOpResponse {
+    pub success: bool,
+}
+
+/// Mirrors AccountConfig.sol Group struct (groupName, groupDescription, plus ids/hashes when returned).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct GroupResponse {
+    pub group_id: String,
+    pub group_name: String,
+    pub group_description: String,
+}
+
+/// One item from list_groups, list_wallets, list_wallets_in_group, or list_actions (AccountConfig.sol Metadata).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ListMetadataItem {
+    pub id: String,
+    pub name: String,
+    pub description: String,
 }

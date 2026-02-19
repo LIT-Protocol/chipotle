@@ -164,8 +164,8 @@
 
     <p class="intro">
       This server exposes a REST API used by the <strong>Core</strong>, <strong>Transfer</strong>, and <strong>Swaps</strong> JavaScript SDKs.
-      The SDKs wrap the API endpoints so you can call them from the browser or Node. Two demo apps are included:
-      <strong>Solver</strong> (for solvers: view swap requests, commit to quotes, process swaps) and <strong>SWPS</strong> (for users: request swaps and manage flow).
+      The SDKs wrap the API endpoints so you can call them from the browser or Node. Demo apps include
+      <strong>Solver</strong> (for solvers: view swap requests, commit to quotes, process swaps), <strong>SWPS</strong> (for users: request swaps and manage flow), and the <strong>AccountConfig dashboard</strong> (manage accounts, groups, wallets, and IPFS actions).
     </p>
 
     <h2 class="section-title">JavaScript APIs</h2>
@@ -197,6 +197,16 @@
       <p class="card-meta">Code: <a href="swaps_sdk.js">swaps_sdk.js</a></p>
     </div>
 
+    <h2 class="section-title">API reference</h2>
+
+    <div class="card">
+      <h3 class="card-title"><a href="open_api.html">Core V1 OpenAPI spec</a></h3>
+      <p class="card-desc">
+        Interactive OpenAPI (Swagger) documentation for <code>/core/v1/</code>: all endpoints, request and response schemas, and &quot;Try it out&quot; to call the API from the browser. Covers new account, create wallet, sign with PKP, lit action, add/remove group, PKP and usage API keys, and list groups, wallets, and actions.
+      </p>
+      <p class="card-meta">Open: <a href="open_api.html">open_api.html</a></p>
+    </div>
+
     <h2 class="section-title">Sample test page</h2>
 
     <div class="card">
@@ -223,6 +233,14 @@
         For end users requesting swaps. Request a swap (origin/destination token and chain), view token list, and follow the swap flow. Uses the Swaps SDK to create quote requests and interact with the swap API.
       </p>
       <p class="card-meta">Open: <a href="dapps/swps/">dapps/swps/</a></p>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title"><a href="dapps/dashboard/">AccountConfig dashboard</a></h3>
+      <p class="card-desc">
+        Four-page desktop app (1920px, light/dark mode) for the <code>AccountConfig</code> contract: log in with an API key or create a new account; create wallets and add existing PKPs to groups; list and create groups; add IPFS CIDs (permitted actions) to groups. Uses the Core SDK and mirrors the contract’s accounts, groups, and actions.
+      </p>
+      <p class="card-meta">Open: <a href="dapps/dashboard/">dapps/dashboard/</a></p>
     </div>
 
     <footer class="footer">
