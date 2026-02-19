@@ -39,18 +39,15 @@ pub use tonic_middleware;
 pub async fn create_providers(
     cfg: &LitConfig, resource: Resource, trace_config: sdktrace::Config,
 ) -> Result<(sdktrace::TracerProvider, SdkMeterProvider, impl Subscriber, LoggerProvider)> {
-    // Initialize standard OTLP tonic exporter
-    let tonic_exporter_builder = init_tonic_exporter_builder(cfg)?;
-    
     // Initialize the tracing pipeline
-    let tracing_provider = init_tracing_provider(tonic_exporter_builder.clone(), trace_config)?;
+    let tracing_provider = init_tracing_provider(init_tonic_exporter_builder(cfg)?, trace_config)?;
     let tracer = tracing_provider.tracer("lit-tracer");
 
     // Initialize the metrics pipeline
-    let meter_provider = init_metrics_provider(tonic_exporter_builder.clone(), resource.clone())?;
+    let meter_provider = init_metrics_provider(init_tonic_exporter_builder(cfg)?, resource.clone())?;
 
     // Initialize the logs pipeline
-    let logger_provider = init_logger_provider(tonic_exporter_builder, resource.clone())?;
+    let logger_provider = init_logger_provider(init_tonic_exporter_builder(cfg)?, resource.clone())?;
 
     let context_aware_log_layer = ContextAwareOtelLogLayer::new(&logger_provider);
 

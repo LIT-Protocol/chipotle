@@ -1,5 +1,5 @@
 use lit_core::{config::LitConfig, error::Result};
-use opentelemetry_otlp::{TonicExporterBuilder};
+use opentelemetry_otlp::{TonicExporterBuilder, WithExportConfig};
 
 const DEFAULT_EXPORTER_ENDPOINT: &str = "http://127.0.0.1:4317";
 
