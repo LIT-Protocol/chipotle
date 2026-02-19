@@ -10,7 +10,9 @@ default = []
 # Dstack TEE attestation. Use --features dstack for simulator/dev testing.
 dstack = []
 # Production deploy (Phala CVM): enables dstack + hardcoded dstack socket, no env override.
-production = ["dstack"]
+production = ["dstack", "otlp"]
+# OTLP telemetry export via otel-collector sidecar.
+otlp = ["lit-observability/otlp"]
 
 [dependencies]
 aes-gcm = "0.10"
@@ -74,6 +76,7 @@ sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
 # rand_core = "0.6"
 lit-core = { path = "../lit-core/lit-core" }
 lit-core-derive = { path = "../lit-core/lit-core-derive" }
+lit-observability = { path = "../lit-core/lit-observability", features = ["channels"] }
 
 # lit-api-core = { path = "../lit-core/lit-api-core" }
 lit-actions-grpc = { path = "../lit-actions/grpc" }

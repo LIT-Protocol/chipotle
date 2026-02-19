@@ -1,14 +1,11 @@
-use anyhow::Result;
 use clap::Parser;
 use lit_core::utils::unix::raise_fd_limit;
-use lit_observability::{
-    opentelemetry::{KeyValue, global},
-    opentelemetry_sdk::{
-        Resource, logs::LoggerProvider, metrics::SdkMeterProvider,
-        propagation::TraceContextPropagator, trace as sdktrace,
-    },
-};
 use tracing::{debug, error, info};
+
+#[cfg(feature = "otlp")]
+use lit_observability::opentelemetry_sdk::{
+    logs::LoggerProvider, metrics::SdkMeterProvider, trace::TracerProvider,
+};
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -19,21 +16,16 @@ struct Args {
         help = "Path to Unix domain socket used by gRPC server"
     )]
     socket: std::path::PathBuf,
-
-    #[arg(long, default_value = "false", help = "Enable observability export")]
-    enable_observability_export: bool,
 }
 
-fn main() -> Result<()> {
+fn main() -> anyhow::Result<()> {
     raise_fd_limit();
 
     let args = Args::parse();
 
     let observability_rt = tokio::runtime::Runtime::new().expect("failed to create runtime");
 
-    let observability_providers = observability_rt
-        .block_on(async { init_observability(&args).await })
-        .expect("failed to init observability");
+    let observability_providers = observability_rt.block_on(async { init_observability().await });
     debug!(?args);
 
     lit_actions_server::init_v8();
@@ -57,72 +49,115 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-async fn init_observability(args: &Args) -> Result<ObservabilityProviders> {
-    use lit_api_core::config::LitApiConfig;
-    use lit_core::config::{LitConfig, LitConfigBuilder, envs::LitEnv};
-    use lit_observability::{LitObservabilityConfig, logging::simple_logging_subscriber};
+async fn init_observability() -> ObservabilityProviders {
     use tracing_subscriber::util::SubscriberInitExt;
 
-    // NB: constructing LitConfig requires lit.env, but the value isn't used by simple_logging_subscriber
-    let mut builder = LitConfigBuilder::default().set_override("lit.env", LitEnv::Dev.to_string());
-    builder = <LitConfig as LitObservabilityConfig>::apply_defaults(builder)?;
-    let cfg = <LitConfig as LitApiConfig>::from_builder(builder)?;
+    let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "trace".to_string());
 
-    if !args.enable_observability_export {
-        simple_logging_subscriber(&cfg, Some("lit-actions -".to_string()))?.init();
-        return Ok(ObservabilityProviders::default());
+    let init_stdout = || {
+        lit_observability::init_subscriber(&log_level)
+            .expect("Failed to init tracing subscriber (invalid RUST_LOG or filter config)")
+            .init()
+    };
+
+    #[cfg(not(feature = "otlp"))]
+    {
+        init_stdout();
+        return ObservabilityProviders::default(); // All None
     }
 
-    let otel_resource = Resource::new(vec![KeyValue::new(
-        lit_observability::opentelemetry_semantic_conventions::resource::SERVICE_NAME,
-        "lit-actions",
-    )]);
+    #[cfg(feature = "otlp")]
+    {
+        use lit_observability::{
+            logging::ContextAwareOtelLogLayer,
+            opentelemetry::{KeyValue, global},
+            opentelemetry_sdk::{Resource, propagation::TraceContextPropagator, trace as sdktrace},
+            opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+        };
+        use tracing_subscriber::layer::SubscriberExt;
 
-    let (tracing_provider, metrics_provider, subscriber, logger_provider) =
-        lit_observability::create_providers(
-            &cfg,
-            otel_resource.clone(),
-            sdktrace::Config::default().with_resource(otel_resource.clone()),
-        )
-        .await
-        .map_err(|e| anyhow::anyhow!("Failed to create OTEL providers: {}", e))?;
+        let endpoint = match std::env::var("LIT_TELEMETRY_ENDPOINT") {
+            Ok(ep) => ep,
+            Err(_) => {
+                eprintln!("LIT_TELEMETRY_ENDPOINT is not set. Exiting.");
+                std::process::exit(1);
+            }
+        };
 
-    // Set globals
-    global::set_text_map_propagator(TraceContextPropagator::new());
-    global::set_tracer_provider(tracing_provider);
-    global::set_meter_provider(metrics_provider.clone());
-    subscriber.init();
+        let otel_resource = Resource::new(vec![KeyValue::new(SERVICE_NAME, "lit-actions")]);
 
-    Ok(ObservabilityProviders::new(
-        metrics_provider,
-        logger_provider,
-    ))
+        let (tracing_provider, metrics_provider, logger_provider) =
+            match lit_observability::create_providers(
+                &endpoint,
+                otel_resource.clone(),
+                sdktrace::Config::default().with_resource(otel_resource),
+            )
+            .await
+            {
+                Ok(providers) => providers,
+                Err(e) => {
+                    eprintln!("OTLP init failed ({e}), falling back to stdout-only logging");
+                    init_stdout();
+                    return ObservabilityProviders::default();
+                }
+            };
+
+        global::set_text_map_propagator(TraceContextPropagator::new());
+        global::set_tracer_provider(tracing_provider.clone());
+        global::set_meter_provider(metrics_provider.clone());
+
+        let otel_log_layer = ContextAwareOtelLogLayer::new(&logger_provider);
+        lit_observability::init_subscriber(&log_level)
+            .expect("Failed to init tracing subscriber (invalid RUST_LOG or filter config)")
+            .with(otel_log_layer)
+            .init();
+
+        ObservabilityProviders::new(tracing_provider, metrics_provider, logger_provider)
+    }
 }
 
 #[derive(Default)]
 struct ObservabilityProviders {
+    #[cfg(feature = "otlp")]
+    tracing_provider: Option<TracerProvider>,
+    #[cfg(feature = "otlp")]
     meter_provider: Option<SdkMeterProvider>,
+    #[cfg(feature = "otlp")]
     logger_provider: Option<LoggerProvider>,
 }
 
 impl ObservabilityProviders {
-    fn new(meter_provider: SdkMeterProvider, logger_provider: LoggerProvider) -> Self {
+    #[cfg(feature = "otlp")]
+    fn new(
+        tracing_provider: TracerProvider,
+        meter_provider: SdkMeterProvider,
+        logger_provider: LoggerProvider,
+    ) -> Self {
         Self {
+            tracing_provider: Some(tracing_provider),
             meter_provider: Some(meter_provider),
             logger_provider: Some(logger_provider),
         }
     }
 
     fn shutdown(self) {
-        if let Some(meter_provider) = self.meter_provider
-            && let Err(e) = meter_provider.shutdown()
+        #[cfg(feature = "otlp")]
         {
-            error!("Failed to shutdown metrics provider: {:?}", e);
-        }
-        if let Some(logger_provider) = self.logger_provider
-            && let Err(e) = logger_provider.shutdown()
-        {
-            error!("Failed to shutdown logger provider: {:?}", e);
+            if let Some(tracing_provider) = self.tracing_provider
+                && let Err(e) = tracing_provider.shutdown()
+            {
+                error!("Failed to shutdown tracing provider: {:?}", e);
+            }
+            if let Some(meter_provider) = self.meter_provider
+                && let Err(e) = meter_provider.shutdown()
+            {
+                error!("Failed to shutdown metrics provider: {:?}", e);
+            }
+            if let Some(logger_provider) = self.logger_provider
+                && let Err(e) = logger_provider.shutdown()
+            {
+                error!("Failed to shutdown logger provider: {:?}", e);
+            }
         }
     }
 }
