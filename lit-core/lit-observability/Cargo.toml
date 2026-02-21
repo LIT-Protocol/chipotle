@@ -11,7 +11,7 @@ testing = ["ansi", "tracing-log"]
 ansi = []
 tracing-log = []
 channels = ["dep:flume"]
-otlp = ["opentelemetry-otlp"]
+otlp = ["dep:opentelemetry-otlp", "dep:opentelemetry_sdk", "dep:tracing-opentelemetry"]
 
 [dependencies]
 dashmap = "6"

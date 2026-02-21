@@ -1,8 +1,11 @@
+#[cfg(feature = "otlp")]
 use lit_core::error::Result;
 #[cfg(feature = "otlp")]
 use opentelemetry_otlp::TonicExporterBuilder;
+#[cfg(feature = "otlp")]
 use opentelemetry_sdk::Resource;
 
+#[cfg(feature = "otlp")]
 use crate::error::unexpected_err;
 
 #[cfg(feature = "otlp")]
@@ -24,4 +27,8 @@ pub mod event_format;
 pub mod privacy_filter;
 
 pub use event_format::CustomEventFormatter;
+#[cfg(feature = "otlp")]
 pub use context_layer::ContextAwareOtelLogLayer;
+pub use context_layer::{
+    RequestContext, get_request_context, set_request_context, clear_task_request_context,
+};

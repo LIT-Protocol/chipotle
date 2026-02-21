@@ -1,7 +1,9 @@
+#[cfg(feature = "otlp")]
 use lit_core::{config::LitConfig, error::Result};
 #[cfg(feature = "otlp")]
 use opentelemetry_otlp::{TonicExporterBuilder, WithExportConfig};
 
+#[cfg(feature = "otlp")]
 const DEFAULT_EXPORTER_ENDPOINT: &str = "http://127.0.0.1:4317";
 
 #[cfg(feature = "otlp")]
@@ -17,8 +19,10 @@ pub mod grpc {
     pub use tonic_middleware;
     use tracing::Instrument;
     use tracing::info_span;
+    #[cfg(feature = "otlp")]
     use tracing_opentelemetry::OpenTelemetrySpanExt;
 
+    #[cfg(feature = "otlp")]
     use opentelemetry::global;
     use tonic::async_trait;
     use tonic::body::BoxBody;
@@ -27,6 +31,7 @@ pub mod grpc {
     use tonic_middleware::Middleware;
     use tonic_middleware::ServiceBound;
 
+    #[cfg(feature = "otlp")]
     use crate::tracing::propagation::HttpMetadataMap;
 
     /// TracingMiddleware is a middleware that handles tracing context that is propagated across process boundaries.
@@ -39,9 +44,11 @@ pub mod grpc {
         S: ServiceBound,
         S::Future: Send,
     {
+        #[allow(unused_mut)]
         async fn call(
             &self, mut req: HttpRequest<BoxBody>, mut service: S,
         ) -> Result<HttpResponse<BoxBody>, S::Error> {
+            #[cfg(feature = "otlp")]
             let parent_cx = global::get_text_map_propagator(|propagator| {
                 propagator.extract(&HttpMetadataMap(req.headers_mut()))
             });
@@ -67,6 +74,7 @@ pub mod grpc {
                 ),
             };
 
+            #[cfg(feature = "otlp")]
             info_span.set_parent(parent_cx);
 
             service.call(req).instrument(info_span).await
