@@ -23,5 +23,7 @@ docker-compose*.yml
 
 # Docs and tests (reduce image size)
 **/*.md
-**/tests/
 **/benches/
+# Exclude test dirs except lit-actions/tests (workspace member required for cargo build)
+lit-api-server/tests/
+lit-core/tests/

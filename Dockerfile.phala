@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     clang \
+    protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy entire repo (needed for workspace dependencies)
