@@ -1,0 +1,136 @@
+Below are ops that aren't used / implemented.
+
+
+            UnionResponse::P2pBroadcast(P2pBroadcastRequest { name: _, value: _ }) => {
+                bail!("P2pBroadcast is not implemented");
+            }
+
+            UnionResponse::P2pCollectFromLeader(P2pCollectFromLeaderRequest { name: _ }) => {
+                bail!("P2pCollectFromLeader is not implemented");
+            }
+
+            UnionResponse::IsLeader(IsLeaderRequest {}) => {
+                bail!("IsLeader is not implemented");
+            }
+
+UnionResponse::DecryptToSingleNode(DecryptToSingleNodeRequest {
+                access_control_conditions: _,
+                ciphertext: _,
+                data_to_encrypt_hash: _,
+                auth_sig: _,
+                chain: _,
+                key_set_id: _,
+            }) => {
+                bail!("DecryptToSingleNode is not implemented");
+            }
+            UnionResponse::SignAndCombineEcdsa(SignAndCombineEcdsaRequest {
+                to_sign: _,
+                public_key: _,
+                sig_name: _,
+                key_set_id: _,
+            }) => {
+                // we both the signatures and the broadcasts for
+                bail!("SignAndCombineEcdsa is not implemented");
+            }
+            UnionResponse::SignAndCombine(SignAndCombineRequest {
+                to_sign: _,
+                public_key: _,
+                sig_name: _,
+                signing_scheme: _,
+                key_set_id: _,
+            }) => {
+                bail!("SignAndCombine is not implemented");
+            }
+
+
+                        UnionResponse::AesDecrypt(AesDecryptRequest {
+                symmetric_key: _,
+                ciphertext: _,
+            }) => {
+                bail!("AesDecrypt is not implemented");
+            }
+            UnionResponse::GetLatestNonce(GetLatestNonceRequest {
+                address: _,
+                chain: _,
+            }) => {
+                bail!("GetLatestNonce is not implemented");
+            }
+            UnionResponse::CheckConditions(CheckConditionsRequest {
+                conditions: _,
+                auth_sig: _,
+                chain: _,
+            }) => {
+                bail!("CheckConditions is not implemented");
+            }
+            UnionResponse::ClaimKeyIdentifier(ClaimKeyIdentifierRequest { key_id: _ }) => {
+                bail!("ClaimKeyIdentifier is not implemented");
+            }
+            UnionResponse::CallContract(CallContractRequest { chain: _, txn: _ }) => {
+                bail!("CallContract is not implemented");
+            }
+
+
+            UnionResponse::PkpPermissionsGetPermitted(PkpPermissionsGetPermittedRequest {
+                method: _,
+                token_id: _,
+                key_set_id: _,
+            }) => {
+                bail!("PkpPermissionsGetPermitted is not implemented");
+            }
+            UnionResponse::PkpPermissionsGetPermittedAuthMethodScopes(
+                PkpPermissionsGetPermittedAuthMethodScopesRequest {
+                    token_id: _,
+                    method: _,
+                    user_id: _,
+                    max_scope_id: _,
+                    key_set_id: _,
+                },
+            ) => {
+                bail!("PkpPermissionsGetPermittedAuthMethodScopes is not implemented");
+            }
+            UnionResponse::PkpPermissionsIsPermitted(PkpPermissionsIsPermittedRequest {
+                method: _,
+                token_id: _,
+                params: _,
+                key_set_id: _,
+            }) => {
+                bail!("PkpPermissionsIsPermitted is not implemented");
+            }
+            UnionResponse::PkpPermissionsIsPermittedAuthMethod(
+                PkpPermissionsIsPermittedAuthMethodRequest {
+                    token_id: _,
+                    method: _,
+                    user_id: _,
+                    key_set_id: _,
+                },
+            ) => {
+                bail!("PkpPermissionsIsPermittedAuthMethod is not implemented");
+            }
+            UnionResponse::PubkeyToTokenId(PubkeyToTokenIdRequest {
+                public_key: _,
+                key_set_id: _,
+            }) => {
+                bail!("PubkeyToTokenId is not implemented");
+            }
+
+
+            UnionResponse::BroadcastAndCollect(BroadcastAndCollectRequest {
+                name: _,
+                value: _,
+            }) => {
+                bail!("BroadcastAndCollect is not implemented");
+            }
+            UnionResponse::DecryptAndCombine(DecryptAndCombineRequest {
+                access_control_conditions: _,
+                ciphertext: _,
+                data_to_encrypt_hash: _,
+                auth_sig: _,
+                chain: _,
+                key_set_id: _,
+            }) => {
+                bail!("DecryptAndCombine is not implemented");
+            }
+            
+            UnionResponse::GetRpcUrl(GetRpcUrlRequest { chain: _ }) => {
+                bail!("GetRpcUrl is not implemented");
+            }

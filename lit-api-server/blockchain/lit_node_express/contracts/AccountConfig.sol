@@ -21,9 +21,7 @@ contract AccountConfig {
     error GroupDoesNotExist(uint256 apiKey, uint256 groupId);
     error WalletDoesNotExist(uint256 apiKey, uint256 groupId, uint256 Wallet);
     error ActionDoesNotExist(uint256 apiKey, uint256 groupId, uint256 action);
-    error AccountApiKeyDoesNotExist(uint256 apiKey, uint256 accountApiKey);
     error UsageApiKeyDoesNotExist(uint256 apiKey, uint256 usageApiKey);
-    error PageSizeTooLarge(uint256 pageSize);
 
     struct Metadata {
         uint256 id;
@@ -42,27 +40,35 @@ contract AccountConfig {
         Metadata metadata; // name and description of the group
         EnumerableSet.UintSet permitted_actions_cid_hash; // keccak256 of an action ipfs cid
         EnumerableSet.UintSet Wallets_hash; // keccak256 of a Wallet public key
+        bool all_wallets_permitted; // whether all wallets are permitted to use the group
+        bool all_actions_permitted; // whether all actions are permitted to use the group
     }
 
     struct Account {
-        uint256 accountApiKeyHash; // keccak256 of the api key
+        Metadata accountMetadata; // name and description of the account
+        UsageApiKey accountApiKey; // the api key that is used to access the account
         address creatorWalletAddress; // wallet address of the creator of the account
-        string accountName; // name of the account
-        string accountDescription; // description of the account
-        mapping(uint256 => UsageApiKey) usageApiKeyHashes; // mapping from a keccak256 of an api key to it's config
-        EnumerableSet.UintSet group_list; // set of groups that the account is a member of
+        // Usage API Keys are rotatable keys that can be used to fund the account
+        EnumerableSet.UintSet usageApiKeysList; // set of usage api keys that the account is a member of
+        mapping(uint256 => UsageApiKey) usageApiKeys; // mapping from a keccak256 of a usage api key to it's config
+        // Groups are collections of actions and optionally wallets that are associated with the account
+        EnumerableSet.UintSet groupList; // list of all groups that the account has created
         mapping(uint256 => Group) groups; // mapping from an index of a group to it's config
+        // Actions are the CID hashes of the actions that are permitted to be used in the group
+        EnumerableSet.UintSet actionHashesList; // set of actions that the account is a member of
+        mapping(uint256 => Metadata) actionMetadata; // mapping from a keccak256 of an action ipfs cid to it's metadata
         bool managed; // whether the LIT-node can help manage the key.
-        uint256 nextGroupId; // counter for creating unique group ids
         mapping(uint256 => uint256) wallet_derivation; // mapping from a wallet address hash to it's derivation path
         // in theory the following two meta data mappings can be blank - can be helpful in a UI, though.
         mapping(uint256 => Metadata) walletDerivationMetadata; // mapping from a wallet address hash to it's metadata
-        mapping(uint256 => Metadata) actionMetadata; // mapping from a keccak256 of an action ipfs cid to it's metadata
+        uint256 walletCount; // counter for creating unique wallet address hashes
+        uint256 actionCount; // counter for creating unique action ids
+        uint256 groupCount; // counter for creating unique group ids
     }
 
     // storage data for the account config
     mapping(uint256 => Account) accounts; // mapping from a given api key to it's config
-    mapping(uint256 => uint256) walletAddressHashes; // mapping from a counter to a wallet address hash
+    mapping(uint256 => uint256) walletAddressHashes; // mapping from a counter to a wallet address hash, allowing us to get a list of all wallet hashes ever generated
     address public owner;
     uint256 public nextWalletCount; // counter for creating unique wallet address hashes
 
@@ -78,23 +84,27 @@ contract AccountConfig {
         bool managed,
         string memory accountName,
         string memory accountDescription,
-        address creatorWalletAddress
+        address creatorWalletAddress,
+        uint256 initialBalance
     ) public {
         Account storage account = accounts[apiKeyHash];
-        account.accountApiKeyHash = apiKeyHash;
         account.managed = managed;
         account.creatorWalletAddress = creatorWalletAddress;
-        account.accountName = accountName;
-        account.accountDescription = accountDescription;
+        account.accountMetadata.id = apiKeyHash;
+        account.accountMetadata.name = accountName;
+        account.accountMetadata.description = accountDescription;
+        account.accountApiKey.apiKeyHash = apiKeyHash;
+        account.accountApiKey.expiration = block.timestamp + 365 days * 10;
+        account.accountApiKey.balance = initialBalance;
     }
 
     // This is a double use function - it checks if the account exists
     // and if the caller is able to mutate the account, providing a modicum of security.
     function accountExistsAndIsMutable(
         uint256 apiKeyHash
-    ) private view returns (bool) {
+    ) public view returns (bool) {
         Account storage account = accounts[apiKeyHash];
-        if (account.accountApiKeyHash != apiKeyHash) {
+        if (account.accountMetadata.id != apiKeyHash) {
             return false;
         }
         if (msg.sender == owner && account.managed == true) {
@@ -113,10 +123,11 @@ contract AccountConfig {
     ) public {
         revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
         UsageApiKey storage apiKeyStorage = accounts[accountApiKeyHash]
-            .usageApiKeyHashes[usageApiKeyHash];
+            .usageApiKeys[usageApiKeyHash];
         apiKeyStorage.apiKeyHash = usageApiKeyHash;
         apiKeyStorage.expiration = expiration;
         apiKeyStorage.balance = balance;
+        accounts[accountApiKeyHash].usageApiKeysList.add(usageApiKeyHash);
     }
 
     function addGroup(
@@ -124,14 +135,16 @@ contract AccountConfig {
         string memory name,
         string memory description,
         uint256[] memory permitted_actions,
-        uint256[] memory Wallets
+        uint256[] memory Wallets,
+        bool all_wallets_permitted,
+        bool all_actions_permitted
     ) public {
         revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
 
         Account storage account = accounts[accountApiKeyHash];
-        account.group_list.add(account.nextGroupId);
-        Group storage group = account.groups[account.nextGroupId];
-        group.metadata.id = account.nextGroupId;
+        account.groupList.add(account.groupCount);
+        Group storage group = account.groups[account.groupCount];
+        group.metadata.id = account.groupCount;
         group.metadata.name = name;
         group.metadata.description = description;
         for (uint256 i = 0; i < permitted_actions.length; i++) {
@@ -140,7 +153,26 @@ contract AccountConfig {
         for (uint256 i = 0; i < Wallets.length; i++) {
             group.Wallets_hash.add(Wallets[i]);
         }
-        account.nextGroupId++;
+        group.all_wallets_permitted = all_wallets_permitted;
+        group.all_actions_permitted = all_actions_permitted;
+        account.groupCount++;
+    }
+
+    function updateGroup(
+        uint256 accountApiKeyHash,
+        uint256 groupId,
+        string memory name,
+        string memory description,
+        bool all_wallets_permitted,
+        bool all_actions_permitted
+    ) public {
+        revertIfGroupDoesNotExist(accountApiKeyHash, groupId);
+
+        Account storage account = accounts[accountApiKeyHash];
+        account.groups[groupId].metadata.name = name;
+        account.groups[groupId].metadata.description = description;
+        account.groups[groupId].all_wallets_permitted = all_wallets_permitted;
+        account.groups[groupId].all_actions_permitted = all_actions_permitted;
     }
 
     function addWalletToGroup(
@@ -168,6 +200,20 @@ contract AccountConfig {
         account.actionMetadata[action].id = action;
         account.actionMetadata[action].name = name;
         account.actionMetadata[action].description = description;
+        account.actionCount++;
+    }
+
+    function updateActionMetadata(
+        uint256 accountApiKeyHash,
+        uint256 actionHash,
+        uint256 groupId,
+        string memory name,
+        string memory description
+    ) public {
+        revertIfActionDoesNotExist(accountApiKeyHash, groupId, actionHash);
+        Account storage account = accounts[accountApiKeyHash];
+        account.actionMetadata[actionHash].name = name;
+        account.actionMetadata[actionHash].description = description;
     }
 
     function removeActionFromGroup(
@@ -179,6 +225,9 @@ contract AccountConfig {
 
         Account storage account = accounts[accountApiKeyHash];
         account.groups[groupId].permitted_actions_cid_hash.remove(action);
+        if (account.actionCount > 0) {
+            account.actionCount--;
+        }
     }
 
     function removeWalletFromGroup(
@@ -196,6 +245,18 @@ contract AccountConfig {
         account.groups[groupId].Wallets_hash.remove(walletAddressHash);
     }
 
+    function updateUsageApiKeyMetadata(
+        uint256 accountApiKeyHash,
+        uint256 usageApiKeyHash,
+        string memory name,
+        string memory description
+    ) public {
+        revertIfUsageApiKeyDoesNotExist(accountApiKeyHash, usageApiKeyHash);
+        Account storage account = accounts[accountApiKeyHash];    
+        account.usageApiKeys[usageApiKeyHash].metadata.name = name;
+        account.usageApiKeys[usageApiKeyHash].metadata.description = description;
+    }
+
     function removeUsageApiKey(
         uint256 accountApiKeyHash,
         uint256 usageApiKeyHash
@@ -203,7 +264,7 @@ contract AccountConfig {
         revertIfUsageApiKeyDoesNotExist(accountApiKeyHash, usageApiKeyHash);
 
         Account storage account = accounts[accountApiKeyHash];
-        delete account.usageApiKeyHashes[usageApiKeyHash];
+        account.usageApiKeysList.remove(usageApiKeyHash);
     }
 
     function registerWalletDerivation(
@@ -224,6 +285,7 @@ contract AccountConfig {
             .walletDerivationMetadata[walletAddressHash]
             .description = description;
         walletAddressHashes[nextWalletCount] = walletAddressHash;
+        account.walletCount++;
         nextWalletCount++;
     }
 
@@ -237,14 +299,14 @@ contract AccountConfig {
     }
 
     // Existence checks
-    function accountApiKeyExists(
+    function usageApiKeyExists(
         uint256 accountApiKeyHash,
         uint256 usageApiKeyHash
     ) private view returns (bool) {
         revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
         return
             accounts[accountApiKeyHash]
-                .usageApiKeyHashes[usageApiKeyHash]
+                .usageApiKeys[usageApiKeyHash]
                 .apiKeyHash == usageApiKeyHash;
     }
 
@@ -324,11 +386,8 @@ contract AccountConfig {
         uint256 accountApiKeyHash,
         uint256 usageApiKeyHash
     ) private view {
-        if (!accountApiKeyExists(accountApiKeyHash, usageApiKeyHash)) {
-            revert AccountApiKeyDoesNotExist(
-                accountApiKeyHash,
-                usageApiKeyHash
-            );
+        if (!usageApiKeyExists(accountApiKeyHash, usageApiKeyHash)) {
+            revert UsageApiKeyDoesNotExist(accountApiKeyHash, usageApiKeyHash);
         }
     }
 
@@ -340,22 +399,23 @@ contract AccountConfig {
         revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
         Account storage account = accounts[accountApiKeyHash];
 
-        if (pageSize > account.group_list.length()) {
-            revert PageSizeTooLarge(account.group_list.length());
+        if (pageSize > account.groupList.length()) {
+            pageSize = account.groupList.length();
+            pageNumber = 0;
         }
 
         uint256 startIndex = pageNumber * pageSize;
         uint256 endIndex = startIndex + pageSize;
 
-        if (endIndex > account.group_list.length()) {
-            endIndex = account.group_list.length();
+        if (endIndex > account.groupList.length()) {
+            endIndex = account.groupList.length();
         }
 
         uint256 pageLength = endIndex - startIndex;
         Metadata[] memory pageMetadata = new Metadata[](pageLength);
         for (uint256 i = 0; i < pageLength; i++) {
             pageMetadata[i] = account
-                .groups[account.group_list.at(startIndex + i)]
+                .groups[account.groupList.at(startIndex + i)]
                 .metadata;
         }
         return pageMetadata;
@@ -370,7 +430,8 @@ contract AccountConfig {
         Account storage account = accounts[accountApiKeyHash];
 
         if (pageSize > nextWalletCount) {
-            revert PageSizeTooLarge(nextWalletCount);
+            pageSize = nextWalletCount;
+            pageNumber = 0;
         }
 
         uint256 startIndex = pageNumber * pageSize;
@@ -402,7 +463,8 @@ contract AccountConfig {
         Group storage group = account.groups[groupId];
 
         if (pageSize > group.Wallets_hash.length()) {
-            revert PageSizeTooLarge(group.Wallets_hash.length());
+            pageSize = group.Wallets_hash.length();
+            pageNumber = 0;
         }
 
         uint256 startIndex = pageNumber * pageSize;
@@ -433,7 +495,8 @@ contract AccountConfig {
         Group storage group = account.groups[groupId];
 
         if (pageSize > group.permitted_actions_cid_hash.length()) {
-            revert PageSizeTooLarge(group.permitted_actions_cid_hash.length());
+            pageSize = group.permitted_actions_cid_hash.length();
+            pageNumber = 0;
         }
 
         uint256 startIndex = pageNumber * pageSize;

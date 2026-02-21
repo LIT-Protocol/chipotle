@@ -4,7 +4,7 @@ pub mod actions;
 pub mod core;
 pub mod error;
 
-use crate::actions::grpc_client_pool::GrpcClientPool;
+use crate::actions::grpc::GrpcClientPool;
 use moka::future::Cache;
 use rocket::fs::{FileServer, relative};
 use rocket_cors::{AllowedOrigins, Method};

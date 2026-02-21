@@ -1,19 +1,22 @@
+use std::time::Instant;
+
 use crate::accounts;
-use crate::actions::action_client;
-use crate::actions::action_client::DenoExecutionEnv;
-use crate::actions::grpc_client_pool::GrpcClientPool;
+use crate::actions::client::ClientBuilder;
+use crate::actions::client::models::DenoExecutionEnv;
+use crate::actions::grpc::GrpcClientPool;
 use crate::core::models::ApiStatus;
 use crate::core::v1::models::request::{
     AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest, AddUsageApiKeyRequest,
-    LitActionRequest, NewAccountRequest, RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest,
-    SignWithPKPRequest,
+    LitActionRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
+    RemoveUsageApiKeyRequest, SignWithPKPRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
+    UpdateUsageApiKeyMetadataRequest,
 };
 use crate::core::v1::models::response::{
-    AccountOpResponse, CreateWalletResponse, ListMetadataItem, LitActionResponse,
-    NewAccountResponse, SignWithPkpResponse,
+    AccountOpResponse, CreateWalletResponse, ListMetadataItem, LitActionResponse, LitActionSignature, NewAccountResponse, SignWithPkpResponse
 };
 use ethers::types::{H160, U256};
 use ethers::utils::keccak256;
+use ipfs_hasher::IpfsHasher;
 use lit_core::utils::binary::{bytes_to_hex, hex_to_bytes};
 use lit_rust_crypto::group::GroupEncoding;
 use lit_rust_crypto::k256::SecretKey;
@@ -32,14 +35,12 @@ fn not_configured() -> ApiStatus {
 fn parse_u256(s: &str) -> Result<U256, ApiStatus> {
     let s = s.trim();
     if s.starts_with("0x") || s.starts_with("0X") {
-        let bytes = hex_to_bytes(s).map_err(|e| {
-            ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex for U256")
-        })?;
+        let bytes = hex_to_bytes(s)
+            .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex for U256"))?;
         Ok(U256::from_big_endian(&bytes))
     } else {
-        U256::from_dec_str(s).map_err(|e| {
-            ApiStatus::bad_request(anyhow::anyhow!(e), "invalid decimal for U256")
-        })
+        U256::from_dec_str(s)
+            .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid decimal for U256"))
     }
 }
 
@@ -48,9 +49,8 @@ fn parse_u256_hex_list(strings: &[String]) -> Result<Vec<U256>, ApiStatus> {
     strings
         .iter()
         .map(|s| {
-            let bytes = hex_to_bytes(s.trim()).map_err(|e| {
-                ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex in list")
-            })?;
+            let bytes = hex_to_bytes(s.trim())
+                .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex in list"))?;
             Ok(U256::from_big_endian(&bytes))
         })
         .collect::<Result<Vec<_>, _>>()
@@ -83,11 +83,19 @@ pub async fn new_account(
     let (_public_key, wallet_address, secret) = get_new_wallet();
     let api_key = base64_light::base64_encode_bytes(&secret);
 
+    let initial_balance = new_account_request
+        .initial_balance
+        .as_deref()
+        .map(|s| parse_u256(s))
+        .transpose()?
+        .unwrap_or(U256::zero());
+
     if let Err(e) = accounts::new_account(
         &api_key,
         &account_name,
         &account_description,
         wallet_address,
+        initial_balance,
     )
     .await
     {
@@ -95,9 +103,16 @@ pub async fn new_account(
     }
 
     Ok(NewAccountResponse {
-        api_key: api_key,
+        api_key: api_key.to_string(),
         wallet_address: bytes_to_hex(&wallet_address.as_bytes()),
     })
+}
+
+pub async fn account_exists(api_key: &str) -> Result<bool, ApiStatus> {
+    let exists = accounts::account_exists(api_key)
+        .await
+        .map_err(|e| ApiStatus::internal_server_error(e, "account_exists failed"))?;
+    Ok(exists)
 }
 
 pub async fn create_wallet(api_key: &str) -> Result<CreateWalletResponse, ApiStatus> {
@@ -107,7 +122,10 @@ pub async fn create_wallet(api_key: &str) -> Result<CreateWalletResponse, ApiSta
 
     // technically this is NOT a derivaton path at all, but it's a stand-in for now
     let derivation_path = U256::from_big_endian(&secret);
-    if let Err(e) = accounts::register_wallet_derivation(&api_key, &wallet_address_hex, derivation_path, "", "").await {
+    if let Err(e) =
+        accounts::register_wallet_derivation(&api_key, &wallet_address_hex, derivation_path, "", "")
+            .await
+    {
         return Err(e.into());
     }
 
@@ -137,7 +155,7 @@ pub async fn lit_action(
         http_client: Some(reqwest::Client::clone(http_client)),
     };
 
-    let mut client = match action_client::ClientBuilder::default()
+    let mut client = match ClientBuilder::default()
         .js_env(deno_execution_env)
         .request_id(request_id.clone())
         .api_key(lit_action_request.api_key.clone())
@@ -151,11 +169,12 @@ pub async fn lit_action(
         Err(e) => return Err(anyhow::anyhow!("failed to build client: {:?}", e).into()),
     };
 
-    let derived_ipfs_id = "some_Value".to_string();
-
     let code_to_run = lit_action_request.code.clone();
+    let ipfs_hasher = IpfsHasher::default();
+    let derived_ipfs_id = ipfs_hasher.compute(code_to_run.as_bytes());
+
     let js_params = lit_action_request.js_params.clone();
-    let execution_options = action_client::ExecutionOptions {
+    let execution_options = crate::actions::client::models::ExecutionOptions {
         code: code_to_run,
         globals: js_params.clone(),
         action_ipfs_id: Some(derived_ipfs_id),
@@ -189,8 +208,14 @@ pub async fn lit_action(
         Err(e) => return Err(anyhow::anyhow!("Actions failed with : {:?}", e).into()),
     };
 
+
+    let signatures = result.signed_data.iter().map(|(name, signed_data)| LitActionSignature {
+        name: name.clone(),
+        data: signed_data.clone().into(),
+    }).collect();
+    
     let lit_action_response = LitActionResponse {
-        signatures: vec![],
+        signatures: signatures,
         response: result.response,
         logs: result.logs,
         has_error: false,
@@ -199,9 +224,7 @@ pub async fn lit_action(
     Ok(lit_action_response)
 }
 
-pub async fn add_group(
-    req: Json<AddGroupRequest>,
-) -> Result<AccountOpResponse, ApiStatus> {
+pub async fn add_group(req: Json<AddGroupRequest>) -> Result<AccountOpResponse, ApiStatus> {
     let permitted_actions = parse_u256_hex_list(&req.permitted_actions)?;
     let pkps = parse_u256_hex_list(&req.pkps)?;
     accounts::add_group(
@@ -210,6 +233,8 @@ pub async fn add_group(
         &req.group_description,
         permitted_actions,
         pkps,
+        req.all_wallets_permitted,
+        req.all_actions_permitted,
     )
     .await
     .map_err(|e| ApiStatus::internal_server_error(e, "add_group failed"))?;
@@ -222,9 +247,15 @@ pub async fn add_action_to_group(
     let group_id = parse_u256(&req.group_id)?;
     let name = req.name.as_deref().unwrap_or("");
     let description = req.description.as_deref().unwrap_or("");
-    accounts::add_action_to_group(&req.api_key, group_id, &req.action_ipfs_cid, name, description)
-        .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "add_action_to_group failed"))?;
+    accounts::add_action_to_group(
+        &req.api_key,
+        group_id,
+        &req.action_ipfs_cid,
+        name,
+        description,
+    )
+    .await
+    .map_err(|e| ApiStatus::internal_server_error(e, "add_action_to_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
@@ -265,6 +296,62 @@ pub async fn remove_usage_api_key(
     accounts::remove_usage_api_key(&req.api_key, &req.usage_api_key)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "remove_usage_api_key failed"))?;
+    Ok(AccountOpResponse { success: true })
+}
+
+pub async fn update_group(req: Json<UpdateGroupRequest>) -> Result<AccountOpResponse, ApiStatus> {
+    let group_id = parse_u256(&req.group_id)?;
+    accounts::update_group(
+        &req.api_key,
+        group_id,
+        &req.name,
+        &req.description,
+        req.all_wallets_permitted,
+        req.all_actions_permitted,
+    )
+    .await
+    .map_err(|e| ApiStatus::internal_server_error(e, "update_group failed"))?;
+    Ok(AccountOpResponse { success: true })
+}
+
+pub async fn remove_action_from_group(
+    req: Json<RemoveActionFromGroupRequest>,
+) -> Result<AccountOpResponse, ApiStatus> {
+    let group_id = parse_u256(&req.group_id)?;
+    accounts::remove_action_from_group_by_cid(&req.api_key, group_id, &req.action_ipfs_cid)
+        .await
+        .map_err(|e| ApiStatus::internal_server_error(e, "remove_action_from_group failed"))?;
+    Ok(AccountOpResponse { success: true })
+}
+
+pub async fn update_action_metadata(
+    req: Json<UpdateActionMetadataRequest>,
+) -> Result<AccountOpResponse, ApiStatus> {
+    let group_id = parse_u256(&req.group_id)?;
+    let action_hash = U256::from_big_endian(&keccak256(&req.action_ipfs_cid));
+    accounts::update_action_metadata(
+        &req.api_key,
+        action_hash,
+        group_id,
+        &req.name,
+        &req.description,
+    )
+    .await
+    .map_err(|e| ApiStatus::internal_server_error(e, "update_action_metadata failed"))?;
+    Ok(AccountOpResponse { success: true })
+}
+
+pub async fn update_usage_api_key_metadata(
+    req: Json<UpdateUsageApiKeyMetadataRequest>,
+) -> Result<AccountOpResponse, ApiStatus> {
+    accounts::update_usage_api_key_metadata(
+        &req.api_key,
+        &req.usage_api_key,
+        &req.name,
+        &req.description,
+    )
+    .await
+    .map_err(|e| ApiStatus::internal_server_error(e, "update_usage_api_key_metadata failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 

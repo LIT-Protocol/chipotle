@@ -3,50 +3,32 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>AccountConfig Dashboard – Lit Node Express</title>
+  <title>Lit Express Node Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <div class="app">
-    <header class="header">
-      <span class="header-brand">AccountConfig Dashboard</span>
-      <div class="header-actions">
-        <button type="button" class="theme-toggle" id="theme-toggle" aria-label="Toggle theme">Dark</button>
-        <button type="button" class="logout-btn requires-auth" id="logout-btn">Log out</button>
-      </div>
-    </header>
-
-    <nav class="nav">
-      <a href="#login" data-page="login" class="active login-only">Login</a>
-      <a href="#wallets" data-page="wallets" class="requires-auth">Wallets</a>
-      <a href="#groups" data-page="groups" class="requires-auth">Groups</a>
-      <a href="#actions" data-page="actions" class="requires-auth">IPFS Actions</a>
-    </nav>
-
-    <main class="main">
-      <!-- Page 1: Login / Create account -->
-      <section id="page-login" class="page active">
-        <h1 class="page-title">Login or create account</h1>
-        <p class="page-desc">Use an existing API key or create a new account to manage AccountConfig.</p>
+    <!-- Login (standalone when not authenticated) -->
+    <section id="page-login" class="login-page">
+      <div class="login-container">
+        <h1 class="login-title">Lit Express Node Dashboard</h1>
+        <p class="login-subtitle">Sign in or create an account to manage Lit Express Node.</p>
         <div id="login-status" class="status info" style="display: none;"></div>
-        <div class="card">
-          <div class="card-title">Use existing API key</div>
+        <div class="login-card">
+          <h2 class="login-card-title">Use existing API key</h2>
           <div class="form-group">
             <label for="login-api-key">API key</label>
             <input type="password" id="login-api-key" class="input" placeholder="Paste your API key (hex or base64)">
           </div>
-          <div class="form-group">
-            <label for="api-base-url">API base URL</label>
-            <input type="text" id="api-base-url" class="input" value="http://localhost:8000" placeholder="http://localhost:8000">
-          </div>
           <button type="button" id="btn-login" class="btn btn-primary btn-block">Log in</button>
+          <p class="form-hint">Log in verifies the API key with the server (account exists and is mutable).</p>
         </div>
-        <div class="card">
-          <div class="card-title">Create new account</div>
-          <p class="page-desc" style="margin-bottom: 1rem;">Creates an account on AccountConfig and returns a new API key. Store it securely.</p>
+        <div class="login-card">
+          <h2 class="login-card-title">Create new account</h2>
+          <p class="form-hint" style="margin-bottom: 1rem;">Creates an account on Lit Express Node and returns a new API key. Store it securely.</p>
           <div class="form-group">
             <label for="new-account-name">Account name</label>
             <input type="text" id="new-account-name" class="input" placeholder="My account">
@@ -55,88 +37,301 @@
             <label for="new-account-desc">Account description</label>
             <input type="text" id="new-account-desc" class="input" placeholder="Optional">
           </div>
+          <div class="form-group">
+            <label for="new-account-initial-balance">Initial balance (optional)</label>
+            <input type="text" id="new-account-initial-balance" class="input" placeholder="0 or hex">
+          </div>
           <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account</button>
         </div>
-      </section>
+      </div>
+    </section>
 
-      <!-- Page 2: Wallets -->
-      <section id="page-wallets" class="page">
-        <h1 class="page-title">Wallets</h1>
-        <p class="page-desc">Create new wallets (usage API key + wallet address) or add existing PKPs to a group.</p>
-        <div id="wallets-status" class="status" style="display: none;"></div>
-        <div class="card">
-          <div class="card-title">Create new wallet</div>
-          <p class="page-desc" style="margin-bottom: 1rem;">Creates a wallet and adds it as a usage API key for this account.</p>
-          <div class="form-group">
-            <label for="create-wallet-group">Add to group (optional, group ID)</label>
-            <input type="text" id="create-wallet-group" class="input" placeholder="e.g. 0 or leave empty">
-          </div>
-          <button type="button" id="btn-create-wallet" class="btn btn-primary btn-block">Create wallet</button>
-          <div id="create-wallet-result" class="mono" style="margin-top: 1rem; font-size: 0.875rem; display: none;"></div>
+    <!-- Dashboard (single page when authenticated) -->
+    <div id="dashboard-wrap" class="dashboard-wrap">
+      <aside class="sidebar">
+        <div class="sidebar-brand">
+          <span class="sidebar-brand-text">Lit Express Node</span>
         </div>
-        <div class="card">
-          <div class="card-title">Add existing PKP to group</div>
-          <div class="form-group">
-            <label for="add-pkp-group">Group ID</label>
-            <input type="text" id="add-pkp-group" class="input" placeholder="0">
-          </div>
-          <div class="form-group">
-            <label for="add-pkp-public-key">PKP public key</label>
-            <input type="text" id="add-pkp-public-key" class="input" placeholder="PKP public key (hex or base64)">
-          </div>
-          <button type="button" id="btn-add-pkp" class="btn btn-primary btn-block">Add PKP to group</button>
-        </div>
-      </section>
+        <nav class="sidebar-nav">
+          <span class="sidebar-menu-label">MENU</span>
+          <a href="#overview" class="sidebar-link" data-scroll="overview">
+            <span class="sidebar-link-icon">◇</span>
+            <span class="sidebar-link-text">Overview</span>
+          </a>
+          <a href="#groups" class="sidebar-link" data-scroll="groups">
+            <span class="sidebar-link-icon">◇</span>
+            <span class="sidebar-link-text">Groups</span>
+          </a>
+          <a href="#actions" class="sidebar-link" data-scroll="actions">
+            <span class="sidebar-link-icon">◇</span>
+            <span class="sidebar-link-text">IPFS Actions</span>
+          </a>
+          <a href="#wallets" class="sidebar-link" data-scroll="wallets">
+            <span class="sidebar-link-icon">◇</span>
+            <span class="sidebar-link-text">Wallets</span>
+          </a>
+        </nav>
+      </aside>
 
-      <!-- Page 3: Groups -->
-      <section id="page-groups" class="page">
-        <h1 class="page-title">Groups</h1>
-        <p class="page-desc">Groups are created on AccountConfig. New groups get the next ID (tracked below).</p>
-        <div id="groups-status" class="status" style="display: none;"></div>
-        <div class="card">
-          <div class="card-title">Add new group</div>
-          <div class="form-group">
-            <label for="new-group-name">Group name</label>
-            <input type="text" id="new-group-name" class="input" placeholder="My group">
+      <div class="dashboard-main">
+        <header class="topbar">
+          <div class="topbar-left">
+            <h1 class="topbar-title">Dashboard</h1>
           </div>
-          <div class="form-group">
-            <label for="new-group-desc">Description</label>
-            <input type="text" id="new-group-desc" class="input" placeholder="Optional">
+          <div class="topbar-right">
+            <button type="button" class="btn btn-topbar" id="theme-toggle" aria-label="Toggle theme">Dark</button>
+            <button type="button" class="btn btn-topbar btn-topbar-logout" id="logout-btn">Sign out</button>
           </div>
-          <button type="button" id="btn-add-group" class="btn btn-primary btn-block">Create group</button>
-        </div>
-        <div class="card">
-          <div class="card-title">Groups (this session)</div>
-          <p class="page-desc" style="margin-bottom: 1rem;">Groups you created this session. IDs match creation order (0, 1, 2…).</p>
-          <ul id="groups-list" class="list"></ul>
-          <p id="groups-empty" class="page-desc">No groups created yet. Create one above.</p>
-        </div>
-      </section>
+        </header>
 
-      <!-- Page 4: IPFS Actions (CIDs) -->
-      <section id="page-actions" class="page">
-        <h1 class="page-title">IPFS actions per group</h1>
-        <p class="page-desc">Add IPFS CIDs (permitted actions) to a group. Listed by group for this session.</p>
-        <div id="actions-status" class="status" style="display: none;"></div>
-        <div class="card">
-          <div class="card-title">Add IPFS CID to group</div>
-          <div class="form-group">
-            <label for="action-group-id">Group ID</label>
-            <input type="text" id="action-group-id" class="input" placeholder="0">
+        <div class="dashboard-content">
+          <!-- Stat cards -->
+          <div class="stats-row">
+            <div class="stat-card">
+              <span class="stat-value" id="stat-groups">—</span>
+              <span class="stat-label">Groups</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-value" id="stat-wallets">—</span>
+              <span class="stat-label">Wallets</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-value" id="stat-actions">—</span>
+              <span class="stat-label">IPFS CIDs</span>
+            </div>
+            <div class="stat-card">
+              <span class="stat-value stat-mono" id="stat-api">—</span>
+              <span class="stat-label">API Key</span>
+            </div>
           </div>
-          <div class="form-group">
-            <label for="action-ipfs-cid">IPFS CID</label>
-            <input type="text" id="action-ipfs-cid" class="input" placeholder="Qm... or bafy...">
-          </div>
-          <button type="button" id="btn-add-action" class="btn btn-primary btn-block">Add action to group</button>
+
+          <!-- Overview -->
+          <section id="section-overview" class="dashboard-section">
+            <h2 class="section-title">Overview</h2>
+            <p class="section-desc">Account details and summary.</p>
+            <div id="overview-status" class="status" style="display: none;"></div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Account</h3>
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <label>API key</label>
+                  <div id="overview-api-key-masked" class="mono">—</div>
+                </div>
+                <div class="form-group">
+                  <label>Status</label>
+                  <div id="overview-status-badge" class="status-badge">—</div>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Summary</h3>
+                <button type="button" id="btn-load-overview-summary" class="btn btn-sm btn-outline">Load summary</button>
+              </div>
+              <div class="card-body">
+                <div id="overview-summary" class="overview-summary" style="display: none;">
+                  <div class="overview-counts"></div>
+                  <div class="grid-2" style="margin-top: 1rem;">
+                    <div>
+                      <strong>Recent groups</strong>
+                      <ul id="overview-groups-list" class="list"></ul>
+                    </div>
+                    <div>
+                      <strong>Recent wallets</strong>
+                      <ul id="overview-wallets-list" class="list"></ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Usage API keys</h3>
+              </div>
+              <div class="card-body">
+                <div class="form-row grid-2">
+                  <div class="form-group">
+                    <label for="usage-key-value">Usage API key</label>
+                    <input type="text" id="usage-key-value" class="input" placeholder="Key to add or manage">
+                  </div>
+                  <div class="form-group">
+                    <label for="usage-key-expiration">Expiration (unix)</label>
+                    <input type="text" id="usage-key-expiration" class="input" value="9999999999">
+                  </div>
+                  <div class="form-group">
+                    <label for="usage-key-balance">Balance (wei)</label>
+                    <input type="text" id="usage-key-balance" class="input" value="1000000000000000000">
+                  </div>
+                  <div class="form-group">
+                    <label for="usage-key-name">Name</label>
+                    <input type="text" id="usage-key-name" class="input" placeholder="Optional">
+                  </div>
+                  <div class="form-group">
+                    <label for="usage-key-desc">Description</label>
+                    <input type="text" id="usage-key-desc" class="input" placeholder="Optional">
+                  </div>
+                </div>
+                <div class="btn-group">
+                  <button type="button" id="btn-add-usage-key" class="btn btn-primary">Add</button>
+                  <button type="button" id="btn-remove-usage-key" class="btn btn-danger">Remove</button>
+                  <button type="button" id="btn-update-usage-key-meta" class="btn btn-outline">Update metadata</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Groups -->
+          <section id="section-groups" class="dashboard-section">
+            <h2 class="section-title">Groups</h2>
+            <p class="section-desc">List, create, and update groups.</p>
+            <div id="groups-status" class="status" style="display: none;"></div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Groups in account</h3>
+                <button type="button" id="btn-load-groups" class="btn btn-sm btn-outline">Refresh</button>
+              </div>
+              <div class="card-body">
+                <div class="table-wrap">
+                  <table class="data-table" id="groups-table">
+                    <thead><tr><th>Name</th><th>ID</th><th>Description</th><th class="th-actions"></th></tr></thead>
+                    <tbody id="groups-tbody"></tbody>
+                  </table>
+                  <p id="groups-empty" class="empty-state" style="display: none;">No groups.</p>
+                </div>
+                <div class="table-add-row">
+                  <button type="button" id="btn-add-group" class="btn btn-primary">Add</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- IPFS Actions -->
+          <section id="section-actions" class="dashboard-section">
+            <h2 class="section-title">IPFS Actions</h2>
+            <p class="section-desc">Add, remove, and update IPFS actions (CIDs) in groups.</p>
+            <div id="actions-status" class="status" style="display: none;"></div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Actions in group</h3>
+                <div class="card-header-actions">
+                  <input type="text" id="actions-group-id" class="input input-sm" placeholder="Group ID" style="width: 6rem;">
+                  <button type="button" id="btn-load-actions" class="btn btn-sm btn-outline">Refresh</button>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="table-wrap">
+                  <table class="data-table" id="actions-table">
+                    <thead><tr><th>Name</th><th>CID</th><th>Description</th><th class="th-actions"></th></tr></thead>
+                    <tbody id="actions-tbody"></tbody>
+                  </table>
+                  <p id="actions-empty" class="empty-state" style="display: none;">No actions in this group.</p>
+                </div>
+                <div class="table-add-row">
+                  <button type="button" id="btn-add-action" class="btn btn-primary">Add</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Wallets -->
+          <section id="section-wallets" class="dashboard-section">
+            <h2 class="section-title">Wallets</h2>
+            <p class="section-desc">Create wallets and manage PKPs in groups.</p>
+            <div id="wallets-status" class="status" style="display: none;"></div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Wallets in account</h3>
+                <button type="button" id="btn-load-wallets" class="btn btn-sm btn-outline">Refresh</button>
+              </div>
+              <div class="card-body">
+                <div class="table-wrap">
+                  <table class="data-table" id="wallets-table">
+                    <thead><tr><th>Address</th><th>ID</th></tr></thead>
+                    <tbody id="wallets-tbody"></tbody>
+                  </table>
+                  <p id="wallets-empty" class="empty-state" style="display: none;">No wallets.</p>
+                </div>
+                <div class="table-add-row">
+                  <button type="button" id="btn-add-wallet" class="btn btn-primary">Add</button>
+                </div>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header"><h3 class="card-title">Wallets in group</h3></div>
+              <div class="card-body">
+                <div class="form-group">
+                  <label for="wallets-in-group-id">Group ID</label>
+                  <input type="text" id="wallets-in-group-id" class="input" placeholder="0" style="max-width: 8rem;">
+                </div>
+                <button type="button" id="btn-load-wallets-in-group" class="btn btn-outline">Load wallets in group</button>
+                <ul id="wallets-in-group-list" class="list" style="margin-top: 1rem;"></ul>
+              </div>
+            </div>
+            <div class="card-grid grid-2">
+              <div class="card">
+                <div class="card-header"><h3 class="card-title">Add PKP to group</h3></div>
+                <div class="card-body">
+                  <div class="form-group">
+                    <label for="add-pkp-group">Group ID</label>
+                    <input type="text" id="add-pkp-group" class="input" placeholder="0">
+                  </div>
+                  <div class="form-group">
+                    <label for="add-pkp-public-key">PKP public key</label>
+                    <input type="text" id="add-pkp-public-key" class="input" placeholder="Hex or base64">
+                  </div>
+                  <button type="button" id="btn-add-pkp" class="btn btn-primary btn-block">Add PKP</button>
+                </div>
+              </div>
+              <div class="card">
+                <div class="card-header"><h3 class="card-title">Remove PKP from group</h3></div>
+                <div class="card-body">
+                  <div class="form-group">
+                    <label for="remove-pkp-group">Group ID</label>
+                    <input type="text" id="remove-pkp-group" class="input" placeholder="0">
+                  </div>
+                  <div class="form-group">
+                    <label for="remove-pkp-public-key">PKP public key</label>
+                    <input type="text" id="remove-pkp-public-key" class="input" placeholder="Must match when added">
+                  </div>
+                  <button type="button" id="btn-remove-pkp" class="btn btn-danger btn-block">Remove PKP</button>
+                </div>
+              </div>
+            </div>
+          </section>
         </div>
-        <div class="card">
-          <div class="card-title">IPFS CIDs by group (this session)</div>
-          <div id="actions-by-group"></div>
-        </div>
-      </section>
-    </main>
+      </div>
+    </div>
   </div>
+
+  <!-- Modal for Add / Edit (reused) -->
+  <div id="modal-overlay" class="modal-overlay" aria-hidden="true">
+    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-header">
+        <h3 id="modal-title" class="modal-title">Form</h3>
+        <button type="button" class="modal-close" id="modal-close-btn" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body" id="modal-body"></div>
+      <div class="modal-footer" id="modal-footer"></div>
+    </div>
+  </div>
+
+  <!-- Delete confirmation (reused) -->
+  <div id="confirm-overlay" class="modal-overlay" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-sm" role="alertdialog" aria-modal="true">
+      <div class="modal-header">
+        <h3 class="modal-title">Confirm delete</h3>
+        <button type="button" class="modal-close" id="confirm-close-btn" aria-label="Close">&times;</button>
+      </div>
+      <div class="modal-body" id="confirm-message">Are you sure?</div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-outline" id="confirm-cancel-btn">Cancel</button>
+        <button type="button" class="btn btn-danger" id="confirm-delete-btn">Delete</button>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="app.js"></script>
 </body>
 </html>

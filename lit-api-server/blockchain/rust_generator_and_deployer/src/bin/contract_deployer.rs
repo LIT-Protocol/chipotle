@@ -17,8 +17,6 @@ const ANVIL_RPC: &str = "http://127.0.0.1:8545";
 const ANVIL_CHAIN_ID: u64 = 31337;
 const YELLOWSTONE_RPC: &str = "https://yellowstone-rpc.litprotocol.com";
 const YELLOWSTONE_CHAIN_ID: u64 = 175188;
-const LIT_MAINNET_RPC: &str = "https://yellowstone-rpc.litprotocol.com";
-const LIT_MAINNET_CHAIN_ID: u64 = 175188;
 /// Default Anvil account #0 private key (well-known for local dev)
 const DEFAULT_SECRET: &str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
@@ -46,7 +44,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (rpc_url, chain_id) = match network {
         0 => (ANVIL_RPC, ANVIL_CHAIN_ID),
         1 => (YELLOWSTONE_RPC, YELLOWSTONE_CHAIN_ID),
-        2 => (LIT_MAINNET_RPC, LIT_MAINNET_CHAIN_ID),
         _ => {
             eprintln!("network must be 0 (Anvil), 1 (Yellowstone), or 2 (LitMainnet)");
             std::process::exit(1);
@@ -88,7 +85,9 @@ fn get_abis(
             get_abis(entry.path().to_str().unwrap(), abis);
             continue;
         }
-        abis.push(entry.path());
+        if entry.path().to_str().unwrap().ends_with("json") {
+            abis.push(entry.path());
+        }
     }    
 }
 

@@ -2,6 +2,8 @@ use std::fmt::{Display, Formatter};
 use rocket_okapi::okapi::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::actions::client::models::SignedData;
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub enum ShareType {
     Ecdsa,
@@ -35,34 +37,36 @@ pub struct CreateWalletResponse {
     pub wallet_address: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct SignatureShare {
-    pub share_id: String,
-    pub peer_id: String,
-    pub signature_share: String,
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SignWithPkpResponse {
     pub signing_scheme: String,
     pub signed_digest: String,
     pub public_key: String,
-    pub share_type: ShareType,
-    pub big_r: Option<String>,
-    pub compressed_public_key: Option<String>,
-    pub verifying_share: Option<String>,
-    pub signing_commitments: Option<String>,
-    pub shares: Vec<SignatureShare>,
+    pub signature: String,
+}
+
+
+impl From<SignedData> for SignWithPkpResponse {
+    fn from(signed_data: SignedData) -> Self {
+        Self {
+            signing_scheme: signed_data.signing_scheme,
+            signed_digest: signed_data.digest,
+            public_key: signed_data.public_key,
+            signature: signed_data.signature,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct LitActionResponses {
-    pub responses: Vec<LitActionResponse>,
+pub struct LitActionSignature {
+    pub name: String,
+    pub data: SignWithPkpResponse,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LitActionResponse {
-    pub signatures: Vec<SignWithPkpResponse>,
+    pub signatures:  Vec<LitActionSignature>,
     pub response: String,
     pub logs: String,
     pub has_error: bool,

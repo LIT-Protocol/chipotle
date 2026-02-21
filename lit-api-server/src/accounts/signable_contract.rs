@@ -14,6 +14,8 @@ pub use std::sync::Arc;
 pub(crate) async fn get_signable_account_config_contract()
 -> Result<AccountConfig<SignerMiddleware<Provider<Http>, LocalWallet>>, anyhow::Error> {
     let chain = Chain::Yellowstone;
+    let chain = Chain::Anvil;
+    
     let chain_info = chain.info();
     let secret = ACCOUNT_CONFIG_SIGNER_PRIVATE_KEY;
     let secret = hex_to_bytes(secret)?;

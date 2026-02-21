@@ -15,6 +15,7 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @typedef {Object} NewAccountOptions
  * @property {string} accountName - Name for the account
  * @property {string} accountDescription - Description for the account
+ * @property {string} [initialBalance] - Optional initial balance (decimal or hex; default 0)
  */
 
 /**
@@ -39,6 +40,8 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @property {string} [groupDescription=''] - Description of the group (Group.groupDescription in AccountConfig.sol)
  * @property {string[]} permittedActions - Keccak256 hashes of action IPFS CIDs (hex strings, with or without 0x)
  * @property {string[]} pkps - Keccak256 hashes of PKP public keys (hex strings)
+ * @property {boolean} [allWalletsPermitted=false] - If true, all wallets are permitted (AccountConfig.sol Group.all_wallets_permitted)
+ * @property {boolean} [allActionsPermitted=false] - If true, all actions are permitted (AccountConfig.sol Group.all_actions_permitted)
  */
 
 /**
@@ -76,6 +79,40 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @typedef {Object} RemoveUsageApiKeyOptions
  * @property {string} apiKey - Account API key
  * @property {string} usageApiKey - Usage API key to remove
+ */
+
+/**
+ * @typedef {Object} UpdateGroupOptions
+ * @property {string} apiKey - Account API key
+ * @property {string} groupId - Group ID (decimal or hex string)
+ * @property {string} name - Group name
+ * @property {string} description - Group description
+ * @property {boolean} [allWalletsPermitted=false] - All wallets permitted
+ * @property {boolean} [allActionsPermitted=false] - All actions permitted
+ */
+
+/**
+ * @typedef {Object} RemoveActionFromGroupOptions
+ * @property {string} apiKey - Account API key
+ * @property {string} groupId - Group ID (decimal or hex string)
+ * @property {string} actionIpfsCid - IPFS CID for the action (keccak256-hashed on server)
+ */
+
+/**
+ * @typedef {Object} UpdateActionMetadataOptions
+ * @property {string} apiKey - Account API key
+ * @property {string} groupId - Group ID (decimal or hex string)
+ * @property {string} actionIpfsCid - IPFS CID for the action (keccak256-hashed on server)
+ * @property {string} name - Action name
+ * @property {string} description - Action description
+ */
+
+/**
+ * @typedef {Object} UpdateUsageApiKeyMetadataOptions
+ * @property {string} apiKey - Account API key
+ * @property {string} usageApiKey - Usage API key to update
+ * @property {string} name - Name
+ * @property {string} description - Description
  */
 
 /**
@@ -229,10 +266,11 @@ export class LitNodeSimpleApiClient {
    * @param {NewAccountOptions} options
    * @returns {Promise<NewAccountResponse>}
    */
-  async newAccount({ accountName, accountDescription }) {
+  async newAccount({ accountName, accountDescription, initialBalance }) {
     const body = {
       account_name: accountName,
       account_description: accountDescription ?? '',
+      initial_balance: initialBalance ?? null,
     };
     const res = await fetch(`${this.baseUrl}/new_account`, {
       method: 'POST',
@@ -240,6 +278,17 @@ export class LitNodeSimpleApiClient {
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'new_account');
+  }
+
+  /**
+   * GET /core/v1/account_exists/<api_key>
+   * Checks whether an account exists and is mutable for the given API key (contract: accountExistsAndIsMutable).
+   * @param {string} apiKey - Account API key (base64-encoded)
+   * @returns {Promise<boolean>}
+   */
+  async accountExists(apiKey) {
+    const res = await fetch(`${this.baseUrl}/account_exists/${encodeURIComponent(apiKey)}`);
+    return parseResponse(res, 'account_exists');
   }
 
   /**
@@ -301,13 +350,15 @@ export class LitNodeSimpleApiClient {
    * @param {AddGroupOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async addGroup({ apiKey, groupName, groupDescription = '', permittedActions, pkps }) {
+  async addGroup({ apiKey, groupName, groupDescription = '', permittedActions, pkps, allWalletsPermitted = false, allActionsPermitted = false }) {
     const body = {
       api_key: apiKey,
       group_name: groupName ?? '',
       group_description: groupDescription ?? '',
       permitted_actions: permittedActions ?? [],
       pkps: pkps ?? [],
+      all_wallets_permitted: allWalletsPermitted,
+      all_actions_permitted: allActionsPermitted,
     };
     const res = await fetch(`${this.baseUrl}/add_group`, {
       method: 'POST',
@@ -417,6 +468,92 @@ export class LitNodeSimpleApiClient {
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'remove_usage_api_key');
+  }
+
+  /**
+   * POST /core/v1/update_group
+   * Update group metadata and permission flags (AccountConfig.updateGroup).
+   * @param {UpdateGroupOptions} options
+   * @returns {Promise<AccountOpResponse>}
+   */
+  async updateGroup({ apiKey, groupId, name, description, allWalletsPermitted = false, allActionsPermitted = false }) {
+    const body = {
+      api_key: apiKey,
+      group_id: groupId,
+      name: name ?? '',
+      description: description ?? '',
+      all_wallets_permitted: allWalletsPermitted,
+      all_actions_permitted: allActionsPermitted,
+    };
+    const res = await fetch(`${this.baseUrl}/update_group`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'update_group');
+  }
+
+  /**
+   * POST /core/v1/remove_action_from_group
+   * Remove an action from a group by IPFS CID (keccak256-hashed on server).
+   * @param {RemoveActionFromGroupOptions} options
+   * @returns {Promise<AccountOpResponse>}
+   */
+  async removeActionFromGroup({ apiKey, groupId, actionIpfsCid }) {
+    const body = {
+      api_key: apiKey,
+      group_id: groupId,
+      action_ipfs_cid: actionIpfsCid,
+    };
+    const res = await fetch(`${this.baseUrl}/remove_action_from_group`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'remove_action_from_group');
+  }
+
+  /**
+   * POST /core/v1/update_action_metadata
+   * Update action metadata (name, description) for an action in a group.
+   * @param {UpdateActionMetadataOptions} options
+   * @returns {Promise<AccountOpResponse>}
+   */
+  async updateActionMetadata({ apiKey, groupId, actionIpfsCid, name, description }) {
+    const body = {
+      api_key: apiKey,
+      group_id: groupId,
+      action_ipfs_cid: actionIpfsCid,
+      name: name ?? '',
+      description: description ?? '',
+    };
+    const res = await fetch(`${this.baseUrl}/update_action_metadata`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'update_action_metadata');
+  }
+
+  /**
+   * POST /core/v1/update_usage_api_key_metadata
+   * Update usage API key metadata (name, description).
+   * @param {UpdateUsageApiKeyMetadataOptions} options
+   * @returns {Promise<AccountOpResponse>}
+   */
+  async updateUsageApiKeyMetadata({ apiKey, usageApiKey, name, description }) {
+    const body = {
+      api_key: apiKey,
+      usage_api_key: usageApiKey,
+      name: name ?? '',
+      description: description ?? '',
+    };
+    const res = await fetch(`${this.baseUrl}/update_usage_api_key_metadata`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'update_usage_api_key_metadata');
   }
 
   /**

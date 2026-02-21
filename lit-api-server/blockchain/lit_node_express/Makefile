@@ -17,4 +17,4 @@ generate: compile
 # 3. Deploy contracts. Args: network (1 = Yellowstone), abis_folder
 deploy: generate
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
-	$(DEPLOYER_BIN) 1 artifacts/contracts
+	$(DEPLOYER_BIN) 0 artifacts/contracts

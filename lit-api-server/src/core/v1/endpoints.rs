@@ -1,11 +1,12 @@
-use crate::actions::grpc_client_pool::GrpcClientPool;
+use crate::actions::grpc::GrpcClientPool;
 use crate::core::internal;
 use crate::core::models::ApiResult;
 use crate::core::models::ErrMessage;
 use crate::core::v1::models::request::{
     AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest, AddUsageApiKeyRequest,
-    LitActionRequest, NewAccountRequest, RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest,
-    SignWithPKPRequest,
+    LitActionRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
+    RemoveUsageApiKeyRequest, SignWithPKPRequest, UpdateActionMetadataRequest,
+    UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest,
 };
 use crate::core::v1::models::response::{
     AccountOpResponse, CreateWalletResponse, ListMetadataItem, LitActionResponse,
@@ -21,6 +22,7 @@ pub fn routes() -> Vec<Route> {
     routes![
         sign_with_pkp,
         new_account,
+        account_exists,
         create_wallet,
         lit_action,
         add_group,
@@ -29,6 +31,10 @@ pub fn routes() -> Vec<Route> {
         remove_pkp_from_group,
         add_usage_api_key,
         remove_usage_api_key,
+        update_group,
+        remove_action_from_group,
+        update_action_metadata,
+        update_usage_api_key_metadata,
         list_groups,
         list_wallets,
         list_wallets_in_group,
@@ -41,6 +47,11 @@ async fn new_account(
     new_account_request: Json<NewAccountRequest>,
 ) -> ApiResponse<NewAccountResponse, ErrMessage> {
     ApiResult(internal::new_account(new_account_request).await).into()
+}
+
+#[get("/account_exists/<api_key>")]
+async fn account_exists(api_key: String) -> ApiResponse<bool, ErrMessage> {
+    ApiResult(internal::account_exists(api_key.as_str()).await).into()
 }
 
 #[get("/create_wallet/<api_key>")]
@@ -114,6 +125,32 @@ async fn remove_usage_api_key(
     req: Json<RemoveUsageApiKeyRequest>,
 ) -> ApiResponse<AccountOpResponse, ErrMessage> {
     ApiResult(internal::remove_usage_api_key(req).await).into()
+}
+
+#[post("/update_group", format = "json", data = "<req>")]
+async fn update_group(req: Json<UpdateGroupRequest>) -> ApiResponse<AccountOpResponse, ErrMessage> {
+    ApiResult(internal::update_group(req).await).into()
+}
+
+#[post("/remove_action_from_group", format = "json", data = "<req>")]
+async fn remove_action_from_group(
+    req: Json<RemoveActionFromGroupRequest>,
+) -> ApiResponse<AccountOpResponse, ErrMessage> {
+    ApiResult(internal::remove_action_from_group(req).await).into()
+}
+
+#[post("/update_action_metadata", format = "json", data = "<req>")]
+async fn update_action_metadata(
+    req: Json<UpdateActionMetadataRequest>,
+) -> ApiResponse<AccountOpResponse, ErrMessage> {
+    ApiResult(internal::update_action_metadata(req).await).into()
+}
+
+#[post("/update_usage_api_key_metadata", format = "json", data = "<req>")]
+async fn update_usage_api_key_metadata(
+    req: Json<UpdateUsageApiKeyMetadataRequest>,
+) -> ApiResponse<AccountOpResponse, ErrMessage> {
+    ApiResult(internal::update_usage_api_key_metadata(req).await).into()
 }
 
 #[get("/list_groups?<api_key>&<page_number>&<page_size>")]

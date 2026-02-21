@@ -8,7 +8,7 @@ use ethers::types::{H160, U256};
 use ethers::utils::keccak256;
 use lit_core::utils::binary::hex_to_bytes;
 
-const ACCOUNT_CONFIG_CONTRACT_ADDRESS: &str = "0x353b4fd4eaac445c1183f9ee0bb5192acc24a61e";
+const ACCOUNT_CONFIG_CONTRACT_ADDRESS: &str = "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9";
 // for testing, this is the anvil private key
 const ACCOUNT_CONFIG_SIGNER_PRIVATE_KEY: &str =
     "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
@@ -23,11 +23,13 @@ fn wallet_address_hash(wallet_address_hex: &str) -> Result<U256> {
     Ok(U256::from_big_endian(&keccak256(&bytes)))
 }
 
+/// Create a new account. `initial_balance` is stored on the account's apiKey (AccountConfig.accountApiKey.balance).
 pub async fn new_account(
     api_key: &str,
     account_name: &str,
     account_description: &str,
     creator_wallet_address: H160,
+    initial_balance: U256,
 ) -> Result<bool> {
     let contract = get_signable_account_config_contract().await?;
     let api_key_hash = api_key_hash(api_key);
@@ -37,21 +39,31 @@ pub async fn new_account(
         account_name.to_string(),
         account_description.to_string(),
         creator_wallet_address,
+        initial_balance,
     );
     let tx = function_call.send().await?;
     tx.await?;
     Ok(true)
 }
 
-/// Add a group to an account with name, description, permitted action CID hashes and PKP public key hashes.
-/// `permitted_actions` and `pkps` are keccak256 hashes (U256). Use `keccak256(action_ipfs_cid)`
-/// and `keccak256(pkp_public_key)` to produce them.
+pub async fn account_exists(api_key: &str) -> Result<bool> {
+    let contract = get_signable_account_config_contract().await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let exists = contract.account_exists_and_is_mutable(account_api_key_hash).call().await?;
+    Ok(exists)
+}
+
+/// Add a group to an account with name, description, permitted action CID hashes, wallet hashes, and permission flags.
+/// `permitted_actions` and `wallets` are keccak256 hashes (U256). Use `keccak256(action_ipfs_cid)` and `keccak256(pkp_public_key)` to produce them.
+/// `all_wallets_permitted` and `all_actions_permitted` match AccountConfig.sol Group fields.
 pub async fn add_group(
     api_key: &str,
     name: &str,
     description: &str,
     permitted_actions: Vec<U256>,
     wallets: Vec<U256>,
+    all_wallets_permitted: bool,
+    all_actions_permitted: bool,
 ) -> Result<bool> {
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
@@ -61,6 +73,8 @@ pub async fn add_group(
         description.to_string(),
         permitted_actions,
         wallets,
+        all_wallets_permitted,
+        all_actions_permitted,
     );
     let tx = function_call.send().await?;
     tx.await?;
@@ -112,6 +126,101 @@ pub async fn add_wallet_to_group(
 /// Add a PKP to a group (alias for add_wallet_to_group; hashes the given string and adds to group).
 pub async fn add_pkp_to_group(api_key: &str, group_id: U256, pkp_public_key: &str) -> Result<bool> {
     add_wallet_to_group(api_key, group_id, pkp_public_key).await
+}
+
+/// Update group metadata and permission flags (AccountConfig.updateGroup).
+pub async fn update_group(
+    api_key: &str,
+    group_id: U256,
+    name: &str,
+    description: &str,
+    all_wallets_permitted: bool,
+    all_actions_permitted: bool,
+) -> Result<bool> {
+    let contract = get_signable_account_config_contract().await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let function_call = contract.update_group(
+        account_api_key_hash,
+        group_id,
+        name.to_string(),
+        description.to_string(),
+        all_wallets_permitted,
+        all_actions_permitted,
+    );
+    let tx = function_call.send().await?;
+    tx.await?;
+    Ok(true)
+}
+
+/// Remove an action from a group by action hash (AccountConfig.removeActionFromGroup). `action_hash` is keccak256 of the action (e.g. IPFS CID).
+pub async fn remove_action_from_group(
+    api_key: &str,
+    group_id: U256,
+    action_hash: U256,
+) -> Result<bool> {
+    let contract = get_signable_account_config_contract().await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let function_call = contract.remove_action_from_group(
+        account_api_key_hash,
+        group_id,
+        action_hash,
+    );
+    let tx = function_call.send().await?;
+    tx.await?;
+    Ok(true)
+}
+
+/// Remove an action from a group by IPFS CID string (hashed with keccak256). Convenience wrapper for remove_action_from_group.
+pub async fn remove_action_from_group_by_cid(
+    api_key: &str,
+    group_id: U256,
+    action_ipfs_cid: &str,
+) -> Result<bool> {
+    let action_hash = U256::from_big_endian(&keccak256(action_ipfs_cid));
+    remove_action_from_group(api_key, group_id, action_hash).await
+}
+
+/// Update action metadata (name, description) for an action in a group (AccountConfig.updateActionMetadata). `action_hash` is keccak256 of the action.
+pub async fn update_action_metadata(
+    api_key: &str,
+    action_hash: U256,
+    group_id: U256,
+    name: &str,
+    description: &str,
+) -> Result<bool> {
+    let contract = get_signable_account_config_contract().await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let function_call = contract.update_action_metadata(
+        account_api_key_hash,
+        action_hash,
+        group_id,
+        name.to_string(),
+        description.to_string(),
+    );
+    let tx = function_call.send().await?;
+    tx.await?;
+    Ok(true)
+}
+
+/// Update usage API key metadata (name, description) (AccountConfig.updateUsageApiKeyMetadata).
+pub async fn update_usage_api_key_metadata(
+    api_key: &str,
+    usage_api_key: &str,
+    name: &str,
+    description: &str,
+) -> Result<bool> {
+    let contract = get_signable_account_config_contract().await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let usage_api_key_hash = U256::from_big_endian(&keccak256(usage_api_key));
+    let function_call = contract.update_usage_api_key_metadata(
+        account_api_key_hash,
+        usage_api_key_hash,
+        name.to_string(),
+        description.to_string(),
+    );
+    let tx = function_call.send().await?;
+    tx.await?;
+    Ok(true)
 }
 
 /// Remove a wallet from a group. `wallet_address` must match the value used when adding (same keccak256 input).
@@ -193,8 +302,9 @@ pub async fn register_wallet_derivation(
         name.to_string(),
         description.to_string(),
     );
+
     let tx = function_call.send().await?;
-    tx.await?;
+    // tx.await?;
     Ok(true)
 }
 
