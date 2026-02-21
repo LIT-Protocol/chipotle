@@ -3,6 +3,8 @@ pub mod core;
 pub mod actions;
 pub mod error;
 pub mod accounts;
+#[cfg(feature = "phala")]
+pub mod phala;
 
 use rocket::fs::{FileServer, relative};
 use rocket_cors::{AllowedOrigins, Method};
@@ -55,7 +57,7 @@ async fn main() -> Result<(), rocket::Error> {
         .max_capacity(1024 * 1024 * 1024)
         .build();
 
-    let r = rocket::build()
+    let mut r = rocket::build()
         .attach(cors)
         .mount("/core/v1/", core::v1::endpoints::routes())
         .mount("/transfer/v1/", abstractions::transfer::endpoints::routes())
@@ -68,6 +70,12 @@ async fn main() -> Result<(), rocket::Error> {
         .manage(default_http_client())
         // .manage(action_store)
         .manage(GrpcClientPool::<tonic::transport::Channel>::new());
+
+    #[cfg(feature = "phala")]
+    {
+        r = r.mount("/phala/v1/", phala::v1::endpoints::routes());
+    }
+
     r.launch().await?;
     Ok(())
 }
