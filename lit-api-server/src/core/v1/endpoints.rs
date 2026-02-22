@@ -1,14 +1,16 @@
 use crate::actions::grpc::GrpcClientPool;
 use crate::core::account_management;
 use crate::core::core_features;
-use crate::core::models::ApiResult;
-use crate::core::models::ErrMessage;
+use crate::core::api_status::ApiResult;
+use crate::core::api_status::ErrMessage;
 use crate::core::v1::models::request::{
     AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest, AddUsageApiKeyRequest,
     LitActionRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
     RemoveUsageApiKeyRequest, SignWithPKPRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
     UpdateUsageApiKeyMetadataRequest,
 };
+use crate::core::v1::models::response::ApiKeyItem;
+use crate::core::v1::models::response::WalletItem;
 use crate::core::v1::models::response::{
     AccountOpResponse, CreateWalletResponse, ListMetadataItem, LitActionResponse,
     NewAccountResponse, SignWithPkpResponse, NodeChainConfigResponse, AddUsageApiKeyResponse
@@ -62,6 +64,7 @@ impl<'r, T: Serialize + JsonSchema, E: Serialize + JsonSchema> Responder<'r, 'st
 pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
     openapi_get_routes_spec![
         // sign_with_pkp,
+        list_api_keys,
         new_account,
         account_exists,
         create_wallet,
@@ -251,6 +254,18 @@ async fn update_usage_api_key_metadata(
 }
 
 #[openapi(tag = "Account Management")]
+#[get("/list_api_keys?<api_key>&<page_number>&<page_size>")]
+async fn list_api_keys(
+    api_key: String,
+    page_number: String,
+    page_size: String,
+) -> OpenApiResponse<Vec<ApiKeyItem>, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(account_management::list_api_keys(api_key.as_str(), page_number.as_str(), page_size.as_str()).await).into(),
+    }
+}
+
+#[openapi(tag = "Account Management")]
 #[get("/list_groups?<api_key>&<page_number>&<page_size>")]
 async fn list_groups(
     api_key: String,
@@ -271,7 +286,7 @@ async fn list_wallets(
     api_key: String,
     page_number: String,
     page_size: String,
-) -> OpenApiResponse<Vec<ListMetadataItem>, ErrMessage> {
+) -> OpenApiResponse<Vec<WalletItem>, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
             account_management::list_wallets(api_key.as_str(), page_number.as_str(), page_size.as_str())
@@ -288,7 +303,7 @@ async fn list_wallets_in_group(
     group_id: String,
     page_number: String,
     page_size: String,
-) -> OpenApiResponse<Vec<ListMetadataItem>, ErrMessage> {
+) -> OpenApiResponse<Vec<WalletItem>, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
             account_management::list_wallets_in_group(

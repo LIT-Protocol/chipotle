@@ -20,7 +20,7 @@ pub fn init_config() -> Result<(), anyhow::Error> {
     let toml_contents = fs::read_to_string(toml_path).unwrap_or_default();
 
     if toml_contents.is_empty() {
-        return Err(anyhow::anyhow!("No config found in NodeConfig.toml"));
+        return Err(anyhow::anyhow!("NodeConfig.toml is empty."));
     }
 
     let toml_document = match toml_contents.parse::<DocumentMut>() {

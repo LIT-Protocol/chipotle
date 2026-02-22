@@ -1,7 +1,7 @@
 use crate::actions::client::ClientBuilder;
 use crate::actions::client::models::DenoExecutionEnv;
 use crate::actions::grpc::GrpcClientPool;
-use crate::core::models::ApiStatus;
+use crate::core::api_status::ApiStatus;
 use crate::core::v1::models::request::{LitActionRequest, SignWithPKPRequest};
 use crate::core::v1::models::response::{
     LitActionResponse, LitActionSignature, SignWithPkpResponse,

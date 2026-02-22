@@ -1,6 +1,7 @@
 use crate::accounts;
 use crate::config::GLOBAL_NODE_CONFIG;
-use crate::core::models::ApiStatus;
+use crate::core::api_status::ApiStatus;
+use crate::core::lookup_data;
 use crate::core::v1::models::request::{
     AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest, AddUsageApiKeyRequest,
     NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
@@ -8,8 +9,7 @@ use crate::core::v1::models::request::{
     UpdateUsageApiKeyMetadataRequest,
 };
 use crate::core::v1::models::response::{
-    AccountOpResponse, AddUsageApiKeyResponse, CreateWalletResponse, ListMetadataItem,
-    NewAccountResponse, NodeChainConfigResponse,
+    AccountOpResponse, AddUsageApiKeyResponse, ApiKeyItem, CreateWalletResponse, ListMetadataItem, NewAccountResponse, NodeChainConfigResponse, WalletItem
 };
 use ethers::types::{H160, U256};
 use ethers::utils::keccak256;
@@ -53,7 +53,7 @@ fn get_random_secret() -> [u8; 32] {
     secret
 }
 
-fn get_new_wallet() -> (String, H160, [u8; 32]) {
+async fn create_new_wallet() -> Result<(String, H160, [u8; 32]), ApiStatus> {
     let secret = get_random_secret();
     let secret_key = SecretKey::from_slice(&secret).unwrap();
     let public_key = secret_key.public_key();
@@ -61,7 +61,16 @@ fn get_new_wallet() -> (String, H160, [u8; 32]) {
 
     let wallet_address = H160::from_slice(&keccak256(&public_key_bytes)[12..]);
     let public_key_string = bytes_to_hex(&public_key_bytes);
-    (public_key_string, wallet_address, secret)
+
+    // save to lookup data
+    let wallet_address_string = bytes_to_hex(&wallet_address.as_bytes());
+    let secret_string = bytes_to_hex(&secret);
+    let wallet_key_hash = bytes_to_hex(&keccak256(&wallet_address.as_bytes()));
+    if let Err(e) = lookup_data::add_wallet(&wallet_key_hash, &public_key_string, &wallet_address_string, &secret_string).await {
+        return Err(e.into());
+    }
+
+    Ok((public_key_string, wallet_address, secret))
 }
 
 pub async fn new_account(
@@ -69,7 +78,7 @@ pub async fn new_account(
 ) -> Result<NewAccountResponse, ApiStatus> {
     let account_name = new_account_request.account_name.clone();
     let account_description = new_account_request.account_description.clone();
-    let (_public_key, wallet_address, secret) = get_new_wallet();
+    let (_public_key, wallet_address, secret) = create_new_wallet().await?;
     let api_key = base64_light::base64_encode_bytes(&secret);
 
     let initial_balance = new_account_request
@@ -105,7 +114,7 @@ pub async fn account_exists(api_key: &str) -> Result<bool, ApiStatus> {
 }
 
 pub async fn create_wallet(api_key: &str) -> Result<CreateWalletResponse, ApiStatus> {
-    let (_public_key, wallet_address, secret) = get_new_wallet();
+    let (_public_key, wallet_address, secret) = create_new_wallet().await?;
 
     let wallet_address_hex = bytes_to_hex(&wallet_address.as_bytes());
 
@@ -190,7 +199,7 @@ pub async fn add_usage_api_key(
     let expiration = parse_u256(&req.expiration)?;
     let balance = parse_u256(&req.balance)?;
 
-    let (_public_key, _wallet_address, secret) = get_new_wallet();
+    let (_public_key, _wallet_address, secret) = create_new_wallet().await?;
     let usage_api_key = base64_light::base64_encode_bytes(&secret);
 
     accounts::add_usage_api_key(&req.api_key, &usage_api_key, expiration, balance)
@@ -275,6 +284,40 @@ fn metadata_to_item(m: &accounts::Metadata) -> ListMetadataItem {
     }
 }
 
+fn metadata_to_wallet_item(m: &accounts::Metadata) -> WalletItem {
+    WalletItem {
+        id: m.id.to_string(),
+        name: m.name.clone(),
+        description: m.description.clone(),
+        wallet_address: "".to_string(),
+        public_key: "".to_string(),
+    }
+}
+
+fn usage_api_key_to_api_key_item(m: &accounts::contracts::account_config::UsageApiKey) -> ApiKeyItem {
+    ApiKeyItem {
+        id: m.metadata.id.to_string(),
+        name: m.metadata.name.clone(),
+        description: m.metadata.description.clone(),
+        api_key: "".to_string(),
+        expiration: m.expiration.to_string(),
+        balance: m.balance.as_u64(),
+    }
+}
+
+pub async fn list_api_keys(
+    api_key: &str,
+    page_number: &str,
+    page_size: &str,
+) -> Result<Vec<ApiKeyItem>, ApiStatus> {
+    let pn = parse_u256(page_number)?;
+    let ps = parse_u256(page_size)?;
+    let list = accounts::list_api_keys(api_key, pn, ps)
+        .await
+        .map_err(|e| ApiStatus::internal_server_error(e, "list_api_keys failed"))?;
+    Ok(list.iter().map(usage_api_key_to_api_key_item).collect())
+}
+
 pub async fn list_groups(
     api_key: &str,
     page_number: &str,
@@ -292,13 +335,13 @@ pub async fn list_wallets(
     api_key: &str,
     page_number: &str,
     page_size: &str,
-) -> Result<Vec<ListMetadataItem>, ApiStatus> {
+) -> Result<Vec<WalletItem>, ApiStatus> {
     let pn = parse_u256(page_number)?;
     let ps = parse_u256(page_size)?;
     let list = accounts::list_wallets(api_key, pn, ps)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_wallets failed"))?;
-    Ok(list.iter().map(metadata_to_item).collect())
+    Ok(list.iter().map(metadata_to_wallet_item).collect())
 }
 
 pub async fn list_wallets_in_group(
@@ -306,14 +349,14 @@ pub async fn list_wallets_in_group(
     group_id: &str,
     page_number: &str,
     page_size: &str,
-) -> Result<Vec<ListMetadataItem>, ApiStatus> {
+) -> Result<Vec<WalletItem>, ApiStatus> {
     let gid = parse_u256(group_id)?;
     let pn = parse_u256(page_number)?;
     let ps = parse_u256(page_size)?;
     let list = accounts::list_wallets_in_group(api_key, gid, pn, ps)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_wallets_in_group failed"))?;
-    Ok(list.iter().map(metadata_to_item).collect())
+    Ok(list.iter().map(metadata_to_wallet_item).collect())
 }
 
 pub async fn list_actions(

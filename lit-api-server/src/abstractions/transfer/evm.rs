@@ -1,6 +1,6 @@
 use super::chain_info::Chain;
 use super::models::{GetBalanceResponse, TransferRequest, TransferResponse};
-use crate::core::models::ApiStatus;
+use crate::core::api_status::ApiStatus;
 use ethers::providers::{Http, Middleware, Provider};
 use ethers::types::H160;
 use ethers::utils::{format_ether, keccak256};

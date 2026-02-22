@@ -17,31 +17,37 @@
         <h1 class="login-title">Lit Express Dashboard</h1>
         <p class="login-subtitle">Sign in or create an account to manage a Lit Express Node account.</p>
         <div id="login-status" class="status info" style="display: none;"></div>
-        <div class="login-card">
-          <h2 class="login-card-title">Use existing API key</h2>
-          <div class="form-group">
-            <label for="login-api-key">API key</label>
-            <input type="password" id="login-api-key" class="input" placeholder="Paste your API key">
-          </div>
-          <button type="button" id="btn-login" class="btn btn-primary btn-block">Log in</button>
-          <p class="form-hint">Log in verifies the API key with the server (account exists and is mutable).</p>
+        <div class="login-tabs" role="tablist" aria-label="Login or create account">
+          <button type="button" class="login-tab is-active" role="tab" id="login-tab-existing" aria-selected="true" aria-controls="login-panel-existing" data-tab="existing">Existing User</button>
+          <button type="button" class="login-tab" role="tab" id="login-tab-new" aria-selected="false" aria-controls="login-panel-new" data-tab="new">New User</button>
         </div>
-        <div class="login-card">
-          <h2 class="login-card-title">Create new account</h2>
-          <p class="form-hint" style="margin-bottom: 1rem;">Creates an account on Lit Express Node and returns a new API key. Store it securely.</p>
-          <div class="form-group">
-            <label for="new-account-name">Account name</label>
-            <input type="text" id="new-account-name" class="input" placeholder="My account">
+        <div id="login-panel-existing" class="login-tab-panel is-active" role="tabpanel" aria-labelledby="login-tab-existing">
+          <div class="login-card">
+            <div class="form-group">
+              <label for="login-api-key">API key</label>
+              <input type="password" id="login-api-key" class="input" placeholder="Paste your API key">
+            </div>
+            <button type="button" id="btn-login" class="btn btn-primary btn-block">Log in</button>
+            <p class="form-hint">Log in verifies the API key with the server (account exists and is mutable).</p>
           </div>
-          <div class="form-group">
-            <label for="new-account-desc">Account description</label>
-            <input type="text" id="new-account-desc" class="input" placeholder="Optional">
+        </div>
+        <div id="login-panel-new" class="login-tab-panel" role="tabpanel" aria-labelledby="login-tab-new" hidden>
+          <div class="login-card">
+            <p class="form-hint" style="margin-bottom: 1rem;">Creates an account on Lit Express Node and returns a new API key. Store it securely.</p>
+            <div class="form-group">
+              <label for="new-account-name">Account name</label>
+              <input type="text" id="new-account-name" class="input" placeholder="My account">
+            </div>
+            <div class="form-group">
+              <label for="new-account-desc">Account description</label>
+              <input type="text" id="new-account-desc" class="input" placeholder="Optional">
+            </div>
+            <div class="form-group">
+              <label for="new-account-initial-balance">Initial balance (optional)</label>
+              <input type="text" id="new-account-initial-balance" class="input" placeholder="0 ( or some balance to 10000000)">
+            </div>
+            <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account</button>
           </div>
-          <div class="form-group">
-            <label for="new-account-initial-balance">Initial balance (optional)</label>
-            <input type="text" id="new-account-initial-balance" class="input" placeholder="0 ( or some balance to 10000000)">
-          </div>
-          <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account</button>
         </div>
       </div>
     </section>
@@ -153,19 +159,20 @@
           <!-- Usage API Keys -->
           <section id="section-usage-keys" class="dashboard-section">
             <h2 class="section-title">Usage API Keys</h2>
-            <p class="section-desc">Keys added in this session are shown below.</p>
+            <p class="section-desc">List and manage usage API keys for this account.</p>
             <div id="overview-status-usage-keys" class="status" style="display: none;"></div>
             <div class="card">
               <div class="card-header">
                 <h3 class="card-title">Usage API keys</h3>
+                <button type="button" id="btn-load-usage-keys" class="btn btn-sm btn-outline">Refresh</button>
               </div>
               <div class="card-body">
                 <div class="table-wrap">
                   <table class="data-table" id="usage-keys-table">
-                    <thead><tr><th>Key</th><th>Name</th><th>Description</th><th class="th-actions"></th></tr></thead>
+                    <thead><tr><th>Key</th><th>Name</th><th>Description</th><th>Expiration</th><th>Balance</th><th class="th-actions"></th></tr></thead>
                     <tbody id="usage-keys-tbody"></tbody>
                   </table>
-                  <p id="usage-keys-empty" class="empty-state" style="display: none;">No usage API keys added yet.</p>
+                  <p id="usage-keys-empty" class="empty-state" style="display: none;">No usage API keys.</p>
                 </div>
                 <div class="table-add-row">
                   <button type="button" id="btn-add-usage-key" class="btn btn-primary">Add</button>

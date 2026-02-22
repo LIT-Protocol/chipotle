@@ -7,8 +7,8 @@ use super::models::{
 };
 use crate::abstractions::intents::swaps::internal;
 use crate::abstractions::intents::swaps::models::{FillQuoteRequest, FillQuoteResponse};
-use crate::core::models::ApiResult;
-use crate::core::models::ErrMessage;
+use crate::core::api_status::ApiResult;
+use crate::core::api_status::ErrMessage;
 use rocket::serde::json::Json;
 use rocket::{Route, get, post, routes};
 use rocket_responder::ApiResponse;

@@ -1,25 +1,6 @@
+use crate::actions::client::models::SignedData;
 use rocket_okapi::okapi::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
-use std::fmt::{Display, Formatter};
-
-use crate::actions::client::models::SignedData;
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub enum ShareType {
-    Ecdsa,
-    Frost,
-    Bls,
-}
-
-impl Display for ShareType {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ShareType::Ecdsa => write!(f, "Ecdsa"),
-            ShareType::Frost => write!(f, "Frost"),
-            ShareType::Bls => write!(f, "Bls"),
-        }
-    }
-}
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct NewAccountResponse {
@@ -81,16 +62,6 @@ pub struct DecryptResponse {
     pub decrypted_text: String,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct CombineSignatureSharesResponse {
-    pub signature: String,
-    pub signed_data: String,
-    pub verifying_key: String,
-    pub r: String,
-    pub s: String,
-    pub recovery_id: u8,
-}
-
 /// Response for account config operations (add_group, add_pkp_to_group, remove_pkp_from_group, add_usage_api_key, remove_usage_api_key).
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AddUsageApiKeyResponse {
@@ -115,11 +86,32 @@ pub struct GroupResponse {
 /// One item from list_groups, list_wallets, list_wallets_in_group, or list_actions (AccountConfig.sol Metadata).
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ListMetadataItem {
-    pub id: String,
+    pub id: String, // hash of the item, as stored on chain.
     pub name: String,
     pub description: String,
 }
 
+/// One item from list_groups, list_wallets, list_wallets_in_group, or list_actions (AccountConfig.sol Metadata).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct WalletItem {
+    pub id: String, // hash of the item, as stored on chain.
+    pub name: String,
+    pub description: String,
+    pub wallet_address: String, // if the item is managed by the LIT-node, this will be the actual IPFS CID, or Wallet Address, or public key, etc.
+    pub public_key: String, // if the item is managed by the LIT-node, this will be the actual IPFS CID, or Wallet Address, or public key, etc.
+                            // pub secret: String, // if the item is managed by the LIT-node, this will be the actual IPFS CID, or Wallet Address, or public key, etc.
+}
+
+/// One item from list_api_keys (AccountConfig.sol UsageApiKey).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ApiKeyItem {
+    pub id: String, // hash of the item, as stored on chain.
+    pub name: String,
+    pub description: String,
+    pub api_key: String, // if the item is managed by the LIT-node, this will be the actual IPFS CID, or Wallet Address, or public key, etc.
+    pub expiration: String,
+    pub balance: u64,
+}
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct NodeChainConfigResponse {

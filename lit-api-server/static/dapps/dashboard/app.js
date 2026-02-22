@@ -37,13 +37,14 @@ function updateAuthUI() {
   }
 }
 
-// Preload groups, wallets, and actions (for default group) when dashboard is shown
+// Preload groups, wallets, usage keys, and actions (for default group) when dashboard is shown
 async function preloadAllTables() {
   const apiKey = getApiKey();
   if (!apiKey) return;
   try {
     const groups = await loadGroups();
     await loadWallets();
+    await loadUsageKeys();
     const groupIdEl = document.getElementById('actions-group-id');
     let groupId = (groupIdEl && groupIdEl.value.trim()) || '';
     if (!groupId && groups && groups.length > 0) {
@@ -79,7 +80,7 @@ function updateStatCards() {
   const elGroups = document.getElementById('stat-groups');
   const elWallets = document.getElementById('stat-wallets');
   const elActions = document.getElementById('stat-actions');
-  if (elUsageKeys) elUsageKeys.textContent = getUsageKeysStore().length;
+  if (elUsageKeys) elUsageKeys.textContent = (typeof window._statUsageKeys === 'number') ? window._statUsageKeys : getUsageKeysStore().length;
   if (elGroups) elGroups.textContent = (typeof window._statGroups === 'number') ? window._statGroups : '—';
   if (elWallets) elWallets.textContent = (typeof window._statWallets === 'number') ? window._statWallets : '—';
   if (elActions) elActions.textContent = (typeof window._statActions === 'number') ? window._statActions : '—';
@@ -110,6 +111,24 @@ function setTheme(theme) {
 function initLogin() {
   const apiKeyInput = document.getElementById('login-api-key');
   if (getApiKey()) apiKeyInput.value = '';
+
+  const tabExisting = document.getElementById('login-tab-existing');
+  const tabNew = document.getElementById('login-tab-new');
+  const panelExisting = document.getElementById('login-panel-existing');
+  const panelNew = document.getElementById('login-panel-new');
+  function switchLoginTab(toExisting) {
+    const isExisting = toExisting === true;
+    tabExisting.classList.toggle('is-active', isExisting);
+    tabNew.classList.toggle('is-active', !isExisting);
+    tabExisting.setAttribute('aria-selected', isExisting ? 'true' : 'false');
+    tabNew.setAttribute('aria-selected', !isExisting ? 'true' : 'false');
+    panelExisting.classList.toggle('is-active', isExisting);
+    panelNew.classList.toggle('is-active', !isExisting);
+    if (panelExisting) panelExisting.hidden = !isExisting;
+    if (panelNew) panelNew.hidden = isExisting;
+  }
+  tabExisting?.addEventListener('click', () => switchLoginTab(true));
+  tabNew?.addEventListener('click', () => switchLoginTab(false));
 
   document.getElementById('btn-login').addEventListener('click', async () => {
     const key = (apiKeyInput.value || '').trim();
@@ -176,6 +195,7 @@ function initOverview() {
   refreshOverviewAccount();
   renderUsageKeysTable();
   updateStatCards();
+  document.getElementById('btn-load-usage-keys')?.addEventListener('click', () => loadUsageKeys());
   document.getElementById('btn-add-usage-key')?.addEventListener('click', () => openAddUsageKeyModal());
 }
 
@@ -357,16 +377,16 @@ function renderWalletsTable(items) {
   if (empty) empty.style.display = 'none';
   items.forEach((item) => {
     const tr = document.createElement('tr');
-    const name = item.name || item.wallet_address || item.address || '';
+    const address = item.wallet_address ?? item.address ?? item.name ?? '';
     const id = item.id != null ? String(item.id) : '—';
     tr.innerHTML =
-      '<td class="mono">' + escapeHtml(name) + '</td>' +
+      '<td class="mono">' + escapeHtml(address) + '</td>' +
       '<td class="mono">' + escapeHtml(id) + '</td>';
     tbody.appendChild(tr);
   });
 }
 
-// In-memory list of usage API keys added this session (no backend list endpoint)
+// Store for usage API keys (loaded from listApiKeys or pushed when adding)
 function getUsageKeysStore() {
   if (!window._usageKeys) window._usageKeys = [];
   return window._usageKeys;
@@ -384,12 +404,17 @@ function renderUsageKeysTable() {
   }
   if (empty) empty.style.display = 'none';
   items.forEach((item) => {
+    const key = item.usage_api_key ?? item.api_key ?? '';
+    const masked = maskApiKey(key);
+    const expiration = item.expiration != null ? String(item.expiration) : '—';
+    const balance = item.balance != null ? String(item.balance) : '—';
     const tr = document.createElement('tr');
-    const masked = maskApiKey(item.usage_api_key || '');
     tr.innerHTML =
       '<td class="mono">' + escapeHtml(masked) + '</td>' +
       '<td>' + escapeHtml(item.name || '') + '</td>' +
       '<td class="mono">' + escapeHtml(item.description || '') + '</td>' +
+      '<td class="mono">' + escapeHtml(expiration) + '</td>' +
+      '<td class="mono">' + escapeHtml(balance) + '</td>' +
       '<td class="cell-actions"></td>';
     const actionsCell = tr.querySelector('.cell-actions');
     const delBtn = document.createElement('button');
@@ -397,10 +422,49 @@ function renderUsageKeysTable() {
     delBtn.className = 'btn-icon btn-icon-danger';
     delBtn.title = 'Delete';
     delBtn.innerHTML = ICON_TRASH;
-    delBtn.addEventListener('click', () => confirmAndRemoveUsageKey(item));
+    delBtn.addEventListener('click', () => confirmAndRemoveUsageKey(normalizeUsageKeyItem(item)));
     actionsCell.appendChild(delBtn);
     tbody.appendChild(tr);
   });
+}
+
+function normalizeUsageKeyItem(item) {
+  return {
+    usage_api_key: item.usage_api_key ?? item.api_key,
+    name: item.name,
+    description: item.description,
+    expiration: item.expiration,
+    balance: item.balance,
+  };
+}
+
+async function loadUsageKeys() {
+  const apiKey = getApiKey();
+  if (!apiKey) return [];
+  hideStatus('overview-status-usage-keys');
+  const btn = document.getElementById('btn-load-usage-keys');
+  if (btn) btn.disabled = true;
+  try {
+    const client = await getClient();
+    const items = await client.listApiKeys({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
+    window._usageKeys = items.map((it) => ({
+      api_key: it.api_key,
+      usage_api_key: it.api_key,
+      name: it.name ?? '',
+      description: it.description ?? '',
+      expiration: it.expiration,
+      balance: it.balance,
+    }));
+    window._statUsageKeys = window._usageKeys.length;
+    renderUsageKeysTable();
+    updateStatCards();
+    return window._usageKeys;
+  } catch (e) {
+    showStatus('overview-status-usage-keys', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+    return [];
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // ----- Load table data (used by preload and refresh buttons) -----
@@ -672,9 +736,7 @@ function openAddUsageKeyModal() {
         await client.updateUsageApiKeyMetadata({ apiKey, usageApiKey: usageKey, name, description });
       }
       if (usageKey) {
-        getUsageKeysStore().push({ usage_api_key: usageKey, name, description });
-        renderUsageKeysTable();
-        updateStatCards();
+        await loadUsageKeys();
       }
       showStatus('overview-status-usage-keys', 'Usage API key added. Copy and store your key now (shown once): ' + usageKey, 'success');
     } catch (e) {

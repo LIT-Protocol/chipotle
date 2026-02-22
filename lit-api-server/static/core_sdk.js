@@ -131,10 +131,40 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  */
 
 /**
- * @typedef {Object} ListMetadataItem - One item from list_groups, list_wallets, list_wallets_in_group, or list_actions
+ * @typedef {Object} ListMetadataItem - One item from list_groups or list_actions
  * @property {string} id - ID (decimal string from contract)
  * @property {string} name - Name
  * @property {string} description - Description
+ */
+
+/**
+ * @typedef {Object} WalletItem - One item from list_wallets or list_wallets_in_group (response.rs WalletItem)
+ * @property {string} id - ID (hash as stored on chain)
+ * @property {string} name - Name
+ * @property {string} description - Description
+ * @property {string} wallet_address - Wallet address (or IPFS CID / public key as stored)
+ * @property {string} public_key - Public key (or CID / address as stored)
+ */
+
+/**
+ * @typedef {Object} ApiKeyItem - One item from list_api_keys (response.rs ApiKeyItem)
+ * @property {string} id - ID (hash as stored on chain)
+ * @property {string} name - Name
+ * @property {string} description - Description
+ * @property {string} api_key - Usage API key
+ * @property {string} expiration - Expiration (e.g. unix timestamp string)
+ * @property {number} balance - Balance (u64)
+ */
+
+/**
+ * @typedef {Object} NodeChainConfigResponse - Node chain config (response.rs NodeChainConfigResponse)
+ * @property {string} chain_name - Chain name
+ * @property {number} chain_id - Chain ID
+ * @property {boolean} is_evm - Whether the chain is EVM
+ * @property {boolean} testnet - Whether the chain is a testnet
+ * @property {string} token - Native token symbol
+ * @property {string} rpc_url - RPC URL
+ * @property {string} contract_address - AccountConfig contract address
  */
 
 /** Share type enum (response.rs ShareType). */
@@ -151,12 +181,6 @@ export const SHARE_TYPE_BLS = 'Bls';
  */
 
 // --- Response types (match core/v1/models/response.rs) ---
-
-/**
- * @typedef {Object} GetApiKeyResponse
- * @property {string} api_key - Hex-encoded API key
- * @property {string} wallet_address - Wallet address for the API key
- */
 
 /**
  * @typedef {Object} NewAccountResponse
@@ -248,16 +272,6 @@ export class LitNodeSimpleApiClient {
   constructor({ baseUrl = 'http://localhost:8000' } = {}) {
     const base = baseUrl.replace(/\/$/, '');
     this.baseUrl = `${base}/core/v1`;
-  }
-
-  /**
-   * GET /core/v1/get_api_key
-   * Generates and returns a new API key (hex-encoded wallet secret).
-   * @returns {Promise<GetApiKeyResponse>}
-   */
-  async getApiKey() {
-    const res = await fetch(`${this.baseUrl}/get_api_key`);
-    return parseResponse(res, 'get_api_key');
   }
 
   /**
@@ -557,6 +571,22 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
+   * GET /core/v1/list_api_keys
+   * List usage API keys for an account (paginated). Returns ApiKeyItem per key.
+   * @param {ListPageOptions} options
+   * @returns {Promise<ApiKeyItem[]>}
+   */
+  async listApiKeys({ apiKey, pageNumber = '0', pageSize = '10' }) {
+    const params = new URLSearchParams({
+      api_key: apiKey,
+      page_number: String(pageNumber),
+      page_size: String(pageSize),
+    });
+    const res = await fetch(`${this.baseUrl}/list_api_keys?${params}`);
+    return parseResponse(res, 'list_api_keys');
+  }
+
+  /**
    * GET /core/v1/list_groups
    * List groups for an account (paginated). Returns metadata (id, name, description) per group.
    * @param {ListPageOptions} options
@@ -576,7 +606,7 @@ export class LitNodeSimpleApiClient {
    * GET /core/v1/list_wallets
    * List wallets (wallet derivation metadata) for an account (paginated).
    * @param {ListPageOptions} options
-   * @returns {Promise<ListMetadataItem[]>}
+   * @returns {Promise<WalletItem[]>}
    */
   async listWallets({ apiKey, pageNumber = '0', pageSize = '10' }) {
     const params = new URLSearchParams({
@@ -590,9 +620,9 @@ export class LitNodeSimpleApiClient {
 
   /**
    * GET /core/v1/list_wallets_in_group
-   * List wallets in a group (paginated). Returns metadata for each wallet in the group.
+   * List wallets in a group (paginated). Returns WalletItem for each wallet in the group.
    * @param {ListPageWithGroupOptions} options
-   * @returns {Promise<ListMetadataItem[]>}
+   * @returns {Promise<WalletItem[]>}
    */
   async listWalletsInGroup({ apiKey, groupId, pageNumber = '0', pageSize = '10' }) {
     const params = new URLSearchParams({
@@ -620,6 +650,16 @@ export class LitNodeSimpleApiClient {
     });
     const res = await fetch(`${this.baseUrl}/list_actions?${params}`);
     return parseResponse(res, 'list_actions');
+  }
+
+  /**
+   * GET /core/v1/get_node_chain_config
+   * Returns the node's chain configuration (chain name, id, RPC URL, contract address, etc.).
+   * @returns {Promise<NodeChainConfigResponse>}
+   */
+  async getNodeChainConfig() {
+    const res = await fetch(`${this.baseUrl}/get_node_chain_config`);
+    return parseResponse(res, 'get_node_chain_config');
   }
 }
 

@@ -89,13 +89,73 @@ body {
   font-size: 0.9375rem;
 }
 
-.login-card {
+.login-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--card-bg);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: 0.25rem 0.25rem 0 0.25rem;
+  box-shadow: var(--shadow);
+  border: 1px solid var(--border);
+  border-bottom: none;
+}
+
+.login-tab {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s;
+  font-family: inherit;
+}
+
+.login-tab:hover {
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+[data-theme="dark"] .login-tab:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.login-tab.is-active {
+  color: var(--primary);
+  background: rgba(60, 80, 224, 0.08);
+}
+
+[data-theme="dark"] .login-tab.is-active {
+  background: rgba(99, 102, 241, 0.15);
+}
+
+.login-tab-panel {
+  display: none;
   background: var(--card-bg);
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-top: none;
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  box-shadow: var(--shadow);
   padding: 1.5rem;
   margin-bottom: 1.25rem;
-  box-shadow: var(--shadow);
+}
+
+.login-tab-panel.is-active {
+  display: block;
+}
+
+.login-card {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin-bottom: 0;
+  box-shadow: none;
 }
 
 .login-card-title {

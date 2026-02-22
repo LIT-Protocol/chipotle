@@ -391,6 +391,30 @@ contract AccountConfig {
         }
     }
 
+    function listApiKeys(
+        uint256 accountApiKeyHash,
+        uint256 pageNumber,
+        uint256 pageSize
+    ) public view returns (UsageApiKey[] memory) {
+        revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
+        Account storage account = accounts[accountApiKeyHash];
+        uint256 pageLength = account.usageApiKeysList.length();
+        if (pageSize > pageLength) {
+            pageSize = pageLength;
+            pageNumber = 0;
+        }
+        uint256 startIndex = pageNumber * pageSize;
+        uint256 endIndex = startIndex + pageSize;
+        if (endIndex > pageLength) {
+            endIndex = pageLength;
+        }
+        UsageApiKey[] memory pageApiKeys = new UsageApiKey[](endIndex - startIndex);
+        for (uint256 i = 0; i < pageLength; i++) {
+            pageApiKeys[i] = account.usageApiKeys[account.usageApiKeysList.at(startIndex + i)];
+        }
+        return pageApiKeys;
+    }
+
     function listGroups(
         uint256 accountApiKeyHash,
         uint256 pageNumber,
