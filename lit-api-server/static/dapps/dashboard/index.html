@@ -14,14 +14,14 @@
     <!-- Login (standalone when not authenticated) -->
     <section id="page-login" class="login-page">
       <div class="login-container">
-        <h1 class="login-title">Lit Express Node Dashboard</h1>
-        <p class="login-subtitle">Sign in or create an account to manage Lit Express Node.</p>
+        <h1 class="login-title">Lit Express Dashboard</h1>
+        <p class="login-subtitle">Sign in or create an account to manage a Lit Express Node account.</p>
         <div id="login-status" class="status info" style="display: none;"></div>
         <div class="login-card">
           <h2 class="login-card-title">Use existing API key</h2>
           <div class="form-group">
             <label for="login-api-key">API key</label>
-            <input type="password" id="login-api-key" class="input" placeholder="Paste your API key (hex or base64)">
+            <input type="password" id="login-api-key" class="input" placeholder="Paste your API key">
           </div>
           <button type="button" id="btn-login" class="btn btn-primary btn-block">Log in</button>
           <p class="form-hint">Log in verifies the API key with the server (account exists and is mutable).</p>
@@ -39,7 +39,7 @@
           </div>
           <div class="form-group">
             <label for="new-account-initial-balance">Initial balance (optional)</label>
-            <input type="text" id="new-account-initial-balance" class="input" placeholder="0 or hex">
+            <input type="text" id="new-account-initial-balance" class="input" placeholder="0 ( or some balance to 10000000)">
           </div>
           <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account</button>
         </div>
@@ -50,13 +50,17 @@
     <div id="dashboard-wrap" class="dashboard-wrap">
       <aside class="sidebar">
         <div class="sidebar-brand">
-          <span class="sidebar-brand-text">Lit Express Node</span>
+          <span class="sidebar-brand-text">Lit Express Dashboard</span>
         </div>
         <nav class="sidebar-nav">
           <span class="sidebar-menu-label">MENU</span>
           <a href="#overview" class="sidebar-link" data-scroll="overview">
             <span class="sidebar-link-icon">◇</span>
             <span class="sidebar-link-text">Overview</span>
+          </a>
+          <a href="#usage-keys" class="sidebar-link" data-scroll="usage-keys">
+            <span class="sidebar-link-icon">◇</span>
+            <span class="sidebar-link-text">Usage API Keys</span>
           </a>
           <a href="#groups" class="sidebar-link" data-scroll="groups">
             <span class="sidebar-link-icon">◇</span>
@@ -70,23 +74,45 @@
             <span class="sidebar-link-icon">◇</span>
             <span class="sidebar-link-text">Wallets</span>
           </a>
+          <a href="#action-runner" class="sidebar-link" data-scroll="action-runner">
+            <span class="sidebar-link-icon">◇</span>
+            <span class="sidebar-link-text">Action Runner</span>
+          </a>
         </nav>
       </aside>
 
       <div class="dashboard-main">
         <header class="topbar">
           <div class="topbar-left">
-            <h1 class="topbar-title">Dashboard</h1>
+            <h1 class="topbar-title"> </h1>
           </div>
           <div class="topbar-right">
-            <button type="button" class="btn btn-topbar" id="theme-toggle" aria-label="Toggle theme">Dark</button>
-            <button type="button" class="btn btn-topbar btn-topbar-logout" id="logout-btn">Sign out</button>
+            <button type="button" class="btn btn-topbar btn-theme-toggle" id="theme-toggle" aria-label="Switch to dark mode"><span class="theme-icon" aria-hidden="true"></span></button>
+            <div class="account-dropdown" id="account-dropdown">
+              <button type="button" class="btn btn-topbar account-dropdown-trigger" id="account-dropdown-trigger" aria-expanded="false" aria-haspopup="true" aria-label="Account menu">
+                Account
+                <span class="account-dropdown-chevron" aria-hidden="true">▾</span>
+              </button>
+              <div class="account-dropdown-panel" id="account-dropdown-panel" role="menu" aria-hidden="true">
+                <div class="account-dropdown-item account-dropdown-api-key-row">
+                  <span class="account-dropdown-label">API key</span>
+                  <span class="account-dropdown-api-key-text mono" id="account-api-key-text">—</span>
+                  <button type="button" class="account-dropdown-copy" id="account-copy-btn" role="menuitem" title="Copy full API key">Copy</button>
+                </div>
+                <div class="account-dropdown-divider"></div>
+                <button type="button" class="account-dropdown-item account-dropdown-signout" id="account-signout-btn" role="menuitem">Sign out</button>
+              </div>
+            </div>
           </div>
         </header>
 
         <div class="dashboard-content">
           <!-- Stat cards -->
           <div class="stats-row">
+            <div class="stat-card">
+              <span class="stat-value" id="stat-usage-keys">—</span>
+              <span class="stat-label">Usage API Keys</span>
+            </div>
             <div class="stat-card">
               <span class="stat-value" id="stat-groups">—</span>
               <span class="stat-label">Groups</span>
@@ -99,84 +125,50 @@
               <span class="stat-value" id="stat-actions">—</span>
               <span class="stat-label">IPFS CIDs</span>
             </div>
-            <div class="stat-card">
-              <span class="stat-value stat-mono" id="stat-api">—</span>
-              <span class="stat-label">API Key</span>
-            </div>
           </div>
 
-          <!-- Overview -->
+          <!-- Overview / Instructions -->
           <section id="section-overview" class="dashboard-section">
             <h2 class="section-title">Overview</h2>
-            <p class="section-desc">Account details and summary.</p>
+            <p class="section-desc">Instructions and account details.</p>
             <div id="overview-status" class="status" style="display: none;"></div>
             <div class="card">
               <div class="card-header">
-                <h3 class="card-title">Account</h3>
+                <h3 class="card-title">Instructions</h3>
               </div>
               <div class="card-body">
-                <div class="form-group">
-                  <label>API key</label>
-                  <div id="overview-api-key-masked" class="mono">—</div>
-                </div>
-                <div class="form-group">
-                  <label>Status</label>
-                  <div id="overview-status-badge" class="status-badge">—</div>
+                <div class="instructions-block">
+                  <p>You can control access to the Lit Actions run by this node in the following ways:</p>
+                  <ul>
+                    <li><strong>Groups</strong> — Create groups for different categories of actions (e.g. by app or use case). Each group can have its own set of allowed IPFS action CIDs and wallet (PKP) restrictions.</li>
+                    <li><strong>Usage API keys</strong> — Create usage API keys and assign them to pay for Lit Action runs. Use different keys per client or app to track and limit spending. Add keys in the <strong>Usage API Keys</strong> section and use them when calling the node.  <strong>Note: </strong> your account api key can be also be used as a usage api key, but can not be rotated or removed, so this is not recommended.</li>
+                    <li><strong>Wallet restrictions</strong> — For any group, you can restrict which wallets (PKPs) are allowed to run actions in that group. Add or remove PKPs in the <strong>Wallets</strong> section (Add PKP to group / Remove PKP from group). You can also set a group to allow all wallets, if you do not need this limit.</li>
+                  </ul>
+                  <p>In short: create groups, add the IPFS action CIDs and (optionally) the wallets allowed for each group, then use usage API keys to authorize and pay for runs.</p>
                 </div>
               </div>
             </div>
-            <div class="card">
-              <div class="card-header">
-                <h3 class="card-title">Summary</h3>
-                <button type="button" id="btn-load-overview-summary" class="btn btn-sm btn-outline">Load summary</button>
-              </div>
-              <div class="card-body">
-                <div id="overview-summary" class="overview-summary" style="display: none;">
-                  <div class="overview-counts"></div>
-                  <div class="grid-2" style="margin-top: 1rem;">
-                    <div>
-                      <strong>Recent groups</strong>
-                      <ul id="overview-groups-list" class="list"></ul>
-                    </div>
-                    <div>
-                      <strong>Recent wallets</strong>
-                      <ul id="overview-wallets-list" class="list"></ul>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+          </section>
+
+          <!-- Usage API Keys -->
+          <section id="section-usage-keys" class="dashboard-section">
+            <h2 class="section-title">Usage API Keys</h2>
+            <p class="section-desc">Keys added in this session are shown below.</p>
+            <div id="overview-status-usage-keys" class="status" style="display: none;"></div>
             <div class="card">
               <div class="card-header">
                 <h3 class="card-title">Usage API keys</h3>
               </div>
               <div class="card-body">
-                <div class="form-row grid-2">
-                  <div class="form-group">
-                    <label for="usage-key-value">Usage API key</label>
-                    <input type="text" id="usage-key-value" class="input" placeholder="Key to add or manage">
-                  </div>
-                  <div class="form-group">
-                    <label for="usage-key-expiration">Expiration (unix)</label>
-                    <input type="text" id="usage-key-expiration" class="input" value="9999999999">
-                  </div>
-                  <div class="form-group">
-                    <label for="usage-key-balance">Balance (wei)</label>
-                    <input type="text" id="usage-key-balance" class="input" value="1000000000000000000">
-                  </div>
-                  <div class="form-group">
-                    <label for="usage-key-name">Name</label>
-                    <input type="text" id="usage-key-name" class="input" placeholder="Optional">
-                  </div>
-                  <div class="form-group">
-                    <label for="usage-key-desc">Description</label>
-                    <input type="text" id="usage-key-desc" class="input" placeholder="Optional">
-                  </div>
+                <div class="table-wrap">
+                  <table class="data-table" id="usage-keys-table">
+                    <thead><tr><th>Key</th><th>Name</th><th>Description</th><th class="th-actions"></th></tr></thead>
+                    <tbody id="usage-keys-tbody"></tbody>
+                  </table>
+                  <p id="usage-keys-empty" class="empty-state" style="display: none;">No usage API keys added yet.</p>
                 </div>
-                <div class="btn-group">
+                <div class="table-add-row">
                   <button type="button" id="btn-add-usage-key" class="btn btn-primary">Add</button>
-                  <button type="button" id="btn-remove-usage-key" class="btn btn-danger">Remove</button>
-                  <button type="button" id="btn-update-usage-key-meta" class="btn btn-outline">Update metadata</button>
                 </div>
               </div>
             </div>
@@ -238,7 +230,7 @@
           <!-- Wallets -->
           <section id="section-wallets" class="dashboard-section">
             <h2 class="section-title">Wallets</h2>
-            <p class="section-desc">Create wallets and manage PKPs in groups.</p>
+            <p class="section-desc">Create and list wallets for this account.</p>
             <div id="wallets-status" class="status" style="display: none;"></div>
             <div class="card">
               <div class="card-header">
@@ -258,45 +250,31 @@
                 </div>
               </div>
             </div>
+          </section>
+
+          <!-- Action Runner -->
+          <section id="section-action-runner" class="dashboard-section">
+            <h2 class="section-title">Action Runner</h2>
+            <p class="section-desc">Paste Lit Action JavaScript code and optional JSON parameters, then execute.</p>
+            <div id="action-runner-status" class="status" style="display: none;"></div>
             <div class="card">
-              <div class="card-header"><h3 class="card-title">Wallets in group</h3></div>
+              <div class="card-header">
+                <h3 class="card-title">Execute Lit Action</h3>
+              </div>
               <div class="card-body">
                 <div class="form-group">
-                  <label for="wallets-in-group-id">Group ID</label>
-                  <input type="text" id="wallets-in-group-id" class="input" placeholder="0" style="max-width: 8rem;">
+                  <label for="action-runner-code">Lit Action code</label>
+                  <textarea id="action-runner-code" class="input textarea-lg" rows="10" placeholder="Paste your Lit Action JavaScript code here (e.g. const go = async () => { Lit.Actions.setResponse({ response: JSON.stringify('hello') }); }; go();)" spellcheck="false"></textarea>
                 </div>
-                <button type="button" id="btn-load-wallets-in-group" class="btn btn-outline">Load wallets in group</button>
-                <ul id="wallets-in-group-list" class="list" style="margin-top: 1rem;"></ul>
-              </div>
-            </div>
-            <div class="card-grid grid-2">
-              <div class="card">
-                <div class="card-header"><h3 class="card-title">Add PKP to group</h3></div>
-                <div class="card-body">
-                  <div class="form-group">
-                    <label for="add-pkp-group">Group ID</label>
-                    <input type="text" id="add-pkp-group" class="input" placeholder="0">
-                  </div>
-                  <div class="form-group">
-                    <label for="add-pkp-public-key">PKP public key</label>
-                    <input type="text" id="add-pkp-public-key" class="input" placeholder="Hex or base64">
-                  </div>
-                  <button type="button" id="btn-add-pkp" class="btn btn-primary btn-block">Add PKP</button>
+                <div class="form-group">
+                  <label for="action-runner-params">Parameters (JSON, optional)</label>
+                  <textarea id="action-runner-params" class="input textarea-sm" rows="4" placeholder='Optional JSON object, e.g. {"key": "value"}' spellcheck="false"></textarea>
                 </div>
-              </div>
-              <div class="card">
-                <div class="card-header"><h3 class="card-title">Remove PKP from group</h3></div>
-                <div class="card-body">
-                  <div class="form-group">
-                    <label for="remove-pkp-group">Group ID</label>
-                    <input type="text" id="remove-pkp-group" class="input" placeholder="0">
-                  </div>
-                  <div class="form-group">
-                    <label for="remove-pkp-public-key">PKP public key</label>
-                    <input type="text" id="remove-pkp-public-key" class="input" placeholder="Must match when added">
-                  </div>
-                  <button type="button" id="btn-remove-pkp" class="btn btn-danger btn-block">Remove PKP</button>
+                <div class="action-runner-buttons">
+                  <button type="button" id="btn-execute-lit-action" class="btn btn-primary">Execute Lit Action</button>
+                  <button type="button" id="btn-get-lit-action-ipfs-cid" class="btn btn-outline">Get Lit Action IPFS CID</button>
                 </div>
+                <div id="action-runner-output" class="action-runner-output"></div>
               </div>
             </div>
           </section>

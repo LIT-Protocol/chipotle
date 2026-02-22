@@ -1,18 +1,15 @@
-use std::time::Instant;
-
 use crate::accounts;
-use crate::actions::client::ClientBuilder;
-use crate::actions::client::models::DenoExecutionEnv;
-use crate::actions::grpc::GrpcClientPool;
+use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::models::ApiStatus;
 use crate::core::v1::models::request::{
     AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest, AddUsageApiKeyRequest,
-    LitActionRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
-    RemoveUsageApiKeyRequest, SignWithPKPRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
+    NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
+    RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
     UpdateUsageApiKeyMetadataRequest,
 };
 use crate::core::v1::models::response::{
-    AccountOpResponse, CreateWalletResponse, ListMetadataItem, LitActionResponse, LitActionSignature, NewAccountResponse, SignWithPkpResponse
+    AccountOpResponse, AddUsageApiKeyResponse, CreateWalletResponse, ListMetadataItem,
+    NewAccountResponse, NodeChainConfigResponse,
 };
 use ethers::types::{H160, U256};
 use ethers::utils::keccak256;
@@ -20,16 +17,8 @@ use ipfs_hasher::IpfsHasher;
 use lit_core::utils::binary::{bytes_to_hex, hex_to_bytes};
 use lit_rust_crypto::group::GroupEncoding;
 use lit_rust_crypto::k256::SecretKey;
-use moka::future::Cache;
 use rand::Rng;
 use rocket::serde::json::Json;
-
-fn not_configured() -> ApiStatus {
-    ApiStatus::internal_server_error(
-        anyhow::anyhow!("Lit testnet not configured"),
-        "This operation is not available.",
-    )
-}
 
 /// Parse U256 from decimal string or hex string (with or without 0x prefix).
 fn parse_u256(s: &str) -> Result<U256, ApiStatus> {
@@ -134,94 +123,10 @@ pub async fn create_wallet(api_key: &str) -> Result<CreateWalletResponse, ApiSta
     })
 }
 
-pub async fn sign_with_pkp(
-    sign_request: Json<SignWithPKPRequest>,
-) -> Result<SignWithPkpResponse, ApiStatus> {
-    Err(not_configured())
-}
-
-pub async fn lit_action(
-    grpc_client_pool: &GrpcClientPool<tonic::transport::Channel>,
-    ipfs_cache: &Cache<String, String>,
-    // action_store: &ActionStore,
-    http_client: &reqwest::Client,
-    // request_headers: RequestHeaders<'_>,
-    lit_action_request: Json<LitActionRequest>,
-) -> Result<LitActionResponse, ApiStatus> {
-    let request_id = Some("test".to_string());
-
-    let deno_execution_env = DenoExecutionEnv {
-        ipfs_cache: Some(moka::future::Cache::clone(ipfs_cache)),
-        http_client: Some(reqwest::Client::clone(http_client)),
-    };
-
-    let mut client = match ClientBuilder::default()
-        .js_env(deno_execution_env)
-        .request_id(request_id.clone())
-        .api_key(lit_action_request.api_key.clone())
-        // .http_headers(http_headers)
-        .client_grpc_channels((*grpc_client_pool).clone())
-        // .key_set_id(json_execution_request.key_set_id.clone())
-        .build()
-        .map_err(|e| e.to_string())
-    {
-        Ok(client) => client,
-        Err(e) => return Err(anyhow::anyhow!("failed to build client: {:?}", e).into()),
-    };
-
-    let code_to_run = lit_action_request.code.clone();
+pub async fn get_lit_action_ipfs_id(code: String) -> Result<String, ApiStatus> {
     let ipfs_hasher = IpfsHasher::default();
-    let derived_ipfs_id = ipfs_hasher.compute(code_to_run.as_bytes());
-
-    let js_params = lit_action_request.js_params.clone();
-    let execution_options = crate::actions::client::models::ExecutionOptions {
-        code: code_to_run,
-        globals: js_params.clone(),
-        action_ipfs_id: Some(derived_ipfs_id),
-    };
-
-    // for async calls.
-    // let result = match   client
-    //     .execute_js_async(execution_options, action_store)
-    //     .await
-    //     {
-    //         Ok(job_id) => {
-    //             info!("Submitted async action job with ID {job_id}");
-    //             client_session.json_encrypt_response_status::<JobId>(job_id)
-    //         }
-    //         Err(err) => {
-    //             error!("Error processing async action job: {err:?}");
-    //             return client_session.json_encrypt_err_custom_response(
-    //                 "error processing async action job",
-    //                 unexpected_err_code(
-    //                     err,
-    //                     EC::NodeJsExecutionError,
-    //                     Some("Error processing action job".into()),
-    //                 )
-    //                 .handle(),
-    //             );
-    //         }
-    //     };
-
-    let result = match client.execute_js(execution_options).await {
-        Ok(result) => result,
-        Err(e) => return Err(anyhow::anyhow!("Actions failed with : {:?}", e).into()),
-    };
-
-
-    let signatures = result.signed_data.iter().map(|(name, signed_data)| LitActionSignature {
-        name: name.clone(),
-        data: signed_data.clone().into(),
-    }).collect();
-    
-    let lit_action_response = LitActionResponse {
-        signatures: signatures,
-        response: result.response,
-        logs: result.logs,
-        has_error: false,
-    };
-
-    Ok(lit_action_response)
+    let derived_ipfs_id = ipfs_hasher.compute(code.as_bytes());
+    Ok(derived_ipfs_id)
 }
 
 pub async fn add_group(req: Json<AddGroupRequest>) -> Result<AccountOpResponse, ApiStatus> {
@@ -281,13 +186,20 @@ pub async fn remove_pkp_from_group(
 
 pub async fn add_usage_api_key(
     req: Json<AddUsageApiKeyRequest>,
-) -> Result<AccountOpResponse, ApiStatus> {
+) -> Result<AddUsageApiKeyResponse, ApiStatus> {
     let expiration = parse_u256(&req.expiration)?;
     let balance = parse_u256(&req.balance)?;
-    accounts::add_usage_api_key(&req.api_key, &req.usage_api_key, expiration, balance)
+
+    let (_public_key, _wallet_address, secret) = get_new_wallet();
+    let usage_api_key = base64_light::base64_encode_bytes(&secret);
+
+    accounts::add_usage_api_key(&req.api_key, &usage_api_key, expiration, balance)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "add_usage_api_key failed"))?;
-    Ok(AccountOpResponse { success: true })
+    Ok(AddUsageApiKeyResponse {
+        success: true,
+        usage_api_key: usage_api_key,
+    })
 }
 
 pub async fn remove_usage_api_key(
@@ -417,4 +329,20 @@ pub async fn list_actions(
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?;
     Ok(list.iter().map(metadata_to_item).collect())
+}
+
+pub async fn get_chain_info() -> Result<NodeChainConfigResponse, ApiStatus> {
+    let node_config = GLOBAL_NODE_CONFIG
+        .get()
+        .ok_or(anyhow::anyhow!("Node configuration not found"))?;
+    let chain_info = node_config.chain.info();
+    Ok(NodeChainConfigResponse {
+        chain_name: chain_info.chain_name.to_string(),
+        chain_id: chain_info.chain_id,
+        is_evm: chain_info.is_evm,
+        testnet: chain_info.testnet,
+        token: chain_info.token.to_string(),
+        rpc_url: chain_info.rpc_url.to_string(),
+        contract_address: node_config.contract_address.to_string(),
+    })
 }

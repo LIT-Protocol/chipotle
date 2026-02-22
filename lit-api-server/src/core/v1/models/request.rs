@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
-use rocket_okapi::okapi::schemars::JsonSchema;
 use crate::core::v1::models::response::SignWithPkpResponse;
+use rocket_okapi::okapi::schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct NewAccountRequest {
@@ -105,7 +105,6 @@ pub struct UpdateUsageApiKeyMetadataRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AddUsageApiKeyRequest {
     pub api_key: String,
-    pub usage_api_key: String,
     pub expiration: String,
     pub balance: String,
 }

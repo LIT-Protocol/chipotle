@@ -26,6 +26,10 @@ function getBaseUrl() {
 function updateAuthUI() {
   const hasKey = !!getApiKey();
   document.body.classList.toggle('has-api-key', hasKey);
+  const apiKeyTextEl = document.getElementById('account-api-key-text');
+  if (apiKeyTextEl) {
+    apiKeyTextEl.textContent = hasKey ? maskApiKey(getApiKey()) : '—';
+  }
   if (hasKey) {
     refreshOverviewAccount();
     updateStatCards();
@@ -71,18 +75,20 @@ async function getClient() {
 }
 
 function updateStatCards() {
-  const apiKey = getApiKey();
-  const elActions = document.getElementById('stat-actions');
-  const elApi = document.getElementById('stat-api');
-  if (elActions) elActions.textContent = (typeof window._statActions === 'number') ? window._statActions : '—';
-  if (elApi) elApi.textContent = apiKey ? maskApiKey(apiKey) : '—';
+  const elUsageKeys = document.getElementById('stat-usage-keys');
   const elGroups = document.getElementById('stat-groups');
   const elWallets = document.getElementById('stat-wallets');
+  const elActions = document.getElementById('stat-actions');
+  if (elUsageKeys) elUsageKeys.textContent = getUsageKeysStore().length;
   if (elGroups) elGroups.textContent = (typeof window._statGroups === 'number') ? window._statGroups : '—';
   if (elWallets) elWallets.textContent = (typeof window._statWallets === 'number') ? window._statWallets : '—';
+  if (elActions) elActions.textContent = (typeof window._statActions === 'number') ? window._statActions : '—';
 }
 
-// ----- Theme -----
+// ----- Theme (sun = switch to light, moon = switch to dark) -----
+const THEME_ICON_SUN = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>';
+const THEME_ICON_MOON = '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"/></svg>';
+
 function getTheme() {
   return sessionStorage.getItem(STORAGE_KEY_THEME) || 'light';
 }
@@ -91,7 +97,13 @@ function setTheme(theme) {
   sessionStorage.setItem(STORAGE_KEY_THEME, theme);
   document.documentElement.setAttribute('data-theme', theme === 'dark' ? 'dark' : 'light');
   const btn = document.getElementById('theme-toggle');
-  if (btn) btn.textContent = theme === 'dark' ? 'Light' : 'Dark';
+  if (btn) {
+    const iconEl = btn.querySelector('.theme-icon');
+    if (iconEl) {
+      iconEl.innerHTML = theme === 'dark' ? THEME_ICON_SUN : THEME_ICON_MOON;
+    }
+    btn.setAttribute('aria-label', theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
+  }
 }
 
 // ----- Login -----
@@ -157,116 +169,14 @@ function maskApiKey(key) {
 }
 
 function refreshOverviewAccount() {
-  const apiKey = getApiKey();
-  const elKey = document.getElementById('overview-api-key-masked');
-  const elBadge = document.getElementById('overview-status-badge');
-  if (elKey) elKey.textContent = apiKey ? maskApiKey(apiKey) : '—';
-  if (elBadge) {
-    elBadge.textContent = apiKey ? 'Verified' : '—';
-    elBadge.className = 'status-badge' + (apiKey ? ' status-badge-success' : '');
-  }
+  // Overview no longer displays API key or status; kept for any future use.
 }
 
 function initOverview() {
   refreshOverviewAccount();
-
-  document.getElementById('btn-load-overview-summary').addEventListener('click', async () => {
-    const apiKey = getApiKey();
-    if (!apiKey) {
-      showStatus('overview-status', 'Log in first.', 'error');
-      return;
-    }
-    hideStatus('overview-status');
-    const summaryEl = document.getElementById('overview-summary');
-    const countsEl = summaryEl ? summaryEl.querySelector('.overview-counts') : null;
-    const btn = document.getElementById('btn-load-overview-summary');
-    btn.disabled = true;
-    try {
-      const client = await getClient();
-      const [groups, wallets] = await Promise.all([
-        client.listGroups({ apiKey, pageNumber: '0', pageSize: '10' }),
-        client.listWallets({ apiKey, pageNumber: '0', pageSize: '10' }),
-      ]);
-      if (summaryEl) summaryEl.style.display = 'block';
-      if (countsEl) countsEl.textContent = 'Groups: ' + groups.length + (groups.length >= 10 ? '+' : '') + '  ·  Wallets: ' + wallets.length + (wallets.length >= 10 ? '+' : '');
-      renderMetadataList('overview-groups-list', null, groups);
-      renderMetadataList('overview-wallets-list', null, wallets);
-      window._statGroups = groups.length;
-      window._statWallets = wallets.length;
-      updateStatCards();
-    } catch (e) {
-      showStatus('overview-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
-    } finally {
-      btn.disabled = false;
-    }
-  });
-
-  document.getElementById('btn-add-usage-key').addEventListener('click', async () => {
-    const apiKey = getApiKey();
-    const usageKey = document.getElementById('usage-key-value').value.trim();
-    const expiration = document.getElementById('usage-key-expiration').value.trim();
-    const balance = document.getElementById('usage-key-balance').value.trim();
-    if (!apiKey || !usageKey || !expiration || !balance) {
-      showStatus('overview-status', 'Fill Usage API key, Expiration, and Balance.', 'error');
-      return;
-    }
-    hideStatus('overview-status');
-    const btn = document.getElementById('btn-add-usage-key');
-    btn.disabled = true;
-    try {
-      const client = await getClient();
-      await client.addUsageApiKey({ apiKey, usageApiKey: usageKey, expiration, balance });
-      showStatus('overview-status', 'Usage API key added.', 'success');
-    } catch (e) {
-      showStatus('overview-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
-    } finally {
-      btn.disabled = false;
-    }
-  });
-
-  document.getElementById('btn-remove-usage-key').addEventListener('click', async () => {
-    const apiKey = getApiKey();
-    const usageKey = document.getElementById('usage-key-value').value.trim();
-    if (!apiKey || !usageKey) {
-      showStatus('overview-status', 'Fill Usage API key.', 'error');
-      return;
-    }
-    hideStatus('overview-status');
-    const btn = document.getElementById('btn-remove-usage-key');
-    btn.disabled = true;
-    try {
-      const client = await getClient();
-      await client.removeUsageApiKey({ apiKey, usageApiKey: usageKey });
-      showStatus('overview-status', 'Usage API key removed.', 'success');
-    } catch (e) {
-      showStatus('overview-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
-    } finally {
-      btn.disabled = false;
-    }
-  });
-
-  document.getElementById('btn-update-usage-key-meta').addEventListener('click', async () => {
-    const apiKey = getApiKey();
-    const usageKey = document.getElementById('usage-key-value').value.trim();
-    const name = document.getElementById('usage-key-name').value.trim();
-    const description = document.getElementById('usage-key-desc').value.trim();
-    if (!apiKey || !usageKey || !name) {
-      showStatus('overview-status', 'Fill Usage API key and Name.', 'error');
-      return;
-    }
-    hideStatus('overview-status');
-    const btn = document.getElementById('btn-update-usage-key-meta');
-    btn.disabled = true;
-    try {
-      const client = await getClient();
-      await client.updateUsageApiKeyMetadata({ apiKey, usageApiKey: usageKey, name, description });
-      showStatus('overview-status', 'Usage API key metadata updated.', 'success');
-    } catch (e) {
-      showStatus('overview-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
-    } finally {
-      btn.disabled = false;
-    }
-  });
+  renderUsageKeysTable();
+  updateStatCards();
+  document.getElementById('btn-add-usage-key')?.addEventListener('click', () => openAddUsageKeyModal());
 }
 
 // ----- Icons (pencil, trash) -----
@@ -456,6 +366,43 @@ function renderWalletsTable(items) {
   });
 }
 
+// In-memory list of usage API keys added this session (no backend list endpoint)
+function getUsageKeysStore() {
+  if (!window._usageKeys) window._usageKeys = [];
+  return window._usageKeys;
+}
+
+function renderUsageKeysTable() {
+  const items = getUsageKeysStore();
+  const tbody = document.getElementById('usage-keys-tbody');
+  const empty = document.getElementById('usage-keys-empty');
+  if (!tbody) return;
+  tbody.innerHTML = '';
+  if (!items || items.length === 0) {
+    if (empty) empty.style.display = 'block';
+    return;
+  }
+  if (empty) empty.style.display = 'none';
+  items.forEach((item) => {
+    const tr = document.createElement('tr');
+    const masked = maskApiKey(item.usage_api_key || '');
+    tr.innerHTML =
+      '<td class="mono">' + escapeHtml(masked) + '</td>' +
+      '<td>' + escapeHtml(item.name || '') + '</td>' +
+      '<td class="mono">' + escapeHtml(item.description || '') + '</td>' +
+      '<td class="cell-actions"></td>';
+    const actionsCell = tr.querySelector('.cell-actions');
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn-icon btn-icon-danger';
+    delBtn.title = 'Delete';
+    delBtn.innerHTML = ICON_TRASH;
+    delBtn.addEventListener('click', () => confirmAndRemoveUsageKey(item));
+    actionsCell.appendChild(delBtn);
+    tbody.appendChild(tr);
+  });
+}
+
 // ----- Load table data (used by preload and refresh buttons) -----
 async function loadGroups() {
   const apiKey = getApiKey();
@@ -523,76 +470,7 @@ async function loadActions(groupId) {
 // ----- Wallets -----
 function initWallets() {
   document.getElementById('btn-load-wallets')?.addEventListener('click', () => loadWallets());
-
-  document.getElementById('btn-load-wallets-in-group')?.addEventListener('click', async () => {
-    const apiKey = getApiKey();
-    const groupId = document.getElementById('wallets-in-group-id').value.trim();
-    if (!apiKey || !groupId) {
-      showStatus('wallets-status', 'Log in and enter Group ID.', 'error');
-      return;
-    }
-    hideStatus('wallets-status');
-    const btn = document.getElementById('btn-load-wallets-in-group');
-    btn.disabled = true;
-    try {
-      const client = await getClient();
-      const items = await client.listWalletsInGroup({ apiKey, groupId, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
-      renderMetadataList('wallets-in-group-list', null, items);
-    } catch (e) {
-      showStatus('wallets-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
-    } finally {
-      btn.disabled = false;
-    }
-  });
-
-  // Add wallet: open modal with "Create wallet" and Add & Cancel
   document.getElementById('btn-add-wallet')?.addEventListener('click', () => openAddWalletModal());
-
-  document.getElementById('btn-add-pkp').addEventListener('click', async () => {
-    const apiKey = getApiKey();
-    const groupId = document.getElementById('add-pkp-group').value.trim();
-    const pkp = document.getElementById('add-pkp-public-key').value.trim();
-    if (!apiKey || !groupId || !pkp) {
-      showStatus('wallets-status', 'Fill Group ID and PKP public key.', 'error');
-      return;
-    }
-    hideStatus('wallets-status');
-    const btn = document.getElementById('btn-add-pkp');
-    btn.disabled = true;
-    try {
-      const client = await getClient();
-      await client.addPkpToGroup({ apiKey, groupId, pkpPublicKey: pkp });
-      showStatus('wallets-status', 'PKP added to group.', 'success');
-    } catch (e) {
-      showStatus('wallets-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
-    } finally {
-      btn.disabled = false;
-    }
-  });
-
-  const btnRemovePkp = document.getElementById('btn-remove-pkp');
-  if (btnRemovePkp) {
-    btnRemovePkp.addEventListener('click', async () => {
-      const apiKey = getApiKey();
-      const groupId = document.getElementById('remove-pkp-group').value.trim();
-      const pkp = document.getElementById('remove-pkp-public-key').value.trim();
-      if (!apiKey || !groupId || !pkp) {
-        showStatus('wallets-status', 'Fill Group ID and PKP public key.', 'error');
-        return;
-      }
-      hideStatus('wallets-status');
-      btnRemovePkp.disabled = true;
-      try {
-        const client = await getClient();
-        await client.removePkpFromGroup({ apiKey, groupId, pkpPublicKey: pkp });
-        showStatus('wallets-status', 'PKP removed from group.', 'success');
-      } catch (e) {
-        showStatus('wallets-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
-      } finally {
-        btnRemovePkp.disabled = false;
-      }
-    });
-  }
 }
 
 // ----- Group modals -----
@@ -630,8 +508,8 @@ function openAddGroupModal() {
         allWalletsPermitted: allWallets,
         allActionsPermitted: allActions,
       });
+      await loadGroups();
       showStatus('groups-status', 'Group created.', 'success');
-      loadGroups();
     } catch (e) {
       showStatus('groups-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
     }
@@ -666,8 +544,8 @@ function openEditGroupModal(item) {
     try {
       const client = await getClient();
       await client.updateGroup({ apiKey, groupId: id, name, description: desc, allWalletsPermitted: allWallets, allActionsPermitted: allActions });
+      await loadGroups();
       showStatus('groups-status', 'Group updated.', 'success');
-      loadGroups();
     } catch (e) {
       showStatus('groups-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
     }
@@ -703,9 +581,9 @@ function openAddActionModal() {
     try {
       const client = await getClient();
       await client.addActionToGroup({ apiKey, groupId: gid, actionIpfsCid: cid, name, description: desc });
-      showStatus('actions-status', 'Action added.', 'success');
       if (groupIdEl) groupIdEl.value = gid;
-      loadActions(gid);
+      await loadActions(gid);
+      showStatus('actions-status', 'Action added.', 'success');
     } catch (e) {
       showStatus('actions-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
     }
@@ -737,8 +615,8 @@ function openEditActionModal(item, groupId) {
     try {
       const client = await getClient();
       await client.updateActionMetadata({ apiKey, groupId, actionIpfsCid: cid, name, description: desc });
+      await loadActions(groupId);
       showStatus('actions-status', 'Action updated.', 'success');
-      loadActions(groupId);
     } catch (e) {
       showStatus('actions-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
     }
@@ -757,10 +635,73 @@ async function confirmAndRemoveAction(item, groupId) {
   try {
     const client = await getClient();
     await client.removeActionFromGroup({ apiKey, groupId, actionIpfsCid: cid });
+    await loadActions(groupId);
     showStatus('actions-status', 'Action removed.', 'success');
-    loadActions(groupId);
   } catch (e) {
     showStatus('actions-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+  }
+}
+
+// ----- Usage API key Add modal and delete -----
+function openAddUsageKeyModal() {
+  const body =
+    '<div class="form-group"><label for="modal-usage-name">Name (optional)</label><input type="text" id="modal-usage-name" class="input" placeholder="Optional"></div>' +
+    '<div class="form-group"><label for="modal-usage-desc">Description (optional)</label><input type="text" id="modal-usage-desc" class="input" placeholder="Optional"></div>';
+  const footer =
+    '<button type="button" class="btn btn-outline" id="modal-cancel-btn">Cancel</button>' +
+    '<button type="button" class="btn btn-primary" id="modal-add-btn">Add</button>';
+  openModal('Add usage API key', body, footer);
+  document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
+  document.getElementById('modal-add-btn').addEventListener('click', async () => {
+    const name = document.getElementById('modal-usage-name').value.trim() || '';
+    const description = document.getElementById('modal-usage-desc').value.trim() || '';
+    const apiKey = getApiKey();
+    if (!apiKey) {
+      showStatus('overview-status-usage-keys', 'Log in first.', 'error');
+      return;
+    }
+    closeModal();
+    hideStatus('overview-status-usage-keys');
+    try {
+      const client = await getClient();
+      const expiration = '9999999999';
+      const balance = '1000000000000000000';
+      const res = await client.addUsageApiKey({ apiKey, usageApiKey: '', expiration, balance });
+      const usageKey = res && res.usage_api_key ? res.usage_api_key : '';
+      if (usageKey && (name || description)) {
+        await client.updateUsageApiKeyMetadata({ apiKey, usageApiKey: usageKey, name, description });
+      }
+      if (usageKey) {
+        getUsageKeysStore().push({ usage_api_key: usageKey, name, description });
+        renderUsageKeysTable();
+        updateStatCards();
+      }
+      showStatus('overview-status-usage-keys', 'Usage API key added. Copy and store your key now (shown once): ' + usageKey, 'success');
+    } catch (e) {
+      showStatus('overview-status-usage-keys', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+    }
+  });
+}
+
+async function confirmAndRemoveUsageKey(item) {
+  const masked = maskApiKey(item.usage_api_key || '');
+  const msg = 'Remove usage API key "' + escapeHtml(masked) + '" from this account? This cannot be undone.';
+  const confirmed = await confirmDelete(msg);
+  if (!confirmed) return;
+  const apiKey = getApiKey();
+  if (!apiKey) return;
+  hideStatus('overview-status-usage-keys');
+  try {
+    const client = await getClient();
+    await client.removeUsageApiKey({ apiKey, usageApiKey: item.usage_api_key });
+    const store = getUsageKeysStore();
+    const idx = store.findIndex((k) => k.usage_api_key === item.usage_api_key);
+    if (idx !== -1) store.splice(idx, 1);
+    renderUsageKeysTable();
+    updateStatCards();
+    showStatus('overview-status-usage-keys', 'Usage API key removed.', 'success');
+  } catch (e) {
+    showStatus('overview-status-usage-keys', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
   }
 }
 
@@ -781,8 +722,8 @@ function openAddWalletModal() {
     try {
       const client = await getClient();
       const res = await client.createWallet(apiKey);
+      await loadWallets();
       showStatus('wallets-status', 'Wallet created: ' + (res.wallet_address || ''), 'success');
-      loadWallets();
     } catch (e) {
       showStatus('wallets-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
     }
@@ -818,14 +759,172 @@ function initSidebar() {
 }
 
 // ----- Header -----
+function closeAccountDropdown() {
+  const wrap = document.getElementById('account-dropdown');
+  const trigger = document.getElementById('account-dropdown-trigger');
+  const panel = document.getElementById('account-dropdown-panel');
+  if (wrap) wrap.classList.remove('is-open');
+  if (trigger) {
+    trigger.setAttribute('aria-expanded', 'false');
+  }
+  if (panel) panel.setAttribute('aria-hidden', 'true');
+}
+
 function initHeader() {
-  document.getElementById('logout-btn').addEventListener('click', () => {
-    setApiKey('');
+  const themeToggle = document.getElementById('theme-toggle');
+  if (themeToggle) {
+    themeToggle.addEventListener('click', () => {
+      const next = getTheme() === 'dark' ? 'light' : 'dark';
+      setTheme(next);
+    });
+  }
+
+  const dropdown = document.getElementById('account-dropdown');
+  const trigger = document.getElementById('account-dropdown-trigger');
+  const panel = document.getElementById('account-dropdown-panel');
+  if (trigger && panel) {
+    trigger.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = dropdown?.classList.toggle('is-open');
+      trigger.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+      panel.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+    });
+  }
+
+  document.addEventListener('click', (e) => {
+    if (dropdown && !dropdown.contains(e.target)) closeAccountDropdown();
   });
 
-  document.getElementById('theme-toggle').addEventListener('click', () => {
-    const next = getTheme() === 'dark' ? 'light' : 'dark';
-    setTheme(next);
+  const copyBtn = document.getElementById('account-copy-btn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const key = getApiKey();
+      if (!key) return;
+      try {
+        await navigator.clipboard.writeText(key);
+        const orig = copyBtn.textContent;
+        copyBtn.textContent = 'Copied!';
+        copyBtn.setAttribute('title', 'Copied');
+        setTimeout(() => {
+          copyBtn.textContent = orig;
+          copyBtn.setAttribute('title', 'Copy full API key');
+        }, 1500);
+      } catch (_) {
+        try {
+          const ta = document.createElement('textarea');
+          ta.value = key;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          copyBtn.textContent = 'Copied!';
+          setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+        } catch (__) {}
+      }
+    });
+  }
+
+  const signoutBtn = document.getElementById('account-signout-btn');
+  if (signoutBtn) {
+    signoutBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAccountDropdown();
+      setApiKey('');
+    });
+  }
+}
+
+// ----- Action Runner -----
+function initActionRunner() {
+  const codeEl = document.getElementById('action-runner-code');
+  const paramsEl = document.getElementById('action-runner-params');
+  const btn = document.getElementById('btn-execute-lit-action');
+  const btnGetCid = document.getElementById('btn-get-lit-action-ipfs-cid');
+  const outputEl = document.getElementById('action-runner-output');
+  const statusEl = document.getElementById('action-runner-status');
+
+  if (!btn || !outputEl) return;
+
+  btn.addEventListener('click', async () => {
+    const apiKey = getApiKey();
+    const code = codeEl?.value?.trim() ?? '';
+    const paramsRaw = paramsEl?.value?.trim() ?? '';
+
+    if (!apiKey) {
+      hideStatus('action-runner-status');
+      outputEl.textContent = 'Log in first to execute Lit Actions.';
+      outputEl.className = 'action-runner-output error';
+      return;
+    }
+    if (!code) {
+      hideStatus('action-runner-status');
+      outputEl.textContent = 'Enter Lit Action code.';
+      outputEl.className = 'action-runner-output error';
+      return;
+    }
+
+    let jsParams = null;
+    if (paramsRaw) {
+      try {
+        jsParams = JSON.parse(paramsRaw);
+      } catch (e) {
+        outputEl.textContent = 'Invalid JSON in parameters: ' + (e && e.message ? e.message : String(e));
+        outputEl.className = 'action-runner-output error';
+        return;
+      }
+    }
+
+    hideStatus('action-runner-status');
+    outputEl.textContent = 'Executing…';
+    outputEl.className = 'action-runner-output';
+    btn.disabled = true;
+
+    try {
+      const client = await getClient();
+      const result = await client.litAction({ apiKey, code, jsParams });
+      outputEl.textContent = JSON.stringify(result, null, 2);
+      outputEl.className = 'action-runner-output success';
+    } catch (e) {
+      outputEl.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
+      outputEl.className = 'action-runner-output error';
+    } finally {
+      btn.disabled = false;
+    }
+  });
+
+  btnGetCid?.addEventListener('click', async () => {
+    const code = codeEl?.value?.trim() ?? '';
+    if (!code) {
+      outputEl.textContent = 'Enter Lit Action code to get its IPFS CID.';
+      outputEl.className = 'action-runner-output error';
+      return;
+    }
+    outputEl.textContent = 'Fetching…';
+    outputEl.className = 'action-runner-output';
+    btnGetCid.disabled = true;
+    try {
+      const baseUrl = getBaseUrl().replace(/\/$/, '');
+      const url = baseUrl + '/core/v1/get_lit_action_ipfs_id/' + encodeURIComponent(code);
+      const res = await fetch(url);
+      const text = await res.text();
+      if (!res.ok) throw new Error(text || res.status + ' ' + res.statusText);
+      let cid = text;
+      try {
+        const parsed = JSON.parse(text);
+        if (typeof parsed === 'string') cid = parsed;
+      } catch (_) {}
+      outputEl.textContent = cid;
+      outputEl.className = 'action-runner-output success';
+    } catch (e) {
+      outputEl.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
+      outputEl.className = 'action-runner-output error';
+    } finally {
+      btnGetCid.disabled = false;
+    }
   });
 }
 
@@ -840,6 +939,7 @@ function init() {
   initWallets();
   initGroups();
   initActions();
+  initActionRunner();
   initSidebar();
   initHeader();
 }

@@ -1,8 +1,9 @@
 //! Deploy contracts from a folder of ABI JSON artifacts to a chain.
 //!
-//! Usage: deploy <network> <abis_folder>
+//! Usage: deploy <network> <abis_folder> [secret]
 //!
 //! network: 0 = Anvil, 1 = Yellowstone, 2 = LitMainnet
+//! secret: optional; if blank or omitted, uses the default Anvil dev secret.
 
 use ethers::contract::ContractFactory;
 use ethers::prelude::*;
@@ -17,6 +18,8 @@ const ANVIL_RPC: &str = "http://127.0.0.1:8545";
 const ANVIL_CHAIN_ID: u64 = 31337;
 const YELLOWSTONE_RPC: &str = "https://yellowstone-rpc.litprotocol.com";
 const YELLOWSTONE_CHAIN_ID: u64 = 175188;
+const BASE_SEPOLIA_RPC: &str = "https://sepolia.base.org";
+const BASE_SEPOLIA_CHAIN_ID: u64 = 84532;
 /// Default Anvil account #0 private key (well-known for local dev)
 const DEFAULT_SECRET: &str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
@@ -25,13 +28,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
         eprintln!(
-            "Usage: {} <network> <abis_folder>",
+            "Usage: {} <network> <abis_folder> [secret]",
             args.get(0).unwrap_or(&"deploy".into())
         );
-        eprintln!("  network   - 0 = Anvil, 1 = Yellowstone, 2 = LitMainnet");
+        eprintln!("  network   - 0 = Anvil, 1 = Yellowstone, 2 = Base Sepolia");
         eprintln!(
             "  abis_folder - folder containing contract artifact JSON files (abi + bytecode)"
         );
+        eprintln!("  secret    - optional; deployer private key (hex). If blank or omitted, uses default.");
         std::process::exit(1);
     }
     let network: u16 = match args[1].parse() {
@@ -44,27 +48,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (rpc_url, chain_id) = match network {
         0 => (ANVIL_RPC, ANVIL_CHAIN_ID),
         1 => (YELLOWSTONE_RPC, YELLOWSTONE_CHAIN_ID),
+        2 => (BASE_SEPOLIA_RPC, BASE_SEPOLIA_CHAIN_ID),
         _ => {
-            eprintln!("network must be 0 (Anvil), 1 (Yellowstone), or 2 (LitMainnet)");
+            eprintln!("network must be 0 (Anvil), 1 (Yellowstone), or 2 (Base Sepolia)");
             std::process::exit(1);
         }
     };
 
     let abis_folder = args[2].trim_end_matches('/').to_string();
+    let secret = args
+        .get(3)
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(DEFAULT_SECRET);
     println!("Deploying contracts from folder {} on chain {} with RPC URL {}", args[2], abis_folder, rpc_url);
 
-    deploy_contracts(rpc_url, chain_id,  &abis_folder).await.expect("Failed to deploy contracts");
+    deploy_contracts(rpc_url, chain_id, &abis_folder, secret).await.expect("Failed to deploy contracts");
     Ok(())
 }
 
 async fn deploy_contracts(
     rpc_url: &str,
-    chain_id: u64, 
+    chain_id: u64,
     abis_folder: &str,
+    secret: &str,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let provider = Provider::<Http>::try_from(rpc_url).expect("Failed to create provider");
-    
-    let wallet: LocalWallet = DEFAULT_SECRET
+
+    let wallet: LocalWallet = secret
         .parse::<LocalWallet>()?
         .with_chain_id(chain_id);
     let client = SignerMiddleware::new(provider, wallet);

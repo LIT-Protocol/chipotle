@@ -3,15 +3,14 @@
 //! It holds all configuration data (including secrets) and manages state; none of
 //! which are shared with lit_actions, enabling a secure execution environment.
 
-
 use crate::actions::client::{ClientBuilder, DEFAULT_CLIENT_TIMEOUT_MS_BUFFER};
 use anyhow::{Result, bail};
 use std::path::PathBuf;
 
+use super::Client;
 use lit_actions_grpc::tonic::metadata::MetadataMap;
 use moka::future::Cache;
 use tokio::time::Duration;
-use super::Client;
 
 impl Client {
     pub fn new(socket_path: impl Into<PathBuf>) -> Self {
@@ -72,8 +71,6 @@ impl Client {
     pub fn reset_state(&mut self) {
         std::mem::take(&mut self.state);
     }
-
-
 
     // async fn pay(&mut self, price_component: LitActionPriceComponent, price: u64) -> Result<()> {
     //     if let Err(e) = self.dynamic_payment.add(price_component, price) {

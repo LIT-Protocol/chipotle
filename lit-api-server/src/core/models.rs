@@ -1,6 +1,10 @@
 use anyhow::Result;
 use lit_rust_crypto::blsful::BlsError;
 use rocket::http::Status;
+use rocket_okapi::{
+    OpenApiError, r#gen::OpenApiGenerator, okapi::schemars::JsonSchema,
+    response::OpenApiResponderInner,
+};
 use rocket_responder::{
     ApiResponse, bad_request, internal_server_error, not_found, ok, payment_required,
 };
@@ -8,11 +12,12 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, warn};
 
 // This is the endpoint response error message
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, JsonSchema)]
 pub struct ErrMessage(pub String);
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct ApiStatus {
+    #[schemars(with = "String")]
     pub status: Status,
     pub message: String,
 }
@@ -93,6 +98,7 @@ impl From<ethers::utils::ConversionError> for ApiStatus {
 }
 
 // Wrapper type to implement From trait for Result<T, ApiStatus>
+#[derive(Serialize, Deserialize, JsonSchema)]
 pub struct ApiResult<T>(pub Result<T, ApiStatus>);
 
 impl<T: Serialize> From<ApiResult<T>> for ApiResponse<T, ErrMessage> {
@@ -164,5 +170,20 @@ impl ApiStatus {
             status: Status::InternalServerError,
             message: message.into(),
         }
+    }
+}
+
+impl OpenApiResponderInner for ApiStatus {
+    fn responses(
+        generator: &mut OpenApiGenerator,
+    ) -> std::result::Result<rocket_okapi::okapi::openapi3::Responses, OpenApiError> {
+        let mut responses = rocket_okapi::okapi::openapi3::Responses::default();
+        let schema = generator.json_schema::<ApiStatus>();
+        rocket_okapi::util::add_default_response_schema(
+            &mut responses,
+            "application/json".to_string(),
+            schema,
+        );
+        Ok(responses)
     }
 }

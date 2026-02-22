@@ -19,8 +19,8 @@ use apalis_sql::{
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use super::client::models::{ExecutionOptions, ExecutionState, DenoExecutionEnv};
 use super::client::Client;
+use super::client::models::{DenoExecutionEnv, ExecutionOptions, ExecutionState};
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JobId(TaskId);

@@ -2,12 +2,13 @@ use anyhow::{Result, bail};
 use lit_core::utils::binary::bytes_to_hex;
 use lit_rust_crypto::k256::ecdsa::SigningKey;
 
-use lit_actions_grpc::{proto::*};
+use crate::actions::client::models::SignedData;
+use lit_actions_grpc::proto::*;
 use tracing::{instrument, trace};
+
 use super::Client;
 
 impl Client {
-
     #[instrument(level = "debug", skip(self), err)]
     pub async fn handle_op(
         &mut self,
@@ -53,31 +54,39 @@ impl Client {
                 .into()
             }
             UnionResponse::SignEcdsa(SignEcdsaRequest {
-                to_sign ,
-                public_key ,  // currently this is actually the wallet address.
-                sig_name: _ ,
-                eth_personal_sign: _ ,
-                key_set_id: _ ,
+                to_sign,
+                public_key, // currently this is actually the wallet address.
+                sig_name,
+                eth_personal_sign: _,
+                key_set_id: _,
             }) => {
                 let api_key = self.api_key.clone();
-                let secret_u256 = crate::accounts::get_wallet_derivation(&api_key, &public_key).await?;
+                let secret_u256 =
+                    crate::accounts::get_wallet_derivation(&api_key, &public_key).await?;
                 let mut secret_bytes = [0; 32];
                 secret_u256.to_big_endian(&mut secret_bytes);
 
-
                 let signing_key = SigningKey::from_slice(&secret_bytes)?;
                 let signature = signing_key.sign_recoverable(&to_sign)?;
-                
                 let hex_signature = bytes_to_hex(&signature.0.to_vec());
 
-
-                
-
                 self.state.sign_count += 1;
-                
+                self.state.signed_data.insert(
+                    sig_name,
+                    SignedData {
+                        signing_scheme: "EcdsaK256Sha256".to_string(),
+                        digest: bytes_to_hex(&to_sign),
+                        public_key: public_key,
+                        signature: hex_signature.clone(),
+                    },
+                );
+
                 // let recovery_id = signature.1.to_string();
 
-                SignEcdsaResponse { success: hex_signature }.into()                
+                SignEcdsaResponse {
+                    success: hex_signature,
+                }
+                .into()
             }
             UnionResponse::Sign(SignRequest {
                 to_sign: _,
@@ -136,14 +145,13 @@ impl Client {
                 bail!("CallChild is not implemented");
             }
 
-
             UnionResponse::EncryptBls(EncryptBlsRequest {
                 access_control_conditions: _,
                 to_encrypt: _,
                 key_set_id: _,
             }) => {
-                use lit_rust_crypto::blsful::Bls12381G1;
-                
+                // use lit_rust_crypto::blsful::Bls12381G1;
+
                 bail!("EncryptBls is not implemented");
             }
             UnionResponse::UpdateResourceUsage(UpdateResourceUsageRequest {
@@ -163,8 +171,6 @@ impl Client {
                 sig_name: _,
                 signing_scheme: _,
             }) => {
-
-
                 bail!("SignAsAction is not implemented");
             }
             UnionResponse::GetActionPublicKey(GetActionPublicKeyRequest {
@@ -183,7 +189,6 @@ impl Client {
             }
             UnionResponse::Result(_) => unreachable!(), // handled in main loop
             _ => bail!("Unhandled operation: {:?}", op),
-            
         })
     }
 }

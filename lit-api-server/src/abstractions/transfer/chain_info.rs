@@ -1050,7 +1050,6 @@ impl Chain {
                 signing_scheme: SigningScheme::EcdsaK256Sha256,
                 derivation_path: "m/44'/501'/0'/0'",
             },
-
         }
     }
 

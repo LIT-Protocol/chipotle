@@ -8,14 +8,13 @@ use crate::actions::jobs::{ActionJob, ActionStore, JobId};
 use futures::{FutureExt as _, TryFutureExt};
 use lit_actions_grpc::tokio_stream::StreamExt as _;
 use lit_actions_grpc::tonic::{
-    Code, Extensions, Request, Status, metadata::MetadataMap, transport::Error as TransportError,
+    Code, Extensions, Request, Status, transport::Error as TransportError,
 };
 
 use super::Client;
 use lit_actions_grpc::{proto::*, unix};
-use moka::future::Cache;
 use tokio::time::Duration;
-use tracing::{instrument, trace};
+use tracing::instrument;
 
 impl Client {
     #[instrument(level = "debug", skip_all, ret)]
@@ -142,7 +141,7 @@ impl Client {
 
         let (outbound_tx, outbound_rx) = flume::bounded(0);
 
-        let socket_path = self.socket_path();
+        // let socket_path = self.socket_path();
         let socket_path = PathBuf::from("/tmp/lit_actions.sock");
         let channel = self
             .client_grpc_channels

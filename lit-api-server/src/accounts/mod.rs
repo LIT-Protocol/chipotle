@@ -8,11 +8,6 @@ use ethers::types::{H160, U256};
 use ethers::utils::keccak256;
 use lit_core::utils::binary::hex_to_bytes;
 
-const ACCOUNT_CONFIG_CONTRACT_ADDRESS: &str = "0xcf7ed3acca5a467e9e704c703e8d87f634fb0fc9";
-// for testing, this is the anvil private key
-const ACCOUNT_CONFIG_SIGNER_PRIVATE_KEY: &str =
-    "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
-
 fn api_key_hash(api_key: &str) -> U256 {
     U256::from_big_endian(&keccak256(api_key))
 }
@@ -49,7 +44,10 @@ pub async fn new_account(
 pub async fn account_exists(api_key: &str) -> Result<bool> {
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
-    let exists = contract.account_exists_and_is_mutable(account_api_key_hash).call().await?;
+    let exists = contract
+        .account_exists_and_is_mutable(account_api_key_hash)
+        .call()
+        .await?;
     Ok(exists)
 }
 
@@ -113,11 +111,8 @@ pub async fn add_wallet_to_group(
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let wallet_address_hash = wallet_address_hash(wallet_address)?;
-    let function_call = contract.add_wallet_to_group(
-        account_api_key_hash,
-        group_id,
-        wallet_address_hash,
-    );
+    let function_call =
+        contract.add_wallet_to_group(account_api_key_hash, group_id, wallet_address_hash);
     let tx = function_call.send().await?;
     tx.await?;
     Ok(true)
@@ -160,11 +155,8 @@ pub async fn remove_action_from_group(
 ) -> Result<bool> {
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
-    let function_call = contract.remove_action_from_group(
-        account_api_key_hash,
-        group_id,
-        action_hash,
-    );
+    let function_call =
+        contract.remove_action_from_group(account_api_key_hash, group_id, action_hash);
     let tx = function_call.send().await?;
     tx.await?;
     Ok(true)
@@ -232,11 +224,8 @@ pub async fn remove_wallet_from_group(
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let wallet_address_hash = wallet_address_hash(wallet_address)?;
-    let function_call = contract.remove_wallet_from_group(
-        account_api_key_hash,
-        group_id,
-        wallet_address_hash,
-    );
+    let function_call =
+        contract.remove_wallet_from_group(account_api_key_hash, group_id, wallet_address_hash);
     let tx = function_call.send().await?;
     tx.await?;
     Ok(true)
@@ -303,7 +292,8 @@ pub async fn register_wallet_derivation(
         description.to_string(),
     );
 
-    let tx = function_call.send().await?;
+    let _tx = function_call.send().await?;
+    // optimisticly return true, we will check the tx in the future
     // tx.await?;
     Ok(true)
 }
@@ -361,12 +351,7 @@ pub async fn list_wallets_in_group(
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let page = contract
-        .list_wallets_in_group(
-            account_api_key_hash,
-            group_id,
-            page_number,
-            page_size,
-        )
+        .list_wallets_in_group(account_api_key_hash, group_id, page_number, page_size)
         .call()
         .await?;
     Ok(page)
@@ -382,12 +367,7 @@ pub async fn list_actions(
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let page = contract
-        .list_actions(
-            account_api_key_hash,
-            group_id,
-            page_number,
-            page_size,
-        )
+        .list_actions(account_api_key_hash, group_id, page_number, page_size)
         .call()
         .await?;
     Ok(page)

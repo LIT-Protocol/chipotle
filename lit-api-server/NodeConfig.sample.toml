@@ -1,0 +1,9 @@
+## This is a sample configuration file for the lit-api-server.
+## It is used to configure the chain and the secret key for the account config contract.
+## The chain name is the name of the chain to use for the account config contract.
+## The secret is the private key for the account config contract.
+
+[chain]
+name = "anvil"
+contract_address = "0xbe3f614224386bf7f82b4e521bddf92fe56c670d"
+secret = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
