@@ -415,3 +415,21 @@ pub async fn list_api_keys(
         .await?;
     Ok(page)
 }
+
+pub async fn debit_api_key(api_key: &str, amount: U256) -> Result<bool> {
+    let contract = get_signable_account_config_contract().await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let function_call = contract.debit_api_key(account_api_key_hash, amount);
+    let _tx = function_call.send().await?;
+    // tx.await?;
+    Ok(true)
+}
+
+pub async fn credit_api_key(api_key: &str, amount: U256) -> Result<bool> {  
+    let contract = get_signable_account_config_contract().await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let function_call = contract.credit_api_key(account_api_key_hash, amount);
+    let _tx = function_call.send().await?;
+    // tx.await?;
+    Ok(true)
+}

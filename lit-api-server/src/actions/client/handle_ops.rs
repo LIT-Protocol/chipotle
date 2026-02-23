@@ -1,10 +1,7 @@
 use anyhow::{Result, bail};
-use lit_core::utils::binary::bytes_to_hex;
-use lit_rust_crypto::k256::ecdsa::SigningKey;
-
-use crate::actions::client::models::SignedData;
 use lit_actions_grpc::proto::*;
 use tracing::{instrument, trace};
+use super::op_code_helpers;
 
 use super::Client;
 
@@ -60,42 +57,21 @@ impl Client {
                 eth_personal_sign: _,
                 key_set_id: _,
             }) => {
-                let api_key = self.api_key.clone();
-                let secret_u256 = match crate::accounts::get_wallet_derivation_from_pubkey(&api_key, &public_key).await {
-                    Ok(secret_u256) => secret_u256,
-                    Err(e) => bail!("Error getting wallet derivation: {:?}", e),
-                };
 
-                if secret_u256 == ethers::types::U256::zero() {
-                    bail!("Wallet not found");
-                }
-                
-                let mut secret_bytes = [0; 32];
-                secret_u256.to_big_endian(&mut secret_bytes);
+                let signing_scheme = "EcdsaK256Sha256";
 
-                let signing_key = match SigningKey::from_slice(&secret_bytes) {
-                    Ok(signing_key) => signing_key,
-                    Err(e) => bail!("Error creating signing key: {:?}", e),
-                };
-
-                let signature = match signing_key.sign_recoverable(&to_sign) {
-                    Ok(signature) => signature,
+                let (sig_name, signed_data) = match  op_code_helpers::sign_with_pkp(&self.api_key, &public_key, &to_sign, &sig_name, signing_scheme).await {
+                    Ok((sig_name, signed_data)) => (sig_name, signed_data),
                     Err(e) => bail!("Error signing: {:?}", e),
                 };
-                let hex_signature = bytes_to_hex(&signature.0.to_vec());
+
+                let hex_signature = signed_data.signature.clone();
 
                 self.state.sign_count += 1;
                 self.state.signed_data.insert(
                     sig_name,
-                    SignedData {
-                        signing_scheme: "EcdsaK256Sha256".to_string(),
-                        digest: bytes_to_hex(&to_sign),
-                        public_key: public_key,
-                        signature: hex_signature.clone(),
-                    },
+                    signed_data,
                 );
-
-                // let recovery_id = signature.1.to_string();
 
                 SignEcdsaResponse {
                     success: hex_signature,
@@ -103,13 +79,30 @@ impl Client {
                 .into()
             }
             UnionResponse::Sign(SignRequest {
-                to_sign: _,
-                public_key: _,
-                sig_name: _,
-                signing_scheme: _,
+                to_sign,
+                public_key,
+                sig_name,
+                signing_scheme,
                 key_set_id: _,
             }) => {
-                bail!("Sign is not implemented");
+                let (sig_name, signed_data) = match  op_code_helpers::sign_with_pkp(&self.api_key, &public_key, &to_sign, &sig_name, &signing_scheme).await {
+                    Ok((sig_name, signed_data)) => (sig_name, signed_data),
+                    Err(e) => bail!("Error signing: {:?}", e),
+                };
+
+                let hex_signature = signed_data.signature.clone();
+
+                self.state.sign_count += 1;
+                self.state.signed_data.insert(
+                    sig_name,
+                    signed_data,
+                );
+
+
+                SignResponse {
+                    success: hex_signature,
+                }
+                .into()
             }
             UnionResponse::CallChild(CallChildRequest {
                 ipfs_id: _,

@@ -40,7 +40,9 @@ RUN apt-get update -y && apt-get install -y --no-install-recommends \
 
 # Copy built binaries into PATH
 COPY --from=builder /app/lit-api-server/target/debug/lit-api-server /usr/local/bin/
+COPY --from=builder /app/lit-api-server/NodeConfig.demo.toml /usr/local/bin/NodeConfig.toml
 COPY --from=builder /app/lit-actions/target/debug/lit_actions /usr/local/bin/
+
 
 # Copy static assets (served by lit-api-server)
 COPY --from=builder /app/lit-api-server/static /app/lit-api-server/static/

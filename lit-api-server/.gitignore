@@ -1,4 +1,4 @@
 /target
 NodeConfig.toml
-NodeConfig Copy.toml
+NodeConfig.demo.toml
 lookup.db

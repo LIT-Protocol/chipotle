@@ -2,7 +2,7 @@ pub mod client;
 pub mod execution;
 pub mod handle_ops;
 pub mod models;
-pub mod op_codes;
+pub mod op_code_helpers;
 
 use crate::actions::client::models::DenoExecutionEnv;
 use crate::actions::client::models::ExecutionState;
