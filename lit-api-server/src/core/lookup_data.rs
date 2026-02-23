@@ -2,8 +2,8 @@
 //! Tables: `wallets` (keyHash → pubkey, wallet_address, secret), `api_keys` (keyHash → apiKey).
 
 use anyhow::Result;
-use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::SqlitePool;
+use sqlx::sqlite::SqliteConnectOptions;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
@@ -17,36 +17,39 @@ pub fn db_path() -> Result<PathBuf> {
 }
 
 async fn open_pool(db_path: &Path) -> Result<SqlitePool> {
+    let need_tables = !db_path.exists();
+
     let path_str = db_path
         .to_str()
         .ok_or_else(|| anyhow::anyhow!("Invalid DB path"))?;
+
     let opts = SqliteConnectOptions::from_str(path_str)?.create_if_missing(true);
-    
     let pool = SqlitePool::connect_with(opts).await?;
+    if need_tables {
+        ensure_tables(&pool).await?;
+    }
     Ok(pool)
 }
 
 /// Creates the database file and tables (`wallets`, `api_keys`) if they do not exist.
 /// Safe to call at startup; no-op if the tables already exist.
-pub async fn ensure_tables() -> Result<()> {
-    let pool = open_pool(&db_path()?).await?;
+pub async fn ensure_tables(pool: &SqlitePool) -> Result<()> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS wallets (keyHash TEXT NOT NULL, pubkey TEXT NOT NULL, wallet_address TEXT NOT NULL, secret TEXT NOT NULL)",
     )
-    .execute(&pool)
+    .execute(pool)
     .await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_wallets_keyHash ON wallets (keyHash)")
-        .execute(&pool)
+        .execute(pool)
         .await?;
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS api_keys (keyHash TEXT NOT NULL, apiKey TEXT NOT NULL)",
     )
-    .execute(&pool)
+    .execute(pool)
     .await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_api_keys_keyHash ON api_keys (keyHash)")
-        .execute(&pool)
+        .execute(pool)
         .await?;
-    pool.close().await;
     Ok(())
 }
 
@@ -104,6 +107,7 @@ pub async fn lookup_wallets_by_key_hashes(
     if key_hashes.is_empty() {
         return Ok(Vec::new());
     }
+
     let pool = open_pool(&db_path()?).await?;
     let placeholders = key_hashes
         .iter()
@@ -152,12 +156,11 @@ pub async fn add_api_key(key_hash: &str, api_key: &str) -> Result<()> {
 /// Looks up `apiKey` by `keyHash`. Returns `None` if not found.
 pub async fn get_api_key_by_key_hash(key_hash: &str) -> Result<Option<String>> {
     let pool = open_pool(&db_path()?).await?;
-    let row: Option<(String,)> = sqlx::query_as(
-        "SELECT apiKey FROM api_keys WHERE keyHash = ?1 LIMIT 1",
-    )
-    .bind(key_hash)
-    .fetch_optional(&pool)
-    .await?;
+    let row: Option<(String,)> =
+        sqlx::query_as("SELECT apiKey FROM api_keys WHERE keyHash = ?1 LIMIT 1")
+            .bind(key_hash)
+            .fetch_optional(&pool)
+            .await?;
     pool.close().await;
     Ok(row.map(|(api_key,)| api_key))
 }
@@ -170,6 +173,7 @@ pub async fn get_api_keys_by_key_hashes(
     if key_hashes.is_empty() {
         return Ok(Vec::new());
     }
+
     let pool = open_pool(&db_path()?).await?;
     let placeholders = key_hashes
         .iter()

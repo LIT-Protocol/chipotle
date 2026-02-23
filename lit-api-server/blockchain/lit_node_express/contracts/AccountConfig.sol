@@ -58,6 +58,7 @@ contract AccountConfig {
         EnumerableSet.UintSet actionHashesList; // set of actions that the account is a member of
         mapping(uint256 => Metadata) actionMetadata; // mapping from a keccak256 of an action ipfs cid to it's metadata
         bool managed; // whether the LIT-node can help manage the key.
+        mapping(uint256 => uint256) walletAddressHash; // mapping from a wallet address hash to an index, allowing us to get a list of all wallet hashes for this account
         mapping(uint256 => uint256) wallet_derivation; // mapping from a wallet address hash to it's derivation path
         // in theory the following two meta data mappings can be blank - can be helpful in a UI, though.
         mapping(uint256 => Metadata) walletDerivationMetadata; // mapping from a wallet address hash to it's metadata
@@ -68,7 +69,7 @@ contract AccountConfig {
 
     // storage data for the account config
     mapping(uint256 => Account) accounts; // mapping from a given api key to it's config
-    mapping(uint256 => uint256) walletAddressHashes; // mapping from a counter to a wallet address hash, allowing us to get a list of all wallet hashes ever generated
+    mapping(uint256 => uint256) allWalletAddressHashes; // mapping from a counter to a wallet address hash, allowing us to get a list of all wallet hashes ever generated
     address public owner;
     uint256 public nextWalletCount; // counter for creating unique wallet address hashes
 
@@ -284,7 +285,8 @@ contract AccountConfig {
         account
             .walletDerivationMetadata[walletAddressHash]
             .description = description;
-        walletAddressHashes[nextWalletCount] = walletAddressHash;
+        account.walletAddressHash[account.walletCount] = walletAddressHash;
+        allWalletAddressHashes[nextWalletCount] = walletAddressHash;
         account.walletCount++;
         nextWalletCount++;
     }
@@ -453,23 +455,23 @@ contract AccountConfig {
         revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
         Account storage account = accounts[accountApiKeyHash];
 
-        if (pageSize > nextWalletCount) {
-            pageSize = nextWalletCount;
+        if (pageSize > account.walletCount) {
+            pageSize = account.walletCount;
             pageNumber = 0;
         }
 
         uint256 startIndex = pageNumber * pageSize;
         uint256 endIndex = startIndex + pageSize;
 
-        if (endIndex > nextWalletCount) {
-            endIndex = nextWalletCount;
+        if (endIndex > account.walletCount) {
+            endIndex = account.walletCount;
         }
 
         uint256 pageLength = endIndex - startIndex;
         Metadata[] memory pageMetadata = new Metadata[](pageLength);
         for (uint256 i = 0; i < pageLength; i++) {
             pageMetadata[i] = account.walletDerivationMetadata[
-                walletAddressHashes[startIndex + i]
+                account.walletAddressHash[startIndex + i]
             ];
         }
         return pageMetadata;

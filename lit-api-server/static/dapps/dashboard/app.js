@@ -187,6 +187,12 @@ function maskApiKey(key) {
   return key.slice(0, 6) + '••••••••' + key.slice(-4);
 }
 
+/** First 4 and last 4 characters for display (e.g. "abcd...wxyz"). */
+function keyPreview(key) {
+  if (!key || key.length < 9) return '••••••••';
+  return key.slice(0, 4) + '…' + key.slice(-4);
+}
+
 function refreshOverviewAccount() {
   // Overview no longer displays API key or status; kept for any future use.
 }
@@ -310,10 +316,8 @@ function renderGroupsTable(items) {
   if (empty) empty.style.display = 'none';
   items.forEach((item) => {
     const tr = document.createElement('tr');
-    const id = String(item.id);
     tr.innerHTML =
       '<td><strong>' + escapeHtml(item.name || '') + '</strong></td>' +
-      '<td class="mono">' + escapeHtml(id) + '</td>' +
       '<td class="mono">' + escapeHtml(item.description || '') + '</td>' +
       '<td class="cell-actions"></td>';
     const actionsCell = tr.querySelector('.cell-actions');
@@ -376,12 +380,55 @@ function renderWalletsTable(items) {
   }
   if (empty) empty.style.display = 'none';
   items.forEach((item) => {
-    const tr = document.createElement('tr');
     const address = item.wallet_address ?? item.address ?? item.name ?? '';
-    const id = item.id != null ? String(item.id) : '—';
+    const pubkey = item.public_key ?? '';
+    const pubkeyPreview = pubkey ? keyPreview(pubkey) : '—';
+    const description = item.description ?? '';
+    const tr = document.createElement('tr');
     tr.innerHTML =
-      '<td class="mono">' + escapeHtml(address) + '</td>' +
-      '<td class="mono">' + escapeHtml(id) + '</td>';
+      '<td class="mono cell-address"></td>' +
+      '<td class="mono cell-pubkey"></td>' +
+      '<td class="mono">' + escapeHtml(description) + '</td>';
+    const addressCell = tr.querySelector('.cell-address');
+    const addressCopyBtn = document.createElement('button');
+    addressCopyBtn.type = 'button';
+    addressCopyBtn.className = 'btn-copy-key';
+    addressCopyBtn.textContent = address;
+    addressCopyBtn.title = 'Copy full address';
+    addressCopyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(address);
+        const orig = addressCopyBtn.textContent;
+        addressCopyBtn.textContent = 'Copied!';
+        addressCopyBtn.title = 'Copied!';
+        setTimeout(() => { addressCopyBtn.textContent = orig; addressCopyBtn.title = 'Copy full address'; }, 1500);
+      } catch (_) {
+        addressCopyBtn.title = 'Copy failed';
+      }
+    });
+    addressCell.appendChild(addressCopyBtn);
+    const pubkeyCell = tr.querySelector('.cell-pubkey');
+    if (pubkey) {
+      const pubkeyCopyBtn = document.createElement('button');
+      pubkeyCopyBtn.type = 'button';
+      pubkeyCopyBtn.className = 'btn-copy-key';
+      pubkeyCopyBtn.textContent = pubkeyPreview;
+      pubkeyCopyBtn.title = 'Copy full public key';
+      pubkeyCopyBtn.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(pubkey);
+          const orig = pubkeyCopyBtn.textContent;
+          pubkeyCopyBtn.textContent = 'Copied!';
+          pubkeyCopyBtn.title = 'Copied!';
+          setTimeout(() => { pubkeyCopyBtn.textContent = orig; pubkeyCopyBtn.title = 'Copy full public key'; }, 1500);
+        } catch (_) {
+          pubkeyCopyBtn.title = 'Copy failed';
+        }
+      });
+      pubkeyCell.appendChild(pubkeyCopyBtn);
+    } else {
+      pubkeyCell.textContent = '—';
+    }
     tbody.appendChild(tr);
   });
 }
@@ -405,17 +452,35 @@ function renderUsageKeysTable() {
   if (empty) empty.style.display = 'none';
   items.forEach((item) => {
     const key = item.usage_api_key ?? item.api_key ?? '';
-    const masked = maskApiKey(key);
+    const preview = keyPreview(key);
     const expiration = item.expiration != null ? String(item.expiration) : '—';
     const balance = item.balance != null ? String(item.balance) : '—';
     const tr = document.createElement('tr');
     tr.innerHTML =
-      '<td class="mono">' + escapeHtml(masked) + '</td>' +
+      '<td class="mono cell-key"></td>' +
       '<td>' + escapeHtml(item.name || '') + '</td>' +
       '<td class="mono">' + escapeHtml(item.description || '') + '</td>' +
       '<td class="mono">' + escapeHtml(expiration) + '</td>' +
       '<td class="mono">' + escapeHtml(balance) + '</td>' +
       '<td class="cell-actions"></td>';
+    const keyCell = tr.querySelector('.cell-key');
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'btn-copy-key';
+    copyBtn.textContent = preview;
+    copyBtn.title = 'Copy full key';
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(key);
+        const orig = copyBtn.textContent;
+        copyBtn.textContent = 'Copied!';
+        copyBtn.title = 'Copied!';
+        setTimeout(() => { copyBtn.textContent = orig; copyBtn.title = 'Copy full key'; }, 1500);
+      } catch (_) {
+        copyBtn.title = 'Copy failed';
+      }
+    });
+    keyCell.appendChild(copyBtn);
     const actionsCell = tr.querySelector('.cell-actions');
     const delBtn = document.createElement('button');
     delBtn.type = 'button';

@@ -10,14 +10,27 @@ use ethers::types::{H160, U256};
 use ethers::utils::keccak256;
 use lit_core::utils::binary::{bytes_to_hex, hex_to_bytes};
 
-fn api_key_hash(api_key: &str) -> U256 {
-    U256::from_big_endian(&keccak256(api_key))
+pub fn api_key_hash(api_key_base_64: &str) -> U256 {
+    U256::from_big_endian(&keccak256(api_key_base_64.as_bytes()))
 }
 
 /// keccak256 of wallet address bytes (hex string with or without 0x) as U256.
-fn wallet_address_hash(wallet_address_hex: &str) -> Result<U256> {
-    let bytes = hex_to_bytes(wallet_address_hex)?;
-    Ok(U256::from_big_endian(&keccak256(&bytes)))
+pub fn wallet_address_hash(wallet_address: H160) -> U256 {        
+    U256::from_big_endian(&keccak256(wallet_address.as_bytes()))
+}
+
+pub fn derivation_path(wallet_address: H160) -> U256 {
+    U256::from_big_endian(&keccak256(wallet_address.as_bytes()))
+}
+
+pub fn address_from_pubkey(pubkey: &str) -> Result<H160> {
+    let pubkey_bytes = hex_to_bytes(pubkey)?;
+    address_from_pubkey_bytes(&pubkey_bytes)
+}
+
+pub fn address_from_pubkey_bytes(pubkey_bytes: &[u8]) -> Result<H160> {
+    let address = H160::from_slice(&keccak256(&pubkey_bytes)[12..]);
+    Ok(address)
 }
 
 /// Create a new account. `initial_balance` is stored on the account's apiKey (AccountConfig.accountApiKey.balance).
@@ -31,8 +44,7 @@ pub async fn new_account(
     
     let contract = get_signable_account_config_contract().await?;
     let api_key_hash = api_key_hash(api_key);
-    let api_key_hash_string = bytes_to_hex( &keccak256(api_key.as_bytes()));
-    lookup_data::add_api_key(&api_key_hash_string, api_key).await?;
+    lookup_data::add_api_key(&api_key_hash.to_string(), api_key).await?;
 
     let function_call = contract.new_account(
         api_key_hash,
@@ -42,8 +54,9 @@ pub async fn new_account(
         creator_wallet_address,
         initial_balance,
     );
-    let tx = function_call.send().await?;
-    tx.await?;
+    let _tx = function_call.send().await?;
+    // tx.await?;
+
     Ok(true)
 }
 
@@ -80,8 +93,8 @@ pub async fn add_group(
         all_wallets_permitted,
         all_actions_permitted,
     );
-    let tx = function_call.send().await?;
-    tx.await?;
+    let _tx = function_call.send().await?;
+    // tx.await?;
     Ok(true)
 }
 
@@ -103,8 +116,8 @@ pub async fn add_action_to_group(
         name.to_string(),
         description.to_string(),
     );
-    let tx = function_call.send().await?;
-    tx.await?;
+    let _tx = function_call.send().await?;
+    // tx.await?;
     Ok(true)
 }
 
@@ -112,21 +125,21 @@ pub async fn add_action_to_group(
 pub async fn add_wallet_to_group(
     api_key: &str,
     group_id: U256,
-    wallet_address: &str,
+    wallet_address: H160,
 ) -> Result<bool> {
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
-    let wallet_address_hash = wallet_address_hash(wallet_address)?;
+    let wallet_address_hash = wallet_address_hash(wallet_address);
     let function_call =
         contract.add_wallet_to_group(account_api_key_hash, group_id, wallet_address_hash);
-    let tx = function_call.send().await?;
-    tx.await?;
+    let _tx = function_call.send().await?;
+    // tx.await?;
     Ok(true)
 }
 
 /// Add a PKP to a group (alias for add_wallet_to_group; hashes the given string and adds to group).
-pub async fn add_pkp_to_group(api_key: &str, group_id: U256, pkp_public_key: &str) -> Result<bool> {
-    add_wallet_to_group(api_key, group_id, pkp_public_key).await
+pub async fn add_pkp_to_group(api_key: &str, group_id: U256, wallet_address: H160) -> Result<bool> {
+    add_wallet_to_group(api_key, group_id, wallet_address).await
 }
 
 /// Update group metadata and permission flags (AccountConfig.updateGroup).
@@ -148,8 +161,8 @@ pub async fn update_group(
         all_wallets_permitted,
         all_actions_permitted,
     );
-    let tx = function_call.send().await?;
-    tx.await?;
+    let _tx = function_call.send().await?;
+    // tx.await?;
     Ok(true)
 }
 
@@ -163,8 +176,8 @@ pub async fn remove_action_from_group(
     let account_api_key_hash = api_key_hash(api_key);
     let function_call =
         contract.remove_action_from_group(account_api_key_hash, group_id, action_hash);
-    let tx = function_call.send().await?;
-    tx.await?;
+    let _tx = function_call.send().await?;
+    // tx.await?;
     Ok(true)
 }
 
@@ -195,8 +208,8 @@ pub async fn update_action_metadata(
         name.to_string(),
         description.to_string(),
     );
-    let tx = function_call.send().await?;
-    tx.await?;
+    let _tx = function_call.send().await?;
+    // tx.await?;
     Ok(true)
 }
 
@@ -216,8 +229,8 @@ pub async fn update_usage_api_key_metadata(
         name.to_string(),
         description.to_string(),
     );
-    let tx = function_call.send().await?;
-    tx.await?;
+    let _tx = function_call.send().await?;
+    // tx.await?;
     Ok(true)
 }
 
@@ -225,15 +238,15 @@ pub async fn update_usage_api_key_metadata(
 pub async fn remove_wallet_from_group(
     api_key: &str,
     group_id: U256,
-    wallet_address: &str,
+    wallet_address: H160,
 ) -> Result<bool> {
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
-    let wallet_address_hash = wallet_address_hash(wallet_address)?;
+    let wallet_address_hash = wallet_address_hash(wallet_address);
     let function_call =
         contract.remove_wallet_from_group(account_api_key_hash, group_id, wallet_address_hash);
-    let tx = function_call.send().await?;
-    tx.await?;
+    let _tx = function_call.send().await?;
+    // tx.await?;
     Ok(true)
 }
 
@@ -241,9 +254,9 @@ pub async fn remove_wallet_from_group(
 pub async fn remove_pkp_from_group(
     api_key: &str,
     group_id: U256,
-    pkp_public_key: &str,
+    wallet_address: H160,
 ) -> Result<bool> {
-    remove_wallet_from_group(api_key, group_id, pkp_public_key).await
+    remove_wallet_from_group(api_key, group_id, wallet_address).await
 }
 
 /// Add a usage API key to an account (usageApiKey in AccountConfig.sol).
@@ -254,18 +267,18 @@ pub async fn add_usage_api_key(
     balance: U256,
 ) -> Result<bool> {
     let contract = get_signable_account_config_contract().await?;
+    tracing::info!("Adding usage API key to account: {}, usage_api_key: {}, expiration: {}, balance: {}", api_key, usage_api_key, expiration, balance);
     let account_api_key_hash = api_key_hash(api_key);
     let usage_api_key_hash = api_key_hash(usage_api_key);
-    let usage_api_key_hash_string = bytes_to_hex( &keccak256(usage_api_key.as_bytes()));
-    lookup_data::add_api_key(&usage_api_key_hash_string, usage_api_key).await?;
+    lookup_data::add_api_key(&usage_api_key_hash.to_string(), usage_api_key).await?;
     let function_call = contract.add_api_key(
         account_api_key_hash,
         usage_api_key_hash,
         expiration,
         balance,
     );
-    let tx = function_call.send().await?;
-    tx.await?;
+    let _tx = function_call.send().await?;
+    // tx.await?;
     Ok(true)
 }
 
@@ -277,8 +290,8 @@ pub async fn remove_usage_api_key(api_key: &str, usage_api_key: &str) -> Result<
     let usage_api_key_hash_string = bytes_to_hex( &keccak256(usage_api_key.as_bytes()));
     lookup_data::delete_api_key_by_key_hash(&usage_api_key_hash_string).await?;
     let function_call = contract.remove_usage_api_key(account_api_key_hash, usage_api_key_hash);
-    let tx = function_call.send().await?;
-    tx.await?;
+    let _tx = function_call.send().await?;
+    // tx.await?;
     Ok(true)
 }
 
@@ -286,14 +299,14 @@ pub async fn remove_usage_api_key(api_key: &str, usage_api_key: &str) -> Result<
 /// `wallet_address` is the hex address (with or without 0x). `derivation_path` is the path stored on-chain.
 pub async fn register_wallet_derivation(
     api_key: &str,
-    wallet_address: &str,
+    wallet_address: H160,
     derivation_path: U256,
     name: &str,
     description: &str,
 ) -> Result<bool> {
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
-    let wallet_address_hash = wallet_address_hash(wallet_address)?;
+    let wallet_address_hash = wallet_address_hash(wallet_address);
     let function_call = contract.register_wallet_derivation(
         account_api_key_hash,
         wallet_address_hash,
@@ -308,12 +321,17 @@ pub async fn register_wallet_derivation(
     Ok(true)
 }
 
+pub async fn get_wallet_derivation_from_pubkey(api_key: &str, pubkey: &str) -> Result<U256> {
+    let wallet_address = address_from_pubkey(pubkey)?;
+    get_wallet_derivation(api_key, wallet_address).await    
+}
+
 /// Get the derivation path for a wallet address under an account (read-only).
 /// `wallet_address` is the hex address (with or without 0x). Returns the U256 derivation path, or errors if not set.
-pub async fn get_wallet_derivation(api_key: &str, wallet_address: &str) -> Result<U256> {
+pub async fn get_wallet_derivation(api_key: &str, wallet_address: H160) -> Result<U256> {
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
-    let wallet_address_hash = wallet_address_hash(wallet_address)?;
+    let wallet_address_hash = wallet_address_hash(wallet_address);
     let derivation = contract
         .get_wallet_derivation(account_api_key_hash, wallet_address_hash)
         .call()

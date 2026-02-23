@@ -980,6 +980,26 @@ textarea.input.textarea-sm {
   fill: currentColor;
 }
 
+/* Usage API key copy button (first 4…last 4, click to copy) */
+.btn-copy-key {
+  font-family: ui-monospace, monospace;
+  font-size: inherit;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  transition: color 0.15s;
+}
+
+.btn-copy-key:hover {
+  color: var(--text);
+}
+
 .cell-actions {
   text-align: right;
   white-space: nowrap;

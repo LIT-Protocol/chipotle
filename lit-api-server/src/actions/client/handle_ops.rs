@@ -61,13 +61,27 @@ impl Client {
                 key_set_id: _,
             }) => {
                 let api_key = self.api_key.clone();
-                let secret_u256 =
-                    crate::accounts::get_wallet_derivation(&api_key, &public_key).await?;
+                let secret_u256 = match crate::accounts::get_wallet_derivation_from_pubkey(&api_key, &public_key).await {
+                    Ok(secret_u256) => secret_u256,
+                    Err(e) => bail!("Error getting wallet derivation: {:?}", e),
+                };
+
+                if secret_u256 == ethers::types::U256::zero() {
+                    bail!("Wallet not found");
+                }
+                
                 let mut secret_bytes = [0; 32];
                 secret_u256.to_big_endian(&mut secret_bytes);
 
-                let signing_key = SigningKey::from_slice(&secret_bytes)?;
-                let signature = signing_key.sign_recoverable(&to_sign)?;
+                let signing_key = match SigningKey::from_slice(&secret_bytes) {
+                    Ok(signing_key) => signing_key,
+                    Err(e) => bail!("Error creating signing key: {:?}", e),
+                };
+
+                let signature = match signing_key.sign_recoverable(&to_sign) {
+                    Ok(signature) => signature,
+                    Err(e) => bail!("Error signing: {:?}", e),
+                };
                 let hex_signature = bytes_to_hex(&signature.0.to_vec());
 
                 self.state.sign_count += 1;
