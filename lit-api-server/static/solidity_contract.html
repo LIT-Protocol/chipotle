@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AccountConfig — Developer Documentation</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --surface: #1a2332;
+      --border: #2d3a4f;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --code: #79c0ff;
+      --green: #3fb950;
+      --orange: #d29922;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+      line-height: 1.6;
+      color: var(--text);
+      background: var(--bg);
+      margin: 0;
+      padding: 2rem;
+      max-width: 56rem;
+      margin-left: auto;
+      margin-right: auto;
+    }
+    h1, h2, h3 { font-weight: 600; margin-top: 2rem; margin-bottom: 0.75rem; color: var(--text); }
+    h1 { font-size: 1.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+    h2 { font-size: 1.35rem; }
+    h3 { font-size: 1.1rem; color: var(--text-muted); }
+    p { margin: 0.5rem 0; color: var(--text-muted); }
+    .notice { margin: 0.5rem 0; color: var(--text); }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    code, .sig, .type { font-family: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace; font-size: 0.9em; }
+    .sig { color: var(--code); word-break: break-all; }
+    .type { color: var(--orange); }
+    section { margin-bottom: 2rem; }
+    .doc-block {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin: 0.75rem 0;
+    }
+    .doc-block h3 { margin-top: 0; }
+    .param-list, .returns { margin: 0.5rem 0; font-size: 0.95rem; }
+    .param-list dt { color: var(--text-muted); margin-top: 0.35rem; }
+    .param-list dd { margin-left: 1rem; color: var(--text); }
+    ul.errors-list, ul.struct-fields { list-style: none; padding-left: 0; margin: 0.5rem 0; }
+    ul.errors-list li, ul.struct-fields li { padding: 0.25rem 0; color: var(--text-muted); }
+    ul.errors-list code, ul.struct-fields code { color: var(--code); }
+    .badge { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.4rem; border-radius: 4px; margin-left: 0.5rem; }
+    .badge.public { background: rgba(63, 185, 80, 0.2); color: var(--green); }
+    .badge.private { background: rgba(210, 153, 34, 0.2); color: var(--orange); }
+    .badge.internal { background: rgba(88, 166, 255, 0.2); color: var(--accent); }
+    nav { margin-bottom: 2rem; }
+    nav a { margin-right: 1rem; }
+  </style>
+</head>
+<body>
+  <nav><a href="#overview">Overview</a> <a href="#errors">Errors</a> <a href="#structs">Structs</a> <a href="#state">State</a> <a href="#functions">Functions</a></nav>
+
+  <header>
+    <h1>AccountConfig</h1>
+    <p><strong>Author:</strong> Brendon Paul</p>
+    <p><strong>License:</strong> MIT · <code>pragma solidity ^0.8.0</code></p>
+  </header>
+
+  <section id="overview">
+    <h2>Overview</h2>
+    <p class="notice">This contract is used to manage the configuration of accounts and their associated data.</p>
+    <p>Mappings using <code>uint256</code> are always <code>keccak256</code> of whatever is being mapped. Each struct contains a <code>keccak256</code> that matches the mapping to prove existence of the struct.</p>
+  </section>
+
+  <section id="errors">
+    <h2>Errors</h2>
+    <ul class="errors-list">
+      <li><code>AccountDoesNotExist(uint256 apiKey)</code></li>
+      <li><code>GroupDoesNotExist(uint256 apiKey, uint256 groupId)</code></li>
+      <li><code>WalletDoesNotExist(uint256 apiKey, uint256 groupId, uint256 Wallet)</code></li>
+      <li><code>ActionDoesNotExist(uint256 apiKey, uint256 groupId, uint256 action)</code></li>
+      <li><code>UsageApiKeyDoesNotExist(uint256 apiKey, uint256 usageApiKey)</code></li>
+      <li><code>InsufficientBalance(uint256 apiKey, uint256 amount)</code></li>
+      <li><code>OnlyApiPayerOrPricingOperator(address caller)</code></li>
+    </ul>
+  </section>
+
+  <section id="structs">
+    <h2>Structs</h2>
+
+    <div class="doc-block">
+      <h3>Metadata</h3>
+      <p class="notice">Metadata struct for account, group, action, and wallet.</p>
+      <ul class="struct-fields">
+        <li><code>uint256 id</code> — keccak256 of the metadata id; used to prove existence of the struct.</li>
+        <li><code>string name</code> — Name of the metadata.</li>
+        <li><code>string description</code> — Description of the metadata.</li>
+      </ul>
+    </div>
+
+    <div class="doc-block">
+      <h3>UsageApiKey</h3>
+      <p class="notice">UsageApiKey struct for usage API keys.</p>
+      <ul class="struct-fields">
+        <li><code>Metadata metadata</code> — Name and description of the usage API key.</li>
+        <li><code>uint256 apiKeyHash</code> — keccak256 of the base64-encoded API key.</li>
+        <li><code>uint256 expiration</code> — Expiration date of the API key.</li>
+        <li><code>uint256 balance</code> — Balance of the API key (funds for payment).</li>
+      </ul>
+    </div>
+
+    <div class="doc-block">
+      <h3>Group</h3>
+      <p class="notice">Group struct for groups.</p>
+      <ul class="struct-fields">
+        <li><code>Metadata metadata</code> — Name and description of the group.</li>
+        <li><code>EnumerableSet.UintSet permitted_actions_cid_hash</code> — keccak256 of action IPFS CIDs.</li>
+        <li><code>EnumerableSet.UintSet Wallets_hash</code> — keccak256 of wallet public keys.</li>
+        <li><code>bool all_wallets_permitted</code> — Whether all wallets are permitted to use the group.</li>
+        <li><code>bool all_actions_permitted</code> — Whether all actions are permitted in the group.</li>
+      </ul>
+    </div>
+
+    <div class="doc-block">
+      <h3>Account</h3>
+      <p class="notice">Account struct for accounts.</p>
+      <ul class="struct-fields">
+        <li><code>Metadata accountMetadata</code> — Name and description of the account.</li>
+        <li><code>UsageApiKey accountApiKey</code> — API key used to access the account.</li>
+        <li><code>address creatorWalletAddress</code> — Wallet address of the account creator.</li>
+        <li><code>EnumerableSet.UintSet usageApiKeysList</code> — Set of usage API key hashes.</li>
+        <li><code>mapping(uint256 => UsageApiKey) usageApiKeys</code> — Usage key hash → config.</li>
+        <li><code>EnumerableSet.UintSet groupList</code> — List of group IDs.</li>
+        <li><code>mapping(uint256 => Group) groups</code> — Group ID → group config.</li>
+        <li><code>EnumerableSet.UintSet actionHashesList</code> — Set of action hashes.</li>
+        <li><code>mapping(uint256 => Metadata) actionMetadata</code> — Action CID hash → metadata.</li>
+        <li><code>bool managed</code> — Whether the LIT-node can help manage the key.</li>
+        <li><code>mapping(uint256 => uint256) walletAddressHash</code> — Wallet address hash → index.</li>
+        <li><code>mapping(uint256 => uint256) wallet_derivation</code> — Wallet address hash → derivation path.</li>
+        <li><code>mapping(uint256 => Metadata) walletDerivationMetadata</code> — Wallet hash → metadata.</li>
+        <li><code>uint256 walletCount</code>, <code>actionCount</code>, <code>groupCount</code> — Counters.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="state">
+    <h2>State Variables</h2>
+    <ul class="struct-fields">
+      <li><code>mapping(uint256 => Account) accounts</code> — API key hash → account config.</li>
+      <li><code>mapping(uint256 => uint256) allApiKeyHashes</code> — Any API key hash → master account API key hash.</li>
+      <li><code>mapping(uint256 => uint256) allWalletAddressHashes</code> — Counter → wallet address hash.</li>
+      <li><code>mapping(uint256 => uint256) pricing</code> — Pricing item ID → price.</li>
+      <li><code>address public api_payer</code> — Pays for state mutations from API calls; may mutate on behalf of key holder.</li>
+      <li><code>address public pricing_operator</code> — May mutate pricing and related state.</li>
+      <li><code>uint256 public nextWalletCount</code> — Counter for globally unique wallet hashes.</li>
+    </ul>
+  </section>
+
+  <section id="functions">
+    <h2>Functions</h2>
+
+    <h3>Constructor</h3>
+    <div class="doc-block">
+      <p class="notice">Initializes the contract with the deployer as <code>api_payer</code> and <code>pricing_operator</code>, and sets initial pricing.</p>
+      <p><span class="sig">constructor()</span> <span class="badge public">public</span></p>
+    </div>
+
+    <h3>Account lifecycle</h3>
+    <div class="doc-block">
+      <p class="notice">Creates a new account with the given API key hash, metadata, and optional managed flag.</p>
+      <p><span class="sig">newAccount(apiKeyHash, managed, accountName, accountDescription, creatorWalletAddress, initialBalance)</span> <span class="badge public">public</span></p>
+      <dl class="param-list">
+        <dt><code>apiKeyHash</code></dt><dd>Keccak256 hash of the base64-encoded account API key.</dd>
+        <dt><code>managed</code></dt><dd>If true, the LIT-node (api_payer) may mutate the account on behalf of the holder.</dd>
+        <dt><code>accountName</code>, <code>accountDescription</code></dt><dd>Display name and description.</dd>
+        <dt><code>creatorWalletAddress</code></dt><dd>Wallet address of the account creator (used for access control).</dd>
+        <dt><code>initialBalance</code></dt><dd>Initial balance assigned to the account API key.</dd>
+      </dl>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Returns whether the account exists and the caller is allowed to mutate it (api_payer for managed accounts, or the creator).</p>
+      <p><span class="sig">accountExistsAndIsMutable(apiKeyHash)</span> <span class="badge public">public view</span></p>
+      <p><strong>Returns:</strong> True if the account exists and <code>msg.sender</code> may mutate it.</p>
+    </div>
+
+    <h3>Usage API keys</h3>
+    <div class="doc-block">
+      <p class="notice">Adds a usage API key to the account with the given expiration and balance.</p>
+      <p><span class="sig">addApiKey(accountApiKeyHash, usageApiKeyHash, expiration, balance)</span> <span class="badge public">public</span></p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Updates the name and description metadata for a usage API key.</p>
+      <p><span class="sig">updateUsageApiKeyMetadata(accountApiKeyHash, usageApiKeyHash, name, description)</span> <span class="badge public">public</span></p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Removes a usage API key from the account (key can no longer be used; balance is effectively forfeit).</p>
+      <p><span class="sig">removeUsageApiKey(accountApiKeyHash, usageApiKeyHash)</span> <span class="badge public">public</span></p>
+    </div>
+
+    <h3>Groups</h3>
+    <div class="doc-block">
+      <p class="notice">Creates a new group for the account with optional permitted actions, wallets, and permission flags.</p>
+      <p><span class="sig">addGroup(accountApiKeyHash, name, description, permitted_actions, Wallets, all_wallets_permitted, all_actions_permitted)</span> <span class="badge public">public</span></p>
+      <p><code>permitted_actions</code> — Array of keccak256 hashes of permitted action IPFS CIDs. <code>Wallets</code> — Array of keccak256 hashes of permitted wallet public keys.</p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Updates a group's metadata and permission flags.</p>
+      <p><span class="sig">updateGroup(accountApiKeyHash, groupId, name, description, all_wallets_permitted, all_actions_permitted)</span> <span class="badge public">public</span></p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Adds a wallet (by its address hash) to a group's permitted set.</p>
+      <p><span class="sig">addWalletToGroup(accountApiKeyHash, groupId, walletAddressHash)</span> <span class="badge public">public</span></p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Removes a wallet from a group's permitted wallets set.</p>
+      <p><span class="sig">removeWalletFromGroup(accountApiKeyHash, groupId, walletAddressHash)</span> <span class="badge public">public</span></p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Adds an action (by its CID hash) to a group and stores its metadata.</p>
+      <p><span class="sig">addActionToGroup(accountApiKeyHash, groupId, action, name, description)</span> <span class="badge public">public</span></p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Updates the name and description metadata for an action in a group.</p>
+      <p><span class="sig">updateActionMetadata(accountApiKeyHash, actionHash, groupId, name, description)</span> <span class="badge public">public</span></p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Removes an action from a group's permitted actions set.</p>
+      <p><span class="sig">removeActionFromGroup(accountApiKeyHash, groupId, action)</span> <span class="badge public">public</span></p>
+    </div>
+
+    <h3>Wallets (derivation)</h3>
+    <div class="doc-block">
+      <p class="notice">Registers a wallet derivation (address hash, derivation path, and metadata) for the account.</p>
+      <p><span class="sig">registerWalletDerivation(accountApiKeyHash, walletAddressHash, derivationPath, name, description)</span> <span class="badge public">public</span></p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Returns the derivation path registered for a wallet address hash under the account.</p>
+      <p><span class="sig">getWalletDerivation(apiKeyHash, walletAddressHash)</span> <span class="badge public">public view</span></p>
+      <p><strong>Returns:</strong> The derivation path (index) for the wallet.</p>
+    </div>
+
+    <h3>List / query (paginated)</h3>
+    <div class="doc-block">
+      <p class="notice">Returns a paginated list of usage API keys (UsageApiKey structs) for the account.</p>
+      <p><span class="sig">listApiKeys(accountApiKeyHash, pageNumber, pageSize)</span> <span class="badge public">public view</span></p>
+      <p><strong>Returns:</strong> Array of <code>UsageApiKey</code> for the requested page.</p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Returns a paginated list of group metadata for the account.</p>
+      <p><span class="sig">listGroups(accountApiKeyHash, pageNumber, pageSize)</span> <span class="badge public">public view</span></p>
+      <p><strong>Returns:</strong> Array of <code>Metadata</code> (id, name, description) for each group on the page.</p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Returns a paginated list of wallet derivation metadata for the account.</p>
+      <p><span class="sig">listWallets(accountApiKeyHash, pageNumber, pageSize)</span> <span class="badge public">public view</span></p>
+      <p><strong>Returns:</strong> Array of <code>Metadata</code> for each wallet on the page.</p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Returns a paginated list of wallet metadata permitted in the given group.</p>
+      <p><span class="sig">listWalletsInGroup(accountApiKeyHash, groupId, pageNumber, pageSize)</span> <span class="badge public">public view</span></p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Returns a paginated list of action metadata permitted in the given group.</p>
+      <p><span class="sig">listActions(accountApiKeyHash, groupId, pageNumber, pageSize)</span> <span class="badge public">public view</span></p>
+      <p><strong>Returns:</strong> Array of <code>Metadata</code> for actions in the group on the requested page.</p>
+    </div>
+
+    <h3>Balance &amp; pricing</h3>
+    <div class="doc-block">
+      <p class="notice">Decreases the balance of an account or usage API key by amount. Callable only by <code>api_payer</code> or <code>pricing_operator</code>.</p>
+      <p><span class="sig">debitApiKey(apiKeyHash, amount)</span> <span class="badge public">public</span></p>
+      <p>Reverts with <code>InsufficientBalance</code> if balance &lt; amount.</p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Increases the balance of an account or usage API key by amount. Callable only by <code>api_payer</code> or <code>pricing_operator</code>.</p>
+      <p><span class="sig">creditApiKey(apiKeyHash, amount)</span> <span class="badge public">public</span></p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Returns the price for a pricing item (e.g. cost per Lit Action run).</p>
+      <p><span class="sig">getPricing(pricingItemId)</span> <span class="badge public">public view</span></p>
+      <p><strong>Returns:</strong> The price (e.g. in wei or smallest unit).</p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Sets the price for a pricing item. Callable only by <code>api_payer</code> or <code>pricing_operator</code>.</p>
+      <p><span class="sig">setPricing(pricingItemId, price)</span> <span class="badge public">public</span></p>
+    </div>
+
+    <h3>Access control</h3>
+    <div class="doc-block">
+      <p class="notice">Reverts with <code>OnlyApiPayerOrPricingOperator</code> if caller is neither <code>api_payer</code> nor <code>pricing_operator</code>.</p>
+      <p><span class="sig">CheckIfApiPayerOrPricingOperator(caller)</span> <span class="badge internal">internal</span></p>
+    </div>
+    <div class="doc-block">
+      <p class="notice">Sets the <code>pricing_operator</code> address. Callable only by the current <code>api_payer</code> or <code>pricing_operator</code>.</p>
+      <p><span class="sig">setPricingOperator(newPricingOperator)</span> <span class="badge public">public</span></p>
+    </div>
+
+    <h3>Internal / private helpers</h3>
+    <p>These revert or return existence checks; they are used by the public API and are documented in the contract NatSpec:</p>
+    <ul class="struct-fields">
+      <li><code>usageApiKeyExists</code> — Returns whether a usage API key exists (reverts if account not mutable by caller).</li>
+      <li><code>groupExists</code> — Returns whether a group exists for the account.</li>
+      <li><code>actionExists</code> — Returns whether an action is permitted in the given group.</li>
+      <li><code>WalletExists</code> — Returns whether a wallet is in the group's permitted set.</li>
+      <li><code>revertIfAccountDoesNotExistAndIsMutable</code> — Reverts with <code>AccountDoesNotExist</code> if account missing or immutable by caller.</li>
+      <li><code>revertIfGroupDoesNotExist</code>, <code>revertIfActionDoesNotExist</code>, <code>revertIfWalletDoesNotExist</code>, <code>revertIfUsageApiKeyDoesNotExist</code> — Revert with the corresponding error if the entity does not exist.</li>
+    </ul>
+  </section>
+
+  <footer style="margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 0.9rem;">
+    <p>Generated from <code>AccountConfig.sol</code> NatSpec and comments. Contract author: Brendon Paul.</p>
+  </footer>
+</body>
+</html>

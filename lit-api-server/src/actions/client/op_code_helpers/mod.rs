@@ -44,3 +44,8 @@ pub async fn sign_with_pkp(
         },
     ))
 }
+
+
+pub async fn decrypt_with_pkp() {
+
+}
