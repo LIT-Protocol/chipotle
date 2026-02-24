@@ -66,8 +66,10 @@ export interface SignWithPkpResponse {
  */
 export type LitActionRequestJsParams = unknown | null;
 
+/**
+ * API key via header.
+ */
 export interface LitActionRequest {
-  api_key: string;
   code: string;
   /** @nullable */
   js_params?: LitActionRequestJsParams;
@@ -81,10 +83,9 @@ export interface AccountOpResponse {
 }
 
 /**
- * Request for add_group. permitted_actions and pkps are keccak256 hashes as hex strings (with or without 0x).
+ * Request for add_group. permitted_actions and pkps are keccak256 hashes as hex strings (with or without 0x). API key via header.
  */
 export interface AddGroupRequest {
-  api_key: string;
   /** Name of the group (Group.metadata.name in AccountConfig.sol). */
   group_name: string;
   /** Description of the group (Group.metadata.description in AccountConfig.sol). */
@@ -100,7 +101,6 @@ export interface AddGroupRequest {
 }
 
 export interface AddActionToGroupRequest {
-  api_key: string;
   group_id: string;
   /** IPFS CID for the action (will be keccak256-hashed on server). */
   action_ipfs_cid: string;
@@ -117,14 +117,12 @@ export interface AddActionToGroupRequest {
 }
 
 export interface AddPkpToGroupRequest {
-  api_key: string;
   /** Group ID (decimal or hex string). */
   group_id: string;
   pkp_public_key: string;
 }
 
 export interface RemovePkpFromGroupRequest {
-  api_key: string;
   group_id: string;
   pkp_public_key: string;
 }
@@ -138,24 +136,24 @@ export interface AddUsageApiKeyResponse {
 }
 
 /**
- * Request for add_usage_api_key. expiration and balance as decimal strings (e.g. unix timestamp, wei).
+ * Request for add_usage_api_key. expiration and balance as decimal strings (e.g. unix timestamp, wei). API key via header.
  */
 export interface AddUsageApiKeyRequest {
-  api_key: string;
   expiration: string;
   balance: string;
 }
 
+/**
+ * API key via header.
+ */
 export interface RemoveUsageApiKeyRequest {
-  api_key: string;
   usage_api_key: string;
 }
 
 /**
- * Request for update_group (AccountConfig.updateGroup).
+ * Request for update_group (AccountConfig.updateGroup). API key via header.
  */
 export interface UpdateGroupRequest {
-  api_key: string;
   /** Group ID (decimal or hex string). */
   group_id: string;
   name: string;
@@ -165,20 +163,18 @@ export interface UpdateGroupRequest {
 }
 
 /**
- * Request for remove_action_from_group. action_ipfs_cid is keccak256-hashed on server.
+ * Request for remove_action_from_group. action_ipfs_cid is keccak256-hashed on server. API key via header.
  */
 export interface RemoveActionFromGroupRequest {
-  api_key: string;
   group_id: string;
   /** IPFS CID for the action (keccak256-hashed on server). */
   action_ipfs_cid: string;
 }
 
 /**
- * Request for update_action_metadata. action_ipfs_cid is keccak256-hashed on server.
+ * Request for update_action_metadata. action_ipfs_cid is keccak256-hashed on server. API key via header.
  */
 export interface UpdateActionMetadataRequest {
-  api_key: string;
   group_id: string;
   /** IPFS CID for the action (keccak256-hashed on server). */
   action_ipfs_cid: string;
@@ -187,10 +183,9 @@ export interface UpdateActionMetadataRequest {
 }
 
 /**
- * Request for update_usage_api_key_metadata (AccountConfig.updateUsageApiKeyMetadata).
+ * Request for update_usage_api_key_metadata (AccountConfig.updateUsageApiKeyMetadata). API key via header.
  */
 export interface UpdateUsageApiKeyMetadataRequest {
-  api_key: string;
   usage_api_key: string;
   name: string;
   description: string;
@@ -228,35 +223,156 @@ export interface NodeChainConfigResponse {
 }
 
 export type ListApiKeysParams = {
-  api_key: string;
   page_number: string;
   page_size: string;
+};
+
+export type ListApiKeysHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type AccountExistsHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type CreateWalletHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type LitActionHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type AddGroupHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type AddActionToGroupHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type AddPkpToGroupHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type RemovePkpFromGroupHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type AddUsageApiKeyHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type RemoveUsageApiKeyHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type UpdateGroupHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type RemoveActionFromGroupHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type UpdateActionMetadataHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type UpdateUsageApiKeyMetadataHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
 };
 
 export type ListGroupsParams = {
-  api_key: string;
   page_number: string;
   page_size: string;
+};
+
+export type ListGroupsHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
 };
 
 export type ListWalletsParams = {
-  api_key: string;
   page_number: string;
   page_size: string;
+};
+
+export type ListWalletsHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
 };
 
 export type ListWalletsInGroupParams = {
-  api_key: string;
   group_id: string;
   page_number: string;
   page_size: string;
 };
 
+export type ListWalletsInGroupHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
 export type ListActionsParams = {
-  api_key: string;
   group_id: string;
   page_number: string;
   page_size: string;
+};
+
+export type ListActionsHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
 };
 
 /**
@@ -277,6 +393,7 @@ export class LitApiServerClient {
 
   listApiKeys(
     params: ListApiKeysParams,
+    headers: ListApiKeysHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -294,6 +411,16 @@ export class LitApiServerClient {
     );
     const response = http.request("GET", k6url.toString(), undefined, {
       ...mergedRequestParameters,
+      headers: {
+        ...mergedRequestParameters?.headers,
+        // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+        ...Object.fromEntries(
+          Object.entries(headers || {}).map(([key, value]) => [
+            key,
+            String(value),
+          ]),
+        ),
+      },
     });
     let data;
 
@@ -349,24 +476,31 @@ export class LitApiServerClient {
   }
 
   accountExists(
-    apiKey: string,
+    headers: AccountExistsHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
     data: boolean;
     operationId: string;
   } {
-    const k6url = new URL(this.cleanBaseUrl + `/account_exists/${apiKey}`);
+    const k6url = new URL(this.cleanBaseUrl + `/account_exists`);
     const mergedRequestParameters = this._mergeRequestParameters(
       requestParameters || {},
       this.commonRequestParameters,
     );
-    const response = http.request(
-      "GET",
-      k6url.toString(),
-      undefined,
-      mergedRequestParameters,
-    );
+    const response = http.request("GET", k6url.toString(), undefined, {
+      ...mergedRequestParameters,
+      headers: {
+        ...mergedRequestParameters?.headers,
+        // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+        ...Object.fromEntries(
+          Object.entries(headers || {}).map(([key, value]) => [
+            key,
+            String(value),
+          ]),
+        ),
+      },
+    });
     let data;
 
     try {
@@ -382,24 +516,31 @@ export class LitApiServerClient {
   }
 
   createWallet(
-    apiKey: string,
+    headers: CreateWalletHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
     data: CreateWalletResponse;
     operationId: string;
   } {
-    const k6url = new URL(this.cleanBaseUrl + `/create_wallet/${apiKey}`);
+    const k6url = new URL(this.cleanBaseUrl + `/create_wallet`);
     const mergedRequestParameters = this._mergeRequestParameters(
       requestParameters || {},
       this.commonRequestParameters,
     );
-    const response = http.request(
-      "GET",
-      k6url.toString(),
-      undefined,
-      mergedRequestParameters,
-    );
+    const response = http.request("GET", k6url.toString(), undefined, {
+      ...mergedRequestParameters,
+      headers: {
+        ...mergedRequestParameters?.headers,
+        // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+        ...Object.fromEntries(
+          Object.entries(headers || {}).map(([key, value]) => [
+            key,
+            String(value),
+          ]),
+        ),
+      },
+    });
     let data;
 
     try {
@@ -416,6 +557,7 @@ export class LitApiServerClient {
 
   litAction(
     litActionRequest: LitActionRequest,
+    headers: LitActionHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -436,6 +578,13 @@ export class LitApiServerClient {
         headers: {
           ...mergedRequestParameters?.headers,
           "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
         },
       },
     );
@@ -490,6 +639,7 @@ export class LitApiServerClient {
 
   addGroup(
     addGroupRequest: AddGroupRequest,
+    headers: AddGroupHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -510,6 +660,13 @@ export class LitApiServerClient {
         headers: {
           ...mergedRequestParameters?.headers,
           "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
         },
       },
     );
@@ -529,6 +686,7 @@ export class LitApiServerClient {
 
   addActionToGroup(
     addActionToGroupRequest: AddActionToGroupRequest,
+    headers: AddActionToGroupHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -549,6 +707,13 @@ export class LitApiServerClient {
         headers: {
           ...mergedRequestParameters?.headers,
           "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
         },
       },
     );
@@ -568,6 +733,7 @@ export class LitApiServerClient {
 
   addPkpToGroup(
     addPkpToGroupRequest: AddPkpToGroupRequest,
+    headers: AddPkpToGroupHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -588,6 +754,13 @@ export class LitApiServerClient {
         headers: {
           ...mergedRequestParameters?.headers,
           "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
         },
       },
     );
@@ -607,6 +780,7 @@ export class LitApiServerClient {
 
   removePkpFromGroup(
     removePkpFromGroupRequest: RemovePkpFromGroupRequest,
+    headers: RemovePkpFromGroupHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -627,6 +801,13 @@ export class LitApiServerClient {
         headers: {
           ...mergedRequestParameters?.headers,
           "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
         },
       },
     );
@@ -646,6 +827,7 @@ export class LitApiServerClient {
 
   addUsageApiKey(
     addUsageApiKeyRequest: AddUsageApiKeyRequest,
+    headers: AddUsageApiKeyHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -666,6 +848,13 @@ export class LitApiServerClient {
         headers: {
           ...mergedRequestParameters?.headers,
           "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
         },
       },
     );
@@ -685,6 +874,7 @@ export class LitApiServerClient {
 
   removeUsageApiKey(
     removeUsageApiKeyRequest: RemoveUsageApiKeyRequest,
+    headers: RemoveUsageApiKeyHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -705,6 +895,13 @@ export class LitApiServerClient {
         headers: {
           ...mergedRequestParameters?.headers,
           "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
         },
       },
     );
@@ -724,6 +921,7 @@ export class LitApiServerClient {
 
   updateGroup(
     updateGroupRequest: UpdateGroupRequest,
+    headers: UpdateGroupHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -744,6 +942,13 @@ export class LitApiServerClient {
         headers: {
           ...mergedRequestParameters?.headers,
           "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
         },
       },
     );
@@ -763,6 +968,7 @@ export class LitApiServerClient {
 
   removeActionFromGroup(
     removeActionFromGroupRequest: RemoveActionFromGroupRequest,
+    headers: RemoveActionFromGroupHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -783,6 +989,13 @@ export class LitApiServerClient {
         headers: {
           ...mergedRequestParameters?.headers,
           "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
         },
       },
     );
@@ -802,6 +1015,7 @@ export class LitApiServerClient {
 
   updateActionMetadata(
     updateActionMetadataRequest: UpdateActionMetadataRequest,
+    headers: UpdateActionMetadataHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -822,6 +1036,13 @@ export class LitApiServerClient {
         headers: {
           ...mergedRequestParameters?.headers,
           "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
         },
       },
     );
@@ -841,6 +1062,7 @@ export class LitApiServerClient {
 
   updateUsageApiKeyMetadata(
     updateUsageApiKeyMetadataRequest: UpdateUsageApiKeyMetadataRequest,
+    headers: UpdateUsageApiKeyMetadataHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -861,6 +1083,13 @@ export class LitApiServerClient {
         headers: {
           ...mergedRequestParameters?.headers,
           "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
         },
       },
     );
@@ -880,6 +1109,7 @@ export class LitApiServerClient {
 
   listGroups(
     params: ListGroupsParams,
+    headers: ListGroupsHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -897,6 +1127,16 @@ export class LitApiServerClient {
     );
     const response = http.request("GET", k6url.toString(), undefined, {
       ...mergedRequestParameters,
+      headers: {
+        ...mergedRequestParameters?.headers,
+        // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+        ...Object.fromEntries(
+          Object.entries(headers || {}).map(([key, value]) => [
+            key,
+            String(value),
+          ]),
+        ),
+      },
     });
     let data;
 
@@ -914,6 +1154,7 @@ export class LitApiServerClient {
 
   listWallets(
     params: ListWalletsParams,
+    headers: ListWalletsHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -931,6 +1172,16 @@ export class LitApiServerClient {
     );
     const response = http.request("GET", k6url.toString(), undefined, {
       ...mergedRequestParameters,
+      headers: {
+        ...mergedRequestParameters?.headers,
+        // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+        ...Object.fromEntries(
+          Object.entries(headers || {}).map(([key, value]) => [
+            key,
+            String(value),
+          ]),
+        ),
+      },
     });
     let data;
 
@@ -948,6 +1199,7 @@ export class LitApiServerClient {
 
   listWalletsInGroup(
     params: ListWalletsInGroupParams,
+    headers: ListWalletsInGroupHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -965,6 +1217,16 @@ export class LitApiServerClient {
     );
     const response = http.request("GET", k6url.toString(), undefined, {
       ...mergedRequestParameters,
+      headers: {
+        ...mergedRequestParameters?.headers,
+        // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+        ...Object.fromEntries(
+          Object.entries(headers || {}).map(([key, value]) => [
+            key,
+            String(value),
+          ]),
+        ),
+      },
     });
     let data;
 
@@ -982,6 +1244,7 @@ export class LitApiServerClient {
 
   listActions(
     params: ListActionsParams,
+    headers: ListActionsHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -999,6 +1262,16 @@ export class LitApiServerClient {
     );
     const response = http.request("GET", k6url.toString(), undefined, {
       ...mergedRequestParameters,
+      headers: {
+        ...mergedRequestParameters?.headers,
+        // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+        ...Object.fromEntries(
+          Object.entries(headers || {}).map(([key, value]) => [
+            key,
+            String(value),
+          ]),
+        ),
+      },
     });
     let data;
 
