@@ -196,4 +196,25 @@ export default function () {
     return;
   }
   const groupId = groups[groups.length - 1].id; // use the most recently created group
+
+  // ── 9. addActionToGroup ───────────────────────────────────────────────────
+  const addActionRes = client.addActionToGroup(
+    {
+      group_id: groupId,
+      action_ipfs_cid: ipfsId,
+      name: "hello-world",
+      description: "Hello World lit action",
+    },
+    authHeaders,
+  );
+  if (!assertOk("addActionToGroup", "POST /add_action_to_group", addActionRes)) return;
+  check(addActionRes.response, {
+    "addActionToGroup success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+  });
 }
