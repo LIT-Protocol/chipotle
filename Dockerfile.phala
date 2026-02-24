@@ -23,13 +23,13 @@ RUN sed -i 's/, "tests"//; s/"tests", //' lit-actions/Cargo.toml
 # Build lit-actions binary
 RUN cd lit-actions && cargo build --bin lit_actions
 
-# Copy and build lit-api-server
-COPY lit-api-server ./lit-api-server/
-RUN cd lit-api-server && cargo build --bin lit-api-server --features phala
-
 # Copy and build lit-static
 COPY lit-static ./lit-static/
 RUN cd lit-static && cargo build --bin lit-static
+
+# Copy and build lit-api-server (last because it takes longest to build)
+COPY lit-api-server ./lit-api-server/
+RUN cd lit-api-server && cargo build --bin lit-api-server --features phala
 
 # Runtime stage
 FROM debian:bookworm-slim AS runtime
