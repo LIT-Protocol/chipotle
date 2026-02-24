@@ -373,4 +373,20 @@ export default function () {
       }
     },
   });
+
+  // ── 18. updateUsageApiKeyMetadata ─────────────────────────────────────────
+  const updateUsageKeyRes = client.updateUsageApiKeyMetadata(
+    { usage_api_key: usageApiKey, name: "k6-usage-key", description: "Integration test usage key" },
+    authHeaders,
+  );
+  if (!assertOk("updateUsageApiKeyMetadata", "POST /update_usage_api_key_metadata", updateUsageKeyRes)) return;
+  check(updateUsageKeyRes.response, {
+    "updateUsageApiKeyMetadata success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+  });
 }
