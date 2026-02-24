@@ -389,4 +389,20 @@ export default function () {
       }
     },
   });
+
+  // ── 19. removeUsageApiKey ─────────────────────────────────────────────────
+  const removeUsageKeyRes = client.removeUsageApiKey(
+    { usage_api_key: usageApiKey },
+    authHeaders,
+  );
+  if (!assertOk("removeUsageApiKey", "POST /remove_usage_api_key", removeUsageKeyRes)) return;
+  check(removeUsageKeyRes.response, {
+    "removeUsageApiKey success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+  });
 }
