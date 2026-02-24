@@ -80,10 +80,10 @@ Configure these in **Settings → Secrets and variables → Actions**:
 | Secret | Description |
 |--------|-------------|
 | `PHALA_CLOUD_API_KEY` | From [Phala Cloud Dashboard](https://cloud.phala.network/dashboard) → Avatar → API Tokens |
-| `DOCKER_REGISTRY_USERNAME` | Docker Hub or GHCR username |
-| `DOCKER_REGISTRY_PASSWORD` | Docker Hub access token or GHCR PAT |
-| `DOCKER_IMAGE` | Full image path, e.g. `docker.io/username/lit-node-express` or `ghcr.io/owner/lit-node-express` |
-| `PHALA_APP_NAME` | CVM name, e.g. `lit-api-server` |
+| `DOCKERHUB_USERNAME` (variable) | Docker Hub username |
+| `DOCKER_IMAGE` (variable) | Full image path, e.g. `docker.io/username/lit-node-express` |
+| `PHALA_APP_NAME` (variable) | CVM name, e.g. `lit-api-server` |
+| `DOCKERHUB_TOKEN` (secret) | Docker Hub PAT (Account Settings > Security > Access Tokens) |
 
 ## Workflow Steps
 
@@ -155,6 +155,31 @@ LIT_API_KEY=your-base64-api-key just k6-test
 ```
 
 The full flow creates a new account and group when `LIT_API_KEY` is not set; this requires the AccountConfig contract to be deployed and configured on the chain (e.g. Base Sepolia).
+
+## Phala Networking
+
+Phala Cloud offers several networking options when scaling a service to multiple CVMs.
+
+This deployment uses the **built-in gateway** for automated load balancing and simplicity.
+
+### Built-in Gateway (Current Choice)
+
+The Phala gateway terminates TLS and load-balances traffic across CVM instances. We use this for zero-configuration deployment.
+
+**Session handling:** There is no session affinity. Each request may hit a different instance.
+
+**WebSocket connections:** The TCP connection stays with one instance for its lifetime, but reconnections may hit a different instance.
+
+### Other Options
+
+- **API Gateway pattern** — Run a CVM as an API gateway that proxies to backend CVMs. Use when you need customized routing, centralized auth, or routing logic under your control. See [Phala Architecture: API Gateway Pattern](https://docs.phala.com/phala-cloud/networking/architecture#api-gateway-pattern).
+- **TLS passthrough / custom domains** — For end-to-end TLS or custom domain attestation; requires dstack-ingress in your CVM.
+
+We stick to the built-in gateway for automated load balancing and deployment simplicity.
+
+### Custom Domain Redirect
+
+We use a simple HTTP redirect from `*.litprotocol.com` to the Phala gateway domain (`*.phala.network`). Users visiting the litprotocol.com URL are redirected to the CVM's Phala endpoint; TLS terminates at the Phala gateway. The custom domain is a convenience shortcut during development and INSECURE — users must verify attestation at the gateway's `/.dstack/` endpoints on the final `*.phala.network` URL but see [CPL-5: Use Custom domain on CVM security flow for dev.chipotle.litprotocol.com](https://linear.app/litprotocol/issue/CPL-5/use-custom-domain-on-cvm-security-flow-for-devchipotlelitprotocolcom) on how to fix this.
 
 ## Current Limitations
 

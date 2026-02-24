@@ -35,16 +35,16 @@ setup:
     npm install -g phala
     phala --version
 
-# Build Docker image for Phala deployment (linux/amd64 for Phala CVM)
+# Build Docker image for Phala deployment (release mode, linux/amd64 for Phala CVM)
 [group: 'deploy']
 docker-build: _check_docker
+    #!/usr/bin/env sh
+    set -eu
     docker build --platform linux/amd64 -f Dockerfile.phala -t {{image}} .
+    docker push {{image}}
 
 [group: 'deploy']
 docker-push: docker-build
-    #!/usr/bin/env sh
-    set -eu
-    docker push {{image}}
 
 
 # Deploy to Phala Cloud (requires: docker login, phala login)
@@ -58,18 +58,10 @@ deploy: docker-push _check_phala
     sed "s|\${DOCKER_IMAGE}|{{image}}|g" docker-compose.phala.yml > docker-compose.deploy.yml
     phala deploy -c docker-compose.deploy.yml --cvm-id {{app_name}} --instance-type {{instance_type}}
 
-# First-time deploy (provision new CVM). Use deploy for subsequent upgrades.
-[group: 'deploy']
-deploy-new: docker-push _check_phala
-    #!/usr/bin/env sh
-    set -eu
-    sed "s|\${DOCKER_IMAGE}|{{image}}|g" docker-compose.phala.yml > docker-compose.deploy.yml
-    phala deploy -c docker-compose.deploy.yml -n {{app_name}} --instance-type {{instance_type}}
-
 # Run locally with Docker Compose (no Phala Cloud)
 [group: 'deploy']
-run-local: docker-build
-    DOCKER_IMAGE={{image}} docker compose -f docker-compose.phala.yml up -d
+docker-run-local: docker-build
+    DOCKER_IMAGE={{image}} docker compose -f docker-compose.deploy.yml up -d
 
 [private]
 _check_docker:
@@ -82,3 +74,7 @@ _check_phala:
     #!/usr/bin/env sh
     set -eu
     command -v phala >/dev/null 2>&1 || { echo "error: phala not found. Run: just setup"; exit 1; }
+
+[group: 'debug']
+ssh:
+    phala ssh

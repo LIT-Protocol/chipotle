@@ -20,16 +20,16 @@ COPY lit-actions ./lit-actions/
 # Remove tests from workspace (excluded by .dockerignore; not needed for release build)
 RUN sed -i 's/, "tests"//; s/"tests", //' lit-actions/Cargo.toml
 
-# Build lit-actions binary
-RUN cd lit-actions && cargo build --bin lit_actions
+# Build lit-actions binary (release)
+RUN cd lit-actions && cargo build --release --bin lit_actions
 
 # Copy and build lit-static
 COPY lit-static ./lit-static/
-RUN cd lit-static && cargo build --bin lit-static
+RUN cd lit-static && cargo build --release --bin lit-static
 
 # Copy and build lit-api-server (last because it takes longest to build)
 COPY lit-api-server ./lit-api-server/
-RUN cd lit-api-server && cargo build --bin lit-api-server --features phala
+RUN cd lit-api-server && cargo build --release --bin lit-api-server --features phala
 
 # Runtime stage
 FROM debian:bookworm-slim AS runtime
@@ -42,9 +42,9 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy binaries from builder
-COPY --from=builder /build/lit-actions/target/debug/lit_actions /usr/local/bin/
-COPY --from=builder /build/lit-api-server/target/debug/lit-api-server /usr/local/bin/
-COPY --from=builder /build/lit-static/target/debug/lit-static /usr/local/bin/
+COPY --from=builder /build/lit-actions/target/release/lit_actions /usr/local/bin/
+COPY --from=builder /build/lit-api-server/target/release/lit-api-server /usr/local/bin/
+COPY --from=builder /build/lit-static/target/release/lit-static /usr/local/bin/
 
 # Copy static assets for lit-static server
 COPY --from=builder /build/lit-static/static /app/static

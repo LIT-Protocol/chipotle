@@ -2,9 +2,9 @@
 #
 # Required secrets:
 #   PHALA_CLOUD_API_KEY  - From Phala Cloud Dashboard > API Tokens
-#   DOCKER_REGISTRY_USERNAME - Docker Hub or GHCR username
-#   DOCKER_REGISTRY_PASSWORD - Docker Hub token or GHCR PAT
-#   DOCKER_IMAGE - Full image path, e.g. docker.io/username/lit-node-express or ghcr.io/owner/lit-node-express
+#   DOCKERHUB_USERNAME - Docker Hub username
+#   DOCKERHUB_TOKEN - Docker Hub PAT (Account Settings > Security > Access Tokens)
+#   DOCKER_IMAGE - Full image path, e.g. docker.io/username/lit-node-express
 #   PHALA_APP_NAME - CVM name, e.g. lit-api-server
 
 name: Deploy to Phala CVM
