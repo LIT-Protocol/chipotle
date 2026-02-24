@@ -89,7 +89,7 @@ Configure these in **Settings → Secrets and variables → Actions**:
 
 1. **Checkout** — Clone the repository
 2. **Log in to registry** — Authenticate with Docker Hub or GHCR
-3. **Build and push** — Build the image and push with tags `$SHA` and `latest`
+3. **Build and push** — Build the image, tag with a unique UUID, and push
 4. **Prepare compose** — Substitute `${DOCKER_IMAGE}` with the built image tag
 5. **Deploy** — Run `phala deploy` with `--instance-type tdx.small`
 
@@ -99,28 +99,30 @@ Using [just](https://github.com/casey/just) (recommended):
 
 ```bash
 just setup       # optional: install Phala CLI (requires npm)
-just deploy      # builds, pushes to litptcl/lit-node-express, and deploys
+just deploy      # builds with UUID tag, pushes to registry, and deploys that image
 ```
 
 **Prerequisites:** Log in to Docker Hub (`docker login`) and ensure you have push access to `litptcl/lit-node-express`. The deploy command updates an existing CVM by name; for first-time deploy when no CVM exists, use `just deploy-new`.
 
-Override with `DOCKER_IMAGE` for a different registry:
+Override with `DOCKER_IMAGE` (repo path without tag) or `DOCKER_TAG` (to pin a specific build):
 
 ```bash
-DOCKER_IMAGE=ghcr.io/owner/lit-node-express:latest just deploy
+DOCKER_IMAGE=ghcr.io/owner/lit-node-express just deploy
+DOCKER_TAG=abc123-def456 just deploy   # deploy a specific tag
 ```
 
 Or run the commands directly (after `docker login` and `phala login`):
 
 ```bash
-# Build, push, and deploy
-docker build -f Dockerfile.phala -t litptcl/lit-node-express:latest .
-docker push litptcl/lit-node-express:latest
-sed "s|\${DOCKER_IMAGE}|litptcl/lit-node-express:latest|g" docker-compose.phala.yml > docker-compose.deploy.yml
+# Build with UUID tag, push, and deploy
+TAG=$(uuidgen | tr '[:upper:]' '[:lower:]')
+docker build -f Dockerfile.phala -t litptcl/lit-node-express:$TAG .
+docker push litptcl/lit-node-express:$TAG
+sed "s|\${DOCKER_IMAGE}|litptcl/lit-node-express:$TAG|g" docker-compose.phala.yml > docker-compose.deploy.yml
 phala deploy -c docker-compose.deploy.yml -n lit-api-server --instance-type tdx.small
 ```
 
-Environment variables: `DOCKER_IMAGE` (default: `litptcl/lit-node-express:latest`), `PHALA_APP_NAME` (default: `lit-api-server`), `PHALA_INSTANCE_TYPE` (default: `tdx.small`).
+Environment variables: `DOCKER_IMAGE` (default: `litptcl/lit-node-express`, repo path without tag), `DOCKER_TAG` (default: auto-generated UUID), `PHALA_APP_NAME` (default: `lit-api-server`), `PHALA_INSTANCE_TYPE` (default: `tdx.small`).
 
 ## Instance Type
 
@@ -129,6 +131,30 @@ The workflow uses `tdx.small`, the smallest available Phala CVM plan. For custom
 ```bash
 phala deploy --vcpu 1 --memory 2048MB --disk-size 40GB ...
 ```
+
+## Integration Testing
+
+Use [Grafana k6](https://grafana.com/docs/k6/latest/) to run integration tests against the deployed API. The script exercises user flows: get chain config, get Lit Action IPFS ID, and execute a simple Lit Action that returns "Hello World!".
+
+**Prerequisites:** Install k6 ([install guide](https://grafana.com/docs/k6/latest/set-up/install-k6/)).
+
+```bash
+just k6-test
+```
+
+Or with a custom base URL:
+
+```bash
+BASE_URL=https://your-instance.phala.network just k6-test
+```
+
+To test `lit_action` with an existing account (skips `new_account` and `add_group`):
+
+```bash
+LIT_API_KEY=your-base64-api-key just k6-test
+```
+
+The full flow creates a new account and group when `LIT_API_KEY` is not set; this requires the AccountConfig contract to be deployed and configured on the chain (e.g. Base Sepolia).
 
 ## Current Limitations
 

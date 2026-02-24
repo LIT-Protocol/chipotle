@@ -1,6 +1,9 @@
 # Conventions: https://github.com/casey/just
 
-image := env('DOCKER_IMAGE', 'litptcl/lit-node-express:latest')
+image_base := env('DOCKER_IMAGE', 'litptcl/lit-node-express')
+# Unique UUID tag per deploy (override with DOCKER_TAG to pin a specific build)
+image_tag := env('DOCKER_TAG', `uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '\n'`)
+image := image_base + ':' + image_tag
 app_name := env('PHALA_APP_NAME', 'lit-api-server')
 instance_type := env('PHALA_INSTANCE_TYPE', 'tdx.small')
 
@@ -9,12 +12,15 @@ default:
     @just --list
 
 [group: 'build']
+build: actions api-server
+
+[group: 'build']
 actions:
-    cargo build --manifest-path=lit-actions/Cargo.toml --bin lit_actions
+    cargo build --manifest-path=lit-actions/Cargo.toml --bin lit_actions --all-features
 
 [group: 'build']
 api-server:
-    cargo build --manifest-path=lit-api-server/Cargo.toml --bin lit-api-server
+    cargo build --manifest-path=lit-api-server/Cargo.toml --bin lit-api-server --all-features
 
 clean:
     cargo clean --manifest-path=lit-actions/Cargo.toml
@@ -42,7 +48,8 @@ docker-push: docker-build
 
 
 # Deploy to Phala Cloud (requires: docker login, phala login)
-# Default pushes to litptcl/lit-node-express. Override with DOCKER_IMAGE.
+# Builds with unique UUID tag, pushes to registry, deploys that tagged image.
+# Override DOCKER_IMAGE (repo path) or DOCKER_TAG (to pin a specific build).
 # Use deploy to upgrade existing CVM; use deploy-new for first-time provisioning.
 [group: 'deploy']
 deploy: docker-push _check_phala

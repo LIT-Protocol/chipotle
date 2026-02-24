@@ -20,14 +20,16 @@ COPY lit-actions ./lit-actions/
 # Remove tests from workspace (excluded by .dockerignore; not needed for release build)
 RUN sed -i 's/, "tests"//; s/"tests", //' lit-actions/Cargo.toml
 
-# Build lit-actions binary (single job reduces memory for V8/Deno compile)
+# Build lit-actions binary
 RUN cd lit-actions && cargo build --bin lit_actions
 
-# Copy lit-api-server and build (layer cached unless lit-api-server changes)
+# Copy and build lit-api-server
 COPY lit-api-server ./lit-api-server/
-
-# Build lit-api-server binary (with phala feature for TDX attestation)
 RUN cd lit-api-server && cargo build --bin lit-api-server --features phala
+
+# Copy and build lit-static
+COPY lit-static ./lit-static/
+RUN cd lit-static && cargo build --bin lit-static
 
 # Runtime stage
 FROM debian:bookworm-slim AS runtime
@@ -39,15 +41,21 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy both binaries from builder
+# Copy binaries from builder
 COPY --from=builder /build/lit-actions/target/debug/lit_actions /usr/local/bin/
 COPY --from=builder /build/lit-api-server/target/debug/lit-api-server /usr/local/bin/
+COPY --from=builder /build/lit-static/target/debug/lit-static /usr/local/bin/
 
-# Copy static assets for API server
-COPY --from=builder /build/lit-api-server/static /app/static
+# Copy static assets for lit-static server
+COPY --from=builder /build/lit-static/static /app/static
+
+# Copy config files for lit-api-server
 COPY --from=builder /build/lit-api-server/Rocket.toml /app/
 COPY --from=builder /build/lit-api-server/rpc-config.yaml /app/
 COPY --from=builder /build/lit-api-server/log_levels.toml /app/
+# NodeConfig.toml required at startup; use sample as default (override via volume mount for production)
+COPY --from=builder /build/lit-api-server/NodeConfig.demo.toml /app/NodeConfig.toml
 
 # Default: run lit-api-server (lit-actions runs as separate service in compose)
+# NOTE: Phala overwrites this entrypoint in docker-compose.phala.yml
 CMD ["lit-api-server"]

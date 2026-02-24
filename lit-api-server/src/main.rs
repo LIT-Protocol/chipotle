@@ -10,7 +10,6 @@ pub mod phala;
 use crate::actions::grpc::GrpcClientPool;
 use moka::future::Cache;
 use rocket::State;
-use rocket::fs::{FileServer, relative};
 use rocket::get;
 use rocket::routes;
 use rocket::serde::json::Json;
@@ -68,7 +67,7 @@ async fn main() -> Result<(), rocket::Error> {
 
     let (core_routes, openapi_spec) = core::v1::endpoints::routes_with_spec();
 
-    let r = rocket::build()
+    let mut r = rocket::build()
         .attach(cors)
         .mount("/", routes![openapi_json])
         .mount("/core/v1/", core_routes)
@@ -77,7 +76,6 @@ async fn main() -> Result<(), rocket::Error> {
             "/swaps/v1/",
             abstractions::intents::swaps::endpoints::routes(),
         )
-        .mount("/", FileServer::from(std::env::current_exe().join("static")))
         .mount(
             "/swagger-ui/",
             make_swagger_ui(&SwaggerUIConfig {

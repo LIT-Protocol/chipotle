@@ -1,6 +1,3 @@
-# source-only files
-**.toml
-
 # Build artifacts
 **/target/
 **/.cargo/

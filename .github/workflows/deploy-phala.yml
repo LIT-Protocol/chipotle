@@ -26,6 +26,10 @@ jobs:
           username: ${{ secrets.DOCKER_REGISTRY_USERNAME }}
           password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
 
+      - name: Generate deploy tag (commit hash)
+        id: tag
+        run: echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+
       - name: Build and Push Docker image
         uses: docker/build-push-action@v6
         with:
@@ -34,12 +38,12 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ secrets.DOCKER_IMAGE }}:${{ github.sha }}
+            ${{ secrets.DOCKER_IMAGE }}:${{ steps.tag.outputs.tag }}
             ${{ secrets.DOCKER_IMAGE }}:latest
 
       - name: Prepare docker-compose for deployment
         run: |
-          IMAGE="${{ secrets.DOCKER_IMAGE }}:${{ github.sha }}"
+          IMAGE="${{ secrets.DOCKER_IMAGE }}:${{ steps.tag.outputs.tag }}"
           sed "s|\${DOCKER_IMAGE}|${IMAGE}|g" docker-compose.phala.yml > docker-compose.deploy.yml
           cat docker-compose.deploy.yml
 
