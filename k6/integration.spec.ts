@@ -405,4 +405,20 @@ export default function () {
       }
     },
   });
+
+  // ── 20. removePkpFromGroup ────────────────────────────────────────────────
+  const removePkpRes = client.removePkpFromGroup(
+    { group_id: groupId, pkp_public_key: walletAddress },
+    authHeaders,
+  );
+  if (!assertOk("removePkpFromGroup", "POST /remove_pkp_from_group", removePkpRes)) return;
+  check(removePkpRes.response, {
+    "removePkpFromGroup success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+  });
 }
