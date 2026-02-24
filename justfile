@@ -79,3 +79,14 @@ _check_phala:
 [group: 'debug']
 ssh:
     phala ssh
+# Run k6 integration tests against deployed API
+# Usage: just k6-test
+#   just k6-test
+#   BASE_URL=https://your-instance.phala.network just k6-test
+#   LIT_API_KEY=base64key just k6-test  # use existing account for lit_action
+[group: 'test']
+k6-test:
+    #!/usr/bin/env sh
+    set -eu
+    command -v k6 >/dev/null 2>&1 || { echo "error: k6 not found. Install from https://grafana.com/docs/k6/latest/set-up/install-k6/"; exit 1; }
+    k6 run scripts/k6-integration.js
