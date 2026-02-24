@@ -330,4 +330,26 @@ export default function () {
       }
     },
   });
+
+  // ── 16. updateGroup ───────────────────────────────────────────────────────
+  const updateGroupRes = client.updateGroup(
+    {
+      group_id: groupId,
+      name: "k6-test-group-updated",
+      description: "Updated integration test group",
+      all_wallets_permitted: true,
+      all_actions_permitted: true,
+    },
+    authHeaders,
+  );
+  if (!assertOk("updateGroup", "POST /update_group", updateGroupRes)) return;
+  check(updateGroupRes.response, {
+    "updateGroup success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+  });
 }
