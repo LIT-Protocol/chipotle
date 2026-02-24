@@ -125,4 +125,14 @@ export default function () {
       }
     },
   });
+
+  // ── 5. createWallet ───────────────────────────────────────────────────────
+  const createWalletRes = client.createWallet(authHeaders);
+  if (!assertOk("createWallet", "GET /create_wallet", createWalletRes)) return;
+  const walletData = createWalletRes.data as { wallet_address: string };
+  check(createWalletRes.response, {
+    "createWallet returns wallet_address": () =>
+      typeof walletData.wallet_address === "string" && walletData.wallet_address.length > 0,
+  });
+  const walletAddress = walletData.wallet_address;
 }
