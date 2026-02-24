@@ -64,6 +64,11 @@ jobs:
           sed "s|\${DOCKER_IMAGE}|${IMAGE}|g" docker-compose.phala.yml > docker-compose.deploy.yml
           cat docker-compose.deploy.yml
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install Phala CLI
         run: npm install -g phala
 
