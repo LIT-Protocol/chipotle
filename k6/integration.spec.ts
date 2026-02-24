@@ -233,4 +233,20 @@ export default function () {
       }
     },
   });
+
+  // ── 11. addPkpToGroup ─────────────────────────────────────────────────────
+  const addPkpRes = client.addPkpToGroup(
+    { group_id: groupId, pkp_public_key: walletAddress },
+    authHeaders,
+  );
+  if (!assertOk("addPkpToGroup", "POST /add_pkp_to_group", addPkpRes)) return;
+  check(addPkpRes.response, {
+    "addPkpToGroup success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+  });
 }
