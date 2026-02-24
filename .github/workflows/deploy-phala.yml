@@ -28,7 +28,7 @@ jobs:
         with:
           primary-runner: "self-hosted"
           fallback-runner: "ubuntu-latest"
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GH_RUNNER_CHECK_TOKEN }}
           fallback-on-error: true
 
   deploy:
