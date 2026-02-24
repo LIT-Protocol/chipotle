@@ -135,4 +135,20 @@ export default function () {
       typeof walletData.wallet_address === "string" && walletData.wallet_address.length > 0,
   });
   const walletAddress = walletData.wallet_address;
+
+  // ── 6. listWallets ────────────────────────────────────────────────────────
+  const listWalletsRes = client.listWallets(
+    { page_number: "0", page_size: "10" },
+    authHeaders,
+  );
+  if (!assertOk("listWallets", "GET /list_wallets", listWalletsRes)) return;
+  check(listWalletsRes.response, {
+    "listWallets returns array": (r) => {
+      try {
+        return Array.isArray(JSON.parse(r.body as string));
+      } catch {
+        return false;
+      }
+    },
+  });
 }
