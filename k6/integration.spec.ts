@@ -265,4 +265,27 @@ export default function () {
       }
     },
   });
+
+  // ── 13. litAction ─────────────────────────────────────────────────────────
+  const litActionRes = client.litAction(
+    { code: HELLO_WORLD_CODE, js_params: null },
+    authHeaders,
+  );
+  if (!assertOk("litAction", "POST /lit_action", litActionRes)) return;
+  check(litActionRes.response, {
+    "litAction has no error": (r) => {
+      try {
+        return JSON.parse(r.body as string).has_error === false;
+      } catch {
+        return false;
+      }
+    },
+    "litAction response is Hello World!": (r) => {
+      try {
+        return JSON.parse(r.body as string).response === "Hello World!";
+      } catch {
+        return false;
+      }
+    },
+  });
 }
