@@ -1,0 +1,45 @@
+# Phala CVM deployment: lit-api-server + lit-actions + lit-static
+# lit-actions and lit-api-server share gRPC Unix socket at /tmp/lit_actions.sock.
+# lit-static serves SDKs, docs, dapps on port 8001.
+# Uses smallest instance type (tdx.small) via phala deploy --instance-type tdx.small
+
+services:
+  lit-actions:
+    image: ${DOCKER_IMAGE}
+    command: ["lit_actions", "--socket", "/tmp/lit_actions.sock"]
+    volumes:
+      - lit-socket:/tmp
+      - /var/run/dstack.sock:/var/run/dstack.sock
+    restart: unless-stopped
+
+  lit-api-server:
+    image: ${DOCKER_IMAGE}
+    command: ["lit-api-server"]
+    working_dir: /app
+    ports:
+      - "8000:8000"
+    environment:
+      ROCKET_ADDRESS: "0.0.0.0"
+      ROCKET_PORT: "8000"
+    volumes:
+      - lit-socket:/tmp
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      # Uncomment to override NodeConfig.toml with production config (chain, contract_address, secret):
+      # - ./NodeConfig.toml:/app/NodeConfig.toml:ro
+    depends_on:
+      - lit-actions
+    restart: unless-stopped
+
+  lit-static:
+    image: ${DOCKER_IMAGE}
+    command: ["lit-static"]
+    working_dir: /app
+    ports:
+      - "8001:8001"
+    environment:
+      ROCKET_ADDRESS: "0.0.0.0"
+      ROCKET_PORT: "8001"
+    restart: unless-stopped
+
+volumes:
+  lit-socket:

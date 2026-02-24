@@ -7,6 +7,7 @@ license = "Apache-2.0"
 
 [features]
 default = []
+phala = []
 
 [dependencies]
 apalis = { version = "0.6.0", features = ["tracing"] }

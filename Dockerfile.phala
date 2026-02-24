@@ -1,0 +1,61 @@
+# Multi-stage build for lit-api-server + lit-actions (Phala CVM deployment)
+# Builds both binaries in a single image for docker-compose deployment
+
+FROM rust:1-bookworm AS builder
+
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    clang \
+    protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy lit-core and lit-actions first (lit-actions has longest build)
+COPY lit-core ./lit-core/
+COPY lit-actions ./lit-actions/
+
+# Remove tests from workspace (excluded by .dockerignore; not needed for release build)
+RUN sed -i 's/, "tests"//; s/"tests", //' lit-actions/Cargo.toml
+
+# Build lit-actions binary (release)
+RUN cd lit-actions && cargo build --release --bin lit_actions
+
+# Copy and build lit-static
+COPY lit-static ./lit-static/
+RUN cd lit-static && cargo build --release --bin lit-static
+
+# Copy and build lit-api-server (last because it takes longest to build)
+COPY lit-api-server ./lit-api-server/
+RUN cd lit-api-server && cargo build --release --bin lit-api-server --features phala
+
+# Runtime stage
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy binaries from builder
+COPY --from=builder /build/lit-actions/target/release/lit_actions /usr/local/bin/
+COPY --from=builder /build/lit-api-server/target/release/lit-api-server /usr/local/bin/
+COPY --from=builder /build/lit-static/target/release/lit-static /usr/local/bin/
+
+# Copy static assets for lit-static server
+COPY --from=builder /build/lit-static/static /app/static
+
+# Copy config files for lit-api-server
+COPY --from=builder /build/lit-api-server/Rocket.toml /app/
+COPY --from=builder /build/lit-api-server/rpc-config.yaml /app/
+COPY --from=builder /build/lit-api-server/log_levels.toml /app/
+# NodeConfig.toml required at startup; use sample as default (override via volume mount for production)
+COPY --from=builder /build/lit-api-server/NodeConfig.demo.toml /app/NodeConfig.toml
+
+# Default: run lit-api-server (lit-actions runs as separate service in compose)
+# NOTE: Phala overwrites this entrypoint in docker-compose.phala.yml
+CMD ["lit-api-server"]

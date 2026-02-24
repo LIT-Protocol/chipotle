@@ -6,4 +6,5 @@
 [chain]
 name = "anvil"
 contract_address = "0xbe3f614224386bf7f82b4e521bddf92fe56c670d"
+# TODO: Make this a phala-protected secret
 secret = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
