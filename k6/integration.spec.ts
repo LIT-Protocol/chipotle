@@ -314,4 +314,20 @@ export default function () {
     },
   });
   const usageApiKey = (addUsageKeyRes.data as { usage_api_key: string }).usage_api_key;
+
+  // ── 15. listApiKeys ───────────────────────────────────────────────────────
+  const listApiKeysRes = client.listApiKeys(
+    { page_number: "0", page_size: "10" },
+    authHeaders,
+  );
+  if (!assertOk("listApiKeys", "GET /list_api_keys", listApiKeysRes)) return;
+  check(listApiKeysRes.response, {
+    "listApiKeys returns array": (r) => {
+      try {
+        return Array.isArray(JSON.parse(r.body as string));
+      } catch {
+        return false;
+      }
+    },
+  });
 }
