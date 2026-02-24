@@ -217,4 +217,20 @@ export default function () {
       }
     },
   });
+
+  // ── 10. listActions ───────────────────────────────────────────────────────
+  const listActionsRes = client.listActions(
+    { group_id: groupId, page_number: "0", page_size: "10" },
+    authHeaders,
+  );
+  if (!assertOk("listActions", "GET /list_actions", listActionsRes)) return;
+  check(listActionsRes.response, {
+    "listActions returns array": (r) => {
+      try {
+        return Array.isArray(JSON.parse(r.body as string));
+      } catch {
+        return false;
+      }
+    },
+  });
 }
