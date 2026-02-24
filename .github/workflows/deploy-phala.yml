@@ -17,15 +17,30 @@ on:
   workflow_dispatch:
 
 jobs:
-  deploy:
+  determine-runner:
     runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.set-runner.outputs.use-runner }}
+    steps:
+      - name: Determine runner (self-hosted or fallback)
+        id: set-runner
+        uses: mikehardy/runner-fallback-action@v1
+        with:
+          primary-runner: "self-hosted"
+          fallback-runner: "ubuntu-latest"
+          github-token: ${{ secrets.GH_RUNNER_CHECK_TOKEN }}
+          fallback-on-error: true
+
+  deploy:
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Log in to Docker Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Generate deploy tag (commit hash)
@@ -48,6 +63,11 @@ jobs:
           IMAGE="${{ vars.DOCKER_IMAGE }}:${{ steps.tag.outputs.tag }}"
           sed "s|\${DOCKER_IMAGE}|${IMAGE}|g" docker-compose.phala.yml > docker-compose.deploy.yml
           cat docker-compose.deploy.yml
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
 
       - name: Install Phala CLI
         run: npm install -g phala
