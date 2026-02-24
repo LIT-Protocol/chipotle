@@ -8,8 +8,8 @@
  *
  * Ref: https://datil.developer.litprotocol.com/sdk/serverless-signing/sign-as-action
  */
-import { check } from "k6";
 import type { Response } from "k6/http";
+import { checkAndLog } from "./check.ts";
 import { LitApiServerClient } from "./litApiServer.ts";
 
 const BASE_URL =
@@ -70,10 +70,10 @@ function assertOk(
     }
     console.error(`FAIL ${name} | ${endpoint} | ${status} | ${msg}`);
   }
-  check(response, {
+  checkAndLog(response, {
     [`${name} 2xx`]: (r) =>
       (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  });
+  }, name);
   return ok;
 }
 
@@ -99,7 +99,7 @@ export default function () {
   if (!assertOk("litAction/getActionPublicKey", "POST /lit_action", res))
     return;
 
-  check(res.response, {
+  checkAndLog(res.response, {
     "getActionPublicKey has no error": (r) => {
       try {
         return JSON.parse(r.body as string).has_error === false;
@@ -141,7 +141,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "litAction/getActionPublicKey");
 
   const body = JSON.parse(res.response.body as string);
   const result = JSON.parse(body.response);

@@ -12,8 +12,8 @@
  *
  * Ref: https://datil.developer.litprotocol.com/sdk/serverless-signing/sign-as-action
  */
-import { check } from "k6";
 import type { Response } from "k6/http";
+import { checkAndLog } from "./check.ts";
 import { LitApiServerClient } from "./litApiServer.ts";
 
 const BASE_URL =
@@ -85,10 +85,10 @@ function assertOk(
     }
     console.error(`FAIL ${name} | ${endpoint} | ${status} | ${msg}`);
   }
-  check(response, {
+  checkAndLog(response, {
     [`${name} 2xx`]: (r) =>
       (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  });
+  }, name);
   return ok;
 }
 
@@ -114,9 +114,9 @@ export default function () {
   const actionIpfsCid = (ipfsRes.response.body as string)
     .replace(/^"|"$/g, "")
     .trim();
-  check(ipfsRes.response, {
+  checkAndLog(ipfsRes.response, {
     "getLitActionIpfsId returns non-empty CID": () => actionIpfsCid.length > 0,
-  });
+  }, "getLitActionIpfsId");
   console.log(`actionIpfsCid: ${actionIpfsCid}`);
 
   // ── Step 2: sign data with the action's own CID identity ─────────────────
@@ -133,7 +133,7 @@ export default function () {
   );
   if (!assertOk("litAction/signAsAction", "POST /lit_action", signRes)) return;
 
-  check(signRes.response, {
+  checkAndLog(signRes.response, {
     "signAsAction has no error": (r) => {
       try {
         return JSON.parse(r.body as string).has_error === false;
@@ -149,7 +149,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "litAction/signAsAction");
 
   const signBody = JSON.parse(signRes.response.body as string);
   // signOutput is the signature object returned by Lit.Actions.signAsAction()
@@ -180,7 +180,7 @@ export default function () {
   )
     return;
 
-  check(verifyRes.response, {
+  checkAndLog(verifyRes.response, {
     "verifyActionSignature has no error": (r) => {
       try {
         return JSON.parse(r.body as string).has_error === false;
@@ -196,7 +196,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "litAction/verifyActionSignature");
 
   const verifyBody = JSON.parse(verifyRes.response.body as string);
   console.log(`verifyActionSignature response: ${verifyBody.response}`);

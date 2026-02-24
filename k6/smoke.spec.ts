@@ -2,7 +2,8 @@
  * Smoke test - hits the public get_node_chain_config endpoint (no auth required).
  * Use: k6 run smoke.spec.ts
  */
-import { check } from "k6";
+import type { Response } from "k6/http";
+import { checkAndLog } from "./check.ts";
 import { LitApiServerClient } from "./litApiServer.ts";
 
 const baseUrl =
@@ -17,7 +18,7 @@ export const options = {
 
 export default function () {
   const { response } = client.getNodeChainConfig();
-  check(response, {
+  checkAndLog<Response>(response, {
     "status is 200": (r) => r.status === 200,
     "has chain config": (r) => {
       try {
@@ -27,5 +28,5 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "getNodeChainConfig");
 }

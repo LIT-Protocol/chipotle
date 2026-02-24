@@ -6,8 +6,8 @@
  *   k6 run k6/integration.spec.ts
  *   BASE_URL=https://your-instance.phala.network/core/v1 k6 run k6/integration.spec.ts
  */
-import { check } from "k6";
 import type { Response } from "k6/http";
+import { checkAndLog } from "./check.ts";
 import { LitApiServerClient } from "./litApiServer.ts";
 
 const BASE_URL =
@@ -58,10 +58,10 @@ function assertOk(
     }
     console.error(`FAIL ${name} | ${endpoint} | ${status} | ${msg}`);
   }
-  check(response, {
+  checkAndLog(response, {
     [`${name} 2xx`]: (r) =>
       (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  });
+  }, name);
   return ok;
 }
 
@@ -71,7 +71,7 @@ export default function () {
   // ── 1. getNodeChainConfig ─────────────────────────────────────────────────
   const chainConfigRes = client.getNodeChainConfig();
   if (!assertOk("getNodeChainConfig", "GET /get_node_chain_config", chainConfigRes)) return;
-  check(chainConfigRes.response, {
+  checkAndLog(chainConfigRes.response, {
     "chain config has numeric chain_id": (r) => {
       try {
         return typeof JSON.parse(r.body as string).chain_id === "number";
@@ -79,15 +79,15 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "getNodeChainConfig");
 
   // ── 2. getLitActionIpfsId ─────────────────────────────────────────────────
   const ipfsRes = client.getLitActionIpfsId(encodeURIComponent(HELLO_WORLD_CODE));
   if (!assertOk("getLitActionIpfsId", "GET /get_lit_action_ipfs_id/{code}", ipfsRes)) return;
   const ipfsId = (ipfsRes.response.body as string).replace(/^"|"$/g, "").trim();
-  check(ipfsRes.response, {
+  checkAndLog(ipfsRes.response, {
     "ipfs id is non-empty string": () => ipfsId.length > 0,
-  });
+  }, "getLitActionIpfsId");
 
   // ── 3. newAccount ─────────────────────────────────────────────────────────
   // BUG-001: May 500 when the AccountConfig contract is not configured on this
@@ -103,12 +103,12 @@ export default function () {
       return;
     }
     const newAccountData = newAccountRes.data as { api_key: string; wallet_address: string };
-    check(newAccountRes.response, {
+    checkAndLog(newAccountRes.response, {
       "newAccount returns api_key": () =>
         typeof newAccountData.api_key === "string" && newAccountData.api_key.length > 0,
       "newAccount returns wallet_address": () =>
         typeof newAccountData.wallet_address === "string" && newAccountData.wallet_address.length > 0,
-    });
+    }, "newAccount");
     apiKey = newAccountData.api_key;
   }
   const authHeaders = { "X-Api-Key": apiKey };
@@ -116,7 +116,7 @@ export default function () {
   // ── 4. accountExists ──────────────────────────────────────────────────────
   const existsRes = client.accountExists(authHeaders);
   if (!assertOk("accountExists", "GET /account_exists", existsRes)) return;
-  check(existsRes.response, {
+  checkAndLog(existsRes.response, {
     "accountExists returns true": (r) => {
       try {
         return JSON.parse(r.body as string) === true;
@@ -124,16 +124,16 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "accountExists");
 
   // ── 5. createWallet ───────────────────────────────────────────────────────
   const createWalletRes = client.createWallet(authHeaders);
   if (!assertOk("createWallet", "GET /create_wallet", createWalletRes)) return;
   const walletData = createWalletRes.data as { wallet_address: string };
-  check(createWalletRes.response, {
+  checkAndLog(createWalletRes.response, {
     "createWallet returns wallet_address": () =>
       typeof walletData.wallet_address === "string" && walletData.wallet_address.length > 0,
-  });
+  }, "createWallet");
   const walletAddress = walletData.wallet_address;
 
   // ── 6. listWallets ────────────────────────────────────────────────────────
@@ -142,7 +142,7 @@ export default function () {
     authHeaders,
   );
   if (!assertOk("listWallets", "GET /list_wallets", listWalletsRes)) return;
-  check(listWalletsRes.response, {
+  checkAndLog(listWalletsRes.response, {
     "listWallets returns array": (r) => {
       try {
         return Array.isArray(JSON.parse(r.body as string));
@@ -150,7 +150,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "listWallets");
 
   // ── 7. addGroup ───────────────────────────────────────────────────────────
   const addGroupRes = client.addGroup(
@@ -165,7 +165,7 @@ export default function () {
     authHeaders,
   );
   if (!assertOk("addGroup", "POST /add_group", addGroupRes)) return;
-  check(addGroupRes.response, {
+  checkAndLog(addGroupRes.response, {
     "addGroup success": (r) => {
       try {
         return JSON.parse(r.body as string).success === true;
@@ -173,7 +173,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "addGroup");
 
   // ── 8. listGroups — extract groupId for subsequent tests ──────────────────
   const listGroupsRes = client.listGroups(
@@ -181,7 +181,7 @@ export default function () {
     authHeaders,
   );
   if (!assertOk("listGroups", "GET /list_groups", listGroupsRes)) return;
-  check(listGroupsRes.response, {
+  checkAndLog(listGroupsRes.response, {
     "listGroups returns array": (r) => {
       try {
         return Array.isArray(JSON.parse(r.body as string));
@@ -189,7 +189,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "listGroups");
   const groups = listGroupsRes.data as Array<{ id: string; name: string; description: string }>;
   if (!groups || groups.length === 0) {
     console.error("listGroups returned empty array after addGroup");
@@ -208,7 +208,7 @@ export default function () {
     authHeaders,
   );
   if (!assertOk("addActionToGroup", "POST /add_action_to_group", addActionRes)) return;
-  check(addActionRes.response, {
+  checkAndLog(addActionRes.response, {
     "addActionToGroup success": (r) => {
       try {
         return JSON.parse(r.body as string).success === true;
@@ -216,7 +216,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "addActionToGroup");
 
   // ── 10. listActions ───────────────────────────────────────────────────────
   const listActionsRes = client.listActions(
@@ -224,7 +224,7 @@ export default function () {
     authHeaders,
   );
   if (!assertOk("listActions", "GET /list_actions", listActionsRes)) return;
-  check(listActionsRes.response, {
+  checkAndLog(listActionsRes.response, {
     "listActions returns array": (r) => {
       try {
         return Array.isArray(JSON.parse(r.body as string));
@@ -232,7 +232,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "listActions");
 
   // ── 11. addPkpToGroup ─────────────────────────────────────────────────────
   const addPkpRes = client.addPkpToGroup(
@@ -240,7 +240,7 @@ export default function () {
     authHeaders,
   );
   if (!assertOk("addPkpToGroup", "POST /add_pkp_to_group", addPkpRes)) return;
-  check(addPkpRes.response, {
+  checkAndLog(addPkpRes.response, {
     "addPkpToGroup success": (r) => {
       try {
         return JSON.parse(r.body as string).success === true;
@@ -248,7 +248,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "addPkpToGroup");
 
   // ── 12. listWalletsInGroup ────────────────────────────────────────────────
   const listWiGRes = client.listWalletsInGroup(
@@ -256,7 +256,7 @@ export default function () {
     authHeaders,
   );
   if (!assertOk("listWalletsInGroup", "GET /list_wallets_in_group", listWiGRes)) return;
-  check(listWiGRes.response, {
+  checkAndLog(listWiGRes.response, {
     "listWalletsInGroup returns array": (r) => {
       try {
         return Array.isArray(JSON.parse(r.body as string));
@@ -264,7 +264,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "listWalletsInGroup");
 
   // ── 13. litAction ─────────────────────────────────────────────────────────
   const litActionRes = client.litAction(
@@ -272,7 +272,7 @@ export default function () {
     authHeaders,
   );
   if (!assertOk("litAction", "POST /lit_action", litActionRes)) return;
-  check(litActionRes.response, {
+  checkAndLog(litActionRes.response, {
     "litAction has no error": (r) => {
       try {
         return JSON.parse(r.body as string).has_error === false;
@@ -287,7 +287,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "litAction");
 
   // ── 14. addUsageApiKey ────────────────────────────────────────────────────
   const expiration = String(Math.floor(Date.now() / 1000) + 86400); // 24 h from now
@@ -296,7 +296,7 @@ export default function () {
     authHeaders,
   );
   if (!assertOk("addUsageApiKey", "POST /add_usage_api_key", addUsageKeyRes)) return;
-  check(addUsageKeyRes.response, {
+  checkAndLog(addUsageKeyRes.response, {
     "addUsageApiKey success": (r) => {
       try {
         return JSON.parse(r.body as string).success === true;
@@ -312,7 +312,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "addUsageApiKey");
   const usageApiKey = (addUsageKeyRes.data as { usage_api_key: string }).usage_api_key;
 
   // ── 15. listApiKeys ───────────────────────────────────────────────────────
@@ -321,7 +321,7 @@ export default function () {
     authHeaders,
   );
   if (!assertOk("listApiKeys", "GET /list_api_keys", listApiKeysRes)) return;
-  check(listApiKeysRes.response, {
+  checkAndLog(listApiKeysRes.response, {
     "listApiKeys returns array": (r) => {
       try {
         return Array.isArray(JSON.parse(r.body as string));
@@ -329,7 +329,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "listApiKeys");
 
   // ── 16. updateGroup ───────────────────────────────────────────────────────
   const updateGroupRes = client.updateGroup(
@@ -343,7 +343,7 @@ export default function () {
     authHeaders,
   );
   if (!assertOk("updateGroup", "POST /update_group", updateGroupRes)) return;
-  check(updateGroupRes.response, {
+  checkAndLog(updateGroupRes.response, {
     "updateGroup success": (r) => {
       try {
         return JSON.parse(r.body as string).success === true;
@@ -351,7 +351,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "updateGroup");
 
   // ── 17. updateActionMetadata ──────────────────────────────────────────────
   const updateActionRes = client.updateActionMetadata(
@@ -364,7 +364,7 @@ export default function () {
     authHeaders,
   );
   if (!assertOk("updateActionMetadata", "POST /update_action_metadata", updateActionRes)) return;
-  check(updateActionRes.response, {
+  checkAndLog(updateActionRes.response, {
     "updateActionMetadata success": (r) => {
       try {
         return JSON.parse(r.body as string).success === true;
@@ -372,7 +372,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "updateActionMetadata");
 
   // ── 18. updateUsageApiKeyMetadata ─────────────────────────────────────────
   const updateUsageKeyRes = client.updateUsageApiKeyMetadata(
@@ -380,7 +380,7 @@ export default function () {
     authHeaders,
   );
   if (!assertOk("updateUsageApiKeyMetadata", "POST /update_usage_api_key_metadata", updateUsageKeyRes)) return;
-  check(updateUsageKeyRes.response, {
+  checkAndLog(updateUsageKeyRes.response, {
     "updateUsageApiKeyMetadata success": (r) => {
       try {
         return JSON.parse(r.body as string).success === true;
@@ -388,7 +388,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "updateUsageApiKeyMetadata");
 
   // ── 19. removeUsageApiKey ─────────────────────────────────────────────────
   const removeUsageKeyRes = client.removeUsageApiKey(
@@ -396,7 +396,7 @@ export default function () {
     authHeaders,
   );
   if (!assertOk("removeUsageApiKey", "POST /remove_usage_api_key", removeUsageKeyRes)) return;
-  check(removeUsageKeyRes.response, {
+  checkAndLog(removeUsageKeyRes.response, {
     "removeUsageApiKey success": (r) => {
       try {
         return JSON.parse(r.body as string).success === true;
@@ -404,7 +404,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "removeUsageApiKey");
 
   // ── 20. removePkpFromGroup ────────────────────────────────────────────────
   const removePkpRes = client.removePkpFromGroup(
@@ -412,7 +412,7 @@ export default function () {
     authHeaders,
   );
   if (!assertOk("removePkpFromGroup", "POST /remove_pkp_from_group", removePkpRes)) return;
-  check(removePkpRes.response, {
+  checkAndLog(removePkpRes.response, {
     "removePkpFromGroup success": (r) => {
       try {
         return JSON.parse(r.body as string).success === true;
@@ -420,7 +420,7 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "removePkpFromGroup");
 
   // ── 21. removeActionFromGroup ─────────────────────────────────────────────
   const removeActionRes = client.removeActionFromGroup(
@@ -428,7 +428,7 @@ export default function () {
     authHeaders,
   );
   assertOk("removeActionFromGroup", "POST /remove_action_from_group", removeActionRes);
-  check(removeActionRes.response, {
+  checkAndLog(removeActionRes.response, {
     "removeActionFromGroup success": (r) => {
       try {
         return JSON.parse(r.body as string).success === true;
@@ -436,5 +436,5 @@ export default function () {
         return false;
       }
     },
-  });
+  }, "removeActionFromGroup");
 }
