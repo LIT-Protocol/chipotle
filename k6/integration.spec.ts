@@ -151,4 +151,27 @@ export default function () {
       }
     },
   });
+
+  // ── 7. addGroup ───────────────────────────────────────────────────────────
+  const addGroupRes = client.addGroup(
+    {
+      group_name: "k6-test-group",
+      group_description: "Integration test group",
+      permitted_actions: [],
+      pkps: [],
+      all_wallets_permitted: true,
+      all_actions_permitted: true,
+    },
+    authHeaders,
+  );
+  if (!assertOk("addGroup", "POST /add_group", addGroupRes)) return;
+  check(addGroupRes.response, {
+    "addGroup success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+  });
 }
