@@ -249,4 +249,20 @@ export default function () {
       }
     },
   });
+
+  // ── 12. listWalletsInGroup ────────────────────────────────────────────────
+  const listWiGRes = client.listWalletsInGroup(
+    { group_id: groupId, page_number: "0", page_size: "10" },
+    authHeaders,
+  );
+  if (!assertOk("listWalletsInGroup", "GET /list_wallets_in_group", listWiGRes)) return;
+  check(listWiGRes.response, {
+    "listWalletsInGroup returns array": (r) => {
+      try {
+        return Array.isArray(JSON.parse(r.body as string));
+      } catch {
+        return false;
+      }
+    },
+  });
 }
