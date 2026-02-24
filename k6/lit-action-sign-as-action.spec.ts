@@ -1,0 +1,133 @@
+/**
+ * Tests Lit.Actions.signAsAction() — signs data using the action's own
+ * cryptographic identity derived from its IPFS CID.
+ *
+ * Usage:
+ *   LIT_API_KEY=your-key k6 run k6/lit-action-sign-as-action.spec.ts
+ *   BASE_URL=https://your-instance/core/v1 LIT_API_KEY=your-key k6 run k6/lit-action-sign-as-action.spec.ts
+ *
+ * Ref: https://datil.developer.litprotocol.com/sdk/serverless-signing/sign-as-action
+ */
+import { check } from "k6";
+import type { Response } from "k6/http";
+import { LitApiServerClient } from "./litApiServer.ts";
+
+const BASE_URL =
+  __ENV.BASE_URL ||
+  "https://36da669c852c9bd4fdea27dd331c07ff776bd125-8000.dstack-pha-prod5.phala.network/core/v1";
+const LIT_API_KEY = __ENV.LIT_API_KEY || "";
+
+// keccak256("hello world") as a 32-byte array
+const TO_SIGN = [
+  71, 23, 50, 133, 168, 215, 52, 30, 94, 151, 47, 198, 119, 40, 99, 132, 248,
+  2, 248, 239, 66, 165, 236, 95, 3, 187, 250, 37, 76, 176, 31, 173,
+];
+
+// Mirrors the sample from the Lit docs:
+//   const signAsActionCode = `(${_signAsActionLitAction.toString()})();`
+const SIGN_AS_ACTION_CODE = `(async () => {
+  const signature = await Lit.Actions.signAsAction({
+    toSign,
+    sigName,
+    signingScheme,
+  });
+  Lit.Actions.setResponse({ response: JSON.stringify(signature) });
+})();`;
+
+export const options = {
+  vus: 1,
+  iterations: 1,
+  thresholds: {
+    http_req_failed: ["rate<0.1"],
+    http_req_duration: ["p(99)<30000"],
+  },
+};
+
+function assertOk(
+  name: string,
+  endpoint: string,
+  res: { response: Response },
+): boolean {
+  const { response } = res;
+  const status = response?.status ?? 0;
+  const ok = status >= 200 && status < 300;
+  if (!ok) {
+    let msg = "";
+    if (status === 0) {
+      msg = "(no response / connection failed)";
+    } else {
+      try {
+        const body = JSON.parse(response.body as string);
+        msg =
+          body.message ??
+          body.error ??
+          body.detail ??
+          (typeof body === "string" ? body : JSON.stringify(body));
+      } catch {
+        msg = (response.body as string) || "(no body)";
+      }
+    }
+    console.error(`FAIL ${name} | ${endpoint} | ${status} | ${msg}`);
+  }
+  check(response, {
+    [`${name} 2xx`]: (r) =>
+      (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
+  });
+  return ok;
+}
+
+export default function () {
+  if (!LIT_API_KEY) {
+    console.error(
+      "LIT_API_KEY is required. Set it via: LIT_API_KEY=your-key k6 run ...",
+    );
+    return;
+  }
+
+  const client = new LitApiServerClient({ baseUrl: BASE_URL });
+  const authHeaders = { "X-Api-Key": LIT_API_KEY };
+
+  const res = client.litAction(
+    {
+      code: SIGN_AS_ACTION_CODE,
+      js_params: {
+        toSign: TO_SIGN,
+        sigName: "sig",
+        signingScheme: "EcdsaK256Sha256",
+      },
+    },
+    authHeaders,
+  );
+
+  if (!assertOk("litAction/signAsAction", "POST /lit_action", res)) return;
+
+  check(res.response, {
+    "signAsAction has no error": (r) => {
+      try {
+        return JSON.parse(r.body as string).has_error === false;
+      } catch {
+        return false;
+      }
+    },
+    "signAsAction response is non-empty": (r) => {
+      try {
+        const body = JSON.parse(r.body as string);
+        return typeof body.response === "string" && body.response.length > 0;
+      } catch {
+        return false;
+      }
+    },
+    "signAsAction logs are present": (r) => {
+      try {
+        const body = JSON.parse(r.body as string);
+        return typeof body.logs === "string";
+      } catch {
+        return false;
+      }
+    },
+  });
+
+  const body = JSON.parse(res.response.body as string);
+  console.log(`signAsAction response: ${body.response}`);
+  console.log(`signAsAction logs: ${body.logs}`);
+}
