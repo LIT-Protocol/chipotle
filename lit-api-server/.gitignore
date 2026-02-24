@@ -1,1 +1,4 @@
 /target
+NodeConfig.toml
+NodeConfig.demo.toml
+lookup.db

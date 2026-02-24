@@ -1,22 +1,32 @@
 pub mod abstractions;
-pub mod core;
-pub mod actions;
-pub mod error;
 pub mod accounts;
+pub mod actions;
+pub mod config;
+pub mod core;
+pub mod error;
 #[cfg(feature = "phala")]
 pub mod phala;
 
-use rocket::fs::FileServer;
+use crate::actions::grpc::GrpcClientPool;
+use moka::future::Cache;
+use rocket::State;
+use rocket::fs::{FileServer, relative};
+use rocket::get;
+use rocket::routes;
+use rocket::serde::json::Json;
 use rocket_cors::{AllowedOrigins, Method};
+use rocket_okapi::okapi::openapi3::OpenApi;
+use rocket_okapi::swagger_ui::SwaggerUIConfig;
+use rocket_okapi::swagger_ui::make_swagger_ui;
 use std::{collections::HashSet, str::FromStr, time::Duration};
 use tracing::Level;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
-use crate::actions::grpc_client_pool::GrpcClientPool;
-use moka::future::Cache;
 
 #[rocket::main]
 async fn main() -> Result<(), rocket::Error> {
     setup_tracing().expect("Failed to setup tracing.");
+
+    config::init_config().expect("Failed to initialize node configuration.");
 
     let allowed_methods = HashSet::from([
         Method::from_str("Get").expect("Invalid method: Get"),
@@ -50,23 +60,33 @@ async fn main() -> Result<(), rocket::Error> {
     //         .expect("failed to create action store")
     // });
 
-
     // 1gb max capacity
     let ipfs_cache: Cache<String, String> = Cache::builder()
         .weigher(|_key, value: &String| -> u32 { value.len().try_into().unwrap_or(u32::MAX) })
         .max_capacity(1024 * 1024 * 1024)
         .build();
 
-    let mut r = rocket::build()
+    let (core_routes, openapi_spec) = core::v1::endpoints::routes_with_spec();
+
+    let r = rocket::build()
         .attach(cors)
-        .mount("/core/v1/", core::v1::endpoints::routes())
+        .mount("/", routes![openapi_json])
+        .mount("/core/v1/", core_routes)
         .mount("/transfer/v1/", abstractions::transfer::endpoints::routes())
         .mount(
             "/swaps/v1/",
             abstractions::intents::swaps::endpoints::routes(),
         )
-        .mount("/", FileServer::from(std::env::current_dir().unwrap().join("static")))
+        .mount("/", FileServer::from(std::env::current_exe().join("static")))
+        .mount(
+            "/swagger-ui/",
+            make_swagger_ui(&SwaggerUIConfig {
+                url: "../openapi.json".to_owned(),
+                ..Default::default()
+            }),
+        )
         .manage(ipfs_cache)
+        .manage(openapi_spec)
         .manage(default_http_client())
         // .manage(action_store)
         .manage(GrpcClientPool::<tonic::transport::Channel>::new());
@@ -93,6 +113,11 @@ fn setup_tracing() -> Result<(), anyhow::Error> {
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
     Ok(())
+}
+
+#[get("/openapi.json")]
+fn openapi_json(spec: &State<OpenApi>) -> Json<&OpenApi> {
+    Json(spec.inner())
 }
 
 pub fn default_http_client() -> reqwest::Client {

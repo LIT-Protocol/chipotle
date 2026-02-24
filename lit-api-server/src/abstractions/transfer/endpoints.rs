@@ -5,8 +5,8 @@ use crate::abstractions::transfer::{btc, evm, non_evm};
 
 use super::chain_info::Chain;
 use super::models::{GetBalanceResponse, GetChainsResponse, TransferRequest, TransferResponse};
-use crate::core::models::ErrMessage;
-use crate::core::models::{ApiResult, ApiStatus};
+use crate::core::api_status::ErrMessage;
+use crate::core::api_status::{ApiResult, ApiStatus};
 use rocket::serde::json::Json;
 use rocket::{Route, get, post, routes};
 use rocket_responder::{ApiResponse, internal_server_error, ok};

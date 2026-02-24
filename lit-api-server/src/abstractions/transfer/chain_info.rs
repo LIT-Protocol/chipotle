@@ -20,6 +20,7 @@ pub struct ChainInfo {
 /// Supported EVM chains with their RPC and derivation data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum Chain {
+    Anvil,
     Ethereum,
     BnbSmartChain,
     ArbitrumOne,
@@ -98,6 +99,7 @@ pub enum Chain {
 impl Chain {
     pub fn try_from_str(chain: &str) -> Result<Self, Status> {
         match chain.to_lowercase().as_str() {
+            "anvil" => Ok(Self::Anvil),
             "ethereum" => Ok(Self::Ethereum),
             "bnbsmartchain" => Ok(Self::BnbSmartChain),
             "arbitrumone" => Ok(Self::ArbitrumOne),
@@ -177,6 +179,7 @@ impl Chain {
     /// Lowercase enum variant name for API/identification (e.g. "ethereum", "arbitrumsepolia").
     pub fn chain_key(self) -> &'static str {
         match self {
+            Self::Anvil => "anvil",
             Self::Yellowstone => "yellowstone",
             Self::Ethereum => "ethereum",
             Self::BnbSmartChain => "bnbsmartchain",
@@ -1034,6 +1037,17 @@ impl Chain {
                 token: "SOL",
                 rpc_url: "https://api.devnet.solana.com",
                 signing_scheme: SigningScheme::SchnorrEd25519Sha512,
+                derivation_path: "m/44'/501'/0'/0'",
+            },
+            Self::Anvil => ChainInfo {
+                chain: self.chain_key(),
+                chain_name: "Anvil",
+                chain_id: 31337,
+                is_evm: true,
+                testnet: true,
+                token: "ETH",
+                rpc_url: "http://127.0.0.1:8545",
+                signing_scheme: SigningScheme::EcdsaK256Sha256,
                 derivation_path: "m/44'/501'/0'/0'",
             },
         }

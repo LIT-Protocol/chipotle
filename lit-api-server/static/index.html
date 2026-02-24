@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Lit Node Simple API – SDKs &amp; Apps</title>
+  <title>Lit Node Express Node – Dashboard, SDKs, APIs &amp; Apps</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -158,16 +158,44 @@
   <div class="app">
     <header class="header">
       <a href="https://developer.litprotocol.com/" target="_blank" rel="noopener noreferrer" class="header-brand">
-        <span class="logo">Lit Node Simple API</span>
+        <span class="logo">Lit Node Express Server</span>
       </a>
     </header>
 
     <p class="intro">
       This server exposes a REST API used by the <strong>Core</strong>, <strong>Transfer</strong>, and <strong>Swaps</strong> JavaScript SDKs.
-      The SDKs wrap the API endpoints so you can call them from the browser or Node. Two demo apps are included:
-      <strong>Solver</strong> (for solvers: view swap requests, commit to quotes, process swaps) and <strong>SWPS</strong> (for users: request swaps and manage flow).
+      The SDKs wrap the API endpoints so you can call them from the browser or Node. Demo apps include
+      <strong>Solver</strong> (for solvers: view swap requests, commit to quotes, process swaps), <strong>SWPS</strong> (for users: request swaps and manage flow), and the <strong>Lit Express Node dashboard</strong> (manage accounts, groups, wallets, and IPFS actions).
     </p>
 
+    <h2 class="section-title">Lit Express Node dashboard</h2>
+
+    <div class="card">
+      <h3 class="card-title"><a href="dapps/dashboard/">Lit Express Node dashboard</a></h3>
+      <p class="card-desc">
+        Desktop app (light/dark mode) for Lit Express Node (AccountConfig contract): log in with an API key or create a new account; create wallets and add existing PKPs to groups; list and create groups; add IPFS CIDs (permitted actions) to groups. Uses the Core SDK and mirrors the contract’s accounts, groups, and actions.
+      </p>
+      <p class="card-meta">Open: <a href="dapps/dashboard/">dapps/dashboard/</a></p>
+    </div>
+
+     <h2 class="section-title">API reference</h2>
+
+    <div class="card">
+      <h3 class="card-title"><a href="open_api.html">Core V1 OpenAPI spec</a></h3>
+      <p class="card-desc">
+        Interactive OpenAPI (Swagger) documentation for <code>/core/v1/</code>: all endpoints, request and response schemas, and &quot;Try it out&quot; to call the API from the browser. Covers new account, create wallet, sign with PKP, lit action, add/remove group, PKP and usage API keys, and list groups, wallets, and actions.
+      </p>
+      <p class="card-meta">Open: <a href="/swagger-ui/">swagger-ui/</a></p>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title"><a href="solidity_contract.html">AccountConfig contract (Solidity)</a></h3>
+      <p class="card-desc">
+        Developer documentation for the <code>AccountConfig.sol</code> contract: errors, structs (Metadata, UsageApiKey, Group, Account), state variables, and all functions with NatSpec (accounts, groups, wallets, usage API keys, list/query, balance &amp; pricing).
+      </p>
+      <p class="card-meta">Open: <a href="solidity_contract.html">solidity_contract.html</a></p>
+    </div>
+    
     <h2 class="section-title">JavaScript APIs</h2>
 
     <div class="card">
@@ -195,7 +223,7 @@
       </p>
       <p class="card-meta">Docs: <a href="docs/client/js-swaps-sdk.html">docs/client/js-swaps-sdk.html</a></p>
       <p class="card-meta">Code: <a href="swaps_sdk.js">swaps_sdk.js</a></p>
-    </div>
+    </div>   
 
     <h2 class="section-title">Sample test page</h2>
 
@@ -224,6 +252,8 @@
       </p>
       <p class="card-meta">Open: <a href="dapps/swps/">dapps/swps/</a></p>
     </div>
+
+
 
     <footer class="footer">
       <a href="https://developer.litprotocol.com/" target="_blank" rel="noopener noreferrer">Lit Protocol</a> ·

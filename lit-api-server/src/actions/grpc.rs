@@ -61,7 +61,7 @@ where
                             return Ok(self.add_connection(addr, c).await);
                         }
                         Err(tokio::sync::TryAcquireError::Closed) => {
-                            return Err( anyhow::anyhow!(
+                            return Err(anyhow::anyhow!(
                                 "Semaphore for creating grpc connections is closed",
                             ));
                         }

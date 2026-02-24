@@ -10,7 +10,6 @@ use std::time::Duration;
 
 use crate::error::Error;
 
-
 use anyhow::Result;
 use apalis::{layers::tracing::TraceLayer, prelude::*};
 use apalis_sql::{
@@ -20,8 +19,8 @@ use apalis_sql::{
 };
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-use super::action_client::{Client, ExecutionOptions, ExecutionState};
-use crate::actions::action_client::DenoExecutionEnv;
+use super::client::Client;
+use super::client::models::{DenoExecutionEnv, ExecutionOptions, ExecutionState};
 
 #[derive(Debug, Default, Clone, PartialEq, Serialize, Deserialize)]
 pub struct JobId(TaskId);
@@ -87,10 +86,7 @@ impl ActionJob {
         self.client.execute_js(self.opts.clone()).await
     }
 
-    pub async fn run_with_env(
-        &mut self,
-        env: DenoExecutionEnv,
-    ) -> Result<ExecutionState, Error> {
+    pub async fn run_with_env(&mut self, env: DenoExecutionEnv) -> Result<ExecutionState, Error> {
         self.client.js_env = env;
         self.run().await
     }

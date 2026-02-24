@@ -1,3 +1,6 @@
+# source-only files
+**.toml
+
 # Build artifacts
 **/target/
 **/.cargo/
@@ -8,7 +11,6 @@
 
 # IDE
 .vscode/
-.idea/
 
 # CI (not needed in image)
 .github/
@@ -30,6 +32,6 @@ lit-api-server/tests/
 lit-core/tests/
 
 # Not needed for Phala build
-lit-api-server/blockchain/
+**/blockchain/
 lit-actions/docs/
 lit-actions/packages/

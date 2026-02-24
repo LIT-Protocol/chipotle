@@ -1,9 +1,8 @@
-
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::array::IntoIter;
 use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
-use anyhow::Result;
 
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, Ord, PartialOrd, Hash, Serialize, Deserialize,

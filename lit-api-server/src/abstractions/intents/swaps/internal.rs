@@ -11,7 +11,7 @@ use crate::abstractions::intents::swaps::contracts::quote_storage::{
 };
 use crate::abstractions::intents::swaps::models::{FillQuoteRequest, FillQuoteResponse};
 use crate::abstractions::transfer::chain_info::Chain;
-use crate::core::models::ApiStatus;
+use crate::core::api_status::ApiStatus;
 use anyhow::Result;
 use ethers::middleware::SignerMiddleware;
 use ethers::providers::Http;

@@ -1,8 +1,8 @@
-pub mod action_client;
-pub mod grpc_client_pool;
-mod job;
+pub mod client;
+pub mod grpc;
+mod jobs;
 
-pub use job::*;
+pub use jobs::*;
 
 // #[cfg(test)]
 // mod tests;

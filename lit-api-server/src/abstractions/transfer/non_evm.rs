@@ -1,6 +1,6 @@
 use super::chain_info::Chain;
 use super::models::{GetBalanceResponse, TransferRequest, TransferResponse};
-use crate::core::models::ApiStatus;
+use crate::core::api_status::ApiStatus;
 use rocket::serde::json::Json;
 
 pub async fn get_api_key_balance(
