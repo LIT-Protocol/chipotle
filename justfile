@@ -61,8 +61,7 @@ deploy: docker-push _check_phala
 # Run locally with Docker Compose (no Phala Cloud)
 [group: 'deploy']
 docker-run-local: docker-build
-	sed "s|\${DOCKER_IMAGE}|{{image}}|g" docker-compose.phala.yml > docker-compose.deploy.yml
-	DOCKER_IMAGE={{image}} docker compose -f docker-compose.deploy.yml up -d
+    DOCKER_IMAGE={{image}} docker compose -f docker-compose.deploy.yml up -d
 
 [private]
 _check_docker:
