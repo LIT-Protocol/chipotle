@@ -13,14 +13,21 @@ RUN apt-get update && apt-get install -y \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy entire repo (needed for workspace dependencies)
-COPY . .
+# Copy lit-core and lit-actions first (lit-actions has longest build)
+COPY lit-core ./lit-core/
+COPY lit-actions ./lit-actions/
 
-# Build lit-actions binary first (Deno/V8 runtime - longest build)
-RUN cd lit-actions && cargo build --release --bin lit_actions
+# Remove tests from workspace (excluded by .dockerignore; not needed for release build)
+RUN sed -i 's/, "tests"//; s/"tests", //' lit-actions/Cargo.toml
+
+# Build lit-actions binary (single job reduces memory for V8/Deno compile)
+RUN cd lit-actions && cargo build --bin lit_actions
+
+# Copy lit-api-server and build (layer cached unless lit-api-server changes)
+COPY lit-api-server ./lit-api-server/
 
 # Build lit-api-server binary (with phala feature for TDX attestation)
-RUN cd lit-api-server && cargo build --release --bin lit-api-server --features phala
+RUN cd lit-api-server && cargo build --bin lit-api-server --features phala
 
 # Runtime stage
 FROM debian:bookworm-slim AS runtime
@@ -33,8 +40,8 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Copy both binaries from builder
-COPY --from=builder /build/lit-actions/target/release/lit_actions /usr/local/bin/
-COPY --from=builder /build/lit-api-server/target/release/lit-api-server /usr/local/bin/
+COPY --from=builder /build/lit-actions/target/debug/lit_actions /usr/local/bin/
+COPY --from=builder /build/lit-api-server/target/debug/lit-api-server /usr/local/bin/
 
 # Copy static assets for API server
 COPY --from=builder /build/lit-api-server/static /app/static

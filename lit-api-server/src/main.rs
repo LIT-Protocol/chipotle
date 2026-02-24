@@ -6,7 +6,7 @@ pub mod accounts;
 #[cfg(feature = "phala")]
 pub mod phala;
 
-use rocket::fs::{FileServer, relative};
+use rocket::fs::FileServer;
 use rocket_cors::{AllowedOrigins, Method};
 use std::{collections::HashSet, str::FromStr, time::Duration};
 use tracing::Level;
@@ -65,7 +65,7 @@ async fn main() -> Result<(), rocket::Error> {
             "/swaps/v1/",
             abstractions::intents::swaps::endpoints::routes(),
         )
-        .mount("/", FileServer::from(relative!("static")))
+        .mount("/", FileServer::from(std::env::current_dir().unwrap().join("static")))
         .manage(ipfs_cache)
         .manage(default_http_client())
         // .manage(action_store)

@@ -70,3 +70,19 @@ cd lit-api-server && cargo run
 ```
 
 By default the API is at `http://localhost:8000`; static files and dApps are served from `/`.
+
+---
+
+## Phala CVM deployment
+
+A GitHub Actions workflow deploys both `lit-api-server` and `lit-actions` binaries to the smallest available Phala CVM (`tdx.small`):
+
+- **Workflow:** `.github/workflows/deploy-phala.yml` — triggers on push to `main` or manual dispatch
+- **Docker:** `Dockerfile.phala` — multi-stage build producing both binaries
+- **Compose:** `docker-compose.phala.yml` — two services sharing a Unix socket for gRPC
+
+**Required secrets:** `PHALA_CLOUD_API_KEY`, `DOCKER_REGISTRY_USERNAME`, `DOCKER_REGISTRY_PASSWORD`, `DOCKER_IMAGE`, `PHALA_APP_NAME`
+
+See **[docs/deployment.md](docs/deployment.md)** for full documentation and architecture diagrams.
+
+**Orchestration:** Development uses the simulator; released builds use either Phala Cloud (`pcloud`) or DeRoT on Base (`derot`) via Cargo feature flags.

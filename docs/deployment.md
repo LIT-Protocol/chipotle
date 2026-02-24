@@ -95,18 +95,32 @@ Configure these in **Settings → Secrets and variables → Actions**:
 
 ## Manual Deployment
 
-To deploy locally (after `phala login`):
+Using [just](https://github.com/casey/just) (recommended):
 
 ```bash
-# Build the image
-docker build -f Dockerfile.phala -t lit-node-express .
-
-# Set the image for compose
-export DOCKER_IMAGE=lit-node-express:latest
-
-# Deploy to Phala
-phala deploy -c docker-compose.phala.yml -n lit-api-server --instance-type tdx.small
+just setup       # optional: install Phala CLI (requires npm)
+just deploy      # builds, pushes to litptcl/lit-node-express, and deploys
 ```
+
+**Prerequisites:** Log in to Docker Hub (`docker login`) and ensure you have push access to `litptcl/lit-node-express`. The deploy command updates an existing CVM by name; for first-time deploy when no CVM exists, use `just deploy-new`.
+
+Override with `DOCKER_IMAGE` for a different registry:
+
+```bash
+DOCKER_IMAGE=ghcr.io/owner/lit-node-express:latest just deploy
+```
+
+Or run the commands directly (after `docker login` and `phala login`):
+
+```bash
+# Build, push, and deploy
+docker build -f Dockerfile.phala -t litptcl/lit-node-express:latest .
+docker push litptcl/lit-node-express:latest
+sed "s|\${DOCKER_IMAGE}|litptcl/lit-node-express:latest|g" docker-compose.phala.yml > docker-compose.deploy.yml
+phala deploy -c docker-compose.deploy.yml -n lit-api-server --instance-type tdx.small
+```
+
+Environment variables: `DOCKER_IMAGE` (default: `litptcl/lit-node-express:latest`), `PHALA_APP_NAME` (default: `lit-api-server`), `PHALA_INSTANCE_TYPE` (default: `tdx.small`).
 
 ## Instance Type
 

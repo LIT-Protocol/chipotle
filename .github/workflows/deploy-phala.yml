@@ -31,6 +31,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile.phala
+          platforms: linux/amd64
           push: true
           tags: |
             ${{ secrets.DOCKER_IMAGE }}:${{ github.sha }}
@@ -51,5 +52,5 @@ jobs:
         run: |
           phala deploy \
             -c docker-compose.deploy.yml \
-            -n ${{ secrets.PHALA_APP_NAME }} \
+            --cvm-id ${{ secrets.PHALA_APP_NAME }} \
             --instance-type tdx.small
