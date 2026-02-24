@@ -174,4 +174,26 @@ export default function () {
       }
     },
   });
+
+  // ── 8. listGroups — extract groupId for subsequent tests ──────────────────
+  const listGroupsRes = client.listGroups(
+    { page_number: "0", page_size: "10" },
+    authHeaders,
+  );
+  if (!assertOk("listGroups", "GET /list_groups", listGroupsRes)) return;
+  check(listGroupsRes.response, {
+    "listGroups returns array": (r) => {
+      try {
+        return Array.isArray(JSON.parse(r.body as string));
+      } catch {
+        return false;
+      }
+    },
+  });
+  const groups = listGroupsRes.data as Array<{ id: string; name: string; description: string }>;
+  if (!groups || groups.length === 0) {
+    console.error("listGroups returned empty array after addGroup");
+    return;
+  }
+  const groupId = groups[groups.length - 1].id; // use the most recently created group
 }
