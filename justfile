@@ -79,14 +79,21 @@ _check_phala:
 [group: 'debug']
 ssh:
     phala ssh
-# Run k6 integration tests against deployed API
-# Usage: just k6-test
-#   just k6-test
-#   BASE_URL=https://your-instance.phala.network just k6-test
-#   LIT_API_KEY=base64key just k6-test  # use existing account for lit_action
+# Run k6 load tests. Default: smoke. Pass test names to run others.
+# Usage:
+#   just test              # runs smoke
+#   just test sample       # runs k6-script.sample.ts
+#   just test smoke sample # runs both
+#   BASE_URL=.../core/v1 just test
 [group: 'test']
-k6-test:
+test *names='smoke':
     #!/usr/bin/env sh
     set -eu
     command -v k6 >/dev/null 2>&1 || { echo "error: k6 not found. Install from https://grafana.com/docs/k6/latest/set-up/install-k6/"; exit 1; }
-    k6 run scripts/k6-integration.js
+    for t in {{names}}; do
+        case "$t" in
+            smoke)  k6 run k6/smoke.spec.ts ;;
+            sample) k6 run k6/k6-script.sample.ts ;;
+            *) echo "error: unknown test '$t'. Available: smoke, sample"; exit 1 ;;
+        esac
+    done
