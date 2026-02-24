@@ -24,6 +24,7 @@ pub async fn sign_with_pkp(
 }
 
 pub async fn lit_action(
+    api_key: &str,
     grpc_client_pool: &GrpcClientPool<tonic::transport::Channel>,
     ipfs_cache: &Cache<String, String>,
     http_client: &reqwest::Client,
@@ -39,7 +40,7 @@ pub async fn lit_action(
     let mut client = match ClientBuilder::default()
         .js_env(deno_execution_env)
         .request_id(request_id.clone())
-        .api_key(lit_action_request.api_key.clone())
+        .api_key(api_key.to_string())
         .client_grpc_channels((*grpc_client_pool).clone())
         .build()
         .map_err(|e| e.to_string())

@@ -248,6 +248,20 @@ function getErrorMessageFromBody(text) {
  * @returns {Promise<any>} Parsed JSON body on success
  * @throws {Error} With server error message when res.ok is false (body message included when present)
  */
+/**
+ * Build headers with API key for endpoints that require authentication.
+ * Sends X-Api-Key header (server also accepts Authorization: Bearer <key>).
+ * @param {string} apiKey - Account or usage API key
+ * @param {Object} [extra={}] - Additional headers (e.g. { 'Content-Type': 'application/json' })
+ * @returns {Object} Headers object for fetch
+ */
+function headersWithApiKey(apiKey, extra = {}) {
+  return {
+    'X-Api-Key': apiKey,
+    ...extra,
+  };
+}
+
 async function parseResponse(res, context) {
   const text = await res.text();
   if (!res.ok) {
@@ -295,24 +309,30 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
-   * GET /core/v1/account_exists/<api_key>
+   * GET /core/v1/account_exists
    * Checks whether an account exists and is mutable for the given API key (contract: accountExistsAndIsMutable).
+   * API key via X-Api-Key or Authorization: Bearer header.
    * @param {string} apiKey - Account API key (base64-encoded)
    * @returns {Promise<boolean>}
    */
   async accountExists(apiKey) {
-    const res = await fetch(`${this.baseUrl}/account_exists/${encodeURIComponent(apiKey)}`);
+    const res = await fetch(`${this.baseUrl}/account_exists`, {
+      headers: headersWithApiKey(apiKey),
+    });
     return parseResponse(res, 'account_exists');
   }
 
   /**
-   * GET /core/v1/create_wallet/<api_key>
+   * GET /core/v1/create_wallet
    * Creates a wallet for the given API key and returns the wallet address.
-   * @param {string} apiKey - Hex-encoded API key (from getApiKey)
+   * API key via X-Api-Key or Authorization: Bearer header.
+   * @param {string} apiKey - API key (from getApiKey)
    * @returns {Promise<CreateWalletResponse>}
    */
   async createWallet(apiKey) {
-    const res = await fetch(`${this.baseUrl}/create_wallet/${encodeURIComponent(apiKey)}`);
+    const res = await fetch(`${this.baseUrl}/create_wallet`, {
+      headers: headersWithApiKey(apiKey),
+    });
     return parseResponse(res, 'create_wallet');
   }
 
@@ -325,14 +345,13 @@ export class LitNodeSimpleApiClient {
    */
   async signWithPkp({ apiKey, pkpPublicKey, message, signingScheme = SIGNING_SCHEME_ECDSA_K256_SHA256 }) {
     const body = {
-      api_key: apiKey,
       pkp_public_key: pkpPublicKey,
       message,
       signing_scheme: signingScheme,
     };
     const res = await fetch(`${this.baseUrl}/sign_with_pkp`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'sign_with_pkp');
@@ -346,13 +365,12 @@ export class LitNodeSimpleApiClient {
    */
   async litAction({ apiKey, code, jsParams }) {
     const body = {
-      api_key: apiKey,
       code,
       js_params: jsParams ?? null,
     };
     const res = await fetch(`${this.baseUrl}/lit_action`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'lit_action');
@@ -366,7 +384,6 @@ export class LitNodeSimpleApiClient {
    */
   async addGroup({ apiKey, groupName, groupDescription = '', permittedActions, pkps, allWalletsPermitted = false, allActionsPermitted = false }) {
     const body = {
-      api_key: apiKey,
       group_name: groupName ?? '',
       group_description: groupDescription ?? '',
       permitted_actions: permittedActions ?? [],
@@ -376,7 +393,7 @@ export class LitNodeSimpleApiClient {
     };
     const res = await fetch(`${this.baseUrl}/add_group`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'add_group');
@@ -390,7 +407,6 @@ export class LitNodeSimpleApiClient {
    */
   async addActionToGroup({ apiKey, groupId, actionIpfsCid, name, description }) {
     const body = {
-      api_key: apiKey,
       group_id: groupId,
       action_ipfs_cid: actionIpfsCid,
       name: name ?? null,
@@ -398,7 +414,7 @@ export class LitNodeSimpleApiClient {
     };
     const res = await fetch(`${this.baseUrl}/add_action_to_group`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'add_action_to_group');
@@ -412,13 +428,12 @@ export class LitNodeSimpleApiClient {
    */
   async addPkpToGroup({ apiKey, groupId, pkpPublicKey }) {
     const body = {
-      api_key: apiKey,
       group_id: groupId,
       pkp_public_key: pkpPublicKey,
     };
     const res = await fetch(`${this.baseUrl}/add_pkp_to_group`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'add_pkp_to_group');
@@ -432,13 +447,12 @@ export class LitNodeSimpleApiClient {
    */
   async removePkpFromGroup({ apiKey, groupId, pkpPublicKey }) {
     const body = {
-      api_key: apiKey,
       group_id: groupId,
       pkp_public_key: pkpPublicKey,
     };
     const res = await fetch(`${this.baseUrl}/remove_pkp_from_group`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'remove_pkp_from_group');
@@ -450,16 +464,14 @@ export class LitNodeSimpleApiClient {
    * @param {AddUsageApiKeyOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async addUsageApiKey({ apiKey, usageApiKey, expiration, balance }) {
+  async addUsageApiKey({ apiKey, expiration, balance }) {
     const body = {
-      api_key: apiKey,
-      usage_api_key: usageApiKey,
       expiration,
       balance,
     };
     const res = await fetch(`${this.baseUrl}/add_usage_api_key`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'add_usage_api_key');
@@ -473,12 +485,11 @@ export class LitNodeSimpleApiClient {
    */
   async removeUsageApiKey({ apiKey, usageApiKey }) {
     const body = {
-      api_key: apiKey,
       usage_api_key: usageApiKey,
     };
     const res = await fetch(`${this.baseUrl}/remove_usage_api_key`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'remove_usage_api_key');
@@ -492,7 +503,6 @@ export class LitNodeSimpleApiClient {
    */
   async updateGroup({ apiKey, groupId, name, description, allWalletsPermitted = false, allActionsPermitted = false }) {
     const body = {
-      api_key: apiKey,
       group_id: groupId,
       name: name ?? '',
       description: description ?? '',
@@ -501,7 +511,7 @@ export class LitNodeSimpleApiClient {
     };
     const res = await fetch(`${this.baseUrl}/update_group`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'update_group');
@@ -515,13 +525,12 @@ export class LitNodeSimpleApiClient {
    */
   async removeActionFromGroup({ apiKey, groupId, actionIpfsCid }) {
     const body = {
-      api_key: apiKey,
       group_id: groupId,
       action_ipfs_cid: actionIpfsCid,
     };
     const res = await fetch(`${this.baseUrl}/remove_action_from_group`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'remove_action_from_group');
@@ -535,7 +544,6 @@ export class LitNodeSimpleApiClient {
    */
   async updateActionMetadata({ apiKey, groupId, actionIpfsCid, name, description }) {
     const body = {
-      api_key: apiKey,
       group_id: groupId,
       action_ipfs_cid: actionIpfsCid,
       name: name ?? '',
@@ -543,7 +551,7 @@ export class LitNodeSimpleApiClient {
     };
     const res = await fetch(`${this.baseUrl}/update_action_metadata`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'update_action_metadata');
@@ -557,14 +565,13 @@ export class LitNodeSimpleApiClient {
    */
   async updateUsageApiKeyMetadata({ apiKey, usageApiKey, name, description }) {
     const body = {
-      api_key: apiKey,
       usage_api_key: usageApiKey,
       name: name ?? '',
       description: description ?? '',
     };
     const res = await fetch(`${this.baseUrl}/update_usage_api_key_metadata`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'update_usage_api_key_metadata');
@@ -578,11 +585,12 @@ export class LitNodeSimpleApiClient {
    */
   async listApiKeys({ apiKey, pageNumber = '0', pageSize = '10' }) {
     const params = new URLSearchParams({
-      api_key: apiKey,
       page_number: String(pageNumber),
       page_size: String(pageSize),
     });
-    const res = await fetch(`${this.baseUrl}/list_api_keys?${params}`);
+    const res = await fetch(`${this.baseUrl}/list_api_keys?${params}`, {
+      headers: headersWithApiKey(apiKey),
+    });
     return parseResponse(res, 'list_api_keys');
   }
 
@@ -594,11 +602,12 @@ export class LitNodeSimpleApiClient {
    */
   async listGroups({ apiKey, pageNumber = '0', pageSize = '10' }) {
     const params = new URLSearchParams({
-      api_key: apiKey,
       page_number: String(pageNumber),
       page_size: String(pageSize),
     });
-    const res = await fetch(`${this.baseUrl}/list_groups?${params}`);
+    const res = await fetch(`${this.baseUrl}/list_groups?${params}`, {
+      headers: headersWithApiKey(apiKey),
+    });
     return parseResponse(res, 'list_groups');
   }
 
@@ -610,11 +619,12 @@ export class LitNodeSimpleApiClient {
    */
   async listWallets({ apiKey, pageNumber = '0', pageSize = '10' }) {
     const params = new URLSearchParams({
-      api_key: apiKey,
       page_number: String(pageNumber),
       page_size: String(pageSize),
     });
-    const res = await fetch(`${this.baseUrl}/list_wallets?${params}`);
+    const res = await fetch(`${this.baseUrl}/list_wallets?${params}`, {
+      headers: headersWithApiKey(apiKey),
+    });
     return parseResponse(res, 'list_wallets');
   }
 
@@ -626,12 +636,13 @@ export class LitNodeSimpleApiClient {
    */
   async listWalletsInGroup({ apiKey, groupId, pageNumber = '0', pageSize = '10' }) {
     const params = new URLSearchParams({
-      api_key: apiKey,
       group_id: groupId,
       page_number: String(pageNumber),
       page_size: String(pageSize),
     });
-    const res = await fetch(`${this.baseUrl}/list_wallets_in_group?${params}`);
+    const res = await fetch(`${this.baseUrl}/list_wallets_in_group?${params}`, {
+      headers: headersWithApiKey(apiKey),
+    });
     return parseResponse(res, 'list_wallets_in_group');
   }
 
@@ -643,12 +654,13 @@ export class LitNodeSimpleApiClient {
    */
   async listActions({ apiKey, groupId, pageNumber = '0', pageSize = '10' }) {
     const params = new URLSearchParams({
-      api_key: apiKey,
       group_id: groupId,
       page_number: String(pageNumber),
       page_size: String(pageSize),
     });
-    const res = await fetch(`${this.baseUrl}/list_actions?${params}`);
+    const res = await fetch(`${this.baseUrl}/list_actions?${params}`, {
+      headers: headersWithApiKey(apiKey),
+    });
     return parseResponse(res, 'list_actions');
   }
 
