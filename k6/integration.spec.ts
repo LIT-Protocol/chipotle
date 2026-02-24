@@ -352,4 +352,25 @@ export default function () {
       }
     },
   });
+
+  // ── 17. updateActionMetadata ──────────────────────────────────────────────
+  const updateActionRes = client.updateActionMetadata(
+    {
+      group_id: groupId,
+      action_ipfs_cid: ipfsId,
+      name: "hello-world-updated",
+      description: "Updated Hello World lit action",
+    },
+    authHeaders,
+  );
+  if (!assertOk("updateActionMetadata", "POST /update_action_metadata", updateActionRes)) return;
+  check(updateActionRes.response, {
+    "updateActionMetadata success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+  });
 }
