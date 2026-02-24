@@ -18,8 +18,8 @@ function setApiKey(v) {
 }
 
 function getBaseUrl() {
-  if (typeof location !== 'undefined' && location.origin && (location.origin.startsWith('http://') || location.origin.startsWith('https://')))
-    return location.origin;
+  // if (typeof location !== 'undefined' && location.origin && (location.origin.startsWith('http://') || location.origin.startsWith('https://')))
+    // return location.origin;
   return 'http://localhost:8000';
 }
 
