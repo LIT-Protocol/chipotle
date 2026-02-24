@@ -288,4 +288,30 @@ export default function () {
       }
     },
   });
+
+  // ── 14. addUsageApiKey ────────────────────────────────────────────────────
+  const expiration = String(Math.floor(Date.now() / 1000) + 86400); // 24 h from now
+  const addUsageKeyRes = client.addUsageApiKey(
+    { expiration, balance: "1000000000000000000" }, // 1 token in wei
+    authHeaders,
+  );
+  if (!assertOk("addUsageApiKey", "POST /add_usage_api_key", addUsageKeyRes)) return;
+  check(addUsageKeyRes.response, {
+    "addUsageApiKey success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+    "addUsageApiKey returns usage_api_key": (r) => {
+      try {
+        const body = JSON.parse(r.body as string);
+        return typeof body.usage_api_key === "string" && body.usage_api_key.length > 0;
+      } catch {
+        return false;
+      }
+    },
+  });
+  const usageApiKey = (addUsageKeyRes.data as { usage_api_key: string }).usage_api_key;
 }
