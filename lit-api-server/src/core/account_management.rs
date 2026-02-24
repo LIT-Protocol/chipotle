@@ -139,11 +139,11 @@ pub async fn get_lit_action_ipfs_id(code: String) -> Result<String, ApiStatus> {
     Ok(derived_ipfs_id)
 }
 
-pub async fn add_group(req: Json<AddGroupRequest>) -> Result<AccountOpResponse, ApiStatus> {
+pub async fn add_group(api_key: &str, req: Json<AddGroupRequest>) -> Result<AccountOpResponse, ApiStatus> {
     let permitted_actions = parse_u256_hex_list(&req.permitted_actions)?;
     let pkps = parse_u256_hex_list(&req.pkps)?;
     accounts::add_group(
-        &req.api_key,
+        api_key,
         &req.group_name,
         &req.group_description,
         permitted_actions,
@@ -157,13 +157,14 @@ pub async fn add_group(req: Json<AddGroupRequest>) -> Result<AccountOpResponse, 
 }
 
 pub async fn add_action_to_group(
+    api_key: &str,
     req: Json<AddActionToGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = parse_u256(&req.group_id)?;
     let name = req.name.as_deref().unwrap_or("");
     let description = req.description.as_deref().unwrap_or("");
     accounts::add_action_to_group(
-        &req.api_key,
+        api_key,
         group_id,
         &req.action_ipfs_cid,
         name,
@@ -175,28 +176,31 @@ pub async fn add_action_to_group(
 }
 
 pub async fn add_pkp_to_group(
+    api_key: &str,
     req: Json<AddPkpToGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = parse_u256(&req.group_id)?;
     let wallet_address = accounts::address_from_pubkey(&req.pkp_public_key)?;
-    accounts::add_pkp_to_group(&req.api_key, group_id, wallet_address)
+    accounts::add_pkp_to_group(api_key, group_id, wallet_address)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "add_pkp_to_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
 pub async fn remove_pkp_from_group(
+    api_key: &str,
     req: Json<RemovePkpFromGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = parse_u256(&req.group_id)?;
     let wallet_address = accounts::address_from_pubkey(&req.pkp_public_key)?;
-    accounts::remove_pkp_from_group(&req.api_key, group_id, wallet_address)
+    accounts::remove_pkp_from_group(api_key, group_id, wallet_address)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "remove_pkp_from_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
 pub async fn add_usage_api_key(
+    api_key: &str,
     req: Json<AddUsageApiKeyRequest>,
 ) -> Result<AddUsageApiKeyResponse, ApiStatus> {
     let expiration = parse_u256(&req.expiration)?;
@@ -206,11 +210,11 @@ pub async fn add_usage_api_key(
 
      // technically this is NOT a derivaton path at all, but it's a stand-in for now
     let derivation_path = accounts::derivation_path(wallet_address);
-    accounts::register_wallet_derivation(&req.api_key, wallet_address, derivation_path, "API Key Wallet", "Usage API Key Wallet").await?;
+    accounts::register_wallet_derivation(api_key, wallet_address, derivation_path, "API Key Wallet", "Usage API Key Wallet").await?;
 
     let usage_api_key = base64_light::base64_encode_bytes(&secret);
 
-    accounts::add_usage_api_key(&req.api_key, &usage_api_key, expiration, balance)
+    accounts::add_usage_api_key(api_key, &usage_api_key, expiration, balance)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "add_usage_api_key failed"))?;
     Ok(AddUsageApiKeyResponse {
@@ -220,18 +224,19 @@ pub async fn add_usage_api_key(
 }
 
 pub async fn remove_usage_api_key(
+    api_key: &str,
     req: Json<RemoveUsageApiKeyRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    accounts::remove_usage_api_key(&req.api_key, &req.usage_api_key)
+    accounts::remove_usage_api_key(api_key, &req.usage_api_key)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "remove_usage_api_key failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
-pub async fn update_group(req: Json<UpdateGroupRequest>) -> Result<AccountOpResponse, ApiStatus> {
+pub async fn update_group(api_key: &str, req: Json<UpdateGroupRequest>) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = parse_u256(&req.group_id)?;
     accounts::update_group(
-        &req.api_key,
+        api_key,
         group_id,
         &req.name,
         &req.description,
@@ -244,22 +249,24 @@ pub async fn update_group(req: Json<UpdateGroupRequest>) -> Result<AccountOpResp
 }
 
 pub async fn remove_action_from_group(
+    api_key: &str,
     req: Json<RemoveActionFromGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = parse_u256(&req.group_id)?;
-    accounts::remove_action_from_group_by_cid(&req.api_key, group_id, &req.action_ipfs_cid)
+    accounts::remove_action_from_group_by_cid(api_key, group_id, &req.action_ipfs_cid)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "remove_action_from_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
 pub async fn update_action_metadata(
+    api_key: &str,
     req: Json<UpdateActionMetadataRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = parse_u256(&req.group_id)?;
     let action_hash = U256::from_big_endian(&keccak256(&req.action_ipfs_cid));
     accounts::update_action_metadata(
-        &req.api_key,
+        api_key,
         action_hash,
         group_id,
         &req.name,
@@ -271,10 +278,11 @@ pub async fn update_action_metadata(
 }
 
 pub async fn update_usage_api_key_metadata(
+    api_key: &str,
     req: Json<UpdateUsageApiKeyMetadataRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     accounts::update_usage_api_key_metadata(
-        &req.api_key,
+        api_key,
         &req.usage_api_key,
         &req.name,
         &req.description,

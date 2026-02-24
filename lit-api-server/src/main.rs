@@ -24,7 +24,10 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 async fn main() -> Result<(), rocket::Error> {
     setup_tracing().expect("Failed to setup tracing.");
 
-    config::init_config().expect("Failed to initialize node configuration.");
+    if let Err(e) = config::init_config() {
+        eprintln!("Failed to initialize node configuration: {:?}. Exiting.", e);
+        std::process::exit(1);
+    }
 
     let allowed_methods = HashSet::from([
         Method::from_str("Get").expect("Invalid method: Get"),

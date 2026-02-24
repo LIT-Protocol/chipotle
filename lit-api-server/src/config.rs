@@ -1,6 +1,6 @@
 use crate::abstractions::transfer::chain_info::Chain;
 use anyhow::Result;
-use std::fs;
+use std::{env, fs};
 use std::path::Path;
 use toml_edit::DocumentMut;
 
@@ -17,6 +17,11 @@ pub static GLOBAL_NODE_CONFIG: OnceLock<NodeConfig> = OnceLock::new();
 
 pub fn init_config() -> Result<(), anyhow::Error> {
     let toml_path = Path::new("NodeConfig.toml");
+    if !toml_path.exists() {
+
+        return Err(anyhow::anyhow!("NodeConfig.toml does not exist at {:?}. Current working dir is {:?}.", toml_path, env::current_dir()));
+    }
+
     let toml_contents = fs::read_to_string(toml_path).unwrap_or_default();
 
     if toml_contents.is_empty() {
