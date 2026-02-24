@@ -112,4 +112,17 @@ export default function () {
     apiKey = newAccountData.api_key;
   }
   const authHeaders = { "X-Api-Key": apiKey };
+
+  // ── 4. accountExists ──────────────────────────────────────────────────────
+  const existsRes = client.accountExists(authHeaders);
+  if (!assertOk("accountExists", "GET /account_exists", existsRes)) return;
+  check(existsRes.response, {
+    "accountExists returns true": (r) => {
+      try {
+        return JSON.parse(r.body as string) === true;
+      } catch {
+        return false;
+      }
+    },
+  });
 }
