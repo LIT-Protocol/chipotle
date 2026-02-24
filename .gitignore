@@ -1,2 +1,3 @@
 .vscode
+.cursor
 docker-compose.deploy.yml
