@@ -40,28 +40,28 @@ jobs:
       - name: smoke.spec.ts
         env:
           BASE_URL: ${{ vars.BASE_URL }}
-        run: k6 run --vus 2 --iterations 1 k6/smoke.spec.ts
+        run: k6 run --vus 2 --iterations 2 k6/smoke.spec.ts
 
       - name: integration.spec.ts
         env:
           BASE_URL: ${{ vars.BASE_URL }}
           LIT_API_KEY: ${{ secrets.LIT_API_KEY }}
-        run: k6 run --vus 2 --iterations 1 k6/integration.spec.ts
+        run: k6 run --vus 2 --iterations 2 k6/integration.spec.ts
 
       - name: lit-action-sign-as-action.spec.ts
         env:
           BASE_URL: ${{ vars.BASE_URL }}
           LIT_API_KEY: ${{ secrets.LIT_API_KEY }}
-        run: k6 run --vus 2 --iterations 1 k6/lit-action-sign-as-action.spec.ts
+        run: k6 run --vus 2 --iterations 2 k6/lit-action-sign-as-action.spec.ts
 
       - name: lit-action-verify-action-signature.spec.ts
         env:
           BASE_URL: ${{ vars.BASE_URL }}
           LIT_API_KEY: ${{ secrets.LIT_API_KEY }}
-        run: k6 run --vus 2 --iterations 1 k6/lit-action-verify-action-signature.spec.ts
+        run: k6 run --vus 2 --iterations 2 k6/lit-action-verify-action-signature.spec.ts
 
       - name: lit-action-get-public-key.spec.ts
         env:
           BASE_URL: ${{ vars.BASE_URL }}
           LIT_API_KEY: ${{ secrets.LIT_API_KEY }}
-        run: k6 run --vus 2 --iterations 1 k6/lit-action-get-public-key.spec.ts
+        run: k6 run --vus 2 --iterations 2 k6/lit-action-get-public-key.spec.ts
