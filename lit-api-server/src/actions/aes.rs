@@ -25,6 +25,7 @@ pub async fn aes_decrypt(symmetric_key: &[u8], ciphertext_with_iv: &str) -> Resu
     Ok(bytes_to_hex(decrypted))
 }
 
+
 pub async fn aes_encrypt(symmetric_key: Vec<u8>, plaintext: String) -> Result<String> {
     let cipher_bytes = symmetric_key
         .try_into()
@@ -35,5 +36,10 @@ pub async fn aes_encrypt(symmetric_key: Vec<u8>, plaintext: String) -> Result<St
     let mut iv = [0; 16];
     rand::thread_rng().fill(&mut iv);
     let encrypted = cipher.cbc_encrypt(&iv, plaintext.as_bytes());
-    Ok(bytes_to_hex(encrypted))
+    // Prepend IV to ciphertext
+    let mut result = iv.to_vec();
+    result.extend_from_slice(&encrypted);
+    Ok(bytes_to_hex(result))
+}
+
 }
