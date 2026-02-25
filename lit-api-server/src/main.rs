@@ -85,7 +85,7 @@ async fn main() -> Result<(), rocket::Error> {
             abstractions::intents::swaps::endpoints::routes(),
         )
         .mount(
-            "/swagger-ui/",
+            "/core/v1/swagger-ui/",
             make_swagger_ui(&SwaggerUIConfig {
                 url: "/core/v1/openapi.json".to_owned(),
                 ..Default::default()
