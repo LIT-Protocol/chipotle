@@ -19,7 +19,10 @@ function setApiKey(v) {
 
 function getBaseUrl() {
   if (typeof location !== 'undefined' && location.origin && (location.origin.startsWith('http://') || location.origin.startsWith('https://')))
-    return location.origin;
+    if (location.origin.includes('localhost:8080'))
+      return 'http://localhost:8000';
+    else
+      return 'https://api.dev.litprotocol.com';
   return 'http://localhost:8000';
 }
 
