@@ -337,7 +337,7 @@ pub async fn register_wallet_derivation(
     );
 
     let tx = function_call.send().await?;
-    // optimisticly return true, we will check the tx in the future
+    // Wait for the transaction to be confirmed before returning true
     match tx.await {
         Ok(_) => Ok(true),
         Err(e) => Err(e.into()),
