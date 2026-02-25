@@ -1,0 +1,15 @@
+{
+  "name": "k6",
+  "version": "1.0.0",
+  "description": "Auto-generated from the OpenAPI spec using [@grafana/openapi-to-k6](https://github.com/grafana/openapi-to-k6).",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@grafana/openapi-to-k6": "^0.4.1"
+  }
+}

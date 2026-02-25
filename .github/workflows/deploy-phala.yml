@@ -80,3 +80,12 @@ jobs:
             -c docker-compose.deploy.yml \
             --cvm-id ${{ vars.PHALA_APP_NAME }} \
             --instance-type tdx.small
+
+  wait-for-api:
+    needs: [deploy, determine-runner]
+    uses: ./.github/workflows/wait-for-api.yml
+    with:
+      phala_app_name: ${{ vars.PHALA_APP_NAME }}
+      runner: ${{ needs.determine-runner.outputs.runner }}
+    secrets:
+      PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
