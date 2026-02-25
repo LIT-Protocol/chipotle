@@ -1,0 +1,51 @@
+# Run lit-action-get-public-key.spec.ts in smoke mode (2 VUs, 2 iterations) after deploy completes on main.
+#
+# Required vars:
+#   BASE_URL - Full API base URL, e.g. https://your-instance.phala.network/core/v1
+#
+# Required secrets (for authenticated tests):
+#   LIT_API_KEY - Account API key; tests that need it are skipped gracefully without it
+
+name: k6 Lit Action Get Public Key
+
+on:
+  workflow_run:
+    workflows: ["Deploy to Phala CVM"]
+    types:
+      - completed
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  determine-runner:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.set-runner.outputs.use-runner }}
+    steps:
+      - name: Determine runner (self-hosted or fallback)
+        id: set-runner
+        uses: mikehardy/runner-fallback-action@v1
+        with:
+          primary-runner: "self-hosted"
+          fallback-runner: "ubuntu-slim"
+          github-token: ${{ secrets.GH_RUNNER_CHECK_TOKEN }}
+          fallback-on-error: true
+
+  k6-lit-action-get-public-key:
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Install k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: lit-action-get-public-key.spec.ts
+        env:
+          BASE_URL: ${{ vars.BASE_URL }}
+          LIT_API_KEY: ${{ secrets.LIT_API_KEY }}
+        run: k6 run --vus 2 --iterations 2 k6/lit-action-get-public-key.spec.ts

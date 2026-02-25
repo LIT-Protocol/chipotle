@@ -8,7 +8,6 @@
 # Required vars:
 #   DOCKER_IMAGE - Full image path, e.g. docker.io/username/lit-node-express
 #   PHALA_APP_NAME - CVM name, e.g. lit-api-server
-#   BASE_URL - API base URL, e.g. https://your-instance.phala.network/core/v1
 
 name: Deploy to Phala CVM
 
@@ -82,18 +81,11 @@ jobs:
             --cvm-id ${{ vars.PHALA_APP_NAME }} \
             --instance-type tdx.small
 
-      - name: Wait for API to become available
-        env:
-          BASE_URL: ${{ vars.BASE_URL }}
-        run: |
-          echo "Polling $BASE_URL/get_node_chain_config (timeout: 300s)..."
-          deadline=$(( $(date +%s) + 300 ))
-          until curl -sf "$BASE_URL/get_node_chain_config" > /dev/null; do
-            if [ $(date +%s) -ge $deadline ]; then
-              echo "Timed out after 300s waiting for API"
-              exit 1
-            fi
-            echo "Not ready, retrying in 10s..."
-            sleep 10
-          done
-          echo "API is up"
+  wait-for-api:
+    needs: [deploy, determine-runner]
+    uses: ./.github/workflows/wait-for-api.yml
+    with:
+      phala_app_name: ${{ vars.PHALA_APP_NAME }}
+      runner: ${{ needs.determine-runner.outputs.runner }}
+    secrets:
+      PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}

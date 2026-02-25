@@ -1,4 +1,4 @@
-# Run all k6 tests in smoke mode (2 VUs, 1 iteration) after every push to main.
+# Run lit-action-sign-as-action.spec.ts in smoke mode (2 VUs, 2 iterations) after deploy completes on main.
 #
 # Required vars:
 #   BASE_URL - Full API base URL, e.g. https://your-instance.phala.network/core/v1
@@ -6,15 +6,19 @@
 # Required secrets (for authenticated tests):
 #   LIT_API_KEY - Account API key; tests that need it are skipped gracefully without it
 
-name: k6 Smoke Tests
+name: k6 Lit Action Sign As Action
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Deploy to Phala CVM"]
+    types:
+      - completed
     branches: [main]
   workflow_dispatch:
 
 jobs:
   determine-runner:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       runner: ${{ steps.set-runner.outputs.use-runner }}
@@ -24,44 +28,24 @@ jobs:
         uses: mikehardy/runner-fallback-action@v1
         with:
           primary-runner: "self-hosted"
-          fallback-runner: "ubuntu-latest"
+          fallback-runner: "ubuntu-slim"
           github-token: ${{ secrets.GH_RUNNER_CHECK_TOKEN }}
           fallback-on-error: true
 
-  k6-smoke:
+  k6-lit-action-sign-as-action:
     needs: determine-runner
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
 
       - name: Install k6
         uses: grafana/setup-k6-action@v1
-
-      - name: smoke.spec.ts
-        env:
-          BASE_URL: ${{ vars.BASE_URL }}
-        run: k6 run --vus 2 --iterations 2 k6/smoke.spec.ts
-
-      - name: integration.spec.ts
-        env:
-          BASE_URL: ${{ vars.BASE_URL }}
-          LIT_API_KEY: ${{ secrets.LIT_API_KEY }}
-        run: k6 run --vus 2 --iterations 2 k6/integration.spec.ts
 
       - name: lit-action-sign-as-action.spec.ts
         env:
           BASE_URL: ${{ vars.BASE_URL }}
           LIT_API_KEY: ${{ secrets.LIT_API_KEY }}
         run: k6 run --vus 2 --iterations 2 k6/lit-action-sign-as-action.spec.ts
-
-      - name: lit-action-verify-action-signature.spec.ts
-        env:
-          BASE_URL: ${{ vars.BASE_URL }}
-          LIT_API_KEY: ${{ secrets.LIT_API_KEY }}
-        run: k6 run --vus 2 --iterations 2 k6/lit-action-verify-action-signature.spec.ts
-
-      - name: lit-action-get-public-key.spec.ts
-        env:
-          BASE_URL: ${{ vars.BASE_URL }}
-          LIT_API_KEY: ${{ secrets.LIT_API_KEY }}
-        run: k6 run --vus 2 --iterations 2 k6/lit-action-get-public-key.spec.ts
