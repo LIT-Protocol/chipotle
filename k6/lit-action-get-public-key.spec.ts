@@ -3,8 +3,8 @@
  * derives the Ethereum address for a Lit Action from within the action itself.
  *
  * Usage:
- *   LIT_API_KEY=your-key k6 run k6/lit-action-get-public-key.spec.ts
- *   BASE_URL=https://your-instance/core/v1 LIT_API_KEY=your-key k6 run k6/lit-action-get-public-key.spec.ts
+ *   k6 run k6/lit-action-get-public-key.spec.ts
+ *   BASE_URL=https://your-instance/core/v1 k6 run k6/lit-action-get-public-key.spec.ts
  *
  * Ref: https://datil.developer.litprotocol.com/sdk/serverless-signing/sign-as-action
  */
@@ -15,7 +15,6 @@ import { LitApiServerClient } from "./litApiServer.ts";
 const BASE_URL =
   __ENV.BASE_URL ||
   "https://36da669c852c9bd4fdea27dd331c07ff776bd125-8000.dstack-pha-prod5.phala.network/core/v1";
-const LIT_API_KEY = __ENV.LIT_API_KEY || "";
 
 // Taken verbatim from the Lit docs sample (standalone IIFE, no jsParams needed).
 // Uses Lit.Auth.actionIpfsIdStack[0] to self-identify and ethers (pre-loaded
@@ -41,6 +40,8 @@ export const options = {
   thresholds: {
     http_req_failed: ["rate<0.1"],
     http_req_duration: ["p(99)<30000"],
+    http_reqs: ["count>=1"],
+    checks: ["rate==1"],
   },
 };
 
@@ -78,15 +79,16 @@ function assertOk(
 }
 
 export default function () {
-  if (!LIT_API_KEY) {
-    console.error(
-      "LIT_API_KEY is required. Set it via: LIT_API_KEY=your-key k6 run ...",
-    );
-    return;
-  }
-
   const client = new LitApiServerClient({ baseUrl: BASE_URL });
-  const authHeaders = { "X-Api-Key": LIT_API_KEY };
+
+  const newAccountRes = client.newAccount({
+    account_name: "k6-lit-action-get-public-key",
+    account_description: "k6 test account",
+    initial_balance: "10000",
+  });
+  if (!assertOk("newAccount", "POST /new_account", newAccountRes)) return;
+  const apiKey = (newAccountRes.data as { api_key: string }).api_key;
+  const authHeaders = { "X-Api-Key": apiKey };
 
   const res = client.litAction(
     {

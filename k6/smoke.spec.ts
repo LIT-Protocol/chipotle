@@ -14,6 +14,11 @@ const client = new LitApiServerClient({ baseUrl });
 export const options = {
   vus: 2,
   duration: "10s",
+  thresholds: {
+    http_reqs: ["count>=1"],
+    http_req_failed: ["rate<0.1"],
+    checks: ["rate==1"],
+  },
 };
 
 export default function () {

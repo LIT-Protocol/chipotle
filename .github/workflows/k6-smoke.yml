@@ -2,7 +2,6 @@
 # Called from Deploy to Phala CVM after wait-for-api, or manually via workflow_dispatch.
 #
 # Required vars: BASE_URL (for workflow_dispatch when base_url not passed)
-# Required secrets: LIT_API_KEY (for authenticated tests)
 
 name: k6 Smoke Tests
 

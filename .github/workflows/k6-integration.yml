@@ -2,7 +2,6 @@
 # Called from Deploy to Phala CVM after wait-for-api, or manually via workflow_dispatch.
 #
 # Required vars: BASE_URL (for workflow_dispatch when base_url not passed)
-# Required secrets: LIT_API_KEY (for authenticated tests)
 
 name: k6 Integration
 
@@ -13,10 +12,6 @@ on:
         description: "API base URL (e.g. https://example.com/core/v1)"
         required: true
         type: string
-    secrets:
-      LIT_API_KEY:
-        description: "Account API key for authenticated tests"
-        required: false
   workflow_dispatch:
     inputs:
       base_url:
@@ -51,5 +46,4 @@ jobs:
       - name: integration.spec.ts
         env:
           BASE_URL: ${{ inputs.base_url || vars.BASE_URL }}
-          LIT_API_KEY: ${{ secrets.LIT_API_KEY }}
         run: k6 run --vus 2 --iterations 2 k6/integration.spec.ts
