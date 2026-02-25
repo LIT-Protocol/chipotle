@@ -92,13 +92,13 @@ jobs:
 
   k6-smoke:
     needs: wait-for-api
-    uses: ./.github/workflows/k6/smoke.yml
+    uses: ./.github/workflows/k6-smoke.yml
     with:
       base_url: ${{ needs.wait-for-api.outputs.base_url }}
 
   k6-integration:
     needs: wait-for-api
-    uses: ./.github/workflows/k6/integration.yml
+    uses: ./.github/workflows/k6-integration.yml
     with:
       base_url: ${{ needs.wait-for-api.outputs.base_url }}
     secrets:
@@ -106,7 +106,7 @@ jobs:
 
   k6-lit-action-get-public-key:
     needs: wait-for-api
-    uses: ./.github/workflows/k6/lit-action-get-public-key.yml
+    uses: ./.github/workflows/k6-lit-action-get-public-key.yml
     with:
       base_url: ${{ needs.wait-for-api.outputs.base_url }}
     secrets:
@@ -114,7 +114,7 @@ jobs:
 
   k6-lit-action-sign-as-action:
     needs: wait-for-api
-    uses: ./.github/workflows/k6/lit-action-sign-as-action.yml
+    uses: ./.github/workflows/k6-lit-action-sign-as-action.yml
     with:
       base_url: ${{ needs.wait-for-api.outputs.base_url }}
     secrets:
@@ -122,7 +122,7 @@ jobs:
 
   k6-lit-action-verify-action-signature:
     needs: wait-for-api
-    uses: ./.github/workflows/k6/lit-action-verify-action-signature.yml
+    uses: ./.github/workflows/k6-lit-action-verify-action-signature.yml
     with:
       base_url: ${{ needs.wait-for-api.outputs.base_url }}
     secrets:
