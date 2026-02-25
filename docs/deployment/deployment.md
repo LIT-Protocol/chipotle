@@ -148,13 +148,7 @@ Or with a custom base URL:
 BASE_URL=https://your-instance.phala.network just k6-test
 ```
 
-To test `lit_action` with an existing account (skips `new_account` and `add_group`):
-
-```bash
-LIT_API_KEY=your-base64-api-key just k6-test
-```
-
-The full flow creates a new account and group when `LIT_API_KEY` is not set; this requires the AccountConfig contract to be deployed and configured on the chain (e.g. Base Sepolia).
+The k6 tests create a new account via `new_account` in each run; this requires the AccountConfig contract to be deployed and configured on the chain (e.g. Base Sepolia).
 
 ## Phala Networking
 

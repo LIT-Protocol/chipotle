@@ -30,6 +30,11 @@ async fn main() -> Result<(), rocket::Error> {
         std::process::exit(1);
     }
 
+    if let Err(e) = accounts::signable_contract::init_signing_client() {
+        eprintln!("Failed to initialize signing client: {:?}. Exiting.", e);
+        std::process::exit(1);
+    }
+
     let allowed_methods = HashSet::from([
         Method::from_str("Get").expect("Invalid method: Get"),
         Method::from_str("Options").expect("Invalid method: Options"),
