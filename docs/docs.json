@@ -9,9 +9,9 @@
   },
   "favicon": "/favicon.svg",
   "navigation": {
-    "tabs": [     
+    "tabs": [
       {
-        "tab": "Build with Lit",
+        "tab": "Build with Lit Node Express",
         "groups": [
           {
             "group": "Getting Started",
