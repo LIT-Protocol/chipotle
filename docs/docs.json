@@ -11,7 +11,9 @@
     "groups": [
       {
         "group": "Getting Started",
-        "pages": []
+        "pages": [
+          "index"
+        ]
       }
     ]
   },
