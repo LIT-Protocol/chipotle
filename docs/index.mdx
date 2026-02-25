@@ -3,7 +3,7 @@ title: "Quick Start"
 description: "Get started with Lit Node Express using the Lit Express Dashboard or the REST API (Core SDK and cURL), the fastest and easiest method to get started with Lit Actions."
 ---
 
-This guide introduces the **Lit Express API ** and it's web interface, the **Lit Express** **Dashboard** which allows both web3 and non-web3 developers to quickly set up their Lit environment and start using Lit Actions.
+This guide introduces the \*\*Lit Express API \*\* and it's web interface, the **Lit Express** **Dashboard** which allows both web3 and non-web3 developers to quickly set up their Lit environment and start using Lit Actions.
 
 ## Overview
 
@@ -24,7 +24,7 @@ All of this can be done via the **Dashboard** (web GUI) or directly via the **RE
 
 The Dashboard is a web management GUI for Lit Node Express. Open it from your browser at
 
- `dashboard.dev.litprotocol.com` 
+`dashboard.dev.litprotocol.com`
 
 It supports light/dark theme for your convenience and provides simple management tools.
 
@@ -55,7 +55,7 @@ It supports light/dark theme for your convenience and provides simple management
     Use this key in the `X-Api-Key` (or `Authorization: Bearer`) header when calling the node so that usage is attributed to this key.
   </Step>
   <Step title="Request new PKPs (wallets)">
-    PKPs (Programmable Key Pairs) are wallets the lit-nodes can use for signing. In the **Wallets** section, click **Add** to create a new wallet to assign to one of your users, or for use in running a lit-action. The server generates a new PKP and returns its address and public key. 
+    PKPs (Programmable Key Pairs) are wallets the lit-nodes can use for signing. In the **Wallets** section, click **Add** to create a new wallet to assign to one of your users, or for use in running a lit-action. The server generates a new PKP and returns its address and public key.
 
     You can add existing PKPs to groups (see step 5) via **Add PKP to group** in the Groups section.
   </Step>
@@ -300,6 +300,14 @@ Execute a lit-action by sending JavaScript code and optional params. Use the acc
 - **list_wallets_in_group** — List wallets in a group.
 - **update_group** — Update group name, description, and permission flags.
 - **remove_action_from_group** / **remove_pkp_from_group** — Remove action or PKP from a group.
-- **get_node_chain_config** — Get node chain config (no auth).
+- **get_node_chain_config** — Get node chain config - a quick way to find the location of contracts within the system.
 
-For full request/response shapes and OpenAPI spec, see the API reference (e.g. `/openapi.json` or Swagger UI if mounted).
+Both request/response shapes and OpenAPI spec are available directly in the dev system.  For a Swagger-UI implementation of the OpenAPI spec, please browser to;\
+\
+https://api.dev.litprotocol.com/swagger-ui/
+
+The OpenAPI spec itself can be found at:\
+\
+https://api.dev.litprotocol.com/openapi.json
+
+Note that these specs are subject to mild changes and will always be available with the dev server endpoints.
