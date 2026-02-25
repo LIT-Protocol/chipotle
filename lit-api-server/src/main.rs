@@ -11,8 +11,10 @@ use crate::actions::grpc::GrpcClientPool;
 use moka::future::Cache;
 use rocket::State;
 use rocket::get;
+use rocket::response::Redirect;
 use rocket::routes;
 use rocket::serde::json::Json;
+use rocket::uri;
 use rocket_cors::{AllowedOrigins, Method};
 use rocket_okapi::okapi::openapi3::{OpenApi, Server};
 use rocket_okapi::swagger_ui::SwaggerUIConfig;
@@ -75,9 +77,9 @@ async fn main() -> Result<(), rocket::Error> {
 
     let (core_routes, openapi_spec) = core::v1::endpoints::routes_with_spec();
 
-    let mut r = rocket::build()
+    let r = rocket::build()
         .attach(cors)
-        .mount("/", routes![openapi_json])
+        .mount("/", routes![openapi_json, openapi_json_redirect, swagger_ui_redirect])
         .mount("/core/v1/", core_routes)
         .mount("/transfer/v1/", abstractions::transfer::endpoints::routes())
         .mount(
@@ -141,4 +143,14 @@ pub fn default_http_client() -> reqwest::Client {
         .pool_max_idle_per_host(30)
         .build()
         .expect("Error building request client")
+}
+
+#[get("/openapi.json")]
+fn openapi_json_redirect() -> Redirect {
+    Redirect::permanent(uri!("/core/v1/openapi.json"))
+}
+
+#[get("/")]
+fn swagger_ui_redirect() -> Redirect {
+    Redirect::permanent(uri!("/core/v1/swagger-ui/"))
 }
