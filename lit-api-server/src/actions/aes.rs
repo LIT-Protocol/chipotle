@@ -4,7 +4,7 @@ use lit_core::utils::binary::{bytes_to_hex, hex_to_bytes};
 use rand::Rng;
 
 pub async fn aes_decrypt(symmetric_key: &[u8], ciphertext_with_iv: &str) -> Result<String> {
-    // Create a new 128-bit cipher
+    // Create a new 256-bit cipher
     let cipher_bytes = symmetric_key
         .try_into()
         .map_err(|e| conversion_err("Could not convert symmetric key to length 32", None))?;
