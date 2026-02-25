@@ -54,8 +54,8 @@ pub async fn new_account(
         creator_wallet_address,
         initial_balance,
     );
-    let _tx = function_call.send().await?;
-    // tx.await?;
+    let tx = function_call.send().await?;
+    tx.await?;
 
     Ok(true)
 }
@@ -93,8 +93,8 @@ pub async fn add_group(
         all_wallets_permitted,
         all_actions_permitted,
     );
-    let _tx = function_call.send().await?;
-    // tx.await?;
+    let tx = function_call.send().await?;
+    tx.await?;
     Ok(true)
 }
 
@@ -116,8 +116,8 @@ pub async fn add_action_to_group(
         name.to_string(),
         description.to_string(),
     );
-    let _tx = function_call.send().await?;
-    // tx.await?;
+    let tx = function_call.send().await?;
+    tx.await?;
     Ok(true)
 }
 
@@ -132,8 +132,8 @@ pub async fn add_wallet_to_group(
     let wallet_address_hash = wallet_address_hash(wallet_address);
     let function_call =
         contract.add_wallet_to_group(account_api_key_hash, group_id, wallet_address_hash);
-    let _tx = function_call.send().await?;
-    // tx.await?;
+    let tx = function_call.send().await?;
+    tx.await?;
     Ok(true)
 }
 
@@ -161,8 +161,8 @@ pub async fn update_group(
         all_wallets_permitted,
         all_actions_permitted,
     );
-    let _tx = function_call.send().await?;
-    // tx.await?;
+    let tx = function_call.send().await?;
+    tx.await?;
     Ok(true)
 }
 
@@ -176,8 +176,8 @@ pub async fn remove_action_from_group(
     let account_api_key_hash = api_key_hash(api_key);
     let function_call =
         contract.remove_action_from_group(account_api_key_hash, group_id, action_hash);
-    let _tx = function_call.send().await?;
-    // tx.await?;
+    let tx = function_call.send().await?;
+    tx.await?;
     Ok(true)
 }
 
@@ -208,8 +208,8 @@ pub async fn update_action_metadata(
         name.to_string(),
         description.to_string(),
     );
-    let _tx = function_call.send().await?;
-    // tx.await?;
+    let tx = function_call.send().await?;
+    tx.await?;
     Ok(true)
 }
 
@@ -229,8 +229,8 @@ pub async fn update_usage_api_key_metadata(
         name.to_string(),
         description.to_string(),
     );
-    let _tx = function_call.send().await?;
-    // tx.await?;
+    let tx = function_call.send().await?;
+    tx.await?;
     Ok(true)
 }
 
@@ -245,8 +245,8 @@ pub async fn remove_wallet_from_group(
     let wallet_address_hash = wallet_address_hash(wallet_address);
     let function_call =
         contract.remove_wallet_from_group(account_api_key_hash, group_id, wallet_address_hash);
-    let _tx = function_call.send().await?;
-    // tx.await?;
+    let tx = function_call.send().await?;
+    tx.await?;
     Ok(true)
 }
 
@@ -277,8 +277,8 @@ pub async fn add_usage_api_key(
         expiration,
         balance,
     );
-    let _tx = function_call.send().await?;
-    // tx.await?;
+    let tx = function_call.send().await?;
+    tx.await?;
     Ok(true)
 }
 
@@ -290,8 +290,8 @@ pub async fn remove_usage_api_key(api_key: &str, usage_api_key: &str) -> Result<
     let usage_api_key_hash_string = bytes_to_hex( &keccak256(usage_api_key.as_bytes()));
     lookup_data::delete_api_key_by_key_hash(&usage_api_key_hash_string).await?;
     let function_call = contract.remove_usage_api_key(account_api_key_hash, usage_api_key_hash);
-    let _tx = function_call.send().await?;
-    // tx.await?;
+    let tx = function_call.send().await?;
+    tx.await?;
     Ok(true)
 }
 
@@ -315,9 +315,9 @@ pub async fn register_wallet_derivation(
         description.to_string(),
     );
 
-    let _tx = function_call.send().await?;
+    let tx = function_call.send().await?;
     // optimisticly return true, we will check the tx in the future
-    // tx.await?;
+    tx.await?;
     Ok(true)
 }
 
@@ -420,8 +420,8 @@ pub async fn debit_api_key(api_key: &str, amount: U256) -> Result<bool> {
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.debit_api_key(account_api_key_hash, amount);
-    let _tx = function_call.send().await?;
-    // tx.await?;
+    let tx = function_call.send().await?;
+    tx.await?;
     Ok(true)
 }
 
@@ -429,7 +429,7 @@ pub async fn credit_api_key(api_key: &str, amount: U256) -> Result<bool> {
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.credit_api_key(account_api_key_hash, amount);
-    let _tx = function_call.send().await?;
-    // tx.await?;
+    let tx = function_call.send().await?;
+    tx.await?;
     Ok(true)
 }
