@@ -1,0 +1,67 @@
+# Run all k6 tests in smoke mode (2 VUs, 1 iteration) after every push to main.
+#
+# Required vars:
+#   BASE_URL - Full API base URL, e.g. https://your-instance.phala.network/core/v1
+#
+# Required secrets (for authenticated tests):
+#   LIT_API_KEY - Account API key; tests that need it are skipped gracefully without it
+
+name: k6 Smoke Tests
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  determine-runner:
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.set-runner.outputs.use-runner }}
+    steps:
+      - name: Determine runner (self-hosted or fallback)
+        id: set-runner
+        uses: mikehardy/runner-fallback-action@v1
+        with:
+          primary-runner: "self-hosted"
+          fallback-runner: "ubuntu-latest"
+          github-token: ${{ secrets.GH_RUNNER_CHECK_TOKEN }}
+          fallback-on-error: true
+
+  k6-smoke:
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: smoke.spec.ts
+        env:
+          BASE_URL: ${{ vars.BASE_URL }}
+        run: k6 run --vus 2 --iterations 2 k6/smoke.spec.ts
+
+      - name: integration.spec.ts
+        env:
+          BASE_URL: ${{ vars.BASE_URL }}
+          LIT_API_KEY: ${{ secrets.LIT_API_KEY }}
+        run: k6 run --vus 2 --iterations 2 k6/integration.spec.ts
+
+      - name: lit-action-sign-as-action.spec.ts
+        env:
+          BASE_URL: ${{ vars.BASE_URL }}
+          LIT_API_KEY: ${{ secrets.LIT_API_KEY }}
+        run: k6 run --vus 2 --iterations 2 k6/lit-action-sign-as-action.spec.ts
+
+      - name: lit-action-verify-action-signature.spec.ts
+        env:
+          BASE_URL: ${{ vars.BASE_URL }}
+          LIT_API_KEY: ${{ secrets.LIT_API_KEY }}
+        run: k6 run --vus 2 --iterations 2 k6/lit-action-verify-action-signature.spec.ts
+
+      - name: lit-action-get-public-key.spec.ts
+        env:
+          BASE_URL: ${{ vars.BASE_URL }}
+          LIT_API_KEY: ${{ secrets.LIT_API_KEY }}
+        run: k6 run --vus 2 --iterations 2 k6/lit-action-get-public-key.spec.ts
