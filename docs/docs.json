@@ -1,26 +1,21 @@
 {
   "$schema": "https://mintlify.com/docs.json",
   "theme": "mint",
-  "name": "Lit Protocol Documentation",
+  "name": "Documentation",
   "colors": {
-    "primary": "#EA580C",
+    "primary": "#0D9373",
     "light": "#F97316",
     "dark": "#EA580C"
   },
-  "favicon": "/favicon.svg",
   "navigation": {
-    "tabs": [
+    "groups": [
       {
-        "tab": "Build with Lit Node Express",
-        "groups": [
-          {
-            "group": "Getting Started",
-            "pages": ["getting-started/index"]
-          }
-        ]
+        "group": "Getting Started",
+        "pages": []
       }
     ]
   },
+  "favicon": "/favicon.svg",
   "logo": {
     "light": "/logo/light.svg",
     "dark": "/logo/dark.svg"

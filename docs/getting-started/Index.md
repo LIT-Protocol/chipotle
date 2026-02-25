@@ -1,6 +1,8 @@
 ---
-title: Getting Started
-description: Get started with Lit Node Express using the Dashboard or the REST API (Core SDK and cURL).
+title: "Getting Started"
+description: "
+
+Get started with Lit Node Express using the Dashboard or the REST API (Core SDK and cURL)."
 ---
 
 This guide introduces the **Lit Express Node** server and its **Dashboard** web UI, then shows how to do the same workflows using the REST API with the JavaScript Core SDK or cURL.
@@ -40,21 +42,17 @@ The Dashboard is a web management GUI for Lit Node Express. Open it from your no
 
     After login, the dashboard shows Overview, Usage API Keys, Groups, IPFS Actions, Wallets, and Action Runner.
   </Step>
-
   <Step title="Request usage API keys">
     Usage API keys are scoped keys you can give to clients or dApps to run specific lit-actions or to deploy. They can be rotated or removed without changing the main account.
 
     In the **Usage API Keys** section, click **Add**. Set expiration and initial balance, then confirm. The server returns a new usage key **once** — copy and store it. You can optionally set a name and description after creation. Use this key in the `X-Api-Key` (or `Authorization: Bearer`) header when calling the node so that usage is attributed to this key.
   </Step>
-
   <Step title="Request new PKPs (wallets)">
     PKPs (Programmable Key Pairs) are wallets the node can use for signing. In the **Wallets** section, click **Add** to create a new wallet. The server generates a new PKP and returns its address and public key. You can add existing PKPs to groups (see step 5) via **Add PKP to group** in the Groups section.
   </Step>
-
   <Step title="Register IPFS CIDs (actions)">
     To scope which usage API keys can run which code, you register **IPFS CIDs** as permitted actions. In the **IPFS Actions** section, pick a group from the dropdown, then **Add** an action: enter the IPFS CID of the lit-action and optional name/description. The server hashes the CID and stores it in the group. Only keys that are allowed to use that group can run that action.
   </Step>
-
   <Step title="Create groups">
     Groups logically combine PKPs, IPFS actions, and (indirectly) usage API keys. You can use any combination: e.g. a group with only permitted actions, or only permitted wallets, or both.
 
@@ -65,7 +63,6 @@ The Dashboard is a web management GUI for Lit Node Express. Open it from your no
 
     Usage API keys (and the account key) are validated against the account's groups and permitted actions/wallets when you run a lit-action.
   </Step>
-
   <Step title="Run lit-actions">
     In the **Action Runner** section, paste Lit Action JavaScript code and optional JSON parameters. Choose the API key (account or usage key) to use for the request, then click **Execute**. The node runs the action and returns signatures, response, and logs. The key you use must be allowed to run that action (via the group and IPFS CID configuration).
   </Step>
@@ -95,37 +92,37 @@ Create a new account (returns API key and wallet address). Or verify an existing
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
-```javascript
-import { createClient } from './core_sdk.js';
-
-const client = createClient('http://localhost:8000');
-
-// New account
-const res = await client.newAccount({
-  accountName: 'My App',
-  accountDescription: 'Optional description',
-  initialBalance: '0'  // optional
-});
-console.log('API key:', res.api_key);
-console.log('Wallet:', res.wallet_address);
-// Store res.api_key securely.
-
-// Or verify existing key (login)
-const exists = await client.accountExists(res.api_key);
-console.log('Account exists:', exists);
-```
+    ```javascript
+    import { createClient } from './core_sdk.js';
+    
+    const client = createClient('http://localhost:8000');
+    
+    // New account
+    const res = await client.newAccount({
+      accountName: 'My App',
+      accountDescription: 'Optional description',
+      initialBalance: '0'  // optional
+    });
+    console.log('API key:', res.api_key);
+    console.log('Wallet:', res.wallet_address);
+    // Store res.api_key securely.
+    
+    // Or verify existing key (login)
+    const exists = await client.accountExists(res.api_key);
+    console.log('Account exists:', exists);
+    ```
   </Tab>
   <Tab title="cURL">
-```bash
-# New account
-curl -s -X POST "http://localhost:8000/core/v1/new_account" \
-  -H "Content-Type: application/json" \
-  -d '{"account_name":"My App","account_description":"Optional","initial_balance":"0"}'
-
-# Verify account (replace KEY with your API key)
-curl -s "http://localhost:8000/core/v1/account_exists" \
-  -H "X-Api-Key: KEY"
-```
+    ```bash
+    # New account
+    curl -s -X POST "http://localhost:8000/core/v1/new_account" \
+      -H "Content-Type: application/json" \
+      -d '{"account_name":"My App","account_description":"Optional","initial_balance":"0"}'
+    
+    # Verify account (replace KEY with your API key)
+    curl -s "http://localhost:8000/core/v1/account_exists" \
+      -H "X-Api-Key: KEY"
+    ```
   </Tab>
 </Tabs>
 
@@ -135,27 +132,27 @@ Create a usage API key with expiration and balance. The response includes the ne
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
-```javascript
-// Expiration: e.g. 1 year from now (Unix timestamp). Balance: e.g. "1000000"
-const expiration = String(Math.floor(Date.now() / 1000) + 365 * 24 * 3600);
-const balance = '1000000';
-
-const res = await client.addUsageApiKey({
-  apiKey: accountApiKey,
-  expiration,
-  balance
-});
-console.log('New usage API key (store it now):', res.usage_api_key);
-```
+    ```javascript
+    // Expiration: e.g. 1 year from now (Unix timestamp). Balance: e.g. "1000000"
+    const expiration = String(Math.floor(Date.now() / 1000) + 365 * 24 * 3600);
+    const balance = '1000000';
+    
+    const res = await client.addUsageApiKey({
+      apiKey: accountApiKey,
+      expiration,
+      balance
+    });
+    console.log('New usage API key (store it now):', res.usage_api_key);
+    ```
   </Tab>
   <Tab title="cURL">
-```bash
-# Replace KEY with account API key; set expiration (e.g. Unix ts) and balance
-curl -s -X POST "http://localhost:8000/core/v1/add_usage_api_key" \
-  -H "Content-Type: application/json" \
-  -H "X-Api-Key: KEY" \
-  -d '{"expiration":"9999999999","balance":"1000000"}'
-```
+    ```bash
+    # Replace KEY with account API key; set expiration (e.g. Unix ts) and balance
+    curl -s -X POST "http://localhost:8000/core/v1/add_usage_api_key" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{"expiration":"9999999999","balance":"1000000"}'
+    ```
   </Tab>
 </Tabs>
 
@@ -165,16 +162,16 @@ Request a new wallet (PKP) for the account. The server returns the wallet addres
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
-```javascript
-const res = await client.createWallet(accountApiKey);
-console.log('Wallet address:', res.wallet_address);
-```
+    ```javascript
+    const res = await client.createWallet(accountApiKey);
+    console.log('Wallet address:', res.wallet_address);
+    ```
   </Tab>
   <Tab title="cURL">
-```bash
-curl -s "http://localhost:8000/core/v1/create_wallet" \
-  -H "X-Api-Key: KEY"
-```
+    ```bash
+    curl -s "http://localhost:8000/core/v1/create_wallet" \
+      -H "X-Api-Key: KEY"
+    ```
   </Tab>
 </Tabs>
 
@@ -184,50 +181,50 @@ Create a group (with optional permitted actions and PKPs). Then add an action (I
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
-```javascript
-// Create group (permitted_actions and pkps are keccak256 hashes; can be empty arrays)
-await client.addGroup({
-  apiKey: accountApiKey,
-  groupName: 'My Group',
-  groupDescription: 'Optional',
-  permittedActions: [],
-  pkps: [],
-  allWalletsPermitted: true,
-  allActionsPermitted: false
-});
-
-// List groups to get the new group id
-const groups = await client.listGroups({ apiKey: accountApiKey, pageNumber: '0', pageSize: '10' });
-const groupId = groups[groups.length - 1].id;
-
-// Add an IPFS action (CID) to the group
-await client.addActionToGroup({
-  apiKey: accountApiKey,
-  groupId,
-  actionIpfsCid: 'QmYourIpfsCidHere',
-  name: 'My Action',
-  description: 'Optional'
-});
-```
+    ```javascript
+    // Create group (permitted_actions and pkps are keccak256 hashes; can be empty arrays)
+    await client.addGroup({
+      apiKey: accountApiKey,
+      groupName: 'My Group',
+      groupDescription: 'Optional',
+      permittedActions: [],
+      pkps: [],
+      allWalletsPermitted: true,
+      allActionsPermitted: false
+    });
+    
+    // List groups to get the new group id
+    const groups = await client.listGroups({ apiKey: accountApiKey, pageNumber: '0', pageSize: '10' });
+    const groupId = groups[groups.length - 1].id;
+    
+    // Add an IPFS action (CID) to the group
+    await client.addActionToGroup({
+      apiKey: accountApiKey,
+      groupId,
+      actionIpfsCid: 'QmYourIpfsCidHere',
+      name: 'My Action',
+      description: 'Optional'
+    });
+    ```
   </Tab>
   <Tab title="cURL">
-```bash
-# Create group
-curl -s -X POST "http://localhost:8000/core/v1/add_group" \
-  -H "Content-Type: application/json" \
-  -H "X-Api-Key: KEY" \
-  -d '{"group_name":"My Group","group_description":"","permitted_actions":[],"pkps":[],"all_wallets_permitted":true,"all_actions_permitted":false}'
-
-# List groups to get group_id (use the "id" from the response)
-curl -s "http://localhost:8000/core/v1/list_groups?page_number=0&page_size=10" \
-  -H "X-Api-Key: KEY"
-
-# Add action to group (replace GROUP_ID and IPFS_CID)
-curl -s -X POST "http://localhost:8000/core/v1/add_action_to_group" \
-  -H "Content-Type: application/json" \
-  -H "X-Api-Key: KEY" \
-  -d '{"group_id":"GROUP_ID","action_ipfs_cid":"QmYourIpfsCidHere","name":"My Action","description":""}'
-```
+    ```bash
+    # Create group
+    curl -s -X POST "http://localhost:8000/core/v1/add_group" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{"group_name":"My Group","group_description":"","permitted_actions":[],"pkps":[],"all_wallets_permitted":true,"all_actions_permitted":false}'
+    
+    # List groups to get group_id (use the "id" from the response)
+    curl -s "http://localhost:8000/core/v1/list_groups?page_number=0&page_size=10" \
+      -H "X-Api-Key: KEY"
+    
+    # Add action to group (replace GROUP_ID and IPFS_CID)
+    curl -s -X POST "http://localhost:8000/core/v1/add_action_to_group" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{"group_id":"GROUP_ID","action_ipfs_cid":"QmYourIpfsCidHere","name":"My Action","description":""}'
+    ```
   </Tab>
 </Tabs>
 
@@ -237,21 +234,21 @@ Restrict which wallets (PKPs) can be used in the group by adding their public ke
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
-```javascript
-await client.addPkpToGroup({
-  apiKey: accountApiKey,
-  groupId,
-  pkpPublicKey: walletPublicKeyHex  // from listWallets or createWallet flow
-});
-```
+    ```javascript
+    await client.addPkpToGroup({
+      apiKey: accountApiKey,
+      groupId,
+      pkpPublicKey: walletPublicKeyHex  // from listWallets or createWallet flow
+    });
+    ```
   </Tab>
   <Tab title="cURL">
-```bash
-curl -s -X POST "http://localhost:8000/core/v1/add_pkp_to_group" \
-  -H "Content-Type: application/json" \
-  -H "X-Api-Key: KEY" \
-  -d '{"group_id":"GROUP_ID","pkp_public_key":"YOUR_PKP_PUBLIC_KEY_HEX"}'
-```
+    ```bash
+    curl -s -X POST "http://localhost:8000/core/v1/add_pkp_to_group" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{"group_id":"GROUP_ID","pkp_public_key":"YOUR_PKP_PUBLIC_KEY_HEX"}'
+    ```
   </Tab>
 </Tabs>
 
@@ -261,27 +258,27 @@ Execute a lit-action by sending JavaScript code and optional params. Use the acc
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
-```javascript
-const result = await client.litAction({
-  apiKey: accountApiKey,  // or usageApiKey
-  code: `
-    const message = "Hello from Lit Action";
-    const sig = await LitActions.signEcdsa({ toSign: new TextEncoder().encode(message), publicKey, sigName });
-    LitActions.setResponse({ response: JSON.stringify({ message, sig }) });
-  `,
-  jsParams: { publicKey: '0x...', sigName: 'sig1' }
-});
-console.log(result.signatures, result.response, result.logs);
-```
+    ```javascript
+    const result = await client.litAction({
+      apiKey: accountApiKey,  // or usageApiKey
+      code: `
+        const message = "Hello from Lit Action";
+        const sig = await LitActions.signEcdsa({ toSign: new TextEncoder().encode(message), publicKey, sigName });
+        LitActions.setResponse({ response: JSON.stringify({ message, sig }) });
+      `,
+      jsParams: { publicKey: '0x...', sigName: 'sig1' }
+    });
+    console.log(result.signatures, result.response, result.logs);
+    ```
   </Tab>
   <Tab title="cURL">
-```bash
-# Replace KEY with account or usage API key. Code and js_params in body.
-curl -s -X POST "http://localhost:8000/core/v1/lit_action" \
-  -H "Content-Type: application/json" \
-  -H "X-Api-Key: KEY" \
-  -d '{"code":"const msg = \"hello\"; LitActions.setResponse({ response: msg });","js_params":null}'
-```
+    ```bash
+    # Replace KEY with account or usage API key. Code and js_params in body.
+    curl -s -X POST "http://localhost:8000/core/v1/lit_action" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{"code":"const msg = \"hello\"; LitActions.setResponse({ response: msg });","js_params":null}'
+    ```
   </Tab>
 </Tabs>
 
