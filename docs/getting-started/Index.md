@@ -293,4 +293,4 @@ Execute a lit-action by sending JavaScript code and optional params. Use the acc
 - **remove_action_from_group** / **remove_pkp_from_group** — Remove action or PKP from a group.
 - **get_node_chain_config** — Get node chain config (no auth).
 
-For full request/response shapes and OpenAPI spec, see the API reference (e.g. `/openapi.json` or Swagger UI if mounted).
+For full request/response shapes and OpenAPI spec, see the API reference (e.g. `/core/v1/openapi.json` or Swagger UI if mounted).
