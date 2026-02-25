@@ -49,7 +49,7 @@ COPY --from=builder /app/lit-api-server/static /app/lit-api-server/static/
 # Copy demo configuration file
 COPY NodeConfig.demo.toml /app/lit-api-server/NodeConfig.toml
 COPY NodeConfig.demo.toml /usr/local/bin/NodeConfig.toml
-COPY NodeConfig.demo.toml /app//NodeConfig.toml
+COPY NodeConfig.demo.toml /app/NodeConfig.toml
 
 # Copy and set entrypoint script (starts lit_actions in background, then lit-api-server)
 COPY DockerEntryPoint.sh /usr/local/bin/DockerEntryPoint.sh
