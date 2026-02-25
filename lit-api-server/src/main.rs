@@ -14,7 +14,7 @@ use rocket::get;
 use rocket::routes;
 use rocket::serde::json::Json;
 use rocket_cors::{AllowedOrigins, Method};
-use rocket_okapi::okapi::openapi3::OpenApi;
+use rocket_okapi::okapi::openapi3::{OpenApi, Server};
 use rocket_okapi::swagger_ui::SwaggerUIConfig;
 use rocket_okapi::swagger_ui::make_swagger_ui;
 use std::{collections::HashSet, str::FromStr, time::Duration};
@@ -82,7 +82,7 @@ async fn main() -> Result<(), rocket::Error> {
         .mount(
             "/swagger-ui/",
             make_swagger_ui(&SwaggerUIConfig {
-                url: "../openapi.json".to_owned(),
+                url: "/core/v1/openapi.json".to_owned(),
                 ..Default::default()
             }),
         )
@@ -116,9 +116,16 @@ fn setup_tracing() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-#[get("/openapi.json")]
-fn openapi_json(spec: &State<OpenApi>) -> Json<&OpenApi> {
-    Json(spec.inner())
+#[get("/core/v1/openapi.json")]
+fn openapi_json(spec: &State<OpenApi>) -> Json<OpenApi> {
+    let mut spec = spec.inner().clone();
+
+    let mut server = Server::default();
+    server.url = "/core/v1/".to_string();
+    server.description = Some("Lit Protocol Express API (Core v1)".to_string());
+    spec.servers.push(server);
+
+    Json(spec)
 }
 
 pub fn default_http_client() -> reqwest::Client {
