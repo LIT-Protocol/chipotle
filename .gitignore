@@ -1,5 +1,3 @@
 .vscode
 .cursor
 docker-compose.deploy.yml
-k6/node_modules/
-k6/package-lock.json
