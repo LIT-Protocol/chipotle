@@ -10,7 +10,7 @@
   "navigation": {
     "groups": [
       {
-        "group": "Getting Started",
+        "group": "Building with Lit Express",
         "pages": [
           "index"
         ]
