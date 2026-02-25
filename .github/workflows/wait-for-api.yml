@@ -59,9 +59,9 @@ jobs:
         run: |
           if [ -n "${{ inputs.phala_app_name }}" ]; then
             CVM_JSON=$(phala cvms get ${{ inputs.phala_app_name }} --json)
-            APP_URL=$(echo "$CVM_JSON" | jq -r '.public_urls[] | select(.app != null and (.app | tostring | test("-8000\\."))) | .app' | head -1)
+            APP_URL=$(echo "$CVM_JSON" | jq -r '.endpoints[]? | select(.app != null and (.app | tostring | test("-8000\\."))) | .app' | head -1)
             if [ -z "$APP_URL" ]; then
-              APP_URL=$(echo "$CVM_JSON" | jq -r '.public_urls[0].app // empty')
+              APP_URL=$(echo "$CVM_JSON" | jq -r '(.endpoints // [])[0].app // empty')
             fi
             if [ -z "$APP_URL" ]; then
               echo "Could not get public URL from phala cvms get"
