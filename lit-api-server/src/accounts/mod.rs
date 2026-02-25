@@ -55,9 +55,10 @@ pub async fn new_account(
         initial_balance,
     );
     let tx = function_call.send().await?;
-    tx.await?;
-
-    Ok(true)
+    match tx.await {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }
 
 pub async fn account_exists(api_key: &str) -> Result<bool> {
@@ -94,8 +95,10 @@ pub async fn add_group(
         all_actions_permitted,
     );
     let tx = function_call.send().await?;
-    tx.await?;
-    Ok(true)
+    match tx.await {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Add an action (IPFS CID) to a group with optional metadata. `action_ipfs_cid` is hashed with keccak256; pass the raw CID string.
@@ -117,8 +120,10 @@ pub async fn add_action_to_group(
         description.to_string(),
     );
     let tx = function_call.send().await?;
-    tx.await?;
-    Ok(true)
+    match tx.await {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Add a wallet (by address hash) to a group. `wallet_address` is hashed with keccak256 (hex with or without 0x).
@@ -133,8 +138,10 @@ pub async fn add_wallet_to_group(
     let function_call =
         contract.add_wallet_to_group(account_api_key_hash, group_id, wallet_address_hash);
     let tx = function_call.send().await?;
-    tx.await?;
-    Ok(true)
+    match tx.await {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Add a PKP to a group (alias for add_wallet_to_group; hashes the given string and adds to group).
@@ -162,8 +169,10 @@ pub async fn update_group(
         all_actions_permitted,
     );
     let tx = function_call.send().await?;
-    tx.await?;
-    Ok(true)
+    match tx.await {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Remove an action from a group by action hash (AccountConfig.removeActionFromGroup). `action_hash` is keccak256 of the action (e.g. IPFS CID).
@@ -177,8 +186,10 @@ pub async fn remove_action_from_group(
     let function_call =
         contract.remove_action_from_group(account_api_key_hash, group_id, action_hash);
     let tx = function_call.send().await?;
-    tx.await?;
-    Ok(true)
+    match tx.await {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Remove an action from a group by IPFS CID string (hashed with keccak256). Convenience wrapper for remove_action_from_group.
@@ -209,8 +220,10 @@ pub async fn update_action_metadata(
         description.to_string(),
     );
     let tx = function_call.send().await?;
-    tx.await?;
-    Ok(true)
+    match tx.await {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Update usage API key metadata (name, description) (AccountConfig.updateUsageApiKeyMetadata).
@@ -230,8 +243,10 @@ pub async fn update_usage_api_key_metadata(
         description.to_string(),
     );
     let tx = function_call.send().await?;
-    tx.await?;
-    Ok(true)
+    match tx.await {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Remove a wallet from a group. `wallet_address` must match the value used when adding (same keccak256 input).
@@ -246,8 +261,10 @@ pub async fn remove_wallet_from_group(
     let function_call =
         contract.remove_wallet_from_group(account_api_key_hash, group_id, wallet_address_hash);
     let tx = function_call.send().await?;
-    tx.await?;
-    Ok(true)
+    match tx.await {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Remove a PKP from a group (alias for remove_wallet_from_group).
@@ -278,8 +295,10 @@ pub async fn add_usage_api_key(
         balance,
     );
     let tx = function_call.send().await?;
-    tx.await?;
-    Ok(true)
+    match tx.await {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Remove a usage API key from an account.
@@ -291,8 +310,10 @@ pub async fn remove_usage_api_key(api_key: &str, usage_api_key: &str) -> Result<
     lookup_data::delete_api_key_by_key_hash(&usage_api_key_hash_string).await?;
     let function_call = contract.remove_usage_api_key(account_api_key_hash, usage_api_key_hash);
     let tx = function_call.send().await?;
-    tx.await?;
-    Ok(true)
+    match tx.await {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }
 
 /// Register the derivation path for a wallet address under an account (AccountConfig.wallet_derivation).
@@ -317,8 +338,10 @@ pub async fn register_wallet_derivation(
 
     let tx = function_call.send().await?;
     // optimisticly return true, we will check the tx in the future
-    tx.await?;
-    Ok(true)
+    match tx.await {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }
 
 pub async fn get_wallet_derivation_from_pubkey(api_key: &str, pubkey: &str) -> Result<U256> {
@@ -421,8 +444,10 @@ pub async fn debit_api_key(api_key: &str, amount: U256) -> Result<bool> {
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.debit_api_key(account_api_key_hash, amount);
     let tx = function_call.send().await?;
-    tx.await?;
-    Ok(true)
+    match tx.await {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }
 
 pub async fn credit_api_key(api_key: &str, amount: U256) -> Result<bool> {  
@@ -430,6 +455,8 @@ pub async fn credit_api_key(api_key: &str, amount: U256) -> Result<bool> {
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.credit_api_key(account_api_key_hash, amount);
     let tx = function_call.send().await?;
-    tx.await?;
-    Ok(true)
+    match tx.await {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    }
 }
