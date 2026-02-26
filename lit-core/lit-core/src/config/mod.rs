@@ -596,12 +596,13 @@ where
                 }
 
                 if let Some(len) = expected_len
-                    && value.len() != len {
-                        stdout
-                            .write_all(b"\nERROR: Value invalid length.\n")
-                            .map_err(|e| io_err(e, None))?;
-                        continue;
-                    }
+                    && value.len() != len
+                {
+                    stdout
+                        .write_all(b"\nERROR: Value invalid length.\n")
+                        .map_err(|e| io_err(e, None))?;
+                    continue;
+                }
 
                 stdout.write_all(b"\n").map_err(|e| io_err(e, None))?;
 

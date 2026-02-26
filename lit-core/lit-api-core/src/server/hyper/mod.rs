@@ -80,16 +80,18 @@ pub async fn bind_unix_socket(socket_path: PathBuf, r: Router) {
 
 fn is_broken_pipe_error(err: &(dyn Error + 'static)) -> bool {
     if let Some(io_err) = err.downcast_ref::<io::Error>()
-        && io_err.kind() == io::ErrorKind::BrokenPipe {
-            return true;
-        }
+        && io_err.kind() == io::ErrorKind::BrokenPipe
+    {
+        return true;
+    }
 
     let mut source = err.source();
     while let Some(source_err) = source {
         if let Some(io_err) = source_err.downcast_ref::<io::Error>()
-            && io_err.kind() == io::ErrorKind::BrokenPipe {
-                return true;
-            }
+            && io_err.kind() == io::ErrorKind::BrokenPipe
+        {
+            return true;
+        }
         source = source_err.source();
     }
     false

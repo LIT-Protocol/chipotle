@@ -109,9 +109,9 @@ pub async fn get_swap_status(quote_id: &str) -> Result<GetSwapStatusResponse, Ap
 
 /// GET /get_open_swap_requests — returns open swap requests from the contract via getRecentSwapRequests.
 pub async fn get_open_swap_requests() -> Result<GetOpenSwapRequestsResponse, ApiStatus> {
-    let contract = get_signable_quote_contract().await.map_err(|e| {
-        ApiStatus::internal_server_error(e, "Failed to get quoting contract.")
-    })?;
+    let contract = get_signable_quote_contract()
+        .await
+        .map_err(|e| ApiStatus::internal_server_error(e, "Failed to get quoting contract."))?;
 
     let count = contract
         .open_swap_requests_count()
@@ -144,9 +144,9 @@ pub async fn get_open_swap_requests() -> Result<GetOpenSwapRequestsResponse, Api
 
 /// GET /get_open_quotes — returns open quotes from the contract via getRecentQuotes.
 pub async fn get_open_quotes() -> Result<GetOpenQuotesResponse, ApiStatus> {
-    let contract = get_signable_quote_contract().await.map_err(|e| {
-        ApiStatus::internal_server_error(e, "Failed to get quoting contract.")
-    })?;
+    let contract = get_signable_quote_contract()
+        .await
+        .map_err(|e| ApiStatus::internal_server_error(e, "Failed to get quoting contract."))?;
     let count: U256 = contract.open_quotes_count().call().await.map_err(|e| {
         ApiStatus::internal_server_error(e.into(), "Failed to get open quotes count.")
     })?;
@@ -189,9 +189,9 @@ pub async fn get_quote_balances(quote_id: &str) -> Result<QuoteBalancesResponse,
     let quote_id_u256 = U256::from_dec_str(quote_id)
         .map_err(|e| ApiStatus::bad_request(e.into(), "Invalid quote_id."))?;
 
-    let contract = get_signable_quote_contract().await.map_err(|e| {
-        ApiStatus::internal_server_error(e, "Failed to get quoting contract.")
-    })?;
+    let contract = get_signable_quote_contract()
+        .await
+        .map_err(|e| ApiStatus::internal_server_error(e, "Failed to get quoting contract."))?;
     let quote = contract
         .get_quote(quote_id_u256)
         .call()

@@ -51,7 +51,7 @@ async fn get_balance(address: H160, chain: Chain) -> Result<GetBalanceResponse, 
     Ok(GetBalanceResponse {
         address: bytes_to_hex(address.as_bytes()),
         balance,
-        chain: chain,
+        chain,
         symbol: chain.info().token.to_string(),
     })
 }

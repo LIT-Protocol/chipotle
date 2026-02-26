@@ -217,13 +217,15 @@ pub(crate) fn extract_request_and_correlation_ids(
 
         let privacy_suffix = format!("_{}", PRIVACY_MODE_TAG);
         if let Some(ref id) = request_id
-            && !id.ends_with(&privacy_suffix) {
-                request_id = Some(format!("{}_{}", id, PRIVACY_MODE_TAG));
-            }
+            && !id.ends_with(&privacy_suffix)
+        {
+            request_id = Some(format!("{}_{}", id, PRIVACY_MODE_TAG));
+        }
         if let Some(ref id) = correlation_id
-            && !id.ends_with(&privacy_suffix) {
-                correlation_id = Some(format!("{}_{}", id, PRIVACY_MODE_TAG));
-            }
+            && !id.ends_with(&privacy_suffix)
+        {
+            correlation_id = Some(format!("{}_{}", id, PRIVACY_MODE_TAG));
+        }
     }
 
     (request_id, correlation_id)

@@ -140,10 +140,11 @@ where
                 file.unlock().map_err(|e| lock_err(e, None))?;
             }
             if let Some(path) = path
-                && path.exists().await {
-                    // Ignore remove error.
-                    let _ = fs::remove_file(&path).await;
-                }
+                && path.exists().await
+            {
+                // Ignore remove error.
+                let _ = fs::remove_file(&path).await;
+            }
 
             Err(e)
         }

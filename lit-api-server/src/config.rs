@@ -74,7 +74,7 @@ pub fn init_config() -> Result<(), anyhow::Error> {
     }
 
     let node_config = NodeConfig {
-        chain: chain,
+        chain,
         secret,
         contract_address,
     };

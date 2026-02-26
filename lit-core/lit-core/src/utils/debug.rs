@@ -4,9 +4,10 @@ where
 {
     let val = val.as_ref();
     if let Some(v) = val.strip_prefix('\"')
-        && let Some(v) = v.strip_suffix('\"') {
-            return v.to_string();
-        }
+        && let Some(v) = v.strip_suffix('\"')
+    {
+        return v.to_string();
+    }
 
     val.to_string()
 }

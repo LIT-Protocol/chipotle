@@ -450,13 +450,11 @@ pub async fn list_wallets_in_group(
     let wallet_items = list
         .iter()
         .map(|m| {
-            let (wallet_address, pubkey) = match lookup_results
-                .iter()
-                .find(|(id, _)| *id == m.id.clone())
-            {
-                Some((_, result)) => (result.wallet_address.clone(), result.pubkey.clone()),
-                None => ("unmanaged".to_string(), "unmanaged".to_string()),
-            };
+            let (wallet_address, pubkey) =
+                match lookup_results.iter().find(|(id, _)| *id == m.id.clone()) {
+                    Some((_, result)) => (result.wallet_address.clone(), result.pubkey.clone()),
+                    None => ("unmanaged".to_string(), "unmanaged".to_string()),
+                };
             WalletItem {
                 id: m.id.to_string(),
                 name: m.name.clone(),

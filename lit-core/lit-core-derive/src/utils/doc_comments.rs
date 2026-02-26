@@ -32,9 +32,7 @@ pub fn extract_doc_comment(attrs: &[syn::Attribute]) -> Vec<String> {
         })
         .skip_while(|s| is_blank(s))
         .flat_map(|s| {
-            
-            s
-                .split('\n')
+            s.split('\n')
                 .map(|s| {
                     // remove one leading space no matter what
                     let s = s.strip_prefix(' ').unwrap_or(s);

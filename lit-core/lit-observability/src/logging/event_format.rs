@@ -286,10 +286,11 @@ where
                 for span in scope.from_root() {
                     let ext = span.extensions();
                     if let Some(ctx) = ext.get::<RequestContext>()
-                        && ctx.has_context() {
-                            request_ctx = Some(ctx.clone());
-                            break;
-                        }
+                        && ctx.has_context()
+                    {
+                        request_ctx = Some(ctx.clone());
+                        break;
+                    }
                 }
             }
             // Fall back to task-local storage
@@ -359,28 +360,30 @@ where
         let dimmed = Style::new().dimmed();
 
         if self.display_event_scope
-            && let Some(scope) = ctx.event_scope() {
-                // let bold = writer.bold();
-                let bold = Style::new().bold();
+            && let Some(scope) = ctx.event_scope()
+        {
+            // let bold = writer.bold();
+            let bold = Style::new().bold();
 
-                let mut seen = false;
+            let mut seen = false;
 
-                for span in scope.from_root() {
-                    write!(writer, "{}", bold.paint(span.metadata().name()))?;
-                    seen = true;
+            for span in scope.from_root() {
+                write!(writer, "{}", bold.paint(span.metadata().name()))?;
+                seen = true;
 
-                    let ext = span.extensions();
-                    if let Some(fields) = &ext.get::<FormattedFields<N>>()
-                        && !fields.is_empty() {
-                            write!(writer, "{}{}{}", bold.paint("{"), fields, bold.paint("}"))?;
-                        }
-                    write!(writer, "{}", dimmed.paint(":"))?;
+                let ext = span.extensions();
+                if let Some(fields) = &ext.get::<FormattedFields<N>>()
+                    && !fields.is_empty()
+                {
+                    write!(writer, "{}{}{}", bold.paint("{"), fields, bold.paint("}"))?;
                 }
+                write!(writer, "{}", dimmed.paint(":"))?;
+            }
 
-                if seen {
-                    writer.write_char(' ')?;
-                }
-            };
+            if seen {
+                writer.write_char(' ')?;
+            }
+        };
 
         if self.display_target {
             write!(writer, "{}{} ", dimmed.paint(meta.target()), dimmed.paint(":"))?;
@@ -389,15 +392,16 @@ where
         let line_number = if self.display_line_number { meta.line() } else { None };
 
         if self.display_filename
-            && let Some(filename) = meta.file() {
-                write!(
-                    writer,
-                    "{}{}{}",
-                    dimmed.paint(filename),
-                    dimmed.paint(":"),
-                    if line_number.is_some() { "" } else { " " }
-                )?;
-            }
+            && let Some(filename) = meta.file()
+        {
+            write!(
+                writer,
+                "{}{}{}",
+                dimmed.paint(filename),
+                dimmed.paint(":"),
+                if line_number.is_some() { "" } else { " " }
+            )?;
+        }
 
         if let Some(line_number) = line_number {
             write!(writer, "{}{}:{} ", dimmed.prefix(), line_number, dimmed.suffix())?;

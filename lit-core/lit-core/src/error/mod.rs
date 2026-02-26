@@ -186,9 +186,10 @@ impl Error {
         }
 
         if let Some(source) = self.source()
-            && let Some(source) = source.downcast_ref::<Error>() {
-                Self::walk(source, cb);
-            }
+            && let Some(source) = source.downcast_ref::<Error>()
+        {
+            Self::walk(source, cb);
+        }
     }
 
     // Accessors
