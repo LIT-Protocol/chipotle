@@ -29,13 +29,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if args.len() < 3 {
         eprintln!(
             "Usage: {} <network> <abis_folder> [secret]",
-            args.get(0).unwrap_or(&"deploy".into())
+            args.first().unwrap_or(&"deploy".into())
         );
         eprintln!("  network   - 0 = Anvil, 1 = Yellowstone, 2 = Base Sepolia");
         eprintln!(
             "  abis_folder - folder containing contract artifact JSON files (abi + bytecode)"
         );
-        eprintln!("  secret    - optional; deployer private key (hex). If blank or omitted, uses default.");
+        eprintln!(
+            "  secret    - optional; deployer private key (hex). If blank or omitted, uses default."
+        );
         std::process::exit(1);
     }
     let network: u16 = match args[1].parse() {
@@ -61,9 +63,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .unwrap_or(DEFAULT_SECRET);
-    println!("Deploying contracts from folder {} on chain {} with RPC URL {}", args[2], abis_folder, rpc_url);
+    println!(
+        "Deploying contracts from folder {} on chain {} with RPC URL {}",
+        args[2], abis_folder, rpc_url
+    );
 
-    deploy_contracts(rpc_url, chain_id, &abis_folder, secret).await.expect("Failed to deploy contracts");
+    deploy_contracts(rpc_url, chain_id, &abis_folder, secret)
+        .await
+        .expect("Failed to deploy contracts");
     Ok(())
 }
 
@@ -75,22 +82,20 @@ async fn deploy_contracts(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let provider = Provider::<Http>::try_from(rpc_url).expect("Failed to create provider");
 
-    let wallet: LocalWallet = secret
-        .parse::<LocalWallet>()?
-        .with_chain_id(chain_id);
+    let wallet: LocalWallet = secret.parse::<LocalWallet>()?.with_chain_id(chain_id);
     let client = SignerMiddleware::new(provider, wallet);
     let client = std::sync::Arc::new(client);
     let mut abis = Vec::new();
     get_abis(abis_folder, &mut abis);
-    deploy_abis(abis, client).await.expect("Failed to deploy contracts");
+    deploy_abis(abis, client)
+        .await
+        .expect("Failed to deploy contracts");
     Ok(())
 }
 
-fn get_abis(
-    abis_folder: &str,
-    abis: &mut Vec<PathBuf>,
-)  {
-    let dir = fs::read_dir(abis_folder).expect(format!("Failed to read directory {:?}", abis_folder).as_str());
+fn get_abis(abis_folder: &str, abis: &mut Vec<PathBuf>) {
+    let dir = fs::read_dir(abis_folder)
+        .unwrap_or_else(|_| panic!("Failed to read directory {:?}", abis_folder));
     for entry in dir.flatten() {
         if entry.file_type().unwrap().is_dir() {
             get_abis(entry.path().to_str().unwrap(), abis);
@@ -99,7 +104,7 @@ fn get_abis(
         if entry.path().to_str().unwrap().ends_with("json") {
             abis.push(entry.path());
         }
-    }    
+    }
 }
 
 async fn deploy_abis(
@@ -107,7 +112,9 @@ async fn deploy_abis(
     client: std::sync::Arc<SignerMiddleware<Provider<Http>, LocalWallet>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     for abi in abis {
-        deploy_artifact(&abi, client.clone()).await.expect("Failed to deploy contract");
+        deploy_artifact(&abi, client.clone())
+            .await
+            .expect("Failed to deploy contract");
     }
     Ok(())
 }
@@ -147,7 +154,11 @@ async fn deploy_artifact(
     let bytecode = Bytes::from_hex(bytecode_hex)?;
     let factory = ContractFactory::new(abi, bytecode, client);
     let deployer = factory.deploy(())?.legacy();
-    println!("Deploying {} with bytecode size {}.", name, bytecode_hex.len());
+    println!(
+        "Deploying {} with bytecode size {}.",
+        name,
+        bytecode_hex.len()
+    );
     let (contract, _receipt) = deployer.send_with_receipt().await?;
     println!("Deployed {} -> {:?}", name, contract.address());
     Ok(())

@@ -133,7 +133,7 @@ pub async fn internal_send(request: &Json<TransferRequest>) -> Result<TransferRe
     };
 
     match chain.info().is_evm {
-        true => evm::send(&request, chain).await,
-        false => non_evm::send(&request, chain).await,
+        true => evm::send(request, chain).await,
+        false => non_evm::send(request, chain).await,
     }
 }

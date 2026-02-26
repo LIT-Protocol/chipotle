@@ -1,7 +1,7 @@
+use super::op_code_helpers;
 use anyhow::{Result, bail};
 use lit_actions_grpc::proto::*;
 use tracing::{instrument, trace};
-use super::op_code_helpers;
 
 use super::Client;
 
@@ -65,7 +65,15 @@ impl Client {
                 sig_name,
                 signing_scheme,
             }) => {
-                let (sig_name, signed_data) = match  op_code_helpers::sign_with_pkp(&self.api_key, &public_key, &to_sign, &sig_name, &signing_scheme).await {
+                let (sig_name, signed_data) = match op_code_helpers::sign_with_pkp(
+                    &self.api_key,
+                    &public_key,
+                    &to_sign,
+                    &sig_name,
+                    &signing_scheme,
+                )
+                .await
+                {
                     Ok((sig_name, signed_data)) => (sig_name, signed_data),
                     Err(e) => bail!("Error signing: {:?}", e),
                 };
@@ -73,11 +81,7 @@ impl Client {
                 let hex_signature = signed_data.signature.clone();
 
                 self.state.sign_count += 1;
-                self.state.signed_data.insert(
-                    sig_name,
-                    signed_data,
-                );
-
+                self.state.signed_data.insert(sig_name, signed_data);
 
                 SignResponse {
                     success: hex_signature,

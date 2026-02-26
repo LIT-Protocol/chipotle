@@ -205,10 +205,10 @@ impl CertManager {
     pub fn shutdown(&mut self) {
         set_bool_mu(self.quit_mu.clone(), true);
 
-        if let Some(join_handle) = self.thread_join_handle.take() {
-            if let Err(err) = join_handle.join() {
-                warn!("cert manager shutdown: failed to join thread - {:?}", err);
-            }
+        if let Some(join_handle) = self.thread_join_handle.take()
+            && let Err(err) = join_handle.join()
+        {
+            warn!("cert manager shutdown: failed to join thread - {:?}", err);
         }
     }
 
@@ -545,6 +545,7 @@ fn generate_self_signed_cert(cfg: &LitConfig, common_name: String) -> Result<()>
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(true)
             .open(&certs_file)
             .map_err(|e| error::certs_err(e, None))?;
 

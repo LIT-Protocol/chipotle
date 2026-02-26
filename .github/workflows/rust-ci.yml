@@ -1,0 +1,78 @@
+# Runs cargo fmt --check, cargo clippy, and cargo build --all-features
+# on every push to every branch and on every pull request.
+
+name: Rust CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel any in-progress run on the same branch/PR when a new commit is pushed.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: ${{ matrix.crate }}
+    runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        crate:
+          - lit-actions
+          - lit-core
+          - lit-api-server
+          - lit-api-server/blockchain/rust_generator_and_deployer
+          - lit-static
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Force a clean workspace — self-hosted runners persist state between runs
+      # and checkout@v4 alone is not always sufficient to clear stale files.
+      - name: Reset workspace to HEAD
+        run: git checkout HEAD -- .
+
+      # lit-actions needs libsqlite3-dev + libclang-dev (bindgen for libsqlite3-sys)
+      # lit-api-server depends on lit-actions-grpc which runs a protobuf build script
+      # Both steps retry with back-off because concurrent matrix jobs on the same
+      # self-hosted machine can contend for /var/lib/apt/lists/lock.
+      - name: Install system dependencies (lit-actions)
+        if: matrix.crate == 'lit-actions'
+        run: |
+          for i in 1 2 3 4 5; do
+            sudo apt-get update -qq && \
+            sudo apt-get install -y libsqlite3-dev libclang-dev && break
+            echo "apt lock held, waiting 10s (attempt $i/5)..."
+            sleep 10
+          done
+
+      - name: Install system dependencies (lit-api-server)
+        if: matrix.crate == 'lit-api-server'
+        run: |
+          for i in 1 2 3 4 5; do
+            sudo apt-get update -qq && \
+            sudo apt-get install -y protobuf-compiler && break
+            echo "apt lock held, waiting 10s (attempt $i/5)..."
+            sleep 10
+          done
+
+      # All crates now have rust-toolchain.toml pinned to 1.91; this action
+      # installs the toolchain declared in the file for the working directory.
+      - uses: dtolnay/rust-toolchain@1.91
+        with:
+          components: rustfmt, clippy
+
+      - name: fmt
+        working-directory: ${{ matrix.crate }}
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        working-directory: ${{ matrix.crate }}
+        run: cargo clippy --all-features -- -D warnings
+
+      - name: build
+        working-directory: ${{ matrix.crate }}
+        run: cargo build --all-features

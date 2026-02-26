@@ -28,7 +28,7 @@ pub async fn get_pkp_balance(
     Ok(GetBalanceResponse {
         address: pkp_public_key.to_string(),
         balance: 0.0,
-        chain: chain.clone(),
+        chain,
         symbol: String::new(),
     })
 }
@@ -40,7 +40,7 @@ pub async fn get_address_balance(
     Ok(GetBalanceResponse {
         address: address.to_string(),
         balance: 0.0,
-        chain: chain.clone(),
+        chain,
         symbol: String::new(),
     })
 }

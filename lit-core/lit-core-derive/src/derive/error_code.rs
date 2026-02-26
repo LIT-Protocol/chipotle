@@ -29,21 +29,21 @@ pub(crate) fn derive_error_code(input: &DeriveInput) -> TokenStream {
                 });
 
                 for attr in CodeAttr::parse_all(&variant.attrs).iter() {
-                    if let Some(magic) = attr.magic.as_ref() {
-                        if let Some(val) = attr.value.as_ref() {
-                            match magic {
-                                MagicAttrName::Kind => {
-                                    kind_variants.push(quote! {
-                                        #name::#variant_name => Some(::lit_core::error::Kind::#val),
-                                    });
-                                    added_kind = true;
-                                }
-                                MagicAttrName::HttpStatus => {
-                                    http_code_variants.push(quote! {
-                                        #name::#variant_name => Some(#val),
-                                    });
-                                    added_http_code = true;
-                                }
+                    if let Some(magic) = attr.magic.as_ref()
+                        && let Some(val) = attr.value.as_ref()
+                    {
+                        match magic {
+                            MagicAttrName::Kind => {
+                                kind_variants.push(quote! {
+                                    #name::#variant_name => Some(::lit_core::error::Kind::#val),
+                                });
+                                added_kind = true;
+                            }
+                            MagicAttrName::HttpStatus => {
+                                http_code_variants.push(quote! {
+                                    #name::#variant_name => Some(#val),
+                                });
+                                added_http_code = true;
                             }
                         }
                     }
@@ -172,6 +172,7 @@ pub enum MagicAttrName {
 }
 
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum AttrValue {
     LitStr(LitStr),
     Expr(Expr),

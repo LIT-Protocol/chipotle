@@ -1,8 +1,8 @@
 use crate::actions::grpc::GrpcClientPool;
 use crate::core::account_management;
-use crate::core::core_features;
 use crate::core::api_status::ApiResult;
 use crate::core::api_status::ErrMessage;
+use crate::core::core_features;
 use crate::core::v1::models::request::{
     AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest, AddUsageApiKeyRequest,
     LitActionRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
@@ -12,25 +12,25 @@ use crate::core::v1::models::request::{
 use crate::core::v1::models::response::ApiKeyItem;
 use crate::core::v1::models::response::WalletItem;
 use crate::core::v1::models::response::{
-    AccountOpResponse, CreateWalletResponse, ListMetadataItem, LitActionResponse,
-    NewAccountResponse, SignWithPkpResponse, NodeChainConfigResponse, AddUsageApiKeyResponse
+    AccountOpResponse, AddUsageApiKeyResponse, CreateWalletResponse, ListMetadataItem,
+    LitActionResponse, NewAccountResponse, NodeChainConfigResponse, SignWithPkpResponse,
 };
 use moka::future::Cache;
-use rocket::request::{FromRequest, Outcome, Request};
 use rocket::Route;
 use rocket::State;
+use rocket::http::Status;
+use rocket::request::{FromRequest, Outcome, Request};
 use rocket::response::Responder;
 use rocket::serde::json::Json;
 use rocket::{get, post};
-use rocket::http::Status;
-use rocket_okapi::okapi::openapi3::{Object, Parameter, ParameterValue};
-use rocket_okapi::request::{OpenApiFromRequest, RequestHeaderInput};
 use rocket_okapi::OpenApiError;
 use rocket_okapi::Result as RocketOkapiResult;
 use rocket_okapi::r#gen::OpenApiGenerator;
 use rocket_okapi::okapi::openapi3::OpenApi;
+use rocket_okapi::okapi::openapi3::{Object, Parameter, ParameterValue};
 use rocket_okapi::openapi;
 use rocket_okapi::openapi_get_routes_spec;
+use rocket_okapi::request::{OpenApiFromRequest, RequestHeaderInput};
 use rocket_okapi::response::OpenApiResponderInner;
 use rocket_responder::ApiResponse;
 use schemars::JsonSchema;
@@ -48,8 +48,8 @@ impl<'r> FromRequest<'r> for ApiKey {
         let auth = request.headers().get_one("Authorization");
         if let Some(v) = auth {
             let v = v.trim();
-            if v.starts_with("Bearer ") {
-                let key = v[7..].trim();
+            if let Some(key) = v.strip_prefix("Bearer ") {
+                let key = key.trim();
                 if !key.is_empty() {
                     return Outcome::Success(ApiKey(key.to_string()));
                 }
@@ -75,7 +75,10 @@ impl<'r> OpenApiFromRequest<'r> for ApiKey {
         Ok(RequestHeaderInput::Parameter(Parameter {
             name: "X-Api-Key".to_owned(),
             location: "header".to_owned(),
-            description: Some("Account or usage API key. Alternatively use Authorization: Bearer <key>.".to_owned()),
+            description: Some(
+                "Account or usage API key. Alternatively use Authorization: Bearer <key>."
+                    .to_owned(),
+            ),
             required,
             deprecated: false,
             allow_empty_value: false,
@@ -175,6 +178,7 @@ async fn create_wallet(api_key: ApiKey) -> OpenApiResponse<CreateWalletResponse,
     }
 }
 
+#[allow(dead_code)]
 #[openapi(tag = "Signing")]
 #[post("/sign_with_pkp", format = "json", data = "<sign_request>")]
 async fn sign_with_pkp(
@@ -235,7 +239,8 @@ async fn add_action_to_group(
     req: Json<AddActionToGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::add_action_to_group(api_key.0.as_str(), req).await).into(),
+        response: ApiResult(account_management::add_action_to_group(api_key.0.as_str(), req).await)
+            .into(),
     }
 }
 
@@ -246,7 +251,8 @@ async fn add_pkp_to_group(
     req: Json<AddPkpToGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::add_pkp_to_group(api_key.0.as_str(), req).await).into(),
+        response: ApiResult(account_management::add_pkp_to_group(api_key.0.as_str(), req).await)
+            .into(),
     }
 }
 
@@ -257,7 +263,10 @@ async fn remove_pkp_from_group(
     req: Json<RemovePkpFromGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::remove_pkp_from_group(api_key.0.as_str(), req).await).into(),
+        response: ApiResult(
+            account_management::remove_pkp_from_group(api_key.0.as_str(), req).await,
+        )
+        .into(),
     }
 }
 
@@ -268,7 +277,8 @@ async fn add_usage_api_key(
     req: Json<AddUsageApiKeyRequest>,
 ) -> OpenApiResponse<AddUsageApiKeyResponse, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::add_usage_api_key(api_key.0.as_str(), req).await).into(),
+        response: ApiResult(account_management::add_usage_api_key(api_key.0.as_str(), req).await)
+            .into(),
     }
 }
 
@@ -279,7 +289,10 @@ async fn remove_usage_api_key(
     req: Json<RemoveUsageApiKeyRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::remove_usage_api_key(api_key.0.as_str(), req).await).into(),
+        response: ApiResult(
+            account_management::remove_usage_api_key(api_key.0.as_str(), req).await,
+        )
+        .into(),
     }
 }
 
@@ -301,7 +314,10 @@ async fn remove_action_from_group(
     req: Json<RemoveActionFromGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::remove_action_from_group(api_key.0.as_str(), req).await).into(),
+        response: ApiResult(
+            account_management::remove_action_from_group(api_key.0.as_str(), req).await,
+        )
+        .into(),
     }
 }
 
@@ -312,7 +328,10 @@ async fn update_action_metadata(
     req: Json<UpdateActionMetadataRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::update_action_metadata(api_key.0.as_str(), req).await).into(),
+        response: ApiResult(
+            account_management::update_action_metadata(api_key.0.as_str(), req).await,
+        )
+        .into(),
     }
 }
 
@@ -323,7 +342,10 @@ async fn update_usage_api_key_metadata(
     req: Json<UpdateUsageApiKeyMetadataRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::update_usage_api_key_metadata(api_key.0.as_str(), req).await).into(),
+        response: ApiResult(
+            account_management::update_usage_api_key_metadata(api_key.0.as_str(), req).await,
+        )
+        .into(),
     }
 }
 
@@ -335,7 +357,15 @@ async fn list_api_keys(
     page_size: String,
 ) -> OpenApiResponse<Vec<ApiKeyItem>, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::list_api_keys(api_key.0.as_str(), page_number.as_str(), page_size.as_str()).await).into(),
+        response: ApiResult(
+            account_management::list_api_keys(
+                api_key.0.as_str(),
+                page_number.as_str(),
+                page_size.as_str(),
+            )
+            .await,
+        )
+        .into(),
     }
 }
 
@@ -348,7 +378,12 @@ async fn list_groups(
 ) -> OpenApiResponse<Vec<ListMetadataItem>, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
-            account_management::list_groups(api_key.0.as_str(), page_number.as_str(), page_size.as_str()).await,
+            account_management::list_groups(
+                api_key.0.as_str(),
+                page_number.as_str(),
+                page_size.as_str(),
+            )
+            .await,
         )
         .into(),
     }
@@ -363,8 +398,12 @@ async fn list_wallets(
 ) -> OpenApiResponse<Vec<WalletItem>, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
-            account_management::list_wallets(api_key.0.as_str(), page_number.as_str(), page_size.as_str())
-                .await,
+            account_management::list_wallets(
+                api_key.0.as_str(),
+                page_number.as_str(),
+                page_size.as_str(),
+            )
+            .await,
         )
         .into(),
     }

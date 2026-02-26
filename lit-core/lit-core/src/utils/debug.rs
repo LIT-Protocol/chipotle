@@ -3,10 +3,10 @@ where
     S: AsRef<str>,
 {
     let val = val.as_ref();
-    if let Some(v) = val.strip_prefix('\"') {
-        if let Some(v) = v.strip_suffix('\"') {
-            return v.to_string();
-        }
+    if let Some(v) = val.strip_prefix('\"')
+        && let Some(v) = v.strip_suffix('\"')
+    {
+        return v.to_string();
     }
 
     val.to_string()

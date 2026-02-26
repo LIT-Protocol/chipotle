@@ -1,9 +1,9 @@
-# Run integration.spec.ts.
-# Called from Deploy to Phala CVM after wait-for-api, or manually via workflow_dispatch.
+# Run new-account.spec.ts.
+# Called from Deploy to Phala CVM after k6-integration, or manually via workflow_dispatch.
 #
 # Required vars: BASE_URL (for workflow_dispatch when base_url not passed)
 
-name: k6 Integration
+name: k6 New Account
 
 on:
   workflow_call:
@@ -20,7 +20,7 @@ on:
         type: string
 
 jobs:
-  k6-integration:
+  k6-new-account:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +28,7 @@ jobs:
       - name: Install k6
         uses: grafana/setup-k6-action@v1
 
-      - name: integration.spec.ts
+      - name: new-account.spec.ts
         env:
           BASE_URL: ${{ inputs.base_url || vars.BASE_URL }}
-        run: k6 run k6/integration.spec.ts
+        run: k6 run k6/new-account.spec.ts

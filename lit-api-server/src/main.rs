@@ -24,6 +24,7 @@ use tracing::Level;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 #[rocket::main]
+#[allow(clippy::result_large_err)]
 async fn main() -> Result<(), rocket::Error> {
     setup_tracing().expect("Failed to setup tracing.");
 
@@ -79,7 +80,10 @@ async fn main() -> Result<(), rocket::Error> {
 
     let mut r = rocket::build()
         .attach(cors)
-        .mount("/", routes![openapi_json, openapi_json_redirect, swagger_ui_redirect])
+        .mount(
+            "/",
+            routes![openapi_json, openapi_json_redirect, swagger_ui_redirect],
+        )
         .mount("/core/v1/", core_routes)
         .mount("/transfer/v1/", abstractions::transfer::endpoints::routes())
         .mount(
@@ -127,10 +131,11 @@ fn setup_tracing() -> Result<(), anyhow::Error> {
 fn openapi_json(spec: &State<OpenApi>) -> Json<OpenApi> {
     let mut spec = spec.inner().clone();
 
-    let mut server = Server::default();
-    server.url = "/core/v1/".to_string();
-    server.description = Some("Lit Protocol Express API (Core v1)".to_string());
-    spec.servers.push(server);
+    spec.servers.push(Server {
+        url: "/core/v1/".to_string(),
+        description: Some("Lit Protocol Express API (Core v1)".to_string()),
+        ..Default::default()
+    });
 
     Json(spec)
 }
