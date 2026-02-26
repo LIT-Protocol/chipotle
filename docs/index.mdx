@@ -7,7 +7,7 @@ This guide introduces the \*\*Lit Express API \*\* and it's web interface, the *
 
 ## Overview
 
-The **Lit Express Dashboard** is front end to the **Lit Express API** server designed to quickly and efficently execute Lit Actions, but also  manages your user accounts, usage parameters, client wallet creation (PKPs), and IPFS based actions, through a simple set of groups. \
+The **Lit Express Dashboard** is front end to the **Lit Express API** server designed to quickly and efficiently execute Lit Actions, but also  manages your user accounts, usage parameters, client wallet creation (PKPs), and IPFS based actions, through a simple set of groups. \
 \
 Specifically it lets you:
 
@@ -18,7 +18,7 @@ Specifically it lets you:
 - Organize all your resources into **groups** that combine PKPs, IPFS actions, and usage API keys in any combination.
 - Send **lit-actions** to the node for execution, authorized by a usage or account API key.
 
-All of this can be done via the **Dashboard** (web GUI) or directly via the **REST API**, using a light-weight JS SDK, or even directly through CURL-ing commands.    Data is secure and onchain - all configuration within the Dashboard can be acheived by talking directly to our contracts located on **BASE**.
+All of this can be done via the **Dashboard** (web GUI) or directly via the **REST API**, using a light-weight JS SDK, or even directly through CURL-ing commands.    Data is secure and onchain - all configuration within the Dashboard can be achieved by talking directly to our contracts located on **BASE**.
 
 ## Using the Dashboard
 
@@ -34,7 +34,7 @@ It supports light/dark theme for your convenience and provides simple management
 2. [Request usage API keys](#2-request-usage-api-keys)
 3. [Request new PKPs (wallets)](#3-request-new-pkps-wallets)
 4. [Register IPFS CIDs (actions)](#4-register-ipfs-cids-actions)
-5. [Grouping your resrouces](#5-create-groups)
+5. [Grouping your resources](#5-create-groups)
 6. [Run lit-actions](#6-run-lit-actions)
 
 <Steps>
@@ -45,7 +45,7 @@ It supports light/dark theme for your convenience and provides simple management
     - **New User** — Enter an account name and optional description (and optional initial balance), then click **Create account**. The server creates the account and returns a new API key and wallet address. **Store the API key securely**; you'll need it to manage the account.
 
     After login, the dashboard shows Overview, Usage API Keys, Groups, IPFS Actions, Wallets, and Action Runner.\
-    You'll notice a single wallet in your account - it represents your master account API key, and can be used like a standard EVM wallet, or you can safely skip it's web3 propertiers and use the APIs directly.
+    You'll notice a single wallet in your account - it represents your master account API key, and can be used like a standard EVM wallet, or you can safely skip it's web3 properties and use the APIs directly.
   </Step>
   <Step title="Request usage API keys">
     Usage API keys are scoped keys you can give to clients or dApps to run specific lit-actions or to deploy. They can be rotated or removed without changing the main account.
