@@ -1,0 +1,31 @@
+FROM rust:1-bookworm AS builder
+
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    clang \
+    libsqlite3-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY lit-core ./lit-core/
+COPY lit-actions ./lit-actions/
+
+# Remove tests workspace member (excluded by .dockerignore; not needed for release build)
+RUN sed -i 's/, "tests"//; s/"tests", //' lit-actions/Cargo.toml
+
+RUN cd lit-actions && cargo build --release --bin lit_actions
+
+FROM debian:bookworm-slim AS runtime
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /build/lit-actions/target/release/lit_actions /usr/local/bin/
+
+CMD ["lit_actions", "--socket", "/tmp/lit_actions.sock"]

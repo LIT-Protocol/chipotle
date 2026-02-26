@@ -1,13 +1,18 @@
-# Deploy lit-api-server + lit-actions to Phala CVM (smallest instance)
+# Deploy lit-api-server + lit-actions + lit-static to Phala CVM (smallest instance)
 #
 # Required secrets:
-#   DOCKERHUB_USERNAME - Docker Hub username
 #   DOCKERHUB_TOKEN - Docker Hub PAT (Account Settings > Security > Access Tokens)
 #   PHALA_CLOUD_API_KEY - From Phala Cloud Dashboard > API Tokens
 #
 # Required vars:
-#   DOCKER_IMAGE - Full image path, e.g. docker.io/username/lit-node-express
+#   DOCKER_IMAGE - Base image path, e.g. docker.io/username/lit-node-express
+#                  Three images are pushed:
+#                    ${DOCKER_IMAGE}-lit-actions
+#                    ${DOCKER_IMAGE}-lit-api-server
+#                    ${DOCKER_IMAGE}-lit-static
+#   DOCKERHUB_USERNAME - Docker Hub username
 #   PHALA_APP_NAME - CVM name, e.g. lit-api-server
+#   BASE_URL - Public URL of the deployed CVM, e.g. https://abc123-8000.dstack-prod.phala.network
 
 name: Deploy to Phala CVM
 
@@ -31,9 +36,19 @@ jobs:
           github-token: ${{ secrets.GH_RUNNER_CHECK_TOKEN }}
           fallback-on-error: true
 
-  deploy:
+  build:
     needs: determine-runner
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: lit-actions
+            dockerfile: Dockerfile.lit-actions
+          - service: lit-api-server
+            dockerfile: Dockerfile.lit-api-server
+          - service: lit-static
+            dockerfile: Dockerfile.lit-static
     steps:
       - uses: actions/checkout@v4
 
@@ -43,25 +58,31 @@ jobs:
           username: ${{ vars.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Generate deploy tag (commit hash)
-        id: tag
-        run: echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
-
-      - name: Build and Push Docker image
+      - name: Build and push ${{ matrix.service }}
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: ./Dockerfile.phala
+          file: ./${{ matrix.dockerfile }}
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ vars.DOCKER_IMAGE }}:${{ steps.tag.outputs.tag }}
-            ${{ vars.DOCKER_IMAGE }}:latest
+            ${{ vars.DOCKER_IMAGE }}-${{ matrix.service }}:${{ github.sha }}
+            ${{ vars.DOCKER_IMAGE }}-${{ matrix.service }}:latest
+
+  deploy:
+    needs: [determine-runner, build]
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Prepare docker-compose for deployment
         run: |
-          IMAGE="${{ vars.DOCKER_IMAGE }}:${{ steps.tag.outputs.tag }}"
-          sed "s|\${DOCKER_IMAGE}|${IMAGE}|g" docker-compose.phala.yml > docker-compose.deploy.yml
+          TAG="${{ github.sha }}"
+          sed \
+            -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|${{ vars.DOCKER_IMAGE }}-lit-actions:${TAG}|g" \
+            -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|${{ vars.DOCKER_IMAGE }}-lit-api-server:${TAG}|g" \
+            -e "s|\${DOCKER_IMAGE_LIT_STATIC}|${{ vars.DOCKER_IMAGE }}-lit-static:${TAG}|g" \
+            docker-compose.phala.yml > docker-compose.deploy.yml
           cat docker-compose.deploy.yml
 
       - name: Setup Node.js

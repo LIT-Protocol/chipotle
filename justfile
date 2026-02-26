@@ -3,7 +3,9 @@
 image_base := env('DOCKER_IMAGE', 'litptcl/lit-node-express')
 # Unique UUID tag per deploy (override with DOCKER_TAG to pin a specific build)
 image_tag := env('DOCKER_TAG', `uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '\n'`)
-image := image_base + ':' + image_tag
+image_lit_actions    := image_base + '-lit-actions:'    + image_tag
+image_lit_api_server := image_base + '-lit-api-server:' + image_tag
+image_lit_static     := image_base + '-lit-static:'     + image_tag
 app_name := env('PHALA_APP_NAME', 'lit-api-server')
 instance_type := env('PHALA_INSTANCE_TYPE', 'tdx.small')
 
@@ -35,13 +37,19 @@ setup:
     npm install -g phala
     phala --version
 
-# Build Docker image for Phala deployment (release mode, linux/amd64 for Phala CVM)
+# Build and push all three Docker images in parallel (release mode, linux/amd64 for Phala CVM)
 [group: 'deploy']
 docker-build: _check_docker
     #!/usr/bin/env sh
     set -eu
-    docker build --platform linux/amd64 -f Dockerfile.phala -t {{image}} .
-    docker push {{image}}
+    docker build --platform linux/amd64 -f Dockerfile.lit-actions    -t {{image_lit_actions}}    . &
+    docker build --platform linux/amd64 -f Dockerfile.lit-api-server -t {{image_lit_api_server}} . &
+    docker build --platform linux/amd64 -f Dockerfile.lit-static     -t {{image_lit_static}}     . &
+    wait
+    docker push {{image_lit_actions}}    &
+    docker push {{image_lit_api_server}} &
+    docker push {{image_lit_static}}     &
+    wait
 
 [group: 'deploy']
 docker-push: docker-build
@@ -55,13 +63,20 @@ docker-push: docker-build
 deploy: docker-push _check_phala
     #!/usr/bin/env sh
     set -eu
-    sed "s|\${DOCKER_IMAGE}|{{image}}|g" docker-compose.phala.yml > docker-compose.deploy.yml
+    sed \
+        -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|{{image_lit_actions}}|g" \
+        -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|{{image_lit_api_server}}|g" \
+        -e "s|\${DOCKER_IMAGE_LIT_STATIC}|{{image_lit_static}}|g" \
+        docker-compose.phala.yml > docker-compose.deploy.yml
     phala deploy -c docker-compose.deploy.yml --cvm-id {{app_name}} --instance-type {{instance_type}}
 
 # Run locally with Docker Compose (no Phala Cloud)
 [group: 'deploy']
 docker-run-local: docker-build
-    DOCKER_IMAGE={{image}} docker compose -f docker-compose.deploy.yml up -d
+    DOCKER_IMAGE_LIT_ACTIONS={{image_lit_actions}} \
+    DOCKER_IMAGE_LIT_API_SERVER={{image_lit_api_server}} \
+    DOCKER_IMAGE_LIT_STATIC={{image_lit_static}} \
+    docker compose -f docker-compose.phala.yml up -d
 
 [private]
 _check_docker:

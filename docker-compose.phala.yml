@@ -5,7 +5,7 @@
 
 services:
   lit-actions:
-    image: ${DOCKER_IMAGE}
+    image: ${DOCKER_IMAGE_LIT_ACTIONS}
     command: ["lit_actions", "--socket", "/tmp/lit_actions.sock"]
     volumes:
       - lit-socket:/tmp
@@ -13,7 +13,7 @@ services:
     restart: unless-stopped
 
   lit-api-server:
-    image: ${DOCKER_IMAGE}
+    image: ${DOCKER_IMAGE_LIT_API_SERVER}
     command: ["lit-api-server"]
     working_dir: /app
     ports:
@@ -31,7 +31,7 @@ services:
     restart: unless-stopped
 
   lit-static:
-    image: ${DOCKER_IMAGE}
+    image: ${DOCKER_IMAGE_LIT_STATIC}
     command: ["lit-static"]
     working_dir: /app
     ports:
