@@ -22,8 +22,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # sqlite3 dev headers are required to build libsqlite3-sys (used by lit-actions)
+      # sqlite3 dev headers are required to build libsqlite3-sys (used by lit-actions only)
       - name: Install system dependencies
+        if: matrix.crate == 'lit-actions'
         run: sudo apt-get update -qq && sudo apt-get install -y libsqlite3-dev
 
       # All crates now have rust-toolchain.toml pinned to 1.91; this action
