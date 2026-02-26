@@ -79,7 +79,10 @@ async fn main() -> Result<(), rocket::Error> {
 
     let mut r = rocket::build()
         .attach(cors)
-        .mount("/", routes![openapi_json, openapi_json_redirect, swagger_ui_redirect])
+        .mount(
+            "/",
+            routes![openapi_json, openapi_json_redirect, swagger_ui_redirect],
+        )
         .mount("/core/v1/", core_routes)
         .mount("/transfer/v1/", abstractions::transfer::endpoints::routes())
         .mount(
