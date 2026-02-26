@@ -157,7 +157,7 @@ impl Error {
 
     #[allow(unused)]
     pub fn into_io(self) -> io::Error {
-        io::Error::new(io::ErrorKind::Other, self)
+        io::Error::other(self)
     }
 
     pub fn concrete(&self, use_first: bool) -> Self {
@@ -185,10 +185,10 @@ impl Error {
             return;
         }
 
-        if let Some(source) = self.source() {
-            if let Some(source) = source.downcast_ref::<Error>() {
-                Self::walk(source, cb);
-            }
+        if let Some(source) = self.source()
+            && let Some(source) = source.downcast_ref::<Error>()
+        {
+            Self::walk(source, cb);
         }
     }
 

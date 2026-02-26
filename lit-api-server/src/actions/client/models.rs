@@ -36,7 +36,7 @@ impl From<&str> for ExecutionOptions {
 impl From<String> for ExecutionOptions {
     fn from(code: String) -> Self {
         Self {
-            code: code,
+            code,
             ..Default::default()
         }
     }

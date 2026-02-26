@@ -111,26 +111,22 @@ impl<T> Unexpected<T> for LocalResult<T> {
     {
         match self {
             LocalResult::Single(v) => Ok(v),
-            LocalResult::None => {
-                return Err(Error::new(
-                    Some(Kind::Unexpected),
-                    err_pkg_name(),
-                    Some(msg.into()),
-                    None,
-                    Some("unexpected err in chrono LocalResult: None/invalid"),
-                    Some(Location::caller()),
-                ));
-            }
-            LocalResult::Ambiguous(_, _) => {
-                return Err(Error::new(
-                    Some(Kind::Unexpected),
-                    err_pkg_name(),
-                    Some(msg.into()),
-                    None,
-                    Some("unexpected err in chrono LocalResult: Ambiguous/invalid"),
-                    Some(Location::caller()),
-                ));
-            }
+            LocalResult::None => Err(Error::new(
+                Some(Kind::Unexpected),
+                err_pkg_name(),
+                Some(msg.into()),
+                None,
+                Some("unexpected err in chrono LocalResult: None/invalid"),
+                Some(Location::caller()),
+            )),
+            LocalResult::Ambiguous(_, _) => Err(Error::new(
+                Some(Kind::Unexpected),
+                err_pkg_name(),
+                Some(msg.into()),
+                None,
+                Some("unexpected err in chrono LocalResult: Ambiguous/invalid"),
+                Some(Location::caller()),
+            )),
         }
     }
 
@@ -143,26 +139,22 @@ impl<T> Unexpected<T> for LocalResult<T> {
     {
         match self {
             LocalResult::Single(v) => Ok(v),
-            LocalResult::None => {
-                return Err(Error::new(
-                    Some(Kind::Unexpected),
-                    err_pkg_name(),
-                    Some(msg.into()),
-                    Some(Arc::new(code)),
-                    Some("unexpected err in chrono LocalResult: None/invalid"),
-                    Some(Location::caller()),
-                ));
-            }
-            LocalResult::Ambiguous(_, _) => {
-                return Err(Error::new(
-                    Some(Kind::Unexpected),
-                    err_pkg_name(),
-                    Some(msg.into()),
-                    Some(Arc::new(code)),
-                    Some("unexpected err in chrono LocalResult: Ambiguous/invalid"),
-                    Some(Location::caller()),
-                ));
-            }
+            LocalResult::None => Err(Error::new(
+                Some(Kind::Unexpected),
+                err_pkg_name(),
+                Some(msg.into()),
+                Some(Arc::new(code)),
+                Some("unexpected err in chrono LocalResult: None/invalid"),
+                Some(Location::caller()),
+            )),
+            LocalResult::Ambiguous(_, _) => Err(Error::new(
+                Some(Kind::Unexpected),
+                err_pkg_name(),
+                Some(msg.into()),
+                Some(Arc::new(code)),
+                Some("unexpected err in chrono LocalResult: Ambiguous/invalid"),
+                Some(Location::caller()),
+            )),
         }
     }
 }

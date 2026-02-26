@@ -595,13 +595,13 @@ where
                     value = remove_0x_prefix(value);
                 }
 
-                if let Some(len) = expected_len {
-                    if value.len() != len {
-                        stdout
-                            .write_all(b"\nERROR: Value invalid length.\n")
-                            .map_err(|e| io_err(e, None))?;
-                        continue;
-                    }
+                if let Some(len) = expected_len
+                    && value.len() != len
+                {
+                    stdout
+                        .write_all(b"\nERROR: Value invalid length.\n")
+                        .map_err(|e| io_err(e, None))?;
+                    continue;
                 }
 
                 stdout.write_all(b"\n").map_err(|e| io_err(e, None))?;

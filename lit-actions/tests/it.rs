@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 
 use anyhow::{Result, bail};
 use indoc::{formatdoc, indoc};
+use lit_actions_server::proto::execute_js_request::AesEncryptResponse;
 use lit_actions_server::{TestServer, init_v8, proto::*, unix};
 use pretty_assertions::assert_eq;
 use rstest::*;
@@ -95,38 +96,6 @@ impl TestClient {
                 self.messages.put(req);
                 self.messages.take::<IncrementFetchCountResponse>().into()
             }
-            UnionResponse::PkpPermissionsGetPermitted(req) => {
-                self.messages.put(req);
-                self.messages
-                    .take::<PkpPermissionsGetPermittedResponse>()
-                    .into()
-            }
-            UnionResponse::PkpPermissionsGetPermittedAuthMethodScopes(req) => {
-                self.messages.put(req);
-                self.messages
-                    .take::<PkpPermissionsGetPermittedAuthMethodScopesResponse>()
-                    .into()
-            }
-            UnionResponse::PkpPermissionsIsPermitted(req) => {
-                self.messages.put(req);
-                self.messages
-                    .take::<PkpPermissionsIsPermittedResponse>()
-                    .into()
-            }
-            UnionResponse::PkpPermissionsIsPermittedAuthMethod(req) => {
-                self.messages.put(req);
-                self.messages
-                    .take::<PkpPermissionsIsPermittedAuthMethodResponse>()
-                    .into()
-            }
-            UnionResponse::PubkeyToTokenId(req) => {
-                self.messages.put(req);
-                self.messages.take::<PubkeyToTokenIdResponse>().into()
-            }
-            UnionResponse::SignEcdsa(req) => {
-                self.messages.put(req);
-                self.messages.take::<SignEcdsaResponse>().into()
-            }
             UnionResponse::Sign(req) => {
                 self.messages.put(req);
                 self.messages.take::<SignResponse>().into()
@@ -139,14 +108,6 @@ impl TestClient {
                 self.messages.put(req);
                 self.messages.take::<GetLatestNonceResponse>().into()
             }
-            UnionResponse::CheckConditions(req) => {
-                self.messages.put(req);
-                self.messages.take::<CheckConditionsResponse>().into()
-            }
-            UnionResponse::ClaimKeyIdentifier(req) => {
-                self.messages.put(req);
-                self.messages.take::<ClaimKeyIdentifierResponse>().into()
-            }
             UnionResponse::CallContract(req) => {
                 self.messages.put(req);
                 self.messages.take::<CallContractResponse>().into()
@@ -155,45 +116,21 @@ impl TestClient {
                 self.messages.put(req);
                 self.messages.take::<CallChildResponse>().into()
             }
-            UnionResponse::BroadcastAndCollect(req) => {
-                self.messages.put(req);
-                self.messages.take::<BroadcastAndCollectResponse>().into()
-            }
-            UnionResponse::DecryptAndCombine(req) => {
-                self.messages.put(req);
-                self.messages.take::<DecryptAndCombineResponse>().into()
-            }
-            UnionResponse::DecryptToSingleNode(req) => {
-                self.messages.put(req);
-                self.messages.take::<DecryptToSingleNodeResponse>().into()
-            }
-            UnionResponse::SignAndCombineEcdsa(req) => {
-                self.messages.put(req);
-                self.messages.take::<SignAndCombineEcdsaResponse>().into()
-            }
-            UnionResponse::SignAndCombine(req) => {
-                self.messages.put(req);
-                self.messages.take::<SignAndCombineResponse>().into()
-            }
             UnionResponse::GetRpcUrl(req) => {
                 self.messages.put(req);
                 self.messages.take::<GetRpcUrlResponse>().into()
             }
-            UnionResponse::P2pBroadcast(req) => {
+            UnionResponse::AesEncrypt(req) => {
                 self.messages.put(req);
-                self.messages.take::<P2pBroadcastResponse>().into()
-            }
-            UnionResponse::P2pCollectFromLeader(req) => {
-                self.messages.put(req);
-                self.messages.take::<P2pCollectFromLeaderResponse>().into()
-            }
-            UnionResponse::IsLeader(req) => {
-                self.messages.put(req);
-                self.messages.take::<IsLeaderResponse>().into()
+                self.messages.take::<AesEncryptResponse>().into()
             }
             UnionResponse::EncryptBls(req) => {
                 self.messages.put(req);
                 self.messages.take::<EncryptBlsResponse>().into()
+            }
+            UnionResponse::DecryptBls(req) => {
+                self.messages.put(req);
+                self.messages.take::<DecryptBlsResponse>().into()
             }
             UnionResponse::UpdateResourceUsage(req) => {
                 self.messages.put(req);
@@ -277,14 +214,10 @@ async fn lit_namespace(mut client: TestClient) {
     let code = indoc! {r#"
         console.log(
             Object.keys(Lit.Actions).length > 0,
-            Object.keys(Lit.Auth).length === 0,
             Object.keys(Lit.Headers).length === 0,
 
             Lit.Actions === LitActions,
             Lit.Actions === globalThis.LitActions,
-
-            Lit.Auth === LitAuth,
-            Lit.Auth === globalThis.LitAuth,
 
             Lit.Headers === LitHeaders,
             Lit.Headers === globalThis.LitHeaders,
@@ -301,7 +234,7 @@ async fn lit_namespace(mut client: TestClient) {
 
     assert_eq!(
         client.received::<PrintRequest>().message,
-        "true true true true true true true true true true\n"
+        "true true true true true true true\n"
     );
     assert!(client.received::<ExecutionResult>().success);
 }
@@ -317,21 +250,17 @@ async fn lit_namespace_protection(mut client: TestClient) {
 
         run(() => delete globalThis.Lit);
         run(() => delete globalThis.LitActions);
-        run(() => delete globalThis.LitAuth);
         run(() => delete globalThis.LitHeaders);
 
         run(() => delete Lit.Actions);
         run(() => delete Lit.Actions.signEcdsa);
-        run(() => delete Lit.Auth);
         run(() => delete Lit.Headers);
 
         run(() => Lit = {});
         run(() => LitActions = {});
-        run(() => LitAuth = {});
         run(() => LitHeaders = {});
 
         run(() => Lit.Actions = {});
-        run(() => Lit.Auth = {});
         run(() => Lit.Headers = {});
 
         console.log(errors.join('\n'))
@@ -348,18 +277,13 @@ async fn lit_namespace_protection(mut client: TestClient) {
         [
             "TypeError: Cannot delete property 'Lit' of #<Window>",
             "TypeError: Cannot delete property 'LitActions' of #<Window>",
-            "TypeError: Cannot delete property 'LitAuth' of #<Window>",
             "TypeError: Cannot delete property 'LitHeaders' of #<Window>",
             "TypeError: Cannot delete property 'Actions' of #<Object>",
-            "TypeError: Cannot delete property 'signEcdsa' of #<Object>",
-            "TypeError: Cannot delete property 'Auth' of #<Object>",
             "TypeError: Cannot delete property 'Headers' of #<Object>",
             "TypeError: Cannot assign to read only property 'Lit' of object '#<Window>'",
             "TypeError: Cannot assign to read only property 'LitActions' of object '#<Window>'",
-            "TypeError: Cannot assign to read only property 'LitAuth' of object '#<Window>'",
             "TypeError: Cannot assign to read only property 'LitHeaders' of object '#<Window>'",
             "TypeError: Cannot assign to read only property 'Actions' of object '#<Object>'",
-            "TypeError: Cannot assign to read only property 'Auth' of object '#<Object>'",
             "TypeError: Cannot assign to read only property 'Headers' of object '#<Object>'",
         ]
         .join("\n")
@@ -466,252 +390,6 @@ async fn fetch(mut client: TestClient) {
 
 #[rstest]
 #[tokio::test]
-async fn pkp_get_permitted(mut client: TestClient) {
-    for method in [
-        "getPermittedActions",
-        "getPermittedAddresses",
-        "getPermittedAuthMethods",
-    ] {
-        client
-            .respond_with(PkpPermissionsGetPermittedResponse {
-                resources: b"[]".into(), // ignored
-            })
-            .execute_js(format!(
-                r#"(async () => {{ await LitActions.{method}({{tokenId: "0x1234"}}) }})()"#
-            ))
-            .await
-            .unwrap();
-
-        assert_eq!(
-            client.received::<PkpPermissionsGetPermittedRequest>(),
-            PkpPermissionsGetPermittedRequest {
-                method: method.to_string(),
-                token_id: "0x1234".to_string(),
-                key_set_id: "".to_string(),
-            }
-        );
-        assert!(client.received::<ExecutionResult>().success);
-    }
-
-    // getPermittedAuthMethodScopes
-    {
-        client
-            .respond_with(PkpPermissionsGetPermittedAuthMethodScopesResponse {
-                scopes: vec![/* ignored */],
-            })
-            .execute_js(
-                r#"(async () => { await LitActions.getPermittedAuthMethodScopes({tokenId: "0x1234", authMethodType: "5", userId: [1,2,3]}) })()"#,
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            client.received::<PkpPermissionsGetPermittedAuthMethodScopesRequest>(),
-            PkpPermissionsGetPermittedAuthMethodScopesRequest {
-                token_id: "0x1234".to_string(),
-                method: "5".to_string(),
-                user_id: vec![1, 2, 3],
-                max_scope_id: 100,
-                key_set_id: "".to_string(),
-            }
-        );
-        assert!(client.received::<ExecutionResult>().success);
-    }
-}
-
-#[rstest]
-#[tokio::test]
-async fn pkp_is_permitted(mut client: TestClient) {
-    // isPermittedAction
-    {
-        client
-            .respond_with(PkpPermissionsIsPermittedResponse { is_permitted: true })
-            .execute_js(
-                r#"(async () => { await LitActions.isPermittedAction({tokenId: "0x1234", ipfsId: "some-id"}) })()"#,
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            client.received::<PkpPermissionsIsPermittedRequest>(),
-            PkpPermissionsIsPermittedRequest {
-                method: "isPermittedAction".to_string(),
-                token_id: "0x1234".to_string(),
-                params: b"[\"some-id\"]".into(),
-                key_set_id: "".to_string(),
-            }
-        );
-        assert!(client.received::<ExecutionResult>().success);
-    }
-
-    // isPermittedAddress
-    {
-        client
-            .respond_with(PkpPermissionsIsPermittedResponse { is_permitted: true })
-            .execute_js(
-                r#"(async () => { await LitActions.isPermittedAddress({tokenId: "0x1234", address: "some-address"}) })()"#,
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            client.received::<PkpPermissionsIsPermittedRequest>(),
-            PkpPermissionsIsPermittedRequest {
-                method: "isPermittedAddress".to_string(),
-                token_id: "0x1234".to_string(),
-                params: b"[\"some-address\"]".into(),
-                key_set_id: "".to_string(),
-            }
-        );
-        assert!(client.received::<ExecutionResult>().success);
-    }
-
-    // isPermittedAuthMethod
-    {
-        client
-            .respond_with(PkpPermissionsIsPermittedAuthMethodResponse { is_permitted: true })
-            .execute_js(
-                r#"(async () => { await LitActions.isPermittedAuthMethod({tokenId: "0x1234", authMethodType: "5", userId: [1,2,3]}) })()"#,
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            client.received::<PkpPermissionsIsPermittedAuthMethodRequest>(),
-            PkpPermissionsIsPermittedAuthMethodRequest {
-                token_id: "0x1234".to_string(),
-                method: "5".to_string(),
-                user_id: vec![1, 2, 3],
-                key_set_id: "".to_string(),
-            }
-        );
-        assert!(client.received::<ExecutionResult>().success);
-    }
-}
-
-#[rstest]
-#[tokio::test]
-async fn sign_ecdsa(mut client: TestClient) {
-    // signEcdsa
-    {
-        client
-            .respond_with(SignEcdsaResponse { success: "ignored".to_string() })
-            .execute_js(
-                r#"(async () => { await LitActions.signEcdsa({toSign: [1,2,3], publicKey: "some-key", sigName: "some-sig"}) })()"#,
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            client.received::<SignEcdsaRequest>(),
-            SignEcdsaRequest {
-                to_sign: vec![1, 2, 3],
-                public_key: "some-key".to_string(),
-                sig_name: "some-sig".to_string(),
-                eth_personal_sign: false,
-                key_set_id: "".to_string(),
-            }
-        );
-        assert!(client.received::<ExecutionResult>().success);
-    }
-
-    // ethPersonalSignMessageEcdsa
-    {
-        client
-            .respond_with(SignEcdsaResponse { success: "ignored".to_string() })
-            .execute_js(
-                r#"(async () => { await LitActions.ethPersonalSignMessageEcdsa({message: "some-message", publicKey: "some-key", sigName: "some-sig"}) })()"#,
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            client.received::<SignEcdsaRequest>(),
-            SignEcdsaRequest {
-                to_sign: b"some-message".into(),
-                public_key: "some-key".to_string(),
-                sig_name: "some-sig".to_string(),
-                eth_personal_sign: true,
-                key_set_id: "".to_string(),
-            }
-        );
-        assert!(client.received::<ExecutionResult>().success);
-    }
-
-    // signEcdsa with invalid params
-    {
-        let res = client
-            .execute_js(
-                r#"(async () => { await LitActions.signEcdsa({toSign: [], publicKey: "some-key", sigName: "some-sig"}) })()"#,
-            )
-            .await;
-
-        assert_eq!(
-            res.unwrap_err().to_string().lines().next().unwrap(),
-            "Uncaught (in promise) RangeError: toSign must not be empty"
-        );
-        assert!(!client.received::<ExecutionResult>().success);
-    }
-    {
-        let res = client
-            .execute_js(
-                r#"(async () => { await LitActions.signEcdsa({toSign: [1,2,3], publicKey: " ", sigName: "some-sig"}) })()"#,
-            )
-            .await;
-
-        assert_eq!(
-            res.unwrap_err().to_string().lines().next().unwrap(),
-            "Uncaught (in promise) RangeError: publicKey must not be blank"
-        );
-        assert!(!client.received::<ExecutionResult>().success);
-    }
-    {
-        let res = client
-            .execute_js(
-                r#"(async () => { await LitActions.signEcdsa({toSign: [1,2,3], publicKey: "some-key"}) })()"#,
-            )
-            .await;
-
-        assert_eq!(
-            res.unwrap_err().to_string().lines().next().unwrap(),
-            "Uncaught (in promise) RangeError: sigName must not be blank"
-        );
-        assert!(!client.received::<ExecutionResult>().success);
-    }
-
-    // catch signEcdsa op error
-    {
-        let code = indoc! {r#"
-            (async () => {
-                try {
-                    await LitActions.signEcdsa({toSign: [1,2,3], publicKey: "some-key", sigName: "some-sig"})
-                } catch (e) {
-                    LitActions.setResponse({response: e.toString()})
-                }
-            })()
-        "#};
-
-        client
-            .respond_with(ErrorResponse {
-                error: "something went wrong".to_string(),
-            })
-            .respond_with(SetResponseResponse {})
-            .execute_js(code)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            client.received::<SetResponseRequest>(),
-            SetResponseRequest {
-                response: "Error: something went wrong".to_string(),
-            }
-        );
-        assert!(client.received::<ExecutionResult>().success);
-    }
-}
-
-#[rstest]
-#[tokio::test]
 async fn aes_decrypt(mut client: TestClient) {
     client
         .respond_with(AesDecryptResponse { plaintext: "ignored".to_string() })
@@ -724,30 +402,7 @@ async fn aes_decrypt(mut client: TestClient) {
     assert_eq!(
         client.received::<AesDecryptRequest>(),
         AesDecryptRequest {
-            symmetric_key: vec![1, 2, 3],
             ciphertext: vec![4, 5, 6],
-        }
-    );
-    assert!(client.received::<ExecutionResult>().success);
-}
-
-#[rstest]
-#[tokio::test]
-async fn check_conditions(mut client: TestClient) {
-    client
-        .respond_with(CheckConditionsResponse { success: true })
-        .execute_js(
-            r#"(async () => { await LitActions.checkConditions({conditions: [{conditionType: "some-type"}], authSig: {sig: "0x123"}, chain: "some-chain"}) })()"#,
-        )
-        .await
-        .unwrap();
-
-    assert_eq!(
-        client.received::<CheckConditionsRequest>(),
-        CheckConditionsRequest {
-            conditions: b"[{\"conditionType\":\"some-type\"}]".into(),
-            auth_sig: Some(b"{\"sig\":\"0x123\"}".into()),
-            chain: Some("some-chain".to_string()),
         }
     );
     assert!(client.received::<ExecutionResult>().success);
@@ -790,27 +445,6 @@ async fn get_latest_nonce(mut client: TestClient) {
         );
         assert_eq!(client.received::<ExecutionResult>().success, false);
     }
-}
-
-#[rstest]
-#[tokio::test]
-async fn pubkey_to_token_id(mut client: TestClient) {
-    client
-        .respond_with(PubkeyToTokenIdResponse {
-            token_id: "ignored".to_string(),
-        })
-        .execute_js(r#"LitActions.pubkeyToTokenId({publicKey: "some-key"})"#)
-        .await
-        .unwrap();
-
-    assert_eq!(
-        client.received::<PubkeyToTokenIdRequest>(),
-        PubkeyToTokenIdRequest {
-            public_key: "some-key".to_string(),
-            key_set_id: "".to_string(),
-        }
-    );
-    assert!(client.received::<ExecutionResult>().success);
 }
 
 #[rstest]
@@ -872,26 +506,6 @@ async fn call_contract(mut client: TestClient) {
         CallContractRequest {
             chain: "some-chain".to_string(),
             txn: "some-txn".to_string(),
-        }
-    );
-    assert!(client.received::<ExecutionResult>().success);
-}
-
-#[rstest]
-#[tokio::test]
-async fn claim_key(mut client: TestClient) {
-    client
-        .respond_with(ClaimKeyIdentifierResponse {
-            success: "ignored".to_string(),
-        })
-        .execute_js(r#"(async () => { await LitActions.claimKey({keyId: "some-id"}) })()"#)
-        .await
-        .unwrap();
-
-    assert_eq!(
-        client.received::<ClaimKeyIdentifierRequest>(),
-        ClaimKeyIdentifierRequest {
-            key_id: "some-id".to_string(),
         }
     );
     assert!(client.received::<ExecutionResult>().success);
@@ -1002,7 +616,7 @@ async fn async_await(mut client: TestClient) {
     let code = indoc! {r#"
         (async () => {
             const fulfilled = await Promise.all([
-                LitActions.signEcdsa({toSign: [1,2,3], publicKey: "some-key", sigName: "some-sig"}),
+                LitActions.sign({toSign: [1,2,3], publicKey: "some-key", sigName: "some-sig", signingScheme: "EcdsaK256Sha256"}),
                 LitActions.aesDecrypt({symmetricKey: [1,2,3], ciphertext: [4,5,6]}),
                 LitActions.setResponse({response: await "OK"})
             ])
@@ -1013,7 +627,7 @@ async fn async_await(mut client: TestClient) {
     for _ in 0..20 {
         client
             .respond_with(PrintResponse {})
-            .respond_with(SignEcdsaResponse {
+            .respond_with(SignResponse {
                 success: "success".to_string(),
             })
             .respond_with(AesDecryptResponse {
@@ -1024,7 +638,7 @@ async fn async_await(mut client: TestClient) {
             .await
             .unwrap();
 
-        assert_eq!(client.received::<SignEcdsaRequest>().sig_name, "some-sig");
+        assert_eq!(client.received::<SignRequest>().sig_name, "some-sig");
         assert_eq!(
             client.received::<AesDecryptRequest>().ciphertext,
             vec![4, 5, 6]
@@ -1236,40 +850,6 @@ async fn deno_exit(mut client: TestClient) {
         );
         assert_eq!(client.received::<ExecutionResult>().success, false);
     }
-}
-
-#[rstest]
-#[tokio::test]
-async fn broadcast_and_collect(mut client: TestClient) {
-    let code = indoc! {r#"
-        (async () => {
-            const resp = await Lit.Actions.broadcastAndCollect({name: "some-name", value: "some-value"})
-            Lit.Actions.setResponse({response: JSON.stringify(resp)})
-        })()
-    "#};
-
-    client
-        .respond_with(BroadcastAndCollectResponse {
-            name: "some-name".to_string(),
-            values: vec!["some-response".to_string()],
-        })
-        .respond_with(SetResponseResponse {})
-        .execute_js(code)
-        .await
-        .unwrap();
-
-    assert_eq!(
-        client.received::<BroadcastAndCollectRequest>(),
-        BroadcastAndCollectRequest {
-            name: "some-name".to_string(),
-            value: "some-value".to_string(),
-        }
-    );
-    assert_eq!(
-        client.received::<SetResponseRequest>().response,
-        "[\"some-response\"]"
-    );
-    assert!(client.received::<ExecutionResult>().success);
 }
 
 #[rstest]

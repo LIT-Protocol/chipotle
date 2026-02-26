@@ -11,10 +11,12 @@ use crate::actions::grpc::GrpcClientPool;
 use moka::future::Cache;
 use rocket::State;
 use rocket::get;
+use rocket::response::Redirect;
 use rocket::routes;
 use rocket::serde::json::Json;
+use rocket::uri;
 use rocket_cors::{AllowedOrigins, Method};
-use rocket_okapi::okapi::openapi3::OpenApi;
+use rocket_okapi::okapi::openapi3::{OpenApi, Server};
 use rocket_okapi::swagger_ui::SwaggerUIConfig;
 use rocket_okapi::swagger_ui::make_swagger_ui;
 use std::{collections::HashSet, str::FromStr, time::Duration};
@@ -22,6 +24,7 @@ use tracing::Level;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 #[rocket::main]
+#[allow(clippy::result_large_err)]
 async fn main() -> Result<(), rocket::Error> {
     setup_tracing().expect("Failed to setup tracing.");
 
@@ -77,7 +80,10 @@ async fn main() -> Result<(), rocket::Error> {
 
     let mut r = rocket::build()
         .attach(cors)
-        .mount("/", routes![openapi_json])
+        .mount(
+            "/",
+            routes![openapi_json, openapi_json_redirect, swagger_ui_redirect],
+        )
         .mount("/core/v1/", core_routes)
         .mount("/transfer/v1/", abstractions::transfer::endpoints::routes())
         .mount(
@@ -85,9 +91,9 @@ async fn main() -> Result<(), rocket::Error> {
             abstractions::intents::swaps::endpoints::routes(),
         )
         .mount(
-            "/swagger-ui/",
+            "/core/v1/swagger-ui/",
             make_swagger_ui(&SwaggerUIConfig {
-                url: "../openapi.json".to_owned(),
+                url: "/core/v1/openapi.json".to_owned(),
                 ..Default::default()
             }),
         )
@@ -121,9 +127,17 @@ fn setup_tracing() -> Result<(), anyhow::Error> {
     Ok(())
 }
 
-#[get("/openapi.json")]
-fn openapi_json(spec: &State<OpenApi>) -> Json<&OpenApi> {
-    Json(spec.inner())
+#[get("/core/v1/openapi.json")]
+fn openapi_json(spec: &State<OpenApi>) -> Json<OpenApi> {
+    let mut spec = spec.inner().clone();
+
+    spec.servers.push(Server {
+        url: "/core/v1/".to_string(),
+        description: Some("Lit Protocol Express API (Core v1)".to_string()),
+        ..Default::default()
+    });
+
+    Json(spec)
 }
 
 pub fn default_http_client() -> reqwest::Client {
@@ -134,4 +148,14 @@ pub fn default_http_client() -> reqwest::Client {
         .pool_max_idle_per_host(30)
         .build()
         .expect("Error building request client")
+}
+
+#[get("/openapi.json")]
+fn openapi_json_redirect() -> Redirect {
+    Redirect::permanent(uri!("/core/v1/openapi.json"))
+}
+
+#[get("/")]
+fn swagger_ui_redirect() -> Redirect {
+    Redirect::permanent(uri!("/core/v1/swagger-ui/"))
 }

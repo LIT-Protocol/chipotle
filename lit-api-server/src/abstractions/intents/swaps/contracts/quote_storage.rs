@@ -3,6 +3,8 @@ pub use quote_storage::*;
 /// More information at: <https://github.com/gakonst/ethers-rs>
 #[allow(
     clippy::enum_variant_names,
+    clippy::large_enum_variant,
+    clippy::module_inception,
     clippy::too_many_arguments,
     clippy::upper_case_acronyms,
     clippy::type_complexity,
@@ -461,7 +463,7 @@ pub mod quote_storage {
         > {
             let factory = ::ethers::contract::ContractFactory::new(
                 QUOTESTORAGE_ABI.clone(),
-                QUOTESTORAGE_BYTECODE.clone().into(),
+                QUOTESTORAGE_BYTECODE.clone(),
                 client,
             );
             let deployer = factory.deploy(constructor_args)?;

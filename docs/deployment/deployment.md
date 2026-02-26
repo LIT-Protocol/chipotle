@@ -9,13 +9,13 @@ The deployment uses:
 - **GitHub Actions** — CI/CD workflow triggered on push to `main` or manual dispatch
 - **Docker** — Multi-stage build producing both binaries in a single image
 - **Docker Compose** — Two services sharing a Unix socket for gRPC communication
-- **Phala Cloud** — Confidential Virtual Machine (CVM) with TEE, instance type `tdx.small`
+- **Phala Cloud** — Confidential Virtual Machine (CVM) with TEE, instance type `tdx.large`
 
 ## Architecture
 
 ```mermaid
 flowchart TB
-    subgraph CVM["Phala CVM (tdx.small)"]
+    subgraph CVM["Phala CVM (tdx.large)"]
         subgraph containers["Docker Compose"]
             API["lit-api-server<br/>:8000"]
             Actions["lit-actions<br/>gRPC server"]
@@ -91,7 +91,7 @@ Configure these in **Settings → Secrets and variables → Actions**:
 2. **Log in to registry** — Authenticate with Docker Hub or GHCR
 3. **Build and push** — Build the image, tag with a unique UUID, and push
 4. **Prepare compose** — Substitute `${DOCKER_IMAGE}` with the built image tag
-5. **Deploy** — Run `phala deploy` with `--instance-type tdx.small`
+5. **Deploy** — Run `phala deploy` with `--instance-type tdx.large`
 
 ## Manual Deployment
 
@@ -119,14 +119,14 @@ TAG=$(uuidgen | tr '[:upper:]' '[:lower:]')
 docker build -f Dockerfile.phala -t litptcl/lit-node-express:$TAG .
 docker push litptcl/lit-node-express:$TAG
 sed "s|\${DOCKER_IMAGE}|litptcl/lit-node-express:$TAG|g" docker-compose.phala.yml > docker-compose.deploy.yml
-phala deploy -c docker-compose.deploy.yml -n lit-api-server --instance-type tdx.small
+phala deploy -c docker-compose.deploy.yml -n lit-api-server --instance-type tdx.large
 ```
 
-Environment variables: `DOCKER_IMAGE` (default: `litptcl/lit-node-express`, repo path without tag), `DOCKER_TAG` (default: auto-generated UUID), `PHALA_APP_NAME` (default: `lit-api-server`), `PHALA_INSTANCE_TYPE` (default: `tdx.small`).
+Environment variables: `DOCKER_IMAGE` (default: `litptcl/lit-node-express`, repo path without tag), `DOCKER_TAG` (default: auto-generated UUID), `PHALA_APP_NAME` (default: `lit-api-server`), `PHALA_INSTANCE_TYPE` (default: `tdx.large`).
 
 ## Instance Type
 
-The workflow uses `tdx.small`, the smallest available Phala CVM plan. For custom sizing:
+The workflow uses `tdx.large`. For custom sizing:
 
 ```bash
 phala deploy --vcpu 1 --memory 2048MB --disk-size 40GB ...

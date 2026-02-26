@@ -1,0 +1,51 @@
+{
+  "$schema": "https://mintlify.com/docs.json",
+  "theme": "mint",
+  "name": "Documentation",
+  "colors": {
+    "primary": "#0D9373",
+    "light": "#F97316",
+    "dark": "#EA580C"
+  },
+  "navigation": {
+    "groups": [
+      {
+        "group": "Building with Lit Express",
+        "pages": [
+          "index"
+        ]
+      }
+    ]
+  },
+  "favicon": "/favicon.svg",
+  "logo": {
+    "light": "/logo/light.svg",
+    "dark": "/logo/dark.svg"
+  },
+  "navbar": {
+    "links": [
+      {
+        "label": "Support",
+        "href": "https://developer.litprotocol.com/support/intro"
+      }
+    ]
+  },
+  "contextual": {
+    "options": [
+      "copy",
+      "view",
+      "chatgpt",
+      "claude",
+      "perplexity",
+      "mcp",
+      "cursor",
+      "vscode"
+    ]
+  },
+  "footer": {
+    "socials": {
+      "x": "https://twitter.com/litprotocol",
+      "discord": "https://litgateway.com/discord"
+    }
+  }
+}

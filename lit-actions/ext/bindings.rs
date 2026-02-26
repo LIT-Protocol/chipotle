@@ -87,205 +87,6 @@ async fn op_increment_fetch_count(state: Rc<RefCell<OpState>>) -> Result<u32, Js
 
 #[instrument(skip_all, ret)]
 #[op2(async, reentrant)]
-#[serde]
-async fn op_pkp_permissions_get_permitted(
-    state: Rc<RefCell<OpState>>,
-    #[string] method: String,
-    #[string] token_id: String,
-    #[string] key_set_id: String,
-) -> Result<Vec<serde_json::Value>, JsErrorBox> {
-    ensure_one_of!(
-        method,
-        [
-            "getPermittedActions",
-            "getPermittedAddresses",
-            "getPermittedAuthMethods",
-        ]
-    );
-    ensure_u256!(&token_id, "tokenId");
-
-    remote_op_async!(op_pkp_permissions_get_permitted,
-        state,
-        PkpPermissionsGetPermittedRequest { method, token_id, key_set_id },
-        UnionRequest::PkpPermissionsGetPermitted(resp) => serde_json::from_slice(&resp.resources).map_err(JsErrorBox::from_err)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-#[serde]
-async fn op_pkp_permissions_get_permitted_auth_method_scopes(
-    state: Rc<RefCell<OpState>>,
-    #[string] token_id: String,
-    #[string] method: String,
-    #[buffer(copy)] user_id: Vec<u8>,
-    #[bigint] max_scope_id: u64,
-    #[string] key_set_id: String,
-) -> Result<Vec<bool>, JsErrorBox> {
-    ensure_u256!(&token_id, "tokenId");
-    ensure_u256!(&method, "authMethodType");
-    ensure_not_empty!(user_id, "userId");
-
-    remote_op_async!(op_pkp_permissions_get_permitted_auth_method_scopes,
-        state,
-        PkpPermissionsGetPermittedAuthMethodScopesRequest {
-            token_id,
-            method,
-            user_id,
-            max_scope_id,
-            key_set_id,
-        },
-        UnionRequest::PkpPermissionsGetPermittedAuthMethodScopes(resp) => Ok(resp.scopes)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-async fn op_pkp_permissions_is_permitted(
-    state: Rc<RefCell<OpState>>,
-    #[string] method: String,
-    #[string] token_id: String,
-    #[serde] params: Vec<serde_json::Value>,
-    #[string] key_set_id: String,
-) -> Result<bool, JsErrorBox> {
-    ensure_one_of!(method, ["isPermittedAction", "isPermittedAddress"]);
-    ensure_u256!(&token_id, "tokenId");
-    ensure_not_empty!(params);
-
-    remote_op_async!(op_pkp_permissions_is_permitted,
-        state,
-        PkpPermissionsIsPermittedRequest {
-            method,
-            token_id,
-            params: serde_json::to_vec(&params).map_err(JsErrorBox::from_err)?,
-            key_set_id,
-        },
-        UnionRequest::PkpPermissionsIsPermitted(resp) => Ok(resp.is_permitted)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-async fn op_pkp_permissions_is_permitted_auth_method(
-    state: Rc<RefCell<OpState>>,
-    #[string] token_id: String,
-    #[string] method: String,
-    #[buffer(copy)] user_id: Vec<u8>,
-    #[string] key_set_id: String,
-) -> Result<bool, JsErrorBox> {
-    ensure_u256!(&token_id, "tokenId");
-    ensure_u256!(&method, "authMethodType");
-    ensure_not_empty!(user_id, "userId");
-
-    remote_op_async!(op_pkp_permissions_is_permitted_auth_method,
-        state,
-        PkpPermissionsIsPermittedAuthMethodRequest {
-            token_id,
-            method,
-            user_id,
-            key_set_id,
-        },
-        UnionRequest::PkpPermissionsIsPermittedAuthMethod(resp) => Ok(resp.is_permitted)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-async fn op_check_conditions(
-    state: Rc<RefCell<OpState>>,
-    #[serde] conditions: Vec<serde_json::Value>, // Vec<UnifiedAccessControlConditionItem>
-    #[serde] auth_sig: Option<serde_json::Value>, // AuthSigItem
-    #[string] chain: Option<String>,
-) -> Result<bool, JsErrorBox> {
-    ensure_not_empty!(conditions);
-    if let Some(chain) = &chain {
-        ensure_not_blank!(chain);
-    }
-
-    remote_op_async!(op_check_conditions,
-        state,
-        CheckConditionsRequest {
-            conditions: serde_json::to_vec(&conditions).map_err(JsErrorBox::from_err)?,
-            auth_sig: auth_sig.as_ref().map(serde_json::to_vec).transpose().map_err(JsErrorBox::from_err)?,
-            chain,
-        },
-        UnionRequest::CheckConditions(resp) => Ok(resp.success)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2]
-#[string]
-fn op_pubkey_to_token_id(
-    state: &mut OpState,
-    #[string] public_key: String,
-    #[string] key_set_id: String,
-) -> Result<String, JsErrorBox> {
-    ensure_not_blank!(public_key, "publicKey");
-
-    remote_op!(op_pubkey_to_token_id,
-        state,
-        PubkeyToTokenIdRequest { public_key, key_set_id },
-        UnionRequest::PubkeyToTokenId(resp) => Ok(resp.token_id)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-#[string]
-async fn op_sign_ecdsa(
-    state: Rc<RefCell<OpState>>,
-    #[buffer(copy)] to_sign: Vec<u8>,
-    #[string] public_key: String,
-    #[string] sig_name: String,
-    #[string] key_set_id: String,
-) -> Result<String, JsErrorBox> {
-    ensure_not_empty!(to_sign, "toSign");
-    ensure_not_blank!(public_key, "publicKey");
-    ensure_not_blank!(sig_name, "sigName");
-
-    remote_op_async!(op_sign_ecdsa,
-        state,
-        SignEcdsaRequest {
-            to_sign,
-            public_key,
-            sig_name,
-            eth_personal_sign: false,
-            key_set_id,
-        },
-        UnionRequest::SignEcdsa(resp) => Ok(resp.success)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-#[string]
-async fn op_sign_ecdsa_eth_personal_sign_message(
-    state: Rc<RefCell<OpState>>,
-    #[buffer(copy)] to_sign: Vec<u8>,
-    #[string] public_key: String,
-    #[string] sig_name: String,
-    #[string] key_set_id: String,
-) -> Result<String, JsErrorBox> {
-    ensure_not_empty!(to_sign, "toSign");
-    ensure_not_blank!(public_key, "publicKey");
-    ensure_not_blank!(sig_name, "sigName");
-
-    remote_op_async!(op_sign_ecdsa_eth_personal_sign_message,
-        state,
-        SignEcdsaRequest {
-            to_sign,
-            public_key,
-            sig_name,
-            eth_personal_sign: true,
-            key_set_id,
-        },
-        UnionRequest::SignEcdsa(resp) => Ok(resp.success)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
 #[string]
 async fn op_sign(
     state: Rc<RefCell<OpState>>,
@@ -293,7 +94,7 @@ async fn op_sign(
     #[string] public_key: String,
     #[string] sig_name: String,
     #[string] signing_scheme: String,
-    #[string] key_set_id: String,
+    #[string] _key_set_id: String,
 ) -> Result<String, JsErrorBox> {
     ensure_not_empty!(to_sign, "toSign");
     ensure_not_blank!(public_key, "publicKey");
@@ -307,7 +108,6 @@ async fn op_sign(
             public_key,
             sig_name,
             signing_scheme,
-            key_set_id,
         },
         UnionRequest::Sign(resp) => Ok(resp.success)
     )
@@ -397,7 +197,7 @@ async fn op_aes_decrypt(
 
     remote_op_async!(op_aes_decrypt,
         state,
-        AesDecryptRequest { symmetric_key, ciphertext },
+        AesDecryptRequest { ciphertext },
         UnionRequest::AesDecrypt(resp) => Ok(resp.plaintext)
     )
 }
@@ -419,22 +219,6 @@ async fn op_get_latest_nonce(
             chain,
         },
         UnionRequest::GetLatestNonce(resp) => Ok(resp.nonce)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-#[string]
-async fn op_claim_key_identifier(
-    state: Rc<RefCell<OpState>>,
-    #[string] key_id: String,
-) -> Result<String, JsErrorBox> {
-    ensure_not_blank!(key_id, "keyId");
-
-    remote_op_async!(op_claim_key_identifier,
-        state,
-        ClaimKeyIdentifierRequest { key_id },
-        UnionRequest::ClaimKeyIdentifier(resp) => Ok(resp.success)
     )
 }
 
@@ -478,82 +262,6 @@ async fn op_call_child(
 
 #[instrument(skip_all, ret)]
 #[op2(async, reentrant)]
-#[serde]
-async fn op_broadcast_and_collect(
-    state: Rc<RefCell<OpState>>,
-    #[string] name: String,
-    #[string] value: String,
-) -> Result<Vec<String>, JsErrorBox> {
-    remote_op_async!(op_broadcast_and_collect,
-        state,
-        BroadcastAndCollectRequest { name, value },
-        UnionRequest::BroadcastAndCollect(resp) => Ok(resp.values)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-#[string]
-async fn op_decrypt_and_combine(
-    state: Rc<RefCell<OpState>>,
-    #[serde] access_control_conditions: Vec<serde_json::Value>, // Vec<UnifiedAccessControlConditionItem>
-    #[string] ciphertext: String,
-    #[string] data_to_encrypt_hash: String,
-    #[serde] auth_sig: Option<serde_json::Value>, // AuthSigItem
-    #[string] chain: String,
-    #[string] key_set_id: String,
-) -> Result<String, JsErrorBox> {
-    remote_op_async!(op_decrypt_and_combine,
-        state,
-        DecryptAndCombineRequest {
-            access_control_conditions: serde_json::to_vec(&access_control_conditions).map_err(JsErrorBox::from_err)?,
-            ciphertext,
-            data_to_encrypt_hash,
-            auth_sig: auth_sig.as_ref().map(serde_json::to_vec).transpose().map_err(JsErrorBox::from_err)?,
-            chain,
-            key_set_id,
-        },
-        UnionRequest::DecryptAndCombine(resp) => Ok(resp.result)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-#[string]
-async fn op_sign_and_combine_ecdsa(
-    state: Rc<RefCell<OpState>>,
-    #[buffer(copy)] to_sign: Vec<u8>,
-    #[string] public_key: String,
-    #[string] sig_name: String,
-    #[string] key_set_id: String,
-) -> Result<String, JsErrorBox> {
-    remote_op_async!(op_sign_and_combine_ecdsa,
-        state,
-        SignAndCombineEcdsaRequest { to_sign, public_key, sig_name, key_set_id },
-        UnionRequest::SignAndCombineEcdsa(resp) => Ok(resp.result)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-#[string]
-async fn op_sign_and_combine(
-    state: Rc<RefCell<OpState>>,
-    #[buffer(copy)] to_sign: Vec<u8>,
-    #[string] public_key: String,
-    #[string] sig_name: String,
-    #[string] signing_scheme: String,
-    #[string] key_set_id: String,
-) -> Result<String, JsErrorBox> {
-    remote_op_async!(op_sign_and_combine,
-        state,
-        SignAndCombineRequest { to_sign, public_key, sig_name, signing_scheme, key_set_id },
-        UnionRequest::SignAndCombine(resp) => Ok(resp.result)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
 #[string]
 async fn op_get_rpc_url(
     state: Rc<RefCell<OpState>>,
@@ -568,89 +276,20 @@ async fn op_get_rpc_url(
 
 #[instrument(skip_all, ret)]
 #[op2(async, reentrant)]
-async fn op_p2p_broadcast(
-    state: Rc<RefCell<OpState>>,
-    #[string] name: String,
-    #[string] value: String,
-) -> Result<bool, JsErrorBox> {
-    remote_op_async!(op_p2p_broadcast,
-        state,
-        P2pBroadcastRequest { name, value },
-        UnionRequest::P2pBroadcast(resp) => Ok(resp.result)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-#[string]
-async fn op_p2p_collect_from_leader(
-    state: Rc<RefCell<OpState>>,
-    #[string] name: String,
-) -> Result<String, JsErrorBox> {
-    remote_op_async!(op_p2p_collect_from_leader,
-        state,
-        P2pCollectFromLeaderRequest { name  },
-        UnionRequest::P2pCollectFromLeader(resp) => Ok(resp.value)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-async fn op_is_leader(state: Rc<RefCell<OpState>>) -> Result<bool, JsErrorBox> {
-    remote_op_async!(op_is_leader,
-        state,
-        IsLeaderRequest { },
-        UnionRequest::IsLeader(resp) => Ok(resp.result)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
 #[serde]
 async fn op_encrypt_bls(
     state: Rc<RefCell<OpState>>,
     #[serde] access_control_conditions: Vec<serde_json::Value>, // Vec<UnifiedAccessControlConditionItem>
     #[buffer(copy)] to_encrypt: Vec<u8>,
-    #[string] key_set_id: String,
+    #[string] _key_set_id: String,
 ) -> Result<serde_json::Value, JsErrorBox> {
     remote_op_async!(op_encrypt_bls,
         state,
         EncryptBlsRequest {
             access_control_conditions: serde_json::to_vec(&access_control_conditions).map_err(JsErrorBox::from_err)?,
             to_encrypt,
-            key_set_id,
         },
         UnionRequest::EncryptBls(resp) => Ok(json!({"ciphertext": resp.ciphertext, "dataToEncryptHash": resp.data_to_encrypt_hash}))
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-#[string]
-async fn op_decrypt_to_single_node(
-    state: Rc<RefCell<OpState>>,
-    #[serde] access_control_conditions: Vec<serde_json::Value>, // Vec<UnifiedAccessControlConditionItem>
-    #[string] ciphertext: String,
-    #[string] data_to_encrypt_hash: String,
-    #[serde] auth_sig: Option<serde_json::Value>, // AuthSigItem
-    #[string] chain: String,
-    #[string] key_set_id: String,
-) -> Result<String, JsErrorBox> {
-    let auth_sig = match auth_sig {
-        Some(auth_sig) => Some(serde_json::to_vec(&auth_sig).map_err(JsErrorBox::from_err)?),
-        None => None,
-    };
-    remote_op_async!(op_decrypt_to_single_node,
-        state,
-        DecryptToSingleNodeRequest {
-            access_control_conditions: serde_json::to_vec(&access_control_conditions).map_err(JsErrorBox::from_err)?,
-            ciphertext,
-            data_to_encrypt_hash,
-            auth_sig,
-            chain,
-            key_set_id,
-        },
-        UnionRequest::DecryptToSingleNode(resp) => Ok(resp.result)
     )
 }
 
@@ -689,32 +328,15 @@ extension!(
         op_aes_decrypt,
         op_call_child,
         op_call_contract,
-        op_check_conditions,
-        op_claim_key_identifier,
         op_get_latest_nonce,
         op_increment_fetch_count,
-        op_pkp_permissions_get_permitted_auth_method_scopes,
-        op_pkp_permissions_get_permitted,
-        op_pkp_permissions_is_permitted_auth_method,
-        op_pkp_permissions_is_permitted,
-        op_pubkey_to_token_id,
         op_set_response,
-        op_sign_ecdsa_eth_personal_sign_message,
-        op_sign_ecdsa,
         op_sign,
         op_sign_as_action,
         op_get_action_public_key,
         op_verify_action_signature,
-        op_broadcast_and_collect,
-        op_decrypt_and_combine,
-        op_sign_and_combine_ecdsa,
-        op_sign_and_combine,
         op_get_rpc_url,
-        op_p2p_broadcast,
-        op_p2p_collect_from_leader,
-        op_is_leader,
         op_encrypt_bls,
-        op_decrypt_to_single_node,
         op_update_resource_usage,
     ],
     esm_entry_point = "ext:lit_actions/99_patches.js",

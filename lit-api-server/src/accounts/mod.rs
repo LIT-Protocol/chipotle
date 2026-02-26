@@ -15,7 +15,7 @@ pub fn api_key_hash(api_key_base_64: &str) -> U256 {
 }
 
 /// keccak256 of wallet address bytes (hex string with or without 0x) as U256.
-pub fn wallet_address_hash(wallet_address: H160) -> U256 {        
+pub fn wallet_address_hash(wallet_address: H160) -> U256 {
     U256::from_big_endian(&keccak256(wallet_address.as_bytes()))
 }
 
@@ -29,7 +29,7 @@ pub fn address_from_pubkey(pubkey: &str) -> Result<H160> {
 }
 
 pub fn address_from_pubkey_bytes(pubkey_bytes: &[u8]) -> Result<H160> {
-    let address = H160::from_slice(&keccak256(&pubkey_bytes)[12..]);
+    let address = H160::from_slice(&keccak256(pubkey_bytes)[12..]);
     Ok(address)
 }
 
@@ -41,7 +41,6 @@ pub async fn new_account(
     creator_wallet_address: H160,
     initial_balance: U256,
 ) -> Result<bool> {
-    
     let contract = get_signable_account_config_contract().await?;
     let api_key_hash = api_key_hash(api_key);
     lookup_data::add_api_key(&api_key_hash.to_string(), api_key).await?;
@@ -284,7 +283,13 @@ pub async fn add_usage_api_key(
     balance: U256,
 ) -> Result<bool> {
     let contract = get_signable_account_config_contract().await?;
-    tracing::info!("Adding usage API key to account: {}, usage_api_key: {}, expiration: {}, balance: {}", api_key, usage_api_key, expiration, balance);
+    tracing::info!(
+        "Adding usage API key to account: {}, usage_api_key: {}, expiration: {}, balance: {}",
+        api_key,
+        usage_api_key,
+        expiration,
+        balance
+    );
     let account_api_key_hash = api_key_hash(api_key);
     let usage_api_key_hash = api_key_hash(usage_api_key);
     lookup_data::add_api_key(&usage_api_key_hash.to_string(), usage_api_key).await?;
@@ -306,7 +311,7 @@ pub async fn remove_usage_api_key(api_key: &str, usage_api_key: &str) -> Result<
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let usage_api_key_hash = api_key_hash(usage_api_key);
-    let usage_api_key_hash_string = bytes_to_hex( &keccak256(usage_api_key.as_bytes()));
+    let usage_api_key_hash_string = bytes_to_hex(keccak256(usage_api_key.as_bytes()));
     lookup_data::delete_api_key_by_key_hash(&usage_api_key_hash_string).await?;
     let function_call = contract.remove_usage_api_key(account_api_key_hash, usage_api_key_hash);
     let tx = function_call.send().await?;
@@ -346,7 +351,7 @@ pub async fn register_wallet_derivation(
 
 pub async fn get_wallet_derivation_from_pubkey(api_key: &str, pubkey: &str) -> Result<U256> {
     let wallet_address = address_from_pubkey(pubkey)?;
-    get_wallet_derivation(api_key, wallet_address).await    
+    get_wallet_derivation(api_key, wallet_address).await
 }
 
 /// Get the derivation path for a wallet address under an account (read-only).
@@ -450,7 +455,7 @@ pub async fn debit_api_key(api_key: &str, amount: U256) -> Result<bool> {
     }
 }
 
-pub async fn credit_api_key(api_key: &str, amount: U256) -> Result<bool> {  
+pub async fn credit_api_key(api_key: &str, amount: U256) -> Result<bool> {
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.credit_api_key(account_api_key_hash, amount);
