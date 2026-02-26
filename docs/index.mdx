@@ -8,9 +8,9 @@ This guide introduces the [**Lit Chipotle API**](https://api.dev.litprotocol.com
 ## Zero to LitAction
 
 1. Create an account via the Dashboard, note down your API key
-2. Run a HelloWorld LitAction
-   1. [Run it from the Dashboard](#6-run-lit-actions)
-   2. [Call the API via cURL/JavaScript](#6. Run lit-action)
+2. Run a Hello World LitAction
+   1. [Run it from the Dashboard](https://dashboard.dev.litprotocol.com)
+   2. [Call the API via cURL or JavaScript](#6-run-lit-action)
    3. or build your own SDK from the [OpenAPI spec]([https://api.dev.litprotocol.com/openapi.json]\(https://36da669c852c9bd4fdea27dd331c07ff776bd125-8000.dstack-pha-prod5.phala.network/openapi.json\))
 
 ## Overview
@@ -43,7 +43,7 @@ It supports light/dark theme for your convenience and provides simple management
 3. [Request new PKPs (wallets)](#3-request-new-pkps-wallets)
 4. [Register IPFS CIDs (actions)](#4-register-ipfs-cids-actions)
 5. [Grouping your resources](#5-create-groups)
-6. [Run lit-actions](#6-run-lit-actions)
+6. [Test lit-actions](#6-run-lit-actions)
 
 <Steps>
   <Step title="Request a new account (or log in)">
@@ -80,10 +80,18 @@ It supports light/dark theme for your convenience and provides simple management
 
     Usage API keys (and the account key) are validated against the account's groups and permitted actions/wallets when you run a lit-action.
   </Step>
-  <Step title="Run lit-actions">
+  <Step title="Test lit-actions">
     In the **Action Runner** section, paste some Lit Action JavaScript code and optional JSON parameters. Choose the API key (account or usage key) to use for the request, then click **Execute**. The node runs the action and returns signatures, response, and logs. The key you use must be allowed to run that action (via the group and IPFS CID configuration).
   </Step>
 </Steps>
+
+## Daily Usage
+
+The dashboard is just your configuration tool - once you have it set up, you can simple call the lit-action endpoint with your usage key each time you, your dApp or cron job needs to execute a lit action.   This simple :
+
+<Step title="Call the API with your usage key, action-code ( or IPFS CID ) and any parameters that you need">
+  Call the API with your usage key, action-code ( or IPFS CID ) and any parameters that you need
+</Step>
 
 ## Using the API directly
 
@@ -271,7 +279,7 @@ Restrict which wallets (PKPs) can be used in the group by adding their public ke
 
 ### 6. Run lit-action
 
-Execute a lit-action by sending JavaScript code and optional params. Use the account API key or a usage API key in the header.
+Execute a lit-action by sending JavaScript code and optional params. Use a usage API key in the header.
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
