@@ -20,23 +20,8 @@ on:
         type: string
 
 jobs:
-  determine-runner:
-    runs-on: ubuntu-latest
-    outputs:
-      runner: ${{ steps.set-runner.outputs.use-runner }}
-    steps:
-      - name: Determine runner (self-hosted or fallback)
-        id: set-runner
-        uses: mikehardy/runner-fallback-action@v1
-        with:
-          primary-runner: "self-hosted"
-          fallback-runner: "ubuntu-slim"
-          github-token: ${{ secrets.GH_RUNNER_CHECK_TOKEN }}
-          fallback-on-error: true
-
   k6-smoke:
-    needs: determine-runner
-    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
