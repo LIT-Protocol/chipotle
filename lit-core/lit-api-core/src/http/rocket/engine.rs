@@ -177,7 +177,7 @@ fn take_shutdown_handles(shutdown_handles: Arc<Mutex<Vec<Shutdown>>>) -> Vec<Shu
     let mut res = Vec::new();
 
     let mut shutdown_handles = shutdown_handles.lock().unwrap();
-    while shutdown_handles.len() > 0 {
+    while !shutdown_handles.is_empty() {
         res.push(shutdown_handles.remove(0));
     }
 

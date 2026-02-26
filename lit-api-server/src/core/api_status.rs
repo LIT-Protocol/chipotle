@@ -150,7 +150,7 @@ impl ApiStatus {
         warn!("not_found: {:?}", message);
         Self {
             status: Status::NotFound,
-            message: message.into(),
+            message: message,
         }
     }
 
@@ -159,7 +159,7 @@ impl ApiStatus {
         warn!("payment_required: {:?}", message);
         Self {
             status: Status::PaymentRequired,
-            message: message.into(),
+            message: message,
         }
     }
 
@@ -168,7 +168,7 @@ impl ApiStatus {
         warn!("Option not found: {:?}", message);
         Self {
             status: Status::InternalServerError,
-            message: message.into(),
+            message: message,
         }
     }
 }

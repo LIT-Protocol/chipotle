@@ -70,10 +70,7 @@ impl Tracer for Tracing {
     /// Add some fields to the structured logs.
     #[allow(dead_code)]
     fn add_field(&mut self, key: String, value: Value) {
-        let mut fields = match self.fields.take() {
-            Some(v) => v,
-            None => HashMap::new(),
-        };
+        let mut fields = self.fields.take().unwrap_or_default();
 
         fields.insert(key, value);
         self.fields = Some(fields);
@@ -133,10 +130,7 @@ impl Tracer for TracingRequired {
 
     /// Add some fields to the structured logs.
     fn add_field(&mut self, key: String, value: Value) {
-        let mut fields = match self.fields.take() {
-            Some(v) => v,
-            None => HashMap::new(),
-        };
+        let mut fields = self.fields.take().unwrap_or_default();
 
         fields.insert(key, value);
         self.fields = Some(fields);
@@ -222,16 +216,14 @@ pub(crate) fn extract_request_and_correlation_ids(
         counter::add_one(HttpMetrics::PrivacyModeRequest, &[]);
 
         let privacy_suffix = format!("_{}", PRIVACY_MODE_TAG);
-        if let Some(ref id) = request_id {
-            if !id.ends_with(&privacy_suffix) {
+        if let Some(ref id) = request_id
+            && !id.ends_with(&privacy_suffix) {
                 request_id = Some(format!("{}_{}", id, PRIVACY_MODE_TAG));
             }
-        }
-        if let Some(ref id) = correlation_id {
-            if !id.ends_with(&privacy_suffix) {
+        if let Some(ref id) = correlation_id
+            && !id.ends_with(&privacy_suffix) {
                 correlation_id = Some(format!("{}_{}", id, PRIVACY_MODE_TAG));
             }
-        }
     }
 
     (request_id, correlation_id)

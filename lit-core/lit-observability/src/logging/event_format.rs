@@ -285,12 +285,11 @@ where
             if let Some(scope) = ctx.event_scope() {
                 for span in scope.from_root() {
                     let ext = span.extensions();
-                    if let Some(ctx) = ext.get::<RequestContext>() {
-                        if ctx.has_context() {
+                    if let Some(ctx) = ext.get::<RequestContext>()
+                        && ctx.has_context() {
                             request_ctx = Some(ctx.clone());
                             break;
                         }
-                    }
                 }
             }
             // Fall back to task-local storage
@@ -359,8 +358,8 @@ where
         // let dimmed = writer.dimmed();
         let dimmed = Style::new().dimmed();
 
-        if self.display_event_scope {
-            if let Some(scope) = ctx.event_scope() {
+        if self.display_event_scope
+            && let Some(scope) = ctx.event_scope() {
                 // let bold = writer.bold();
                 let bold = Style::new().bold();
 
@@ -371,19 +370,17 @@ where
                     seen = true;
 
                     let ext = span.extensions();
-                    if let Some(fields) = &ext.get::<FormattedFields<N>>() {
-                        if !fields.is_empty() {
+                    if let Some(fields) = &ext.get::<FormattedFields<N>>()
+                        && !fields.is_empty() {
                             write!(writer, "{}{}{}", bold.paint("{"), fields, bold.paint("}"))?;
                         }
-                    }
                     write!(writer, "{}", dimmed.paint(":"))?;
                 }
 
                 if seen {
                     writer.write_char(' ')?;
                 }
-            }
-        };
+            };
 
         if self.display_target {
             write!(writer, "{}{} ", dimmed.paint(meta.target()), dimmed.paint(":"))?;
@@ -391,8 +388,8 @@ where
 
         let line_number = if self.display_line_number { meta.line() } else { None };
 
-        if self.display_filename {
-            if let Some(filename) = meta.file() {
+        if self.display_filename
+            && let Some(filename) = meta.file() {
                 write!(
                     writer,
                     "{}{}{}",
@@ -401,7 +398,6 @@ where
                     if line_number.is_some() { "" } else { " " }
                 )?;
             }
-        }
 
         if let Some(line_number) = line_number {
             write!(writer, "{}{}:{} ", dimmed.prefix(), line_number, dimmed.suffix())?;

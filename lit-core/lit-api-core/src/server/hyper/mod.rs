@@ -58,7 +58,7 @@ pub async fn bind_unix_socket(socket_path: PathBuf, r: Router) {
                     let (parts, body) = req.into_parts();
 
                     let bytes = body.collect().await.unwrap().to_bytes();
-                    let full_body = http_body_util::Full::new(bytes.into());
+                    let full_body = http_body_util::Full::new(bytes);
                     let new_req = hyper::Request::from_parts(parts, full_body);
                     r.route(new_req).await
                 }
@@ -79,19 +79,17 @@ pub async fn bind_unix_socket(socket_path: PathBuf, r: Router) {
 }
 
 fn is_broken_pipe_error(err: &(dyn Error + 'static)) -> bool {
-    if let Some(io_err) = err.downcast_ref::<io::Error>() {
-        if io_err.kind() == io::ErrorKind::BrokenPipe {
+    if let Some(io_err) = err.downcast_ref::<io::Error>()
+        && io_err.kind() == io::ErrorKind::BrokenPipe {
             return true;
         }
-    }
 
     let mut source = err.source();
     while let Some(source_err) = source {
-        if let Some(io_err) = source_err.downcast_ref::<io::Error>() {
-            if io_err.kind() == io::ErrorKind::BrokenPipe {
+        if let Some(io_err) = source_err.downcast_ref::<io::Error>()
+            && io_err.kind() == io::ErrorKind::BrokenPipe {
                 return true;
             }
-        }
         source = source_err.source();
     }
     false

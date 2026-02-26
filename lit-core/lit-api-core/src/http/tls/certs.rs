@@ -205,11 +205,10 @@ impl CertManager {
     pub fn shutdown(&mut self) {
         set_bool_mu(self.quit_mu.clone(), true);
 
-        if let Some(join_handle) = self.thread_join_handle.take() {
-            if let Err(err) = join_handle.join() {
+        if let Some(join_handle) = self.thread_join_handle.take()
+            && let Err(err) = join_handle.join() {
                 warn!("cert manager shutdown: failed to join thread - {:?}", err);
             }
-        }
     }
 
     // Private Key

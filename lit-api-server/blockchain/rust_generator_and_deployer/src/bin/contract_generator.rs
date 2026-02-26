@@ -6,9 +6,14 @@ use std::path::Path;
 fn main() {
     let args: Vec<String> = env::args().collect();
     if args.len() < 3 {
-        eprintln!("Usage: {} <input_folder> <output_folder>", args.get(0).unwrap_or(&"generate_contracts".into()));
+        eprintln!(
+            "Usage: {} <input_folder> <output_folder>",
+            args.first().unwrap_or(&"generate_contracts".into())
+        );
         eprintln!("  input_folder  - folder containing ABI files (e.g. ../lit-blockchain/abis/)");
-        eprintln!("  output_folder - folder to write generated .rs files (e.g. ../lit-blockchain/src/contracts/)");
+        eprintln!(
+            "  output_folder - folder to write generated .rs files (e.g. ../lit-blockchain/src/contracts/)"
+        );
         std::process::exit(1);
     }
     let input_folder = args[1].trim_end_matches('/');
@@ -58,18 +63,22 @@ fn process_folder(input_folder: &str, output_folder: &str) {
                         .replace(abi_source, file.path().to_str().unwrap())
                         .replace(input_folder, ".");
 
-                    write(output_file_name, as_str.clone()).expect("Could not write generated file.");
+                    write(output_file_name, as_str.clone())
+                        .expect("Could not write generated file.");
 
-
-                    let output_file_path = format!("{}/{}", output_folder, file_name.to_str().unwrap());
-                    copy(abi_source, output_file_path).expect("Could not copy abi file to the output folder.");
-                    
+                    let output_file_path =
+                        format!("{}/{}", output_folder, file_name.to_str().unwrap());
+                    copy(abi_source, output_file_path)
+                        .expect("Could not copy abi file to the output folder.");
                 }
             }
             Err(..) => {
-                println!("Error generating ABI for {:?}:  {:?}", file_path, result.unwrap_err());
+                println!(
+                    "Error generating ABI for {:?}:  {:?}",
+                    file_path,
+                    result.unwrap_err()
+                );
             }
         }
     }
-
 }

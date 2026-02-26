@@ -78,11 +78,10 @@ where
     }
 
     fn set_context_impl(dispatch: &Dispatch, id: &Id, ctx: &RequestContext) {
-        if let Some(subscriber) = dispatch.downcast_ref::<S>() {
-            if let Some(span) = subscriber.span(id) {
+        if let Some(subscriber) = dispatch.downcast_ref::<S>()
+            && let Some(span) = subscriber.span(id) {
                 span.extensions_mut().insert(ctx.clone());
             }
-        }
     }
 
     fn get_context_impl(dispatch: &Dispatch, id: &Id) -> Option<RequestContext> {
@@ -92,11 +91,10 @@ where
         // Walk the span hierarchy (scope() includes current span first, then ancestors)
         // This allows child spans to find context set on parent spans
         for ancestor in span.scope() {
-            if let Some(ctx) = ancestor.extensions().get::<RequestContext>() {
-                if ctx.has_context() {
+            if let Some(ctx) = ancestor.extensions().get::<RequestContext>()
+                && ctx.has_context() {
                     return Some(ctx.clone());
                 }
-            }
         }
         None
     }
@@ -107,11 +105,10 @@ where
         // Priority 1: Walk span ancestry to find request context in extensions.
         if let Some(scope) = ctx.event_scope(event) {
             for span in scope {
-                if let Some(request_ctx) = span.extensions().get::<RequestContext>() {
-                    if request_ctx.has_context() {
+                if let Some(request_ctx) = span.extensions().get::<RequestContext>()
+                    && request_ctx.has_context() {
                         return Some(request_ctx.clone());
                     }
-                }
             }
         }
 
@@ -158,27 +155,24 @@ where
         event.record(&mut visitor);
         let context_fields = visitor.into_recorded_context_fields();
 
-        if !context_fields.has_request_id || !context_fields.has_correlation_id {
-            if let Some(request_ctx) = self.resolve_request_context(&ctx, event) {
+        if (!context_fields.has_request_id || !context_fields.has_correlation_id)
+            && let Some(request_ctx) = self.resolve_request_context(&ctx, event) {
                 // Only add attributes not already present from event fields
-                if !context_fields.has_request_id {
-                    if let Some(ref request_id) = request_ctx.request_id {
+                if !context_fields.has_request_id
+                    && let Some(ref request_id) = request_ctx.request_id {
                         log_record.add_attribute(
                             Key::new("request_id"),
                             AnyValue::from(request_id.clone()),
                         );
                     }
-                }
-                if !context_fields.has_correlation_id {
-                    if let Some(ref correlation_id) = request_ctx.correlation_id {
+                if !context_fields.has_correlation_id
+                    && let Some(ref correlation_id) = request_ctx.correlation_id {
                         log_record.add_attribute(
                             Key::new("correlation_id"),
                             AnyValue::from(correlation_id.clone()),
                         );
                     }
-                }
             }
-        }
 
         self.logger.emit(log_record);
     }

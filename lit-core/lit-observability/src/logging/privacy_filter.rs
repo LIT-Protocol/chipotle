@@ -11,13 +11,11 @@ where
         &self, _metadata: &tracing::Metadata<'_>, _ctx: tracing_subscriber::layer::Context<'_, S>,
     ) -> bool {
         let ctx = get_request_context();
-        if let Some(ctx) = ctx {
-            if let Some(request_id) = ctx.request_id {
-                if request_id.contains(PRIVACY_MODE_TAG) {
+        if let Some(ctx) = ctx
+            && let Some(request_id) = ctx.request_id
+                && request_id.contains(PRIVACY_MODE_TAG) {
                     return false;
                 }
-            }
-        }
         true
     }
 

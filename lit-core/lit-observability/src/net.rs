@@ -99,6 +99,12 @@ pub mod grpc {
         skip_metrics_with_origin: Option<String>,
     }
 
+    impl Default for MetricsMiddleware {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl MetricsMiddleware {
         pub fn new() -> Self {
             MetricsMiddleware { skip_metrics_with_origin: None }
@@ -146,7 +152,7 @@ pub mod grpc {
             let elapsed_time = start_time.elapsed();
 
             // Send metrics events
-            let meter = global::meter(format!("grpc"));
+            let meter = global::meter("grpc".to_string());
             meter
                 .u64_counter("request.latency")
                 .with_description("Latency of a GRPC request")

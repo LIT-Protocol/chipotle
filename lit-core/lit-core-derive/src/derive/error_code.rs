@@ -29,8 +29,8 @@ pub(crate) fn derive_error_code(input: &DeriveInput) -> TokenStream {
                 });
 
                 for attr in CodeAttr::parse_all(&variant.attrs).iter() {
-                    if let Some(magic) = attr.magic.as_ref() {
-                        if let Some(val) = attr.value.as_ref() {
+                    if let Some(magic) = attr.magic.as_ref()
+                        && let Some(val) = attr.value.as_ref() {
                             match magic {
                                 MagicAttrName::Kind => {
                                     kind_variants.push(quote! {
@@ -46,7 +46,6 @@ pub(crate) fn derive_error_code(input: &DeriveInput) -> TokenStream {
                                 }
                             }
                         }
-                    }
                 }
 
                 if !added_kind {

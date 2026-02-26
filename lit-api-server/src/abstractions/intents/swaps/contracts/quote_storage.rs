@@ -461,7 +461,7 @@ pub mod quote_storage {
         > {
             let factory = ::ethers::contract::ContractFactory::new(
                 QUOTESTORAGE_ABI.clone(),
-                QUOTESTORAGE_BYTECODE.clone().into(),
+                QUOTESTORAGE_BYTECODE.clone(),
                 client,
             );
             let deployer = factory.deploy(constructor_args)?;
