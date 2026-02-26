@@ -1,4 +1,4 @@
-# Deploy lit-api-server + lit-actions + lit-static to Phala CVM (smallest instance)
+# Deploy lit-api-server + lit-actions + lit-static to Phala CVM (tdx.large instance)
 #
 # Required secrets:
 #   DOCKERHUB_TOKEN - Docker Hub PAT (Account Settings > Security > Access Tokens)
@@ -93,14 +93,14 @@ jobs:
       - name: Install Phala CLI
         run: npm install -g phala
 
-      - name: Deploy to Phala Cloud (smallest CVM)
+      - name: Deploy to Phala Cloud (tdx.large CVM)
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
         run: |
           phala deploy \
             -c docker-compose.deploy.yml \
             --cvm-id ${{ vars.PHALA_APP_NAME }} \
-            --instance-type tdx.small
+            --instance-type tdx.large
 
   wait-for-api:
     needs: [deploy, determine-runner]

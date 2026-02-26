@@ -7,7 +7,7 @@ image_lit_actions    := image_base + '-lit-actions:'    + image_tag
 image_lit_api_server := image_base + '-lit-api-server:' + image_tag
 image_lit_static     := image_base + '-lit-static:'     + image_tag
 app_name := env('PHALA_APP_NAME', 'lit-api-server')
-instance_type := env('PHALA_INSTANCE_TYPE', 'tdx.small')
+instance_type := env('PHALA_INSTANCE_TYPE', 'tdx.large')
 
 # List available recipes (default when invoked with no args)
 default:
