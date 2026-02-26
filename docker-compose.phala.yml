@@ -1,7 +1,7 @@
 # Phala CVM deployment: lit-api-server + lit-actions + lit-static
 # lit-actions and lit-api-server share gRPC Unix socket at /tmp/lit_actions.sock.
 # lit-static serves SDKs, docs, dapps on port 8001.
-# Uses smallest instance type (tdx.small) via phala deploy --instance-type tdx.small
+# Uses tdx.large instance type via phala deploy --instance-type tdx.large
 
 services:
   lit-actions:
