@@ -14,6 +14,23 @@ function getLatestNonce({ address, chain }) {
 }
 
 /**
+ * 
+ * Ask the Lit Node to sign any data using the ECDSA Algorithm with it's private key .  The resulting signature  will be returned to the Lit JS SDK which will automatically combine the s and give you the full signature to use.
+ * @name Lit.Actions.signEcdsa
+ * @function signEcdsa
+ * @param {Object} params
+ * @param {Uint8Array} params.toSign The message to sign
+ * @param {string} params.publicKey The public key of the PKP
+ * @param {string} params.sigName The name of the signature
+ * @name Lit.Actions.signEcdsa
+ * @function signEcdsa
+ * @returns {Promise<Uint8Array>} The resulting signature 
+ */
+function signEcdsa({ toSign, publicKey, sigName}) {
+  return sign({ toSign, publicKey, sigName, signingScheme: "EcdsaK256Sha256" });
+}
+
+/**
  * @param {Uint8array} toSign the message to sign
  * @param {string} publicKey the public key of the PKP
  * @param {string} sigName the name of the signature
@@ -36,15 +53,14 @@ function getLatestNonce({ address, chain }) {
  * @param {string} params.keySetId The key set id to use
  * @name Lit.Actions.sign
  * @function sign
- * @returns {Uint8array} The resulting signature share
+ * @returns {Uint8array} The resulting signature 
  */
-function sign({ toSign, publicKey, sigName, signingScheme, keySetId }) {
+function sign({ toSign, publicKey, sigName, signingScheme }) {
   return ops.op_sign(
     new Uint8Array(toSign),
     publicKey,
     sigName,
     signingScheme,
-    keySetId
   );
 }
 
@@ -239,6 +255,7 @@ function encrypt({
 globalThis.LitActions = {
   getLatestNonce,
   sign,
+  signEcdsa,
   signAsAction,
   getActionPublicKey,
   verifyActionSignature,
