@@ -36,14 +36,28 @@ jobs:
         run: git checkout HEAD -- .
 
       # lit-actions needs libsqlite3-dev + libclang-dev (bindgen for libsqlite3-sys)
+      # lit-api-server depends on lit-actions-grpc which runs a protobuf build script
+      # Both steps retry with back-off because concurrent matrix jobs on the same
+      # self-hosted machine can contend for /var/lib/apt/lists/lock.
       - name: Install system dependencies (lit-actions)
         if: matrix.crate == 'lit-actions'
-        run: sudo apt-get update -qq && sudo apt-get install -y libsqlite3-dev libclang-dev
+        run: |
+          for i in 1 2 3 4 5; do
+            sudo apt-get update -qq && \
+            sudo apt-get install -y libsqlite3-dev libclang-dev && break
+            echo "apt lock held, waiting $((i * 15))s (attempt $i/5)..."
+            sleep $((i * 15))
+          done
 
-      # lit-api-server depends on lit-actions-grpc which runs a protobuf build script
       - name: Install system dependencies (lit-api-server)
         if: matrix.crate == 'lit-api-server'
-        run: sudo apt-get update -qq && sudo apt-get install -y protobuf-compiler
+        run: |
+          for i in 1 2 3 4 5; do
+            sudo apt-get update -qq && \
+            sudo apt-get install -y protobuf-compiler && break
+            echo "apt lock held, waiting $((i * 15))s (attempt $i/5)..."
+            sleep $((i * 15))
+          done
 
       # All crates now have rust-toolchain.toml pinned to 1.91; this action
       # installs the toolchain declared in the file for the working directory.
