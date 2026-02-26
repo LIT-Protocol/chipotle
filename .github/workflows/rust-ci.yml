@@ -8,6 +8,11 @@ on:
     branches: [main]
   pull_request:
 
+# Cancel any in-progress run on the same branch/PR when a new commit is pushed.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     name: ${{ matrix.crate }}
@@ -24,6 +29,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # Force a clean workspace — self-hosted runners persist state between runs
+      # and checkout@v4 alone is not always sufficient to clear stale files.
+      - name: Reset workspace to HEAD
+        run: git checkout HEAD -- .
 
       # sqlite3 dev headers are required to build libsqlite3-sys (used by lit-actions only)
       - name: Install system dependencies
