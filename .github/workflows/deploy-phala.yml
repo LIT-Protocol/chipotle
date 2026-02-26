@@ -118,25 +118,31 @@ jobs:
       base_url: ${{ needs.wait-for-api.outputs.base_url }}
 
   k6-integration:
-    needs: wait-for-api
+    needs: [wait-for-api, k6-smoke]
     uses: ./.github/workflows/k6-integration.yml
     with:
       base_url: ${{ needs.wait-for-api.outputs.base_url }}
 
+  k6-new-account:
+    needs: [wait-for-api, k6-integration]
+    uses: ./.github/workflows/k6-new-account.yml
+    with:
+      base_url: ${{ needs.wait-for-api.outputs.base_url }}
+
   k6-lit-action-get-public-key:
-    needs: wait-for-api
+    needs: [wait-for-api, k6-integration]
     uses: ./.github/workflows/k6-lit-action-get-public-key.yml
     with:
       base_url: ${{ needs.wait-for-api.outputs.base_url }}
 
   k6-lit-action-sign-as-action:
-    needs: wait-for-api
+    needs: [wait-for-api, k6-integration]
     uses: ./.github/workflows/k6-lit-action-sign-as-action.yml
     with:
       base_url: ${{ needs.wait-for-api.outputs.base_url }}
 
   k6-lit-action-verify-action-signature:
-    needs: wait-for-api
+    needs: [wait-for-api, k6-integration]
     uses: ./.github/workflows/k6-lit-action-verify-action-signature.yml
     with:
       base_url: ${{ needs.wait-for-api.outputs.base_url }}
