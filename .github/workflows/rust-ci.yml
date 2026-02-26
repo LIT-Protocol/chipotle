@@ -36,10 +36,6 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ${{ matrix.crate }}
-
       - name: fmt
         working-directory: ${{ matrix.crate }}
         run: cargo fmt --all -- --check
