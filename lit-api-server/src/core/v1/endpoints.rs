@@ -48,8 +48,8 @@ impl<'r> FromRequest<'r> for ApiKey {
         let auth = request.headers().get_one("Authorization");
         if let Some(v) = auth {
             let v = v.trim();
-            if v.starts_with("Bearer ") {
-                let key = v[7..].trim();
+            if let Some(key) = v.strip_prefix("Bearer ") {
+                let key = key.trim();
                 if !key.is_empty() {
                     return Outcome::Success(ApiKey(key.to_string()));
                 }
@@ -178,6 +178,7 @@ async fn create_wallet(api_key: ApiKey) -> OpenApiResponse<CreateWalletResponse,
     }
 }
 
+#[allow(dead_code)]
 #[openapi(tag = "Signing")]
 #[post("/sign_with_pkp", format = "json", data = "<sign_request>")]
 async fn sign_with_pkp(

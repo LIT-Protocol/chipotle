@@ -3,6 +3,7 @@ pub use account_config::*;
 /// More information at: <https://github.com/gakonst/ethers-rs>
 #[allow(
     clippy::enum_variant_names,
+    clippy::module_inception,
     clippy::too_many_arguments,
     clippy::upper_case_acronyms,
     clippy::type_complexity,

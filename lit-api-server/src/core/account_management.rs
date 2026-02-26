@@ -315,6 +315,7 @@ fn metadata_to_item(m: &accounts::Metadata) -> ListMetadataItem {
     }
 }
 
+#[allow(dead_code)]
 fn usage_api_key_to_api_key_item(
     m: &accounts::contracts::account_config::UsageApiKey,
 ) -> ApiKeyItem {
