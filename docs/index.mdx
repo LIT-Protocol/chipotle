@@ -1,6 +1,6 @@
 ---
 title: "Quick Start"
-description: "Get started with the Lit Chipotle using the Lit Chipotle Dashboard or the REST API (Core SDK and cURL), the fastest and easiest method to get started with Lit Actions."
+description: "Get started with Lit Chipotle using the Lit Chipotle Dashboard or the REST API (Core SDK and cURL), the fastest and easiest method to get started with Lit Actions."
 ---
 
 This guide introduces the [**Lit Chipotle API**](https://api.dev.litprotocol.com/) and its web interface, the [**Lit Chipotle Dashboard**](https://dashboard.dev.litprotocol.com) which allows both web3 and non-web3 developers to quickly set up their Lit environment and start using Lit Actions.
@@ -9,9 +9,9 @@ This guide introduces the [**Lit Chipotle API**](https://api.dev.litprotocol.com
 
 1. [Create an account via the Dashboard](#1-request-a-new-account-or-log-in), note down your API key
 2. Run a HelloWorld LitAction
-   1. [Run it from the Dashboard](#6-run-lit-actions)
-   2. [Call the API via cURL/JavaScript](#6-run-lit-action)
-   3. or build your own SDK from the [OpenAPI spec](https://api.dev.litprotocol.com/openapi.json)
+   1. [From the Dashboard](#6-run-lit-actions)
+   2. [Programmatically via cURL/JavaScript](#6-run-lit-action)
+   3. or build your own SDK from the [OpenAPI spec](#open-api-specification)
 
 ## Overview
 
@@ -86,7 +86,13 @@ Usage API keys (and the account key) are validated against the account's groups 
 
 ### 6. Run lit-actions
 
-In the **Action Runner** section, paste some Lit Action JavaScript code and optional JSON parameters. Choose the API key (account or usage key) to use for the request, then click **Execute**. The node runs the action and returns signatures, response, and logs. The key you use must be allowed to run that action (via the group and IPFS CID configuration).
+In the **Action Runner** section, paste some Lit Action JavaScript code and optional JSON parameters. For example
+```
+    const message = "Hello from Lit Action";
+    const sig = await LitActions.signEcdsa({ toSign: new TextEncoder().encode(message), publicKey, sigName });
+    LitActions.setResponse({ response: JSON.stringify({ message, sig }) });
+```
+ Choose the API key (account or usage key) to use for the request, then click **Execute**. The node runs the action and returns signatures, response, and logs. The key you use must be allowed to run that action (via the group and IPFS CID configuration).
 
 ## Daily Usage
 
@@ -324,6 +330,9 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
 Both request/response shapes and OpenAPI spec are available directly in the dev system. For a Swagger UI implementation of the OpenAPI spec, please browse to:\
 \
 https://api.dev.litprotocol.com/swagger-ui/
+
+
+### Open API Specification
 
 The OpenAPI spec itself can be found at:\
 \
