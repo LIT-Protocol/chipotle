@@ -77,7 +77,7 @@ async fn main() -> Result<(), rocket::Error> {
 
     let (core_routes, openapi_spec) = core::v1::endpoints::routes_with_spec();
 
-    let r = rocket::build()
+    let mut r = rocket::build()
         .attach(cors)
         .mount("/", routes![openapi_json, openapi_json_redirect, swagger_ui_redirect])
         .mount("/core/v1/", core_routes)
