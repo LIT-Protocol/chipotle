@@ -172,6 +172,7 @@ pub enum MagicAttrName {
 }
 
 #[derive(Clone)]
+#[allow(clippy::large_enum_variant)]
 pub enum AttrValue {
     LitStr(LitStr),
     Expr(Expr),
