@@ -1,4 +1,4 @@
-# Run smoke.spec.ts in smoke mode (2 VUs, 2 iterations).
+# Run smoke.spec.ts.
 # Called from Deploy to Phala CVM after wait-for-api, or manually via workflow_dispatch.
 #
 # Required vars: BASE_URL (for workflow_dispatch when base_url not passed)
@@ -31,4 +31,4 @@ jobs:
       - name: smoke.spec.ts
         env:
           BASE_URL: ${{ inputs.base_url || vars.BASE_URL }}
-        run: k6 run --vus 2 --iterations 2 k6/smoke.spec.ts
+        run: k6 run k6/smoke.spec.ts
