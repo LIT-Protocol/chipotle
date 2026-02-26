@@ -545,6 +545,7 @@ fn generate_self_signed_cert(cfg: &LitConfig, common_name: String) -> Result<()>
         let mut file = OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(true)
             .open(&certs_file)
             .map_err(|e| error::certs_err(e, None))?;
 

@@ -137,6 +137,7 @@ impl Engine {
     }
 }
 
+#[allow(clippy::result_large_err)]
 fn spawn_launcher(
     restart_tx: SyncSender<()>, create_launcher: CreateLauncher,
     launcher_join_handles: Arc<Mutex<Vec<JoinHandle<()>>>>,

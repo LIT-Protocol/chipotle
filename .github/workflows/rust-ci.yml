@@ -35,10 +35,15 @@ jobs:
       - name: Reset workspace to HEAD
         run: git checkout HEAD -- .
 
-      # sqlite3 dev headers are required to build libsqlite3-sys (used by lit-actions only)
-      - name: Install system dependencies
+      # lit-actions needs libsqlite3-dev + libclang-dev (bindgen for libsqlite3-sys)
+      - name: Install system dependencies (lit-actions)
         if: matrix.crate == 'lit-actions'
-        run: sudo apt-get update -qq && sudo apt-get install -y libsqlite3-dev
+        run: sudo apt-get update -qq && sudo apt-get install -y libsqlite3-dev libclang-dev
+
+      # lit-api-server depends on lit-actions-grpc which runs a protobuf build script
+      - name: Install system dependencies (lit-api-server)
+        if: matrix.crate == 'lit-api-server'
+        run: sudo apt-get update -qq && sudo apt-get install -y protobuf-compiler
 
       # All crates now have rust-toolchain.toml pinned to 1.91; this action
       # installs the toolchain declared in the file for the working directory.
