@@ -1,4 +1,4 @@
-# Run lit-action-sign-as-action.spec.ts in smoke mode (2 VUs, 2 iterations).
+# Run lit-action-sign-as-action.spec.ts.
 # Called from Deploy to Phala CVM after wait-for-api, or manually via workflow_dispatch.
 #
 # Required vars: BASE_URL (for workflow_dispatch when base_url not passed)
@@ -20,23 +20,8 @@ on:
         type: string
 
 jobs:
-  determine-runner:
-    runs-on: ubuntu-latest
-    outputs:
-      runner: ${{ steps.set-runner.outputs.use-runner }}
-    steps:
-      - name: Determine runner (self-hosted or fallback)
-        id: set-runner
-        uses: mikehardy/runner-fallback-action@v1
-        with:
-          primary-runner: "self-hosted"
-          fallback-runner: "ubuntu-slim"
-          github-token: ${{ secrets.GH_RUNNER_CHECK_TOKEN }}
-          fallback-on-error: true
-
   k6-lit-action-sign-as-action:
-    needs: determine-runner
-    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
@@ -46,4 +31,4 @@ jobs:
       - name: lit-action-sign-as-action.spec.ts
         env:
           BASE_URL: ${{ inputs.base_url || vars.BASE_URL }}
-        run: k6 run --vus 2 --iterations 2 k6/lit-action-sign-as-action.spec.ts
+        run: k6 run k6/lit-action-sign-as-action.spec.ts
