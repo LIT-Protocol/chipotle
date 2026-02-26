@@ -1,0 +1,46 @@
+# Runs cargo fmt --check, cargo clippy, and cargo build --all-features
+# on every push to every branch and on every pull request.
+
+name: Rust CI
+
+on: [push, pull_request]
+
+jobs:
+  check:
+    name: ${{ matrix.crate }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crate:
+          - lit-actions
+          - lit-core
+          - lit-api-server
+          - lit-api-server/blockchain/rust_generator_and_deployer
+          - lit-static
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install stable Rust + components for crates without rust-toolchain.toml.
+      # For lit-actions and lit-core, cargo will auto-install the pinned toolchain
+      # from their rust-toolchain.toml (including rustfmt and clippy).
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ matrix.crate }}
+
+      - name: fmt
+        working-directory: ${{ matrix.crate }}
+        run: cargo fmt --all -- --check
+
+      - name: clippy
+        working-directory: ${{ matrix.crate }}
+        run: cargo clippy --all-features -- -D warnings
+
+      - name: build
+        working-directory: ${{ matrix.crate }}
+        run: cargo build --all-features
