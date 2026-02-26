@@ -79,10 +79,6 @@ impl TestClient {
     fn handle_op(&mut self, op: UnionResponse) -> ExecuteJsRequest {
         match op {
             UnionResponse::SetResponse(_) => SetResponseResponse {}.into(),
-            UnionResponse::PubkeyToTokenId(_) => PubkeyToTokenIdResponse {
-                token_id: "ignored".to_string(),
-            }
-            .into(),
             _ => unimplemented!("op not implemented"),
         }
     }

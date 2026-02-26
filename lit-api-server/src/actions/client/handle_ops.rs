@@ -50,40 +50,20 @@ impl Client {
                 }
                 .into()
             }
-            UnionResponse::SignEcdsa(SignEcdsaRequest {
-                to_sign,
-                public_key, // currently this is actually the wallet address.
-                sig_name,
-                eth_personal_sign: _,
-                key_set_id: _,
-            }) => {
-
-                let signing_scheme = "EcdsaK256Sha256";
-
-                let (sig_name, signed_data) = match  op_code_helpers::sign_with_pkp(&self.api_key, &public_key, &to_sign, &sig_name, signing_scheme).await {
-                    Ok((sig_name, signed_data)) => (sig_name, signed_data),
-                    Err(e) => bail!("Error signing: {:?}", e),
-                };
-
-                let hex_signature = signed_data.signature.clone();
-
-                self.state.sign_count += 1;
-                self.state.signed_data.insert(
-                    sig_name,
-                    signed_data,
-                );
-
-                SignEcdsaResponse {
-                    success: hex_signature,
-                }
-                .into()
+            UnionResponse::AesEncrypt(AesEncryptRequest { .. }) => {
+                bail!("AesEncrypt is not implemented");
+            }
+            UnionResponse::AesDecrypt(AesDecryptRequest { .. }) => {
+                bail!("AesDecrypt is not implemented");
+            }
+            UnionResponse::GetLatestNonce(GetLatestNonceRequest { .. }) => {
+                bail!("GetLatestNonce is not implemented");
             }
             UnionResponse::Sign(SignRequest {
                 to_sign,
                 public_key,
                 sig_name,
                 signing_scheme,
-                key_set_id: _,
             }) => {
                 let (sig_name, signed_data) = match  op_code_helpers::sign_with_pkp(&self.api_key, &public_key, &to_sign, &sig_name, &signing_scheme).await {
                     Ok((sig_name, signed_data)) => (sig_name, signed_data),
@@ -151,15 +131,22 @@ impl Client {
                 // .into()
                 bail!("CallChild is not implemented");
             }
-
+            UnionResponse::CallContract(CallContractRequest { .. }) => {
+                bail!("CallContract is not implemented");
+            }
+            UnionResponse::GetRpcUrl(GetRpcUrlRequest { .. }) => {
+                bail!("GetRpcUrl is not implemented");
+            }
             UnionResponse::EncryptBls(EncryptBlsRequest {
                 access_control_conditions: _,
                 to_encrypt: _,
-                key_set_id: _,
             }) => {
                 // use lit_rust_crypto::blsful::Bls12381G1;
 
                 bail!("EncryptBls is not implemented");
+            }
+            UnionResponse::DecryptBls(DecryptBlsRequest { .. }) => {
+                bail!("DecryptBls is not implemented");
             }
             UnionResponse::UpdateResourceUsage(UpdateResourceUsageRequest {
                 tick: _,
@@ -195,7 +182,6 @@ impl Client {
                 bail!("VerifyActionSignature is not implemented");
             }
             UnionResponse::Result(_) => unreachable!(), // handled in main loop
-            _ => bail!("Unhandled operation: {:?}", op),
         })
     }
 }
