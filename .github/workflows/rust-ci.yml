@@ -45,8 +45,8 @@ jobs:
           for i in 1 2 3 4 5; do
             sudo apt-get update -qq && \
             sudo apt-get install -y libsqlite3-dev libclang-dev && break
-            echo "apt lock held, waiting $((i * 15))s (attempt $i/5)..."
-            sleep $((i * 15))
+            echo "apt lock held, waiting 10s (attempt $i/5)..."
+            sleep 10
           done
 
       - name: Install system dependencies (lit-api-server)
@@ -55,8 +55,8 @@ jobs:
           for i in 1 2 3 4 5; do
             sudo apt-get update -qq && \
             sudo apt-get install -y protobuf-compiler && break
-            echo "apt lock held, waiting $((i * 15))s (attempt $i/5)..."
-            sleep $((i * 15))
+            echo "apt lock held, waiting 10s (attempt $i/5)..."
+            sleep 10
           done
 
       # All crates now have rust-toolchain.toml pinned to 1.91; this action
