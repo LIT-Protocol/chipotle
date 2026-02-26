@@ -1,13 +1,13 @@
 ---
-title: "Quick Start"
-description: "Get started with the Lit Chipotle using the Lit Chipotle Dashboard or the REST API (Core SDK and cURL), the fastest and easiest method to get started with Lit Actions."
+title: 'Quick Start'
+description: 'Get started with the Lit Chipotle using the Lit Chipotle Dashboard or the REST API (Core SDK and cURL), the fastest and easiest method to get started with Lit Actions.'
 ---
 
-This guide introduces the **Lit Chipotle API** and its web interface, the **Lit Chipotle** **Dashboard** which allows both web3 and non-web3 developers to quickly set up their Lit environment and start using Lit Actions.
+This guide introduces the **[Lit Chipotle API](https://api.dev.litprotocol.com/)** and its web interface, the [**Lit Chipotle Dashboard**](https://dashboard.dev.litprotocol.com) which allows both web3 and non-web3 developers to quickly set up their Lit environment and start using Lit Actions.
 
 ## Overview
 
-The **Lit Chipotle Dashboard** is the front end to the **Lit Chipotle API** server, designed to quickly and efficiently execute Lit Actions and to manage your user accounts, usage parameters, client wallet creation (PKPs), and IPFS based actions, through a simple set of groups. \
+The [**Lit Chipotle Dashboard**](https://dashboard.dev.litprotocol.com) is the front end to the [**Lit Chipotle API**](https://api.dev.litprotocol.com) server, designed to quickly and efficiently execute Lit Actions and to manage your user accounts, usage parameters, client wallet creation (PKPs), and IPFS based actions, through a simple set of groups. \
 \
 Specifically it lets you:
 
@@ -18,11 +18,11 @@ Specifically it lets you:
 - Organize all your resources into **groups** that combine PKPs, IPFS actions, and usage API keys in any combination.
 - Send **lit-actions** to the node for execution, authorized by a usage or account API key.
 
-All of this can be done via the **Dashboard** (web GUI) or directly via the **REST API**, using a light-weight JS SDK, or even directly through CURL-ing commands.    Data is secure and on-chain—all configuration within the Dashboard can be achieved by talking directly to our contracts located on **BASE**.
+All of this can be done via the [**Dashboard**](https://dashboard.dev.litprotocol.com) (web GUI) or directly via the [**REST API**](https://api.dev.litprotocol.com), using a light-weight JS SDK, or even directly through CURL-ing commands. Data is secure and on-chain—all configuration within the Dashboard can be achieved by talking directly to our contracts located on **BASE**.
 
 ## Using the Dashboard
 
-The Dashboard is a web management GUI for Lit's Chipotle offering. Open it from your browser at
+The [Dashboard](https://dashboard.dev.litprotocol.com) is a web management GUI for Lit's Chipotle offering. Open it from your browser at
 
 `https://dashboard.dev.litprotocol.com`
 
@@ -46,6 +46,7 @@ It supports light/dark theme for your convenience and provides simple management
 
     After login, the dashboard shows Overview, Usage API Keys, Groups, IPFS Actions, Wallets, and Action Runner.\
     You'll notice a single wallet in your account - it represents your master account API key, and can be used like a standard EVM wallet, or you can safely skip its web3 properties and use the APIs directly.
+
   </Step>
   <Step title="Request usage API keys">
     Usage API keys are scoped keys you can give to clients or dApps to run specific lit-actions or to deploy. They can be rotated or removed without changing the main account.
@@ -53,11 +54,13 @@ It supports light/dark theme for your convenience and provides simple management
     In the **Usage API Keys** section, click **Add**. Set _expiration_ and _initial balance_, then click _Confirm_. The server returns a new usage key **once** — copy and store it. You can optionally set a name and description after creation. \
     \
     Use this key in the `X-Api-Key` (or `Authorization: Bearer`) header when calling the node so that usage is attributed to this key.
+
   </Step>
   <Step title="Request new PKPs (wallets)">
     PKPs (Programmable Key Pairs) are wallets the lit-nodes can use for signing. In the **Wallets** section, click **Add** to create a new wallet to assign to one of your users, or for use in running a lit-action. The server generates a new PKP and returns its address and public key.
 
     You can add existing PKPs to groups (see step 5) via **Add PKP to group** in the Groups section.
+
   </Step>
   <Step title="Register IPFS CIDs (actions)">
     To scope which usage API keys can run which code, you register **IPFS CIDs** as permitted actions. In the **IPFS Actions** section, pick a group from the dropdown, then **Add** an action: enter the IPFS CID of the lit-action and optional name/description. The server hashes the CID and stores it in the group. Only keys that are allowed to use that group can run that action.
@@ -71,6 +74,7 @@ It supports light/dark theme for your convenience and provides simple management
     - Use **Add PKP to group** / **Remove PKP from group** to allow which wallets can be used in that group.
 
     Usage API keys (and the account key) are validated against the account's groups and permitted actions/wallets when you run a lit-action.
+
   </Step>
   <Step title="Run lit-actions">
     In the **Action Runner** section, paste some Lit Action JavaScript code and optional JSON parameters. Choose the API key (account or usage key) to use for the request, then click **Execute**. The node runs the action and returns signatures, response, and logs. The key you use must be allowed to run that action (via the group and IPFS CID configuration).
@@ -302,12 +306,12 @@ Execute a lit-action by sending JavaScript code and optional params. Use the acc
 - **remove_action_from_group** / **remove_pkp_from_group** — Remove action or PKP from a group.
 - **get_node_chain_config** — Get node chain config - a quick way to find the location of contracts within the system.
 
-Both request/response shapes and OpenAPI spec are available directly in the dev system.  For a Swagger UI implementation of the OpenAPI spec, please browse to:\
+Both request/response shapes and OpenAPI spec are available directly in the dev system. For a Swagger UI implementation of the OpenAPI spec, please browse to:\
 \
-https://api.dev.litprotocol.com/swagger-ui/
+[https://api.dev.litprotocol.com/swagger-ui/](https://api.dev.litprotocol.com/swagger-ui/)
 
 The OpenAPI spec itself can be found at:\
 \
 [https://api.dev.litprotocol.com/core/v1/openapi.json](https://api.dev.litprotocol.com/openapi.json)
 
-Note that these specs are subject to mild changes and will always be available with the dev server endpoints.
+Note that these specs are subject to minor changes and will always be available with the dev server endpoints.
