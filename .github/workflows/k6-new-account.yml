@@ -1,0 +1,49 @@
+# Run new-account.spec.ts in smoke mode (2 VUs, 2 iterations).
+# Called from Deploy to Phala CVM after k6-integration, or manually via workflow_dispatch.
+#
+# Required vars: BASE_URL (for workflow_dispatch when base_url not passed)
+
+name: k6 New Account
+
+on:
+  workflow_call:
+    inputs:
+      base_url:
+        description: "API base URL (e.g. https://example.com/core/v1)"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "API base URL (optional; uses vars.BASE_URL when empty)"
+        required: false
+        type: string
+
+jobs:
+  determine-runner:
+    runs-on: ubuntu-latest
+    outputs:
+      runner: ${{ steps.set-runner.outputs.use-runner }}
+    steps:
+      - name: Determine runner (self-hosted or fallback)
+        id: set-runner
+        uses: mikehardy/runner-fallback-action@v1
+        with:
+          primary-runner: "self-hosted"
+          fallback-runner: "ubuntu-slim"
+          github-token: ${{ secrets.GH_RUNNER_CHECK_TOKEN }}
+          fallback-on-error: true
+
+  k6-new-account:
+    needs: determine-runner
+    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: new-account.spec.ts
+        env:
+          BASE_URL: ${{ inputs.base_url || vars.BASE_URL }}
+        run: k6 run --vus 2 --iterations 2 k6/new-account.spec.ts
