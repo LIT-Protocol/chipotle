@@ -64,11 +64,11 @@ pub fn simple_file_logging_subscriber(
         .with_event_scope(false)
         .with_prefix_string(prefix_string);
 
-    return Ok(tracing_subscriber::registry()
+    Ok(tracing_subscriber::registry()
         .with(level_filter)
         .with(PrivacyModeLayer)
         .with(fmt::layer().event_format(custom_formatter.clone()))
-        .with(fmt::layer().event_format(custom_formatter).with_writer(file_appender)));
+        .with(fmt::layer().event_format(custom_formatter).with_writer(file_appender)))
 }
 
 pub(crate) fn init_logger_provider(

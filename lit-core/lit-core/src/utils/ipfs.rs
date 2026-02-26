@@ -139,11 +139,11 @@ where
             if let Some(file) = file {
                 file.unlock().map_err(|e| lock_err(e, None))?;
             }
-            if let Some(path) = path {
-                if path.exists().await {
-                    // Ignore remove error.
-                    let _ = fs::remove_file(&path).await;
-                }
+            if let Some(path) = path
+                && path.exists().await
+            {
+                // Ignore remove error.
+                let _ = fs::remove_file(&path).await;
             }
 
             Err(e)

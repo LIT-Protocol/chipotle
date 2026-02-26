@@ -3,10 +3,9 @@
 use rocket::fs::FileServer;
 
 #[rocket::main]
+#[allow(clippy::result_large_err)]
 async fn main() -> Result<(), rocket::Error> {
-    let static_dir = std::env::current_dir()
-        .unwrap()
-        .join("static");
+    let static_dir = std::env::current_dir().unwrap().join("static");
 
     rocket::build()
         .mount("/", FileServer::from(static_dir))

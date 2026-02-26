@@ -36,6 +36,7 @@ impl Client {
         &self.state.logs
     }
 
+    #[allow(dead_code)]
     fn ipfs_cache(&self) -> Result<Cache<String, String>> {
         // if let Some(ipfs_cache) = self.js_env.ipfs_cache.clone() {
         //     return Ok(ipfs_cache);
@@ -44,6 +45,7 @@ impl Client {
         bail!("No IPFS cache found");
     }
 
+    #[allow(dead_code)]
     fn http_cache(&self) -> Result<reqwest::Client> {
         if let Some(http_cache) = self.js_env.http_client.clone() {
             return Ok(http_cache);

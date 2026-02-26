@@ -285,11 +285,11 @@ where
             if let Some(scope) = ctx.event_scope() {
                 for span in scope.from_root() {
                     let ext = span.extensions();
-                    if let Some(ctx) = ext.get::<RequestContext>() {
-                        if ctx.has_context() {
-                            request_ctx = Some(ctx.clone());
-                            break;
-                        }
+                    if let Some(ctx) = ext.get::<RequestContext>()
+                        && ctx.has_context()
+                    {
+                        request_ctx = Some(ctx.clone());
+                        break;
                     }
                 }
             }
@@ -359,29 +359,29 @@ where
         // let dimmed = writer.dimmed();
         let dimmed = Style::new().dimmed();
 
-        if self.display_event_scope {
-            if let Some(scope) = ctx.event_scope() {
-                // let bold = writer.bold();
-                let bold = Style::new().bold();
+        if self.display_event_scope
+            && let Some(scope) = ctx.event_scope()
+        {
+            // let bold = writer.bold();
+            let bold = Style::new().bold();
 
-                let mut seen = false;
+            let mut seen = false;
 
-                for span in scope.from_root() {
-                    write!(writer, "{}", bold.paint(span.metadata().name()))?;
-                    seen = true;
+            for span in scope.from_root() {
+                write!(writer, "{}", bold.paint(span.metadata().name()))?;
+                seen = true;
 
-                    let ext = span.extensions();
-                    if let Some(fields) = &ext.get::<FormattedFields<N>>() {
-                        if !fields.is_empty() {
-                            write!(writer, "{}{}{}", bold.paint("{"), fields, bold.paint("}"))?;
-                        }
-                    }
-                    write!(writer, "{}", dimmed.paint(":"))?;
+                let ext = span.extensions();
+                if let Some(fields) = &ext.get::<FormattedFields<N>>()
+                    && !fields.is_empty()
+                {
+                    write!(writer, "{}{}{}", bold.paint("{"), fields, bold.paint("}"))?;
                 }
+                write!(writer, "{}", dimmed.paint(":"))?;
+            }
 
-                if seen {
-                    writer.write_char(' ')?;
-                }
+            if seen {
+                writer.write_char(' ')?;
             }
         };
 
@@ -391,16 +391,16 @@ where
 
         let line_number = if self.display_line_number { meta.line() } else { None };
 
-        if self.display_filename {
-            if let Some(filename) = meta.file() {
-                write!(
-                    writer,
-                    "{}{}{}",
-                    dimmed.paint(filename),
-                    dimmed.paint(":"),
-                    if line_number.is_some() { "" } else { " " }
-                )?;
-            }
+        if self.display_filename
+            && let Some(filename) = meta.file()
+        {
+            write!(
+                writer,
+                "{}{}{}",
+                dimmed.paint(filename),
+                dimmed.paint(":"),
+                if line_number.is_some() { "" } else { " " }
+            )?;
         }
 
         if let Some(line_number) = line_number {

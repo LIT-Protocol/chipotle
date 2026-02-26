@@ -9,7 +9,7 @@ pub const PKG_NAME: &str = "lit_node";
 // constructors
 
 #[derive(Debug, Display, Description, ErrorCode)]
-#[allow(dead_code)]
+#[allow(dead_code, clippy::enum_variant_names)]
 pub(crate) enum EC {
     /// A general system fault has occurred in the node
     #[code(kind = Unexpected, http_status = 500)]

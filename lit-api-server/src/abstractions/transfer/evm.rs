@@ -49,9 +49,9 @@ async fn get_balance(address: H160, chain: Chain) -> Result<GetBalanceResponse, 
     let balance = format_ether(balance).parse::<f64>()?;
 
     Ok(GetBalanceResponse {
-        address: bytes_to_hex(&address.as_bytes()),
-        balance: balance,
-        chain: chain.clone(),
+        address: bytes_to_hex(address.as_bytes()),
+        balance,
+        chain,
         symbol: chain.info().token.to_string(),
     })
 }

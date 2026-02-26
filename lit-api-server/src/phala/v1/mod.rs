@@ -1,2 +1,2 @@
-pub mod endpoints;
 mod dstack;
+pub mod endpoints;

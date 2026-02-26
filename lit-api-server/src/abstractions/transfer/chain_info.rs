@@ -1134,7 +1134,7 @@ impl Chain {
         let mut all = Vec::new();
         for chain in Chain::all_chains() {
             if chain.info().is_evm {
-                all.push(chain.clone());
+                all.push(*chain);
             }
         }
         all
@@ -1143,7 +1143,7 @@ impl Chain {
         let mut all = Vec::new();
         for chain in Chain::all_chains() {
             if !chain.info().is_evm {
-                all.push(chain.clone());
+                all.push(*chain);
             }
         }
         all
@@ -1152,7 +1152,7 @@ impl Chain {
         let mut all = Vec::new();
         for chain in Chain::all_chains() {
             if chain.info().testnet {
-                all.push(chain.clone());
+                all.push(*chain);
             }
         }
         all
@@ -1161,7 +1161,7 @@ impl Chain {
         let mut all = Vec::new();
         for chain in Chain::all_evm_chains() {
             if chain.info().testnet {
-                all.push(chain.clone());
+                all.push(chain);
             }
         }
         all
