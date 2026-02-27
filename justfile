@@ -1,7 +1,9 @@
 # Conventions: https://github.com/casey/just
 
 image_base := env('DOCKER_IMAGE', 'litptcl/lit-node-express')
-# Unique UUID tag per deploy (override with DOCKER_TAG to pin a specific build)
+# Tag used only to satisfy the registry push requirement; the deploy step uses
+# the @sha256: digest captured after push, never this tag. Override with
+# DOCKER_TAG to reuse a previously-pushed image (digest files must then exist).
 image_tag := env('DOCKER_TAG', `uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '\n'`)
 image_lit_actions    := image_base + '-lit-actions:'    + image_tag
 image_lit_api_server := image_base + '-lit-api-server:' + image_tag
@@ -38,7 +40,9 @@ setup:
     npm install -g phala
     phala --version
 
-# Build and push all three Docker images in parallel (release mode, linux/amd64 for Phala CVM)
+# Build and push all three Docker images (release mode, linux/amd64 for Phala CVM).
+# After each push the registry-assigned @sha256: digest is written to
+# .digest-{service}.txt — these are read by `deploy` for DR-1.1 compliance.
 [group: 'deploy']
 docker-build: _check_docker
     #!/usr/bin/env sh
@@ -51,24 +55,42 @@ docker-build: _check_docker
     docker push {{image_lit_api_server}} &
     docker push {{image_lit_static}}     &
     wait
+    # Capture the immutable registry digest for each image.
+    # docker inspect .RepoDigests is populated by `docker push` with the
+    # registry-assigned content hash; we strip the repo prefix to get sha256:...
+    docker inspect --format='{{{{json .RepoDigests}}}}' {{image_lit_actions}}    | tr -d '[]" ' | cut -d',' -f1 | sed 's/.*@//' > .digest-lit-actions.txt
+    docker inspect --format='{{{{json .RepoDigests}}}}' {{image_lit_api_server}} | tr -d '[]" ' | cut -d',' -f1 | sed 's/.*@//' > .digest-lit-api-server.txt
+    docker inspect --format='{{{{json .RepoDigests}}}}' {{image_lit_static}}     | tr -d '[]" ' | cut -d',' -f1 | sed 's/.*@//' > .digest-lit-static.txt
+    for f in .digest-lit-actions.txt .digest-lit-api-server.txt .digest-lit-static.txt; do
+        [ -s "$f" ] || { echo "error: digest capture failed for $f"; exit 1; }
+        printf "captured %s: %s\n" "$f" "$(cat $f)"
+    done
 
 [group: 'deploy']
 docker-push: docker-build
 
 
-# Deploy to Phala Cloud (requires: docker login, phala login)
-# Builds with unique UUID tag, pushes to registry, deploys that tagged image.
-# Override DOCKER_IMAGE (repo path) or DOCKER_TAG (to pin a specific build).
+# Deploy to Phala Cloud (requires: docker login, phala login).
+# Builds, pushes, captures @sha256: digests, then substitutes them into the
+# compose file (DR-1.1, DR-1.2). Override DOCKER_IMAGE (repo path) or
+# DOCKER_TAG (to skip the build and reuse a prior push; digest files must exist).
 # Use deploy to upgrade existing CVM; use deploy-new for first-time provisioning.
 [group: 'deploy']
 deploy: docker-push _check_phala
     #!/usr/bin/env sh
     set -eu
+    DIGEST_LIT_ACTIONS=$(cat .digest-lit-actions.txt)
+    DIGEST_LIT_API_SERVER=$(cat .digest-lit-api-server.txt)
+    DIGEST_LIT_STATIC=$(cat .digest-lit-static.txt)
+    [ -n "$DIGEST_LIT_ACTIONS" ]    || { echo "error: lit-actions digest missing; run: just docker-build"; exit 1; }
+    [ -n "$DIGEST_LIT_API_SERVER" ] || { echo "error: lit-api-server digest missing; run: just docker-build"; exit 1; }
+    [ -n "$DIGEST_LIT_STATIC" ]     || { echo "error: lit-static digest missing; run: just docker-build"; exit 1; }
     sed \
-        -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|{{image_lit_actions}}|g" \
-        -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|{{image_lit_api_server}}|g" \
-        -e "s|\${DOCKER_IMAGE_LIT_STATIC}|{{image_lit_static}}|g" \
+        -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|{{image_base}}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
+        -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|{{image_base}}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
+        -e "s|\${DOCKER_IMAGE_LIT_STATIC}|{{image_base}}-lit-static@${DIGEST_LIT_STATIC}|g" \
         docker-compose.phala.yml > docker-compose.deploy.yml
+    cat docker-compose.deploy.yml
     phala deploy -c docker-compose.deploy.yml --cvm-id {{app_name}} --instance-type {{instance_type}}
 
 # Run locally with Docker Compose (no Phala Cloud)
