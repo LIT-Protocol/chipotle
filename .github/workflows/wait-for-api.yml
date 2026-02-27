@@ -93,9 +93,9 @@ jobs:
         run: |
           BASE_URL="${{ steps.resolve-url.outputs.base_url }}"
           TIMEOUT="${{ inputs.timeout }}"
-          echo "Polling $BASE_URL/get_node_chain_config (timeout: ${TIMEOUT}s)..."
+          echo "Polling $BASE_URL/openapi.json (timeout: ${TIMEOUT}s)..."
           deadline=$(( $(date +%s) + TIMEOUT ))
-          until curl -sf "$BASE_URL/get_node_chain_config" > /dev/null; do
+          until curl -sf "$BASE_URL/openapi.json" > /dev/null; do
             if [ "$(date +%s)" -ge "$deadline" ]; then
               echo "Timed out after ${TIMEOUT}s waiting for API"
               exit 1
@@ -103,5 +103,4 @@ jobs:
             echo "Not ready, retrying in 10s..."
             sleep 10
           done
-          sleep 15
           echo "API is up"
