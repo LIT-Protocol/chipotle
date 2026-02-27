@@ -222,6 +222,47 @@ async fn op_aes_decrypt(
 
 #[instrument(skip_all, ret)]
 #[op2(async, reentrant)]
+#[serde]
+async fn op_aes_encrypt_to_action(
+    state: Rc<RefCell<OpState>>,
+    #[string] message: String,
+    #[string] ipfs_id: String,
+) -> Result<serde_json::Value, JsErrorBox> {
+    ensure_not_blank!(message, "message");
+    ensure_not_blank!(ipfs_id, "ipfsId");
+
+    remote_op_async!(op_aes_encrypt_to_action,
+        state,
+        AesEncryptToActionRequest {
+            message,
+            ipfs_id,
+        },
+        UnionRequest::AesEncryptToAction(resp) => {
+            Ok(json!({ "ciphertext": resp.ciphertext, "ipfs_id": resp.ipfs_id }))
+        }
+    )
+}
+
+#[instrument(skip_all, ret)]
+#[op2(async, reentrant)]
+#[serde]
+async fn op_aes_decrypt_to_action(
+    state: Rc<RefCell<OpState>>,
+    #[string] ciphertext: String,
+) -> Result<serde_json::Value, JsErrorBox> {
+    ensure_not_empty!(ciphertext);
+
+    remote_op_async!(op_aes_decrypt_to_action,
+        state,
+        AesDecryptToActionRequest { ciphertext },
+        UnionRequest::AesDecryptToAction(resp) => {
+            Ok(json!({ "plaintext": resp.plaintext, "ipfs_id": resp.ipfs_id }))
+        }
+    )
+}
+
+#[instrument(skip_all, ret)]
+#[op2(async, reentrant)]
 #[string]
 async fn op_get_latest_nonce(
     state: Rc<RefCell<OpState>>,
@@ -345,6 +386,8 @@ extension!(
     ops = [
         op_aes_decrypt,
         op_aes_encrypt,
+        op_aes_encrypt_to_action,
+        op_aes_decrypt_to_action,
         op_call_child,
         op_call_contract,
         op_get_latest_nonce,

@@ -17,7 +17,7 @@ use tokio::time::Duration;
 use tracing::instrument;
 
 impl Client {
-    // #[instrument(level = "debug", skip_all, ret)]
+    #[instrument(level = "debug", skip_all, ret)]
     pub async fn execute_js_async(
         &self,
         opts: impl Into<ExecutionOptions>,
@@ -35,15 +35,16 @@ impl Client {
             .await
     }
 
-    // #[instrument(level = "debug", skip_all, ret)]
+    #[instrument(level = "debug", skip_all, ret)]
     pub async fn execute_js(
         &mut self,
         opts: impl Into<ExecutionOptions>,
     ) -> Result<ExecutionState, Error> {
-        self.reset_state();
+        let opts = opts.into();
+        self.reset_state(opts.action_ipfs_id.clone());
         // self.dynamic_payment
         // .add(LitActionPriceComponent::BaseAmount, 1)?;
-        let opts = opts.into();
+        
         let timeout = self.client_timeout();
 
         // Hand-roll retry loop as crates like tokio-retry or again don't play well with &mut self
@@ -123,7 +124,7 @@ impl Client {
         }
     }
 
-    // #[instrument(level = "debug", skip(self), err)]
+    #[instrument(level = "debug", skip(self), err)]
     async fn execute_js_inner(
         &mut self,
         code: String,

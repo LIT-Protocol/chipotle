@@ -263,9 +263,38 @@ function Encrypt({
   return ops.op_aes_encrypt(publicKey, message);
 }
 
+/**
+ * Encrypt a message for a specific Lit Action (by IPFS CID). Only that action can decrypt.
+ * @name Lit.Actions.aesEncryptToAction
+ * @function aesEncryptToAction
+ * @param {Object} params
+ * @param {string} params.publicKey The public key of the PKP
+ * @param {string} params.message The message to encrypt
+ * @param {string} params.ipfsId The IPFS CID of the target Lit Action
+ * @returns {Promise<{ciphertext: string, ipfs_id: string}>} The ciphertext and target action ipfs_id
+ */
+function aesEncryptToAction({ publicKey, message, ipfsId }) {
+  return ops.op_aes_encrypt_to_action(publicKey, message, ipfsId);
+}
+
+/**
+ * Decrypt data that was encrypted for this action (AesEncryptToAction). Uses current action identity.
+ * @name Lit.Actions.aesDecryptToAction
+ * @function aesDecryptToAction
+ * @param {Object} params
+ * @param {string} params.publicKey The public key of the PKP
+ * @param {string} params.ciphertext The ciphertext to decrypt
+ * @returns {Promise<{plaintext: string, ipfs_id: string}>} The decrypted plaintext and action ipfs_id
+ */
+function aesDecryptToAction({ publicKey, ciphertext }) {
+  return ops.op_aes_decrypt_to_action(publicKey, ciphertext);
+}
+
 globalThis.LitActions = {
   Encrypt,
   Decrypt,
+  aesEncryptToAction,
+  aesDecryptToAction,
   getLatestNonce,
   sign,
   signEcdsa,

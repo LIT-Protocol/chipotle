@@ -19,15 +19,18 @@ pub fn wallet_address_hash(wallet_address: H160) -> U256 {
     U256::from_big_endian(&keccak256(wallet_address.as_bytes()))
 }
 
+/// keccak256 of wallet address bytes (hex string with or without 0x) as U256.
 pub fn derivation_path(wallet_address: H160) -> U256 {
     U256::from_big_endian(&keccak256(wallet_address.as_bytes()))
 }
 
+/// Convert a public key (hex string with or without 0x) to a wallet address.
 pub fn address_from_pubkey(pubkey: &str) -> Result<H160> {
     let pubkey_bytes = hex_to_bytes(pubkey)?;
     address_from_pubkey_bytes(&pubkey_bytes)
 }
 
+/// Convert a public key bytes to a wallet address.
 pub fn address_from_pubkey_bytes(pubkey_bytes: &[u8]) -> Result<H160> {
     let address = H160::from_slice(&keccak256(pubkey_bytes)[12..]);
     Ok(address)
@@ -60,6 +63,7 @@ pub async fn new_account(
     }
 }
 
+/// Check if an account exists and is mutable.
 pub async fn account_exists(api_key: &str) -> Result<bool> {
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
@@ -68,6 +72,17 @@ pub async fn account_exists(api_key: &str) -> Result<bool> {
         .call()
         .await?;
     Ok(exists)
+}
+
+/// Get the master account API key hash for a given API key.
+pub async fn get_naster_account_api_key_hash(api_key: &str) -> Result<U256> {
+    let contract = get_signable_account_config_contract().await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let master_account_api_key_hash = contract
+        .all_api_key_hashes(account_api_key_hash)
+        .call()
+        .await?;
+    Ok(master_account_api_key_hash)
 }
 
 /// Add a group to an account with name, description, permitted action CID hashes, wallet hashes, and permission flags.

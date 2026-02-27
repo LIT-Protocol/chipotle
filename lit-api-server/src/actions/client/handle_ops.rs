@@ -80,6 +80,38 @@ impl Client {
                 }
                 .into()
             }
+            UnionResponse::AesEncryptToAction(AesEncryptToActionRequest {
+                message,
+                ipfs_id,
+            }) => {
+                let encrypted = op_code_helpers::encryption::aes_encrypt_to_action_with_pkp(
+                    &self.api_key,
+                    &message,
+                    &ipfs_id,
+                )
+                .await?;
+                AesEncryptToActionResponse {
+                    ciphertext: encrypted,
+                    ipfs_id: ipfs_id.clone(),
+                }
+                .into()
+            }
+            UnionResponse::AesDecryptToAction(AesDecryptToActionRequest {
+                ciphertext,
+            }) => {
+                let ipfs_id = &self.state.ipfs_id;
+                let decrypted = op_code_helpers::encryption::aes_decrypt_to_action_with_pkp(
+                    &self.api_key,
+                    &ciphertext,
+                    ipfs_id,
+                )
+                .await?;
+                AesDecryptToActionResponse {
+                    plaintext: decrypted,
+                    ipfs_id: String::new(), // current action ipfs_id if available
+                }
+                .into()
+            }
             UnionResponse::GetLatestNonce(GetLatestNonceRequest { .. }) => {
                 bail!("GetLatestNonce is not implemented");
             }

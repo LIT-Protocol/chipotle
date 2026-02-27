@@ -21,7 +21,7 @@ pub struct DenoExecutionEnv {
 pub struct ExecutionOptions {
     pub code: String,
     pub globals: Option<serde_json::Value>,
-    pub action_ipfs_id: Option<String>,
+    pub action_ipfs_id: String,
 }
 
 impl From<&str> for ExecutionOptions {
@@ -61,4 +61,5 @@ pub struct ExecutionState {
     pub broadcast_and_collect_count: u32,
     #[serde(skip)]
     pub ops_count: u32,
+    pub ipfs_id: String,
 }

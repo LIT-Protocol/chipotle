@@ -16,6 +16,8 @@ message ExecuteJsRequest {
     AesEncryptResponse aes_encrypt = 10;
     AesDecryptResponse aes_decrypt = 11;
     GetLatestNonceResponse get_latest_nonce = 12;
+    AesEncryptToActionResponse aes_encrypt_to_action = 13;
+    AesDecryptToActionResponse aes_decrypt_to_action = 14;
     CallContractResponse call_contract = 15;
     CallChildResponse call_child = 16;
     GetRpcUrlResponse get_rpc_url = 21;    
@@ -59,6 +61,16 @@ message ExecuteJsRequest {
 
   message AesDecryptResponse {
     string plaintext = 1;  // hex-encoded
+  }
+
+  message AesEncryptToActionResponse {    
+    string ciphertext = 1; 
+    string ipfs_id = 2; 
+  }
+
+  message AesDecryptToActionResponse {
+    string plaintext = 1;  // hex-encoded
+    string ipfs_id = 2; 
   }
 
   message GetLatestNonceResponse {
@@ -110,8 +122,10 @@ message ExecuteJsResponse {
     PrintRequest print = 3;
     IncrementFetchCountRequest increment_fetch_count = 4;
     AesEncryptRequest aes_encrypt = 10;
-    AesDecryptRequest aes_decrypt = 11;
+    AesDecryptRequest aes_decrypt = 11;    
     GetLatestNonceRequest get_latest_nonce = 12;
+    AesEncryptToActionRequest aes_encrypt_to_action = 13;
+    AesDecryptToActionRequest aes_decrypt_to_action = 14;
     CallContractRequest call_contract = 15;
     CallChildRequest call_child = 16;
     GetRpcUrlRequest get_rpc_url = 21;
@@ -159,6 +173,15 @@ message ExecuteJsResponse {
   message GetLatestNonceRequest {
     string address = 1;  // hex-encoded Ethereum Address
     string chain = 2;
+  }
+
+  message AesEncryptToActionRequest {
+    string message = 1;    
+    string ipfs_id = 2;
+  }
+
+  message AesDecryptToActionRequest {
+    string ciphertext = 1;  // we don't include the ipfs_id, as it must use the current action id.
   }
 
   message CallContractRequest {

@@ -2,7 +2,9 @@ use std::collections::BTreeMap;
 
 use anyhow::{Result, bail};
 use indoc::{formatdoc, indoc};
-use lit_actions_server::proto::execute_js_request::AesEncryptResponse;
+use lit_actions_server::proto::execute_js_request::{
+    AesEncryptResponse, AesEncryptToActionResponse, AesDecryptToActionResponse,
+};
 use lit_actions_server::{TestServer, init_v8, proto::*, unix};
 use pretty_assertions::assert_eq;
 use rstest::*;
@@ -123,6 +125,14 @@ impl TestClient {
             UnionResponse::AesEncrypt(req) => {
                 self.messages.put(req);
                 self.messages.take::<AesEncryptResponse>().into()
+            }
+            UnionResponse::AesEncryptToAction(req) => {
+                self.messages.put(req);
+                self.messages.take::<AesEncryptToActionResponse>().into()
+            }
+            UnionResponse::AesDecryptToAction(req) => {
+                self.messages.put(req);
+                self.messages.take::<AesDecryptToActionResponse>().into()
             }
             UnionResponse::EncryptBls(req) => {
                 self.messages.put(req);
@@ -252,8 +262,8 @@ async fn lit_namespace_protection(mut client: TestClient) {
         run(() => delete globalThis.LitActions);
         run(() => delete globalThis.LitHeaders);
 
+        run(() => delete Lit.Actions.sign);
         run(() => delete Lit.Actions);
-        run(() => delete Lit.Actions.signEcdsa);
         run(() => delete Lit.Headers);
 
         run(() => Lit = {});
@@ -278,6 +288,7 @@ async fn lit_namespace_protection(mut client: TestClient) {
             "TypeError: Cannot delete property 'Lit' of #<Window>",
             "TypeError: Cannot delete property 'LitActions' of #<Window>",
             "TypeError: Cannot delete property 'LitHeaders' of #<Window>",
+            "TypeError: Cannot delete property 'sign' of #<Object>",
             "TypeError: Cannot delete property 'Actions' of #<Object>",
             "TypeError: Cannot delete property 'Headers' of #<Object>",
             "TypeError: Cannot assign to read only property 'Lit' of object '#<Window>'",
@@ -394,7 +405,7 @@ async fn aes_decrypt(mut client: TestClient) {
     client
         .respond_with(AesDecryptResponse { plaintext: "ignored".to_string() })
         .execute_js(
-            r#"(async () => { await LitActions.aesDecrypt({ publicKey: "ignored", ciphertext: "456"}) })()"#,
+            r#"(async () => { await LitActions.Decrypt({ publicKey: "ignored", ciphertext: "456"}) })()"#,
         )
         .await
         .unwrap();
@@ -618,7 +629,7 @@ async fn async_await(mut client: TestClient) {
         (async () => {
             const fulfilled = await Promise.all([
                 LitActions.sign({toSign: [1,2,3], publicKey: "some-key", sigName: "some-sig", signingScheme: "EcdsaK256Sha256"}),
-                LitActions.aesDecrypt({publicKey: "some-key", ciphertext: "456"}),
+                LitActions.Decrypt({publicKey: "some-key", ciphertext: "456"}),
                 LitActions.setResponse({response: await "OK"})
             ])
             console.log(fulfilled)

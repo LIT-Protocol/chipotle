@@ -70,8 +70,9 @@ impl Client {
         Ok(md)
     }
 
-    pub fn reset_state(&mut self) {
+    pub fn reset_state(&mut self, ipfs_id: String) {
         std::mem::take(&mut self.state);
+        self.state.ipfs_id = ipfs_id;
     }
 
     // async fn pay(&mut self, price_component: LitActionPriceComponent, price: u64) -> Result<()> {

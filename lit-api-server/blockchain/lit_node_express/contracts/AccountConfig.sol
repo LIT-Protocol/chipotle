@@ -77,9 +77,9 @@ contract AccountConfig {
 
     // storage data for the account config
     mapping(uint256 => Account) accounts; // mapping from a given api key to it's config
-    mapping(uint256 => uint256) allApiKeyHashes; // mapping from any api key has to it's master account api key hash
+    mapping(uint256 => uint256) public allApiKeyHashes; // mapping from any api key has to it's master account api key hash
     mapping(uint256 => uint256) allWalletAddressHashes; // mapping from a counter to a wallet address hash, allowing us to get a list of all wallet hashes ever generated
-    mapping(uint256 => uint256) pricing; // mapping from a pricing item id to it's price
+    mapping(uint256 => uint256) public pricing; // mapping from a pricing item id to it's price
     address public api_payer;  // account that pays for state mutation made by api calls, optionally mutates state on behalf of an api key holder.
     address public pricing_operator; // account that can mutate certain state for operational purposes ( like pricing ).
     uint256 public nextWalletCount; // counter for creating unique wallet address hashes
@@ -144,6 +144,7 @@ contract AccountConfig {
         // This is artificially done when using the API, and we use the API Key wallet address as the account creator.
         return account.creatorWalletAddress == msg.sender;
     }
+
 
     /// @notice Adds a usage API key to the account with the given expiration and balance.
     /// @param accountApiKeyHash Keccak256 hash of the account API key.
@@ -700,15 +701,6 @@ contract AccountConfig {
         Account storage account = accounts[masterAccountApiKeyHash];
         UsageApiKey storage usageApiKey = (account.accountApiKey.apiKeyHash == apiKeyHash) ? account.accountApiKey : account.usageApiKeys[apiKeyHash];
         usageApiKey.balance += amount;
-    }
-
-    /// @notice Returns the price for a pricing item (e.g. cost per Lit Action run).
-    /// @param pricingItemId ID of the pricing item.
-    /// @return The price (e.g. in wei or smallest unit).
-    function getPricing(
-        uint256 pricingItemId
-    ) public view returns (uint256) {
-        return pricing[pricingItemId];
     }
 
     /// @notice Sets the price for a pricing item. Callable only by api_payer or pricing_operator.

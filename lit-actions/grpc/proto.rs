@@ -120,6 +120,8 @@ macro_rules! decl_op {
 }
 
 decl_op!(AesDecrypt);
+decl_op!(AesEncryptToAction);
+decl_op!(AesDecryptToAction);
 decl_op!(CallChild);
 decl_op!(CallContract);
 decl_op!(GetLatestNonce);

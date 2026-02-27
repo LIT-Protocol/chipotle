@@ -9,7 +9,7 @@ use crate::core::v1::models::response::{
 use ipfs_hasher::IpfsHasher;
 use moka::future::Cache;
 use rocket::serde::json::Json;
-use tracing::instrument;
+// use tracing::instrument;
 
 fn not_configured() -> ApiStatus {
     ApiStatus::internal_server_error(
@@ -58,7 +58,7 @@ pub async fn lit_action(
     let execution_options = crate::actions::client::models::ExecutionOptions {
         code: code_to_run,
         globals: js_params.clone(),
-        action_ipfs_id: Some(derived_ipfs_id),
+        action_ipfs_id: derived_ipfs_id,
     };
 
     let result = match client.execute_js(execution_options).await {
