@@ -163,7 +163,6 @@ macro_rules! ensure_u256 {
     };
 }
 
-
 #[allow(unused_imports)]
 pub(crate) use {
     ensure_not_blank, ensure_not_empty, ensure_not_null, ensure_one_of, ensure_u256, remote_op,
