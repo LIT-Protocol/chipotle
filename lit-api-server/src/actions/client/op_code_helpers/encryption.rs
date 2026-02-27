@@ -18,7 +18,7 @@ pub async fn aes_encrypt_with_pkp(
     let mut symmetric_key = [0; 32];
     secret_u256.to_big_endian(&mut symmetric_key);
 
-    let encrypted = aes_encrypt(symmetric_key.to_vec(), plaintext.to_string()).await?;
+    let encrypted = aes_encrypt(&symmetric_key, plaintext.to_string()).await?;
     Ok(encrypted)
 }
 
