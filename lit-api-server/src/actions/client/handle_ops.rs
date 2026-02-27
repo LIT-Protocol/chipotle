@@ -80,10 +80,7 @@ impl Client {
                 }
                 .into()
             }
-            UnionResponse::AesEncryptToAction(AesEncryptToActionRequest {
-                message,
-                ipfs_id,
-            }) => {
+            UnionResponse::AesEncryptToAction(AesEncryptToActionRequest { message, ipfs_id }) => {
                 let encrypted = op_code_helpers::encryption::aes_encrypt_to_action_with_pkp(
                     &self.api_key,
                     &message,
@@ -96,9 +93,7 @@ impl Client {
                 }
                 .into()
             }
-            UnionResponse::AesDecryptToAction(AesDecryptToActionRequest {
-                ciphertext,
-            }) => {
+            UnionResponse::AesDecryptToAction(AesDecryptToActionRequest { ciphertext }) => {
                 let ipfs_id = &self.state.ipfs_id;
                 let decrypted = op_code_helpers::encryption::aes_decrypt_to_action_with_pkp(
                     &self.api_key,

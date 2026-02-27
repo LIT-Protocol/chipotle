@@ -44,7 +44,7 @@ impl Client {
         self.reset_state(opts.action_ipfs_id.clone());
         // self.dynamic_payment
         // .add(LitActionPriceComponent::BaseAmount, 1)?;
-        
+
         let timeout = self.client_timeout();
 
         // Hand-roll retry loop as crates like tokio-retry or again don't play well with &mut self

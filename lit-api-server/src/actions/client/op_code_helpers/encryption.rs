@@ -52,14 +52,14 @@ pub async fn aes_decrypt_to_action_with_pkp(
     ciphertext: &str,
     ipfs_id: &str,
 ) -> Result<String> {
-    
     let symmetric_key = get_master_symmetric_key_for_action(api_key, ipfs_id).await?;
     let decrypted = aes_decrypt(&symmetric_key, ciphertext).await?;
     Ok(decrypted)
 }
 
 pub async fn get_master_symmetric_key_for_action(api_key: &str, ipfs_id: &str) -> Result<Vec<u8>> {
-    let master_account_api_key_hash = crate::accounts::get_naster_account_api_key_hash(api_key).await?;
+    let master_account_api_key_hash =
+        crate::accounts::get_naster_account_api_key_hash(api_key).await?;
     if master_account_api_key_hash == ethers::types::U256::zero() {
         return Err(anyhow!("Master account not found"));
     }
@@ -67,7 +67,11 @@ pub async fn get_master_symmetric_key_for_action(api_key: &str, ipfs_id: &str) -
     let mut master_account_api_key_hash_bytes = [0; 32];
     master_account_api_key_hash.to_big_endian(&mut master_account_api_key_hash_bytes);
 
-    let extended_key_string = format!("lit-action-key-{}-{}", bytes_to_hex(master_account_api_key_hash_bytes), ipfs_id);
+    let extended_key_string = format!(
+        "lit-action-key-{}-{}",
+        bytes_to_hex(master_account_api_key_hash_bytes),
+        ipfs_id
+    );
     let symmetric_key = keccak256(extended_key_string.as_bytes()).to_vec();
     Ok(symmetric_key)
 }

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use anyhow::{Result, bail};
 use indoc::{formatdoc, indoc};
 use lit_actions_server::proto::execute_js_request::{
-    AesEncryptResponse, AesEncryptToActionResponse, AesDecryptToActionResponse,
+    AesDecryptToActionResponse, AesEncryptResponse, AesEncryptToActionResponse,
 };
 use lit_actions_server::{TestServer, init_v8, proto::*, unix};
 use pretty_assertions::assert_eq;
