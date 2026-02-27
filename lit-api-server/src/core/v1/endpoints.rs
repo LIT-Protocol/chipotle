@@ -3,6 +3,7 @@ use crate::core::account_management;
 use crate::core::api_status::ApiResult;
 use crate::core::api_status::ErrMessage;
 use crate::core::core_features;
+use crate::core::v1::models::request::EncryptToActionRequest;
 use crate::core::v1::models::request::{
     AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest, AddUsageApiKeyRequest,
     LitActionRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
@@ -10,6 +11,7 @@ use crate::core::v1::models::request::{
     UpdateUsageApiKeyMetadataRequest,
 };
 use crate::core::v1::models::response::ApiKeyItem;
+use crate::core::v1::models::response::EncryptToActionResponse;
 use crate::core::v1::models::response::WalletItem;
 use crate::core::v1::models::response::{
     AccountOpResponse, AddUsageApiKeyResponse, CreateWalletResponse, ListMetadataItem,
@@ -128,6 +130,7 @@ impl<'r, T: Serialize + JsonSchema, E: Serialize + JsonSchema> Responder<'r, 'st
 pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
     openapi_get_routes_spec![
         // sign_with_pkp,
+        encrypt_to_action,
         list_api_keys,
         new_account,
         account_exists,
@@ -186,6 +189,21 @@ async fn sign_with_pkp(
 ) -> OpenApiResponse<SignWithPkpResponse, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(core_features::sign_with_pkp(sign_request).await).into(),
+    }
+}
+
+#[openapi(tag = "Actions")]
+#[post("/encrypt_to_action", format = "json", data = "<encrypt_request>")]
+async fn encrypt_to_action(
+    api_key: ApiKey,
+    encrypt_request: Json<EncryptToActionRequest>,
+) -> OpenApiResponse<EncryptToActionResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(
+            core_features::encrypt_to_action(api_key.0.as_str(), encrypt_request.into_inner())
+                .await,
+        )
+        .into(),
     }
 }
 

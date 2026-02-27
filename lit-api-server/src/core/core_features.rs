@@ -1,30 +1,24 @@
 use crate::actions::client::ClientBuilder;
 use crate::actions::client::models::DenoExecutionEnv;
+use crate::actions::client::op_code_helpers::encryption::aes_encrypt_to_action_with_pkp;
 use crate::actions::grpc::GrpcClientPool;
 use crate::core::api_status::ApiStatus;
-use crate::core::v1::models::request::{LitActionRequest, SignWithPKPRequest};
+use crate::core::v1::models::request::{
+    EncryptToActionRequest, LitActionRequest, SignWithPKPRequest,
+};
 use crate::core::v1::models::response::{
-    LitActionResponse, LitActionSignature, SignWithPkpResponse,
+    EncryptToActionResponse, LitActionResponse, LitActionSignature, SignWithPkpResponse,
 };
 use ipfs_hasher::IpfsHasher;
 use moka::future::Cache;
 use rocket::serde::json::Json;
-// use tracing::instrument;
+use tracing::instrument;
 
-fn not_configured() -> ApiStatus {
-    ApiStatus::internal_server_error(
-        anyhow::anyhow!("Lit testnet not configured"),
-        "This operation is not available.",
-    )
-}
-
-pub async fn sign_with_pkp(
-    _sign_request: Json<SignWithPKPRequest>,
-) -> Result<SignWithPkpResponse, ApiStatus> {
-    Err(not_configured())
-}
-
-// #[instrument(level = "debug", skip(api_key, grpc_client_pool, ipfs_cache, http_client), err)]
+#[instrument(
+    level = "debug",
+    skip(api_key, grpc_client_pool, ipfs_cache, http_client),
+    err
+)]
 pub async fn lit_action(
     api_key: &str,
     grpc_client_pool: &GrpcClientPool<tonic::transport::Channel>,
@@ -91,4 +85,35 @@ async fn get_lit_action_ipfs_id(code: String) -> Result<String, ApiStatus> {
     let ipfs_hasher = IpfsHasher::default();
     let derived_ipfs_id = ipfs_hasher.compute(code.as_bytes());
     Ok(derived_ipfs_id)
+}
+
+pub async fn encrypt_to_action(
+    api_key: &str,
+    encrypt_to_action_request: EncryptToActionRequest,
+) -> Result<EncryptToActionResponse, ApiStatus> {
+    let encrypted = aes_encrypt_to_action_with_pkp(
+        api_key,
+        &encrypt_to_action_request.message,
+        &encrypt_to_action_request.action_ipfs_id,
+    )
+    .await?;
+    Ok(EncryptToActionResponse {
+        ciphertext: encrypted,
+        action_ipfs_id: encrypt_to_action_request.action_ipfs_id,
+    })
+}
+
+// to be re-implemented later
+
+fn not_configured() -> ApiStatus {
+    ApiStatus::internal_server_error(
+        anyhow::anyhow!("Lit testnet not configured"),
+        "This operation is not available.",
+    )
+}
+
+pub async fn sign_with_pkp(
+    _sign_request: Json<SignWithPKPRequest>,
+) -> Result<SignWithPkpResponse, ApiStatus> {
+    Err(not_configured())
 }

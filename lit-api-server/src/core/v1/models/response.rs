@@ -123,3 +123,9 @@ pub struct NodeChainConfigResponse {
     pub rpc_url: String,
     pub contract_address: String,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct EncryptToActionResponse {
+    pub ciphertext: String,
+    pub action_ipfs_id: String,
+}
