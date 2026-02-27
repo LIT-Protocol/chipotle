@@ -1,7 +1,5 @@
 # Run lit-action-sign-as-action.spec.ts.
 # Called from Deploy to Phala CVM after wait-for-api, or manually via workflow_dispatch.
-#
-# Required vars: BASE_URL (for workflow_dispatch when base_url not passed)
 
 name: k6 Lit Action Sign As Action
 
@@ -15,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       base_url:
-        description: "API base URL (optional; uses vars.BASE_URL when empty)"
+        description: "API base URL (optional; uses k6 spec fallback when empty)"
         required: false
         type: string
 
@@ -30,5 +28,5 @@ jobs:
 
       - name: lit-action-sign-as-action.spec.ts
         env:
-          BASE_URL: ${{ inputs.base_url || vars.BASE_URL }}
+          BASE_URL: ${{ inputs.base_url }}
         run: k6 run k6/lit-action-sign-as-action.spec.ts

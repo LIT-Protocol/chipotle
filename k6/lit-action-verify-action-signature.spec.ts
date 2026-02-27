@@ -18,7 +18,7 @@ import { LitApiServerClient } from "./litApiServer.ts";
 
 const BASE_URL =
   __ENV.BASE_URL ||
-  "https://36da669c852c9bd4fdea27dd331c07ff776bd125-8000.dstack-pha-prod5.phala.network/core/v1";
+  "https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network/core/v1";
 
 // keccak256("hello world") as a 32-byte array
 const TO_SIGN = [

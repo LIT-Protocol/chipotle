@@ -1,0 +1,58 @@
+# Run openapi-to-k6 against deployed OpenAPI spec and fail if litApiServer.ts has drifted.
+# Called from Deploy to Phala CVM after wait-for-api, or manually via workflow_dispatch.
+
+name: OpenAPI Spec Check
+
+permissions:
+  contents: read
+
+# checkov:skip=CKV_GHA_7:Manual base_url/runner selection requires workflow_dispatch inputs
+on:
+  workflow_call:
+    inputs:
+      base_url:
+        description: API base URL (e.g. https://example.com/core/v1)
+        required: true
+        type: string
+      runner:
+        description: Runner as JSON array (e.g. ["self-hosted"]), to match caller's runner
+        required: false
+        type: string
+        default: '["ubuntu-latest"]'
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: API base URL (e.g. https://example.com/core/v1)
+        required: true
+        type: string
+      runner:
+        description: Runner as JSON array
+        required: false
+        type: string
+        default: '["self-hosted"]'
+
+jobs:
+  openapi-spec-check:
+    runs-on: ${{ fromJson(inputs.runner) }}
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Generate litApiServer from deployed OpenAPI spec
+        run: |
+          npm install -g @grafana/openapi-to-k6
+          openapi-to-k6 "${{ inputs.base_url }}/openapi.json" ./k6-generated
+
+      - name: Compare with committed litApiServer.ts
+        run: |
+          if ! diff -q ./k6-generated/litApiServer.ts ./k6/litApiServer.ts; then
+            echo "::error::Deployed OpenAPI spec differs from committed k6/litApiServer.ts. Regenerate with: openapi-to-k6 <BASE_URL>/openapi.json ./k6"
+            diff ./k6-generated/litApiServer.ts ./k6/litApiServer.ts || true
+            exit 1
+          fi
+          echo "litApiServer.ts matches deployed OpenAPI spec"

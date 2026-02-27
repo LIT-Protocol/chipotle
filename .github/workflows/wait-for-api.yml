@@ -33,7 +33,7 @@ on:
         type: number
         default: 300
       runner:
-        description: "Runner as JSON array (e.g. [\"self-hosted\"]), to match caller's runner"
+        description: 'Runner as JSON array (e.g. ["self-hosted"]), to match caller''s runner'
         required: false
         type: string
         default: '["ubuntu-latest"]'
@@ -64,8 +64,12 @@ jobs:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
         run: |
           if [ -n "${{ inputs.phala_app_name }}" ]; then
-            CVM_JSON=$(phala cvms get ${{ inputs.phala_app_name }} --json)
+            CVM_JSON=$(phala cvms get "${{ inputs.phala_app_name }}" --json)
+            # Try multiple patterns: endpoints (prod), public_urls (Phala docs), prefer -8000. (app port)
             APP_URL=$(echo "$CVM_JSON" | jq -r '.endpoints[]? | select(.app != null and (.app | tostring | test("-8000\\."))) | .app' | head -1)
+            if [ -z "$APP_URL" ]; then
+              APP_URL=$(echo "$CVM_JSON" | jq -r '.public_urls[0].app // empty')
+            fi
             if [ -z "$APP_URL" ]; then
               APP_URL=$(echo "$CVM_JSON" | jq -r '(.endpoints // [])[0].app // empty')
             fi
@@ -73,6 +77,8 @@ jobs:
               echo "Could not get public URL from phala cvms get"
               exit 1
             fi
+            # Ensure https:// (lit-api-server-next uses dstack-pha-prod5.phala.network)
+            case "$APP_URL" in http*) ;; *) APP_URL="https://$APP_URL" ;; esac
             BASE_URL="${APP_URL%/}/core/v1"
           elif [ -n "${{ inputs.base_url }}" ]; then
             BASE_URL="${{ inputs.base_url }}"
@@ -80,7 +86,7 @@ jobs:
             echo "Either base_url or phala_app_name must be provided"
             exit 1
           fi
-          echo "base_url=$BASE_URL" >> $GITHUB_OUTPUT
+          echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
           echo "API base URL: $BASE_URL"
 
       - name: Wait for API to become available
@@ -90,7 +96,7 @@ jobs:
           echo "Polling $BASE_URL/get_node_chain_config (timeout: ${TIMEOUT}s)..."
           deadline=$(( $(date +%s) + TIMEOUT ))
           until curl -sf "$BASE_URL/get_node_chain_config" > /dev/null; do
-            if [ $(date +%s) -ge $deadline ]; then
+            if [ "$(date +%s)" -ge "$deadline" ]; then
               echo "Timed out after ${TIMEOUT}s waiting for API"
               exit 1
             fi
