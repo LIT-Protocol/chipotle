@@ -618,7 +618,7 @@ async fn async_await(mut client: TestClient) {
         (async () => {
             const fulfilled = await Promise.all([
                 LitActions.sign({toSign: [1,2,3], publicKey: "some-key", sigName: "some-sig", signingScheme: "EcdsaK256Sha256"}),
-                LitActions.aesDecrypt({ciphertext: "456"}),
+                LitActions.aesDecrypt({publicKey: "some-key", ciphertext: "456"}),
                 LitActions.setResponse({response: await "OK"})
             ])
             console.log(fulfilled)
