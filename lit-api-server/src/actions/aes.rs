@@ -40,7 +40,7 @@ pub async fn aes_decrypt(symmetric_key: &[u8], ciphertext_with_iv: &str) -> Resu
     Ok(plaintext)
 }
 
-pub async fn aes_encrypt(symmetric_key: Vec<u8>, plaintext: String) -> Result<String> {
+pub async fn aes_encrypt(symmetric_key: &[u8], plaintext: String) -> Result<String> {
     let user_key = symmetric_key
         .try_into()
         .map_err(|e| conversion_err("Could not convert symmetric key to length 32", None))?;
