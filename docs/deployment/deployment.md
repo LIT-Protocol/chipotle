@@ -55,7 +55,9 @@ flowchart TB
 
 | File | Purpose |
 |------|---------|
-| [requirements.md](requirements.md) | Verifiable clean bill of execution — requirements derived from implementation plan |
+| [requirements.md](requirements.md) | One-time CVM verification — requirements |
+| [PLAN.md](PLAN.md) | Implementation plan (traceability to requirements) |
+| [PLAN-phase-1.md](PLAN-phase-1.md) through [PLAN-phase-4.md](PLAN-phase-4.md) | Per-phase plans with parallelizable workflows |
 | `.github/workflows/deploy-phala.yml` | GitHub Actions workflow |
 | `Dockerfile.phala` | Multi-stage build for both binaries |
 | `docker-compose.phala.yml` | Service definitions and shared socket volume |
@@ -72,7 +74,7 @@ Both run as separate containers in the same CVM, communicating via a shared Unix
 
 ### Phala attestation
 
-When built with the `phala` feature, `lit-api-server` exposes `GET /phala/v1/verify`, which returns a TDX attestation quote from the dstack socket. Callers can verify the CVM is running in genuine Intel TDX hardware.
+Attestation (quote, event_log, vm_config) is obtained from the gateway `/.dstack/` endpoints—the gateway is the required ingress and the single attestation source. Do not implement an app-level attestation endpoint. For dev: Phala-hosted gateway; for local testing: dstack simulator (`DSTACK_SIMULATOR_ENDPOINT`). See [PLAN.md](PLAN.md) and [requirements.md](requirements.md) for the verification flow.
 
 ## Required Secrets
 
