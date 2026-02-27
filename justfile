@@ -40,9 +40,7 @@ setup:
     npm install -g phala
     phala --version
 
-# Build and push all three Docker images (release mode, linux/amd64 for Phala CVM).
-# After each push the registry-assigned @sha256: digest is written to
-# .digest-{service}.txt — these are read by `deploy` for DR-1.1 compliance.
+# Build all three Docker images in parallel (release mode, linux/amd64 for Phala CVM)
 [group: 'deploy']
 docker-build: _check_docker
     #!/usr/bin/env sh
@@ -51,13 +49,19 @@ docker-build: _check_docker
     docker build --platform linux/amd64 -f Dockerfile.lit-api-server -t {{image_lit_api_server}} . &
     docker build --platform linux/amd64 -f Dockerfile.lit-static     -t {{image_lit_static}}     . &
     wait
+
+# Push all three images in parallel and capture each registry-assigned @sha256: digest.
+# Digests are written to .digest-{service}.txt and read by `deploy` (DR-1.1, DR-1.2).
+# docker inspect .RepoDigests is populated by `docker push` with the registry-assigned
+# content hash; we strip the repo prefix to get sha256:...
+[group: 'deploy']
+docker-push: docker-build
+    #!/usr/bin/env sh
+    set -eu
     docker push {{image_lit_actions}}    &
     docker push {{image_lit_api_server}} &
     docker push {{image_lit_static}}     &
     wait
-    # Capture the immutable registry digest for each image.
-    # docker inspect .RepoDigests is populated by `docker push` with the
-    # registry-assigned content hash; we strip the repo prefix to get sha256:...
     docker inspect --format='{{{{json .RepoDigests}}}}' {{image_lit_actions}}    | tr -d '[]" ' | cut -d',' -f1 | sed 's/.*@//' > .digest-lit-actions.txt
     docker inspect --format='{{{{json .RepoDigests}}}}' {{image_lit_api_server}} | tr -d '[]" ' | cut -d',' -f1 | sed 's/.*@//' > .digest-lit-api-server.txt
     docker inspect --format='{{{{json .RepoDigests}}}}' {{image_lit_static}}     | tr -d '[]" ' | cut -d',' -f1 | sed 's/.*@//' > .digest-lit-static.txt
@@ -65,9 +69,6 @@ docker-build: _check_docker
         [ -s "$f" ] || { echo "error: digest capture failed for $f"; exit 1; }
         printf "captured %s: %s\n" "$f" "$(cat $f)"
     done
-
-[group: 'deploy']
-docker-push: docker-build
 
 
 # Deploy to Phala Cloud (requires: docker login, phala login).
