@@ -103,5 +103,4 @@ jobs:
             echo "Not ready, retrying in 10s..."
             sleep 10
           done
-          sleep 45
           echo "API is up"

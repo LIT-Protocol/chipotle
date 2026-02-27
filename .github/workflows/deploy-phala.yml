@@ -141,57 +141,64 @@ jobs:
             --cvm-id ${{ needs.determine-target.outputs.phala_app_name }} \
             --instance-type tdx.large
 
-  wait-for-api:
+  wait-for-api-available:
     needs: [deploy, determine-runner, determine-target]
     uses: ./.github/workflows/wait-for-api.yml
     with:
       base_url: ${{ needs.determine-target.outputs.base_url }}
       runner: ${{ needs.determine-runner.outputs.runner }}
 
+  wait-for-api-settled:
+    needs: [wait-for-api-available]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for API warm-up
+        run: sleep 45
+
   openapi-spec-check:
-    needs: [wait-for-api, determine-runner]
+    needs: [wait-for-api-available, wait-for-api-settled, determine-runner]
     uses: ./.github/workflows/openapi-spec-check.yml
     with:
-      base_url: ${{ needs.wait-for-api.outputs.base_url }}
+      base_url: ${{ needs.wait-for-api-available.outputs.base_url }}
       runner: ${{ needs.determine-runner.outputs.runner }}
 
   k6-smoke:
-    needs: [wait-for-api, openapi-spec-check]
+    needs: [wait-for-api-available, openapi-spec-check]
     uses: ./.github/workflows/k6-smoke.yml
     with:
-      base_url: ${{ needs.wait-for-api.outputs.base_url }}
+      base_url: ${{ needs.wait-for-api-available.outputs.base_url }}
 
   k6-integration:
-    needs: [wait-for-api, k6-smoke]
+    needs: [wait-for-api-available, k6-smoke]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/k6-integration.yml
     with:
-      base_url: ${{ needs.wait-for-api.outputs.base_url }}
+      base_url: ${{ needs.wait-for-api-available.outputs.base_url }}
 
   k6-new-account:
-    needs: [wait-for-api, k6-integration]
+    needs: [wait-for-api-available, k6-integration]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/k6-new-account.yml
     with:
-      base_url: ${{ needs.wait-for-api.outputs.base_url }}
+      base_url: ${{ needs.wait-for-api-available.outputs.base_url }}
 
   k6-lit-action-get-public-key:
-    needs: [wait-for-api, k6-new-account]
+    needs: [wait-for-api-available, k6-new-account]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/k6-lit-action-get-public-key.yml
     with:
-      base_url: ${{ needs.wait-for-api.outputs.base_url }}
+      base_url: ${{ needs.wait-for-api-available.outputs.base_url }}
 
   k6-lit-action-sign-as-action:
-    needs: [wait-for-api, k6-lit-action-get-public-key]
+    needs: [wait-for-api-available, k6-lit-action-get-public-key]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/k6-lit-action-sign-as-action.yml
     with:
-      base_url: ${{ needs.wait-for-api.outputs.base_url }}
+      base_url: ${{ needs.wait-for-api-available.outputs.base_url }}
 
   k6-lit-action-verify-action-signature:
-    needs: [wait-for-api, k6-lit-action-sign-as-action]
+    needs: [wait-for-api-available, k6-lit-action-sign-as-action]
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/k6-lit-action-verify-action-signature.yml
     with:
-      base_url: ${{ needs.wait-for-api.outputs.base_url }}
+      base_url: ${{ needs.wait-for-api-available.outputs.base_url }}
