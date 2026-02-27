@@ -103,15 +103,23 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push ${{ matrix.service }}
+        id: push
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./${{ matrix.dockerfile }}
           platforms: linux/amd64
           push: true
-          tags: |
-            ${{ vars.DOCKER_IMAGE }}-${{ matrix.service }}:${{ github.sha }}
-            ${{ vars.DOCKER_IMAGE }}-${{ matrix.service }}:latest
+          tags: ${{ vars.DOCKER_IMAGE }}-${{ matrix.service }}:${{ github.sha }}
+
+      - name: Save image digest
+        run: echo "${{ steps.push.outputs.digest }}" > digest-${{ matrix.service }}.txt
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.service }}
+          path: digest-${{ matrix.service }}.txt
 
   deploy:
     needs: [determine-runner, determine-target, build]
@@ -119,13 +127,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Prepare docker-compose for deployment
+      - name: Download image digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Prepare docker-compose for deployment (digest-pinned)
         run: |
-          TAG="${{ github.sha }}"
+          DIGEST_LIT_ACTIONS=$(cat digest-lit-actions.txt)
+          DIGEST_LIT_API_SERVER=$(cat digest-lit-api-server.txt)
+          DIGEST_LIT_STATIC=$(cat digest-lit-static.txt)
           sed \
-            -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|${{ vars.DOCKER_IMAGE }}-lit-actions:${TAG}|g" \
-            -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|${{ vars.DOCKER_IMAGE }}-lit-api-server:${TAG}|g" \
-            -e "s|\${DOCKER_IMAGE_LIT_STATIC}|${{ vars.DOCKER_IMAGE }}-lit-static:${TAG}|g" \
+            -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|${{ vars.DOCKER_IMAGE }}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
+            -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|${{ vars.DOCKER_IMAGE }}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
+            -e "s|\${DOCKER_IMAGE_LIT_STATIC}|${{ vars.DOCKER_IMAGE }}-lit-static@${DIGEST_LIT_STATIC}|g" \
             docker-compose.phala.yml > docker-compose.deploy.yml
           cat docker-compose.deploy.yml
 

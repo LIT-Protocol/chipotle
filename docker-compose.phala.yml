@@ -2,6 +2,11 @@
 # lit-actions and lit-api-server share gRPC Unix socket at /tmp/lit_actions.sock.
 # lit-static serves SDKs, docs, dapps on port 8001.
 # Uses tdx.large instance type via phala deploy --instance-type tdx.large
+#
+# Image placeholders (DOCKER_IMAGE_*) are substituted with @sha256: digests by
+# the deploy workflow (DR-1.1, DR-1.2) to ensure verifiable, immutable image
+# references for CVM verification. Mutable tags (:latest, :sha) are never used
+# in the deployed compose file.
 
 services:
   lit-actions:
