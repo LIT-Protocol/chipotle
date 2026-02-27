@@ -110,9 +110,6 @@ jobs:
           file: ./${{ matrix.dockerfile }}
           platforms: linux/amd64
           push: true
-          # A tag is required by the registry to accept the push; the digest
-          # (not this tag) is what the deploy step uses. :latest is intentionally
-          # omitted — mutable tags must not exist for images deployed to the CVM.
           tags: ${{ vars.DOCKER_IMAGE }}-${{ matrix.service }}:${{ github.sha }}
 
       - name: Save image digest
