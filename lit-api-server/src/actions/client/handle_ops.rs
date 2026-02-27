@@ -50,11 +50,35 @@ impl Client {
                 }
                 .into()
             }
-            UnionResponse::AesEncrypt(AesEncryptRequest { .. }) => {
-                bail!("AesEncrypt is not implemented");
+            UnionResponse::AesEncrypt(AesEncryptRequest {
+                public_key,
+                message,
+            }) => {
+                let encrypted = op_code_helpers::encryption::aes_encrypt_with_pkp(
+                    &self.api_key,
+                    &public_key,
+                    &message,
+                )
+                .await?;
+                AesEncryptResponse {
+                    ciphertext: encrypted,
+                }
+                .into()
             }
-            UnionResponse::AesDecrypt(AesDecryptRequest { .. }) => {
-                bail!("AesDecrypt is not implemented");
+            UnionResponse::AesDecrypt(AesDecryptRequest {
+                public_key,
+                ciphertext,
+            }) => {
+                let decrypted = op_code_helpers::encryption::aes_decrypt_with_pkp(
+                    &self.api_key,
+                    &public_key,
+                    &ciphertext,
+                )
+                .await?;
+                AesDecryptResponse {
+                    plaintext: decrypted,
+                }
+                .into()
             }
             UnionResponse::GetLatestNonce(GetLatestNonceRequest { .. }) => {
                 bail!("GetLatestNonce is not implemented");
@@ -65,7 +89,7 @@ impl Client {
                 sig_name,
                 signing_scheme,
             }) => {
-                let (sig_name, signed_data) = match op_code_helpers::sign_with_pkp(
+                let (sig_name, signed_data) = match op_code_helpers::signing::sign_with_pkp(
                     &self.api_key,
                     &public_key,
                     &to_sign,

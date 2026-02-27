@@ -5,10 +5,10 @@ use rand::Rng;
 
 pub async fn aes_decrypt(symmetric_key: &[u8], ciphertext_with_iv: &str) -> Result<String> {
     // Create a new 256-bit cipher
-    let cipher_bytes = symmetric_key
+    let user_key = symmetric_key
         .try_into()
         .map_err(|e| conversion_err("Could not convert symmetric key to length 32", None))?;
-    let cipher = Cipher::new_256(&cipher_bytes);
+    let cipher = Cipher::new_256(&user_key);
 
     let ciphertext_with_iv = hex_to_bytes(ciphertext_with_iv)?;
     if ciphertext_with_iv.len() < 16 {
@@ -36,19 +36,21 @@ pub async fn aes_decrypt(symmetric_key: &[u8], ciphertext_with_iv: &str) -> Resu
         ));
     }
 
-    Ok(bytes_to_hex(decrypted))
+    let plaintext = String::from_utf8_lossy(&decrypted).to_string();
+    Ok(plaintext)
 }
 
 pub async fn aes_encrypt(symmetric_key: Vec<u8>, plaintext: String) -> Result<String> {
-    let cipher_bytes = symmetric_key
+    let user_key = symmetric_key
         .try_into()
         .map_err(|e| conversion_err("Could not convert symmetric key to length 32", None))?;
-    let cipher = Cipher::new_256(&cipher_bytes);
+    let cipher = Cipher::new_256(&user_key);
 
     // get random byte slice that is 16 bytes long
     let mut iv = [0; 16];
     rand::thread_rng().fill(&mut iv);
-    let encrypted = cipher.cbc_encrypt(&iv, plaintext.as_bytes());
+    let plaintext_bytes = plaintext.as_bytes();
+    let encrypted = cipher.cbc_encrypt(&iv, plaintext_bytes);
     // Prepend IV to ciphertext
     let mut result = iv.to_vec();
     result.extend_from_slice(&encrypted);

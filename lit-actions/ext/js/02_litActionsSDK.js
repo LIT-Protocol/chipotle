@@ -49,8 +49,7 @@ function signEcdsa({ toSign, publicKey, sigName}) {
  *   "SchnorrK256Taproot"
  *   "SchnorrRedDecaf377Blake2b512"
  *   "SchnorrkelSubstrate"
- *   "Bls12381G1ProofOfPossession"
- * @param {string} params.keySetId The key set id to use
+ *   "Bls12381G1ProofOfPossession" 
  * @name Lit.Actions.sign
  * @function sign
  * @returns {Uint8array} The resulting signature 
@@ -212,15 +211,12 @@ function uint8arrayFromString(...args) {
  * @name Lit.Actions.aesDecrypt
  * @function aesDecrypt
  * @param {Object} params
- * @param {Uint8Array} params.symmetricKey The AES symmetric key
- * @param {Uint8Array} params.ciphertext The ciphertext to decrypt
+ * @param {string} params.publicKey The public key of the PKP
+ * @param {string} params.ciphertext The ciphertext to decrypt
  * @returns {Promise<string>} The decrypted plaintext
  */
-function aesDecrypt({ symmetricKey, ciphertext }) {
-  return ops.op_aes_decrypt(
-    new Uint8Array(symmetricKey),
-    new Uint8Array(ciphertext)
-  );
+function aesDecrypt({ publicKey, ciphertext }) {
+  return ops.op_aes_decrypt(publicKey, ciphertext);
 }
 
 /**
@@ -242,17 +238,34 @@ function getRpcUrl({ chain }) {
  * @param {Object} params
  * @param {Array<Object>} params.accessControlConditions The access control conditions that must be met to decrypt
  * @param {string} params.to_encrypt The message to encrypt
- * @param {string} params.keySetId The key set id to use
  * @returns {Promise<{ciphertext: string, dataToEncryptHash: string}>} An object containing the ciphertext and the hash of the data that was encrypted
  */
 function encrypt({
   accessControlConditions,
-  to_encrypt,
-  keySetId,
+  to_encrypt,  
 }) {
-  return ops.op_encrypt_bls(accessControlConditions, to_encrypt, keySetId);
+  return ops.op_encrypt_bls(accessControlConditions, to_encrypt);
 }
+
+/**
+ * @name Lit.Actions.aesEncrypt
+ * @function aesEncrypt
+ * @param {Object} params
+ * @param {string} params.publicKey The public key of the PKP
+ * @param {string} params.message The message to encrypt
+ * @returns {Promise<string>} The ciphertext
+ */
+
+function aesEncrypt({
+  publicKey,
+  message,
+}) {
+  return ops.op_aes_encrypt(publicKey, message);
+}
+
 globalThis.LitActions = {
+  aesEncrypt,
+  aesDecrypt,
   getLatestNonce,
   sign,
   signEcdsa,
