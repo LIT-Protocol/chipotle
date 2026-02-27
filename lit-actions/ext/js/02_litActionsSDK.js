@@ -208,14 +208,14 @@ function uint8arrayFromString(...args) {
 
 /**
  * Decrypt data using AES with a symmetric key
- * @name Lit.Actions.aesDecrypt
- * @function aesDecrypt
+ * @name Lit.Actions.Decrypt
+ * @function Decrypt
  * @param {Object} params
  * @param {string} params.publicKey The public key of the PKP
  * @param {string} params.ciphertext The ciphertext to decrypt
  * @returns {Promise<string>} The decrypted plaintext
  */
-function aesDecrypt({ publicKey, ciphertext }) {
+function Decrypt({ publicKey, ciphertext }) {
   return ops.op_aes_decrypt(publicKey, ciphertext);
 }
 
@@ -233,14 +233,14 @@ function getRpcUrl({ chain }) {
 
 /**
  * Encrypt data using BLS encryption with access control conditions
- * @name Lit.Actions.encrypt
- * @function encrypt
+ * @name Lit.Actions.encrypt_bls
+ * @function encrypt_bls
  * @param {Object} params
  * @param {Array<Object>} params.accessControlConditions The access control conditions that must be met to decrypt
  * @param {string} params.to_encrypt The message to encrypt
  * @returns {Promise<{ciphertext: string, dataToEncryptHash: string}>} An object containing the ciphertext and the hash of the data that was encrypted
  */
-function encrypt({
+function encrypt_bls({
   accessControlConditions,
   to_encrypt,  
 }) {
@@ -248,15 +248,15 @@ function encrypt({
 }
 
 /**
- * @name Lit.Actions.aesEncrypt
- * @function aesEncrypt
+ * @name Lit.Actions.Encrypt
+ * @function Encrypt
  * @param {Object} params
  * @param {string} params.publicKey The public key of the PKP
  * @param {string} params.message The message to encrypt
  * @returns {Promise<string>} The ciphertext
  */
 
-function aesEncrypt({
+function Encrypt({
   publicKey,
   message,
 }) {
@@ -264,8 +264,8 @@ function aesEncrypt({
 }
 
 globalThis.LitActions = {
-  aesEncrypt,
-  aesDecrypt,
+  Encrypt,
+  Decrypt,
   getLatestNonce,
   sign,
   signEcdsa,
@@ -277,7 +277,6 @@ globalThis.LitActions = {
   callContract,
   uint8arrayToString,
   uint8arrayFromString,
-  aesDecrypt,
   getRpcUrl,
-  encrypt,
+  encrypt_bls,
 };
