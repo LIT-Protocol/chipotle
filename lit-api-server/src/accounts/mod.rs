@@ -1,9 +1,9 @@
 pub mod contracts;
-pub use contracts::account_config::{AccountConfig, Metadata};
+pub use contracts::account_config_contract::{AccountConfig, Metadata};
 pub mod signable_contract;
 pub use anyhow::Result;
 
-use crate::accounts::contracts::account_config::UsageApiKey;
+use crate::accounts::contracts::account_config_contract::UsageApiKey;
 use crate::accounts::signable_contract::get_signable_account_config_contract;
 use crate::core::lookup_data;
 use ethers::types::{H160, U256};

@@ -317,7 +317,7 @@ fn metadata_to_item(m: &accounts::Metadata) -> ListMetadataItem {
 
 #[allow(dead_code)]
 fn usage_api_key_to_api_key_item(
-    m: &accounts::contracts::account_config::UsageApiKey,
+    m: &accounts::contracts::account_config_contract::UsageApiKey,
 ) -> ApiKeyItem {
     let mut bytes = [0; 32];
     m.metadata.id.to_big_endian(&mut bytes);
