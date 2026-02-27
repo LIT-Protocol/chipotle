@@ -394,7 +394,7 @@ async fn aes_decrypt(mut client: TestClient) {
     client
         .respond_with(AesDecryptResponse { plaintext: "ignored".to_string() })
         .execute_js(
-            r#"(async () => { await LitActions.aesDecrypt({ public_key: "ignored", ciphertext: "456"}) })()"#,
+            r#"(async () => { await LitActions.aesDecrypt({ publicKey: "ignored", ciphertext: "456"}) })()"#,
         )
         .await
         .unwrap();
