@@ -24,7 +24,11 @@ pub async fn sign_with_pkp(
     Err(not_configured())
 }
 
-// #[instrument(level = "debug", skip(api_key, grpc_client_pool, ipfs_cache, http_client), err)]
+#[instrument(
+    level = "debug",
+    skip(api_key, grpc_client_pool, ipfs_cache, http_client),
+    err
+)]
 pub async fn lit_action(
     api_key: &str,
     grpc_client_pool: &GrpcClientPool<tonic::transport::Channel>,

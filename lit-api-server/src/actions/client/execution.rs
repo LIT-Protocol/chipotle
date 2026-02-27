@@ -17,7 +17,7 @@ use tokio::time::Duration;
 use tracing::instrument;
 
 impl Client {
-    // #[instrument(level = "debug", skip_all, ret)]
+    #[instrument(level = "debug", skip_all, ret)]
     pub async fn execute_js_async(
         &self,
         opts: impl Into<ExecutionOptions>,
@@ -35,7 +35,7 @@ impl Client {
             .await
     }
 
-    // #[instrument(level = "debug", skip_all, ret)]
+    #[instrument(level = "debug", skip_all, ret)]
     pub async fn execute_js(
         &mut self,
         opts: impl Into<ExecutionOptions>,
@@ -123,7 +123,7 @@ impl Client {
         }
     }
 
-    // #[instrument(level = "debug", skip(self), err)]
+    #[instrument(level = "debug", skip(self), err)]
     async fn execute_js_inner(
         &mut self,
         code: String,

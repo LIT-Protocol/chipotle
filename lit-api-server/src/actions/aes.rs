@@ -5,9 +5,12 @@ use rand::Rng;
 
 pub async fn aes_decrypt(symmetric_key: &[u8], ciphertext_with_iv: &str) -> Result<String> {
     // Create a new 256-bit cipher
-    let user_key = symmetric_key
-        .try_into()
-        .map_err(|e| conversion_err("Could not convert symmetric key to length 32", None))?;
+    let user_key = symmetric_key.try_into().map_err(|e| {
+        conversion_err(
+            "Could not convert symmetric key to length 32",
+            Some(format!("{}", e)),
+        )
+    })?;
     let cipher = Cipher::new_256(&user_key);
 
     let ciphertext_with_iv = hex_to_bytes(ciphertext_with_iv)?;
@@ -41,9 +44,12 @@ pub async fn aes_decrypt(symmetric_key: &[u8], ciphertext_with_iv: &str) -> Resu
 }
 
 pub async fn aes_encrypt(symmetric_key: &[u8], plaintext: String) -> Result<String> {
-    let user_key = symmetric_key
-        .try_into()
-        .map_err(|e| conversion_err("Could not convert symmetric key to length 32", None))?;
+    let user_key = symmetric_key.try_into().map_err(|e| {
+        conversion_err(
+            "Could not convert symmetric key to length 32",
+            Some(format!("{}", e)),
+        )
+    })?;
     let cipher = Cipher::new_256(&user_key);
 
     // get random byte slice that is 16 bytes long
