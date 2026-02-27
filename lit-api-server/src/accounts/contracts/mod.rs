@@ -1,1 +1,1 @@
-pub mod account_config;
+pub mod account_config_contract;

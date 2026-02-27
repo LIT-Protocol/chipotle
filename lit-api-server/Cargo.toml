@@ -10,6 +10,7 @@ default = []
 phala = []
 
 [dependencies]
+aes-gcm = "0.10"
 apalis = { version = "0.6.0", features = ["tracing"] }
 apalis-sql = { version = "0.6.0", features = ["sqlite", "tokio-comp"] }
 
@@ -28,7 +29,6 @@ hex = "0.4"
 
 ipfs-hasher = "0.13.0"
 # lazy_static = "1.5.0"
-libaes = "0.7"
 # hd-keys-curves-wasm = { version = "1.0.5", default-features = false, features = ["bls", "k256", "p256", "p384", "curve25519", "ed448", "jubjub", "decaf377", "pasta"] }
 lit-rust-crypto = { version = "0.6.0", features = [
     "arithmetic",
