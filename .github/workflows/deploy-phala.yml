@@ -1,5 +1,10 @@
 # Deploy lit-api-server + lit-actions + lit-static to Phala CVM (tdx.large instance)
 #
+# Branch-based deployment:
+#   push to main  → lit-api-server
+#   push to next  → lit-api-server-next
+#   manual run    → user selects target (lit-api-server or lit-api-server-next)
+#
 # Required secrets:
 #   DOCKERHUB_TOKEN - Docker Hub PAT (Account Settings > Security > Access Tokens)
 #   PHALA_CLOUD_API_KEY - From Phala Cloud Dashboard > API Tokens
@@ -11,17 +16,44 @@
 #                    ${DOCKER_IMAGE}-lit-api-server
 #                    ${DOCKER_IMAGE}-lit-static
 #   DOCKERHUB_USERNAME - Docker Hub username
-#   PHALA_APP_NAME - CVM name, e.g. lit-api-server
 #   BASE_URL - Public URL of the deployed CVM, e.g. https://abc123-8000.dstack-prod.phala.network
 
 name: Deploy to Phala CVM
 
 on:
   push:
-    branches: [main]
+    branches: [main, next]
   workflow_dispatch:
+    inputs:
+      deployment_target:
+        description: 'Deployment target (CVM name)'
+        required: true
+        type: choice
+        options:
+          - lit-api-server
+          - lit-api-server-next
+        default: lit-api-server-next
 
 jobs:
+  determine-target:
+    runs-on: ubuntu-latest
+    outputs:
+      phala_app_name: ${{ steps.set.outputs.phala_app_name }}
+    steps:
+      - name: Set deployment target
+        id: set
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "phala_app_name=${{ github.event.inputs.deployment_target }}" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "phala_app_name=lit-api-server" >> $GITHUB_OUTPUT
+          elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
+            echo "phala_app_name=lit-api-server-next" >> $GITHUB_OUTPUT
+          else
+            echo "Unsupported branch for deployment"
+            exit 1
+          fi
+
   determine-runner:
     runs-on: ubuntu-latest
     outputs:
@@ -70,7 +102,7 @@ jobs:
             ${{ vars.DOCKER_IMAGE }}-${{ matrix.service }}:latest
 
   deploy:
-    needs: [determine-runner, build]
+    needs: [determine-runner, determine-target, build]
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     steps:
       - uses: actions/checkout@v4
@@ -99,14 +131,14 @@ jobs:
         run: |
           phala deploy \
             -c docker-compose.deploy.yml \
-            --cvm-id ${{ vars.PHALA_APP_NAME }} \
+            --cvm-id ${{ needs.determine-target.outputs.phala_app_name }} \
             --instance-type tdx.large
 
   wait-for-api:
-    needs: [deploy, determine-runner]
+    needs: [deploy, determine-runner, determine-target]
     uses: ./.github/workflows/wait-for-api.yml
     with:
-      phala_app_name: ${{ vars.PHALA_APP_NAME }}
+      phala_app_name: ${{ needs.determine-target.outputs.phala_app_name }}
       runner: ${{ needs.determine-runner.outputs.runner }}
     secrets:
       PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}

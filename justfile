@@ -6,8 +6,9 @@ image_tag := env('DOCKER_TAG', `uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '\n
 image_lit_actions    := image_base + '-lit-actions:'    + image_tag
 image_lit_api_server := image_base + '-lit-api-server:' + image_tag
 image_lit_static     := image_base + '-lit-static:'     + image_tag
-app_name := env('PHALA_APP_NAME', 'lit-api-server')
-instance_type := env('PHALA_INSTANCE_TYPE', 'tdx.large')
+# main → lit-api-server; any other branch → lit-api-server-next (override with PHALA_APP_NAME)
+app_name := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo lit-api-server || echo lit-api-server-next'`
+instance_type := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo tdx.large || echo tdx.small'`
 
 # List available recipes (default when invoked with no args)
 default:
