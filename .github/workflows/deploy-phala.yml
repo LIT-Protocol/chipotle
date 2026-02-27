@@ -19,6 +19,11 @@
 
 name: Deploy to Phala CVM
 
+# Only one deploy job per-branch: abort any running job on same branch when a new commit is pushed.
+concurrency:
+  group: deploy-phala-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}  # branch name (ref_name) or PR head (head_ref)
+  cancel-in-progress: true
+
 # checkov:skip=CKV_GHA_7:Manual deployment target selection requires workflow_dispatch inputs
 on:
   push:
@@ -70,8 +75,8 @@ jobs:
         id: set-runner
         uses: mikehardy/runner-fallback-action@v1
         with:
-          primary-runner: "self-hosted"
-          fallback-runner: "ubuntu-latest"
+          primary-runner: self-hosted
+          fallback-runner: ubuntu-latest
           github-token: ${{ secrets.GH_RUNNER_CHECK_TOKEN }}
           fallback-on-error: true
 
