@@ -253,7 +253,7 @@ async fn lit_namespace_protection(mut client: TestClient) {
         run(() => delete globalThis.LitHeaders);
 
         run(() => delete Lit.Actions);
-        run(() => delete Lit.Actions.Sign);
+        run(() => delete Lit.Actions.signEcdsa);
         run(() => delete Lit.Headers);
 
         run(() => Lit = {});
@@ -394,7 +394,7 @@ async fn aes_decrypt(mut client: TestClient) {
     client
         .respond_with(AesDecryptResponse { plaintext: "ignored".to_string() })
         .execute_js(
-            r#"(async () => { await LitActions.aesDecrypt({ public_key: "ignored", ciphertext: "456"}) })()"#,
+            r#"(async () => { await LitActions.aesDecrypt({ publicKey: "ignored", ciphertext: "456"}) })()"#,
         )
         .await
         .unwrap();
