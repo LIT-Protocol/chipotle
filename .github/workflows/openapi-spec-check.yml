@@ -46,7 +46,7 @@ jobs:
       - name: Generate litApiServer from deployed OpenAPI spec
         run: |
           npm install -g @grafana/openapi-to-k6
-          openapi-to-k6 "${{ inputs.base_url }}/openapi.json" ./k6-generated
+          openapi-to-k6 --verbose "${{ inputs.base_url }}/openapi.json" ./k6-generated
 
       - name: Compare with committed litApiServer.ts
         run: |
