@@ -236,6 +236,54 @@ impl Client {
             }) => {
                 bail!("VerifyActionSignature is not implemented");
             }
+            UnionResponse::PubkeyToTokenId(_) => {
+                bail!("PubkeyToTokenId is not implemented");
+            }
+            UnionResponse::PkpPermissionsGetPermitted(_) => {
+                bail!("PkpPermissionsGetPermitted is not implemented");
+            }
+            UnionResponse::PkpPermissionsGetPermittedAuthMethodScopes(_) => {
+                bail!("PkpPermissionsGetPermittedAuthMethodScopes is not implemented");
+            }
+            UnionResponse::PkpPermissionsIsPermitted(_) => {
+                bail!("PkpPermissionsIsPermitted is not implemented");
+            }
+            UnionResponse::PkpPermissionsIsPermittedAuthMethod(_) => {
+                bail!("PkpPermissionsIsPermittedAuthMethod is not implemented");
+            }
+            UnionResponse::SignEcdsa(_) => {
+                bail!("SignEcdsa is not implemented");
+            }
+            UnionResponse::CheckConditions(_) => {
+                bail!("CheckConditions is not implemented");
+            }
+            UnionResponse::ClaimKeyIdentifier(_) => {
+                bail!("ClaimKeyIdentifier is not implemented");
+            }
+            UnionResponse::BroadcastAndCollect(_) => {
+                bail!("BroadcastAndCollect is not implemented");
+            }
+            UnionResponse::DecryptAndCombine(_) => {
+                bail!("DecryptAndCombine is not implemented");
+            }
+            UnionResponse::SignAndCombineEcdsa(_) => {
+                bail!("SignAndCombineEcdsa is not implemented");
+            }
+            UnionResponse::P2pBroadcast(_) => {
+                bail!("P2pBroadcast is not implemented");
+            }
+            UnionResponse::P2pCollectFromLeader(_) => {
+                bail!("P2pCollectFromLeader is not implemented");
+            }
+            UnionResponse::IsLeader(_) => {
+                bail!("IsLeader is not implemented");
+            }
+            UnionResponse::DecryptToSingleNode(_) => {
+                bail!("DecryptToSingleNode is not implemented");
+            }
+            UnionResponse::SignAndCombine(_) => {
+                bail!("SignAndCombine is not implemented");
+            }
             UnionResponse::Result(_) => unreachable!(), // handled in main loop
         })
     }

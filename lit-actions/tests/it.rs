@@ -159,6 +159,22 @@ impl TestClient {
                 self.messages.put(req);
                 self.messages.take::<VerifyActionSignatureResponse>().into()
             }
+            UnionResponse::PubkeyToTokenId(_) => unreachable!("PubkeyToTokenId is not supported in tests"),
+            UnionResponse::PkpPermissionsGetPermitted(_) => unreachable!("PkpPermissionsGetPermitted is not supported in tests"),
+            UnionResponse::PkpPermissionsGetPermittedAuthMethodScopes(_) => unreachable!("PkpPermissionsGetPermittedAuthMethodScopes is not supported in tests"),
+            UnionResponse::PkpPermissionsIsPermitted(_) => unreachable!("PkpPermissionsIsPermitted is not supported in tests"),
+            UnionResponse::PkpPermissionsIsPermittedAuthMethod(_) => unreachable!("PkpPermissionsIsPermittedAuthMethod is not supported in tests"),
+            UnionResponse::SignEcdsa(_) => unreachable!("SignEcdsa is not supported in tests"),
+            UnionResponse::CheckConditions(_) => unreachable!("CheckConditions is not supported in tests"),
+            UnionResponse::ClaimKeyIdentifier(_) => unreachable!("ClaimKeyIdentifier is not supported in tests"),
+            UnionResponse::BroadcastAndCollect(_) => unreachable!("BroadcastAndCollect is not supported in tests"),
+            UnionResponse::DecryptAndCombine(_) => unreachable!("DecryptAndCombine is not supported in tests"),
+            UnionResponse::SignAndCombineEcdsa(_) => unreachable!("SignAndCombineEcdsa is not supported in tests"),
+            UnionResponse::P2pBroadcast(_) => unreachable!("P2pBroadcast is not supported in tests"),
+            UnionResponse::P2pCollectFromLeader(_) => unreachable!("P2pCollectFromLeader is not supported in tests"),
+            UnionResponse::IsLeader(_) => unreachable!("IsLeader is not supported in tests"),
+            UnionResponse::DecryptToSingleNode(_) => unreachable!("DecryptToSingleNode is not supported in tests"),
+            UnionResponse::SignAndCombine(_) => unreachable!("SignAndCombine is not supported in tests"),
         }
     }
 
