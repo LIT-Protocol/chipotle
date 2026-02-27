@@ -253,7 +253,7 @@ async fn lit_namespace_protection(mut client: TestClient) {
         run(() => delete globalThis.LitHeaders);
 
         run(() => delete Lit.Actions);
-        run(() => delete Lit.Actions.Sign);
+        run(() => delete Lit.Actions.signEcdsa);
         run(() => delete Lit.Headers);
 
         run(() => Lit = {});
