@@ -210,6 +210,7 @@ async fn op_aes_decrypt(
     #[string] public_key: String,
     #[string] ciphertext: String,
 ) -> Result<String, JsErrorBox> {
+    ensure_not_blank!(public_key, "publicKey");
     ensure_not_empty!(ciphertext);
 
     remote_op_async!(op_aes_decrypt,
