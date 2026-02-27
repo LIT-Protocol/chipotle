@@ -141,22 +141,25 @@ jobs:
             --cvm-id ${{ needs.determine-target.outputs.phala_app_name }} \
             --instance-type tdx.large
 
+  # Give the Phala CLI time to trigger the CVM restart and begin rebooting.
+  # Without this, the old instance may still be serving the API when wait-for-api-available
+  # starts polling, so we'd pass before the new deployment is actually live.
+  wait-after-deploy:
+    needs: [deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait after Phala deploy
+        run: sleep 30
+
   wait-for-api-available:
-    needs: [deploy, determine-runner, determine-target]
+    needs: [wait-after-deploy, determine-runner, determine-target]
     uses: ./.github/workflows/wait-for-api.yml
     with:
       base_url: ${{ needs.determine-target.outputs.base_url }}
       runner: ${{ needs.determine-runner.outputs.runner }}
 
-  wait-for-api-settled:
-    needs: [wait-for-api-available]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Wait for API warm-up
-        run: sleep 45
-
   openapi-spec-check:
-    needs: [wait-for-api-available, wait-for-api-settled, determine-runner]
+    needs: [wait-for-api-available, determine-runner]
     uses: ./.github/workflows/openapi-spec-check.yml
     with:
       base_url: ${{ needs.wait-for-api-available.outputs.base_url }}
