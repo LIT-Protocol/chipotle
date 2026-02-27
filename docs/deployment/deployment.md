@@ -55,6 +55,7 @@ flowchart TB
 
 | File | Purpose |
 |------|---------|
+| [requirements.md](requirements.md) | Verifiable clean bill of execution — requirements derived from implementation plan |
 | `.github/workflows/deploy-phala.yml` | GitHub Actions workflow |
 | `Dockerfile.phala` | Multi-stage build for both binaries |
 | `docker-compose.phala.yml` | Service definitions and shared socket volume |
