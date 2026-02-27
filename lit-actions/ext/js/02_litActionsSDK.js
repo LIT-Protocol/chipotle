@@ -244,7 +244,7 @@ function encrypt({
   accessControlConditions,
   to_encrypt,  
 }) {
-  return ops.op_encrypt_bls(accessControlConditions, to_encrypt);
+  return ops.op_encrypt_bls(accessControlConditions, to_encrypt, "");
 }
 
 /**
