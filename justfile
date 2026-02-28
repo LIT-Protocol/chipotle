@@ -98,6 +98,7 @@ ssh:
 #   just test                    # runs smoke
 #   just test integration        # runs integration suite
 #   just test sample             # runs k6-script.sample.ts
+#   just test ecdsa-sign         # runs lit-action-ecdsa-sign.spec.ts
 #   just test smoke integration  # runs both
 #   BASE_URL=.../core/v1 just test
 [group: 'test']
@@ -109,7 +110,8 @@ test *names='smoke':
         case "$t" in
             smoke)       k6 run k6/smoke.spec.ts ;;
             integration) k6 run k6/integration.spec.ts ;;
+            ecdsa-sign)  k6 run k6/lit-action-ecdsa-sign.spec.ts ;;
             sample)      k6 run k6/k6-script.sample.ts ;;
-            *) echo "error: unknown test '$t'. Available: smoke, integration, sample"; exit 1 ;;
+            *) echo "error: unknown test '$t'. Available: smoke, integration, ecdsa-sign, sample"; exit 1 ;;
         esac
     done

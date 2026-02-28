@@ -138,6 +138,16 @@ jobs:
     with:
       base_url: ${{ needs.wait-for-api.outputs.base_url }}
 
+  k6-lit-action-ecdsa-sign:
+    needs: [wait-for-api, k6-lit-action-get-public-key]
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/k6-lit-action-ecdsa-sign.yml
+    with:
+      base_url: ${{ needs.wait-for-api.outputs.base_url }}
+
+  # signAsAction is deprecated. The workflow inverts the k6 exit code so it
+  # succeeds when k6 fails (expected) and fails when k6 passes (unexpected).
+  # See: https://litprotocol.slack.com/archives/C0AG62JLYKS/p1772285399551879?thread_ts=1772254651.978569&cid=C0AG62JLYKS
   k6-lit-action-sign-as-action:
     needs: [wait-for-api, k6-lit-action-get-public-key]
     if: ${{ !cancelled() }}
@@ -145,9 +155,3 @@ jobs:
     with:
       base_url: ${{ needs.wait-for-api.outputs.base_url }}
 
-  k6-lit-action-verify-action-signature:
-    needs: [wait-for-api, k6-lit-action-sign-as-action]
-    if: ${{ !cancelled() }}
-    uses: ./.github/workflows/k6-lit-action-verify-action-signature.yml
-    with:
-      base_url: ${{ needs.wait-for-api.outputs.base_url }}

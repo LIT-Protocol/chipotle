@@ -1,9 +1,7 @@
-# Run lit-action-verify-action-signature.spec.ts.
+# Run lit-action-ecdsa-sign.spec.ts.
 # Called from Deploy to Phala CVM after wait-for-api, or manually via workflow_dispatch.
-#
-# Required vars: BASE_URL (for workflow_dispatch when base_url not passed)
 
-name: k6 Lit Action Verify Action Signature
+name: k6 Lit Action ECDSA Sign
 
 on:
   workflow_call:
@@ -15,12 +13,12 @@ on:
   workflow_dispatch:
     inputs:
       base_url:
-        description: "API base URL (optional; uses vars.BASE_URL when empty)"
+        description: "API base URL (optional; uses k6 spec fallback when empty)"
         required: false
         type: string
 
 jobs:
-  k6-lit-action-verify-action-signature:
+  k6-lit-action-ecdsa-sign:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +26,7 @@ jobs:
       - name: Install k6
         uses: grafana/setup-k6-action@v1
 
-      - name: lit-action-verify-action-signature.spec.ts
+      - name: lit-action-ecdsa-sign.spec.ts
         env:
-          BASE_URL: ${{ inputs.base_url || vars.BASE_URL }}
-        run: k6 run k6/lit-action-verify-action-signature.spec.ts
+          BASE_URL: ${{ inputs.base_url }}
+        run: k6 run k6/lit-action-ecdsa-sign.spec.ts
