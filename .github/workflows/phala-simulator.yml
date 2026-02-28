@@ -36,30 +36,57 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── 1. Build the dstack simulator and verifier ────────────────────────
-      # /tmp/dstack is a shared cache on self-hosted runners; multiple jobs
-      # share the built binaries but each run gets its own socket temp dir.
-      - name: Clone dstack repository
+      # ── 1. Build the dstack simulator and verifier (cached by upstream SHA) ─
+      # The cache key is the dstack HEAD SHA — obtained without cloning via
+      # git ls-remote. On cache hit the clone and both cargo/build.sh builds
+      # are skipped entirely; the binaries and runtime data files are restored
+      # directly to /tmp/dstack-cache/ and used as-is.
+      - name: Get dstack HEAD SHA
+        id: dstack-sha
         run: |
-          git config --global --add safe.directory /tmp/dstack
-          RUNNER_GROUP=runners
-          if [ -d /tmp/dstack/.git ]; then
-            cd /tmp/dstack && git fetch --depth 1 origin && git reset --hard FETCH_HEAD
-          else
-            git clone --depth 1 https://github.com/Dstack-TEE/dstack.git /tmp/dstack
-            chgrp -R "$RUNNER_GROUP" /tmp/dstack
-            chmod -R g+rwx /tmp/dstack
-          fi
+          SHA=$(git ls-remote https://github.com/Dstack-TEE/dstack.git HEAD | cut -f1)
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Restore dstack cache
+        id: dstack-cache
+        uses: actions/cache@v4
+        with:
+          path: /tmp/dstack-cache
+          key: dstack-${{ steps.dstack-sha.outputs.sha }}-${{ runner.os }}
+
+      - name: Clone dstack repository
+        if: steps.dstack-cache.outputs.cache-hit != 'true'
+        run: git clone --depth 1 https://github.com/Dstack-TEE/dstack.git /tmp/dstack
 
       # Use stable Rust for the dstack build (it may require features newer than 1.91).
       - name: Install Rust (stable, for dstack)
+        if: steps.dstack-cache.outputs.cache-hit != 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build dstack simulator
+        if: steps.dstack-cache.outputs.cache-hit != 'true'
         run: cd /tmp/dstack/sdk/simulator && bash build.sh
 
       - name: Build dstack-verifier
+        if: steps.dstack-cache.outputs.cache-hit != 'true'
         run: cargo build --manifest-path=/tmp/dstack/verifier/Cargo.toml --bin dstack-verifier
+
+      - name: Populate dstack cache
+        if: steps.dstack-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/dstack-cache/simulator /tmp/dstack-cache/verifier
+          # Simulator: binary + data files read via relative paths at runtime
+          cp /tmp/dstack/sdk/simulator/dstack-simulator \
+             /tmp/dstack/sdk/simulator/appkeys.json \
+             /tmp/dstack/sdk/simulator/app-compose.json \
+             /tmp/dstack/sdk/simulator/sys-config.json \
+             /tmp/dstack/sdk/simulator/attestation.bin \
+             /tmp/dstack/sdk/simulator/dstack.toml \
+             /tmp/dstack-cache/simulator/
+          # Verifier: binary + config
+          cp /tmp/dstack/target/debug/dstack-verifier \
+             /tmp/dstack/verifier/dstack-verifier.toml \
+             /tmp/dstack-cache/verifier/
 
       # Switch to the pinned toolchain the project declares in rust-toolchain.toml.
       - name: Install Rust 1.91 (lit-api-server toolchain)
@@ -80,7 +107,7 @@ jobs:
       - name: Run phala simulator tests
         run: |
           set -eu
-          SIM_SRC=/tmp/dstack/sdk/simulator
+          SIM_SRC=/tmp/dstack-cache/simulator
 
           # Create an isolated temp dir for this run's sockets and data files.
           SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
@@ -127,9 +154,9 @@ jobs:
       - name: Verify attestation pipeline with dstack-verifier
         run: |
           set -eu
-          SIM_SRC=/tmp/dstack/sdk/simulator
-          VERIFIER_BIN=/tmp/dstack/target/debug/dstack-verifier
-          VERIFIER_CFG=/tmp/dstack/verifier/dstack-verifier.toml
+          SIM_SRC=/tmp/dstack-cache/simulator
+          VERIFIER_BIN=/tmp/dstack-cache/verifier/dstack-verifier
+          VERIFIER_CFG=/tmp/dstack-cache/verifier/dstack-verifier.toml
 
           SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
           SIM_SOCK="$SIM_TMP/dstack.sock"
