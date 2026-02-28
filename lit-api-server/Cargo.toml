@@ -53,7 +53,7 @@ serde_bare = "0.1"
 rocket = { version = "0.5.1", features = ["json"] }
 rocket_responder = "0.1.0"
 rocket_cors = { version = "0.6.0" }
-reqwest = "0.12.10"
+reqwest = { version = "0.12.10", features = ["json"] }
 tracing = "0.1"
 toml_edit = "0.22"
 tokio = { version = "1", features = ["full"] }

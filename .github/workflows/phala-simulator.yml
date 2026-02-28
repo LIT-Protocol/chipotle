@@ -1,0 +1,85 @@
+# Phala / dstack simulator validation
+#
+# Builds the dstack guest-agent from source, runs it as a local simulator,
+# and exercises the phala::v1::dstack integration tests against it.
+#
+# This job gates Phase 1 Workflow A: attestation mechanism (FR-2.5).
+# It runs on every push and pull_request so simulator regressions are caught early.
+#
+# The simulator is the dstack-guest-agent binary from Dstack-TEE/dstack, symlinked
+# as dstack-simulator. It creates Unix sockets (dstack.sock, tappd.sock, …) that
+# replace /var/run/dstack.sock in non-CVM environments.
+# DSTACK_SIMULATOR_ENDPOINT is set to the absolute path of dstack.sock so the
+# dstack client in dstack.rs transparently uses it instead of the CVM socket.
+
+name: Phala Simulator Validation
+
+on:
+  push:
+    branches: [main, "feature/phala_trust_chain"]
+  pull_request:
+
+concurrency:
+  group: phala-simulator-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  simulator:
+    name: dstack simulator attestation
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── 1. Build the dstack simulator ─────────────────────────────────────
+      - name: Clone dstack repository
+        run: git clone --depth 1 https://github.com/Dstack-TEE/dstack.git /tmp/dstack
+
+      # Use stable Rust for the dstack build (it may require features newer than 1.91).
+      - name: Install Rust (stable, for dstack)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache dstack build
+        uses: actions/cache@v4
+        with:
+          path: /tmp/dstack/target
+          key: dstack-simulator-${{ runner.os }}-${{ hashFiles('/tmp/dstack/Cargo.lock') }}
+          restore-keys: dstack-simulator-${{ runner.os }}-
+
+      - name: Build dstack simulator
+        run: cd /tmp/dstack/sdk/simulator && bash build.sh
+
+      # ── 2. Start the simulator ────────────────────────────────────────────
+      - name: Start dstack simulator
+        run: |
+          cd /tmp/dstack/sdk/simulator
+          ./dstack-simulator &
+          echo "Waiting for dstack.sock..."
+          for i in $(seq 1 15); do
+            [ -S /tmp/dstack/sdk/simulator/dstack.sock ] && echo "Socket ready." && break
+            echo "  attempt $i/15…"
+            sleep 1
+          done
+          [ -S /tmp/dstack/sdk/simulator/dstack.sock ] || { echo "ERROR: dstack.sock never appeared"; exit 1; }
+
+      # ── 3. Build and test lit-api-server against the simulator ────────────
+      # Switch to the pinned toolchain the project declares in rust-toolchain.toml.
+      - name: Install Rust 1.91 (lit-api-server toolchain)
+        uses: dtolnay/rust-toolchain@1.91
+
+      - name: Install protobuf-compiler
+        run: |
+          for i in 1 2 3 4 5; do
+            sudo apt-get update -qq && sudo apt-get install -y protobuf-compiler && break
+            echo "apt lock held, waiting 10s (attempt $i/5)…"
+            sleep 10
+          done
+
+      - name: Run phala simulator tests
+        env:
+          DSTACK_SIMULATOR_ENDPOINT: /tmp/dstack/sdk/simulator/dstack.sock
+        working-directory: lit-api-server
+        run: |
+          cargo test --features phala \
+            -- phala::v1::dstack::tests \
+            --nocapture
