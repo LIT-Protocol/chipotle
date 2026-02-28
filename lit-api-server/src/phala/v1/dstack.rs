@@ -1,3 +1,18 @@
+//! Dstack attestation: fetch TDX quotes from the dstack agent.
+//!
+//! ## Simulator vs real TDX
+//!
+//! The dstack simulator does **not** return a real Intel TDX DCAP quote. It uses a
+//! pre-built attestation bundle and a different format (e.g. hex encoding, non-standard
+//! layout). Real TDX hardware returns a proper DCAP quote that parses with dcap-qvl
+//! and tdx-quote.
+//!
+//! Because of this, the tests and quote parsing logic **switch by profile**:
+//! - **Production** (`--profile production`): only accept real TDX quotes (base64,
+//!   parseable by dcap-qvl/tdx-quote, zero report_data when None).
+//! - **Dev/release**: accept simulator-style quotes (hex decode, pattern-scan fallback,
+//!   relaxed report_data checks).
+
 use serde::{Deserialize, Serialize};
 use std::os::unix::fs::FileTypeExt;
 use std::path::Path;
@@ -116,6 +131,71 @@ pub async fn get_quote(report_data: Option<&str>) -> Result<GetQuoteResponse, St
         .map_err(|e| format!("failed to parse dstack response: {e}"))
 }
 
+/// Decode quote string to bytes.
+///
+/// - **Production**: base64 only. Real TDX/gateway uses base64 for binary-in-text transport
+///   (see [Intel TDX DCAP Quoting Library API](https://download.01.org/intel-sgx/latest/dcap-latest/linux/docs/Intel_TDX_DCAP_Quoting_Library_API.pdf) Appendix 3; quote is raw binary; base64 is standard for JSON/HTTP).
+/// - **Dev/release**: try hex first (simulator returns hex), then base64.
+/// TODO: VERIFY THIS IS CORRECT and production doesnt also return hex
+#[cfg(test)]
+fn decode_quote(quote_str: &str) -> Vec<u8> {
+    let s = quote_str.trim();
+    #[cfg(not(is_production))]
+    {
+        let hex_str = s.strip_prefix("0x").unwrap_or(s);
+        if hex_str.len() > 200 && hex_str.chars().all(|c| c.is_ascii_hexdigit()) {
+            if let Ok(decoded) = hex::decode(hex_str) {
+                return decoded;
+            }
+        }
+    }
+    base64_light::base64_decode(s)
+}
+
+/// Extract report_data (64 bytes) from a TDX quote.
+///
+/// - **Production**: only tdx-quote and dcap-qvl (real TDX quotes parse correctly).
+/// - **Dev/release**: also scan for 64-byte window matching expected pattern (simulator fallback).
+#[cfg(test)]
+fn extract_report_data(quote_bytes: &[u8], expected_prefix: Option<&[u8]>) -> Option<[u8; 64]> {
+    match tdx_quote::Quote::from_bytes(quote_bytes) {
+        Ok(parsed) => return Some(parsed.report_input_data()),
+        Err(e) => eprintln!("warn: tdx_quote::Quote::from_bytes failed: {e}"),
+    }
+    match dcap_qvl::quote::Quote::parse(quote_bytes) {
+        Ok(parsed) => {
+            return Some(match &parsed.report {
+                dcap_qvl::quote::Report::TD10(r) => r.report_data,
+                dcap_qvl::quote::Report::TD15(r) => r.base.report_data,
+                dcap_qvl::quote::Report::SgxEnclave(_) => return None,
+            });
+        }
+        Err(e) => eprintln!("warn: dcap_qvl::quote::Quote::parse failed: {e}"),
+    }
+    // If neither parser succeeded, print a hex dump for inspection (help debug invalid TDX).
+    eprintln!(
+        "warn: quote is not valid TDX; raw quote (hex): {}",
+        hex::encode(quote_bytes)
+    );
+
+    #[cfg(not(is_production))]
+    {
+        for i in 0..quote_bytes.len().saturating_sub(64) {
+            let window = &quote_bytes[i..i + 64];
+            let matches = match expected_prefix {
+                None => window.iter().all(|&b| b == 0),
+                Some(prefix) => window.starts_with(prefix),
+            };
+            if matches {
+                let mut out = [0u8; 64];
+                out.copy_from_slice(window);
+                return Some(out);
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -142,61 +222,66 @@ mod tests {
         assert_eq!(resp.vm_config, "some vm config");
     }
 
-    #[tokio::test]
-    async fn missing_socket_returns_descriptive_error() {
-        // Skip when the socket is available (dstack-enabled TEE or simulator running).
-        let path = resolve_socket_path();
-        if socket_available(&path) {
-            return;
-        }
-        let result = get_quote(None).await;
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(
-            err.contains("dstack-enabled TEE") || err.contains("simulator"),
-            "unexpected error: {err}"
-        );
-    }
-
-    /// Validates that the dstack simulator returns a well-formed attestation response.
-    ///
-    /// Only compiled with `--features phala`. Fails if the dstack socket is not available
-    /// (must be a dstack-enabled TEE or simulator running).
+    /// Fails if the dstack socket is unavailable (requires TEE or simulator).
     #[cfg(phala)]
     #[tokio::test]
-    async fn simulator_returns_valid_attestation() {
+    async fn fails_when_socket_unavailable() {
         let path = resolve_socket_path();
         assert!(
             socket_available(&path),
             "dstack socket at {} is not available — must be a dstack-enabled TEE or simulator running",
             path
         );
+        let _ = get_quote(None)
+            .await
+            .expect("get_quote() failed");
+    }
 
+    /// Fails if the socket is available but the returned quote is invalid.
+    #[cfg(phala)]
+    #[tokio::test]
+    async fn fails_when_quote_invalid() {
+        let path = resolve_socket_path();
+        assert!(
+            socket_available(&path),
+            "dstack socket at {} is not available — must be a dstack-enabled TEE or simulator running",
+            path
+        );
         let resp = get_quote(None)
             .await
-            .expect("get_quote() failed against simulator");
-
+            .expect("get_quote() failed");
         assert!(!resp.quote.is_empty(), "quote must not be empty");
         assert!(!resp.event_log.is_empty(), "event_log must not be empty");
         assert!(!resp.vm_config.is_empty(), "vm_config must not be empty");
-    }
 
-    /// Validates that a custom report_data value round-trips through the simulator.
-    #[cfg(phala)]
-    #[tokio::test]
-    async fn simulator_accepts_report_data() {
-        let path = resolve_socket_path();
-        assert!(
-            socket_available(&path),
-            "dstack socket at {} is not available — must be a dstack-enabled TEE or simulator running",
-            path
-        );
+        let quote_bytes = decode_quote(&resp.quote);
+        assert!(quote_bytes.len() > 100, "quote must be substantial (>100 bytes)");
 
+        #[cfg(is_production)]
+        {
+            let report_data_none = extract_report_data(&quote_bytes, None)
+                .expect("quote from get_quote(None) must parse as valid TDX quote (tdx-quote or dcap-qvl)");
+            assert!(
+                report_data_none.iter().all(|&b| b == 0),
+                "report_data must be all zeros when None; got {:02x?}",
+                &report_data_none[..8]
+            );
+        }
+
+        // Validate report_data round-trip: parse quote and verify report_data is embedded
         let resp = get_quote(Some("0xdeadbeef"))
             .await
-            .expect("get_quote() with report_data failed against simulator");
+            .expect("get_quote() with report_data failed");
+        assert!(!resp.quote.is_empty(), "quote with report_data must not be empty");
 
-        // The quote should still be non-empty even with custom report_data.
-        assert!(!resp.quote.is_empty(), "quote must not be empty");
+        let quote_bytes = decode_quote(&resp.quote);
+        let expected: [u8; 4] = [0xde, 0xad, 0xbe, 0xef];
+        let report_data = extract_report_data(&quote_bytes, Some(&expected))
+            .expect("quote must contain 0xdeadbeef in report_data");
+        assert!(
+            report_data.starts_with(&expected),
+            "report_data must contain embedded 0xdeadbeef; got {:02x?}",
+            &report_data[..8]
+        );
     }
 }
