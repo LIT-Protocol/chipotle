@@ -270,7 +270,9 @@ sim-test: sim-build
 
 # Get a live quote from the simulator, POST it to dstack-verifier, and assert quote_verified=true.
 # Builds both the simulator and verifier if needed.
-# Note: is_valid may be false in offline environments (OS image download requires internet access).
+# Note: is_valid will be false for the simulator — its attestation.bin uses a synthetic OS image
+# hash that is not published on download.dstack.org. This is expected; quote_verified=true is the
+# meaningful assertion (it confirms the full get_quote() → verify pipeline is wired correctly).
 [group: 'sim']
 sim-verify: sim-build verifier-build
     #!/usr/bin/env sh
@@ -354,6 +356,6 @@ sim-verify: sim-build verifier-build
     rm -rf "$SIM_TMP"
 
     # quote_verified must be true — this validates the full attestation pipeline.
-    # is_valid may be false in offline environments (OS image download not available).
+    # is_valid will be false for the simulator (synthetic OS image hash not on download.dstack.org).
     [ "$QUOTE_OK" = "true" ] || { echo "error: quote_verified=false — attestation pipeline is broken"; exit 1; }
     echo "Attestation pipeline verified: quote_verified=true."

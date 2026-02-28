@@ -3,7 +3,13 @@
 # Builds the dstack guest-agent from source, runs it as a local simulator,
 # and exercises the phala::v1::dstack integration tests against it.
 # Then runs the dstack-verifier against a live simulator quote to confirm
-# the end-to-end attestation pipeline: get_quote() → dstack-verifier → is_valid.
+# that quote_verified=true — validating the get_quote() → dstack-verifier pipeline.
+#
+# Note on is_valid: the simulator's attestation.bin contains a synthetic OS image
+# hash that is not published on download.dstack.org, so os_image_hash_verified and
+# is_valid will always be false with the simulator. This is expected: the simulator
+# is a developer tool for testing the attestation API, not a real TDX environment.
+# We assert only quote_verified=true, which proves the pipeline is wired correctly.
 #
 # This job gates Phase 1 Workflow A: attestation mechanism (FR-2.5).
 # It runs on every push and pull_request so simulator regressions are caught early.
@@ -117,7 +123,8 @@ jobs:
       # Start a fresh simulator instance and the dstack-verifier HTTP server.
       # Get a live quote from the simulator, POST it to the verifier, and assert
       # that quote_verified=true — confirming the attestation pipeline is intact.
-      # is_valid may be false (OS image download unavailable in CI), which is expected.
+      # is_valid will be false (the simulator's attestation.bin uses a synthetic OS
+      # image hash not published on download.dstack.org) — that is expected.
       - name: Verify attestation pipeline with dstack-verifier
         run: |
           set -eu
@@ -210,7 +217,7 @@ jobs:
           rm -rf "$SIM_TMP"
 
           # Assertion: quote_verified must be true.
-          # is_valid may be false (OS image download unavailable in CI) — that is expected.
+          # is_valid will be false (simulator uses a synthetic OS image hash not on download.dstack.org) — expected.
           [ "$QUOTE_OK" = "true" ] || {
             echo "ERROR: quote_verified=false — attestation pipeline is broken"
             exit 1
