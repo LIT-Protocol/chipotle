@@ -29,7 +29,9 @@ async fn main() -> Result<(), rocket::Error> {
     setup_tracing().expect("Failed to setup tracing.");
 
     if !cfg!(is_production) {
-        tracing::warn!("THIS IS INSECURE! Using non-production profile; lit-api-server was not built with `cargo build-production`");
+        tracing::warn!(
+            "THIS IS INSECURE! Using non-production profile; lit-api-server was not built with `cargo build-production`"
+        );
     }
 
     if let Err(e) = config::init_config() {

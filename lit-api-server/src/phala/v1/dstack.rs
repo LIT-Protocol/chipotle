@@ -232,9 +232,7 @@ mod tests {
             "dstack socket at {} is not available — must be a dstack-enabled TEE or simulator running",
             path
         );
-        let _ = get_quote(None)
-            .await
-            .expect("get_quote() failed");
+        let _ = get_quote(None).await.expect("get_quote() failed");
     }
 
     /// Fails if the socket is available but the returned quote is invalid.
@@ -247,20 +245,22 @@ mod tests {
             "dstack socket at {} is not available — must be a dstack-enabled TEE or simulator running",
             path
         );
-        let resp = get_quote(None)
-            .await
-            .expect("get_quote() failed");
+        let resp = get_quote(None).await.expect("get_quote() failed");
         assert!(!resp.quote.is_empty(), "quote must not be empty");
         assert!(!resp.event_log.is_empty(), "event_log must not be empty");
         assert!(!resp.vm_config.is_empty(), "vm_config must not be empty");
 
         let quote_bytes = decode_quote(&resp.quote);
-        assert!(quote_bytes.len() > 100, "quote must be substantial (>100 bytes)");
+        assert!(
+            quote_bytes.len() > 100,
+            "quote must be substantial (>100 bytes)"
+        );
 
         #[cfg(is_production)]
         {
-            let report_data_none = extract_report_data(&quote_bytes, None)
-                .expect("quote from get_quote(None) must parse as valid TDX quote (tdx-quote or dcap-qvl)");
+            let report_data_none = extract_report_data(&quote_bytes, None).expect(
+                "quote from get_quote(None) must parse as valid TDX quote (tdx-quote or dcap-qvl)",
+            );
             assert!(
                 report_data_none.iter().all(|&b| b == 0),
                 "report_data must be all zeros when None; got {:02x?}",
@@ -272,7 +272,10 @@ mod tests {
         let resp = get_quote(Some("0xdeadbeef"))
             .await
             .expect("get_quote() with report_data failed");
-        assert!(!resp.quote.is_empty(), "quote with report_data must not be empty");
+        assert!(
+            !resp.quote.is_empty(),
+            "quote with report_data must not be empty"
+        );
 
         let quote_bytes = decode_quote(&resp.quote);
         let expected: [u8; 4] = [0xde, 0xad, 0xbe, 0xef];
