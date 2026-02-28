@@ -56,7 +56,10 @@ jobs:
 
       - name: Clone dstack repository
         if: steps.dstack-cache.outputs.cache-hit != 'true'
-        run: git clone --depth 1 https://github.com/Dstack-TEE/dstack.git /tmp/dstack
+        run: |
+          DSTACK_BUILD=$(mktemp -d)
+          echo "DSTACK_BUILD=$DSTACK_BUILD" >> "$GITHUB_ENV"
+          git clone --depth 1 https://github.com/Dstack-TEE/dstack.git "$DSTACK_BUILD"
 
       # Use stable Rust for the dstack build (it may require features newer than 1.91).
       - name: Install Rust (stable, for dstack)
@@ -65,28 +68,32 @@ jobs:
 
       - name: Build dstack simulator
         if: steps.dstack-cache.outputs.cache-hit != 'true'
-        run: cd /tmp/dstack/sdk/simulator && bash build.sh
+        run: cd "$DSTACK_BUILD/sdk/simulator" && bash build.sh
 
       - name: Build dstack-verifier
         if: steps.dstack-cache.outputs.cache-hit != 'true'
-        run: cargo build --manifest-path=/tmp/dstack/verifier/Cargo.toml --bin dstack-verifier
+        run: cargo build --manifest-path="$DSTACK_BUILD/verifier/Cargo.toml" --bin dstack-verifier
 
       - name: Populate dstack cache
         if: steps.dstack-cache.outputs.cache-hit != 'true'
         run: |
           mkdir -p /tmp/dstack-cache/simulator /tmp/dstack-cache/verifier
           # Simulator: binary + data files read via relative paths at runtime
-          cp /tmp/dstack/sdk/simulator/dstack-simulator \
-             /tmp/dstack/sdk/simulator/appkeys.json \
-             /tmp/dstack/sdk/simulator/app-compose.json \
-             /tmp/dstack/sdk/simulator/sys-config.json \
-             /tmp/dstack/sdk/simulator/attestation.bin \
-             /tmp/dstack/sdk/simulator/dstack.toml \
+          cp "$DSTACK_BUILD/sdk/simulator/dstack-simulator" \
+             "$DSTACK_BUILD/sdk/simulator/appkeys.json" \
+             "$DSTACK_BUILD/sdk/simulator/app-compose.json" \
+             "$DSTACK_BUILD/sdk/simulator/sys-config.json" \
+             "$DSTACK_BUILD/sdk/simulator/attestation.bin" \
+             "$DSTACK_BUILD/sdk/simulator/dstack.toml" \
              /tmp/dstack-cache/simulator/
           # Verifier: binary + config
-          cp /tmp/dstack/target/debug/dstack-verifier \
-             /tmp/dstack/verifier/dstack-verifier.toml \
+          cp "$DSTACK_BUILD/target/debug/dstack-verifier" \
+             "$DSTACK_BUILD/verifier/dstack-verifier.toml" \
              /tmp/dstack-cache/verifier/
+
+      - name: Remove dstack build directory
+        if: always() && env.DSTACK_BUILD != ''
+        run: rm -rf "$DSTACK_BUILD"
 
       # Switch to the pinned toolchain the project declares in rust-toolchain.toml.
       - name: Install Rust 1.91 (lit-api-server toolchain)
