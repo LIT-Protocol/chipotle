@@ -16,7 +16,7 @@ Each lit-api-server runs on a Phala CVM. **Automated verification** (company-run
 
 | Aspect | Development | Production |
 |--------|--------------|------------|
-| **Attestation** | Phala-hosted gateway `/.dstack/` (or dstack simulator for local) | Gateway `/.dstack/` (required ingress; assume it exists) |
+| **Attestation** | App exposes `/attestation` and `/info` (quote, event_log, vm_config, report_data, app_compose). Gateway cannot serve attestation—it must come from the application. |
 | **Gateway** | Phala Cloud (Phala-hosted) | Our own dstack-gateway instance (DSTACK; OK for production) |
 | **RoT / KMS** | `pcloud` (Cloud KMS; dev only) | **Onchain KMS on Base** (`derot`; DstackApp contract) or self-hosted |
 | **Verifier deps** | dcap-qvl, dstack-mr | dcap-qvl, dstack-mr (no Phala Cloud API) |
@@ -25,7 +25,7 @@ Each lit-api-server runs on a Phala CVM. **Automated verification** (company-run
 
 **Custom domain in production** = running our own gateway instance. The gateway is part of DSTACK; it is OK to depend on DSTACK in production.
 
-**Gateway is required ingress** in DeRoT production. We assume the gateway exists and thus the `/.dstack/` API endpoints on the gateway exist. No need to implement a separate app attestation endpoint for production—use gateway `/.dstack/`.
+**Gateway is required ingress** in DeRoT production. The gateway handles TLS and routing but **cannot serve attestation** (quote, event_log, vm_config, report_data)—per [Phala Get Attestation](https://docs.phala.com/phala-cloud/attestation/get-attestation), the application must expose `/attestation` and `/info` endpoints. The app fetches from the dstack socket and serves attestation for verifiers.
 
 ### Onchain KMS on Base (Production)
 
@@ -75,7 +75,7 @@ flowchart TB
 
 | Req | Task |
 |-----|------|
-| FR-1.1 | Expose attestation data (quote, event_log, vm_config). **Production (NFR-2)**: Gateway `/.dstack/` (required ingress; assume it exists). Trust Center is Phala-exclusive (dev only). |
+| FR-1.1 | Expose attestation data (quote, event_log, vm_config, report_data) via app endpoints. **lit-api-server** implements `/attestation` and `/info` per [Phala Get Attestation](https://docs.phala.com/phala-cloud/attestation/get-attestation). Gateway cannot serve attestation—it must come from the application. Trust Center is Phala-exclusive (dev only). |
 | FR-1.2 | Expose app_compose or compose-hash for code authentication, or document `--expected-compose-hash` fallback. |
 | FR-1.3 | Ensure verifier can perform verification when attestation is obtained via chosen mechanism. |
 
@@ -97,7 +97,7 @@ flowchart TB
 
 | Req | Task |
 |-----|------|
-| FR-4.1 | Verifier accepts attestation via base_url (gateway URL; fetches from `/.dstack/`) or directly (quote, event_log, app_compose, `--expected-compose-hash`). |
+| FR-4.1 | Verifier accepts attestation via base_url (app URL; fetches from `/attestation` and `/info`) or directly (quote, event_log, app_compose, `--expected-compose-hash`). |
 | FR-4.2 | Verifier implements ALL steps from [Complete Verification Checklist](https://docs.phala.com/phala-cloud/attestation/chain-of-trust#complete-verification-checklist). |
 | FR-4.3 | Support `--skip-*` flags for partial verification. |
 | FR-4.4 | Link to Trust Center in output (optional; dev/Phala Cloud only; omit for production per NFR-2). |
@@ -127,13 +127,19 @@ flowchart TB
 |-----|------|
 | DR-1.1, DR-1.2 | Use `@sha256:` digests in docker-compose; deploy workflow pins images by digest. |
 
+### DR-1b: Container Provenance (Sigstore)
+
+| Req | Task |
+|-----|------|
+| Image provenance | Add Sigstore signing to GitHub Actions container builds. Links image digests to source code via GitHub-endorsed builds. See [Phala: Verify Your Application — Image Provenance](https://docs.phala.com/phala-cloud/attestation/verify-your-application#image-provenance). |
+
 ### DR-2: Documentation
 
 | Req | Task |
 |-----|------|
 | DR-2.1 | Describe one-time CVM verification trust model. |
 | DR-2.2 | Document Complete Chain of Trust steps and how to run verifier. |
-| DR-2.3 | Reference attestation endpoints. Gateway `/.dstack/` is the attestation source; Trust Center optional (dev). |
+| DR-2.3 | Reference attestation endpoints. App `/attestation` and `/info` are the attestation source; Trust Center optional (dev). |
 | DR-2.4 | Stay in sync with Orchestration and DeRoT sections. |
 | DR-2.5 | Document custom domain setup (trust anchor, TLS passthrough). |
 | DR-2.6 | Document company verification repository: access, how outputs are published, how to interpret results. |
@@ -144,7 +150,7 @@ Each phase has its own plan with workflow details, files, and exit criteria. All
 
 | Phase | Plan | Goal |
 |-------|------|------|
-| **1** | [PLAN-phase-1.md](PLAN-phase-1.md) | Prerequisites & Configuration — attestation via gateway `/.dstack/` (assumed), digest pinning, **Onchain KMS on Base** (DstackApp; prod), Cloud KMS (dev). Custom domain deferred to Phase 4. |
+| **1** | [PLAN-phase-1.md](PLAN-phase-1.md) | Prerequisites & Configuration — app `/attestation` and `/info` endpoints, digest pinning, **Sigstore** for container provenance, **Onchain KMS on Base** (DstackApp; prod), Cloud KMS (dev). Custom domain deferred to Phase 4. |
 | **2** | [PLAN-phase-2.md](PLAN-phase-2.md) | Verifier Crate — based on dstack-verifier (Dstack-TEE/dstack); extend VR-3, VR-4 (incl. DstackApp/DstackKms on Base) |
 | **3** | [PLAN-phase-3.md](PLAN-phase-3.md) | Verification Automation — dev + production deploy paths (Onchain KMS app creation) |
 | **4** | [PLAN-phase-4.md](PLAN-phase-4.md) | Documentation — dev vs production paths, Onchain KMS setup |
@@ -169,13 +175,14 @@ flowchart LR
 
 | File | Action | Requirements |
 |------|--------|--------------|
-| Gateway `/.dstack/` | Verify (dev: Phala gateway; local: simulator) | FR-1.1, FR-1.2 |
+| lit-api-server `/attestation`, `/info` | Implement — app must expose attestation; gateway cannot serve it | FR-1.1, FR-1.2 |
 | `verify-cvm/` (Rust crate) | Create — based on dstack-verifier; extend VR-3, VR-4 | FR-4, VR-1–VR-4 |
 | `verify-cvm/README.md` | Create | FR-4, DR-2.2 |
 | Deploy workflow(s) | Modify — add post-deploy verification + publish (dev: deploy-phala; prod: DeRoT/self-hosted when available) | FR-5.1, FR-5.4 |
 | Company verification repository | Create/configure | FR-5.2, FR-5.3 |
 | `docs/deployment/deployment.md` | Modify — One-Time CVM Verification, custom domain, verification repository | DR-2.1–DR-2.6 |
 | `docker-compose.phala.yml` or deploy workflow | Modify — pin images by digest | DR-1.1, DR-1.2 |
+| `.github/workflows/deploy-phala.yml` | Modify — add Sigstore signing for container provenance | DR-1b |
 
 ## Verification Flow Summary
 

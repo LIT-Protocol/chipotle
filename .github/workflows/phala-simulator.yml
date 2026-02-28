@@ -1,16 +1,21 @@
 # Phala / dstack simulator validation
 #
 # Builds the dstack guest-agent from source, runs it as a local simulator,
-# and exercises the phala::v1::dstack integration tests against it.
+# and exercises the dstack::v1::dstack integration tests against it.
+# Then runs the dstack-verifier against a live simulator quote to confirm
+# that quote_verified=true — validating the get_quote() → dstack-verifier pipeline.
+#
+# Note on is_valid: the simulator's attestation.bin contains a synthetic OS image
+# hash that is not published on download.dstack.org, so os_image_hash_verified and
+# is_valid will always be false with the simulator. This is expected: the simulator
+# is a developer tool for testing the attestation API, not a real TDX environment.
+# We assert only quote_verified=true, which proves the pipeline is wired correctly.
 #
 # This job gates Phase 1 Workflow A: attestation mechanism (FR-2.5).
 # It runs on every push and pull_request so simulator regressions are caught early.
 #
-# The simulator is the dstack-guest-agent binary from Dstack-TEE/dstack, symlinked
-# as dstack-simulator. It creates Unix sockets (dstack.sock, tappd.sock, …) that
-# replace /var/run/dstack.sock in non-CVM environments.
-# DSTACK_SOCKET is set to the absolute path of dstack.sock so the
-# dstack client in dstack.rs transparently uses it instead of the CVM socket.
+# Isolation: each run gets a unique mktemp dir for the simulator's sockets so
+# concurrent runners on the same self-hosted host do not conflict.
 
 name: Phala Simulator Validation
 
@@ -31,26 +36,75 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── 1. Build the dstack simulator ─────────────────────────────────────
-      # note: this is a shared resource for multiple runners on a shared host
-      - name: Clone dstack repository
+      # ── 1. Build the dstack simulator and verifier (cached by upstream SHA) ─
+      # The cache key is the dstack HEAD SHA — obtained without cloning via
+      # git ls-remote. On cache hit the clone and both cargo/build.sh builds
+      # are skipped entirely; the binaries and runtime data files are restored
+      # directly and used as-is. Cache is scoped by branch (base branch for PRs).
+      - name: Get dstack HEAD SHA
+        id: dstack-sha
         run: |
-          git config --global --add safe.directory /tmp/dstack
-          RUNNER_GROUP=runners
-          if [ -d /tmp/dstack/.git ]; then
-            cd /tmp/dstack && git fetch --depth 1 origin && git reset --hard FETCH_HEAD
-          else
-            git clone --depth 1 https://github.com/Dstack-TEE/dstack.git /tmp/dstack
-            chgrp -R "$RUNNER_GROUP" /tmp/dstack
-            chmod -R g+rwx /tmp/dstack
-          fi
+          SHA=$(git ls-remote https://github.com/Dstack-TEE/dstack.git HEAD | head -1 | cut -f1 | tr -d '[:space:]')
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Cache key: dstack-${SHA}-${{ runner.os }}"
+
+      - name: Restore dstack cache
+        id: dstack-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/dstack-cache
+          key: dstack-${{ steps.dstack-sha.outputs.sha }}-${{ runner.os }}
+
+      - name: Cache status
+        run: echo "cache-hit=${{ steps.dstack-cache.outputs.cache-hit }}"
+
+      - name: Fix dstack cache permissions
+        if: steps.dstack-cache.outputs.cache-hit == 'true'
+        run: |
+          CACHE_DIR="${{ github.workspace }}/dstack-cache"
+          [ -d "$CACHE_DIR" ] && chmod -R u+rwX "$CACHE_DIR" || true
+
+      - name: Clone dstack repository
+        if: steps.dstack-cache.outputs.cache-hit != 'true'
+        run: |
+          DSTACK_BUILD=$(mktemp -d)
+          echo "DSTACK_BUILD=$DSTACK_BUILD" >> "$GITHUB_ENV"
+          git clone --depth 1 https://github.com/Dstack-TEE/dstack.git "$DSTACK_BUILD"
 
       # Use stable Rust for the dstack build (it may require features newer than 1.91).
       - name: Install Rust (stable, for dstack)
+        if: steps.dstack-cache.outputs.cache-hit != 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build dstack simulator
-        run: cd /tmp/dstack/sdk/simulator && bash build.sh
+        if: steps.dstack-cache.outputs.cache-hit != 'true'
+        run: cd "$DSTACK_BUILD/sdk/simulator" && bash build.sh
+
+      - name: Build dstack-verifier
+        if: steps.dstack-cache.outputs.cache-hit != 'true'
+        run: cargo build --manifest-path="$DSTACK_BUILD/verifier/Cargo.toml" --bin dstack-verifier
+
+      - name: Populate dstack cache
+        if: steps.dstack-cache.outputs.cache-hit != 'true'
+        run: |
+          CACHE_DIR="${{ github.workspace }}/dstack-cache"
+          mkdir -p "$CACHE_DIR/simulator" "$CACHE_DIR/verifier"
+          # Simulator: binary + data files read via relative paths at runtime
+          cp "$DSTACK_BUILD/sdk/simulator/dstack-simulator" \
+             "$DSTACK_BUILD/sdk/simulator/appkeys.json" \
+             "$DSTACK_BUILD/sdk/simulator/app-compose.json" \
+             "$DSTACK_BUILD/sdk/simulator/sys-config.json" \
+             "$DSTACK_BUILD/sdk/simulator/attestation.bin" \
+             "$DSTACK_BUILD/sdk/simulator/dstack.toml" \
+             "$CACHE_DIR/simulator/"
+          # Verifier: binary + config
+          cp "$DSTACK_BUILD/target/debug/dstack-verifier" \
+             "$DSTACK_BUILD/verifier/dstack-verifier.toml" \
+             "$CACHE_DIR/verifier/"
+
+      - name: Remove dstack build directory
+        if: always() && env.DSTACK_BUILD != ''
+        run: rm -rf "$DSTACK_BUILD"
 
       # Switch to the pinned toolchain the project declares in rust-toolchain.toml.
       - name: Install Rust 1.91 (lit-api-server toolchain)
@@ -64,46 +118,152 @@ jobs:
             sleep 10
           done
 
-      # ── 2. Start simulator, run tests, cleanup ──────────────────────────────
+      # ── 2. Unique-socket simulator run, unit tests ──────────────────────────
+      # Each CI run creates a fresh mktemp dir for the simulator's sockets.
+      # This allows multiple runners on the same host to operate in parallel
+      # without competing for /tmp/dstack/sdk/simulator/dstack.sock.
       - name: Run phala simulator tests
         run: |
           set -eu
-          SIM_DIR=/tmp/dstack/sdk/simulator
-          SIM_SOCK="$SIM_DIR/dstack.sock"
+          SIM_SRC="${{ github.workspace }}/dstack-cache/simulator"
 
-          # Clean up any stale simulator from previous runs.
-          echo "Cleaning up stale simulator..."
-          pkill -f dstack-simulator 2>/dev/null || true
-          rm -f "$SIM_SOCK"
-          for i in $(seq 1 10); do
-            [ ! -S "$SIM_SOCK" ] && break
-            echo "  waiting for socket to disappear ($i/10)..."
-            sleep 1
-          done
-          [ ! -S "$SIM_SOCK" ] || { echo "ERROR: stale socket still present"; exit 1; }
+          # Create an isolated temp dir for this run's sockets and data files.
+          SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
+          SIM_SOCK="$SIM_TMP/dstack.sock"
 
-          # Start simulator.
-          echo "Starting dstack simulator..."
-          (cd "$SIM_DIR" && ./dstack-simulator > /tmp/dstack-simulator.log 2>&1) &
+          # Copy data files that the simulator reads via relative paths.
+          cp "$SIM_SRC/appkeys.json" "$SIM_SRC/app-compose.json" \
+             "$SIM_SRC/sys-config.json" "$SIM_SRC/attestation.bin" \
+             "$SIM_SRC/dstack.toml" "$SIM_TMP/"
+
+          # Start simulator; sockets are created relative to CWD ($SIM_TMP).
+          # exec replaces shell with simulator so SIM_PID refers to actual process (avoids zombies).
+          echo "Starting dstack simulator in $SIM_TMP..."
+          sh -c "cd '$SIM_TMP' && exec '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
           SIM_PID=$!
 
-          # Wait for socket to appear.
           for i in $(seq 1 15); do
             [ -S "$SIM_SOCK" ] && echo "Socket ready." && break
             echo "  waiting for dstack.sock ($i/15)..."
             sleep 1
           done
-          [ -S "$SIM_SOCK" ] || { echo "ERROR: dstack.sock never appeared"; cat /tmp/dstack-simulator.log; kill "$SIM_PID" 2>/dev/null || true; exit 1; }
+          [ -S "$SIM_SOCK" ] || {
+            echo "ERROR: dstack.sock never appeared"
+            cat "$SIM_TMP/dstack-simulator.log"
+            kill "$SIM_PID" 2>/dev/null || true
+            rm -rf "$SIM_TMP"
+            exit 1
+          }
 
-          # Run tests.
-          (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" cargo test --features phala -- phala::v1::dstack::tests --nocapture)
+          # Run the Rust unit tests against the simulator socket.
+          (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" cargo test --features phala -- dstack::v1::dstack::tests --nocapture)
           STATUS=$?
 
-          # Cleanup: stop simulator and wait for socket to disappear.
+          # Teardown.
           kill "$SIM_PID" 2>/dev/null || true
-          for i in $(seq 1 10); do
-            [ ! -S "$SIM_SOCK" ] && break
-            sleep 1
-          done
+          rm -rf "$SIM_TMP"
 
           exit "$STATUS"
+
+      - name: Build lit-api-server
+        run: cargo build --manifest-path=lit-api-server/Cargo.toml --features phala --bin lit-api-server
+
+      # ── 3. dstack-verifier end-to-end attestation pipeline ─────────────────
+      # Start simulator, start lit-api-server (attestation-only; fetches from simulator),
+      # get attestation from lit-api-server's /attestation endpoint, run dstack-verifier.
+      # Assert quote_verified=true; is_valid will be false (simulator uses a synthetic
+      # OS image hash not published on download.dstack.org) — that is expected.
+      - name: Verify attestation pipeline with dstack-verifier
+        run: |
+          set -eu
+          CACHE_DIR="${{ github.workspace }}/dstack-cache"
+          SIM_SRC="$CACHE_DIR/simulator"
+          VERIFIER_BIN="$CACHE_DIR/verifier/dstack-verifier"
+          VERIFIER_CFG="$CACHE_DIR/verifier/dstack-verifier.toml"
+          API_BIN="$(pwd)/lit-api-server/target/debug/lit-api-server"
+
+          SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
+          SIM_SOCK="$SIM_TMP/dstack.sock"
+
+          cp "$SIM_SRC/appkeys.json" "$SIM_SRC/app-compose.json" \
+             "$SIM_SRC/sys-config.json" "$SIM_SRC/attestation.bin" \
+             "$SIM_SRC/dstack.toml" "$SIM_TMP/"
+
+          # Start simulator (exec avoids zombie processes).
+          sh -c "cd '$SIM_TMP' && exec '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
+          SIM_PID=$!
+          for i in $(seq 1 15); do
+            [ -S "$SIM_SOCK" ] && break
+            echo "  waiting for simulator ($i/15)..."
+            sleep 1
+          done
+          [ -S "$SIM_SOCK" ] || {
+            echo "ERROR: dstack.sock never appeared"
+            cat "$SIM_TMP/dstack-simulator.log"
+            kill "$SIM_PID" 2>/dev/null || true
+            rm -rf "$SIM_TMP"
+            exit 1
+          }
+
+          # Copy demo config to checkout (NodeConfig.toml is gitignored); run from lit-api-server dir.
+          cp lit-api-server/NodeConfig.demo.toml lit-api-server/NodeConfig.toml
+          (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" "$API_BIN") >> "$SIM_TMP/lit-api-server.log" 2>&1 &
+          API_PID=$!
+          if ! kill -0 "$API_PID" 2>/dev/null; then
+            echo "ERROR: lit-api-server failed to start"
+            cat "$SIM_TMP/lit-api-server.log"
+            kill "$SIM_PID" 2>/dev/null || true
+            rm -rf "$SIM_TMP"
+            exit 1
+          fi
+
+          # Wait for /attestation to respond (up to 5 min).
+          for i in $(seq 1 300); do
+            if curl -sf http://localhost:8000/attestation >/dev/null 2>&1; then
+              echo "lit-api-server /attestation ready."
+              break
+            fi
+            echo "  waiting for lit-api-server ($i/300)..."
+            sleep 1
+          done
+          if ! curl -sf http://localhost:8000/attestation >/dev/null 2>&1; then
+            echo "ERROR: lit-api-server /attestation never responded"
+            cat "$SIM_TMP/lit-api-server.log"
+            kill "$SIM_PID" "$API_PID" 2>/dev/null || true
+            rm -rf "$SIM_TMP"
+            exit 1
+          fi
+
+          # Get attestation from lit-api-server (which got it from the simulator).
+          QUOTE_RESP=$(curl -sf http://localhost:8000/attestation)
+
+          # Teardown simulator and lit-api-server.
+          kill "$SIM_PID" "$API_PID" 2>/dev/null || true
+
+          # Write the verifier request: strip 0x prefix, set attestation=null.
+          VERIFY_FILE="$SIM_TMP/verify-request.json"
+          printf '%s' "$QUOTE_RESP" | python3 -c \
+            'import sys,json; d=json.load(sys.stdin); q=d["quote"]; q=q[2:] if q.startswith("0x") else q; print(json.dumps({"quote":q,"event_log":d["event_log"],"vm_config":d["vm_config"],"attestation":None}))' \
+            > "$VERIFY_FILE"
+
+          # Use workspace for verifier image cache (avoids /tmp permission denied on self-hosted).
+          VERIFIER_CFG_OVERRIDE="$SIM_TMP/verifier.toml"
+          sed "s|image_cache_dir = .*|image_cache_dir = \"${{ github.workspace }}/dstack-cache/verifier-image-cache\"|" "$VERIFIER_CFG" > "$VERIFIER_CFG_OVERRIDE"
+          mkdir -p "${{ github.workspace }}/dstack-cache/verifier-image-cache"
+
+          # Run verifier in oneshot mode. Exits 1 when is_valid=false (expected for
+          # the simulator) — ignore the exit code and check quote_verified directly.
+          "$VERIFIER_BIN" -c "$VERIFIER_CFG_OVERRIDE" --verify "$VERIFY_FILE" || true
+
+          # Assertion: quote_verified must be true.
+          RESULT_FILE="${VERIFY_FILE}.verification.json"
+          QUOTE_OK=$(python3 -c \
+            'import sys,json; v=json.load(open(sys.argv[1]))["details"]["quote_verified"]; print("true" if v else "false")' \
+            "$RESULT_FILE")
+          rm -rf "$SIM_TMP"
+
+          [ "$QUOTE_OK" = "true" ] || {
+            echo "ERROR: quote_verified=false — attestation pipeline is broken"
+            exit 1
+          }
+          echo "Attestation pipeline verified: quote_verified=true."

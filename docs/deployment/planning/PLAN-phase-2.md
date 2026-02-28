@@ -30,7 +30,7 @@ Build `verify-cvm` based on [dstack-verifier](https://github.com/Dstack-TEE/dsta
 ### Workflow A: dstack-verifier Integration
 
 - Add dstack-verifier as dependency (git submodule or `[git]` dep from Dstack-TEE/dstack)
-- Fetch attestation from `{base_url}/.dstack/` (or accept quote, event_log, app_compose directly)
+- Fetch attestation from `{base_url}/attestation` and `{base_url}/info` (or accept quote, event_log, app_compose directly)
 - Build `VerificationRequest` from fetched data; invoke `CvmVerifier::verify`
 - CLI wrapper: `verify-cvm --base-url URL` or `verify-cvm --verify report.json` (oneshot)
 - dstack-verifier already covers: quote verification (dcap-qvl), event log, OS image hash, TCB status, app_info (compose hash)

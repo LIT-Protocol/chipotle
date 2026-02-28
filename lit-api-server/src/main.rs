@@ -3,9 +3,9 @@ pub mod accounts;
 pub mod actions;
 pub mod config;
 pub mod core;
-pub mod error;
 #[cfg(phala)]
-pub mod phala;
+pub mod dstack;
+pub mod error;
 
 use crate::actions::grpc::GrpcClientPool;
 use moka::future::Cache;
@@ -111,7 +111,10 @@ async fn main() -> Result<(), rocket::Error> {
 
     #[cfg(phala)]
     {
-        r = r.mount("/phala/v1/", phala::v1::endpoints::routes());
+        // /attestation at root — per Phala Get Attestation
+        r = r
+            .mount("/", dstack::v1::endpoints::attestation_routes())
+            .mount("/dstack/v1/", dstack::v1::endpoints::routes());
     }
 
     r.launch().await?;

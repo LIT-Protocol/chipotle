@@ -33,6 +33,24 @@ pub struct GetQuoteResponse {
     pub vm_config: String,
 }
 
+/// Response from dstack `/Info` endpoint — per [dstack HTTP API](https://github.com/Dstack-TEE/dstack/blob/master/sdk/curl/api.md).
+/// Verifiers use `tcb_info.app_compose` and `compose_hash` for compose-hash verification.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct InfoResponse {
+    pub app_id: Option<String>,
+    pub instance_id: Option<String>,
+    pub app_cert: Option<String>,
+    pub tcb_info: Option<String>,
+    pub app_name: Option<String>,
+    pub device_id: Option<String>,
+    pub mr_aggregated: Option<String>,
+    pub os_image_hash: Option<String>,
+    pub key_provider_info: Option<String>,
+    pub compose_hash: Option<String>,
+    pub vm_config: Option<String>,
+}
+
 /// Returns the resolved socket path.
 ///
 /// - **Production profile** (`cargo build --profile production`): always
@@ -129,6 +147,60 @@ pub async fn get_quote(report_data: Option<&str>) -> Result<GetQuoteResponse, St
 
     serde_json::from_str::<GetQuoteResponse>(body_str)
         .map_err(|e| format!("failed to parse dstack response: {e}"))
+}
+
+/// Fetch worker info from the dstack agent.
+///
+/// Connects via the dstack Unix socket. Returns app_id, instance_id, tcb_info,
+/// compose_hash, etc. per [dstack HTTP API](https://github.com/Dstack-TEE/dstack/blob/master/sdk/curl/api.md).
+/// Verifiers use `tcb_info.app_compose` and `compose_hash` for compose-hash verification.
+pub async fn get_info() -> Result<InfoResponse, String> {
+    let socket_path = resolve_socket_path();
+
+    if !Path::new(&socket_path).exists() {
+        let hint = if socket_path == DSTACK_SOCKET_DEFAULT {
+            " — not running inside a dstack-enabled TEE; is the simulator running?"
+        } else {
+            " — simulator socket not found; is the simulator running?"
+        };
+        return Err(format!("dstack socket not found at {socket_path}{hint}"));
+    }
+
+    let request = "GET /Info HTTP/1.1\r\n\
+         Host: localhost\r\n\
+         Connection: close\r\n\
+         \r\n";
+
+    let mut stream = UnixStream::connect(&socket_path)
+        .await
+        .map_err(|e| format!("failed to connect to dstack socket at {socket_path}: {e}"))?;
+
+    stream
+        .write_all(request.as_bytes())
+        .await
+        .map_err(|e| format!("failed to write to dstack socket: {e}"))?;
+
+    stream
+        .shutdown()
+        .await
+        .map_err(|e| format!("failed to shutdown write half: {e}"))?;
+
+    let mut response = Vec::new();
+    stream
+        .read_to_end(&mut response)
+        .await
+        .map_err(|e| format!("failed to read dstack response: {e}"))?;
+
+    let response_str =
+        String::from_utf8(response).map_err(|e| format!("invalid UTF-8 in response: {e}"))?;
+
+    let body_str = response_str
+        .split_once("\r\n\r\n")
+        .map(|(_, b)| b)
+        .unwrap_or(&response_str);
+
+    serde_json::from_str::<InfoResponse>(body_str)
+        .map_err(|e| format!("failed to parse dstack info response: {e}"))
 }
 
 /// Decode quote string to bytes.
