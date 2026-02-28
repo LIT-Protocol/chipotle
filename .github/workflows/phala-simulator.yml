@@ -36,11 +36,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Cache path under workspace to avoid /tmp permission issues on self-hosted runners.
+      - name: Set dstack cache path
+        id: cache-path
+        run: echo "path=${{ github.workspace }}/../dstack-cache" >> "$GITHUB_OUTPUT"
+
       # ── 1. Build the dstack simulator and verifier (cached by upstream SHA) ─
       # The cache key is the dstack HEAD SHA — obtained without cloning via
       # git ls-remote. On cache hit the clone and both cargo/build.sh builds
       # are skipped entirely; the binaries and runtime data files are restored
-      # directly to /tmp/dstack-cache/ and used as-is.
+      # directly and used as-is. restore-keys provides fallback when dstack HEAD changes.
       - name: Get dstack HEAD SHA
         id: dstack-sha
         run: |
@@ -51,7 +56,7 @@ jobs:
         id: dstack-cache
         uses: actions/cache@v4
         with:
-          path: /tmp/dstack-cache
+          path: ${{ steps.cache-path.outputs.path }}
           key: dstack-${{ steps.dstack-sha.outputs.sha }}-${{ runner.os }}
 
       - name: Clone dstack repository
@@ -77,7 +82,8 @@ jobs:
       - name: Populate dstack cache
         if: steps.dstack-cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p /tmp/dstack-cache/simulator /tmp/dstack-cache/verifier
+          CACHE_DIR="${{ steps.cache-path.outputs.path }}"
+          mkdir -p "$CACHE_DIR/simulator" "$CACHE_DIR/verifier"
           # Simulator: binary + data files read via relative paths at runtime
           cp "$DSTACK_BUILD/sdk/simulator/dstack-simulator" \
              "$DSTACK_BUILD/sdk/simulator/appkeys.json" \
@@ -85,11 +91,11 @@ jobs:
              "$DSTACK_BUILD/sdk/simulator/sys-config.json" \
              "$DSTACK_BUILD/sdk/simulator/attestation.bin" \
              "$DSTACK_BUILD/sdk/simulator/dstack.toml" \
-             /tmp/dstack-cache/simulator/
+             "$CACHE_DIR/simulator/"
           # Verifier: binary + config
           cp "$DSTACK_BUILD/target/debug/dstack-verifier" \
              "$DSTACK_BUILD/verifier/dstack-verifier.toml" \
-             /tmp/dstack-cache/verifier/
+             "$CACHE_DIR/verifier/"
 
       - name: Remove dstack build directory
         if: always() && env.DSTACK_BUILD != ''
@@ -114,7 +120,7 @@ jobs:
       - name: Run phala simulator tests
         run: |
           set -eu
-          SIM_SRC=/tmp/dstack-cache/simulator
+          SIM_SRC="${{ steps.cache-path.outputs.path }}/simulator"
 
           # Create an isolated temp dir for this run's sockets and data files.
           SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
@@ -164,9 +170,10 @@ jobs:
       - name: Verify attestation pipeline with dstack-verifier
         run: |
           set -eu
-          SIM_SRC=/tmp/dstack-cache/simulator
-          VERIFIER_BIN=/tmp/dstack-cache/verifier/dstack-verifier
-          VERIFIER_CFG=/tmp/dstack-cache/verifier/dstack-verifier.toml
+          CACHE_DIR="${{ steps.cache-path.outputs.path }}"
+          SIM_SRC="$CACHE_DIR/simulator"
+          VERIFIER_BIN="$CACHE_DIR/verifier/dstack-verifier"
+          VERIFIER_CFG="$CACHE_DIR/verifier/dstack-verifier.toml"
           API_BIN="$(pwd)/lit-api-server/target/debug/lit-api-server"
 
           SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
