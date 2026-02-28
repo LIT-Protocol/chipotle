@@ -30,6 +30,14 @@ api-server:
 clean:
     cargo clean --manifest-path=lit-actions/Cargo.toml
     cargo clean --manifest-path=lit-api-server/Cargo.toml
+
+[group: 'build']
+fmt:
+    #!/usr/bin/env sh
+    set -eu
+    find . -name Cargo.toml -not -path './.claude/*' -not -path '*node_modules*' | while read f; do
+        cargo fmt --manifest-path="$f" --all
+    done
 # Install Phala CLI (optional; run before first deploy)
 
 [group: 'deploy']
