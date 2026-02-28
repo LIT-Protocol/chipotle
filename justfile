@@ -315,11 +315,11 @@ sim-verify: sim-build verifier-build api-server
         exit 1
     }
 
-    # Start lit-api-server with demo config; it fetches attestation from the simulator.
-    cp "$PROJECT_ROOT/lit-api-server/NodeConfig.demo.toml" "$SIM_TMP/NodeConfig.toml"
+    # Copy demo config to checkout (NodeConfig.toml is gitignored); run from lit-api-server dir.
+    cp "$PROJECT_ROOT/lit-api-server/NodeConfig.demo.toml" "$PROJECT_ROOT/lit-api-server/NodeConfig.toml"
+    API_BIN="$PROJECT_ROOT/lit-api-server/target/debug/lit-api-server"
     echo "Starting lit-api-server (demo config)..."
-    (cd "$SIM_TMP" && DSTACK_SOCKET="$SIM_SOCK" cargo run --manifest-path="$PROJECT_ROOT/lit-api-server/Cargo.toml" \
-        --features phala --bin lit-api-server) >> "$SIM_TMP/lit-api-server.log" 2>&1 &
+    (cd "$PROJECT_ROOT/lit-api-server" && DSTACK_SOCKET="$SIM_SOCK" "$API_BIN") >> "$SIM_TMP/lit-api-server.log" 2>&1 &
     API_PID=$!
 
     # Wait for /attestation to respond.
