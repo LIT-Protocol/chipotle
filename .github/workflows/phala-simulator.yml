@@ -32,13 +32,17 @@ jobs:
       - uses: actions/checkout@v4
 
       # ── 1. Build the dstack simulator ─────────────────────────────────────
+      # note: this is a shared resource for multiple runners on a shared host
       - name: Clone dstack repository
         run: |
           git config --global --add safe.directory /tmp/dstack
+          RUNNER_GROUP=runners
           if [ -d /tmp/dstack/.git ]; then
             cd /tmp/dstack && git fetch --depth 1 origin && git reset --hard FETCH_HEAD
           else
             git clone --depth 1 https://github.com/Dstack-TEE/dstack.git /tmp/dstack
+            chgrp -R "$RUNNER_GROUP" /tmp/dstack
+            chmod -R g+rwx /tmp/dstack
           fi
 
       # Use stable Rust for the dstack build (it may require features newer than 1.91).
