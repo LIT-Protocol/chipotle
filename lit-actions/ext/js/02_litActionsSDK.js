@@ -50,7 +50,6 @@ function signEcdsa({ toSign, publicKey, sigName}) {
  *   "SchnorrRedDecaf377Blake2b512"
  *   "SchnorrkelSubstrate"
  *   "Bls12381G1ProofOfPossession"
- * @param {string} params.keySetId The key set id to use
  * @name Lit.Actions.sign
  * @function sign
  * @returns {Uint8array} The resulting signature 
