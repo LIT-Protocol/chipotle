@@ -5,7 +5,7 @@ name: Rust CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, next]
   pull_request:
 
 # Cancel any in-progress run on the same branch/PR when a new commit is pushed.
