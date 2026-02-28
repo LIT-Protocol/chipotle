@@ -1,7 +1,7 @@
 # Phala / dstack simulator validation
 #
 # Builds the dstack guest-agent from source, runs it as a local simulator,
-# and exercises the phala::v1::dstack integration tests against it.
+# and exercises the dstack::v1::dstack integration tests against it.
 # Then runs the dstack-verifier against a live simulator quote to confirm
 # that quote_verified=true — validating the get_quote() → dstack-verifier pipeline.
 #
@@ -110,7 +110,7 @@ jobs:
           }
 
           # Run the Rust unit tests against the simulator socket.
-          (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" cargo test --features phala -- phala::v1::dstack::tests --nocapture)
+          (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" cargo test --features phala -- dstack::v1::dstack::tests --nocapture)
           STATUS=$?
 
           # Teardown.
@@ -120,8 +120,8 @@ jobs:
           exit "$STATUS"
 
       # ── 3. dstack-verifier end-to-end attestation pipeline ─────────────────
-      # Start the simulator, get a live quote, then run dstack-verifier in oneshot
-      # mode (--verify FILE) — no HTTP server or port management needed.
+      # Start simulator, start lit-api-server (attestation-only; fetches from simulator),
+      # get attestation from lit-api-server's /attestation endpoint, run dstack-verifier.
       # Assert quote_verified=true; is_valid will be false (simulator uses a synthetic
       # OS image hash not published on download.dstack.org) — that is expected.
       - name: Verify attestation pipeline with dstack-verifier
@@ -154,18 +154,37 @@ jobs:
             exit 1
           }
 
-          # Get a live quote from the simulator.
-          QUOTE_RESP=$(curl -s --unix-socket "$SIM_SOCK" \
-              http://localhost/GetQuote \
-              -X POST \
-              -H 'Content-Type: application/json' \
-              -d '{"report_data":"0x"}')
+          # Start lit-api-server with demo config; it fetches attestation from the simulator.
+          PROJECT_ROOT="$(pwd)"
+          cp lit-api-server/NodeConfig.demo.toml "$SIM_TMP/NodeConfig.toml"
+          (cd "$SIM_TMP" && DSTACK_SOCKET="$SIM_SOCK" cargo run --manifest-path="$PROJECT_ROOT/lit-api-server/Cargo.toml" \
+            --features phala --bin lit-api-server) >> "$SIM_TMP/lit-api-server.log" 2>&1 &
+          API_PID=$!
 
-          # Teardown simulator — verifier runs oneshot, no server needed.
-          kill "$SIM_PID" 2>/dev/null || true
+          # Wait for /attestation to respond.
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:8000/attestation >/dev/null 2>&1; then
+              echo "lit-api-server /attestation ready."
+              break
+            fi
+            echo "  waiting for lit-api-server ($i/20)..."
+            sleep 1
+          done
+          if ! curl -sf http://localhost:8000/attestation >/dev/null 2>&1; then
+            echo "ERROR: lit-api-server /attestation never responded"
+            cat "$SIM_TMP/lit-api-server.log"
+            kill "$SIM_PID" "$API_PID" 2>/dev/null || true
+            rm -rf "$SIM_TMP"
+            exit 1
+          fi
 
-          # Write the verifier request to a file: strip 0x prefix, set attestation=null.
-          # (attestation must be explicitly null — serde_human_bytes requires the key present)
+          # Get attestation from lit-api-server (which got it from the simulator).
+          QUOTE_RESP=$(curl -sf http://localhost:8000/attestation)
+
+          # Teardown simulator and lit-api-server.
+          kill "$SIM_PID" "$API_PID" 2>/dev/null || true
+
+          # Write the verifier request: strip 0x prefix, set attestation=null.
           VERIFY_FILE="$SIM_TMP/verify-request.json"
           printf '%s' "$QUOTE_RESP" | python3 -c \
             'import sys,json; d=json.load(sys.stdin); q=d["quote"]; q=q[2:] if q.startswith("0x") else q; print(json.dumps({"quote":q,"event_log":d["event_log"],"vm_config":d["vm_config"],"attestation":None}))' \

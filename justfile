@@ -261,20 +261,21 @@ sim-test: sim-build
     DSTACK_SOCKET="$SIM_SOCK" \
         cargo test --manifest-path="$PROJECT_ROOT/lit-api-server/Cargo.toml" \
             --features phala \
-            -- phala::v1::dstack::tests --nocapture
+            -- dstack::v1::dstack::tests --nocapture
     STATUS=$?
 
     kill "$SIM_PID" 2>/dev/null || true
     rm -rf "$SIM_TMP"
     exit "$STATUS"
 
-# Get a live quote from the simulator, run dstack-verifier in oneshot mode, and assert
-# quote_verified=true. Builds both the simulator and verifier if needed.
+# Start simulator, run lit-api-server (which fetches attestation from simulator), run
+# dstack-verifier against lit-api-server's /attestation endpoint, assert quote_verified=true.
+# Builds simulator, verifier, and lit-api-server if needed.
 # Note: is_valid will be false for the simulator — its attestation.bin uses a synthetic OS image
 # hash that is not published on download.dstack.org. This is expected; quote_verified=true is the
-# meaningful assertion (it confirms the full get_quote() → verify pipeline is wired correctly).
+# meaningful assertion (it confirms the full simulator → lit-api-server → verifier pipeline).
 [group: 'sim']
-sim-verify: sim-build verifier-build
+sim-verify: sim-build verifier-build api-server
     #!/usr/bin/env sh
     set -eu
     SIM_SRC=/tmp/dstack/sdk/simulator
@@ -282,6 +283,7 @@ sim-verify: sim-build verifier-build
     SIM_SOCK="$SIM_TMP/dstack.sock"
     VERIFIER_BIN=/tmp/dstack/target/debug/dstack-verifier
     VERIFIER_CFG=/tmp/dstack/verifier/dstack-verifier.toml
+    PROJECT_ROOT="$(pwd)"
 
     # Copy simulator data files.
     cp "$SIM_SRC/appkeys.json" "$SIM_SRC/app-compose.json" \
@@ -305,31 +307,48 @@ sim-verify: sim-build verifier-build
         exit 1
     }
 
-    # Get a live quote from the simulator.
-    echo "Getting quote from simulator..."
-    QUOTE_RESP=$(curl -s --unix-socket "$SIM_SOCK" \
-        http://localhost/GetQuote \
-        -X POST \
-        -H 'Content-Type: application/json' \
-        -d '{"report_data":"0x"}')
+    # Start lit-api-server with demo config; it fetches attestation from the simulator.
+    cp "$PROJECT_ROOT/lit-api-server/NodeConfig.demo.toml" "$SIM_TMP/NodeConfig.toml"
+    echo "Starting lit-api-server (demo config)..."
+    (cd "$SIM_TMP" && DSTACK_SOCKET="$SIM_SOCK" cargo run --manifest-path="$PROJECT_ROOT/lit-api-server/Cargo.toml" \
+        --features phala --bin lit-api-server) >> "$SIM_TMP/lit-api-server.log" 2>&1 &
+    API_PID=$!
 
-    # Teardown simulator — verifier runs oneshot, no server needed.
-    kill "$SIM_PID" 2>/dev/null || true
+    # Wait for /attestation to respond.
+    for i in $(seq 1 20); do
+        if curl -sf http://localhost:8000/attestation >/dev/null 2>&1; then
+            echo "lit-api-server /attestation ready."
+            break
+        fi
+        printf "  waiting for lit-api-server (%d/20)...\n" "$i"
+        sleep 1
+    done
+    if ! curl -sf http://localhost:8000/attestation >/dev/null 2>&1; then
+        echo "error: lit-api-server /attestation never responded"
+        cat "$SIM_TMP/lit-api-server.log"
+        kill "$SIM_PID" "$API_PID" 2>/dev/null || true
+        rm -rf "$SIM_TMP"
+        exit 1
+    fi
 
-    # Write the verifier request to a file: strip 0x prefix from quote, set attestation=null.
-    # (attestation must be explicitly null — the serde_human_bytes codec requires the key present)
+    # Get attestation from lit-api-server (which got it from the simulator).
+    echo "Getting attestation from lit-api-server /attestation..."
+    QUOTE_RESP=$(curl -sf http://localhost:8000/attestation)
+
+    # Teardown simulator and lit-api-server.
+    kill "$SIM_PID" "$API_PID" 2>/dev/null || true
+
+    # Write the verifier request: strip 0x prefix from quote, set attestation=null.
     VERIFY_FILE="$SIM_TMP/verify-request.json"
     printf '%s' "$QUOTE_RESP" | python3 -c \
         'import sys,json; d=json.load(sys.stdin); q=d["quote"]; q=q[2:] if q.startswith("0x") else q; print(json.dumps({"quote":q,"event_log":d["event_log"],"vm_config":d["vm_config"],"attestation":None}))' \
         > "$VERIFY_FILE"
 
     # Run verifier in oneshot mode. Exits 1 when is_valid=false, which is expected for the
-    # simulator (synthetic OS image hash) — so we ignore the exit code and check quote_verified.
+    # simulator — so we ignore the exit code and check quote_verified.
     echo "Running dstack-verifier (oneshot)..."
     "$VERIFIER_BIN" -c "$VERIFIER_CFG" --verify "$VERIFY_FILE" || true
 
-    # quote_verified must be true — this validates the full attestation pipeline.
-    # is_valid will be false for the simulator (synthetic OS image hash not on download.dstack.org).
     RESULT_FILE="${VERIFY_FILE}.verification.json"
     QUOTE_OK=$(python3 -c \
         'import sys,json; v=json.load(open(sys.argv[1]))["details"]["quote_verified"]; print("true" if v else "false")' \

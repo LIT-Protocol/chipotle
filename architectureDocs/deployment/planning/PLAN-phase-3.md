@@ -32,7 +32,7 @@ Company-run verification and published results. Automated verification uses the 
 
 - Add verification job to deploy workflow(s): `deploy-phala.yml` (dev), plus production workflow for DeRoT/self-hosted when available
 - **Production**: Ensure CVM is created with Onchain KMS on Base (Phala dashboard "Onchain KMS" when creating app; DstackApp contract from Phase 1)
-- Verification SHALL run after CVM is live; base_url = gateway URL (attestation at `/.dstack/`; gateway is required ingress)
+- Verification SHALL run after CVM is live; base_url = app URL (attestation at `/attestation` and `/info`)
 - Wait for attestation availability (reuse or extend wait-for-api pattern)
 - Run `cargo run -p verify-cvm` with base_url = gateway URL; verifier checks DstackApp/DstackKms (Onchain KMS)
 - Capture verifier output; publish to repository from Workflow A
@@ -41,8 +41,8 @@ Company-run verification and published results. Automated verification uses the 
 
 - Workflow B consumes repository format from A
 - Both can start once repository format is defined
-- Workflow B needs: base_url (gateway URL; attestation at `/.dstack/`), app_compose or `--expected-compose-hash`
-- Production: base_url = gateway URL (custom domain or deployment); gateway `/.dstack/` assumed; **Onchain KMS on Base** (app created with DstackApp)
+- Workflow B needs: base_url (app URL; attestation at `/attestation` and `/info`), app_compose or `--expected-compose-hash`
+- Production: base_url = app URL (custom domain or deployment); **Onchain KMS on Base** (app created with DstackApp)
 
 ## Files to Create/Modify
 
