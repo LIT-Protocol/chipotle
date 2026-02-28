@@ -225,7 +225,7 @@ mod tests {
     /// Fails if the dstack socket is unavailable (requires TEE or simulator).
     #[cfg(phala)]
     #[tokio::test]
-    async fn fails_when_socket_unavailable() {
+    async fn test_get_quote_succeeds_when_socket_available() {
         let path = resolve_socket_path();
         assert!(
             socket_available(&path),
