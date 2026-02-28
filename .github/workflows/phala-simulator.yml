@@ -33,7 +33,12 @@ jobs:
 
       # ── 1. Build the dstack simulator ─────────────────────────────────────
       - name: Clone dstack repository
-        run: git clone --depth 1 https://github.com/Dstack-TEE/dstack.git /tmp/dstack
+        run: |
+          if [ -d /tmp/dstack/.git ]; then
+            cd /tmp/dstack && git fetch --depth 1 origin && git reset --hard FETCH_HEAD
+          else
+            git clone --depth 1 https://github.com/Dstack-TEE/dstack.git /tmp/dstack
+          fi
 
       # Use stable Rust for the dstack build (it may require features newer than 1.91).
       - name: Install Rust (stable, for dstack)
