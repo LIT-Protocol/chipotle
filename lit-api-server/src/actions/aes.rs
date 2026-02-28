@@ -13,10 +13,7 @@ pub async fn aes_decrypt(symmetric_key: &[u8], ciphertext_with_nonce: &str) -> R
 
     // Require at least 12 bytes for the nonce and 16 bytes for the GCM authentication tag
     if ciphertext_with_nonce.len() < 12 + 16 {
-        return Err(validation_err(
-            "Invalid ciphertext: too short",
-            None,
-        ));
+        return Err(validation_err("Invalid ciphertext: too short", None));
     }
     let nonce = Nonce::from_slice(&ciphertext_with_nonce[0..12]);
     let ciphertext = &ciphertext_with_nonce[12..];
