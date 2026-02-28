@@ -93,18 +93,39 @@ export default function () {
   const apiKey = (newAccountRes.data as { api_key: string }).api_key;
   const authHeaders = { "X-Api-Key": apiKey };
 
-  // ── 2. Create wallet — wallet_address is the PKP public key ──────────────
+  // ── 2. Create wallet ──────────────────────────────────────────────────────
   const walletRes = client.createWallet(authHeaders);
   if (!assertOk("createWallet", "GET /create_wallet", walletRes)) return;
-  const publicKey = (walletRes.data as { wallet_address: string })
+  const walletAddress = (walletRes.data as { wallet_address: string })
     .wallet_address;
   checkAndLog(walletRes.response, {
     "createWallet returns wallet_address": () =>
-      typeof publicKey === "string" && publicKey.length > 0,
+      typeof walletAddress === "string" && walletAddress.length > 0,
   }, "createWallet");
+
+  // ── 3. List wallets to get the raw public key ─────────────────────────────
+  // createWallet returns only the Ethereum address; listWallets returns the
+  // full WalletItem including the raw uncompressed public key needed by signEcdsa.
+  const listRes = client.listWallets(
+    { page_number: "0", page_size: "10" },
+    authHeaders,
+  );
+  if (!assertOk("listWallets", "GET /list_wallets", listRes)) return;
+  const wallets = listRes.data as Array<{
+    wallet_address: string;
+    public_key: string;
+  }>;
+  const wallet = wallets.find((w) => w.wallet_address === walletAddress);
+  checkAndLog(listRes.response, {
+    "listWallets finds created wallet": () => wallet !== undefined,
+    "wallet has non-empty public_key": () =>
+      typeof wallet?.public_key === "string" && wallet.public_key.length > 0,
+  }, "listWallets");
+  if (!wallet) return;
+  const publicKey = wallet.public_key;
   console.log(`publicKey: ${publicKey}`);
 
-  // ── 3. Sign with signEcdsa ────────────────────────────────────────────────
+  // ── 4. Sign with signEcdsa ────────────────────────────────────────────────
   const res = client.litAction(
     {
       code: ECDSA_SIGN_CODE,
