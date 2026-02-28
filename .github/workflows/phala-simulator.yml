@@ -2,15 +2,14 @@
 #
 # Builds the dstack guest-agent from source, runs it as a local simulator,
 # and exercises the phala::v1::dstack integration tests against it.
+# Then runs the dstack-verifier against a live simulator quote to confirm
+# the end-to-end attestation pipeline: get_quote() → dstack-verifier → is_valid.
 #
 # This job gates Phase 1 Workflow A: attestation mechanism (FR-2.5).
 # It runs on every push and pull_request so simulator regressions are caught early.
 #
-# The simulator is the dstack-guest-agent binary from Dstack-TEE/dstack, symlinked
-# as dstack-simulator. It creates Unix sockets (dstack.sock, tappd.sock, …) that
-# replace /var/run/dstack.sock in non-CVM environments.
-# DSTACK_SOCKET is set to the absolute path of dstack.sock so the
-# dstack client in dstack.rs transparently uses it instead of the CVM socket.
+# Isolation: each run gets a unique mktemp dir for the simulator's sockets so
+# concurrent runners on the same self-hosted host do not conflict.
 
 name: Phala Simulator Validation
 
@@ -31,8 +30,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── 1. Build the dstack simulator ─────────────────────────────────────
-      # note: this is a shared resource for multiple runners on a shared host
+      # ── 1. Build the dstack simulator and verifier ────────────────────────
+      # /tmp/dstack is a shared cache on self-hosted runners; multiple jobs
+      # share the built binaries but each run gets its own socket temp dir.
       - name: Clone dstack repository
         run: |
           git config --global --add safe.directory /tmp/dstack
@@ -52,6 +52,9 @@ jobs:
       - name: Build dstack simulator
         run: cd /tmp/dstack/sdk/simulator && bash build.sh
 
+      - name: Build dstack-verifier
+        run: cargo build --manifest-path=/tmp/dstack/verifier/Cargo.toml --bin dstack-verifier
+
       # Switch to the pinned toolchain the project declares in rust-toolchain.toml.
       - name: Install Rust 1.91 (lit-api-server toolchain)
         uses: dtolnay/rust-toolchain@1.91
@@ -64,46 +67,152 @@ jobs:
             sleep 10
           done
 
-      # ── 2. Start simulator, run tests, cleanup ──────────────────────────────
+      # ── 2. Unique-socket simulator run, unit tests ──────────────────────────
+      # Each CI run creates a fresh mktemp dir for the simulator's sockets.
+      # This allows multiple runners on the same host to operate in parallel
+      # without competing for /tmp/dstack/sdk/simulator/dstack.sock.
       - name: Run phala simulator tests
         run: |
           set -eu
-          SIM_DIR=/tmp/dstack/sdk/simulator
-          SIM_SOCK="$SIM_DIR/dstack.sock"
+          SIM_SRC=/tmp/dstack/sdk/simulator
 
-          # Clean up any stale simulator from previous runs.
-          echo "Cleaning up stale simulator..."
-          pkill -f dstack-simulator 2>/dev/null || true
-          rm -f "$SIM_SOCK"
-          for i in $(seq 1 10); do
-            [ ! -S "$SIM_SOCK" ] && break
-            echo "  waiting for socket to disappear ($i/10)..."
-            sleep 1
-          done
-          [ ! -S "$SIM_SOCK" ] || { echo "ERROR: stale socket still present"; exit 1; }
+          # Create an isolated temp dir for this run's sockets and data files.
+          SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
+          SIM_SOCK="$SIM_TMP/dstack.sock"
 
-          # Start simulator.
-          echo "Starting dstack simulator..."
-          (cd "$SIM_DIR" && ./dstack-simulator > /tmp/dstack-simulator.log 2>&1) &
+          # Copy data files that the simulator reads via relative paths.
+          cp "$SIM_SRC/appkeys.json" "$SIM_SRC/app-compose.json" \
+             "$SIM_SRC/sys-config.json" "$SIM_SRC/attestation.bin" \
+             "$SIM_SRC/dstack.toml" "$SIM_TMP/"
+
+          # Start simulator; sockets are created relative to CWD ($SIM_TMP).
+          echo "Starting dstack simulator in $SIM_TMP..."
+          sh -c "cd '$SIM_TMP' && '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
           SIM_PID=$!
 
-          # Wait for socket to appear.
           for i in $(seq 1 15); do
             [ -S "$SIM_SOCK" ] && echo "Socket ready." && break
             echo "  waiting for dstack.sock ($i/15)..."
             sleep 1
           done
-          [ -S "$SIM_SOCK" ] || { echo "ERROR: dstack.sock never appeared"; cat /tmp/dstack-simulator.log; kill "$SIM_PID" 2>/dev/null || true; exit 1; }
+          [ -S "$SIM_SOCK" ] || {
+            echo "ERROR: dstack.sock never appeared"
+            cat "$SIM_TMP/dstack-simulator.log"
+            kill "$SIM_PID" 2>/dev/null || true
+            rm -rf "$SIM_TMP"
+            exit 1
+          }
 
-          # Run tests.
+          # Run the Rust unit tests against the simulator socket.
           (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" cargo test --features phala -- phala::v1::dstack::tests --nocapture)
           STATUS=$?
 
-          # Cleanup: stop simulator and wait for socket to disappear.
+          # Teardown.
           kill "$SIM_PID" 2>/dev/null || true
-          for i in $(seq 1 10); do
-            [ ! -S "$SIM_SOCK" ] && break
-            sleep 1
-          done
+          rm -rf "$SIM_TMP"
 
           exit "$STATUS"
+
+      # ── 3. dstack-verifier end-to-end attestation pipeline ─────────────────
+      # Start a fresh simulator instance and the dstack-verifier HTTP server.
+      # Get a live quote from the simulator, POST it to the verifier, and assert
+      # that quote_verified=true — confirming the attestation pipeline is intact.
+      # is_valid may be false (OS image download unavailable in CI), which is expected.
+      - name: Verify attestation pipeline with dstack-verifier
+        run: |
+          set -eu
+          SIM_SRC=/tmp/dstack/sdk/simulator
+          VERIFIER_BIN=/tmp/dstack/target/debug/dstack-verifier
+          VERIFIER_CFG=/tmp/dstack/verifier/dstack-verifier.toml
+          VERIFIER_PORT=28080
+
+          SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
+          SIM_SOCK="$SIM_TMP/dstack.sock"
+
+          cp "$SIM_SRC/appkeys.json" "$SIM_SRC/app-compose.json" \
+             "$SIM_SRC/sys-config.json" "$SIM_SRC/attestation.bin" \
+             "$SIM_SRC/dstack.toml" "$SIM_TMP/"
+
+          # Start simulator.
+          sh -c "cd '$SIM_TMP' && '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
+          SIM_PID=$!
+          for i in $(seq 1 15); do
+            [ -S "$SIM_SOCK" ] && break
+            echo "  waiting for simulator ($i/15)..."
+            sleep 1
+          done
+          [ -S "$SIM_SOCK" ] || {
+            echo "ERROR: dstack.sock never appeared"
+            cat "$SIM_TMP/dstack-simulator.log"
+            kill "$SIM_PID" 2>/dev/null || true
+            rm -rf "$SIM_TMP"
+            exit 1
+          }
+
+          # Start verifier.
+          DSTACK_VERIFIER_PORT="$VERIFIER_PORT" "$VERIFIER_BIN" -c "$VERIFIER_CFG" \
+              >> "$SIM_TMP/verifier.log" 2>&1 &
+          VERIFIER_PID=$!
+          for i in $(seq 1 15); do
+            curl -sf "http://localhost:$VERIFIER_PORT/health" > /dev/null 2>&1 && break
+            echo "  waiting for verifier ($i/15)..."
+            sleep 1
+          done
+          curl -sf "http://localhost:$VERIFIER_PORT/health" > /dev/null 2>&1 || {
+            echo "ERROR: dstack-verifier did not start"
+            cat "$SIM_TMP/verifier.log"
+            kill "$SIM_PID" "$VERIFIER_PID" 2>/dev/null || true
+            rm -rf "$SIM_TMP"
+            exit 1
+          }
+
+          # Get a live quote from the simulator.
+          QUOTE_RESP=$(curl -s --unix-socket "$SIM_SOCK" \
+              http://localhost/GetQuote \
+              -X POST \
+              -H 'Content-Type: application/json' \
+              -d '{"report_data":"0x"}')
+
+          # Build the verifier request: strip 0x from quote, add required attestation field.
+          VERIFY_BODY=$(printf '%s' "$QUOTE_RESP" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          q = d['quote']
+          if q.startswith('0x'): q = q[2:]
+          out = {'quote': q, 'event_log': d['event_log'], 'vm_config': d['vm_config'], 'attestation': None}
+          print(json.dumps(out))")
+
+          # POST to the verifier.
+          VERIFY_RESP=$(printf '%s' "$VERIFY_BODY" | curl -s -X POST \
+              "http://localhost:$VERIFIER_PORT/verify" \
+              -H 'Content-Type: application/json' \
+              -d @-)
+
+          echo "=== Verifier Response ==="
+          printf '%s' "$VERIFY_RESP" | python3 -c "
+          import sys, json
+          d = json.load(sys.stdin)
+          print('is_valid:             ', d['is_valid'])
+          print('quote_verified:       ', d['details']['quote_verified'])
+          print('event_log_verified:   ', d['details']['event_log_verified'])
+          print('os_image_hash_verified:', d['details']['os_image_hash_verified'])
+          r = d.get('reason', '')
+          if r: print('reason:', r[:200])
+          "
+
+          QUOTE_OK=$(printf '%s' "$VERIFY_RESP" | python3 -c "
+          import sys, json
+          v = json.load(sys.stdin)['details']['quote_verified']
+          print('true' if v else 'false')")
+
+          # Teardown.
+          kill "$SIM_PID" "$VERIFIER_PID" 2>/dev/null || true
+          rm -rf "$SIM_TMP"
+
+          # Assertion: quote_verified must be true.
+          # is_valid may be false (OS image download unavailable in CI) — that is expected.
+          [ "$QUOTE_OK" = "true" ] || {
+            echo "ERROR: quote_verified=false — attestation pipeline is broken"
+            exit 1
+          }
+          echo "Attestation pipeline verified: quote_verified=true."

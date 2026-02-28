@@ -154,51 +154,109 @@ sim-build:
     echo "Building dstack-guest-agent (this takes a few minutes)..."
     cd "$DSTACK_DIR/sdk/simulator" && bash build.sh
 
-# Start the dstack simulator (runs in background; survives shell exit). Run `just sim-stop` when done.
+# Build the dstack-verifier from source (cached in /tmp/dstack).
+[group: 'sim']
+verifier-build: sim-build
+    #!/usr/bin/env sh
+    set -eu
+    echo "Building dstack-verifier..."
+    cargo build \
+        --manifest-path=/tmp/dstack/verifier/Cargo.toml \
+        --bin dstack-verifier
+
+# Start the dstack simulator in a unique temp directory so multiple runner
+# instances on the same host can coexist without socket conflicts.
+# Records the temp dir and PID in /tmp/dstack-sim.state; run `just sim-stop` to clean up.
 [group: 'sim']
 sim-start: sim-build
     #!/usr/bin/env sh
     set -eu
-    SIM_DIR=/tmp/dstack/sdk/simulator
-    SIM_SOCK="$SIM_DIR/dstack.sock"
+    SIM_SRC=/tmp/dstack/sdk/simulator
+    STATE=/tmp/dstack-sim.state
 
-    echo "Cleaning up stale simulator..."
-    pkill -f dstack-simulator 2>/dev/null || true
-    rm -f "$SIM_SOCK"
-    for i in $(seq 1 10); do
-        [ ! -S "$SIM_SOCK" ] && break
-        printf "  waiting for socket to disappear (%d/10)...\n" "$i"
-        sleep 1
-    done
-    [ ! -S "$SIM_SOCK" ] || { echo "error: stale socket still present"; exit 1; }
+    # Stop and clean up any previous instance recorded in the state file.
+    if [ -f "$STATE" ]; then
+        OLD_DIR=$(sed -n '1p' "$STATE")
+        OLD_PID=$(sed -n '2p' "$STATE")
+        kill "$OLD_PID" 2>/dev/null || true
+        rm -rf "$OLD_DIR"
+        rm -f "$STATE"
+    fi
 
-    echo "Starting dstack simulator..."
-    nohup sh -c "cd $SIM_DIR && ./dstack-simulator" >> /tmp/dstack-simulator.log 2>&1 &
+    # Create a fresh temp dir; the simulator creates sockets relative to its CWD,
+    # so running from a unique dir isolates sockets per instance.
+    SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
+    SIM_SOCK="$SIM_TMP/dstack.sock"
+
+    # Copy the simulator's data files (referenced by relative paths in dstack.toml).
+    cp "$SIM_SRC/appkeys.json" "$SIM_SRC/app-compose.json" \
+       "$SIM_SRC/sys-config.json" "$SIM_SRC/attestation.bin" \
+       "$SIM_SRC/dstack.toml" "$SIM_TMP/"
+
+    echo "Starting dstack simulator in $SIM_TMP..."
+    sh -c "cd '$SIM_TMP' && '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
+    SIM_PID=$!
+
+    printf '%s\n%s\n' "$SIM_TMP" "$SIM_PID" > "$STATE"
 
     for i in $(seq 1 15); do
         [ -S "$SIM_SOCK" ] && break
         printf "  waiting for dstack.sock (%d/15)...\n" "$i"
         sleep 1
     done
-    [ -S "$SIM_SOCK" ] || { echo "error: dstack.sock never appeared"; cat /tmp/dstack-simulator.log; exit 1; }
-    echo "Simulator ready at $SIM_SOCK (log: /tmp/dstack-simulator.log). Run: just sim-stop"
+    [ -S "$SIM_SOCK" ] || { echo "error: dstack.sock never appeared"; cat "$SIM_TMP/dstack-simulator.log"; exit 1; }
+    echo "Simulator ready at $SIM_SOCK (log: $SIM_TMP/dstack-simulator.log). Run: just sim-stop"
+    printf '  DSTACK_SOCKET=%s\n' "$SIM_SOCK"
 
-# Stop the dstack simulator.
+# Stop the dstack simulator and remove its temp directory.
 [group: 'sim']
 sim-stop:
-    pkill -f dstack-simulator 2>/dev/null || true
-    echo "Simulator stopped"
+    #!/usr/bin/env sh
+    STATE=/tmp/dstack-sim.state
+    if [ -f "$STATE" ]; then
+        OLD_DIR=$(sed -n '1p' "$STATE")
+        OLD_PID=$(sed -n '2p' "$STATE")
+        kill "$OLD_PID" 2>/dev/null || true
+        rm -rf "$OLD_DIR"
+        rm -f "$STATE"
+        echo "Simulator stopped and temp dir removed."
+    else
+        pkill -x dstack-simulator 2>/dev/null || true
+        echo "Simulator stopped (no state file; sent pkill)."
+    fi
 
-# Build the dstack simulator (if needed), run phala attestation tests against it, then stop it.
+# Build the dstack simulator (if needed), run phala attestation tests, then tear down.
+# Each run gets its own temp dir so parallel invocations don't conflict.
 [group: 'sim']
 sim-test: sim-build
     #!/usr/bin/env sh
     set -eu
-    SIM_DIR=/tmp/dstack/sdk/simulator
-    SIM_SOCK="$SIM_DIR/dstack.sock"
+    SIM_SRC=/tmp/dstack/sdk/simulator
+    SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
+    SIM_SOCK="$SIM_TMP/dstack.sock"
     PROJECT_ROOT="$(pwd)"
 
-    just sim-start
+    # Copy simulator data files to the isolated temp dir.
+    cp "$SIM_SRC/appkeys.json" "$SIM_SRC/app-compose.json" \
+       "$SIM_SRC/sys-config.json" "$SIM_SRC/attestation.bin" \
+       "$SIM_SRC/dstack.toml" "$SIM_TMP/"
+
+    echo "Starting dstack simulator in $SIM_TMP..."
+    sh -c "cd '$SIM_TMP' && '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
+    SIM_PID=$!
+
+    for i in $(seq 1 15); do
+        [ -S "$SIM_SOCK" ] && break
+        printf "  waiting for dstack.sock (%d/15)...\n" "$i"
+        sleep 1
+    done
+    [ -S "$SIM_SOCK" ] || {
+        echo "error: dstack.sock never appeared"
+        cat "$SIM_TMP/dstack-simulator.log"
+        kill "$SIM_PID" 2>/dev/null || true
+        rm -rf "$SIM_TMP"
+        exit 1
+    }
 
     DSTACK_SOCKET="$SIM_SOCK" \
         cargo test --manifest-path="$PROJECT_ROOT/lit-api-server/Cargo.toml" \
@@ -206,5 +264,96 @@ sim-test: sim-build
             -- phala::v1::dstack::tests --nocapture
     STATUS=$?
 
-    just sim-stop
+    kill "$SIM_PID" 2>/dev/null || true
+    rm -rf "$SIM_TMP"
     exit "$STATUS"
+
+# Get a live quote from the simulator, POST it to dstack-verifier, and assert quote_verified=true.
+# Builds both the simulator and verifier if needed.
+# Note: is_valid may be false in offline environments (OS image download requires internet access).
+[group: 'sim']
+sim-verify: sim-build verifier-build
+    #!/usr/bin/env sh
+    set -eu
+    SIM_SRC=/tmp/dstack/sdk/simulator
+    SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
+    SIM_SOCK="$SIM_TMP/dstack.sock"
+    VERIFIER_BIN=/tmp/dstack/target/debug/dstack-verifier
+    VERIFIER_CFG=/tmp/dstack/verifier/dstack-verifier.toml
+    VERIFIER_PORT=${DSTACK_VERIFIER_PORT:-28080}
+
+    # Copy simulator data files.
+    cp "$SIM_SRC/appkeys.json" "$SIM_SRC/app-compose.json" \
+       "$SIM_SRC/sys-config.json" "$SIM_SRC/attestation.bin" \
+       "$SIM_SRC/dstack.toml" "$SIM_TMP/"
+
+    # Start simulator.
+    echo "Starting dstack simulator in $SIM_TMP..."
+    sh -c "cd '$SIM_TMP' && '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
+    SIM_PID=$!
+    for i in $(seq 1 15); do
+        [ -S "$SIM_SOCK" ] && break
+        printf "  waiting for dstack.sock (%d/15)...\n" "$i"
+        sleep 1
+    done
+    [ -S "$SIM_SOCK" ] || {
+        echo "error: dstack.sock never appeared"
+        cat "$SIM_TMP/dstack-simulator.log"
+        kill "$SIM_PID" 2>/dev/null || true
+        rm -rf "$SIM_TMP"
+        exit 1
+    }
+
+    # Start verifier.
+    echo "Starting dstack-verifier on port $VERIFIER_PORT..."
+    DSTACK_VERIFIER_PORT="$VERIFIER_PORT" "$VERIFIER_BIN" -c "$VERIFIER_CFG" \
+        >> "$SIM_TMP/verifier.log" 2>&1 &
+    VERIFIER_PID=$!
+    for i in $(seq 1 15); do
+        curl -sf "http://localhost:$VERIFIER_PORT/health" > /dev/null 2>&1 && break
+        printf "  waiting for verifier (%d/15)...\n" "$i"
+        sleep 1
+    done
+    curl -sf "http://localhost:$VERIFIER_PORT/health" > /dev/null 2>&1 || {
+        echo "error: dstack-verifier did not start"
+        cat "$SIM_TMP/verifier.log"
+        kill "$SIM_PID" "$VERIFIER_PID" 2>/dev/null || true
+        rm -rf "$SIM_TMP"
+        exit 1
+    }
+
+    # Get a live quote from the simulator.
+    echo "Getting quote from simulator..."
+    QUOTE_RESP=$(curl -s --unix-socket "$SIM_SOCK" \
+        http://localhost/GetQuote \
+        -X POST \
+        -H 'Content-Type: application/json' \
+        -d '{"report_data":"0x"}')
+
+    # Build the verifier request: strip 0x prefix from quote, add required attestation field.
+    # (attestation must be explicitly null — the serde_human_bytes codec requires the key present)
+    VERIFY_BODY=$(printf '%s' "$QUOTE_RESP" | python3 -c \
+        'import sys,json; d=json.load(sys.stdin); q=d["quote"]; q=q[2:] if q.startswith("0x") else q; print(json.dumps({"quote":q,"event_log":d["event_log"],"vm_config":d["vm_config"],"attestation":None}))')
+
+    # POST to verifier and parse response.
+    echo "Verifying attestation with dstack-verifier..."
+    VERIFY_RESP=$(printf '%s' "$VERIFY_BODY" | curl -s -X POST \
+        "http://localhost:$VERIFIER_PORT/verify" \
+        -H 'Content-Type: application/json' \
+        -d @-)
+
+    printf '%s' "$VERIFY_RESP" | python3 -c \
+        'import sys,json; d=json.load(sys.stdin); det=d["details"]; [print(k+":",v) for k,v in [("is_valid",d["is_valid"]),("quote_verified",det["quote_verified"]),("event_log_verified",det["event_log_verified"]),("os_image_hash_verified",det["os_image_hash_verified"])]]; r=d.get("reason",""); r and print("reason:",r[:200])'
+
+    # Extract quote_verified for assertion.
+    QUOTE_OK=$(printf '%s' "$VERIFY_RESP" | python3 -c \
+        'import sys,json; v=json.load(sys.stdin)["details"]["quote_verified"]; print("true" if v else "false")')
+
+    # Cleanup.
+    kill "$SIM_PID" "$VERIFIER_PID" 2>/dev/null || true
+    rm -rf "$SIM_TMP"
+
+    # quote_verified must be true — this validates the full attestation pipeline.
+    # is_valid may be false in offline environments (OS image download not available).
+    [ "$QUOTE_OK" = "true" ] || { echo "error: quote_verified=false — attestation pipeline is broken"; exit 1; }
+    echo "Attestation pipeline verified: quote_verified=true."
