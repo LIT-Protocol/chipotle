@@ -953,21 +953,21 @@
       <line x1="280" y1="92" x2="358" y2="92" stroke="#f59e0b" stroke-width="1.2" marker-end="url(#arrow-user)" opacity="0.6"/>
       <text x="319" y="86" text-anchor="middle" fill="#f59e0b" font-size="8" opacity="0.6">owns</text>
 
-      <!-- Owner → API Key Registry (manages) -->
-      <path d="M 280 100 Q 330 120 358 170" fill="none" stroke="#f59e0b" stroke-width="1" marker-end="url(#arrow-user)" opacity="0.4" stroke-dasharray="3,3"/>
-      <text x="314" y="128" text-anchor="middle" fill="#f59e0b" font-size="8" opacity="0.4">manages</text>
+      <!-- Owner → API Key Registry (manages): deeper curve so label clears line -->
+      <path d="M 280 100 Q 330 85 358 170" fill="none" stroke="#f59e0b" stroke-width="1" marker-end="url(#arrow-user)" opacity="0.4" stroke-dasharray="3,3"/>
+      <text x="298" y="118" text-anchor="middle" fill="#f59e0b" font-size="8" opacity="0.4">manages</text>
 
       <!-- API Key (user) → API Key Registry (on-chain) -->
       <line x1="280" y1="177" x2="358" y2="177" stroke="#6366f1" stroke-width="1.2" marker-end="url(#arrow-chain)" opacity="0.6"/>
-      <text x="319" y="171" text-anchor="middle" fill="#6366f1" font-size="8" opacity="0.6">registered</text>
+      <text x="319" y="190" text-anchor="middle" fill="#6366f1" font-size="8" opacity="0.6">registered</text>
 
-      <!-- API Key (user) → TEE Auth -->
-      <path d="M 280 172 Q 490 140 678 172" fill="none" stroke="#00e5a0" stroke-width="1.2" marker-end="url(#arrow-tee)" opacity="0.5"/>
-      <text x="480" y="147" text-anchor="middle" fill="#00e5a0" font-size="8" opacity="0.6">sent over HTTPS</text>
+      <!-- API Key (user) → TEE Auth: deeper curve so "sent over HTTPS" sits above arc -->
+      <path d="M 280 172 Q 490 108 678 172" fill="none" stroke="#00e5a0" stroke-width="1.2" marker-end="url(#arrow-tee)" opacity="0.5"/>
+      <text x="480" y="128" text-anchor="middle" fill="#00e5a0" font-size="8" opacity="0.6">sent over HTTPS</text>
 
       <!-- TEE Auth → Chain (reads scopes) -->
       <path d="M 680 177 L 602 177" fill="none" stroke="#6366f1" stroke-width="1" marker-end="url(#arrow-chain)" opacity="0.4" stroke-dasharray="3,3"/>
-      <text x="641" y="171" text-anchor="middle" fill="#6366f1" font-size="8" opacity="0.5">reads</text>
+      <text x="641" y="190" text-anchor="middle" fill="#6366f1" font-size="8" opacity="0.5">reads</text>
 
       <!-- Root Key → Key Derivation -->
       <line x1="800" y1="114" x2="800" y2="153" stroke="#00e5a0" stroke-width="1.2" marker-end="url(#arrow-tee)" opacity="0.5"/>
@@ -977,25 +977,25 @@
       <line x1="800" y1="199" x2="800" y2="258" stroke="#00e5a0" stroke-width="1.2" marker-end="url(#arrow-tee)" opacity="0.5"/>
       <text x="815" y="232" fill="#00e5a0" font-size="8" opacity="0.5">provides keys</text>
 
-      <!-- Lit Actions → Sandbox (IPFS fetch) -->
-      <path d="M 280 315 Q 490 310 678 278" fill="none" stroke="#ec4899" stroke-width="1.2" marker-end="url(#arrow-ipfs)" opacity="0.5"/>
-      <text x="480" y="303" text-anchor="middle" fill="#ec4899" font-size="8" opacity="0.6">fetched from IPFS</text>
+      <!-- Lit Actions → Sandbox (IPFS fetch): curve dips so label clears -->
+      <path d="M 280 315 Q 490 328 678 278" fill="none" stroke="#ec4899" stroke-width="1.2" marker-end="url(#arrow-ipfs)" opacity="0.5"/>
+      <text x="368" y="306" text-anchor="middle" fill="#ec4899" font-size="8" opacity="0.6">fetched from IPFS</text>
 
-      <!-- Lit Actions → Groups (CID reference) -->
-      <path d="M 280 330 Q 320 347 358 347" fill="none" stroke="#6366f1" stroke-width="1" marker-end="url(#arrow-chain)" opacity="0.4"/>
-      <text x="319" y="345" text-anchor="middle" fill="#6366f1" font-size="8" opacity="0.5">CID ref</text>
+      <!-- Lit Actions → Groups (CID reference): deeper curve so label above line -->
+      <path d="M 280 330 Q 320 358 358 347" fill="none" stroke="#6366f1" stroke-width="1" marker-end="url(#arrow-chain)" opacity="0.4"/>
+      <text x="319" y="332" text-anchor="middle" fill="#6366f1" font-size="8" opacity="0.5">CID ref</text>
 
       <!-- PKP Registry → Groups -->
       <line x1="480" y1="284" x2="480" y2="323" stroke="#6366f1" stroke-width="1" marker-end="url(#arrow-chain)" opacity="0.4"/>
-      <text x="495" y="307" fill="#6366f1" font-size="8" opacity="0.5">referenced</text>
+      <text x="495" y="298" fill="#6366f1" font-size="8" opacity="0.5">referenced</text>
 
-      <!-- TX Relay → Chain (submits txs) -->
-      <path d="M 680 377 Q 620 385 602 355" fill="none" stroke="#6366f1" stroke-width="1.2" marker-end="url(#arrow-chain)" opacity="0.5"/>
-      <text x="635" y="386" text-anchor="middle" fill="#6366f1" font-size="8" opacity="0.5">submits tx</text>
+      <!-- TX Relay → Chain (submits txs): curve and label offset so text clears line -->
+      <path d="M 680 377 Q 620 365 602 355" fill="none" stroke="#6366f1" stroke-width="1.2" marker-end="url(#arrow-chain)" opacity="0.5"/>
+      <text x="635" y="398" text-anchor="middle" fill="#6366f1" font-size="8" opacity="0.5">submits tx</text>
 
-      <!-- TEE Auth reads Groups -->
+      <!-- TEE Auth reads Groups: label moved above curve -->
       <path d="M 680 185 Q 640 260 602 340" fill="none" stroke="#6366f1" stroke-width="1" opacity="0.3" stroke-dasharray="3,3" marker-end="url(#arrow-chain)"/>
-      <text x="635" y="270" text-anchor="middle" fill="#6366f1" font-size="8" opacity="0.4">checks groups</text>
+      <text x="638" y="248" text-anchor="middle" fill="#6366f1" font-size="8" opacity="0.4">checks groups</text>
     </svg>
   </div>
 
