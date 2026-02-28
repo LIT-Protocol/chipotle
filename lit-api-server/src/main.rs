@@ -4,7 +4,7 @@ pub mod actions;
 pub mod config;
 pub mod core;
 pub mod error;
-#[cfg(feature = "phala")]
+#[cfg(phala)]
 pub mod phala;
 
 use crate::actions::grpc::GrpcClientPool;
@@ -27,6 +27,10 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 #[allow(clippy::result_large_err)]
 async fn main() -> Result<(), rocket::Error> {
     setup_tracing().expect("Failed to setup tracing.");
+
+    if !cfg!(is_production) {
+        tracing::warn!("THIS IS INSECURE! Using non-production profile; lit-api-server was not built with `cargo build-production`");
+    }
 
     if let Err(e) = config::init_config() {
         eprintln!("Failed to initialize node configuration: {:?}. Exiting.", e);
@@ -103,7 +107,7 @@ async fn main() -> Result<(), rocket::Error> {
         // .manage(action_store)
         .manage(GrpcClientPool::<tonic::transport::Channel>::new());
 
-    #[cfg(feature = "phala")]
+    #[cfg(phala)]
     {
         r = r.mount("/phala/v1/", phala::v1::endpoints::routes());
     }

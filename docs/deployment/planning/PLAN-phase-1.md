@@ -18,7 +18,7 @@ Establish attestation source, digest pinning, and deployment configuration. No c
 |----------|-------|--------------|---------------------|
 | **A** | Verify gateway `/.dstack/` provides attestation; expose app_compose or compose-hash. Gateway required in DeRoT production—assume it exists (NFR-2) | FR-1.1, FR-1.2, FR-1.3 | B, C, D |
 | **B** | Pin images by digest in docker-compose; update deploy workflow to use `@sha256:` | DR-1.1, DR-1.2 | A, C, D |
-| **C** | Verify KMS/RoT configurable (pcloud/derot); add dstack simulator support if missing | FR-2.1–FR-2.5 | A, B, D |
+| **C** | Verify KMS/RoT configurable (pcloud/derot); ✓ add dstack simulator support if missing | FR-2.1–FR-2.5 | A, B, D |
 | **D** | **Onchain KMS on Base**: Deploy DstackApp; configure app creation for Onchain KMS; document Base contract/RPC | FR-2.6 | A, B, C |
 
 ## Workflow Details
@@ -27,7 +27,7 @@ Establish attestation source, digest pinning, and deployment configuration. No c
 
 - **Constraint** (NFR-2.1, NFR-2.2): Production uses open DSTACK only. Trust Center is Phala-exclusive (dev only).
 - **Decision**: Gateway `/.dstack/` is the attestation source. Gateway is required ingress in DeRoT production; assume it exists and thus `/.dstack/` endpoints exist.
-- Verify gateway exposes: quote, event_log, vm_config. Dev: Phala-hosted gateway `/.dstack/`. Local: dstack simulator (`DSTACK_SIMULATOR_ENDPOINT`). **Do not** implement an app attestation endpoint—gateway is the single attestation source.
+- ✓ Verify gateway exposes: quote, event_log, vm_config. Dev: Phala-hosted gateway `/.dstack/`. Local: dstack simulator (`DSTACK_SOCKET`). **Do not** implement an app attestation endpoint—gateway is the single attestation source.
 - Expose app_compose or compose-hash, or document `--expected-compose-hash` fallback
 - Ensure verifier can obtain attestation via base_url (gateway URL; `/.dstack/` assumed)
 
@@ -41,7 +41,7 @@ Establish attestation source, digest pinning, and deployment configuration. No c
 - Verify Cargo feature flags: `pcloud` (dev), `derot` (production per NFR-2)
 - Production default: `derot` (Onchain KMS on Base). `pcloud` (Cloud KMS) for dev only.
 - Ensure local testing with appropriate RoT backend
-- Add or verify dstack simulator support (e.g. `DSTACK_SIMULATOR_ENDPOINT`)
+- ✓ Add or verify dstack simulator support (e.g. `DSTACK_SOCKET`)
 
 ### Workflow D: Onchain KMS on Base (FR-2.6)
 
@@ -54,10 +54,10 @@ Establish attestation source, digest pinning, and deployment configuration. No c
 
 | File | Action | Workflow |
 |------|--------|----------|
-| Gateway `/.dstack/` | Verify (dev: Phala gateway; local: simulator) | A |
+| Gateway `/.dstack/` | ✓ Verify (dev: Phala gateway; local: simulator) | A |
 | `docker-compose.phala.yml` | Modify — `@sha256:` digests | B |
 | `.github/workflows/deploy-phala.yml` | Modify — pin images by digest | B |
-| lit-api-server (or relevant crate) | Modify — KMS/RoT, simulator | C |
+| lit-api-server (or relevant crate) | Modify — KMS/RoT, ✓ simulator | C |
 | DstackApp on Base | Deploy or document use of shared contract | D |
 | `docs/deployment/planning/` | Add Onchain KMS setup notes (Base contract, RPC, app creation) | D |
 

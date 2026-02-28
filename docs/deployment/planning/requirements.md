@@ -26,7 +26,7 @@ The system SHALL expose verification capability to the user. A `GET /phala/v1/ve
 | FR-2.2 | The system SHALL support Phala Cloud as one RoT option (e.g. `pcloud` feature). | Must |
 | FR-2.3 | The system SHALL support DeRoT on Base as another RoT option (e.g. `derot` feature). | Must |
 | FR-2.4 | The selector SHALL enable local/internal testing of deployed networks by building with the appropriate RoT backend. | Must |
-| FR-2.5 | The system SHALL be testable locally using the Phala-provided dstack simulator (e.g. via `DSTACK_SIMULATOR_ENDPOINT` or equivalent). | Must |
+| FR-2.5 | The system SHALL be testable locally using the Phala-provided dstack simulator (e.g. via `DSTACK_SOCKET` or equivalent). | Must |
 | FR-2.6 | Production SHALL use Onchain KMS on Base ([Cloud vs Onchain KMS](https://docs.phala.com/phala-cloud/key-management/cloud-vs-onchain-kms)); DstackApp contract deployment and app creation configured for blockchain-enforced governance. | Must |
 
 ### FR-3: Custom Domain Support

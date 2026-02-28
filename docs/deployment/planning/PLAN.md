@@ -84,7 +84,7 @@ flowchart TB
 | Req | Task |
 |-----|------|
 | FR-2.1–2.4 | KMS/RoT configurable at compile time (Cargo features). **Production**: Onchain KMS on Base (`derot`; DstackApp contract). `pcloud` (Cloud KMS) for dev only. |
-| FR-2.5 | Support dstack simulator (e.g. `DSTACK_SIMULATOR_ENDPOINT`) for local testing. |
+| FR-2.5 | ✓ Support dstack simulator (e.g. `DSTACK_SOCKET`) for local testing. |
 | FR-2.6 | Production SHALL use Onchain KMS on Base; DstackApp contract deployment and app creation configured for blockchain-enforced governance. |
 
 ### FR-3: Custom Domain Support

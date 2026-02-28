@@ -140,8 +140,8 @@ test *names='smoke':
 
 # Build the dstack simulator from source (cached in /tmp/dstack).
 # Skips the build if the binary already exists; re-run manually to update.
-[group: 'test']
-simulator-build:
+[group: 'sim']
+sim-build:
     #!/usr/bin/env sh
     set -eu
     DSTACK_DIR=/tmp/dstack
@@ -149,56 +149,60 @@ simulator-build:
         echo "Cloning Dstack-TEE/dstack..."
         git clone --depth 1 https://github.com/Dstack-TEE/dstack.git "$DSTACK_DIR"
     fi
-    if [ ! -x "$DSTACK_DIR/sdk/simulator/dstack-simulator" ]; then
-        echo "Building dstack-guest-agent (this takes a few minutes)..."
-        cd "$DSTACK_DIR/sdk/simulator" && bash build.sh
-    else
-        echo "Simulator already built: $DSTACK_DIR/sdk/simulator/dstack-simulator"
-    fi
+    echo "Building dstack-guest-agent (this takes a few minutes)..."
+    cd "$DSTACK_DIR/sdk/simulator" && bash build.sh
 
-# Build the dstack simulator (if needed), run phala attestation tests against it, then stop it.
-[group: 'test']
-test-phala-sim: simulator-build
+# Start the dstack simulator (runs in background; survives shell exit). Run `just sim-stop` when done.
+[group: 'sim']
+sim-start: sim-build
     #!/usr/bin/env sh
     set -eu
     SIM_DIR=/tmp/dstack/sdk/simulator
     SIM_SOCK="$SIM_DIR/dstack.sock"
 
-    # Kill any stale simulator process and remove the old socket.
+    echo "Cleaning up stale simulator..."
     pkill -f dstack-simulator 2>/dev/null || true
     rm -f "$SIM_SOCK"
+    for i in $(seq 1 10); do
+        [ ! -S "$SIM_SOCK" ] && break
+        printf "  waiting for socket to disappear (%d/10)...\n" "$i"
+        sleep 1
+    done
+    [ ! -S "$SIM_SOCK" ] || { echo "error: stale socket still present"; exit 1; }
 
-    # Start simulator in background (cd into its directory so it finds its data files,
-    # then immediately return to the project root for the cargo invocation below).
-    PROJECT_ROOT="$(pwd)"
     echo "Starting dstack simulator..."
-    (cd "$SIM_DIR" && ./dstack-simulator > /tmp/dstack-simulator.log 2>&1) &
-    SIM_PID=$!
+    nohup sh -c "cd $SIM_DIR && ./dstack-simulator" >> /tmp/dstack-simulator.log 2>&1 &
 
-    # Wait up to 15 s for the socket to appear.
-    i=1
-    while [ $i -le 15 ]; do
+    for i in $(seq 1 15); do
         [ -S "$SIM_SOCK" ] && break
         printf "  waiting for dstack.sock (%d/15)...\n" "$i"
         sleep 1
-        i=$((i + 1))
     done
-    if [ ! -S "$SIM_SOCK" ]; then
-        echo "error: dstack.sock never appeared. Simulator log:"
-        cat /tmp/dstack-simulator.log
-        kill "$SIM_PID" 2>/dev/null || true
-        exit 1
-    fi
+    [ -S "$SIM_SOCK" ] || { echo "error: dstack.sock never appeared"; cat /tmp/dstack-simulator.log; exit 1; }
+    echo "Simulator ready at $SIM_SOCK (log: /tmp/dstack-simulator.log). Run: just sim-stop"
 
-    echo "Simulator ready (pid $SIM_PID, socket $SIM_SOCK)"
+# Stop the dstack simulator.
+[group: 'sim']
+sim-stop:
+    pkill -f dstack-simulator 2>/dev/null || true
+    echo "Simulator stopped"
 
-    # Run the phala dstack tests against the live simulator.
-    DSTACK_SIMULATOR_ENDPOINT="$SIM_SOCK" \
+# Build the dstack simulator (if needed), run phala attestation tests against it, then stop it.
+[group: 'sim']
+sim-test: sim-build
+    #!/usr/bin/env sh
+    set -eu
+    SIM_DIR=/tmp/dstack/sdk/simulator
+    SIM_SOCK="$SIM_DIR/dstack.sock"
+    PROJECT_ROOT="$(pwd)"
+
+    just sim-start
+
+    DSTACK_SOCKET="$SIM_SOCK" \
         cargo test --manifest-path="$PROJECT_ROOT/lit-api-server/Cargo.toml" \
             --features phala \
             -- phala::v1::dstack::tests --nocapture
     STATUS=$?
 
-    # Always stop the simulator.
-    kill "$SIM_PID" 2>/dev/null || true
+    just sim-stop
     exit "$STATUS"

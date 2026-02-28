@@ -9,7 +9,7 @@
 # The simulator is the dstack-guest-agent binary from Dstack-TEE/dstack, symlinked
 # as dstack-simulator. It creates Unix sockets (dstack.sock, tappd.sock, …) that
 # replace /var/run/dstack.sock in non-CVM environments.
-# DSTACK_SIMULATOR_ENDPOINT is set to the absolute path of dstack.sock so the
+# DSTACK_SOCKET is set to the absolute path of dstack.sock so the
 # dstack client in dstack.rs transparently uses it instead of the CVM socket.
 
 name: Phala Simulator Validation
@@ -49,20 +49,6 @@ jobs:
       - name: Build dstack simulator
         run: cd /tmp/dstack/sdk/simulator && bash build.sh
 
-      # ── 2. Start the simulator ────────────────────────────────────────────
-      - name: Start dstack simulator
-        run: |
-          cd /tmp/dstack/sdk/simulator
-          ./dstack-simulator &
-          echo "Waiting for dstack.sock..."
-          for i in $(seq 1 15); do
-            [ -S /tmp/dstack/sdk/simulator/dstack.sock ] && echo "Socket ready." && break
-            echo "  attempt $i/15…"
-            sleep 1
-          done
-          [ -S /tmp/dstack/sdk/simulator/dstack.sock ] || { echo "ERROR: dstack.sock never appeared"; exit 1; }
-
-      # ── 3. Build and test lit-api-server against the simulator ────────────
       # Switch to the pinned toolchain the project declares in rust-toolchain.toml.
       - name: Install Rust 1.91 (lit-api-server toolchain)
         uses: dtolnay/rust-toolchain@1.91
@@ -75,11 +61,46 @@ jobs:
             sleep 10
           done
 
+      # ── 2. Start simulator, run tests, cleanup ──────────────────────────────
       - name: Run phala simulator tests
-        env:
-          DSTACK_SIMULATOR_ENDPOINT: /tmp/dstack/sdk/simulator/dstack.sock
-        working-directory: lit-api-server
         run: |
-          cargo test --features phala \
-            -- phala::v1::dstack::tests \
-            --nocapture
+          set -eu
+          SIM_DIR=/tmp/dstack/sdk/simulator
+          SIM_SOCK="$SIM_DIR/dstack.sock"
+
+          # Clean up any stale simulator from previous runs.
+          echo "Cleaning up stale simulator..."
+          pkill -f dstack-simulator 2>/dev/null || true
+          rm -f "$SIM_SOCK"
+          for i in $(seq 1 10); do
+            [ ! -S "$SIM_SOCK" ] && break
+            echo "  waiting for socket to disappear ($i/10)..."
+            sleep 1
+          done
+          [ ! -S "$SIM_SOCK" ] || { echo "ERROR: stale socket still present"; exit 1; }
+
+          # Start simulator.
+          echo "Starting dstack simulator..."
+          (cd "$SIM_DIR" && ./dstack-simulator > /tmp/dstack-simulator.log 2>&1) &
+          SIM_PID=$!
+
+          # Wait for socket to appear.
+          for i in $(seq 1 15); do
+            [ -S "$SIM_SOCK" ] && echo "Socket ready." && break
+            echo "  waiting for dstack.sock ($i/15)..."
+            sleep 1
+          done
+          [ -S "$SIM_SOCK" ] || { echo "ERROR: dstack.sock never appeared"; cat /tmp/dstack-simulator.log; kill "$SIM_PID" 2>/dev/null || true; exit 1; }
+
+          # Run tests.
+          (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" cargo test --features phala -- phala::v1::dstack::tests --nocapture)
+          STATUS=$?
+
+          # Cleanup: stop simulator and wait for socket to disappear.
+          kill "$SIM_PID" 2>/dev/null || true
+          for i in $(seq 1 10); do
+            [ ! -S "$SIM_SOCK" ] && break
+            sleep 1
+          done
+
+          exit "$STATUS"

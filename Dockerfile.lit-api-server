@@ -14,7 +14,7 @@ COPY lit-core ./lit-core/
 COPY lit-actions ./lit-actions/
 COPY lit-api-server ./lit-api-server/
 
-RUN cd lit-api-server && cargo build --release --bin lit-api-server --features phala
+RUN cd lit-api-server && cargo build-production --bin lit-api-server
 
 FROM debian:bookworm-slim AS runtime
 
@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-COPY --from=builder /build/lit-api-server/target/release/lit-api-server /usr/local/bin/
+COPY --from=builder /build/lit-api-server/target/production/lit-api-server /usr/local/bin/
 COPY --from=builder /build/lit-api-server/Rocket.toml /app/
 COPY --from=builder /build/lit-api-server/rpc-config.yaml /app/
 COPY --from=builder /build/lit-api-server/log_levels.toml /app/

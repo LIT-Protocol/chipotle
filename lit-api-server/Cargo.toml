@@ -7,6 +7,7 @@ license = "Apache-2.0"
 
 [features]
 default = []
+# Phala TEE attestation. Mandatory in production (auto-enabled by --profile production); optional in dev (--features phala for testing).
 phala = []
 
 [dependencies]
@@ -78,8 +79,9 @@ url = "2"
 rocket_okapi = { version = "=0.9.0", features = ["swagger"] }
 schemars = "0.8"
 
+[profile.production]
+inherits = "release"
+
 [dev-dependencies]
 rand_chacha = "0.3.1"
 rand_core = "0.6"
-
-
