@@ -394,7 +394,7 @@ async fn aes_decrypt(mut client: TestClient) {
     client
         .respond_with(AesDecryptResponse { plaintext: "ignored".to_string() })
         .execute_js(
-            r#"(async () => { await LitActions.aesDecrypt({symmetricKey: [1,2,3], ciphertext: [4,5,6]}) })()"#,
+            r#"(async () => { await LitActions.aesDecrypt({ publicKey: "ignored", ciphertext: "456"}) })()"#,
         )
         .await
         .unwrap();
@@ -402,7 +402,8 @@ async fn aes_decrypt(mut client: TestClient) {
     assert_eq!(
         client.received::<AesDecryptRequest>(),
         AesDecryptRequest {
-            ciphertext: vec![4, 5, 6],
+            public_key: "ignored".to_string(),
+            ciphertext: "456".to_string(),
         }
     );
     assert!(client.received::<ExecutionResult>().success);
@@ -617,7 +618,7 @@ async fn async_await(mut client: TestClient) {
         (async () => {
             const fulfilled = await Promise.all([
                 LitActions.sign({toSign: [1,2,3], publicKey: "some-key", sigName: "some-sig", signingScheme: "EcdsaK256Sha256"}),
-                LitActions.aesDecrypt({symmetricKey: [1,2,3], ciphertext: [4,5,6]}),
+                LitActions.aesDecrypt({publicKey: "some-key", ciphertext: "456"}),
                 LitActions.setResponse({response: await "OK"})
             ])
             console.log(fulfilled)
@@ -631,7 +632,7 @@ async fn async_await(mut client: TestClient) {
                 success: "success".to_string(),
             })
             .respond_with(AesDecryptResponse {
-                plaintext: "plaintext".to_string(),
+                plaintext: "456".to_string(),
             })
             .respond_with(SetResponseResponse {})
             .execute_js(code)
@@ -641,12 +642,12 @@ async fn async_await(mut client: TestClient) {
         assert_eq!(client.received::<SignRequest>().sig_name, "some-sig");
         assert_eq!(
             client.received::<AesDecryptRequest>().ciphertext,
-            vec![4, 5, 6]
+            "456".to_string()
         );
         assert_eq!(client.received::<SetResponseRequest>().response, "OK");
         assert_eq!(
             client.received::<PrintRequest>().message,
-            "[ \"success\", \"plaintext\", null ]\n"
+            "[ \"success\", \"456\", null ]\n"
         );
         assert!(client.received::<ExecutionResult>().success);
     }

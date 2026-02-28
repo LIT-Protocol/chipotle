@@ -147,11 +147,13 @@ message ExecuteJsResponse {
   }
 
   message AesEncryptRequest {
-    bytes message = 1;    
+    string public_key = 1;
+    string message = 2;    
   }
 
   message AesDecryptRequest {
-    bytes ciphertext = 1;
+    string public_key = 1;
+    string ciphertext = 2;
   }
 
   message GetLatestNonceRequest {

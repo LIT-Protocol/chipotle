@@ -187,17 +187,35 @@ async fn op_verify_action_signature(
 #[instrument(skip_all, ret)]
 #[op2(async, reentrant)]
 #[string]
+async fn op_aes_encrypt(
+    state: Rc<RefCell<OpState>>,
+    #[string] public_key: String,
+    #[string] message: String,
+) -> Result<String, JsErrorBox> {
+    ensure_not_blank!(public_key, "publicKey");
+    ensure_not_blank!(message, "message");
+
+    remote_op_async!(op_aes_encrypt,
+        state,
+        AesEncryptRequest { public_key, message },
+        UnionRequest::AesEncrypt(resp) => Ok(resp.ciphertext)
+    )
+}
+
+#[instrument(skip_all, ret)]
+#[op2(async, reentrant)]
+#[string]
 async fn op_aes_decrypt(
     state: Rc<RefCell<OpState>>,
-    #[buffer(copy)] symmetric_key: Vec<u8>,
-    #[buffer(copy)] ciphertext: Vec<u8>,
+    #[string] public_key: String,
+    #[string] ciphertext: String,
 ) -> Result<String, JsErrorBox> {
-    ensure_not_empty!(symmetric_key, "symmetricKey");
+    ensure_not_blank!(public_key, "publicKey");
     ensure_not_empty!(ciphertext);
 
     remote_op_async!(op_aes_decrypt,
         state,
-        AesDecryptRequest { ciphertext },
+        AesDecryptRequest { public_key, ciphertext },
         UnionRequest::AesDecrypt(resp) => Ok(resp.plaintext)
     )
 }
@@ -326,6 +344,7 @@ extension!(
     deps = [runtime],
     ops = [
         op_aes_decrypt,
+        op_aes_encrypt,
         op_call_child,
         op_call_contract,
         op_get_latest_nonce,
