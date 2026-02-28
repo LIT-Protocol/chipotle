@@ -2,3 +2,4 @@
 .cursor
 docker-compose.deploy.yml
 .digest-*.txt
+dstack-cache/
