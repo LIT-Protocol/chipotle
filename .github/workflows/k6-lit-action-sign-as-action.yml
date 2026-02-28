@@ -12,8 +12,8 @@
 # Slack discussion:
 # https://litprotocol.slack.com/archives/C0AG62JLYKS/p1772285399551879?thread_ts=1772254651.978569&cid=C0AG62JLYKS
 #
-# This workflow is kept for tracking purposes. Use k6-lit-action-ecdsa-sign.yml for
-# a working signing test. In the deploy pipeline this job runs with continue-on-error: true.
+# The workflow run succeeds when k6 fails (expected), and fails when k6 passes
+# (unexpected — would mean signAsAction was accidentally implemented).
 
 name: k6 Lit Action Sign As Action
 
@@ -40,7 +40,13 @@ jobs:
       - name: Install k6
         uses: grafana/setup-k6-action@v1
 
-      - name: lit-action-sign-as-action.spec.ts
+      - name: lit-action-sign-as-action.spec.ts (expected to fail)
         env:
           BASE_URL: ${{ inputs.base_url || vars.BASE_URL }}
-        run: k6 run k6/lit-action-sign-as-action.spec.ts
+        run: |
+          if k6 run k6/lit-action-sign-as-action.spec.ts; then
+            echo "UNEXPECTED: signAsAction passed — it should not be implemented"
+            exit 1
+          else
+            echo "OK: signAsAction failed as expected (not implemented, deprecated)"
+          fi
