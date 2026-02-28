@@ -52,7 +52,7 @@ function signEcdsa({ toSign, publicKey, sigName}) {
  *   "Bls12381G1ProofOfPossession"
  * @name Lit.Actions.sign
  * @function sign
- * @returns {Uint8array} The resulting signature 
+ * @returns {Uint8Array} The resulting signature 
  */
 function sign({ toSign, publicKey, sigName, signingScheme }) {
   return ops.op_sign(
