@@ -36,28 +36,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Cache path inside workspace (no .. allowed by actions/cache).
-      - name: Set dstack cache path
-        id: cache-path
-        run: echo "path=${{ github.workspace }}/dstack-cache" >> "$GITHUB_OUTPUT"
-
       # ── 1. Build the dstack simulator and verifier (cached by upstream SHA) ─
       # The cache key is the dstack HEAD SHA — obtained without cloning via
       # git ls-remote. On cache hit the clone and both cargo/build.sh builds
       # are skipped entirely; the binaries and runtime data files are restored
-      # directly and used as-is. restore-keys provides fallback when dstack HEAD changes.
+      # directly and used as-is. Cache is scoped by branch (base branch for PRs).
       - name: Get dstack HEAD SHA
         id: dstack-sha
         run: |
-          SHA=$(git ls-remote https://github.com/Dstack-TEE/dstack.git HEAD | cut -f1)
+          SHA=$(git ls-remote https://github.com/Dstack-TEE/dstack.git HEAD | head -1 | cut -f1 | tr -d '[:space:]')
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Cache key: dstack-${SHA}-${{ runner.os }}"
 
       - name: Restore dstack cache
         id: dstack-cache
         uses: actions/cache@v4
         with:
-          path: ${{ steps.cache-path.outputs.path }}
+          path: ${{ github.workspace }}/dstack-cache
           key: dstack-${{ steps.dstack-sha.outputs.sha }}-${{ runner.os }}
+
+      - name: Cache status
+        run: echo "cache-hit=${{ steps.dstack-cache.outputs.cache-hit }}"
+
+      - name: Fix dstack cache permissions
+        if: steps.dstack-cache.outputs.cache-hit == 'true'
+        run: |
+          CACHE_DIR="${{ github.workspace }}/dstack-cache"
+          [ -d "$CACHE_DIR" ] && chmod -R u+rwX "$CACHE_DIR" || true
 
       - name: Clone dstack repository
         if: steps.dstack-cache.outputs.cache-hit != 'true'
@@ -82,7 +87,7 @@ jobs:
       - name: Populate dstack cache
         if: steps.dstack-cache.outputs.cache-hit != 'true'
         run: |
-          CACHE_DIR="${{ steps.cache-path.outputs.path }}"
+          CACHE_DIR="${{ github.workspace }}/dstack-cache"
           mkdir -p "$CACHE_DIR/simulator" "$CACHE_DIR/verifier"
           # Simulator: binary + data files read via relative paths at runtime
           cp "$DSTACK_BUILD/sdk/simulator/dstack-simulator" \
@@ -120,7 +125,7 @@ jobs:
       - name: Run phala simulator tests
         run: |
           set -eu
-          SIM_SRC="${{ steps.cache-path.outputs.path }}/simulator"
+          SIM_SRC="${{ github.workspace }}/dstack-cache/simulator"
 
           # Create an isolated temp dir for this run's sockets and data files.
           SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
@@ -171,7 +176,7 @@ jobs:
       - name: Verify attestation pipeline with dstack-verifier
         run: |
           set -eu
-          CACHE_DIR="${{ steps.cache-path.outputs.path }}"
+          CACHE_DIR="${{ github.workspace }}/dstack-cache"
           SIM_SRC="$CACHE_DIR/simulator"
           VERIFIER_BIN="$CACHE_DIR/verifier/dstack-verifier"
           VERIFIER_CFG="$CACHE_DIR/verifier/dstack-verifier.toml"
