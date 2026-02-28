@@ -1,7 +1,19 @@
 # Run lit-action-sign-as-action.spec.ts.
 # Called from Deploy to Phala CVM after wait-for-api, or manually via workflow_dispatch.
 #
-# Required vars: BASE_URL (for workflow_dispatch when base_url not passed)
+# ⚠ EXPECTED TO FAIL — signAsAction is not implemented and has been deprecated.
+#
+# Rationale (from Chris, Slack thread below): anything truly immutable is a bad idea
+# because everyone eventually needs to upgrade, and if they don't want to, they still
+# must because their supply chain (APIs, infra, etc.) changes around them. Everyone
+# creates an "out" anyway, so enforced lock-in adds friction without real benefit.
+# Net/net: easier to move forward without forcibly locking things down.
+#
+# Slack discussion:
+# https://litprotocol.slack.com/archives/C0AG62JLYKS/p1772285399551879?thread_ts=1772254651.978569&cid=C0AG62JLYKS
+#
+# This workflow is kept for tracking purposes. Use k6-lit-action-ecdsa-sign.yml for
+# a working signing test. In the deploy pipeline this job runs with continue-on-error: true.
 
 name: k6 Lit Action Sign As Action
 
