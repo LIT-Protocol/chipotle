@@ -202,17 +202,23 @@ sim-start: sim-build
        "$SIM_SRC/dstack.toml" "$SIM_TMP/"
 
     echo "Starting dstack simulator in $SIM_TMP..."
-    sh -c "cd '$SIM_TMP' && '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
+    sh -c "cd '$SIM_TMP' && exec '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
     SIM_PID=$!
-
-    printf '%s\n%s\n' "$SIM_TMP" "$SIM_PID" > "$STATE"
 
     for i in $(seq 1 15); do
         [ -S "$SIM_SOCK" ] && break
         printf "  waiting for dstack.sock (%d/15)...\n" "$i"
         sleep 1
     done
-    [ -S "$SIM_SOCK" ] || { echo "error: dstack.sock never appeared"; cat "$SIM_TMP/dstack-simulator.log"; exit 1; }
+    [ -S "$SIM_SOCK" ] || {
+        echo "error: dstack.sock never appeared"
+        cat "$SIM_TMP/dstack-simulator.log"
+        kill "$SIM_PID" 2>/dev/null || true
+        rm -rf "$SIM_TMP"
+        rm -f "$STATE"
+        exit 1
+    }
+    printf '%s\n%s\n' "$SIM_TMP" "$SIM_PID" > "$STATE"
     echo "Simulator ready at $SIM_SOCK (log: $SIM_TMP/dstack-simulator.log). Run: just sim-stop"
     printf '  DSTACK_SOCKET=%s\n' "$SIM_SOCK"
 
@@ -250,7 +256,7 @@ sim-test: sim-build
        "$SIM_SRC/dstack.toml" "$SIM_TMP/"
 
     echo "Starting dstack simulator in $SIM_TMP..."
-    sh -c "cd '$SIM_TMP' && '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
+    sh -c "cd '$SIM_TMP' && exec '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
     SIM_PID=$!
 
     for i in $(seq 1 15); do
@@ -300,7 +306,7 @@ sim-verify: sim-build verifier-build api-server
 
     # Start simulator.
     echo "Starting dstack simulator in $SIM_TMP..."
-    sh -c "cd '$SIM_TMP' && '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
+    sh -c "cd '$SIM_TMP' && exec '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
     SIM_PID=$!
     for i in $(seq 1 15); do
         [ -S "$SIM_SOCK" ] && break
@@ -321,6 +327,13 @@ sim-verify: sim-build verifier-build api-server
     echo "Starting lit-api-server (demo config)..."
     (cd "$PROJECT_ROOT/lit-api-server" && DSTACK_SOCKET="$SIM_SOCK" "$API_BIN") >> "$SIM_TMP/lit-api-server.log" 2>&1 &
     API_PID=$!
+    if ! kill -0 "$API_PID" 2>/dev/null; then
+        echo "error: lit-api-server failed to start"
+        cat "$SIM_TMP/lit-api-server.log"
+        kill "$SIM_PID" 2>/dev/null || true
+        rm -rf "$SIM_TMP"
+        exit 1
+    fi
 
     # Wait for /attestation to respond.
     for i in $(seq 1 20); do

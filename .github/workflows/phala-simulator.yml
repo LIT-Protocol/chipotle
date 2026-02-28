@@ -132,8 +132,9 @@ jobs:
              "$SIM_SRC/dstack.toml" "$SIM_TMP/"
 
           # Start simulator; sockets are created relative to CWD ($SIM_TMP).
+          # exec replaces shell with simulator so SIM_PID refers to actual process (avoids zombies).
           echo "Starting dstack simulator in $SIM_TMP..."
-          sh -c "cd '$SIM_TMP' && '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
+          sh -c "cd '$SIM_TMP' && exec '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
           SIM_PID=$!
 
           for i in $(seq 1 15); do
@@ -183,8 +184,8 @@ jobs:
              "$SIM_SRC/sys-config.json" "$SIM_SRC/attestation.bin" \
              "$SIM_SRC/dstack.toml" "$SIM_TMP/"
 
-          # Start simulator.
-          sh -c "cd '$SIM_TMP' && '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
+          # Start simulator (exec avoids zombie processes).
+          sh -c "cd '$SIM_TMP' && exec '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
           SIM_PID=$!
           for i in $(seq 1 15); do
             [ -S "$SIM_SOCK" ] && break
@@ -203,6 +204,13 @@ jobs:
           cp lit-api-server/NodeConfig.demo.toml lit-api-server/NodeConfig.toml
           (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" "$API_BIN") >> "$SIM_TMP/lit-api-server.log" 2>&1 &
           API_PID=$!
+          if ! kill -0 "$API_PID" 2>/dev/null; then
+            echo "ERROR: lit-api-server failed to start"
+            cat "$SIM_TMP/lit-api-server.log"
+            kill "$SIM_PID" 2>/dev/null || true
+            rm -rf "$SIM_TMP"
+            exit 1
+          fi
 
           # Wait for /attestation to respond (up to 5 min).
           for i in $(seq 1 300); do
