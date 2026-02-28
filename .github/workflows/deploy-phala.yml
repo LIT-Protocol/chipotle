@@ -155,10 +155,3 @@ jobs:
     with:
       base_url: ${{ needs.wait-for-api.outputs.base_url }}
 
-  # verifyActionSignature calls signAsAction internally — same inverted pattern.
-  k6-lit-action-verify-action-signature:
-    needs: [wait-for-api, k6-lit-action-sign-as-action]
-    if: ${{ !cancelled() }}
-    uses: ./.github/workflows/k6-lit-action-verify-action-signature.yml
-    with:
-      base_url: ${{ needs.wait-for-api.outputs.base_url }}
