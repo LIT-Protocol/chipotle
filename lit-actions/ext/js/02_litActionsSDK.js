@@ -14,17 +14,14 @@ function getLatestNonce({ address, chain }) {
 }
 
 /**
- * 
- * Ask the Lit Node to sign any data using the ECDSA Algorithm with it's private key .  The resulting signature  will be returned to the Lit JS SDK which will automatically combine the s and give you the full signature to use.
+ * Ask the Lit Node to sign any data using the ECDSA Algorithm with its private key. The resulting signature will be returned to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
  * @name Lit.Actions.signEcdsa
  * @function signEcdsa
  * @param {Object} params
  * @param {Uint8Array} params.toSign The message to sign
  * @param {string} params.publicKey The public key of the PKP
  * @param {string} params.sigName The name of the signature
- * @name Lit.Actions.signEcdsa
- * @function signEcdsa
- * @returns {Promise<Uint8Array>} The resulting signature 
+ * @returns {Promise<Uint8Array>} The resulting signature
  */
 function signEcdsa({ toSign, publicKey, sigName}) {
   return sign({ toSign, publicKey, sigName, signingScheme: "EcdsaK256Sha256" });
@@ -49,10 +46,10 @@ function signEcdsa({ toSign, publicKey, sigName}) {
  *   "SchnorrK256Taproot"
  *   "SchnorrRedDecaf377Blake2b512"
  *   "SchnorrkelSubstrate"
- *   "Bls12381G1ProofOfPossession" 
+ *   "Bls12381G1ProofOfPossession"
  * @name Lit.Actions.sign
  * @function sign
- * @returns {Uint8array} The resulting signature 
+ * @returns {Uint8Array} The resulting signature 
  */
 function sign({ toSign, publicKey, sigName, signingScheme }) {
   return ops.op_sign(
