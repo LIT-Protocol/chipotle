@@ -74,7 +74,7 @@ Both run as separate containers in the same CVM, communicating via a shared Unix
 
 ### Phala attestation
 
-Attestation (quote, event_log, vm_config) is obtained from the gateway `/.dstack/` endpoints—the gateway is the required ingress and the single attestation source. Do not implement an app-level attestation endpoint. For dev: Phala-hosted gateway; for local testing: dstack simulator (`DSTACK_SIMULATOR_ENDPOINT`). See [PLAN.md](PLAN.md) and [requirements.md](requirements.md) for the verification flow.
+Attestation (quote, event_log, vm_config) is obtained from the gateway `/.dstack/` endpoints—the gateway is the required ingress and the single attestation source. Do not implement an app-level attestation endpoint. For dev: Phala-hosted gateway; for local testing: dstack simulator (`DSTACK_SOCKET`). See [PLAN.md](PLAN.md) and [requirements.md](requirements.md) for the verification flow.
 
 ## Required Secrets
 

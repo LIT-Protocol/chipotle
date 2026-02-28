@@ -1,0 +1,4 @@
+# Production build: phala is auto-enabled via is_production cfg
+[alias]
+build-production = "build --profile production"
+run-production = "run --profile production"
