@@ -34,6 +34,7 @@ jobs:
       # ── 1. Build the dstack simulator ─────────────────────────────────────
       - name: Clone dstack repository
         run: |
+          git config --global --add safe.directory /tmp/dstack
           if [ -d /tmp/dstack/.git ]; then
             cd /tmp/dstack && git fetch --depth 1 origin && git reset --hard FETCH_HEAD
           else
