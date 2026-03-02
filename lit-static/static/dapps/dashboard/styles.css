@@ -489,6 +489,7 @@ body.has-api-key .dashboard-wrap {
 }
 
 .stat-card {
+  position: relative;
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -519,6 +520,124 @@ body.has-api-key .dashboard-wrap {
   font-size: 0.8125rem;
   color: var(--text-muted);
   font-weight: 500;
+}
+
+/* ----- Skeleton loading ----- */
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--border) 0%,
+    color-mix(in srgb, var(--border) 60%, transparent) 50%,
+    var(--border) 100%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.2s ease-in-out infinite;
+  border-radius: var(--radius);
+}
+
+.skeleton-line {
+  height: 0.875rem;
+  margin-bottom: 0.5rem;
+  max-width: 100%;
+}
+
+.skeleton-line:last-child {
+  margin-bottom: 0;
+}
+
+.skeleton-line.skeleton-line-sm {
+  height: 0.75rem;
+  max-width: 60%;
+}
+
+.stat-card.is-loading .stat-content {
+  visibility: hidden;
+  position: absolute;
+  pointer-events: none;
+}
+
+.stat-card .stat-skeleton {
+  display: none;
+  padding: 0;
+}
+
+.stat-card.is-loading .stat-skeleton {
+  display: block;
+}
+
+.stat-skeleton .skeleton-line:first-child {
+  width: 2.5rem;
+  height: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+
+.stat-skeleton .skeleton-line:last-child {
+  width: 4rem;
+  height: 0.75rem;
+}
+
+.table-skeleton {
+  display: none;
+  padding: 0.5rem 0;
+}
+
+.table-wrap.is-loading .table-skeleton {
+  display: block;
+}
+
+.table-wrap.is-loading .data-table,
+.table-wrap.is-loading .empty-state {
+  display: none !important;
+}
+
+.table-skeleton-row {
+  display: flex;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border);
+  align-items: center;
+}
+
+.table-skeleton-row .skeleton {
+  flex: 1;
+  min-width: 0;
+  height: 0.875rem;
+}
+
+.table-skeleton-row .skeleton.skeleton-cell-sm {
+  flex: 0 0 4rem;
+}
+
+.table-skeleton-row .skeleton.skeleton-cell-md {
+  flex: 0 0 8rem;
+}
+
+.action-runner-output.is-loading .action-runner-output-content {
+  display: none;
+}
+
+.action-runner-output .output-skeleton {
+  display: none;
+  min-height: 6rem;
+  padding: 1rem;
+}
+
+.action-runner-output.is-loading .output-skeleton {
+  display: block;
+}
+
+.action-runner-output.is-loading .output-skeleton .skeleton-line {
+  margin-bottom: 0.75rem;
+}
+
+.action-runner-output .action-runner-output-content:empty::before {
+  content: 'Result will appear here.';
+  color: var(--text-muted);
 }
 
 /* ----- Sections ----- */

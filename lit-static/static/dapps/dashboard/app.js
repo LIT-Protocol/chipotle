@@ -40,10 +40,39 @@ function updateAuthUI() {
   }
 }
 
+function showStatSkeletons() {
+  ['stat-card-usage-keys', 'stat-card-groups', 'stat-card-wallets', 'stat-card-actions'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('is-loading');
+  });
+}
+
+function hideStatSkeletons() {
+  ['stat-card-usage-keys', 'stat-card-groups', 'stat-card-wallets', 'stat-card-actions'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('is-loading');
+  });
+}
+
+function showTableSkeleton(wrapId) {
+  const wrap = document.getElementById(wrapId);
+  if (wrap) wrap.classList.add('is-loading');
+}
+
+function hideTableSkeleton(wrapId) {
+  const wrap = document.getElementById(wrapId);
+  if (wrap) wrap.classList.remove('is-loading');
+}
+
 // Preload groups, wallets, usage keys, and actions (for default group) when dashboard is shown
 async function preloadAllTables() {
   const apiKey = getApiKey();
   if (!apiKey) return;
+  showStatSkeletons();
+  showTableSkeleton('usage-keys-table-wrap');
+  showTableSkeleton('groups-table-wrap');
+  showTableSkeleton('actions-table-wrap');
+  showTableSkeleton('wallets-table-wrap');
   try {
     const groups = await loadGroups();
     await loadWallets();
@@ -56,7 +85,13 @@ async function preloadAllTables() {
     }
     if (!groupId) groupId = '0';
     await loadActions(groupId);
-  } catch (_) { /* ignore */ }
+  } catch (_) { /* ignore */ } finally {
+    hideStatSkeletons();
+    hideTableSkeleton('usage-keys-table-wrap');
+    hideTableSkeleton('groups-table-wrap');
+    hideTableSkeleton('actions-table-wrap');
+    hideTableSkeleton('wallets-table-wrap');
+  }
 }
 
 function showStatus(elId, message, type = 'info') {
@@ -512,6 +547,7 @@ async function loadUsageKeys() {
   hideStatus('overview-status-usage-keys');
   const btn = document.getElementById('btn-load-usage-keys');
   if (btn) btn.disabled = true;
+  showTableSkeleton('usage-keys-table-wrap');
   try {
     const client = await getClient();
     const items = await client.listApiKeys({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
@@ -531,6 +567,7 @@ async function loadUsageKeys() {
     showStatus('overview-status-usage-keys', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
     return [];
   } finally {
+    hideTableSkeleton('usage-keys-table-wrap');
     if (btn) btn.disabled = false;
   }
 }
@@ -542,6 +579,7 @@ async function loadGroups() {
   hideStatus('groups-status');
   const btn = document.getElementById('btn-load-groups');
   if (btn) btn.disabled = true;
+  showTableSkeleton('groups-table-wrap');
   try {
     const client = await getClient();
     const items = await client.listGroups({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
@@ -553,6 +591,7 @@ async function loadGroups() {
     showStatus('groups-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
     return [];
   } finally {
+    hideTableSkeleton('groups-table-wrap');
     if (btn) btn.disabled = false;
   }
 }
@@ -563,6 +602,7 @@ async function loadWallets() {
   hideStatus('wallets-status');
   const btn = document.getElementById('btn-load-wallets');
   if (btn) btn.disabled = true;
+  showTableSkeleton('wallets-table-wrap');
   try {
     const client = await getClient();
     const items = await client.listWallets({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
@@ -574,6 +614,7 @@ async function loadWallets() {
     showStatus('wallets-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
     return [];
   } finally {
+    hideTableSkeleton('wallets-table-wrap');
     if (btn) btn.disabled = false;
   }
 }
@@ -584,6 +625,7 @@ async function loadActions(groupId) {
   hideStatus('actions-status');
   const btn = document.getElementById('btn-load-actions');
   if (btn) btn.disabled = true;
+  showTableSkeleton('actions-table-wrap');
   try {
     const client = await getClient();
     const items = await client.listActions({ apiKey, groupId, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
@@ -595,6 +637,7 @@ async function loadActions(groupId) {
     showStatus('actions-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
     return [];
   } finally {
+    hideTableSkeleton('actions-table-wrap');
     if (btn) btn.disabled = false;
   }
 }
@@ -976,8 +1019,15 @@ function initActionRunner() {
   const btnGetCid = document.getElementById('btn-get-lit-action-ipfs-cid');
   const outputEl = document.getElementById('action-runner-output');
   const statusEl = document.getElementById('action-runner-status');
+  const outputContentEl = outputEl?.querySelector('.action-runner-output-content');
 
   if (!btn || !outputEl) return;
+
+  function setOutput(text, className) {
+    outputEl.classList.remove('is-loading');
+    if (outputContentEl) outputContentEl.textContent = text;
+    outputEl.className = 'action-runner-output' + (className ? ' ' + className : '');
+  }
 
   btn.addEventListener('click', async () => {
     const apiKey = getApiKey();
@@ -986,14 +1036,12 @@ function initActionRunner() {
 
     if (!apiKey) {
       hideStatus('action-runner-status');
-      outputEl.textContent = 'Log in first to execute Lit Actions.';
-      outputEl.className = 'action-runner-output error';
+      setOutput('Log in first to execute Lit Actions.', 'error');
       return;
     }
     if (!code) {
       hideStatus('action-runner-status');
-      outputEl.textContent = 'Enter Lit Action code.';
-      outputEl.className = 'action-runner-output error';
+      setOutput('Enter Lit Action code.', 'error');
       return;
     }
 
@@ -1002,25 +1050,23 @@ function initActionRunner() {
       try {
         jsParams = JSON.parse(paramsRaw);
       } catch (e) {
-        outputEl.textContent = 'Invalid JSON in parameters: ' + (e && e.message ? e.message : String(e));
-        outputEl.className = 'action-runner-output error';
+        setOutput('Invalid JSON in parameters: ' + (e && e.message ? e.message : String(e)), 'error');
         return;
       }
     }
 
     hideStatus('action-runner-status');
-    outputEl.textContent = 'Executing…';
+    if (outputContentEl) outputContentEl.textContent = '';
+    outputEl.classList.add('is-loading');
     outputEl.className = 'action-runner-output';
     btn.disabled = true;
 
     try {
       const client = await getClient();
       const result = await client.litAction({ apiKey, code, jsParams });
-      outputEl.textContent = JSON.stringify(result, null, 2);
-      outputEl.className = 'action-runner-output success';
+      setOutput(JSON.stringify(result, null, 2), 'success');
     } catch (e) {
-      outputEl.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
-      outputEl.className = 'action-runner-output error';
+      setOutput('Error: ' + (e && e.message ? e.message : String(e)), 'error');
     } finally {
       btn.disabled = false;
     }
@@ -1029,11 +1075,11 @@ function initActionRunner() {
   btnGetCid?.addEventListener('click', async () => {
     const code = codeEl?.value?.trim() ?? '';
     if (!code) {
-      outputEl.textContent = 'Enter Lit Action code to get its IPFS CID.';
-      outputEl.className = 'action-runner-output error';
+      setOutput('Enter Lit Action code to get its IPFS CID.', 'error');
       return;
     }
-    outputEl.textContent = 'Fetching…';
+    if (outputContentEl) outputContentEl.textContent = '';
+    outputEl.classList.add('is-loading');
     outputEl.className = 'action-runner-output';
     btnGetCid.disabled = true;
     try {
@@ -1047,11 +1093,9 @@ function initActionRunner() {
         const parsed = JSON.parse(text);
         if (typeof parsed === 'string') cid = parsed;
       } catch (_) {}
-      outputEl.textContent = cid;
-      outputEl.className = 'action-runner-output success';
+      setOutput(cid, 'success');
     } catch (e) {
-      outputEl.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
-      outputEl.className = 'action-runner-output error';
+      setOutput('Error: ' + (e && e.message ? e.message : String(e)), 'error');
     } finally {
       btnGetCid.disabled = false;
     }
