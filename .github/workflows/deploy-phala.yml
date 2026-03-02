@@ -1,8 +1,8 @@
 # Deploy lit-api-server + lit-actions + lit-static to Phala CVM (tdx.large instance)
 #
 # Branch-based deployment:
-#   push to main  → lit-api-server, BASE_URL https://api.dev.litprotocol.com/core/v1
-#   push to next  → lit-api-server-next, BASE_URL https://...-8000.dstack-pha-prod5.phala.network/core/v1
+#   push to main  → lit-api-server, api_root_url https://api.dev.litprotocol.com
+#   push to next  → lit-api-server-next, api_root_url https://...-8000.dstack-pha-prod5.phala.network
 #
 # Required secrets:
 #   DOCKERHUB_TOKEN - Docker Hub PAT (Account Settings > Security > Access Tokens)
@@ -32,7 +32,6 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       phala_app_name: ${{ steps.set.outputs.phala_app_name }}
-      base_url: ${{ steps.set.outputs.base_url }}
       api_root_url: ${{ steps.set.outputs.api_root_url }}
     steps:
       - name: Set deployment target and base URL
@@ -40,20 +39,15 @@ jobs:
         run: |
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             TARGET="lit-api-server"
+            echo "api_root_url=https://api.dev.litprotocol.com" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
             TARGET="lit-api-server-next"
+            echo "api_root_url=https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network" >> "$GITHUB_OUTPUT"
           else
             echo "Unsupported branch for deployment"
             exit 1
           fi
           echo "phala_app_name=$TARGET" >> "$GITHUB_OUTPUT"
-          if [ "$TARGET" = "lit-api-server" ]; then
-            echo "base_url=https://api.dev.litprotocol.com/core/v1" >> "$GITHUB_OUTPUT"
-            echo "api_root_url=https://api.dev.litprotocol.com" >> "$GITHUB_OUTPUT"
-          else
-            echo "base_url=https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network/core/v1" >> "$GITHUB_OUTPUT"
-            echo "api_root_url=https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network" >> "$GITHUB_OUTPUT"
-          fi
 
   determine-runner:
     runs-on: ubuntu-latest
@@ -166,7 +160,7 @@ jobs:
     needs: [wait-after-deploy, determine-runner, determine-target]
     uses: ./.github/workflows/wait-for-api.yml
     with:
-      base_url: ${{ needs.determine-target.outputs.base_url }}
+      base_url: ${{ needs.determine-target.outputs.api_root_url }}/core/v1
       runner: ${{ needs.determine-runner.outputs.runner }}
 
   openapi-spec-check:
