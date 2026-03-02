@@ -1,22 +1,28 @@
 # Deploy lit-api-server + lit-actions + lit-static to Phala CVM (tdx.large instance)
+# Uses Onchain KMS on Base (DeRoT) for key management — no Phala Cloud KMS.
 #
 # Branch-based deployment:
-#   push to main  → lit-api-server,      base_url https://api.dev.litprotocol.com
-#   push to next  → lit-api-server-next, base_url https://...-8000.dstack-pha-prod5.phala.network
+#   push to main  → lit-api-server,      api_url https://api.dev.litprotocol.com
+#   push to next  → lit-api-server-next, api_url https://...-8000.dstack-pha-prod5.phala.network
 #
 # Required secrets:
-#   DOCKERHUB_TOKEN - Docker Hub PAT (Account Settings > Security > Access Tokens)
-#   PHALA_CLOUD_API_KEY - From Phala Cloud Dashboard > API Tokens
+#   DOCKERHUB_TOKEN      - Docker Hub PAT (Account Settings > Security > Access Tokens)
+#   PHALA_CLOUD_API_KEY  - From Phala Cloud Dashboard > API Tokens (CVM management)
+#   DEROT_PRIVATE_KEY    - Private key of the DstackApp owner wallet on Base
+#                          Used to whitelist the new compose-hash in the DstackApp contract
+#                          before the CVM boots. This key controls governance.
 #
 # Required vars:
-#   DOCKER_IMAGE - Base image path, e.g. docker.io/username/lit-node-express
-#                  Three images are pushed:
-#                    ${DOCKER_IMAGE}-lit-actions
-#                    ${DOCKER_IMAGE}-lit-api-server
-#                    ${DOCKER_IMAGE}-lit-static
-#   DOCKERHUB_USERNAME - Docker Hub username
+#   DOCKER_IMAGE         - Base image path, e.g. docker.io/username/lit-node-express
+#                          Three images are pushed:
+#                            ${DOCKER_IMAGE}-lit-actions
+#                            ${DOCKER_IMAGE}-lit-api-server
+#                            ${DOCKER_IMAGE}-lit-static
+#   DOCKERHUB_USERNAME   - Docker Hub username
+#   PHALA_APP_NAME       - CVM name, e.g. lit-api-server
+#   BASE_RPC_URL         - Base mainnet RPC URL, e.g. https://mainnet.base.org
 
-name: Deploy to Phala CVM
+name: Deploy to Phala CVM (DeRoT)
 
 # Only one deploy job per-branch: abort any running job on same branch when a new commit is pushed.
 concurrency:
@@ -32,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       phala_app_name: ${{ steps.set.outputs.phala_app_name }}
-      base_url: ${{ steps.set.outputs.base_url }}
+      server_root_url: ${{ steps.set.outputs.server_root_url }}
       api_root_url: ${{ steps.set.outputs.api_root_url }}
     steps:
       - name: Set deployment target
@@ -40,16 +46,16 @@ jobs:
         run: |
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             echo "phala_app_name=lit-api-server" >> "$GITHUB_OUTPUT"
-            BASE_URL="https://api.dev.litprotocol.com"
+            SERVER_ROOT_URL="https://api.dev.litprotocol.com"
           elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
             echo "phala_app_name=lit-api-server-next" >> "$GITHUB_OUTPUT"
-            BASE_URL="https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network"
+            SERVER_ROOT_URL="https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network"
           else
             echo "Unsupported branch for deployment"
             exit 1
           fi
-          echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
-          echo "api_root_url=${BASE_URL}/core/v1" >> "$GITHUB_OUTPUT"
+          echo "server_root_url=$SERVER_ROOT_URL" >> "$GITHUB_OUTPUT"
+          echo "api_root_url=${SERVER_ROOT_URL}/core/v1" >> "$GITHUB_OUTPUT"
 
   determine-runner:
     runs-on: ubuntu-latest
@@ -96,7 +102,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ vars.DOCKER_IMAGE }}-${{ matrix.service }}:${{ github.sha }}
-          build-args: ${{ matrix.service == 'lit-static' && format('BASE_URL={0}', needs.determine-target.outputs.base_url) || '' }}
+          build-args: ${{ matrix.service == 'lit-static' && format('BASE_URL={0}', needs.determine-target.outputs.server_root_url) || '' }}
 
       - name: Save image digest
         run: echo "${{ steps.push.outputs.digest }}" > digest-${{ matrix.service }}.txt
@@ -139,14 +145,17 @@ jobs:
       - name: Install Phala CLI
         run: npm install -g phala
 
-      - name: Deploy to Phala Cloud (tdx.large CVM)
+      - name: Deploy to Phala CVM with Onchain KMS (DeRoT on Base)
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
         run: |
           phala deploy \
             -c docker-compose.deploy.yml \
-            --cvm-id ${{ needs.determine-target.outputs.phala_app_name }} \
-            --instance-type tdx.large
+            --cvm-id ${{ vars.PHALA_APP_NAME }} \
+            --instance-type tdx.large \
+            --kms base \
+            --private-key ${{ secrets.DEROT_PRIVATE_KEY }} \
+            --rpc-url ${{ vars.BASE_RPC_URL }}
 
   # Give the Phala CLI time to trigger the CVM restart and begin rebooting.
   # Without this, the old instance may still be serving the API when wait-for-api-available
@@ -169,7 +178,7 @@ jobs:
     needs: [wait-for-api-available, determine-runner, determine-target]
     uses: ./.github/workflows/verify-attestation.yml
     with:
-      attestation_url: ${{ needs.determine-target.outputs.base_url }}
+      attestation_url: ${{ needs.determine-target.outputs.server_root_url }}
       runner: ${{ needs.determine-runner.outputs.runner }}
 
   openapi-spec-check:

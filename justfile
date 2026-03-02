@@ -11,6 +11,8 @@ image_lit_static     := image_base + '-lit-static:'     + image_tag
 # main → lit-api-server; any other branch → lit-api-server-next (override with PHALA_APP_NAME)
 app_name := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo lit-api-server || echo lit-api-server-next'`
 instance_type := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo tdx.large || echo tdx.small'`
+base_rpc_url := env('BASE_RPC_URL', 'https://mainnet.base.org')
+derot_private_key := env('DEROT_PRIVATE_KEY', '')
 
 # List available recipes (default when invoked with no args)
 default:
@@ -79,13 +81,14 @@ docker-push: docker-build
     done
 
 
-# Deploy to Phala Cloud (requires: docker login, phala login).
-# Builds, pushes, captures @sha256: digests, then substitutes them into the
-# compose file (DR-1.1, DR-1.2). Override DOCKER_IMAGE (repo path) or
-# DOCKER_TAG (to skip the build and reuse a prior push; digest files must exist).
-# Use deploy to upgrade existing CVM; use deploy-new for first-time provisioning.
+# Deploy to Phala CVM with Onchain KMS on Base (DeRoT).
+# Requires: docker login, phala login, DEROT_PRIVATE_KEY env var set.
+# DEROT_PRIVATE_KEY is the private key of the DstackApp owner wallet on Base —
+# the phala CLI uses it to whitelist the new compose-hash before the CVM boots.
+# Builds with unique UUID tag, pushes to registry, deploys that tagged image.
+# Override DOCKER_IMAGE (repo path) or DOCKER_TAG (to pin a specific build).
 [group: 'deploy']
-deploy: docker-push _check_phala
+deploy: docker-push _check_phala _check_derot
     #!/usr/bin/env sh
     set -eu
     DIGEST_LIT_ACTIONS=$(cat .digest-lit-actions.txt)
@@ -99,8 +102,13 @@ deploy: docker-push _check_phala
         -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|{{image_base}}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
         -e "s|\${DOCKER_IMAGE_LIT_STATIC}|{{image_base}}-lit-static@${DIGEST_LIT_STATIC}|g" \
         docker-compose.phala.yml > docker-compose.deploy.yml
-    cat docker-compose.deploy.yml
-    phala deploy -c docker-compose.deploy.yml --cvm-id {{app_name}} --instance-type {{instance_type}}
+    phala deploy \
+        -c docker-compose.deploy.yml \
+        --cvm-id {{app_name}} \
+        --instance-type {{instance_type}} \
+        --kms base \
+        --private-key {{derot_private_key}} \
+        --rpc-url {{base_rpc_url}}
 
 # Run locally with Docker Compose (no Phala Cloud)
 [group: 'deploy']
@@ -121,6 +129,12 @@ _check_phala:
     #!/usr/bin/env sh
     set -eu
     command -v phala >/dev/null 2>&1 || { echo "error: phala not found. Run: just setup"; exit 1; }
+
+[private]
+_check_derot:
+    #!/usr/bin/env sh
+    set -eu
+    [ -n "{{derot_private_key}}" ] || { echo "error: DEROT_PRIVATE_KEY is not set. Export the DstackApp owner private key."; exit 1; }
 
 [group: 'debug']
 ssh:
