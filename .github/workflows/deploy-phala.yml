@@ -1,8 +1,8 @@
 # Deploy lit-api-server + lit-actions + lit-static to Phala CVM (tdx.large instance)
 #
 # Branch-based deployment:
-#   push to main  → lit-api-server, api_root_url https://api.dev.litprotocol.com
-#   push to next  → lit-api-server-next, api_root_url https://...-8000.dstack-pha-prod5.phala.network
+#   push to main  → lit-api-server,      base_url https://api.dev.litprotocol.com
+#   push to next  → lit-api-server-next, base_url https://...-8000.dstack-pha-prod5.phala.network
 #
 # Required secrets:
 #   DOCKERHUB_TOKEN - Docker Hub PAT (Account Settings > Security > Access Tokens)
@@ -32,6 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       phala_app_name: ${{ steps.set.outputs.phala_app_name }}
+      base_url: ${{ steps.set.outputs.base_url }}
       api_root_url: ${{ steps.set.outputs.api_root_url }}
     steps:
       - name: Set deployment target
@@ -39,10 +40,12 @@ jobs:
         run: |
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             echo "phala_app_name=lit-api-server" >> "$GITHUB_OUTPUT"
-            echo "api_root_url=https://api.dev.litprotocol.com" >> "$GITHUB_OUTPUT"
+            echo "base_url=https://api.dev.litprotocol.com" >> "$GITHUB_OUTPUT"
+            echo "api_root_url=https://api.dev.litprotocol.com/core/v1" >> "$GITHUB_OUTPUT"
           elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
             echo "phala_app_name=lit-api-server-next" >> "$GITHUB_OUTPUT"
-            echo "api_root_url=https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network" >> "$GITHUB_OUTPUT"
+            echo "base_url=https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network" >> "$GITHUB_OUTPUT"
+            echo "api_root_url=https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network/core/v1" >> "$GITHUB_OUTPUT"
           else
             echo "Unsupported branch for deployment"
             exit 1
@@ -93,7 +96,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ vars.DOCKER_IMAGE }}-${{ matrix.service }}:${{ github.sha }}
-          build-args: ${{ matrix.service == 'lit-static' && format('BASE_URL={0}', needs.determine-target.outputs.api_root_url) || '' }}
+          build-args: ${{ matrix.service == 'lit-static' && format('BASE_URL={0}', needs.determine-target.outputs.base_url) || '' }}
 
       - name: Save image digest
         run: echo "${{ steps.push.outputs.digest }}" > digest-${{ matrix.service }}.txt
@@ -159,7 +162,7 @@ jobs:
     needs: [wait-after-deploy, determine-runner, determine-target]
     uses: ./.github/workflows/wait-for-api.yml
     with:
-      base_url: ${{ needs.determine-target.outputs.api_root_url }}/core/v1
+      base_url: ${{ needs.determine-target.outputs.api_root_url }}
       runner: ${{ needs.determine-runner.outputs.runner }}
 
   openapi-spec-check:
