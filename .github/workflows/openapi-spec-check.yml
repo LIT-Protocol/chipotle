@@ -6,11 +6,11 @@ name: OpenAPI Spec Check
 permissions:
   contents: read
 
-# checkov:skip=CKV_GHA_7:Manual base_url/runner selection requires workflow_dispatch inputs
+# checkov:skip=CKV_GHA_7:Manual api_root_url/runner selection requires workflow_dispatch inputs
 on:
   workflow_call:
     inputs:
-      base_url:
+      api_root_url:
         description: API base URL (e.g. https://example.com/core/v1)
         required: true
         type: string
@@ -21,7 +21,7 @@ on:
         default: '["ubuntu-latest"]'
   workflow_dispatch:
     inputs:
-      base_url:
+      api_root_url:
         description: API base URL (e.g. https://example.com/core/v1)
         required: true
         type: string
@@ -46,7 +46,7 @@ jobs:
       - name: Generate litApiServer from deployed OpenAPI spec
         run: |
           npm install -g @grafana/openapi-to-k6
-          openapi-to-k6 --verbose "${{ inputs.base_url }}/openapi.json" ./k6-generated
+          openapi-to-k6 --verbose "${{ inputs.api_root_url }}/openapi.json" ./k6-generated
 
       - name: Compare with committed litApiServer.ts
         run: |

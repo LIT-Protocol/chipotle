@@ -20,13 +20,13 @@ name: k6 Lit Action Sign As Action
 on:
   workflow_call:
     inputs:
-      base_url:
+      api_root_url:
         description: "API base URL (e.g. https://example.com/core/v1)"
         required: true
         type: string
   workflow_dispatch:
     inputs:
-      base_url:
+      api_root_url:
         description: "API base URL (optional; uses k6 spec fallback when empty)"
         required: false
         type: string
@@ -42,7 +42,7 @@ jobs:
 
       - name: lit-action-sign-as-action.spec.ts (expected to fail)
         env:
-          BASE_URL: ${{ inputs.base_url || vars.BASE_URL }}
+          BASE_URL: ${{ inputs.api_root_url || vars.BASE_URL }}
         run: |
           if k6 run k6/lit-action-sign-as-action.spec.ts; then
             echo "UNEXPECTED: signAsAction passed — it should not be implemented"
