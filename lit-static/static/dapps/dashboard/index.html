@@ -114,46 +114,22 @@
 
         <div class="dashboard-content">
           <!-- Stat cards -->
-          <div class="stats-row" id="stats-row">
-            <div class="stat-card" id="stat-card-usage-keys">
-              <div class="stat-content">
-                <span class="stat-value" id="stat-usage-keys">—</span>
-                <span class="stat-label">Usage API Keys</span>
-              </div>
-              <div class="stat-skeleton" aria-hidden="true">
-                <div class="skeleton skeleton-line"></div>
-                <div class="skeleton skeleton-line"></div>
-              </div>
+          <div class="stats-row">
+            <div class="stat-card">
+              <span class="stat-value" id="stat-usage-keys">—</span>
+              <span class="stat-label">Usage API Keys</span>
             </div>
-            <div class="stat-card" id="stat-card-groups">
-              <div class="stat-content">
-                <span class="stat-value" id="stat-groups">—</span>
-                <span class="stat-label">Groups</span>
-              </div>
-              <div class="stat-skeleton" aria-hidden="true">
-                <div class="skeleton skeleton-line"></div>
-                <div class="skeleton skeleton-line"></div>
-              </div>
+            <div class="stat-card">
+              <span class="stat-value" id="stat-groups">—</span>
+              <span class="stat-label">Groups</span>
             </div>
-            <div class="stat-card" id="stat-card-wallets">
-              <div class="stat-content">
-                <span class="stat-value" id="stat-wallets">—</span>
-                <span class="stat-label">Wallets</span>
-              </div>
-              <div class="stat-skeleton" aria-hidden="true">
-                <div class="skeleton skeleton-line"></div>
-                <div class="skeleton skeleton-line"></div>
-              </div>
+            <div class="stat-card">
+              <span class="stat-value" id="stat-wallets">—</span>
+              <span class="stat-label">Wallets</span>
             </div>
-            <div class="stat-card" id="stat-card-actions">
-              <div class="stat-content">
-                <span class="stat-value" id="stat-actions">—</span>
-                <span class="stat-label">IPFS CIDs</span>
-              </div>
-              <div class="stat-skeleton" aria-hidden="true">
-                <div class="skeleton skeleton-line"></div>
-                <div class="skeleton skeleton-line"></div>
-              </div>
+            <div class="stat-card">
+              <span class="stat-value" id="stat-actions">—</span>
+              <span class="stat-label">IPFS CIDs</span>
             </div>
           </div>
 
@@ -191,12 +167,7 @@
                 <button type="button" id="btn-load-usage-keys" class="btn btn-sm btn-outline">Refresh</button>
               </div>
               <div class="card-body">
-                <div class="table-wrap" id="usage-keys-table-wrap">
-                  <div class="table-skeleton" id="usage-keys-skeleton" aria-hidden="true">
-                    <div class="table-skeleton-row"><span class="skeleton skeleton-cell-md"></span><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton skeleton-cell-sm"></span><span class="skeleton skeleton-cell-sm"></span><span class="skeleton skeleton-cell-sm"></span></div>
-                    <div class="table-skeleton-row"><span class="skeleton skeleton-cell-md"></span><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton skeleton-cell-sm"></span><span class="skeleton skeleton-cell-sm"></span><span class="skeleton skeleton-cell-sm"></span></div>
-                    <div class="table-skeleton-row"><span class="skeleton skeleton-cell-md"></span><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton skeleton-cell-sm"></span><span class="skeleton skeleton-cell-sm"></span><span class="skeleton skeleton-cell-sm"></span></div>
-                  </div>
+                <div class="table-wrap">
                   <table class="data-table" id="usage-keys-table">
                     <thead><tr><th>Key</th><th>Name</th><th>Description</th><th>Expiration</th><th>Balance</th><th class="th-actions"></th></tr></thead>
                     <tbody id="usage-keys-tbody"></tbody>
@@ -221,12 +192,7 @@
                 <button type="button" id="btn-load-groups" class="btn btn-sm btn-outline">Refresh</button>
               </div>
               <div class="card-body">
-                <div class="table-wrap" id="groups-table-wrap">
-                  <div class="table-skeleton" id="groups-skeleton" aria-hidden="true">
-                    <div class="table-skeleton-row"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton skeleton-cell-sm"></span></div>
-                    <div class="table-skeleton-row"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton skeleton-cell-sm"></span></div>
-                    <div class="table-skeleton-row"><span class="skeleton"></span><span class="skeleton"></span><span class="skeleton skeleton-cell-sm"></span></div>
-                  </div>
+                <div class="table-wrap">
                   <table class="data-table" id="groups-table">
                     <thead><tr><th>Name</th><th>Description</th><th class="th-actions"></th></tr></thead>
                     <tbody id="groups-tbody"></tbody>
@@ -254,12 +220,7 @@
                 </div>
               </div>
               <div class="card-body">
-                <div class="table-wrap" id="actions-table-wrap">
-                  <div class="table-skeleton" id="actions-skeleton" aria-hidden="true">
-                    <div class="table-skeleton-row"><span class="skeleton"></span><span class="skeleton skeleton-cell-md"></span><span class="skeleton"></span><span class="skeleton skeleton-cell-sm"></span></div>
-                    <div class="table-skeleton-row"><span class="skeleton"></span><span class="skeleton skeleton-cell-md"></span><span class="skeleton"></span><span class="skeleton skeleton-cell-sm"></span></div>
-                    <div class="table-skeleton-row"><span class="skeleton"></span><span class="skeleton skeleton-cell-md"></span><span class="skeleton"></span><span class="skeleton skeleton-cell-sm"></span></div>
-                  </div>
+                <div class="table-wrap">
                   <table class="data-table" id="actions-table">
                     <thead><tr><th>Name</th><th>CID</th><th>Description</th><th class="th-actions"></th></tr></thead>
                     <tbody id="actions-tbody"></tbody>
@@ -284,12 +245,7 @@
                 <button type="button" id="btn-load-wallets" class="btn btn-sm btn-outline">Refresh</button>
               </div>
               <div class="card-body">
-                <div class="table-wrap" id="wallets-table-wrap">
-                  <div class="table-skeleton" id="wallets-skeleton" aria-hidden="true">
-                    <div class="table-skeleton-row"><span class="skeleton skeleton-cell-md"></span><span class="skeleton skeleton-cell-md"></span><span class="skeleton"></span></div>
-                    <div class="table-skeleton-row"><span class="skeleton skeleton-cell-md"></span><span class="skeleton skeleton-cell-md"></span><span class="skeleton"></span></div>
-                    <div class="table-skeleton-row"><span class="skeleton skeleton-cell-md"></span><span class="skeleton skeleton-cell-md"></span><span class="skeleton"></span></div>
-                  </div>
+                <div class="table-wrap">
                   <table class="data-table" id="wallets-table">
                     <thead><tr><th>Address</th><th>Public key</th><th>Description</th></tr></thead>
                     <tbody id="wallets-tbody"></tbody>
@@ -325,14 +281,7 @@
                   <button type="button" id="btn-execute-lit-action" class="btn btn-primary">Execute Lit Action</button>
                   <button type="button" id="btn-get-lit-action-ipfs-cid" class="btn btn-outline">Get Lit Action IPFS CID</button>
                 </div>
-                <div id="action-runner-output" class="action-runner-output">
-                  <div class="action-runner-output-content"></div>
-                  <div class="output-skeleton" aria-hidden="true">
-                    <div class="skeleton skeleton-line"></div>
-                    <div class="skeleton skeleton-line"></div>
-                    <div class="skeleton skeleton-line skeleton-line-sm"></div>
-                  </div>
-                </div>
+                <div id="action-runner-output" class="action-runner-output"></div>
               </div>
             </div>
           </section>
