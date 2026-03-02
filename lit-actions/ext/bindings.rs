@@ -362,9 +362,11 @@ extension!(
     esm = [
         dir "js",
         "00_ethers.js",
+        "00_viem.js",
         "01_uint8arrays.js",
         "02_litActionsSDK.js",
         "03_jsonwebtoken.js",
+        "06_litActionsSDK_viem.js",
         "99_patches.js",
     ],
     middleware = |op| match op.name {

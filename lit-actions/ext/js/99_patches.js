@@ -4,8 +4,10 @@ import { op_increment_fetch_count, op_panic } from 'ext:core/ops';
 // "Following modules were not evaluated; make sure they are imported from other code"
 // This is required because we currently extend globalThis instead of using ES modules at runtime.
 import * as _ethers from 'ext:lit_actions/00_ethers.js';
+import * as _viem from 'ext:lit_actions/00_viem.js';
 import * as _actions from 'ext:lit_actions/02_litActionsSDK.js';
 import * as _jwt from 'ext:lit_actions/03_jsonwebtoken.js';
+import * as _viemToAccount from 'ext:lit_actions/06_litActionsSDK_viem.js';
 
 // this block scopes oldFetch so that nobody can ever use it after
 {
