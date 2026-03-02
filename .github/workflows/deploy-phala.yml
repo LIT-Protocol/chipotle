@@ -40,16 +40,16 @@ jobs:
         run: |
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             echo "phala_app_name=lit-api-server" >> "$GITHUB_OUTPUT"
-            echo "base_url=https://api.dev.litprotocol.com" >> "$GITHUB_OUTPUT"
-            echo "api_root_url=https://api.dev.litprotocol.com/core/v1" >> "$GITHUB_OUTPUT"
+            BASE_URL="https://api.dev.litprotocol.com"
           elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
             echo "phala_app_name=lit-api-server-next" >> "$GITHUB_OUTPUT"
-            echo "base_url=https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network" >> "$GITHUB_OUTPUT"
-            echo "api_root_url=https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network/core/v1" >> "$GITHUB_OUTPUT"
+            BASE_URL="https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network"
           else
             echo "Unsupported branch for deployment"
             exit 1
           fi
+          echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
+          echo "api_root_url=${BASE_URL}/core/v1" >> "$GITHUB_OUTPUT"
 
   determine-runner:
     runs-on: ubuntu-latest
