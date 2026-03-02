@@ -18,14 +18,12 @@ function setApiKey(v) {
 }
 
 function getBaseUrl() {
-
-  if (typeof location !== 'undefined' && location.origin && (location.origin.startsWith('http://') || location.origin.startsWith('https://')))
-    
-    if (location.origin.indexOf('localhost.:8080') !== -1)
-      return 'http://localhost:8000';
-    else
-      return 'https://36da669c852c9bd4fdea27dd331c07ff776bd125-8000.dstack-pha-prod5.phala.network';
-  return 'http://localhost:8000';
+  // Falls back to localhost for local development.
+  // For deployments, __LIT_API_BASE_URL__ is replaced at image build time
+  // via ARG BASE_URL in Dockerfile.lit-static.
+  if (typeof location !== 'undefined' && location.origin && location.origin.indexOf('localhost') !== -1)
+    return 'http://localhost:8000';
+  return '__LIT_API_BASE_URL__';
 }
 
 function updateAuthUI() {

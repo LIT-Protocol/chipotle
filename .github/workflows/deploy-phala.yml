@@ -3,7 +3,6 @@
 # Branch-based deployment:
 #   push to main  → lit-api-server, BASE_URL https://api.dev.litprotocol.com/core/v1
 #   push to next  → lit-api-server-next, BASE_URL https://...-8000.dstack-pha-prod5.phala.network/core/v1
-#   manual run    → user selects target (lit-api-server or lit-api-server-next)
 #
 # Required secrets:
 #   DOCKERHUB_TOKEN - Docker Hub PAT (Account Settings > Security > Access Tokens)
@@ -24,20 +23,9 @@ concurrency:
   group: deploy-phala-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}  # branch name (ref_name) or PR head (head_ref)
   cancel-in-progress: true
 
-# checkov:skip=CKV_GHA_7:Manual deployment target selection requires workflow_dispatch inputs
 on:
   push:
     branches: [main, next]
-  workflow_dispatch:
-    inputs:
-      deployment_target:
-        description: Deployment target (CVM name)
-        required: true
-        type: choice
-        options:
-          - lit-api-server
-          - lit-api-server-next
-        default: lit-api-server-next
 
 jobs:
   determine-target:
@@ -45,13 +33,12 @@ jobs:
     outputs:
       phala_app_name: ${{ steps.set.outputs.phala_app_name }}
       base_url: ${{ steps.set.outputs.base_url }}
+      api_root_url: ${{ steps.set.outputs.api_root_url }}
     steps:
       - name: Set deployment target and base URL
         id: set
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TARGET="${{ github.event.inputs.deployment_target }}"
-          elif [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             TARGET="lit-api-server"
           elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
             TARGET="lit-api-server-next"
@@ -62,8 +49,10 @@ jobs:
           echo "phala_app_name=$TARGET" >> "$GITHUB_OUTPUT"
           if [ "$TARGET" = "lit-api-server" ]; then
             echo "base_url=https://api.dev.litprotocol.com/core/v1" >> "$GITHUB_OUTPUT"
+            echo "api_root_url=https://api.dev.litprotocol.com" >> "$GITHUB_OUTPUT"
           else
             echo "base_url=https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network/core/v1" >> "$GITHUB_OUTPUT"
+            echo "api_root_url=https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network" >> "$GITHUB_OUTPUT"
           fi
 
   determine-runner:
@@ -81,7 +70,7 @@ jobs:
           fallback-on-error: true
 
   build:
-    needs: determine-runner
+    needs: [determine-runner, determine-target]
     runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
     strategy:
       fail-fast: false
@@ -111,6 +100,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ vars.DOCKER_IMAGE }}-${{ matrix.service }}:${{ github.sha }}
+          build-args: ${{ matrix.service == 'lit-static' && format('BASE_URL={0}', needs.determine-target.outputs.api_root_url) || '' }}
 
       - name: Save image digest
         run: echo "${{ steps.push.outputs.digest }}" > digest-${{ matrix.service }}.txt
