@@ -67,3 +67,17 @@ pub(crate) async fn get_signable_account_config_contract()
     let contract = AccountConfig::new(account_config_address, client);
     Ok(contract)
 }
+
+pub(crate) async fn get_read_only_account_config_contract()
+-> Result<AccountConfig<Provider<Http>>, anyhow::Error> {
+    let node_config = GLOBAL_NODE_CONFIG
+        .get()
+        .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))?;
+
+    let provider = Provider::<Http>::try_from(node_config.chain.info().rpc_url)?;
+    let client = Arc::new(provider);
+    let account_config_address = hex_to_bytes(&node_config.contract_address)?;
+    let account_config_address = H160::from_slice(&account_config_address);
+    let contract = AccountConfig::new(account_config_address, client);
+    Ok(contract)
+}

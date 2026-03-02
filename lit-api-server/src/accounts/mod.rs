@@ -4,7 +4,9 @@ pub mod signable_contract;
 pub use anyhow::Result;
 
 use crate::accounts::contracts::account_config::UsageApiKey;
-use crate::accounts::signable_contract::get_signable_account_config_contract;
+use crate::accounts::signable_contract::{
+    get_read_only_account_config_contract, get_signable_account_config_contract,
+};
 use crate::core::lookup_data;
 use ethers::types::{H160, U256};
 use ethers::utils::keccak256;
@@ -61,7 +63,7 @@ pub async fn new_account(
 }
 
 pub async fn account_exists(api_key: &str) -> Result<bool> {
-    let contract = get_signable_account_config_contract().await?;
+    let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let exists = contract
         .account_exists_and_is_mutable(account_api_key_hash)
@@ -357,7 +359,7 @@ pub async fn get_wallet_derivation_from_pubkey(api_key: &str, pubkey: &str) -> R
 /// Get the derivation path for a wallet address under an account (read-only).
 /// `wallet_address` is the hex address (with or without 0x). Returns the U256 derivation path, or errors if not set.
 pub async fn get_wallet_derivation(api_key: &str, wallet_address: H160) -> Result<U256> {
-    let contract = get_signable_account_config_contract().await?;
+    let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let wallet_address_hash = wallet_address_hash(wallet_address);
     let derivation = contract
@@ -373,7 +375,7 @@ pub async fn list_groups(
     page_number: U256,
     page_size: U256,
 ) -> Result<Vec<Metadata>> {
-    let contract = get_signable_account_config_contract().await?;
+    let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let page = contract
         .list_groups(account_api_key_hash, page_number, page_size)
@@ -388,7 +390,7 @@ pub async fn list_wallets(
     page_number: U256,
     page_size: U256,
 ) -> Result<Vec<Metadata>> {
-    let contract = get_signable_account_config_contract().await?;
+    let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let page = contract
         .list_wallets(account_api_key_hash, page_number, page_size)
@@ -404,7 +406,7 @@ pub async fn list_wallets_in_group(
     page_number: U256,
     page_size: U256,
 ) -> Result<Vec<Metadata>> {
-    let contract = get_signable_account_config_contract().await?;
+    let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let page = contract
         .list_wallets_in_group(account_api_key_hash, group_id, page_number, page_size)
@@ -420,7 +422,7 @@ pub async fn list_actions(
     page_number: U256,
     page_size: U256,
 ) -> Result<Vec<Metadata>> {
-    let contract = get_signable_account_config_contract().await?;
+    let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let page = contract
         .list_actions(account_api_key_hash, group_id, page_number, page_size)
@@ -435,7 +437,7 @@ pub async fn list_api_keys(
     page_number: U256,
     page_size: U256,
 ) -> Result<Vec<UsageApiKey>> {
-    let contract = get_signable_account_config_contract().await?;
+    let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let page = contract
         .list_api_keys(account_api_key_hash, page_number, page_size)
