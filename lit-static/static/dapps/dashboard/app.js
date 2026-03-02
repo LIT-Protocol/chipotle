@@ -24,7 +24,7 @@ function getBaseUrl() {
     if (location.origin.indexOf('localhost.:8080') !== -1)
       return 'http://localhost:8000';
     else
-      return 'https://api.dev.litprotocol.com';
+      return 'https://36da669c852c9bd4fdea27dd331c07ff776bd125-8000.dstack-pha-prod5.phala.network';
   return 'http://localhost:8000';
 }
 
