@@ -163,16 +163,6 @@ macro_rules! ensure_u256 {
     };
 }
 
-// Based on https://github.com/LIT-Protocol/lit-assets/blob/a93b25d33d0d6e141818fe2d33d8bbb0b39e332f/rust/lit-core/lit-blockchain/src/util/mod.rs#L27-L37
-pub(crate) fn is_u256_string<S: AsRef<str>>(s: S) -> bool {
-    let s = s.as_ref();
-    if let Some(stripped) = s.strip_prefix("0x") {
-        ::ethabi::ethereum_types::U256::from_str_radix(stripped, 16).is_ok()
-    } else {
-        ::ethabi::ethereum_types::U256::from_dec_str(s).is_ok()
-    }
-}
-
 #[allow(unused_imports)]
 pub(crate) use {
     ensure_not_blank, ensure_not_empty, ensure_not_null, ensure_one_of, ensure_u256, remote_op,
