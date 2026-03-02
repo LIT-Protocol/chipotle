@@ -34,7 +34,7 @@ jobs:
       phala_app_name: ${{ steps.set.outputs.phala_app_name }}
       api_root_url: ${{ steps.set.outputs.api_root_url }}
     steps:
-      - name: Set deployment target and base URL
+      - name: Set deployment target
         id: set
         run: |
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
