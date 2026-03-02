@@ -24,9 +24,11 @@ pub(crate) type SigningClient =
 
 static GLOBAL_SIGNING_CLIENT: OnceLock<Arc<SigningClient>> = OnceLock::new();
 
+static GLOBAL_READ_ONLY_CLIENT: OnceLock<Arc<Provider<Http>>> = OnceLock::new();
+
 /// Initialise the global signing client. Must be called once at startup,
 /// after `init_config()`, before any transactions are sent.
-pub(crate) fn init_signing_client() -> Result<()> {
+pub(crate) fn init_chain_clients() -> Result<()> {
     let node_config = GLOBAL_NODE_CONFIG
         .get()
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))?;
@@ -45,6 +47,9 @@ pub(crate) fn init_signing_client() -> Result<()> {
     let nonce_manager = NonceManagerMiddleware::new(signer, address);
 
     GLOBAL_SIGNING_CLIENT.get_or_init(|| Arc::new(nonce_manager));
+
+    let provider = Provider::<Http>::try_from(chain_info.rpc_url)?;
+    GLOBAL_READ_ONLY_CLIENT.get_or_init(|| Arc::new(provider));
     Ok(())
 }
 
@@ -68,15 +73,20 @@ pub(crate) async fn get_signable_account_config_contract()
     Ok(contract)
 }
 
-
 pub(crate) async fn get_read_only_account_config_contract()
 -> Result<AccountConfig<Provider<Http>>, anyhow::Error> {
     let node_config = GLOBAL_NODE_CONFIG
         .get()
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))?;
 
-    let provider = Provider::<Http>::try_from(node_config.chain.info().rpc_url)?;
-    let client = Arc::new(provider);
+    let client = GLOBAL_READ_ONLY_CLIENT
+        .get()
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "Read-only client not initialised — call init_chain_clients() at startup"
+            )
+        })?
+        .clone();
     let account_config_address = hex_to_bytes(&node_config.contract_address)?;
     let account_config_address = H160::from_slice(&account_config_address);
     let contract = AccountConfig::new(account_config_address, client);
