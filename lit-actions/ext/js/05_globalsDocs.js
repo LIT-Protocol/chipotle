@@ -9,16 +9,6 @@
 const LitActions = undefined;
 
 /**
- * Global reference to the Lit Auth namespace for convenience.
- * This alias is injected in the Lit Action execution environment and mirrors `Lit.Auth`.
- *
- * @global
- * @name LitAuth
- * @type {typeof import('./04_litAuthDocs.js')}
- */
-const LitAuth = undefined;
-
-/**
  * The ethers.js v5 API exposed to Lit Actions for interacting with EVM chains.
  * Includes wallets, providers, contracts, and cryptographic helpers.
  *

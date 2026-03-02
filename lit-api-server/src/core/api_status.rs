@@ -9,8 +9,8 @@ use rocket_responder::{
     ApiResponse, bad_request, internal_server_error, not_found, ok, payment_required,
 };
 use serde::{Deserialize, Serialize};
+use std::fmt::Display;
 use tracing::{error, warn};
-
 // This is the endpoint response error message
 #[derive(Serialize, Deserialize, Debug, JsonSchema)]
 pub struct ErrMessage(pub String);
@@ -20,6 +20,12 @@ pub struct ApiStatus {
     #[schemars(with = "String")]
     pub status: Status,
     pub message: String,
+}
+
+impl Display for ApiStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.message)
+    }
 }
 
 impl From<ApiStatus> for ErrMessage {

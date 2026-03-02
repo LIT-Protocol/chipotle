@@ -9,6 +9,7 @@ use crate::core::v1::models::response::{
 use ipfs_hasher::IpfsHasher;
 use moka::future::Cache;
 use rocket::serde::json::Json;
+use tracing::instrument;
 
 fn not_configured() -> ApiStatus {
     ApiStatus::internal_server_error(
@@ -23,6 +24,11 @@ pub async fn sign_with_pkp(
     Err(not_configured())
 }
 
+#[instrument(
+    level = "debug",
+    skip(api_key, grpc_client_pool, ipfs_cache, http_client),
+    err
+)]
 pub async fn lit_action(
     api_key: &str,
     grpc_client_pool: &GrpcClientPool<tonic::transport::Channel>,
