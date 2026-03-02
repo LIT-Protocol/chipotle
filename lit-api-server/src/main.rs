@@ -30,7 +30,7 @@ async fn main() -> Result<(), rocket::Error> {
 
     if !cfg!(is_production) {
         tracing::warn!(
-            "THIS IS INSECURE! Using non-production profile; lit-api-server was not built with `cargo build-production`"
+            "THIS IS INSECURE! Using non-production profile; lit-api-server was not built with `cargo build --profile production`"
         );
     }
 

@@ -14,7 +14,7 @@ COPY lit-core ./lit-core/
 COPY lit-actions ./lit-actions/
 COPY lit-api-server ./lit-api-server/
 
-RUN cd lit-api-server && cargo build-production --bin lit-api-server
+RUN cd lit-api-server && cargo build --profile production --bin lit-api-server
 
 FROM debian:bookworm-slim AS runtime
 
