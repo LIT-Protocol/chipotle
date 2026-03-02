@@ -1,9 +1,9 @@
 # Reusable workflow: wait for an API endpoint to become available
 #
-# Call with base_url (direct) or phala_app_name (get from Phala CLI):
+# Call with api_root_url (direct) or phala_app_name (get from Phala CLI):
 #   uses: ./.github/workflows/wait-for-api.yml
 #   with:
-#     base_url: "https://example.com/core/v1"   # OR phala_app_name
+#     api_root_url: "https://example.com/core/v1"   # OR phala_app_name
 #     # phala_app_name: "lit-api-server"        # CVM name; requires PHALA_CLOUD_API_KEY secret
 #     # timeout: 300  # optional, seconds (default 300)
 #     # runner: '["self-hosted"]'  # optional, JSON array for runs-on (default ubuntu-latest)
@@ -15,11 +15,11 @@ name: Wait for API
 on:
   workflow_call:
     outputs:
-      base_url:
+      api_root_url:
         description: "API base URL (e.g. https://example.com/core/v1)"
-        value: ${{ jobs.wait.outputs.base_url }}
+        value: ${{ jobs.wait.outputs.api_root_url }}
     inputs:
-      base_url:
+      api_root_url:
         description: "API base URL (e.g. https://example.com/core/v1); use when not using phala_app_name"
         required: false
         type: string
@@ -46,7 +46,7 @@ jobs:
   wait:
     runs-on: ${{ fromJson(inputs.runner) }}
     outputs:
-      base_url: ${{ steps.resolve-url.outputs.base_url }}
+      api_root_url: ${{ steps.resolve-url.outputs.api_root_url }}
     steps:
       - name: Setup Node.js
         if: inputs.phala_app_name != ''
@@ -80,18 +80,18 @@ jobs:
             # Ensure https:// (lit-api-server-next uses dstack-pha-prod5.phala.network)
             case "$APP_URL" in http*) ;; *) APP_URL="https://$APP_URL" ;; esac
             BASE_URL="${APP_URL%/}/core/v1"
-          elif [ -n "${{ inputs.base_url }}" ]; then
-            BASE_URL="${{ inputs.base_url }}"
+          elif [ -n "${{ inputs.api_root_url }}" ]; then
+            BASE_URL="${{ inputs.api_root_url }}"
           else
-            echo "Either base_url or phala_app_name must be provided"
+            echo "Either api_root_url or phala_app_name must be provided"
             exit 1
           fi
-          echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
+          echo "api_root_url=$BASE_URL" >> "$GITHUB_OUTPUT"
           echo "API base URL: $BASE_URL"
 
       - name: Wait for API to become available
         run: |
-          BASE_URL="${{ steps.resolve-url.outputs.base_url }}"
+          BASE_URL="${{ steps.resolve-url.outputs.api_root_url }}"
           TIMEOUT="${{ inputs.timeout }}"
           echo "Polling $BASE_URL/openapi.json (timeout: ${TIMEOUT}s)..."
           deadline=$(( $(date +%s) + TIMEOUT ))

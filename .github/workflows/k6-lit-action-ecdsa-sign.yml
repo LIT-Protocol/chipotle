@@ -6,13 +6,13 @@ name: k6 Lit Action ECDSA Sign
 on:
   workflow_call:
     inputs:
-      base_url:
+      api_root_url:
         description: "API base URL (e.g. https://example.com/core/v1)"
         required: true
         type: string
   workflow_dispatch:
     inputs:
-      base_url:
+      api_root_url:
         description: "API base URL (optional; uses k6 spec fallback when empty)"
         required: false
         type: string
@@ -28,5 +28,5 @@ jobs:
 
       - name: lit-action-ecdsa-sign.spec.ts
         env:
-          BASE_URL: ${{ inputs.base_url }}
+          BASE_URL: ${{ inputs.api_root_url }}
         run: k6 run k6/lit-action-ecdsa-sign.spec.ts
