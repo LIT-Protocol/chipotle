@@ -83,8 +83,7 @@ pub async fn get_quote(
         None | Some("0x") | Some("") => vec![0u8; 64],
         Some(s) => {
             let hex_str = s.strip_prefix("0x").unwrap_or(s);
-            hex::decode(hex_str)
-                .map_err(|e| format!("invalid hex in report_data '{s}': {e}"))?
+            hex::decode(hex_str).map_err(|e| format!("invalid hex in report_data '{s}': {e}"))?
         }
     };
     let quote = client
