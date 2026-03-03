@@ -36,36 +36,39 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── 1. Build the dstack simulator and verifier (cached by upstream SHA) ─
-      # The cache key is the dstack HEAD SHA — obtained without cloning via
-      # git ls-remote. On cache hit the clone and both cargo/build.sh builds
-      # are skipped entirely; the binaries and runtime data files are restored
-      # directly and used as-is. Cache is scoped by branch (base branch for PRs).
+      # ── 1. Build the dstack simulator and verifier (cached separately) ────
+      # Each artifact has its own cache keyed by the dstack HEAD SHA (obtained
+      # without cloning via git ls-remote). The verifier cache is shared with
+      # the verify-attestation workflow so a warm hit there avoids rebuilding
+      # here. On full cache hit the clone and all builds are skipped entirely.
       - name: Get dstack HEAD SHA
         id: dstack-sha
         run: |
           SHA=$(git ls-remote https://github.com/Dstack-TEE/dstack.git HEAD | head -1 | cut -f1 | tr -d '[:space:]')
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-          echo "Cache key: dstack-${SHA}-${{ runner.os }}"
 
-      - name: Restore dstack cache
-        id: dstack-cache
+      - name: Restore simulator cache
+        id: sim-cache
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/dstack-cache
-          key: dstack-${{ steps.dstack-sha.outputs.sha }}-${{ runner.os }}
+          path: ${{ github.workspace }}/dstack-cache/simulator
+          key: dstack-simulator-${{ steps.dstack-sha.outputs.sha }}-${{ runner.os }}
 
-      - name: Cache status
-        run: echo "cache-hit=${{ steps.dstack-cache.outputs.cache-hit }}"
+      - name: Restore verifier cache
+        id: verifier-cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/dstack-cache/verifier
+          key: dstack-verifier-${{ steps.dstack-sha.outputs.sha }}-${{ runner.os }}
 
       - name: Fix dstack cache permissions
-        if: steps.dstack-cache.outputs.cache-hit == 'true'
+        if: steps.sim-cache.outputs.cache-hit == 'true' || steps.verifier-cache.outputs.cache-hit == 'true'
         run: |
           CACHE_DIR="${{ github.workspace }}/dstack-cache"
           [ -d "$CACHE_DIR" ] && chmod -R u+rwX "$CACHE_DIR" || true
 
       - name: Clone dstack repository
-        if: steps.dstack-cache.outputs.cache-hit != 'true'
+        if: steps.sim-cache.outputs.cache-hit != 'true' || steps.verifier-cache.outputs.cache-hit != 'true'
         run: |
           DSTACK_BUILD=$(mktemp -d)
           echo "DSTACK_BUILD=$DSTACK_BUILD" >> "$GITHUB_ENV"
@@ -73,34 +76,36 @@ jobs:
 
       # Use stable Rust for the dstack build (it may require features newer than 1.91).
       - name: Install Rust (stable, for dstack)
-        if: steps.dstack-cache.outputs.cache-hit != 'true'
+        if: steps.sim-cache.outputs.cache-hit != 'true' || steps.verifier-cache.outputs.cache-hit != 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build dstack simulator
-        if: steps.dstack-cache.outputs.cache-hit != 'true'
+        if: steps.sim-cache.outputs.cache-hit != 'true'
         run: cd "$DSTACK_BUILD/sdk/simulator" && bash build.sh
 
-      - name: Build dstack-verifier
-        if: steps.dstack-cache.outputs.cache-hit != 'true'
-        run: cargo build --manifest-path="$DSTACK_BUILD/verifier/Cargo.toml" --bin dstack-verifier
-
-      - name: Populate dstack cache
-        if: steps.dstack-cache.outputs.cache-hit != 'true'
+      - name: Populate simulator cache
+        if: steps.sim-cache.outputs.cache-hit != 'true'
         run: |
-          CACHE_DIR="${{ github.workspace }}/dstack-cache"
-          mkdir -p "$CACHE_DIR/simulator" "$CACHE_DIR/verifier"
-          # Simulator: binary + data files read via relative paths at runtime
+          mkdir -p "${{ github.workspace }}/dstack-cache/simulator"
           cp "$DSTACK_BUILD/sdk/simulator/dstack-simulator" \
              "$DSTACK_BUILD/sdk/simulator/appkeys.json" \
              "$DSTACK_BUILD/sdk/simulator/app-compose.json" \
              "$DSTACK_BUILD/sdk/simulator/sys-config.json" \
              "$DSTACK_BUILD/sdk/simulator/attestation.bin" \
              "$DSTACK_BUILD/sdk/simulator/dstack.toml" \
-             "$CACHE_DIR/simulator/"
-          # Verifier: binary + config
+             "${{ github.workspace }}/dstack-cache/simulator/"
+
+      - name: Build dstack-verifier
+        if: steps.verifier-cache.outputs.cache-hit != 'true'
+        run: cargo build --manifest-path="$DSTACK_BUILD/verifier/Cargo.toml" --bin dstack-verifier
+
+      - name: Populate verifier cache
+        if: steps.verifier-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p "${{ github.workspace }}/dstack-cache/verifier"
           cp "$DSTACK_BUILD/target/debug/dstack-verifier" \
              "$DSTACK_BUILD/verifier/dstack-verifier.toml" \
-             "$CACHE_DIR/verifier/"
+             "${{ github.workspace }}/dstack-cache/verifier/"
 
       - name: Remove dstack build directory
         if: always() && env.DSTACK_BUILD != ''
