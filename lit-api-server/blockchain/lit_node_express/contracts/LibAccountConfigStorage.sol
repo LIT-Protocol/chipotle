@@ -18,11 +18,13 @@ library LibAccountConfigStorage {
         keccak256("com.litprotocol.accountconfig.storage");
 
     error AccountDoesNotExist(uint256 apiKey);
+    error AccountAlreadyExists(uint256 apiKey);
     error GroupDoesNotExist(uint256 apiKey, uint256 groupId);
     error WalletDoesNotExist(uint256 apiKey, uint256 groupId, uint256 Wallet);
     error ActionDoesNotExist(uint256 apiKey, uint256 groupId, uint256 action);
     error UsageApiKeyDoesNotExist(uint256 apiKey, uint256 usageApiKey);
     error InsufficientBalance(uint256 apiKey, uint256 amount);
+    error OnlyApiPayer(address caller);
     error OnlyApiPayerOrPricingOperator(address caller);
 
     /// @notice Metadata struct for account, group, action, and wallet.
