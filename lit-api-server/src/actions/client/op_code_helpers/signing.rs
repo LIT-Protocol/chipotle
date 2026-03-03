@@ -1,7 +1,7 @@
 use crate::actions::client::models::SignedData;
 use anyhow::Result;
+use k256::ecdsa::SigningKey;
 use lit_core::utils::binary::bytes_to_hex;
-use lit_rust_crypto::k256::ecdsa::SigningKey;
 
 pub async fn sign_with_pkp(
     api_key: &str,

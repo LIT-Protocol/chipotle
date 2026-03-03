@@ -12,12 +12,13 @@ use crate::core::v1::models::response::{
     AccountOpResponse, AddUsageApiKeyResponse, ApiKeyItem, CreateWalletResponse, ListMetadataItem,
     NewAccountResponse, NodeChainConfigResponse, WalletItem,
 };
+use crate::dstack::v1::get_key;
+use elliptic_curve::group::GroupEncoding;
 use ethers::types::{H160, U256};
 use ethers::utils::keccak256;
 use ipfs_hasher::IpfsHasher;
+use k256::SecretKey;
 use lit_core::utils::binary::{bytes_to_hex, hex_to_bytes};
-use lit_rust_crypto::group::GroupEncoding;
-use lit_rust_crypto::k256::SecretKey;
 use rand::Rng;
 use rocket::serde::json::Json;
 
@@ -55,7 +56,24 @@ fn get_random_secret() -> [u8; 32] {
 }
 
 async fn create_new_wallet() -> Result<(String, H160, [u8; 32]), ApiStatus> {
-    let secret = get_random_secret();
+    let wallet_seed_id = bytes_to_hex(get_random_secret());
+
+    let path = format!("clients/{}", wallet_seed_id);
+    let purpose = "client";
+    let key_response = get_key(path.as_str(), purpose)
+        .await
+        .map_err(|e| ApiStatus::internal_server_error(anyhow::anyhow!(e), "get_key failed"))?;
+    let secret = key_response
+        .decode_key()
+        .map_err(|e| ApiStatus::internal_server_error(anyhow::anyhow!(e), "decode_key failed"))?;
+
+    let secret: [u8; 32] = secret.try_into().map_err(|s: Vec<u8>| {
+        ApiStatus::internal_server_error(
+            anyhow::anyhow!("secret wrong length: {}", s.len()),
+            "secret wrong length",
+        )
+    })?;
+
     let secret_key = SecretKey::from_slice(&secret).unwrap();
     let public_key = secret_key.public_key();
     let public_key_bytes = public_key.as_affine().to_bytes();

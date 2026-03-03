@@ -1,5 +1,4 @@
 use anyhow::Result;
-use lit_rust_crypto::blsful::BlsError;
 use rocket::http::Status;
 use rocket_okapi::{
     OpenApiError, r#gen::OpenApiGenerator, okapi::schemars::JsonSchema,
@@ -64,12 +63,6 @@ impl From<anyhow::Error> for ApiStatus {
 impl From<std::num::ParseFloatError> for ApiStatus {
     fn from(e: std::num::ParseFloatError) -> Self {
         Self::bad_request(e.into(), "Invalid float string.")
-    }
-}
-
-impl From<BlsError> for ApiStatus {
-    fn from(e: BlsError) -> Self {
-        Self::internal_server_error(e.into(), "Bls error.")
     }
 }
 
