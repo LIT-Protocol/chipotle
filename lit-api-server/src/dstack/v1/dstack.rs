@@ -10,7 +10,7 @@
 //! Because of this, the tests and quote parsing logic **switch by features**:
 //! - **Production** (`--features production`): only accept real TDX quotes (base64,
 //!   parseable by dcap-qvl/tdx-quote, zero report_data when None).
-//! - **Dev** (`--features phala`): accept simulator-style quotes (hex decode, pattern-scan fallback,
+//! - **Dev** (`--features dstack`): accept simulator-style quotes (hex decode, pattern-scan fallback,
 //!   relaxed report_data checks).
 
 use serde::{Deserialize, Serialize};
@@ -55,7 +55,7 @@ pub struct InfoResponse {
 ///
 /// - **Production** (`--features production`): always
 ///   `/var/run/dstack.sock` (env override disabled).
-/// - **Dev** (`--features phala`): uses `DSTACK_SOCKET` env var if set, otherwise
+/// - **Dev** (`--features dstack`): uses `DSTACK_SOCKET` env var if set, otherwise
 ///   defaults to `/var/run/dstack.sock`.
 fn resolve_socket_path() -> String {
     #[cfg(feature = "production")]
@@ -254,7 +254,7 @@ fn extract_report_data(quote_bytes: &[u8], _expected_prefix: Option<&[u8]>) -> O
     {
         for i in 0..quote_bytes.len().saturating_sub(64) {
             let window = &quote_bytes[i..i + 64];
-            let matches = match expected_prefix {
+            let matches = match _expected_prefix {
                 None => window.iter().all(|&b| b == 0),
                 Some(prefix) => window.starts_with(prefix),
             };
@@ -295,7 +295,7 @@ mod tests {
     }
 
     /// Fails if the dstack socket is unavailable (requires TEE or simulator).
-    #[cfg(feature = "phala")]
+    #[cfg(feature = "dstack")]
     #[tokio::test]
     async fn test_get_quote_succeeds_when_socket_available() {
         let path = resolve_socket_path();
@@ -308,7 +308,7 @@ mod tests {
     }
 
     /// Fails if the socket is available but the returned quote is invalid.
-    #[cfg(feature = "phala")]
+    #[cfg(feature = "dstack")]
     #[tokio::test]
     async fn fails_when_quote_invalid() {
         let path = resolve_socket_path();

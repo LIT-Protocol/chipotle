@@ -7,10 +7,10 @@ license = "Apache-2.0"
 
 [features]
 default = []
-# Phala TEE attestation. Use --features phala for simulator/dev testing.
-phala = []
-# Production deploy (Phala CVM): enables phala + hardcoded dstack socket, no env override.
-production = ["phala"]
+# Dstack TEE attestation. Use --features dstack for simulator/dev testing.
+dstack = []
+# Production deploy (Phala CVM): enables dstack + hardcoded dstack socket, no env override.
+production = ["dstack"]
 
 [dependencies]
 aes-gcm = "0.10"

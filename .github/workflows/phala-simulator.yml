@@ -156,7 +156,7 @@ jobs:
           }
 
           # Run the Rust unit tests against the simulator socket.
-          (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" cargo test --features phala -- dstack::v1::dstack::tests --nocapture)
+          (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" cargo test --features dstack -- dstack::v1::dstack::tests --nocapture)
           STATUS=$?
 
           # Teardown.
@@ -166,7 +166,7 @@ jobs:
           exit "$STATUS"
 
       - name: Build lit-api-server
-        run: cargo build --manifest-path=lit-api-server/Cargo.toml --features phala --bin lit-api-server
+        run: cargo build --manifest-path=lit-api-server/Cargo.toml --features dstack --bin lit-api-server
 
       # ── 3. dstack-verifier end-to-end attestation pipeline ─────────────────
       # Start simulator, start lit-api-server (attestation-only; fetches from simulator),
