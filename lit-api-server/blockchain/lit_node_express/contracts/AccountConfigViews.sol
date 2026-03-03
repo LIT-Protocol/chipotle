@@ -105,14 +105,20 @@ contract AccountConfigViews {
         LibAccountConfigStorage.Account storage account = s.accounts[
             accountApiKeyHash
         ];
-        if (pageSize > account.groupList.length()) {
-            pageSize = account.groupList.length();
+        uint256 totalLength = account.groupList.length();
+        if (totalLength == 0) {
+            return new LibAccountConfigStorage.Metadata[](0);
+        }
+        if (pageSize > totalLength) {
+            pageSize = totalLength;
             pageNumber = 0;
         }
         uint256 startIndex = pageNumber * pageSize;
+        if (startIndex >= totalLength) {
+            return new LibAccountConfigStorage.Metadata[](0);
+        }
         uint256 endIndex = startIndex + pageSize;
-        if (endIndex > account.groupList.length())
-            endIndex = account.groupList.length();
+        if (endIndex > totalLength) endIndex = totalLength;
         uint256 pageLength = endIndex - startIndex;
         LibAccountConfigStorage.Metadata[]
             memory pageMetadata = new LibAccountConfigStorage.Metadata[](
