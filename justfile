@@ -12,6 +12,10 @@ image_lit_static     := image_base + '-lit-static:'     + image_tag
 app_name := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo lit-api-server || echo lit-api-server-next'`
 instance_type := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo tdx.large || echo tdx.small'`
 
+# Remote base URLs for verify-remote (attestation at /attestation).
+verify_remote_main := 'https://api.dev.litprotocol.com'
+verify_remote_next := 'https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network'
+
 # List available recipes (default when invoked with no args)
 default:
     @just --list
@@ -274,7 +278,7 @@ sim-test: sim-build
 
     DSTACK_SOCKET="$SIM_SOCK" \
         cargo test --manifest-path="$PROJECT_ROOT/lit-api-server/Cargo.toml" \
-            --features phala \
+            --features dstack \
             -- dstack::v1::dstack::tests --nocapture
     STATUS=$?
 
@@ -378,3 +382,59 @@ sim-verify: sim-build verifier-build api-server
 
     [ "$QUOTE_OK" = "true" ] || { echo "error: quote_verified=false — attestation pipeline is broken"; exit 1; }
     echo "Attestation pipeline verified: quote_verified=true."
+
+# Run dstack-verifier against a remote attestation endpoint (no simulator).
+# Fetches attestation from {base_url}/attestation, runs verifier in Docker.
+# Requires Docker. Uses dstacktee/dstack-verifier:latest (includes dstack-acpi-tables).
+#
+# Usage: just verify-remote          # defaults to next
+#        just verify-remote main
+#        just verify-remote next
+[group: 'sim']
+verify-remote target='next':
+    #!/usr/bin/env sh
+    set -eu
+    command -v docker >/dev/null 2>&1 || { echo "error: docker required; install from https://docs.docker.com/get-docker/"; exit 1; }
+    case "{{target}}" in
+        main) BASE_URL="{{verify_remote_main}}" ;;
+        next) BASE_URL="{{verify_remote_next}}" ;;
+        *) echo "error: target must be 'main' or 'next'"; exit 1 ;;
+    esac
+    ATTESTATION_URL="${BASE_URL}/attestation"
+    TMP_DIR=$(mktemp -d)
+
+    echo "Fetching attestation from $ATTESTATION_URL..."
+    curl -sf "$ATTESTATION_URL" > "$TMP_DIR/attestation.json" || {
+        echo "error: failed to fetch attestation from $ATTESTATION_URL"
+        rm -rf "$TMP_DIR"
+        exit 1
+    }
+
+    # dstack guest-agent strips digests from runtime events (to reduce size); the verifier
+    # can recompute them, but the Docker verifier's parser rejects digest="" (bug). The script
+    # fills in SHA384(event_type::event::payload) before verification.
+    # This workaround can be removed when the verifier's parser is fixed.
+    VERIFY_FILE="$TMP_DIR/verify-request.json"
+    python3 scripts/fix-attestation-event-log.py "$TMP_DIR/attestation.json" > "$VERIFY_FILE"
+
+    echo "Running dstack-verifier (oneshot)..."
+    docker run --rm \
+        -v "$TMP_DIR:/verify" \
+        -w /verify \
+        --platform linux/amd64 \
+        dstacktee/dstack-verifier:latest \
+        --verify /verify/verify-request.json || true
+
+    RESULT_FILE="${VERIFY_FILE}.verification.json"
+    if [ ! -f "$RESULT_FILE" ]; then
+        echo "error: verifier did not produce result file (check verifier output above)"
+        rm -rf "$TMP_DIR"
+        exit 1
+    fi
+    QUOTE_OK=$(python3 -c \
+        'import sys,json; v=json.load(open(sys.argv[1]))["details"]["quote_verified"]; print("true" if v else "false")' \
+        "$RESULT_FILE")
+    rm -rf "$TMP_DIR"
+
+    [ "$QUOTE_OK" = "true" ] || { echo "error: quote_verified=false"; exit 1; }
+    echo "Remote attestation verified: quote_verified=true."
