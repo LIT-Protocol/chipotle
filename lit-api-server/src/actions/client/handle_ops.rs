@@ -80,9 +80,6 @@ impl Client {
                 }
                 .into()
             }
-            UnionResponse::GetLatestNonce(GetLatestNonceRequest { .. }) => {
-                bail!("GetLatestNonce is not implemented");
-            }
             UnionResponse::Sign(SignRequest {
                 to_sign,
                 public_key,
@@ -162,20 +159,6 @@ impl Client {
             UnionResponse::CallContract(CallContractRequest { .. }) => {
                 bail!("CallContract is not implemented");
             }
-            UnionResponse::GetRpcUrl(GetRpcUrlRequest { .. }) => {
-                bail!("GetRpcUrl is not implemented");
-            }
-            UnionResponse::EncryptBls(EncryptBlsRequest {
-                access_control_conditions: _,
-                to_encrypt: _,
-            }) => {
-                // use lit_rust_crypto::blsful::Bls12381G1;
-
-                bail!("EncryptBls is not implemented");
-            }
-            UnionResponse::DecryptBls(DecryptBlsRequest { .. }) => {
-                bail!("DecryptBls is not implemented");
-            }
             UnionResponse::UpdateResourceUsage(UpdateResourceUsageRequest {
                 tick: _,
                 used_kb: _,
@@ -187,27 +170,6 @@ impl Client {
                 // let cancel_action = r.is_err();
                 let cancel_action = false;
                 UpdateResourceUsageResponse { cancel_action }.into()
-            }
-            UnionResponse::SignAsAction(SignAsActionRequest {
-                to_sign: _,
-                sig_name: _,
-                signing_scheme: _,
-            }) => {
-                bail!("SignAsAction is not implemented");
-            }
-            UnionResponse::GetActionPublicKey(GetActionPublicKeyRequest {
-                signing_scheme: _,
-                action_ipfs_cid: _,
-            }) => {
-                bail!("GetActionPublicKey is not implemented");
-            }
-            UnionResponse::VerifyActionSignature(VerifyActionSignatureRequest {
-                signing_scheme: _,
-                action_ipfs_cid: _,
-                to_sign: _,
-                sign_output: _,
-            }) => {
-                bail!("VerifyActionSignature is not implemented");
             }
             UnionResponse::Result(_) => unreachable!(), // handled in main loop
         })

@@ -132,13 +132,13 @@ These are the steps to implement a new `Hello` op as an example:
 --- rust/lit-actions/grpc/proto.rs
 +++ rust/lit-actions/grpc/proto.rs
 @@ -80,6 +80,7 @@ decl_op!(CallContract);
- decl_op!(CheckConditions);
- decl_op!(ClaimKeyIdentifier);
- decl_op!(GetLatestNonce);
-+decl_op!(Hello);
  decl_op!(IncrementFetchCount);
- decl_op!(PkpPermissionsGetPermitted);
- decl_op!(PkpPermissionsGetPermittedAuthMethodScopes);
+ decl_op!(Print);
+ decl_op!(SetResponse);
++decl_op!(Hello);
+ decl_op!(Sign);
+ decl_op!(AesEncrypt);
+ decl_op!(UpdateResourceUsage);
 ```
 
 3. Generate Rust code via `cargo build` and then format the proto file with `clang-format --Werror --style="{BasedOnStyle: Google, ColumnLimit: 120}" -i proto/*.proto`
@@ -165,17 +165,17 @@ These are the steps to implement a new `Hello` op as an example:
 +    )
 +}
 +
- // Build a deno_core::Extension providing custom ops
- extension!(
-     lit_actions,
+// Build a deno_core::Extension providing custom ops
+extension!(
+    lit_actions,
 @@ -405,6 +416,7 @@ extension!(
-         op_check_conditions,
-         op_claim_key_identifier,
-         op_get_latest_nonce,
+        op_call_child,
+        op_call_contract,
+        op_increment_fetch_count,
 +        op_hello,
-         op_increment_fetch_count,
-         op_pkp_permissions_get_permitted_auth_method_scopes,
-         op_pkp_permissions_get_permitted,
+        op_set_response,
+        op_sign,
+        op_update_resource_usage,
 ```
 
 5. Add the op to the JavaScript Lit SDK

@@ -150,22 +150,6 @@ export declare namespace Lit {
       keySetId: string;
     }): Promise<string>;
     /**
-     * Gets latest nonce for the given address on a supported chain
-     * @name Lit.Actions.getLatestNonce
-     * @function getLatestNonce
-     * @param {Object} params
-     * @param {string} params.address The wallet address for getting the nonce
-     * @param {string} params.chain The chain of which the nonce is fetched
-     * @returns {Promise<string>} The token ID as a string
-     */
-    function getLatestNonce({
-      address,
-      chain,
-    }: {
-      address: string;
-      chain: string;
-    }): Promise<string>;
-    /**
      * Ask the Lit Node to sign any data using the ECDSA Algorithm with it's private key share.  The resulting signature share will be returned to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
      * @name Lit.Actions.signEcdsa
      * @function signEcdsa
@@ -219,93 +203,6 @@ export declare namespace Lit {
       signingScheme,
       keySetId,
     }: Uint8array): Uint8array;
-    /**
-     * Sign data using the Lit Action's own cryptographic identity derived from its IPFS CID.
-     * This allows actions to sign as themselves (not as a PKP), enabling autonomous agent behavior,
-     * action-to-action authentication, and verifiable computation results.
-     *
-     * The action's keypair is deterministically derived from: keccak256("lit_action_" + actionIpfsCid)
-     * The same action IPFS CID always generates the same keypair across all nodes.
-     *
-     * @name Lit.Actions.signAsAction
-     * @function signAsAction
-     * @param {Object} params
-     * @param {Uint8Array} params.toSign The message to sign as an array of 8-bit integers
-     * @param {string} params.sigName The name to identify this signature in the response
-     * @param {string} params.signingScheme The signing algorithm to use. Must be one of:
-     *   "EcdsaK256Sha256", "EcdsaP256Sha256", "EcdsaP384Sha384",
-     *   "SchnorrEd25519Sha512", "SchnorrK256Sha256", "SchnorrP256Sha256", "SchnorrP384Sha384",
-     *   "SchnorrRistretto25519Sha512", "SchnorrEd448Shake256", "SchnorrRedJubjubBlake2b512",
-     *   "SchnorrK256Taproot", "SchnorrRedDecaf377Blake2b512", "SchnorrkelSubstrate",
-     *   "Bls12381G1ProofOfPossession"
-     * @returns {Promise<Uint8Array>} The resulting signature that can be verified using verifyActionSignature
-     */
-    function signAsAction({
-      toSign,
-      sigName,
-      signingScheme,
-    }: {
-      toSign: Uint8Array;
-      sigName: string;
-      signingScheme: string;
-    }): Promise<Uint8Array>;
-    /**
-     * Get the public key for a Lit Action's cryptographic identity.
-     * This can be used to verify signatures created by signAsAction, or to get the public key
-     * of any action (including actions you didn't create) for verification purposes.
-     *
-     * The public key is deterministically derived from: keccak256("lit_action_" + actionIpfsCid)
-     * and will always be the same for a given action IPFS CID and signing scheme.
-     *
-     * @name Lit.Actions.getActionPublicKey
-     * @function getActionPublicKey
-     * @param {Object} params
-     * @param {string} params.signingScheme The signing algorithm. Must be one of:
-     *   "EcdsaK256Sha256", "EcdsaP256Sha256", "EcdsaP384Sha384",
-     *   "SchnorrEd25519Sha512", "SchnorrK256Sha256", "SchnorrP256Sha256", "SchnorrP384Sha384",
-     *   "SchnorrRistretto25519Sha512", "SchnorrEd448Shake256", "SchnorrRedJubjubBlake2b512",
-     *   "SchnorrK256Taproot", "SchnorrRedDecaf377Blake2b512", "SchnorrkelSubstrate",
-     *   "Bls12381G1ProofOfPossession"
-     * @param {string} params.actionIpfsCid The IPFS CID of the Lit Action
-     * @returns {Promise<Uint8Array>} The public key for the action
-     */
-    function getActionPublicKey({
-      signingScheme,
-      actionIpfsCid,
-    }: {
-      signingScheme: string;
-      actionIpfsCid: string;
-    }): Promise<Uint8Array>;
-    /**
-     * Verify that a signature was created by a specific Lit Action using signAsAction.
-     * This enables action-to-action authentication, verifiable computation, and building trust chains
-     * between actions without requiring PKP ownership.
-     *
-     * @name Lit.Actions.verifyActionSignature
-     * @function verifyActionSignature
-     * @param {Object} params
-     * @param {string} params.signingScheme The signing algorithm. Must be one of:
-     *   "EcdsaK256Sha256", "EcdsaP256Sha256", "EcdsaP384Sha384",
-     *   "SchnorrEd25519Sha512", "SchnorrK256Sha256", "SchnorrP256Sha256", "SchnorrP384Sha384",
-     *   "SchnorrRistretto25519Sha512", "SchnorrEd448Shake256", "SchnorrRedJubjubBlake2b512",
-     *   "SchnorrK256Taproot", "SchnorrRedDecaf377Blake2b512", "SchnorrkelSubstrate",
-     *   "Bls12381G1ProofOfPossession"
-     * @param {string} params.actionIpfsCid The IPFS CID of the Lit Action that should have created the signature
-     * @param {Uint8Array} params.toSign The message that was signed
-     * @param {string} params.signOutput The signature output from signAsAction (as a string)
-     * @returns {Promise<boolean>} true if the signature was created by the specified action, false otherwise
-     */
-    function verifyActionSignature({
-      signingScheme,
-      actionIpfsCid,
-      toSign,
-      signOutput,
-    }: {
-      signingScheme: string;
-      actionIpfsCid: string;
-      toSign: Uint8Array;
-      signOutput: string;
-    }): Promise<boolean>;
     /**
      * Ask the Lit Node to sign a message using the eth_personalSign algorithm.  The resulting signature share will be returned to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
      * @name Lit.Actions.ethPersonalSignMessageEcdsa
@@ -581,37 +478,6 @@ export declare namespace Lit {
       },
       async_fn: Function,
     ): Promise<string>;
-    /**
-     * Get the RPC URL for a given blockchain
-     * @name Lit.Actions.getRpcUrl
-     * @function getRpcUrl
-     * @param {Object} params
-     * @param {string} params.chain The chain to get the RPC URL for
-     * @returns {Promise<string>} The RPC URL for the chain
-     */
-    function getRpcUrl({ chain }: { chain: string }): Promise<string>;
-    /**
-     * Encrypt data using BLS encryption with access control conditions
-     * @name Lit.Actions.encrypt
-     * @function encrypt
-     * @param {Object} params
-     * @param {Array<Object>} params.accessControlConditions The access control conditions that must be met to decrypt
-     * @param {string} params.to_encrypt The message to encrypt
-     * @param {string} params.keySetId The key set id to use
-     * @returns {Promise<{ciphertext: string, dataToEncryptHash: string}>} An object containing the ciphertext and the hash of the data that was encrypted
-     */
-    function encrypt({
-      accessControlConditions,
-      to_encrypt,
-      keySetId,
-    }: {
-      accessControlConditions: Array<any>;
-      to_encrypt: string;
-      keySetId: string;
-    }): Promise<{
-      ciphertext: string;
-      dataToEncryptHash: string;
-    }>;
   }
 
   export namespace Auth {
@@ -685,21 +551,3 @@ declare const LitAuth: typeof Lit.Auth;
  * Then import types with: import type { ethers } from 'ethers';
  */
 declare const ethers: typeof import("ethers");
-
-/**
- * The jsonwebtoken library for JWT encoding, decoding, and verification.
- * See https://github.com/auth0/node-jsonwebtoken for full documentation.
- */
-declare const jwt: {
-  decode: (token: string, options?: any) => any;
-  verify: (
-    token: string,
-    secretOrPublicKey: string | Buffer,
-    options?: any,
-  ) => any;
-  sign: (
-    payload: string | object | Buffer,
-    secretOrPrivateKey: string | Buffer,
-    options?: any,
-  ) => string;
-};

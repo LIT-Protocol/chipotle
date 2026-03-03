@@ -5,7 +5,6 @@ import { op_increment_fetch_count, op_panic } from 'ext:core/ops';
 // This is required because we currently extend globalThis instead of using ES modules at runtime.
 import * as _ethers from 'ext:lit_actions/00_ethers.js';
 import * as _actions from 'ext:lit_actions/02_litActionsSDK.js';
-import * as _jwt from 'ext:lit_actions/03_jsonwebtoken.js';
 
 // this block scopes oldFetch so that nobody can ever use it after
 {

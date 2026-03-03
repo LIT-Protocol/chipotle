@@ -7,10 +7,8 @@ toc:
   - signEcdsa
   - ethPersonalSignMessageEcdsa
   - sign
-  - signAsAction
   - signAndCombineEcdsa
   - signAndCombine
-  - verifyActionSignature
   - name: Checking Permissions
   - isPermittedAction
   - isPermittedAddress
@@ -23,8 +21,6 @@ toc:
   - name: Key Management
     description: |
       Accessed via `Lit.Actions.*`.
-  - getActionPublicKey
-  - getLatestNonce
   - claimKey
   - pubkeyToTokenId
 
@@ -37,8 +33,6 @@ toc:
   - callContract
   - broadcastAndCollect
   - runOnce
-  - getRpcUrl
-  - encrypt
   - decryptAndCombine
   - decryptToSingleNode
   - aesDecrypt
