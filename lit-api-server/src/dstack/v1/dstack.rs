@@ -76,9 +76,19 @@ pub async fn get_quote(
     let socket_path = get_socket_path()?;
     let endpoint = Some(socket_path.as_str());
     let client = dstack_client::DstackClient::new(endpoint);
-    let report_data = report_data.unwrap_or("0x");
+    // The dstack SDK takes raw bytes and hex-encodes them internally before sending
+    // to the dstack socket. Callers pass a hex string (e.g. "0xdeadbeef"), so
+    // decode it to actual bytes first. None/empty means all-zero report_data.
+    let report_data_bytes: Vec<u8> = match report_data {
+        None | Some("0x") | Some("") => vec![0u8; 64],
+        Some(s) => {
+            let hex_str = s.strip_prefix("0x").unwrap_or(s);
+            hex::decode(hex_str)
+                .map_err(|e| format!("invalid hex in report_data '{s}': {e}"))?
+        }
+    };
     let quote = client
-        .get_quote(report_data.as_bytes().to_vec())
+        .get_quote(report_data_bytes)
         .await
         .map_err(|e| format!("failed to get quote: {e}"))?;
     Ok(quote)
@@ -209,7 +219,7 @@ mod tests {
     }
 
     /// Fails if the socket is available but the returned quote is invalid.
-    // #[tokio::test]
+    #[tokio::test]
     async fn fails_when_quote_invalid() {
         let path = resolve_socket_path();
         assert!(
