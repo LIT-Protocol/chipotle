@@ -1,4 +1,4 @@
 [chain]
 name = "base"
 contract_address = "0x97ccfb3a7402a8e62404fa9bb8212f495aea2483"
-secret = "0xf2360ce22ff07cde0dd847d7fa25ef0b2d76cc663fe70f249a53b395a872d853" # Lit Chain Mainnet Shared Funds on Bitwarden
+secret = "0xf2360ce22ff07cde0dd847d7fa25ef0b2d76cc663fe70f249a53b395a872d853"
