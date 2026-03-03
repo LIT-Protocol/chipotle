@@ -286,6 +286,8 @@ function initConfirmClose() {
 }
 
 // ----- Action progress modal (non-dismissible) -----
+let _actionProgressPreviousFocus = null;
+
 function showActionProgress(title, description) {
   const overlay = document.getElementById('action-overlay');
   const titleEl = document.getElementById('action-title');
@@ -293,8 +295,11 @@ function showActionProgress(title, description) {
   if (!overlay || !titleEl || !descEl) return;
   titleEl.textContent = title || 'Working…';
   descEl.textContent = description || '';
+  _actionProgressPreviousFocus = document.activeElement;
   overlay.classList.add('is-open');
   overlay.setAttribute('aria-hidden', 'false');
+  const dialog = overlay.querySelector('[role="dialog"]');
+  if (dialog) dialog.focus();
 }
 
 function closeActionProgress() {
@@ -302,6 +307,10 @@ function closeActionProgress() {
   if (!overlay) return;
   overlay.classList.remove('is-open');
   overlay.setAttribute('aria-hidden', 'true');
+  if (_actionProgressPreviousFocus && typeof _actionProgressPreviousFocus.focus === 'function') {
+    try { _actionProgressPreviousFocus.focus(); } catch (_) { /* element may have been removed */ }
+  }
+  _actionProgressPreviousFocus = null;
 }
 
 // ----- Shared list render (overview lists stay as list) -----
