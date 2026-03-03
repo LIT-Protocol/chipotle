@@ -355,6 +355,7 @@ contract AccountConfigFacet {
         uint256 groupId,
         uint256 action
     ) private view {
+        revertIfGroupDoesNotExist(accountApiKeyHash, groupId);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         if (
@@ -377,6 +378,7 @@ contract AccountConfigFacet {
         uint256 groupId,
         uint256 Wallet
     ) private view {
+        revertIfGroupDoesNotExist(accountApiKeyHash, groupId);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         if (
