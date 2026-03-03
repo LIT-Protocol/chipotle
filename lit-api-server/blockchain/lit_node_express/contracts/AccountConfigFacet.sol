@@ -198,6 +198,7 @@ contract AccountConfigFacet {
         uint256 groupId,
         uint256 walletAddressHash
     ) public {
+        revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
         revertIfWalletDoesNotExist(
             accountApiKeyHash,
             groupId,
