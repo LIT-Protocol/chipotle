@@ -234,15 +234,16 @@ contract AccountConfigViews {
             accountApiKeyHash,
             msg.sender
         );
-        LibAccountConfigStorage.revertIfGroupDoesNotExist(
-            LibAccountConfigStorage.getStorage(),
-            accountApiKeyHash,
-            groupId
-        );
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
+        LibAccountConfigStorage.revertIfGroupDoesNotExist(
+            s,
+            masterAccountApiKeyHash,
+            groupId
+        );
         LibAccountConfigStorage.Account storage account = s.accounts[
-            accountApiKeyHash
+            masterAccountApiKeyHash
         ];
         LibAccountConfigStorage.Group storage group = account.groups[groupId];
         uint256 totalLength = group.permitted_actions_cid_hash.length();
