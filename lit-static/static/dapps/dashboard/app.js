@@ -119,6 +119,34 @@ function initLogin() {
   const tabNew = document.getElementById('login-tab-new');
   const panelExisting = document.getElementById('login-panel-existing');
   const panelNew = document.getElementById('login-panel-new');
+  const stripeSection = document.getElementById('new-account-stripe-section');
+  let stripeConfig = { enabled: false, publishable_key: null };
+  let stripeCardElement = null;
+  let stripeElements = null;
+
+  async function ensureStripeInit() {
+    if (stripeCardElement !== null) return;
+    try {
+      const client = await getClient();
+      const config = await client.getStripeConfig();
+      stripeConfig = config;
+      if (config.enabled && config.publishable_key && typeof window.Stripe === 'function') {
+        if (stripeSection) stripeSection.style.display = 'block';
+        const stripe = window.Stripe(config.publishable_key);
+        const elements = stripe.elements();
+        const card = elements.create('card', { style: { base: { fontSize: '16px' } } });
+        const container = document.getElementById('stripe-card-element');
+        if (container) {
+          card.mount(container);
+          stripeCardElement = card;
+          stripeElements = elements;
+        }
+      }
+    } catch (_) {
+      stripeConfig = { enabled: false, publishable_key: null };
+    }
+  }
+
   function switchLoginTab(toExisting) {
     const isExisting = toExisting === true;
     tabExisting.classList.toggle('is-active', isExisting);
@@ -129,6 +157,7 @@ function initLogin() {
     panelNew.classList.toggle('is-active', !isExisting);
     if (panelExisting) panelExisting.hidden = !isExisting;
     if (panelNew) panelNew.hidden = isExisting;
+    if (!isExisting) ensureStripeInit();
   }
   tabExisting?.addEventListener('click', () => switchLoginTab(true));
   tabNew?.addEventListener('click', () => switchLoginTab(false));
@@ -170,12 +199,49 @@ function initLogin() {
     const btn = document.getElementById('btn-create-account');
     btn.disabled = true;
     try {
+      await ensureStripeInit();
       const client = await getClient();
-      const res = await client.newAccount({ accountName: name, accountDescription: desc, initialBalance });
+      let paymentMethodId = null;
+      let initialChargeCents = null;
+      let cardholderName = null;
+      if (stripeConfig.enabled && stripeCardElement) {
+        const amountInput = document.getElementById('new-account-charge-amount');
+        const amount = amountInput ? parseFloat(amountInput.value) : 5;
+        if (amount < 5 || amount > 1000) {
+          showStatus('login-status', 'Initial charge must be between $5 and $1,000.', 'error');
+          btn.disabled = false;
+          return;
+        }
+        cardholderName = (document.getElementById('new-account-cardholder-name')?.value || '').trim() || name;
+        const stripe = window.Stripe(stripeConfig.publishable_key);
+        const { paymentMethod, error } = await stripe.createPaymentMethod({
+          type: 'card',
+          card: stripeCardElement,
+          billing_details: { name: cardholderName },
+        });
+        if (error) {
+          showStatus('login-status', 'Card error: ' + (error.message || String(error)), 'error');
+          btn.disabled = false;
+          return;
+        }
+        paymentMethodId = paymentMethod.id;
+        initialChargeCents = Math.round(amount * 100);
+      }
+      const res = await client.newAccount({
+        accountName: name,
+        accountDescription: desc,
+        initialBalance,
+        paymentMethodId,
+        initialChargeCents,
+        cardholderName,
+      });
       setApiKey(res.api_key);
       showStatus('login-status', 'Account created. You are now logged in.', 'success');
       document.getElementById('new-account-name').value = '';
       document.getElementById('new-account-desc').value = '';
+      if (document.getElementById('new-account-charge-amount')) document.getElementById('new-account-charge-amount').value = '5';
+      if (document.getElementById('new-account-cardholder-name')) document.getElementById('new-account-cardholder-name').value = '';
+      if (stripeCardElement) stripeCardElement.clear();
     } catch (e) {
       showStatus('login-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
     } finally {

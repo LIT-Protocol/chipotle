@@ -130,6 +130,7 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         // sign_with_pkp,
         list_api_keys,
         new_account,
+        stripe_config,
         account_exists,
         create_wallet,
         lit_action,
@@ -155,11 +156,33 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
 #[openapi(tag = "Account Management")]
 #[post("/new_account", format = "json", data = "<new_account_request>")]
 async fn new_account(
+    http_client: &State<reqwest::Client>,
     new_account_request: Json<NewAccountRequest>,
 ) -> OpenApiResponse<NewAccountResponse, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::new_account(new_account_request).await).into(),
+        response: ApiResult(
+            account_management::new_account(http_client.inner(), new_account_request).await,
+        )
+        .into(),
     }
+}
+
+#[openapi(tag = "Account Management")]
+#[get("/stripe_config")]
+async fn stripe_config() -> OpenApiResponse<StripeConfigResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(Ok(StripeConfigResponse {
+            publishable_key: crate::stripe::stripe_publishable_key(),
+            enabled: crate::stripe::stripe_enabled(),
+        }))
+        .into(),
+    }
+}
+
+#[derive(serde::Serialize, schemars::JsonSchema)]
+pub struct StripeConfigResponse {
+    pub publishable_key: Option<String>,
+    pub enabled: bool,
 }
 
 #[openapi(tag = "Account Management")]
@@ -172,9 +195,16 @@ async fn account_exists(api_key: ApiKey) -> OpenApiResponse<bool, ErrMessage> {
 
 #[openapi(tag = "Account Management")]
 #[get("/create_wallet")]
-async fn create_wallet(api_key: ApiKey) -> OpenApiResponse<CreateWalletResponse, ErrMessage> {
+async fn create_wallet(
+    api_key: ApiKey,
+    http_client: &State<reqwest::Client>,
+) -> OpenApiResponse<CreateWalletResponse, ErrMessage> {
+    let res = account_management::create_wallet(api_key.0.as_str()).await;
+    if res.is_ok() {
+        account_management::record_stripe_meter_event_if_any(api_key.0.as_str(), http_client.inner()).await;
+    }
     OpenApiResponse {
-        response: ApiResult(account_management::create_wallet(api_key.0.as_str()).await).into(),
+        response: ApiResult(res).into(),
     }
 }
 
@@ -225,10 +255,15 @@ async fn get_lit_action_ipfs_id(code: String) -> OpenApiResponse<String, ErrMess
 #[post("/add_group", format = "json", data = "<req>")]
 async fn add_group(
     api_key: ApiKey,
+    http_client: &State<reqwest::Client>,
     req: Json<AddGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    let res = account_management::add_group(api_key.0.as_str(), req).await;
+    if res.is_ok() {
+        account_management::record_stripe_meter_event_if_any(api_key.0.as_str(), http_client.inner()).await;
+    }
     OpenApiResponse {
-        response: ApiResult(account_management::add_group(api_key.0.as_str(), req).await).into(),
+        response: ApiResult(res).into(),
     }
 }
 
@@ -236,11 +271,15 @@ async fn add_group(
 #[post("/add_action_to_group", format = "json", data = "<req>")]
 async fn add_action_to_group(
     api_key: ApiKey,
+    http_client: &State<reqwest::Client>,
     req: Json<AddActionToGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    let res = account_management::add_action_to_group(api_key.0.as_str(), req).await;
+    if res.is_ok() {
+        account_management::record_stripe_meter_event_if_any(api_key.0.as_str(), http_client.inner()).await;
+    }
     OpenApiResponse {
-        response: ApiResult(account_management::add_action_to_group(api_key.0.as_str(), req).await)
-            .into(),
+        response: ApiResult(res).into(),
     }
 }
 
@@ -248,11 +287,15 @@ async fn add_action_to_group(
 #[post("/add_pkp_to_group", format = "json", data = "<req>")]
 async fn add_pkp_to_group(
     api_key: ApiKey,
+    http_client: &State<reqwest::Client>,
     req: Json<AddPkpToGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    let res = account_management::add_pkp_to_group(api_key.0.as_str(), req).await;
+    if res.is_ok() {
+        account_management::record_stripe_meter_event_if_any(api_key.0.as_str(), http_client.inner()).await;
+    }
     OpenApiResponse {
-        response: ApiResult(account_management::add_pkp_to_group(api_key.0.as_str(), req).await)
-            .into(),
+        response: ApiResult(res).into(),
     }
 }
 
@@ -260,13 +303,15 @@ async fn add_pkp_to_group(
 #[post("/remove_pkp_from_group", format = "json", data = "<req>")]
 async fn remove_pkp_from_group(
     api_key: ApiKey,
+    http_client: &State<reqwest::Client>,
     req: Json<RemovePkpFromGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    let res = account_management::remove_pkp_from_group(api_key.0.as_str(), req).await;
+    if res.is_ok() {
+        account_management::record_stripe_meter_event_if_any(api_key.0.as_str(), http_client.inner()).await;
+    }
     OpenApiResponse {
-        response: ApiResult(
-            account_management::remove_pkp_from_group(api_key.0.as_str(), req).await,
-        )
-        .into(),
+        response: ApiResult(res).into(),
     }
 }
 
@@ -274,11 +319,15 @@ async fn remove_pkp_from_group(
 #[post("/add_usage_api_key", format = "json", data = "<req>")]
 async fn add_usage_api_key(
     api_key: ApiKey,
+    http_client: &State<reqwest::Client>,
     req: Json<AddUsageApiKeyRequest>,
 ) -> OpenApiResponse<AddUsageApiKeyResponse, ErrMessage> {
+    let res = account_management::add_usage_api_key(api_key.0.as_str(), req).await;
+    if res.is_ok() {
+        account_management::record_stripe_meter_event_if_any(api_key.0.as_str(), http_client.inner()).await;
+    }
     OpenApiResponse {
-        response: ApiResult(account_management::add_usage_api_key(api_key.0.as_str(), req).await)
-            .into(),
+        response: ApiResult(res).into(),
     }
 }
 
@@ -286,13 +335,15 @@ async fn add_usage_api_key(
 #[post("/remove_usage_api_key", format = "json", data = "<req>")]
 async fn remove_usage_api_key(
     api_key: ApiKey,
+    http_client: &State<reqwest::Client>,
     req: Json<RemoveUsageApiKeyRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    let res = account_management::remove_usage_api_key(api_key.0.as_str(), req).await;
+    if res.is_ok() {
+        account_management::record_stripe_meter_event_if_any(api_key.0.as_str(), http_client.inner()).await;
+    }
     OpenApiResponse {
-        response: ApiResult(
-            account_management::remove_usage_api_key(api_key.0.as_str(), req).await,
-        )
-        .into(),
+        response: ApiResult(res).into(),
     }
 }
 
@@ -300,10 +351,15 @@ async fn remove_usage_api_key(
 #[post("/update_group", format = "json", data = "<req>")]
 async fn update_group(
     api_key: ApiKey,
+    http_client: &State<reqwest::Client>,
     req: Json<UpdateGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    let res = account_management::update_group(api_key.0.as_str(), req).await;
+    if res.is_ok() {
+        account_management::record_stripe_meter_event_if_any(api_key.0.as_str(), http_client.inner()).await;
+    }
     OpenApiResponse {
-        response: ApiResult(account_management::update_group(api_key.0.as_str(), req).await).into(),
+        response: ApiResult(res).into(),
     }
 }
 
@@ -311,13 +367,15 @@ async fn update_group(
 #[post("/remove_action_from_group", format = "json", data = "<req>")]
 async fn remove_action_from_group(
     api_key: ApiKey,
+    http_client: &State<reqwest::Client>,
     req: Json<RemoveActionFromGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    let res = account_management::remove_action_from_group(api_key.0.as_str(), req).await;
+    if res.is_ok() {
+        account_management::record_stripe_meter_event_if_any(api_key.0.as_str(), http_client.inner()).await;
+    }
     OpenApiResponse {
-        response: ApiResult(
-            account_management::remove_action_from_group(api_key.0.as_str(), req).await,
-        )
-        .into(),
+        response: ApiResult(res).into(),
     }
 }
 
@@ -325,13 +383,15 @@ async fn remove_action_from_group(
 #[post("/update_action_metadata", format = "json", data = "<req>")]
 async fn update_action_metadata(
     api_key: ApiKey,
+    http_client: &State<reqwest::Client>,
     req: Json<UpdateActionMetadataRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    let res = account_management::update_action_metadata(api_key.0.as_str(), req).await;
+    if res.is_ok() {
+        account_management::record_stripe_meter_event_if_any(api_key.0.as_str(), http_client.inner()).await;
+    }
     OpenApiResponse {
-        response: ApiResult(
-            account_management::update_action_metadata(api_key.0.as_str(), req).await,
-        )
-        .into(),
+        response: ApiResult(res).into(),
     }
 }
 
@@ -339,13 +399,15 @@ async fn update_action_metadata(
 #[post("/update_usage_api_key_metadata", format = "json", data = "<req>")]
 async fn update_usage_api_key_metadata(
     api_key: ApiKey,
+    http_client: &State<reqwest::Client>,
     req: Json<UpdateUsageApiKeyMetadataRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    let res = account_management::update_usage_api_key_metadata(api_key.0.as_str(), req).await;
+    if res.is_ok() {
+        account_management::record_stripe_meter_event_if_any(api_key.0.as_str(), http_client.inner()).await;
+    }
     OpenApiResponse {
-        response: ApiResult(
-            account_management::update_usage_api_key_metadata(api_key.0.as_str(), req).await,
-        )
-        .into(),
+        response: ApiResult(res).into(),
     }
 }
 

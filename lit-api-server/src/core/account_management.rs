@@ -2,6 +2,7 @@ use crate::accounts;
 use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::api_status::ApiStatus;
 use crate::core::lookup_data;
+use crate::stripe;
 use crate::core::v1::models::request::{
     AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest, AddUsageApiKeyRequest,
     NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
@@ -82,6 +83,7 @@ async fn create_new_wallet() -> Result<(String, H160, [u8; 32]), ApiStatus> {
 }
 
 pub async fn new_account(
+    http_client: &reqwest::Client,
     new_account_request: Json<NewAccountRequest>,
 ) -> Result<NewAccountResponse, ApiStatus> {
     let account_name = new_account_request.account_name.clone();
@@ -96,6 +98,34 @@ pub async fn new_account(
         .map(parse_u256)
         .transpose()?
         .unwrap_or(U256::zero());
+
+    // Validate Stripe fields if any provided
+    let (payment_method_id, initial_charge_cents, cardholder_name) = (
+        new_account_request.payment_method_id.as_deref(),
+        new_account_request.initial_charge_cents,
+        new_account_request.cardholder_name.as_deref(),
+    );
+    if initial_charge_cents.is_some() || payment_method_id.is_some() {
+        let cents = initial_charge_cents.ok_or_else(|| {
+            ApiStatus::bad_request(
+                anyhow::anyhow!("initial_charge_cents required when payment_method_id is set"),
+                "Stripe: initial_charge_cents required",
+            )
+        })?;
+        let _pm_id = payment_method_id.ok_or_else(|| {
+            ApiStatus::bad_request(
+                anyhow::anyhow!("payment_method_id required when initial_charge_cents is set"),
+                "Stripe: payment_method_id required",
+            )
+        })?;
+        if !(500..=100_000).contains(&cents) {
+            return Err(ApiStatus::bad_request(
+                anyhow::anyhow!("initial_charge_cents must be between 500 and 100000 ($5–$1000)"),
+                "Stripe: initial_charge_cents must be 500–100000",
+            )
+            .into());
+        }
+    }
 
     if let Err(e) = accounts::new_account(
         &api_key,
@@ -119,6 +149,27 @@ pub async fn new_account(
         "Account Master Wallet",
     )
     .await?;
+
+    // Stripe: create customer and charge after Lit account exists; store customer id for meter events
+    if stripe::stripe_enabled()
+        && payment_method_id.is_some()
+        && initial_charge_cents.is_some()
+    {
+        let pm_id = payment_method_id.unwrap();
+        let cents = initial_charge_cents.unwrap();
+        let name = cardholder_name.unwrap_or(&account_name);
+        if let Ok(stripe_customer_id) = stripe::create_customer_and_charge(
+            http_client,
+            name,
+            pm_id,
+            cents,
+        )
+        .await
+        {
+            let api_key_hash = accounts::api_key_hash(&api_key).to_string();
+            let _ = lookup_data::add_stripe_customer(&api_key_hash, &stripe_customer_id).await;
+        }
+    }
 
     Ok(NewAccountResponse {
         api_key: api_key.to_string(),
@@ -481,6 +532,24 @@ pub async fn list_actions(
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?;
     Ok(list.iter().map(metadata_to_item).collect())
+}
+
+/// If the account has a Stripe customer id, record one meter event (1¢). Called after each mutable action.
+pub async fn record_stripe_meter_event_if_any(
+    api_key: &str,
+    http_client: &reqwest::Client,
+) {
+    if !stripe::stripe_enabled() {
+        return;
+    }
+    let api_key_hash = accounts::api_key_hash(api_key).to_string();
+    let Ok(Some(stripe_customer_id)) = lookup_data::get_stripe_customer_id(&api_key_hash).await
+    else {
+        return;
+    };
+    if let Err(e) = stripe::record_meter_event(http_client, &stripe_customer_id).await {
+        tracing::warn!("Stripe meter event failed for {}: {:?}", stripe_customer_id, e);
+    }
 }
 
 pub async fn get_chain_info() -> Result<NodeChainConfigResponse, ApiStatus> {

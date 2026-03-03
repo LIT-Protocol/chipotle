@@ -46,6 +46,22 @@
               <label for="new-account-initial-balance">Initial balance (optional)</label>
               <input type="text" id="new-account-initial-balance" class="input" placeholder="0 ( or some balance to 10000000)">
             </div>
+            <div id="new-account-stripe-section" class="stripe-section" style="display: none;">
+              <p class="form-label">Payment (Stripe)</p>
+              <p class="form-hint stripe-notice">All credit card information is passed directly to Stripe. We do not save credit card information locally.</p>
+              <div class="form-group">
+                <label for="new-account-charge-amount">Initial charge (USD)</label>
+                <input type="number" id="new-account-charge-amount" class="input" min="5" max="1000" step="1" value="5" placeholder="5–1000">
+              </div>
+              <div class="form-group">
+                <label for="new-account-cardholder-name">Cardholder name</label>
+                <input type="text" id="new-account-cardholder-name" class="input" placeholder="Name on card">
+              </div>
+              <div class="form-group">
+                <label>Card number, expiry, CVC</label>
+                <div id="stripe-card-element" class="stripe-card-element"></div>
+              </div>
+            </div>
             <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account</button>
           </div>
         </div>
@@ -317,6 +333,7 @@
     </div>
   </div>
 
+  <script src="https://js.stripe.com/v3/"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

@@ -1166,3 +1166,30 @@ textarea.input.textarea-sm {
 [data-theme="dark"] .status-badge-success {
   color: #4ade80;
 }
+
+/* ----- Stripe (new account) ----- */
+.stripe-section {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.stripe-section .form-label {
+  margin-bottom: 0.25rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.stripe-notice {
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+.stripe-card-element {
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--input-bg, var(--card-bg));
+  min-height: 42px;
+}

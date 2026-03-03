@@ -3,6 +3,7 @@ pub mod accounts;
 pub mod actions;
 pub mod config;
 pub mod core;
+pub mod stripe;
 #[cfg(feature = "dstack")]
 pub mod dstack;
 pub mod error;

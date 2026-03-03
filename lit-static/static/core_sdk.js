@@ -291,14 +291,18 @@ export class LitNodeSimpleApiClient {
   /**
    * POST /core/v1/new_account
    * Creates a new account; server generates API key and wallet. Returns api_key and wallet_address.
+   * When Stripe is enabled, pass paymentMethodId, initialChargeCents (500–100000 = $5–$1000), and optional cardholderName.
    * @param {NewAccountOptions} options
    * @returns {Promise<NewAccountResponse>}
    */
-  async newAccount({ accountName, accountDescription, initialBalance }) {
+  async newAccount({ accountName, accountDescription, initialBalance, paymentMethodId, initialChargeCents, cardholderName }) {
     const body = {
       account_name: accountName,
       account_description: accountDescription ?? '',
       initial_balance: initialBalance ?? null,
+      payment_method_id: paymentMethodId ?? null,
+      initial_charge_cents: initialChargeCents ?? null,
+      cardholder_name: cardholderName ?? null,
     };
     const res = await fetch(`${this.baseUrl}/new_account`, {
       method: 'POST',
@@ -306,6 +310,16 @@ export class LitNodeSimpleApiClient {
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'new_account');
+  }
+
+  /**
+   * GET /core/v1/stripe_config
+   * Returns { publishable_key, enabled } for Stripe (dashboard uses this to show card form and init Stripe.js).
+   * @returns {Promise<{ publishable_key?: string, enabled: boolean }>}
+   */
+  async getStripeConfig() {
+    const res = await fetch(`${this.baseUrl}/stripe_config`);
+    return parseResponse(res, 'stripe_config');
   }
 
   /**

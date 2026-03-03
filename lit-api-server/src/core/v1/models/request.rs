@@ -9,6 +9,15 @@ pub struct NewAccountRequest {
     /// Optional initial balance for the account (AccountConfig.accountApiKey.balance). Decimal or hex string; default 0.
     #[serde(default)]
     pub initial_balance: Option<String>,
+    /// Stripe: payment method id from Stripe.js (e.g. pm_xxx). Required when initial_charge_cents is set.
+    #[serde(default)]
+    pub payment_method_id: Option<String>,
+    /// Stripe: initial charge in cents ($5 = 500, max $1000 = 100000). Min 500, max 100000.
+    #[serde(default)]
+    pub initial_charge_cents: Option<u64>,
+    /// Stripe: cardholder name for the Stripe customer (optional; account_name used if missing).
+    #[serde(default)]
+    pub cardholder_name: Option<String>,
 }
 
 /// Request for add_group. permitted_actions and pkps are keccak256 hashes as hex strings (with or without 0x). API key via header.

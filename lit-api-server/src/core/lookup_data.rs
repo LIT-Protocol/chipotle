@@ -50,6 +50,11 @@ pub async fn ensure_tables(pool: &SqlitePool) -> Result<()> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_api_keys_keyHash ON api_keys (keyHash)")
         .execute(pool)
         .await?;
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS stripe_customers (api_key_hash TEXT NOT NULL PRIMARY KEY, stripe_customer_id TEXT NOT NULL)",
+    )
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -202,4 +207,33 @@ pub async fn delete_api_key_by_key_hash(key_hash: &str) -> Result<()> {
         .await?;
     pool.close().await;
     Ok(())
+}
+
+// ---------- stripe_customers table ----------
+
+/// Inserts or replaces stripe_customer_id for the given api_key_hash (from new_account with Stripe).
+pub async fn add_stripe_customer(api_key_hash: &str, stripe_customer_id: &str) -> Result<()> {
+    let pool = open_pool(&db_path()?).await?;
+    sqlx::query(
+        "INSERT OR REPLACE INTO stripe_customers (api_key_hash, stripe_customer_id) VALUES (?1, ?2)",
+    )
+    .bind(api_key_hash)
+    .bind(stripe_customer_id)
+    .execute(&pool)
+    .await?;
+    pool.close().await;
+    Ok(())
+}
+
+/// Returns the Stripe customer id for the given api_key_hash, if any.
+pub async fn get_stripe_customer_id(api_key_hash: &str) -> Result<Option<String>> {
+    let pool = open_pool(&db_path()?).await?;
+    let row: Option<(String,)> = sqlx::query_as(
+        "SELECT stripe_customer_id FROM stripe_customers WHERE api_key_hash = ?1 LIMIT 1",
+    )
+    .bind(api_key_hash)
+    .fetch_optional(&pool)
+    .await?;
+    pool.close().await;
+    Ok(row.map(|(id,)| id))
 }
