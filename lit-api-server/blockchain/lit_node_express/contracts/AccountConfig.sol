@@ -6,8 +6,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {AccountConfigFacet} from "./AccountConfigFacet.sol";
-import {AccountConfigViews} from "./AccountConfigViews.sol";
+import {AccountConfigFacet} from "./AccountConfig/AccountConfigFacet.sol";
+import {AccountConfigViews} from "./AccountConfig/AccountConfigViews.sol";
 
 contract AccountConfig is AccountConfigFacet, AccountConfigViews {
     constructor() {
