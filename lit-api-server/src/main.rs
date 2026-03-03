@@ -3,7 +3,7 @@ pub mod accounts;
 pub mod actions;
 pub mod config;
 pub mod core;
-#[cfg(phala)]
+#[cfg(feature = "dstack")]
 pub mod dstack;
 pub mod error;
 
@@ -28,9 +28,9 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 async fn main() -> Result<(), rocket::Error> {
     setup_tracing().expect("Failed to setup tracing.");
 
-    if !cfg!(is_production) {
+    if !cfg!(feature = "production") {
         tracing::warn!(
-            "THIS IS INSECURE! Using non-production profile; lit-api-server was not built with `cargo build --profile production`"
+            "THIS IS INSECURE! lit-api-server was not built with `--features production`"
         );
     }
 
@@ -109,7 +109,7 @@ async fn main() -> Result<(), rocket::Error> {
         // .manage(action_store)
         .manage(GrpcClientPool::<tonic::transport::Channel>::new());
 
-    #[cfg(phala)]
+    #[cfg(feature = "dstack")]
     {
         // /attestation at root — per Phala Get Attestation
         r = r
