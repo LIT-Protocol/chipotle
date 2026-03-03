@@ -49,3 +49,52 @@ pub async fn aes_encrypt(symmetric_key: &[u8], plaintext: String) -> Result<Stri
     result.extend_from_slice(&encrypted);
     Ok(bytes_to_hex(result))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fixed 256-bit key for deterministic tests.
+    fn test_key() -> [u8; 32] {
+        [0x42u8; 32]
+    }
+
+    #[tokio::test]
+    async fn roundtrip_succeeds() {
+        let key = test_key();
+        let plaintext = "Hello, AES-GCM!".to_string();
+        let ciphertext = aes_encrypt(&key, plaintext.clone()).await.unwrap();
+        let decrypted = aes_decrypt(&key, &ciphertext).await.unwrap();
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[tokio::test]
+    async fn tamper_detection() {
+        let key = test_key();
+        let ciphertext_hex = aes_encrypt(&key, "secret".to_string()).await.unwrap();
+        // Flip a byte in the ciphertext portion (after the 12-byte nonce).
+        let mut bytes = hex_to_bytes(&ciphertext_hex).unwrap();
+        bytes[12] ^= 0xFF;
+        let tampered = bytes_to_hex(bytes);
+        let result = aes_decrypt(&key, &tampered).await;
+        assert!(result.is_err(), "tampered ciphertext should fail to decrypt");
+    }
+
+    #[tokio::test]
+    async fn short_input_rejected() {
+        let key = test_key();
+        // 27 bytes is less than the required minimum of 12 (nonce) + 16 (GCM tag) = 28 bytes.
+        let short_hex = "00".repeat(27);
+        let result = aes_decrypt(&key, &short_hex).await;
+        assert!(result.is_err(), "input shorter than nonce+tag should be rejected");
+    }
+
+    #[tokio::test]
+    async fn wrong_key_fails() {
+        let key1 = [0x11u8; 32];
+        let key2 = [0x22u8; 32];
+        let ciphertext = aes_encrypt(&key1, "secret".to_string()).await.unwrap();
+        let result = aes_decrypt(&key2, &ciphertext).await;
+        assert!(result.is_err(), "decryption with wrong key should fail");
+    }
+}
