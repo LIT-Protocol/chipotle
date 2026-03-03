@@ -85,8 +85,9 @@ contract AccountConfigFacet {
         revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
         LibAccountConfigStorage.Account storage account = s.accounts[
-            accountApiKeyHash
+            masterAccountApiKeyHash
         ];
         account.groupList.add(account.groupCount);
         LibAccountConfigStorage.Group storage group = account.groups[
@@ -117,8 +118,9 @@ contract AccountConfigFacet {
         revertIfGroupDoesNotExist(accountApiKeyHash, groupId);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
         LibAccountConfigStorage.Group storage group = s
-            .accounts[accountApiKeyHash]
+            .accounts[masterAccountApiKeyHash]
             .groups[groupId];
         group.metadata.name = name;
         group.metadata.description = description;
@@ -134,7 +136,8 @@ contract AccountConfigFacet {
         revertIfGroupDoesNotExist(accountApiKeyHash, groupId);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
-        s.accounts[accountApiKeyHash].groups[groupId].Wallets_hash.add(
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
+        s.accounts[masterAccountApiKeyHash].groups[groupId].Wallets_hash.add(
             walletAddressHash
         );
     }
@@ -149,8 +152,9 @@ contract AccountConfigFacet {
         revertIfGroupDoesNotExist(accountApiKeyHash, groupId);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
         LibAccountConfigStorage.Account storage account = s.accounts[
-            accountApiKeyHash
+            masterAccountApiKeyHash
         ];
         account.groups[groupId].permitted_actions_cid_hash.add(action);
         account.actionMetadata[action].id = action;
@@ -169,8 +173,9 @@ contract AccountConfigFacet {
         revertIfActionDoesNotExist(accountApiKeyHash, groupId, actionHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
         LibAccountConfigStorage.Account storage account = s.accounts[
-            accountApiKeyHash
+            masterAccountApiKeyHash
         ];
         account.actionMetadata[actionHash].name = name;
         account.actionMetadata[actionHash].description = description;
@@ -184,8 +189,9 @@ contract AccountConfigFacet {
         revertIfActionDoesNotExist(accountApiKeyHash, groupId, action);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
         LibAccountConfigStorage.Account storage account = s.accounts[
-            accountApiKeyHash
+            masterAccountApiKeyHash
         ];
         account.groups[groupId].permitted_actions_cid_hash.remove(action);
         if (account.actionCount > 0) {
@@ -205,7 +211,8 @@ contract AccountConfigFacet {
         );
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
-        s.accounts[accountApiKeyHash].groups[groupId].Wallets_hash.remove(
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
+        s.accounts[masterAccountApiKeyHash].groups[groupId].Wallets_hash.remove(
             walletAddressHash
         );
     }
@@ -219,13 +226,14 @@ contract AccountConfigFacet {
         revertIfUsageApiKeyDoesNotExist(accountApiKeyHash, usageApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
         s
-            .accounts[accountApiKeyHash]
+            .accounts[masterAccountApiKeyHash]
             .usageApiKeys[usageApiKeyHash]
             .metadata
             .name = name;
         s
-            .accounts[accountApiKeyHash]
+            .accounts[masterAccountApiKeyHash]
             .usageApiKeys[usageApiKeyHash]
             .metadata
             .description = description;
@@ -238,7 +246,8 @@ contract AccountConfigFacet {
         revertIfUsageApiKeyDoesNotExist(accountApiKeyHash, usageApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
-        s.accounts[accountApiKeyHash].usageApiKeysList.remove(usageApiKeyHash);
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
+        s.accounts[masterAccountApiKeyHash].usageApiKeysList.remove(usageApiKeyHash);
     }
 
     function registerWalletDerivation(
@@ -251,8 +260,9 @@ contract AccountConfigFacet {
         revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
         LibAccountConfigStorage.Account storage account = s.accounts[
-            accountApiKeyHash
+            masterAccountApiKeyHash
         ];
         account.wallet_derivation[walletAddressHash] = derivationPath;
         account
@@ -337,9 +347,12 @@ contract AccountConfigFacet {
         uint256 groupId
     ) private view {
         revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
+        LibAccountConfigStorage.AccountConfigStorage
+            storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
         LibAccountConfigStorage.revertIfGroupDoesNotExist(
-            LibAccountConfigStorage.getStorage(),
-            accountApiKeyHash,
+            s,
+            masterAccountApiKeyHash,
             groupId
         );
     }
@@ -351,9 +364,10 @@ contract AccountConfigFacet {
     ) private view {
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
         if (
             !s
-                .accounts[accountApiKeyHash]
+                .accounts[masterAccountApiKeyHash]
                 .groups[groupId]
                 .permitted_actions_cid_hash
                 .contains(action)
@@ -373,9 +387,10 @@ contract AccountConfigFacet {
     ) private view {
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
         if (
             !s
-                .accounts[accountApiKeyHash]
+                .accounts[masterAccountApiKeyHash]
                 .groups[groupId]
                 .Wallets_hash
                 .contains(Wallet)
@@ -394,9 +409,10 @@ contract AccountConfigFacet {
     ) private view {
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
         if (
             s
-                .accounts[accountApiKeyHash]
+                .accounts[masterAccountApiKeyHash]
                 .usageApiKeys[usageApiKeyHash]
                 .apiKeyHash != usageApiKeyHash
         ) {

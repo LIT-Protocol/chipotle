@@ -103,8 +103,9 @@ contract AccountConfigViews {
         );
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
         LibAccountConfigStorage.Account storage account = s.accounts[
-            accountApiKeyHash
+            masterAccountApiKeyHash
         ];
         uint256 totalLength = account.groupList.length();
         if (totalLength == 0) {
@@ -145,8 +146,9 @@ contract AccountConfigViews {
         );
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
         LibAccountConfigStorage.Account storage account = s.accounts[
-            accountApiKeyHash
+            masterAccountApiKeyHash
         ];
         if (pageSize > account.walletCount) {
             pageSize = account.walletCount;
@@ -179,15 +181,16 @@ contract AccountConfigViews {
             accountApiKeyHash,
             msg.sender
         );
-        LibAccountConfigStorage.revertIfGroupDoesNotExist(
-            LibAccountConfigStorage.getStorage(),
-            accountApiKeyHash,
-            groupId
-        );
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
+        LibAccountConfigStorage.revertIfGroupDoesNotExist(
+            s,
+            masterAccountApiKeyHash,
+            groupId
+        );
         LibAccountConfigStorage.Account storage account = s.accounts[
-            accountApiKeyHash
+            masterAccountApiKeyHash
         ];
         LibAccountConfigStorage.Group storage group = account.groups[groupId];
         if (pageSize > group.Wallets_hash.length()) {
@@ -222,15 +225,16 @@ contract AccountConfigViews {
             accountApiKeyHash,
             msg.sender
         );
-        LibAccountConfigStorage.revertIfGroupDoesNotExist(
-            LibAccountConfigStorage.getStorage(),
-            accountApiKeyHash,
-            groupId
-        );
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
+        LibAccountConfigStorage.revertIfGroupDoesNotExist(
+            s,
+            masterAccountApiKeyHash,
+            groupId
+        );
         LibAccountConfigStorage.Account storage account = s.accounts[
-            accountApiKeyHash
+            masterAccountApiKeyHash
         ];
         LibAccountConfigStorage.Group storage group = account.groups[groupId];
         uint256 totalLength = group.permitted_actions_cid_hash.length();
