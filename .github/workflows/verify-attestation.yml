@@ -46,39 +46,41 @@ jobs:
           SHA=$(git ls-remote https://github.com/Dstack-TEE/dstack.git HEAD | head -1 | cut -f1 | tr -d '[:space:]')
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
 
-      - name: Restore dstack cache
-        id: dstack-cache
+      # Shared with phala-simulator.yml — same key and path so either
+      # workflow can warm the cache for the other.
+      - name: Restore verifier cache
+        id: verifier-cache
         uses: actions/cache@v4
         with:
-          path: dstack-cache
+          path: ${{ github.workspace }}/dstack-cache/verifier
           key: dstack-verifier-${{ steps.dstack-sha.outputs.sha }}-${{ runner.os }}
 
       - name: Fix dstack cache permissions
-        if: steps.dstack-cache.outputs.cache-hit == 'true'
-        run: chmod -R u+rwX dstack-cache 2>/dev/null || true
+        if: steps.verifier-cache.outputs.cache-hit == 'true'
+        run: chmod -R u+rwX "${{ github.workspace }}/dstack-cache" 2>/dev/null || true
 
       - name: Clone dstack repository
-        if: steps.dstack-cache.outputs.cache-hit != 'true'
+        if: steps.verifier-cache.outputs.cache-hit != 'true'
         run: |
           DSTACK_BUILD=$(mktemp -d)
           echo "DSTACK_BUILD=$DSTACK_BUILD" >> "$GITHUB_ENV"
           git clone --depth 1 https://github.com/Dstack-TEE/dstack.git "$DSTACK_BUILD"
 
       - name: Install Rust (stable, for dstack)
-        if: steps.dstack-cache.outputs.cache-hit != 'true'
+        if: steps.verifier-cache.outputs.cache-hit != 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build dstack-verifier
-        if: steps.dstack-cache.outputs.cache-hit != 'true'
+        if: steps.verifier-cache.outputs.cache-hit != 'true'
         run: cargo build --manifest-path="$DSTACK_BUILD/verifier/Cargo.toml" --bin dstack-verifier
 
-      - name: Populate dstack cache
-        if: steps.dstack-cache.outputs.cache-hit != 'true'
+      - name: Populate verifier cache
+        if: steps.verifier-cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p dstack-cache/verifier
+          mkdir -p "${{ github.workspace }}/dstack-cache/verifier"
           cp "$DSTACK_BUILD/target/debug/dstack-verifier" \
              "$DSTACK_BUILD/verifier/dstack-verifier.toml" \
-             dstack-cache/verifier/
+             "${{ github.workspace }}/dstack-cache/verifier/"
 
       - name: Remove dstack build directory
         if: always() && env.DSTACK_BUILD != ''
@@ -89,8 +91,9 @@ jobs:
         run: |
           set -eu
           ATTESTATION_URL="${{ inputs.attestation_url }}"
-          VERIFIER_BIN="$(pwd)/dstack-cache/verifier/dstack-verifier"
-          VERIFIER_CFG="$(pwd)/dstack-cache/verifier/dstack-verifier.toml"
+          CACHE_DIR="${{ github.workspace }}/dstack-cache"
+          VERIFIER_BIN="$CACHE_DIR/verifier/dstack-verifier"
+          VERIFIER_CFG="$CACHE_DIR/verifier/dstack-verifier.toml"
           TMP_DIR=$(mktemp -d /tmp/verify-remote-XXXXXX)
 
           echo "Fetching attestation from $ATTESTATION_URL/attestation..."
@@ -108,9 +111,9 @@ jobs:
 
           # Use a writable image cache dir (avoids /tmp permission issues on self-hosted).
           VERIFIER_CFG_OVERRIDE="$TMP_DIR/verifier.toml"
-          CACHE_DIR="$(pwd)/dstack-cache/verifier-image-cache"
-          mkdir -p "$CACHE_DIR"
-          sed "s|image_cache_dir = .*|image_cache_dir = \"$CACHE_DIR\"|" "$VERIFIER_CFG" > "$VERIFIER_CFG_OVERRIDE"
+          IMAGE_CACHE="$CACHE_DIR/verifier-image-cache"
+          mkdir -p "$IMAGE_CACHE"
+          sed "s|image_cache_dir = .*|image_cache_dir = \"$IMAGE_CACHE\"|" "$VERIFIER_CFG" > "$VERIFIER_CFG_OVERRIDE"
 
           echo "Running dstack-verifier (oneshot)..."
           "$VERIFIER_BIN" -c "$VERIFIER_CFG_OVERRIDE" --verify "$VERIFY_FILE" || true
