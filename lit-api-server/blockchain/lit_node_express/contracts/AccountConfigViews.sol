@@ -165,6 +165,9 @@ contract AccountConfigViews {
             pageNumber = 0;
         }
         uint256 startIndex = pageNumber * pageSize;
+        if (startIndex >= account.walletCount) {
+            return new LibAccountConfigStorage.Metadata[](0);
+        }
         uint256 endIndex = startIndex + pageSize;
         if (endIndex > account.walletCount) endIndex = account.walletCount;
         uint256 pageLength = endIndex - startIndex;
@@ -207,6 +210,9 @@ contract AccountConfigViews {
             pageNumber = 0;
         }
         uint256 startIndex = pageNumber * pageSize;
+        if (startIndex >= group.Wallets_hash.length()) {
+            return new LibAccountConfigStorage.Metadata[](0);
+        }
         uint256 endIndex = startIndex + pageSize;
         if (endIndex > group.Wallets_hash.length())
             endIndex = group.Wallets_hash.length();
