@@ -103,8 +103,14 @@ contract AccountConfigViews {
         );
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
-        LibAccountConfigStorage.Account storage account = s.accounts[
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[
             accountApiKeyHash
+        ];
+        if (masterAccountApiKeyHash == 0) {
+            masterAccountApiKeyHash = accountApiKeyHash;
+        }
+        LibAccountConfigStorage.Account storage account = s.accounts[
+            masterAccountApiKeyHash
         ];
         uint256 totalLength = account.groupList.length();
         if (totalLength == 0) {
