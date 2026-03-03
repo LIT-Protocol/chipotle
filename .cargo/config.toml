@@ -1,2 +1,0 @@
-# Production build: phala is auto-enabled via is_production cfg
-# Use: cargo build --profile production, cargo run --profile production

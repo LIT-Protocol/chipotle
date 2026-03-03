@@ -7,10 +7,10 @@
 //! layout). Real TDX hardware returns a proper DCAP quote that parses with dcap-qvl
 //! and tdx-quote.
 //!
-//! Because of this, the tests and quote parsing logic **switch by profile**:
-//! - **Production** (`--profile production`): only accept real TDX quotes (base64,
+//! Because of this, the tests and quote parsing logic **switch by features**:
+//! - **Production** (`--features production`): only accept real TDX quotes (base64,
 //!   parseable by dcap-qvl/tdx-quote, zero report_data when None).
-//! - **Dev/release**: accept simulator-style quotes (hex decode, pattern-scan fallback,
+//! - **Dev** (`--features phala`): accept simulator-style quotes (hex decode, pattern-scan fallback,
 //!   relaxed report_data checks).
 
 use serde::{Deserialize, Serialize};
@@ -53,16 +53,16 @@ pub struct InfoResponse {
 
 /// Returns the resolved socket path.
 ///
-/// - **Production profile** (`cargo build --profile production`): always
+/// - **Production** (`--features production`): always
 ///   `/var/run/dstack.sock` (env override disabled).
-/// - **Dev/release profiles**: uses `DSTACK_SOCKET` env var if set, otherwise
+/// - **Dev** (`--features phala`): uses `DSTACK_SOCKET` env var if set, otherwise
 ///   defaults to `/var/run/dstack.sock`.
 fn resolve_socket_path() -> String {
-    #[cfg(is_production)]
+    #[cfg(feature = "production")]
     {
         DSTACK_SOCKET_DEFAULT.to_string()
     }
-    #[cfg(not(is_production))]
+    #[cfg(not(feature = "production"))]
     {
         std::env::var("DSTACK_SOCKET").unwrap_or_else(|_| DSTACK_SOCKET_DEFAULT.to_string())
     }
@@ -208,11 +208,11 @@ pub async fn get_info() -> Result<InfoResponse, String> {
 /// - **Production**: base64 only. Real TDX/gateway uses base64 for binary-in-text transport
 ///   (see [Intel TDX DCAP Quoting Library API](https://download.01.org/intel-sgx/latest/dcap-latest/linux/docs/Intel_TDX_DCAP_Quoting_Library_API.pdf) Appendix 3; quote is raw binary; base64 is standard for JSON/HTTP).
 /// - **Dev/release**: try hex first (simulator returns hex), then base64.
-/// TODO: VERIFY THIS IS CORRECT and production doesnt also return hex
+///   TODO: VERIFY THIS IS CORRECT and production doesnt also return hex
 #[cfg(test)]
 fn decode_quote(quote_str: &str) -> Vec<u8> {
     let s = quote_str.trim();
-    #[cfg(not(is_production))]
+    #[cfg(not(feature = "production"))]
     {
         let hex_str = s.strip_prefix("0x").unwrap_or(s);
         if hex_str.len() > 200 && hex_str.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -229,7 +229,7 @@ fn decode_quote(quote_str: &str) -> Vec<u8> {
 /// - **Production**: only tdx-quote and dcap-qvl (real TDX quotes parse correctly).
 /// - **Dev/release**: also scan for 64-byte window matching expected pattern (simulator fallback).
 #[cfg(test)]
-fn extract_report_data(quote_bytes: &[u8], expected_prefix: Option<&[u8]>) -> Option<[u8; 64]> {
+fn extract_report_data(quote_bytes: &[u8], _expected_prefix: Option<&[u8]>) -> Option<[u8; 64]> {
     match tdx_quote::Quote::from_bytes(quote_bytes) {
         Ok(parsed) => return Some(parsed.report_input_data()),
         Err(e) => eprintln!("warn: tdx_quote::Quote::from_bytes failed: {e}"),
@@ -250,7 +250,7 @@ fn extract_report_data(quote_bytes: &[u8], expected_prefix: Option<&[u8]>) -> Op
         hex::encode(quote_bytes)
     );
 
-    #[cfg(not(is_production))]
+    #[cfg(not(feature = "production"))]
     {
         for i in 0..quote_bytes.len().saturating_sub(64) {
             let window = &quote_bytes[i..i + 64];
@@ -295,7 +295,7 @@ mod tests {
     }
 
     /// Fails if the dstack socket is unavailable (requires TEE or simulator).
-    #[cfg(phala)]
+    #[cfg(feature = "phala")]
     #[tokio::test]
     async fn test_get_quote_succeeds_when_socket_available() {
         let path = resolve_socket_path();
@@ -308,7 +308,7 @@ mod tests {
     }
 
     /// Fails if the socket is available but the returned quote is invalid.
-    #[cfg(phala)]
+    #[cfg(feature = "phala")]
     #[tokio::test]
     async fn fails_when_quote_invalid() {
         let path = resolve_socket_path();
@@ -328,7 +328,7 @@ mod tests {
             "quote must be substantial (>100 bytes)"
         );
 
-        #[cfg(is_production)]
+        #[cfg(feature = "production")]
         {
             let report_data_none = extract_report_data(&quote_bytes, None).expect(
                 "quote from get_quote(None) must parse as valid TDX quote (tdx-quote or dcap-qvl)",
