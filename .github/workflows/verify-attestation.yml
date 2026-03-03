@@ -51,7 +51,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: dstack-cache
-          key: dstack-${{ steps.dstack-sha.outputs.sha }}-${{ runner.os }}
+          key: dstack-verifier-${{ steps.dstack-sha.outputs.sha }}-${{ runner.os }}
 
       - name: Fix dstack cache permissions
         if: steps.dstack-cache.outputs.cache-hit == 'true'
@@ -68,10 +68,6 @@ jobs:
         if: steps.dstack-cache.outputs.cache-hit != 'true'
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build dstack simulator (verifier dependency)
-        if: steps.dstack-cache.outputs.cache-hit != 'true'
-        run: cd "$DSTACK_BUILD/sdk/simulator" && bash build.sh
-
       - name: Build dstack-verifier
         if: steps.dstack-cache.outputs.cache-hit != 'true'
         run: cargo build --manifest-path="$DSTACK_BUILD/verifier/Cargo.toml" --bin dstack-verifier
@@ -79,14 +75,7 @@ jobs:
       - name: Populate dstack cache
         if: steps.dstack-cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p dstack-cache/simulator dstack-cache/verifier
-          cp "$DSTACK_BUILD/sdk/simulator/dstack-simulator" \
-             "$DSTACK_BUILD/sdk/simulator/appkeys.json" \
-             "$DSTACK_BUILD/sdk/simulator/app-compose.json" \
-             "$DSTACK_BUILD/sdk/simulator/sys-config.json" \
-             "$DSTACK_BUILD/sdk/simulator/attestation.bin" \
-             "$DSTACK_BUILD/sdk/simulator/dstack.toml" \
-             dstack-cache/simulator/
+          mkdir -p dstack-cache/verifier
           cp "$DSTACK_BUILD/target/debug/dstack-verifier" \
              "$DSTACK_BUILD/verifier/dstack-verifier.toml" \
              dstack-cache/verifier/
