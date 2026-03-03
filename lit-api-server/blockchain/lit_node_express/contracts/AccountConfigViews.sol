@@ -232,14 +232,22 @@ contract AccountConfigViews {
             accountApiKeyHash
         ];
         LibAccountConfigStorage.Group storage group = account.groups[groupId];
-        if (pageSize > group.permitted_actions_cid_hash.length()) {
-            pageSize = group.permitted_actions_cid_hash.length();
+        uint256 totalLength = group.permitted_actions_cid_hash.length();
+        if (totalLength == 0 || pageSize == 0) {
+            return new LibAccountConfigStorage.Metadata[](0);
+        }
+        if (pageSize > totalLength) {
+            pageSize = totalLength;
             pageNumber = 0;
         }
         uint256 startIndex = pageNumber * pageSize;
+        if (startIndex >= totalLength) {
+            return new LibAccountConfigStorage.Metadata[](0);
+        }
         uint256 endIndex = startIndex + pageSize;
-        if (endIndex > group.permitted_actions_cid_hash.length())
-            endIndex = group.permitted_actions_cid_hash.length();
+        if (endIndex > totalLength) {
+            endIndex = totalLength;
+        }
         uint256 pageLength = endIndex - startIndex;
         LibAccountConfigStorage.Metadata[]
             memory pageMetadata = new LibAccountConfigStorage.Metadata[](
