@@ -88,13 +88,14 @@ function callContract({ chain, txn }) {
  * @name Lit.Actions.uint8arrayToString
  * @function uint8arrayToString
  * @param {Uint8Array} array The Uint8Array to convert
- * @param {string} [encoding='utf8'] The encoding to use (utf8 supported)
+ * @param {string} [encoding='utf8'] The encoding to use (only 'utf8' is supported)
  * @returns {string} The string representation of the Uint8Array
+ * @throws {Error} If a non-utf8 encoding is specified
  */
 function uint8arrayToString(array, encoding) {
   const enc = encoding || 'utf8';
-  if (enc === 'utf8') return new TextDecoder('utf-8').decode(array);
-  return new TextDecoder(enc).decode(array);
+  if (enc !== 'utf8') throw new Error(`Unsupported encoding: '${enc}'. Only 'utf8' is supported.`);
+  return new TextDecoder('utf-8').decode(array);
 }
 
 /**
@@ -102,12 +103,13 @@ function uint8arrayToString(array, encoding) {
  * @name Lit.Actions.uint8arrayFromString
  * @function uint8arrayFromString
  * @param {string} string The string to convert
- * @param {string} [encoding='utf8'] The encoding to use (utf8 supported)
+ * @param {string} [encoding='utf8'] The encoding to use (only 'utf8' is supported)
  * @returns {Uint8Array} The Uint8Array representation of the string
+ * @throws {Error} If a non-utf8 encoding is specified
  */
 function uint8arrayFromString(string, encoding) {
   const enc = encoding || 'utf8';
-  if (enc === 'utf8') return new Uint8Array(new TextEncoder().encode(string));
+  if (enc !== 'utf8') throw new Error(`Unsupported encoding: '${enc}'. Only 'utf8' is supported.`);
   return new Uint8Array(new TextEncoder().encode(string));
 }
 
