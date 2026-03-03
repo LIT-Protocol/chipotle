@@ -317,6 +317,22 @@
     </div>
   </div>
 
+  <!-- Action progress (non-dismissible) -->
+  <div id="action-overlay" class="modal-overlay" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="action-title" tabindex="-1">
+      <div class="modal-header">
+        <h3 class="modal-title" id="action-title">Working…</h3>
+      </div>
+      <div class="modal-body">
+        <p id="action-desc" class="modal-action-desc"></p>
+      </div>
+      <div class="modal-footer modal-footer-progress">
+        <span class="action-spinner" aria-hidden="true"></span>
+        <span class="modal-progress-text">This may take a moment…</span>
+      </div>
+    </div>
+  </div>
+
   <script type="module" src="app.js"></script>
 </body>
 </html>

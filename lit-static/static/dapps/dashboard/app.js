@@ -170,6 +170,10 @@ function initLogin() {
     const btn = document.getElementById('btn-create-account');
     btn.disabled = true;
     try {
+      showActionProgress(
+        'Creating account',
+        'Creating a new Lit Express account and returning an API key.'
+      );
       const client = await getClient();
       const res = await client.newAccount({ accountName: name, accountDescription: desc, initialBalance });
       setApiKey(res.api_key);
@@ -179,6 +183,7 @@ function initLogin() {
     } catch (e) {
       showStatus('login-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
     } finally {
+      closeActionProgress();
       btn.disabled = false;
     }
   });
@@ -278,6 +283,34 @@ function initConfirmClose() {
   document.getElementById('confirm-overlay')?.addEventListener('click', (e) => {
     if (e.target.id === 'confirm-overlay') closeConfirm(false);
   });
+}
+
+// ----- Action progress modal (non-dismissible) -----
+let _actionProgressPreviousFocus = null;
+
+function showActionProgress(title, description) {
+  const overlay = document.getElementById('action-overlay');
+  const titleEl = document.getElementById('action-title');
+  const descEl = document.getElementById('action-desc');
+  if (!overlay || !titleEl || !descEl) return;
+  titleEl.textContent = title || 'Working…';
+  descEl.textContent = description || '';
+  _actionProgressPreviousFocus = document.activeElement;
+  overlay.classList.add('is-open');
+  overlay.setAttribute('aria-hidden', 'false');
+  const dialog = overlay.querySelector('[role="dialog"]');
+  if (dialog) dialog.focus();
+}
+
+function closeActionProgress() {
+  const overlay = document.getElementById('action-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('is-open');
+  overlay.setAttribute('aria-hidden', 'true');
+  if (_actionProgressPreviousFocus && typeof _actionProgressPreviousFocus.focus === 'function') {
+    try { _actionProgressPreviousFocus.focus(); } catch (_) { /* element may have been removed */ }
+  }
+  _actionProgressPreviousFocus = null;
 }
 
 // ----- Shared list render (overview lists stay as list) -----
@@ -630,6 +663,7 @@ function openAddGroupModal() {
     closeModal();
     hideStatus('groups-status');
     try {
+      showActionProgress('Creating group', `Creating group “${name}”.`);
       const client = await getClient();
       await client.addGroup({
         apiKey,
@@ -644,6 +678,8 @@ function openAddGroupModal() {
       showStatus('groups-status', 'Group created.', 'success');
     } catch (e) {
       showStatus('groups-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+    } finally {
+      closeActionProgress();
     }
   });
 }
@@ -674,12 +710,15 @@ function openEditGroupModal(item) {
     closeModal();
     hideStatus('groups-status');
     try {
+      showActionProgress('Updating group', `Updating group “${name}”.`);
       const client = await getClient();
       await client.updateGroup({ apiKey, groupId: id, name, description: desc, allWalletsPermitted: allWallets, allActionsPermitted: allActions });
       await loadGroups();
       showStatus('groups-status', 'Group updated.', 'success');
     } catch (e) {
       showStatus('groups-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+    } finally {
+      closeActionProgress();
     }
   });
 }
@@ -711,6 +750,7 @@ function openAddActionModal() {
     closeModal();
     hideStatus('actions-status');
     try {
+      showActionProgress('Adding action', `Adding action CID “${cid}” to group ${gid}.`);
       const client = await getClient();
       await client.addActionToGroup({ apiKey, groupId: gid, actionIpfsCid: cid, name, description: desc });
       if (groupIdEl) groupIdEl.value = gid;
@@ -718,6 +758,8 @@ function openAddActionModal() {
       showStatus('actions-status', 'Action added.', 'success');
     } catch (e) {
       showStatus('actions-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+    } finally {
+      closeActionProgress();
     }
   });
 }
@@ -745,12 +787,15 @@ function openEditActionModal(item, groupId) {
     closeModal();
     hideStatus('actions-status');
     try {
+      showActionProgress('Updating action', `Updating action metadata for CID “${cid}”.`);
       const client = await getClient();
       await client.updateActionMetadata({ apiKey, groupId, actionIpfsCid: cid, name, description: desc });
       await loadActions(groupId);
       showStatus('actions-status', 'Action updated.', 'success');
     } catch (e) {
       showStatus('actions-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+    } finally {
+      closeActionProgress();
     }
   });
 }
@@ -765,12 +810,15 @@ async function confirmAndRemoveAction(item, groupId) {
   if (!apiKey) return;
   hideStatus('actions-status');
   try {
+    showActionProgress('Removing action', `Removing action CID “${cid}” from group ${groupId}.`);
     const client = await getClient();
     await client.removeActionFromGroup({ apiKey, groupId, actionIpfsCid: cid });
     await loadActions(groupId);
     showStatus('actions-status', 'Action removed.', 'success');
   } catch (e) {
     showStatus('actions-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+  } finally {
+    closeActionProgress();
   }
 }
 
@@ -795,6 +843,7 @@ function openAddUsageKeyModal() {
     closeModal();
     hideStatus('overview-status-usage-keys');
     try {
+      showActionProgress('Adding usage API key', 'Creating a new usage API key for this account.');
       const client = await getClient();
       const expiration = '9999999999';
       const balance = '1000000000000000000';
@@ -809,6 +858,8 @@ function openAddUsageKeyModal() {
       showStatus('overview-status-usage-keys', 'Usage API key added. Copy and store your key now (shown once): ' + usageKey, 'success');
     } catch (e) {
       showStatus('overview-status-usage-keys', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+    } finally {
+      closeActionProgress();
     }
   });
 }
@@ -822,6 +873,7 @@ async function confirmAndRemoveUsageKey(item) {
   if (!apiKey) return;
   hideStatus('overview-status-usage-keys');
   try {
+    showActionProgress('Removing usage API key', `Removing usage API key “${masked}”.`);
     const client = await getClient();
     await client.removeUsageApiKey({ apiKey, usageApiKey: item.usage_api_key });
     const store = getUsageKeysStore();
@@ -832,6 +884,8 @@ async function confirmAndRemoveUsageKey(item) {
     showStatus('overview-status-usage-keys', 'Usage API key removed.', 'success');
   } catch (e) {
     showStatus('overview-status-usage-keys', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+  } finally {
+    closeActionProgress();
   }
 }
 
@@ -850,12 +904,15 @@ function openAddWalletModal() {
     closeModal();
     hideStatus('wallets-status');
     try {
+      showActionProgress('Creating wallet', 'Creating and registering a new wallet for this account.');
       const client = await getClient();
       const res = await client.createWallet(apiKey);
       await loadWallets();
       showStatus('wallets-status', 'Wallet created: ' + (res.wallet_address || ''), 'success');
     } catch (e) {
       showStatus('wallets-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+    } finally {
+      closeActionProgress();
     }
   });
 }
