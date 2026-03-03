@@ -2,7 +2,7 @@
 //!
 //! Usage: deploy <network> <abis_folder> [secret]
 //!
-//! network: 0 = Anvil, 1 = Yellowstone, 2 = LitMainnet
+//! network: 0 = Anvil, 1 = Yellowstone, 2 = Base Sepolia, 3 = Base
 //! secret: optional; if blank or omitted, uses the default Anvil dev secret.
 
 use ethers::contract::ContractFactory;
@@ -20,6 +20,8 @@ const YELLOWSTONE_RPC: &str = "https://yellowstone-rpc.litprotocol.com";
 const YELLOWSTONE_CHAIN_ID: u64 = 175188;
 const BASE_SEPOLIA_RPC: &str = "https://sepolia.base.org";
 const BASE_SEPOLIA_CHAIN_ID: u64 = 84532;
+const BASE_RPC: &str = "https://base-mainnet.g.alchemy.com/v2/PjXc5vEM-AbNrsGKNyK99";
+const BASE_CHAIN_ID: u64 = 8453;
 /// Default Anvil account #0 private key (well-known for local dev)
 const DEFAULT_SECRET: &str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
@@ -31,7 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "Usage: {} <network> <abis_folder> [secret]",
             args.first().unwrap_or(&"deploy".into())
         );
-        eprintln!("  network   - 0 = Anvil, 1 = Yellowstone, 2 = Base Sepolia");
+        eprintln!("  network   - 0 = Anvil, 1 = Yellowstone, 2 = Base Sepolia, 3 = Base");
         eprintln!(
             "  abis_folder - folder containing contract artifact JSON files (abi + bytecode)"
         );
@@ -43,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let network: u16 = match args[1].parse() {
         Ok(n) => n,
         Err(_) => {
-            eprintln!("network must be 0, 1, or 2 (got: {:?})", args[1]);
+            eprintln!("network must be 0, 1, 2, or 3 (got: {:?})", args[1]);
             std::process::exit(1);
         }
     };
@@ -51,8 +53,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         0 => (ANVIL_RPC, ANVIL_CHAIN_ID),
         1 => (YELLOWSTONE_RPC, YELLOWSTONE_CHAIN_ID),
         2 => (BASE_SEPOLIA_RPC, BASE_SEPOLIA_CHAIN_ID),
+        3 => (BASE_RPC, BASE_CHAIN_ID),
         _ => {
-            eprintln!("network must be 0 (Anvil), 1 (Yellowstone), or 2 (Base Sepolia)");
+            eprintln!("network must be 0 (Anvil), 1 (Yellowstone), 2 (Base Sepolia), or 3 (Base)");
             std::process::exit(1);
         }
     };

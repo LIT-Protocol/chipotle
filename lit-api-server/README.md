@@ -91,7 +91,7 @@ cargo run --release --bin contract_generator -- <input_folder> <output_folder>
 cargo run --release --bin contract_deployer -- <network> <abis_folder> [secret]
 ```
 
-- **`<network>`** — `0` = Anvil, `1` = Yellowstone, `2` = Base Sepolia.
+- **`<network>`** — `0` = Anvil, `1` = Yellowstone, `2` = Base Sepolia, `3` = Base.
 - **`<abis_folder>`** — Folder of contract **artifact** JSONs (`abi` + `bytecode` or `evm.bytecode.object`).
 - **`[secret]`** — Optional. Deployer private key (hex). If omitted or blank, uses the default Anvil dev secret.
 
@@ -113,7 +113,7 @@ cargo run --release --bin contract_deployer -- 0 ./artifacts 0xYourPrivateKeyHex
 
 - Uses the given secret or the default Anvil account #0 key; suitable for local/testnet.
 - Skips artifacts with no bytecode (e.g. interfaces).
-- RPC URLs: Anvil `http://127.0.0.1:8545`, Yellowstone `https://yellowstone-rpc.litprotocol.com`, Base Sepolia `https://sepolia.base.org`.
+- RPC URLs: Anvil `http://127.0.0.1:8545`, Yellowstone `https://yellowstone-rpc.litprotocol.com`, Base Sepolia `https://sepolia.base.org`, Base `https://mainnet.base.org`.
 
 ---
 

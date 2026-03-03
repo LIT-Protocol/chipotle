@@ -1,6 +1,6 @@
 # rust_generator_and_deployer
 
-Rust CLI tools for the Lit blockchain stack: generate Rust contract bindings from ABI files, and deploy contract artifacts to a chain (Anvil, Yellowstone, or Lit Mainnet).
+Rust CLI tools for the Lit blockchain stack: generate Rust contract bindings from ABI files, and deploy contract artifacts to a chain (Anvil, Yellowstone, Base Sepolia, or Base).
 
 ## Build
 
@@ -71,7 +71,7 @@ cargo run --release --bin contract_deployer -- <network> <abis_folder>
 
 | Argument | Description |
 |----------|-------------|
-| `network` | `0` = Anvil (local), `1` = Yellowstone, `2` = Lit Mainnet. |
+| `network` | `0` = Anvil (local), `1` = Yellowstone, `2` = Base Sepolia, `3` = Base. |
 | `abis_folder` | Folder containing contract artifact JSON files. Subdirectories are scanned. Each artifact must have `abi` and either top-level `bytecode` or `evm.bytecode.object`. |
 
 ### Networks
@@ -80,7 +80,8 @@ cargo run --release --bin contract_deployer -- <network> <abis_folder>
 |------|---------|-----|
 | `0` | Anvil | `http://127.0.0.1:8545` (chain id 31337) |
 | `1` | Yellowstone | `https://yellowstone-rpc.litprotocol.com` (chain id 175188) |
-| `2` | Lit Mainnet | Same as Yellowstone |
+| `2` | Base Sepolia | `https://sepolia.base.org` (chain id 84532) |
+| `3` | Base | `https://mainnet.base.org` (chain id 8453) |
 
 ### Examples
 
