@@ -238,7 +238,12 @@ contract AccountConfigFacet {
         revertIfUsageApiKeyDoesNotExist(accountApiKeyHash, usageApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
-        s.accounts[accountApiKeyHash].usageApiKeysList.remove(usageApiKeyHash);
+        LibAccountConfigStorage.Account storage account = s.accounts[
+            accountApiKeyHash
+        ];
+        account.usageApiKeysList.remove(usageApiKeyHash);
+        delete account.usageApiKeys[usageApiKeyHash];
+        delete s.allApiKeyHashes[usageApiKeyHash];
     }
 
     function registerWalletDerivation(
