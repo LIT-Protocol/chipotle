@@ -66,8 +66,9 @@ contract AccountConfigViews {
         );
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
         LibAccountConfigStorage.Account storage account = s.accounts[
-            accountApiKeyHash
+            masterAccountApiKeyHash
         ];
         uint256 pageLength = account.usageApiKeysList.length();
         if (pageSize > pageLength) {
