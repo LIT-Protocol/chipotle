@@ -57,14 +57,20 @@ contract AccountConfigFacet {
         revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[
+            accountApiKeyHash
+        ];
         LibAccountConfigStorage.UsageApiKey storage apiKeyStorage = s
-            .accounts[accountApiKeyHash]
+            .accounts[masterAccountApiKeyHash]
             .usageApiKeys[usageApiKeyHash];
         apiKeyStorage.apiKeyHash = usageApiKeyHash;
         apiKeyStorage.expiration = expiration;
         apiKeyStorage.balance = balance;
-        s.accounts[accountApiKeyHash].usageApiKeysList.add(usageApiKeyHash);
-        s.allApiKeyHashes[usageApiKeyHash] = accountApiKeyHash;
+        s
+            .accounts[masterAccountApiKeyHash]
+            .usageApiKeysList
+            .add(usageApiKeyHash);
+        s.allApiKeyHashes[usageApiKeyHash] = masterAccountApiKeyHash;
     }
 
     function addGroup(
