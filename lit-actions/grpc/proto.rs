@@ -128,6 +128,3 @@ decl_op!(SetResponse);
 decl_op!(Sign);
 decl_op!(AesEncrypt);
 decl_op!(UpdateResourceUsage);
-
-
-

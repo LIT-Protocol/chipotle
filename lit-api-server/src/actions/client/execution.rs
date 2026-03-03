@@ -124,7 +124,7 @@ impl Client {
     }
 
     #[instrument(level = "debug", skip(self), err)]
-    async fn execute_js_inner(
+    pub(crate) async fn execute_js_inner(
         &mut self,
         code: String,
         globals: Option<serde_json::Value>,
