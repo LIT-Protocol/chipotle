@@ -36,7 +36,6 @@ fn resolve_socket_path() -> String {
 }
 
 /// Get the socket path from the environment or default to `/var/run/dstack.sock`.
-
 fn get_socket_path() -> Result<String, String> {
     let socket_path = resolve_socket_path();
     if !Path::new(&socket_path).exists() {
