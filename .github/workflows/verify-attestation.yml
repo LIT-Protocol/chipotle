@@ -1,10 +1,9 @@
 # Verify attestation from a deployed Phala CVM
 #
-# Fetches /attestation from the live API, runs dstack-verifier (via its
-# Docker image which bundles dstack-acpi-tables and all dependencies),
-# and asserts is_valid=true.  Unlike the simulator CI job (which can only
-# check quote_verified), a real TDX deployment must produce a fully valid
-# attestation.
+# Fetches /attestation from the live API, runs the official
+# dstacktee/dstack-verifier Docker image, and asserts is_valid=true.
+# Unlike the simulator CI job (which can only check quote_verified),
+# a real TDX deployment must produce a fully valid attestation.
 #
 # Called from Deploy to Phala CVM after the API is available, or manually
 # via workflow_dispatch.
@@ -40,47 +39,11 @@ jobs:
     name: dstack-verifier (remote)
     runs-on: ${{ fromJson(inputs.runner) }}
     steps:
-      # ── 1. Build the dstack-verifier Docker image (cached) ─────────────
-      # The image bundles the verifier binary, dstack-acpi-tables (custom
-      # QEMU build for RTMR0 measurement), shared libraries, and BIOS files
-      # — everything needed for full is_valid verification.
-      - name: Get dstack HEAD SHA
-        id: dstack-sha
-        run: |
-          SHA=$(git ls-remote https://github.com/Dstack-TEE/dstack.git HEAD | head -1 | cut -f1 | tr -d '[:space:]')
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@v4
 
-      - name: Restore verifier image cache
-        id: image-cache
-        uses: actions/cache@v4
-        with:
-          path: dstack-verifier-image.tar
-          key: dstack-verifier-image-${{ steps.dstack-sha.outputs.sha }}-${{ runner.os }}
+      - name: Pull dstack-verifier image
+        run: docker pull --platform linux/amd64 dstacktee/dstack-verifier:latest
 
-      - name: Load cached Docker image
-        if: steps.image-cache.outputs.cache-hit == 'true'
-        run: docker load < dstack-verifier-image.tar
-
-      - name: Clone dstack repository
-        if: steps.image-cache.outputs.cache-hit != 'true'
-        run: |
-          DSTACK_BUILD=$(mktemp -d)
-          echo "DSTACK_BUILD=$DSTACK_BUILD" >> "$GITHUB_ENV"
-          git clone --depth 1 https://github.com/Dstack-TEE/dstack.git "$DSTACK_BUILD"
-
-      - name: Build verifier Docker image
-        if: steps.image-cache.outputs.cache-hit != 'true'
-        run: docker build -t dstack-verifier -f "$DSTACK_BUILD/verifier/builder/Dockerfile" "$DSTACK_BUILD"
-
-      - name: Save Docker image to cache
-        if: steps.image-cache.outputs.cache-hit != 'true'
-        run: docker save dstack-verifier > dstack-verifier-image.tar
-
-      - name: Remove dstack build directory
-        if: always() && env.DSTACK_BUILD != ''
-        run: rm -rf "$DSTACK_BUILD"
-
-      # ── 2. Fetch attestation from deployed CVM, verify with dstack-verifier ─
       - name: Verify remote attestation
         run: |
           set -eu
@@ -88,23 +51,32 @@ jobs:
           TMP_DIR=$(mktemp -d /tmp/verify-remote-XXXXXX)
 
           echo "Fetching attestation from $ATTESTATION_URL/attestation..."
-          QUOTE_RESP=$(curl -sf "$ATTESTATION_URL/attestation") || {
+          curl -sf "$ATTESTATION_URL/attestation" > "$TMP_DIR/attestation.json" || {
             echo "::error::Failed to fetch $ATTESTATION_URL/attestation"
             rm -rf "$TMP_DIR"
             exit 1
           }
 
-          # Build verifier request: strip 0x prefix from quote, set attestation=null.
-          VERIFY_FILE="$TMP_DIR/verify-request.json"
-          printf '%s' "$QUOTE_RESP" | python3 -c \
-            'import sys,json; d=json.load(sys.stdin); q=d["quote"]; q=q[2:] if q.startswith("0x") else q; print(json.dumps({"quote":q,"event_log":d["event_log"],"vm_config":d["vm_config"],"attestation":None}))' \
-            > "$VERIFY_FILE"
+          # Fix empty digests in runtime events (dstack guest-agent strips them;
+          # the Docker verifier's parser rejects digest=""). See script docstring.
+          python3 scripts/fix-attestation-event-log.py "$TMP_DIR/attestation.json" \
+            > "$TMP_DIR/verify-request.json"
 
           echo "Running dstack-verifier (oneshot) via Docker..."
-          docker run --rm -v "$TMP_DIR:/data" dstack-verifier \
-            dstack-verifier --verify /data/verify-request.json || true
+          docker run --rm \
+            -v "$TMP_DIR:/verify" \
+            -w /verify \
+            --platform linux/amd64 \
+            dstacktee/dstack-verifier:latest \
+            --verify /verify/verify-request.json || true
 
           RESULT_FILE="$TMP_DIR/verify-request.json.verification.json"
+          if [ ! -f "$RESULT_FILE" ]; then
+            echo "::error::Verifier did not produce result file"
+            rm -rf "$TMP_DIR"
+            exit 1
+          fi
+
           echo "--- Verifier output ---"
           cat "$RESULT_FILE"
           echo "--- end ---"
