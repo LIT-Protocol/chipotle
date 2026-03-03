@@ -32,8 +32,12 @@ contract AccountConfigFacet {
         address creatorWalletAddress,
         uint256 initialBalance
     ) public {
+        checkIfApiPayer(msg.sender);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
+        if (s.allApiKeyHashes[apiKeyHash] != 0) {
+            revert LibAccountConfigStorage.AccountAlreadyExists(apiKeyHash);
+        }
         LibAccountConfigStorage.Account storage account = s.accounts[
             apiKeyHash
         ];
@@ -420,5 +424,13 @@ contract AccountConfigFacet {
             LibAccountConfigStorage.getStorage(),
             caller
         );
+    }
+
+    function checkIfApiPayer(address caller) private view {
+        LibAccountConfigStorage.AccountConfigStorage
+            storage s = LibAccountConfigStorage.getStorage();
+        if (caller != s.api_payer) {
+            revert LibAccountConfigStorage.OnlyApiPayer(caller);
+        }
     }
 }
