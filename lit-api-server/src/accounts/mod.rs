@@ -1,5 +1,5 @@
 pub mod contracts;
-pub use contracts::account_config::{AccountConfig, Metadata};
+pub use contracts::account_config_contract::{AccountConfig, Metadata};
 pub mod signable_contract;
 pub use anyhow::Result;
 

@@ -1,5 +1,5 @@
 pub use crate::abstractions::transfer::chain_info::Chain;
-pub use crate::accounts::contracts::account_config::AccountConfig;
+pub use crate::accounts::contracts::account_config_contract::AccountConfig;
 use crate::config::GLOBAL_NODE_CONFIG;
 pub use anyhow::Result;
 use ethers::middleware::NonceManagerMiddleware;
