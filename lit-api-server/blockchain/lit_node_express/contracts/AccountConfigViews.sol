@@ -76,6 +76,9 @@ contract AccountConfigViews {
             pageNumber = 0;
         }
         uint256 startIndex = pageNumber * pageSize;
+        if (startIndex >= pageLength) {
+            return new LibAccountConfigStorage.UsageApiKey[](0);
+        }
         uint256 endIndex = startIndex + pageSize;
         if (endIndex > pageLength) endIndex = pageLength;
         uint256 resultLength = endIndex - startIndex;
