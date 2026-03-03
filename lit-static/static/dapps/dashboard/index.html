@@ -84,6 +84,10 @@
             <span class="sidebar-link-icon">◇</span>
             <span class="sidebar-link-text">Action Runner</span>
           </a>
+          <a href="lit_actions.html" class="sidebar-link">
+            <span class="sidebar-link-icon">◇</span>
+            <span class="sidebar-link-text">Lit Actions Viem</span>
+          </a>
         </nav>
       </aside>
 
@@ -313,6 +317,22 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-outline" id="confirm-cancel-btn">Cancel</button>
         <button type="button" class="btn btn-danger" id="confirm-delete-btn">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Action progress (non-dismissible) -->
+  <div id="action-overlay" class="modal-overlay" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="action-title" tabindex="-1">
+      <div class="modal-header">
+        <h3 class="modal-title" id="action-title">Working…</h3>
+      </div>
+      <div class="modal-body">
+        <p id="action-desc" class="modal-action-desc"></p>
+      </div>
+      <div class="modal-footer modal-footer-progress">
+        <span class="action-spinner" aria-hidden="true"></span>
+        <span class="modal-progress-text">This may take a moment…</span>
       </div>
     </div>
   </div>

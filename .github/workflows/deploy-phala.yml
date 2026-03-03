@@ -165,6 +165,13 @@ jobs:
       api_root_url: ${{ needs.determine-target.outputs.api_root_url }}
       runner: ${{ needs.determine-runner.outputs.runner }}
 
+  verify-attestation:
+    needs: [wait-for-api-available, determine-runner, determine-target]
+    uses: ./.github/workflows/verify-attestation.yml
+    with:
+      attestation_url: ${{ needs.determine-target.outputs.base_url }}
+      runner: ${{ needs.determine-runner.outputs.runner }}
+
   openapi-spec-check:
     needs: [wait-for-api-available, determine-runner]
     uses: ./.github/workflows/openapi-spec-check.yml

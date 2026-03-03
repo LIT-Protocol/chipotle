@@ -231,7 +231,15 @@ extension!(
     esm = [
         dir "js",
         "00_ethers.js",
+<<<<<<< feature/cpl-52-clean-up-and-document
         "02_litActionsSDK.js",
+=======
+        "00_viem.js",
+        "01_uint8arrays.js",
+        "02_litActionsSDK.js",
+        "03_jsonwebtoken.js",
+        "06_litActionsSDK_viem.js",
+>>>>>>> next
         "99_patches.js",
     ],
     middleware = |op| match op.name {
