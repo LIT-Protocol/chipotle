@@ -216,6 +216,7 @@ contract AccountConfigFacet {
         string memory name,
         string memory description
     ) public {
+        revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
         revertIfUsageApiKeyDoesNotExist(accountApiKeyHash, usageApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
@@ -235,6 +236,7 @@ contract AccountConfigFacet {
         uint256 accountApiKeyHash,
         uint256 usageApiKeyHash
     ) public {
+        revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
         revertIfUsageApiKeyDoesNotExist(accountApiKeyHash, usageApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
