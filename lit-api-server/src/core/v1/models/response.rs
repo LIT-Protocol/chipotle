@@ -108,7 +108,6 @@ pub struct ApiKeyItem {
     pub id: String, // hash of the item, as stored on chain.
     pub name: String,
     pub description: String,
-    pub api_key: String, // if the item is managed by the LIT-node, this will be the actual IPFS CID, or Wallet Address, or public key, etc.
     pub expiration: String,
     pub balance: u64,
 }

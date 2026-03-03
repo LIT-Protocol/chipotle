@@ -7,10 +7,9 @@ use crate::accounts::contracts::account_config::UsageApiKey;
 use crate::accounts::signable_contract::{
     get_read_only_account_config_contract, get_signable_account_config_contract,
 };
-use crate::core::lookup_data;
 use ethers::types::{H160, U256};
 use ethers::utils::keccak256;
-use lit_core::utils::binary::{bytes_to_hex, hex_to_bytes};
+use lit_core::utils::binary::hex_to_bytes;
 
 pub fn api_key_hash(api_key_base_64: &str) -> U256 {
     U256::from_big_endian(&keccak256(api_key_base_64.as_bytes()))
@@ -45,7 +44,6 @@ pub async fn new_account(
 ) -> Result<bool> {
     let contract = get_signable_account_config_contract().await?;
     let api_key_hash = api_key_hash(api_key);
-    lookup_data::add_api_key(&api_key_hash.to_string(), api_key).await?;
 
     let function_call = contract.new_account(
         api_key_hash,
@@ -294,7 +292,7 @@ pub async fn add_usage_api_key(
     );
     let account_api_key_hash = api_key_hash(api_key);
     let usage_api_key_hash = api_key_hash(usage_api_key);
-    lookup_data::add_api_key(&usage_api_key_hash.to_string(), usage_api_key).await?;
+
     let function_call = contract.add_api_key(
         account_api_key_hash,
         usage_api_key_hash,
@@ -313,8 +311,7 @@ pub async fn remove_usage_api_key(api_key: &str, usage_api_key: &str) -> Result<
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let usage_api_key_hash = api_key_hash(usage_api_key);
-    let usage_api_key_hash_string = bytes_to_hex(keccak256(usage_api_key.as_bytes()));
-    lookup_data::delete_api_key_by_key_hash(&usage_api_key_hash_string).await?;
+    
     let function_call = contract.remove_usage_api_key(account_api_key_hash, usage_api_key_hash);
     let tx = function_call.send().await?;
     match tx.await {
