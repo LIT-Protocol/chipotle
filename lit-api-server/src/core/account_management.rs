@@ -47,16 +47,14 @@ fn parse_u256_hex_list(strings: &[String]) -> Result<Vec<U256>, ApiStatus> {
         .collect::<Result<Vec<_>, _>>()
 }
 
-fn get_random_secret() -> [u8; 32] {
-    let mut secret: [u8; 32] = [0; 32];
-
-    // Get a thread-local random number generator and fill the array.
-    rand::thread_rng().fill(&mut secret);
-    secret
+fn generate_random_bytes() -> [u8; 32] {
+    let mut buf: [u8; 32] = [0; 32];
+    rand::thread_rng().fill(&mut buf);
+    buf
 }
 
 async fn create_new_wallet() -> Result<(String, H160, [u8; 32]), ApiStatus> {
-    let wallet_seed_id = bytes_to_hex(get_random_secret());
+    let wallet_seed_id = bytes_to_hex(generate_random_bytes());
 
     let path = format!("clients/{}", wallet_seed_id);
     let purpose = "client";
