@@ -359,7 +359,6 @@ pub async fn list_wallets(
 ) -> Result<Vec<WalletItem>, ApiStatus> {
     let pn = parse_u256(page_number)?;
     let ps = parse_u256(page_size)?;
-    tracing::info!("listing wallets for api key: {}", api_key);
     let list = accounts::list_wallets(api_key, pn, ps)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_wallets failed"))?;

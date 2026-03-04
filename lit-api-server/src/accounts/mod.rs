@@ -387,7 +387,7 @@ pub async fn list_wallets(
 ) -> Result<Vec<WalletData>> {
     let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
-    tracing::info!("listing wallets for api key hash: {:?}, page_number: {}, page_size: {}", account_api_key_hash, page_number, page_size);
+    
     let page = contract
         .list_wallets(account_api_key_hash, page_number, page_size)
         .call()

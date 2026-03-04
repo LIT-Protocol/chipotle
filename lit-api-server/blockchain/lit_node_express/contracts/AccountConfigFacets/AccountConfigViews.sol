@@ -17,6 +17,10 @@ contract AccountConfigViews {
         return LibAccountConfigStorage.getStorage().api_payer;
     }
 
+    function readOnlyApiHelper() internal view returns (address) {
+        return LibAccountConfigStorage.getStorage().api_payer;
+    }
+
     function pricing_operator() public view returns (address) {
         return LibAccountConfigStorage.getStorage().pricing_operator;
     }
@@ -51,7 +55,9 @@ contract AccountConfigViews {
         uint256 apiKeyHash,
         address walletAddress
     ) public view returns (uint256) {
-        LibAccountConfigStorage.Account storage account = getAccount(apiKeyHash, msg.sender);
+        LibAccountConfigStorage.Account storage account = getReadOnlyAccount(
+            apiKeyHash
+        );
         return account.walletData[walletAddress].id;
     }
 
@@ -60,9 +66,15 @@ contract AccountConfigViews {
         uint256 pageNumber,
         uint256 pageSize
     ) public view returns (LibAccountConfigStorage.UsageApiKey[] memory) {
-        LibAccountConfigStorage.Account storage account = getAccount(accountApiKeyHash, msg.sender);
+        LibAccountConfigStorage.Account storage account = getReadOnlyAccount(
+            accountApiKeyHash
+        );
         uint256 totalLength = account.usageApiKeysList.length();
-        (uint256 startIndex, uint256 pageLength) = getPageStartAndLength(totalLength, pageNumber, pageSize);
+        (uint256 startIndex, uint256 pageLength) = getPageStartAndLength(
+            totalLength,
+            pageNumber,
+            pageSize
+        );
         LibAccountConfigStorage.UsageApiKey[]
             memory pageApiKeys = new LibAccountConfigStorage.UsageApiKey[](
                 pageLength
@@ -80,9 +92,15 @@ contract AccountConfigViews {
         uint256 pageNumber,
         uint256 pageSize
     ) public view returns (LibAccountConfigStorage.Metadata[] memory) {
-        LibAccountConfigStorage.Account storage account = getAccount(accountApiKeyHash, msg.sender);
+        LibAccountConfigStorage.Account storage account = getReadOnlyAccount(
+            accountApiKeyHash
+        );
         uint256 totalLength = account.groupList.length();
-        (uint256 startIndex, uint256 pageLength) = getPageStartAndLength(totalLength, pageNumber, pageSize);
+        (uint256 startIndex, uint256 pageLength) = getPageStartAndLength(
+            totalLength,
+            pageNumber,
+            pageSize
+        );
         LibAccountConfigStorage.Metadata[]
             memory pageMetadata = new LibAccountConfigStorage.Metadata[](
                 pageLength
@@ -100,8 +118,14 @@ contract AccountConfigViews {
         uint256 pageNumber,
         uint256 pageSize
     ) public view returns (LibAccountConfigStorage.WalletData[] memory) {
-        LibAccountConfigStorage.Account storage account = getAccount(accountApiKeyHash, msg.sender);
-        (uint256 startIndex, uint256 pageLength) = getPageStartAndLength(account.walletCount - 1 , pageNumber, pageSize);
+        LibAccountConfigStorage.Account storage account = getReadOnlyAccount(
+            accountApiKeyHash
+        );
+        (uint256 startIndex, uint256 pageLength) = getPageStartAndLength(
+            account.walletCount - 1,
+            pageNumber,
+            pageSize
+        );
 
         LibAccountConfigStorage.WalletData[]
             memory pageWalletData = new LibAccountConfigStorage.WalletData[](
@@ -125,9 +149,15 @@ contract AccountConfigViews {
         uint256 pageNumber,
         uint256 pageSize
     ) public view returns (LibAccountConfigStorage.WalletData[] memory) {
-        LibAccountConfigStorage.Account storage account = getAccount(accountApiKeyHash, msg.sender);
+        LibAccountConfigStorage.Account storage account = getReadOnlyAccount(
+            accountApiKeyHash
+        );
         LibAccountConfigStorage.Group storage group = account.groups[groupId];
-        (uint256 startIndex, uint256 pageLength) = getPageStartAndLength(group.Wallets_hash.length(), pageNumber, pageSize);
+        (uint256 startIndex, uint256 pageLength) = getPageStartAndLength(
+            group.Wallets_hash.length(),
+            pageNumber,
+            pageSize
+        );
         LibAccountConfigStorage.WalletData[]
             memory pageWalletData = new LibAccountConfigStorage.WalletData[](
                 pageLength
@@ -150,11 +180,17 @@ contract AccountConfigViews {
         uint256 pageNumber,
         uint256 pageSize
     ) public view returns (LibAccountConfigStorage.Metadata[] memory) {
-        LibAccountConfigStorage.Account storage account = getAccount(accountApiKeyHash, msg.sender);
+        LibAccountConfigStorage.Account storage account = getReadOnlyAccount(
+            accountApiKeyHash
+        );
         LibAccountConfigStorage.Group storage group = account.groups[groupId];
         uint256 totalLength = group.permitted_actions_cid_hash.length();
-        (uint256 startIndex, uint256 pageLength) = getPageStartAndLength(totalLength, pageNumber, pageSize);
-        
+        (uint256 startIndex, uint256 pageLength) = getPageStartAndLength(
+            totalLength,
+            pageNumber,
+            pageSize
+        );
+
         LibAccountConfigStorage.Metadata[]
             memory pageMetadata = new LibAccountConfigStorage.Metadata[](
                 pageLength
@@ -167,7 +203,11 @@ contract AccountConfigViews {
         return pageMetadata;
     }
 
-    function getPageStartAndLength(uint256 totalLength, uint256 pageNumber, uint256 pageSize) internal pure returns (uint256, uint256) {
+    function getPageStartAndLength(
+        uint256 totalLength,
+        uint256 pageNumber,
+        uint256 pageSize
+    ) internal pure returns (uint256, uint256) {
         if (pageSize > totalLength) {
             pageSize = totalLength;
             pageNumber = 0;
@@ -181,17 +221,21 @@ contract AccountConfigViews {
         return (startIndex, endIndex - startIndex);
     }
 
-    // Internal function to get the account for a given api key hash and sender 
+    // Internal function to get the account for a given api key hash and sender
     // @notice Reverts if the account does not exist or the sender is not allowed to access it
     // @notice The API Key, could be a usage or group API key
     // @param accountApiKeyHash The keccak256 hash of the account api key
     // @param sender The address of the sender
     // @return The account
-    function getAccount(uint256 apiKeyHash, address sender) internal view returns (LibAccountConfigStorage.Account storage) {
-        LibAccountConfigStorage.revertIfNoAccountAccess(apiKeyHash, sender);
+    function getReadOnlyAccount(
+        uint256 apiKeyHash
+    ) internal view returns (LibAccountConfigStorage.Account storage) {
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         uint256 masterAccountApiKeyHash = s.allApiKeyHashes[apiKeyHash];
+        if (masterAccountApiKeyHash == 0) {
+            revert LibAccountConfigStorage.AccountDoesNotExist(apiKeyHash);
+        }
         LibAccountConfigStorage.Account storage account = s.accounts[
             masterAccountApiKeyHash
         ];

@@ -418,13 +418,10 @@ function renderWalletsTable(items) {
   if (empty) empty.style.display = 'none';
   items.forEach((item) => {
     const address = item.wallet_address ?? item.address ?? item.name ?? '';
-    const pubkey = item.public_key ?? '';
-    const pubkeyPreview = pubkey ? keyPreview(pubkey) : '—';
     const description = item.description ?? '';
     const tr = document.createElement('tr');
     tr.innerHTML =
       '<td class="mono cell-address"></td>' +
-      '<td class="mono cell-pubkey"></td>' +
       '<td class="mono">' + escapeHtml(description) + '</td>';
     const addressCell = tr.querySelector('.cell-address');
     const addressCopyBtn = document.createElement('button');
@@ -444,28 +441,6 @@ function renderWalletsTable(items) {
       }
     });
     addressCell.appendChild(addressCopyBtn);
-    const pubkeyCell = tr.querySelector('.cell-pubkey');
-    if (pubkey) {
-      const pubkeyCopyBtn = document.createElement('button');
-      pubkeyCopyBtn.type = 'button';
-      pubkeyCopyBtn.className = 'btn-copy-key';
-      pubkeyCopyBtn.textContent = pubkeyPreview;
-      pubkeyCopyBtn.title = 'Copy full public key';
-      pubkeyCopyBtn.addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(pubkey);
-          const orig = pubkeyCopyBtn.textContent;
-          pubkeyCopyBtn.textContent = 'Copied!';
-          pubkeyCopyBtn.title = 'Copied!';
-          setTimeout(() => { pubkeyCopyBtn.textContent = orig; pubkeyCopyBtn.title = 'Copy full public key'; }, 1500);
-        } catch (_) {
-          pubkeyCopyBtn.title = 'Copy failed';
-        }
-      });
-      pubkeyCell.appendChild(pubkeyCopyBtn);
-    } else {
-      pubkeyCell.textContent = '—';
-    }
     tbody.appendChild(tr);
   });
 }
@@ -488,38 +463,15 @@ function renderUsageKeysTable() {
   }
   if (empty) empty.style.display = 'none';
   items.forEach((item) => {
-    const key = item.usage_api_key ?? item.api_key ?? '';
-    const preview = key ? keyPreview(key) : (item.id ? keyPreview(item.id) : '—');
     const expiration = item.expiration != null ? String(item.expiration) : '—';
     const balance = item.balance != null ? String(item.balance) : '—';
     const tr = document.createElement('tr');
     tr.innerHTML =
-      '<td class="mono cell-key"></td>' +
       '<td>' + escapeHtml(item.name || '') + '</td>' +
       '<td class="mono">' + escapeHtml(item.description || '') + '</td>' +
       '<td class="mono">' + escapeHtml(expiration) + '</td>' +
       '<td class="mono">' + escapeHtml(balance) + '</td>' +
       '<td class="cell-actions"></td>';
-    const keyCell = tr.querySelector('.cell-key');
-    const copyBtn = document.createElement('button');
-    copyBtn.type = 'button';
-    copyBtn.className = 'btn-copy-key';
-    copyBtn.textContent = preview;
-    copyBtn.title = key ? 'Copy full key' : (item.id ? 'Copy ID' : '');
-    copyBtn.addEventListener('click', async () => {
-      const toCopy = key || item.id || '';
-      if (!toCopy) return;
-      try {
-        await navigator.clipboard.writeText(toCopy);
-        const orig = copyBtn.textContent;
-        copyBtn.textContent = 'Copied!';
-        copyBtn.title = 'Copied!';
-        setTimeout(() => { copyBtn.textContent = orig; copyBtn.title = 'Copy full key'; }, 1500);
-      } catch (_) {
-        copyBtn.title = 'Copy failed';
-      }
-    });
-    keyCell.appendChild(copyBtn);
     const actionsCell = tr.querySelector('.cell-actions');
     const delBtn = document.createElement('button');
     delBtn.type = 'button';
