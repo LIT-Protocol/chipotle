@@ -3,7 +3,6 @@ pub mod accounts;
 pub mod actions;
 pub mod config;
 pub mod core;
-#[cfg(feature = "dstack")]
 pub mod dstack;
 pub mod error;
 
@@ -109,7 +108,6 @@ async fn main() -> Result<(), rocket::Error> {
         // .manage(action_store)
         .manage(GrpcClientPool::<tonic::transport::Channel>::new());
 
-    #[cfg(feature = "dstack")]
     {
         // /attestation at root — per Phala Get Attestation
         r = r
