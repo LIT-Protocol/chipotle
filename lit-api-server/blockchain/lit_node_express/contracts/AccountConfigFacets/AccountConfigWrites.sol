@@ -29,10 +29,9 @@ contract AccountConfigWrite {
         bool managed,
         string memory accountName,
         string memory accountDescription,
-        address creatorWalletAddress,
-        uint256 initialBalance
+        address creatorWalletAddress
     ) public {
-        checkIfApiPayer(msg.sender);
+        checkIfApiPayer(msg.sender); // for now, the UI is the only one that can create accounts
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         if (s.allApiKeyHashes[apiKeyHash] != 0) {
@@ -53,7 +52,7 @@ contract AccountConfigWrite {
         account.accountApiKey.manageUsageApiKeys = true;
         account.accountApiKey.apiKeyHash = apiKeyHash;
         account.accountApiKey.expiration = block.timestamp + 365 days * 10;
-        account.accountApiKey.balance = initialBalance;
+        account.accountApiKey.balance = 0;
         s.allApiKeyHashes[apiKeyHash] = apiKeyHash;
         s.indexToAccountHash[s.nextAccountCount] = apiKeyHash;
         s.nextAccountCount++;

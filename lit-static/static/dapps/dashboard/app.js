@@ -161,7 +161,6 @@ function initLogin() {
   document.getElementById('btn-create-account').addEventListener('click', async () => {
     const name = document.getElementById('new-account-name').value.trim();
     const desc = document.getElementById('new-account-desc').value.trim();
-    const initialBalance = document.getElementById('new-account-initial-balance').value.trim() || undefined;
     hideStatus('login-status');
     if (!name) {
       showStatus('login-status', 'Enter an account name.', 'error');
@@ -175,7 +174,7 @@ function initLogin() {
         'Creating a new Lit Express account and returning an API key.'
       );
       const client = await getClient();
-      const res = await client.newAccount({ accountName: name, accountDescription: desc, initialBalance });
+      const res = await client.newAccount({ accountName: name, accountDescription: desc });
       setApiKey(res.api_key);
       const walletMsg = res.wallet_address ? ' Wallet: ' + (res.wallet_address.slice(0, 10) + '…' + res.wallet_address.slice(-8)) : '';
       showStatus('login-status', 'Account created. You are now logged in.' + walletMsg, 'success');

@@ -9,7 +9,6 @@ pub use ethers::providers::Provider;
 pub use ethers::signers::LocalWallet;
 use ethers::signers::Signer;
 pub use ethers::types::H160;
-use ethers_providers::Middleware;
 pub use lit_core::utils::binary::hex_to_bytes;
 pub use std::sync::Arc;
 use std::sync::OnceLock;
@@ -72,7 +71,7 @@ pub(crate) async fn get_signable_account_config_contract()
     let account_config_address = hex_to_bytes(&node_config.contract_address)?;
     let account_config_address = H160::from_slice(&account_config_address);
     let contract = AccountConfig::new(account_config_address, client);
-    
+
     Ok(contract)
 }
 

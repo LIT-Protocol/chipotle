@@ -40,7 +40,6 @@ pub async fn new_account(
     account_name: &str,
     account_description: &str,
     creator_wallet_address: H160,
-    initial_balance: U256,
 ) -> Result<bool> {
     let contract = get_signable_account_config_contract().await?;
     let api_key_hash = api_key_hash(api_key);
@@ -51,7 +50,6 @@ pub async fn new_account(
         account_name.to_string(),
         account_description.to_string(),
         creator_wallet_address,
-        initial_balance,
     );
     let tx = function_call.send().await?;
     match tx.await {
@@ -311,7 +309,7 @@ pub async fn remove_usage_api_key(api_key: &str, usage_api_key: &str) -> Result<
     let contract = get_signable_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let usage_api_key_hash = api_key_hash(usage_api_key);
-    
+
     let function_call = contract.remove_usage_api_key(account_api_key_hash, usage_api_key_hash);
     let tx = function_call.send().await?;
     match tx.await {
@@ -387,7 +385,7 @@ pub async fn list_wallets(
 ) -> Result<Vec<WalletData>> {
     let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
-    
+
     let page = contract
         .list_wallets(account_api_key_hash, page_number, page_size)
         .call()

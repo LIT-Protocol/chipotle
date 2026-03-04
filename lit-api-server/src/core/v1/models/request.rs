@@ -6,9 +6,6 @@ use serde::{Deserialize, Serialize};
 pub struct NewAccountRequest {
     pub account_name: String,
     pub account_description: String,
-    /// Optional initial balance for the account (AccountConfig.accountApiKey.balance). Decimal or hex string; default 0.
-    #[serde(default)]
-    pub initial_balance: Option<String>,
 }
 
 /// Request for add_group. permitted_actions and pkps are keccak256 hashes as hex strings (with or without 0x). API key via header.

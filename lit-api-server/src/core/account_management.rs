@@ -74,19 +74,11 @@ pub async fn new_account(
     let (_public_key, wallet_address, secret) = create_new_wallet().await?;
     let api_key = base64_light::base64_encode_bytes(&secret);
 
-    let initial_balance = new_account_request
-        .initial_balance
-        .as_deref()
-        .map(parse_u256)
-        .transpose()?
-        .unwrap_or(U256::zero());
-
     if let Err(e) = accounts::new_account(
         &api_key,
         &account_name,
         &account_description,
         wallet_address,
-        initial_balance,
     )
     .await
     {
@@ -327,15 +319,16 @@ pub async fn list_api_keys(
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_api_keys failed"))?;
 
-    let api_key_items = list.iter().map(|m| {
-        ApiKeyItem {
+    let api_key_items = list
+        .iter()
+        .map(|m| ApiKeyItem {
             id: m.api_key_hash.to_string(),
             name: m.metadata.name.clone(),
             description: m.metadata.description.clone(),
             expiration: m.expiration.to_string(),
             balance: m.balance.as_u64(),
-        }
-    }).collect();
+        })
+        .collect();
     Ok(api_key_items)
 }
 
@@ -362,15 +355,16 @@ pub async fn list_wallets(
     let list = accounts::list_wallets(api_key, pn, ps)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_wallets failed"))?;
-  
-    let wallet_items = list.iter().map(|m| {
-        WalletItem {
+
+    let wallet_items = list
+        .iter()
+        .map(|m| WalletItem {
             id: m.id.to_string(),
             name: m.name.clone(),
             description: m.description.clone(),
             wallet_address: bytes_to_hex(m.wallet_address.as_bytes()),
-        }
-    }).collect();
+        })
+        .collect();
     Ok(wallet_items)
 }
 
@@ -387,14 +381,15 @@ pub async fn list_wallets_in_group(
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_wallets_in_group failed"))?;
 
-    let wallet_items = list.iter().map(|m| {
-        WalletItem {
+    let wallet_items = list
+        .iter()
+        .map(|m| WalletItem {
             id: m.id.to_string(),
             name: m.name.clone(),
             description: m.description.clone(),
             wallet_address: bytes_to_hex(m.wallet_address.as_bytes()),
-        }
-    }).collect();
+        })
+        .collect();
     Ok(wallet_items)
 }
 
