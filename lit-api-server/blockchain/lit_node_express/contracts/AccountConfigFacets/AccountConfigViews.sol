@@ -122,7 +122,7 @@ contract AccountConfigViews {
             accountApiKeyHash
         );
         (uint256 startIndex, uint256 pageLength) = getPageStartAndLength(
-            account.walletCount - 1,
+            account.walletCount,
             pageNumber,
             pageSize
         );
@@ -152,6 +152,7 @@ contract AccountConfigViews {
         LibAccountConfigStorage.Account storage account = getReadOnlyAccount(
             accountApiKeyHash
         );
+        LibAccountConfigStorage.AccountConfigStorage storage s = LibAccountConfigStorage.getStorage();
         LibAccountConfigStorage.Group storage group = account.groups[groupId];
         (uint256 startIndex, uint256 pageLength) = getPageStartAndLength(
             group.Wallets_hash.length(),
@@ -163,7 +164,8 @@ contract AccountConfigViews {
                 pageLength
             );
         for (uint256 i = 0; i < pageLength; i++) {
-            address walletAddress = account.walletAddresses[startIndex + i];
+            uint256 wallet_hash = group.Wallets_hash.at(startIndex + i);
+            address walletAddress = s.allWalletAddresses[wallet_hash];
             pageWalletData[i].walletAddress = walletAddress;
             pageWalletData[i].name = account.walletData[walletAddress].name;
             pageWalletData[i].description = account

@@ -21,6 +21,7 @@ contract AccountConfigWrite {
         s.api_payer = msg.sender;
         s.pricing_operator = msg.sender;
         s.nextWalletCount = 1;
+        s.nextAccountCount = 1;
         s.pricing[1] = 1;
     }
 
@@ -274,8 +275,6 @@ contract AccountConfigWrite {
         LibAccountConfigStorage.Account storage account = s.accounts[
             accountApiKeyHash
         ];
-        s.indexToAccountHash[s.nextAccountCount] = accountApiKeyHash;
-        s.nextAccountCount++;
         account.walletData[walletAddress].id = derivationPath;
         account.walletData[walletAddress].name = name;
         account.walletData[walletAddress].description = description;

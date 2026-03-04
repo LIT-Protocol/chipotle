@@ -824,7 +824,7 @@ function openAddUsageKeyModal() {
         renderUsageKeysTable();
         updateStatCards();
       }
-      showStatus('overview-status-usage-keys', 'Usage API key added. Copy and store your key now (shown once).', 'success');
+      showStatus('overview-status-usage-keys', 'Usage API key added. Copy and store your key now (shown once): ' + usageKey, 'success');
     } catch (e) {
       showStatus('overview-status-usage-keys', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
     } finally {

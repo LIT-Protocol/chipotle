@@ -119,7 +119,7 @@ library LibAccountConfigStorage {
         AccountConfigStorage storage s = getStorage();
         uint256 masterAccountApiKeyHash = s.allApiKeyHashes[apiKeyHash];
         if (masterAccountApiKeyHash == 0) {
-            revert AccountDoesNotExist(apiKeyHash);
+            return false;
         }
         Account storage account = s.accounts[masterAccountApiKeyHash];
         if (account.accountApiKey.apiKeyHash != masterAccountApiKeyHash)
