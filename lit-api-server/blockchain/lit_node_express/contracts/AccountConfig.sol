@@ -1,16 +1,16 @@
 /// @title AccountConfig
 /// @author Brendon Paul
-/// @notice Diamond-style AccountConfig: storage in LibAccountConfigStorage, logic in AccountConfigFacet (mutable) and AccountConfigViews (read-only).
+/// @notice Pre-Diamond-style AccountConfig: storage in LibAccountConfigStorage, logic in AccountConfigWrite (mutable) and AccountConfigViews (read-only).
 /// @notice This contract composes both facets so a single deployment exposes the full interface.
 
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
-import {AccountConfigFacet} from "./AccountConfig/AccountConfigFacet.sol";
-import {AccountConfigViews} from "./AccountConfig/AccountConfigViews.sol";
+import {AccountConfigWrite} from "./AccountConfigFacets/AccountConfigWrites.sol";
+import {AccountConfigViews} from "./AccountConfigFacets/AccountConfigViews.sol";
 
-contract AccountConfig is AccountConfigFacet, AccountConfigViews {
+contract AccountConfig is AccountConfigWrite, AccountConfigViews {
     constructor() {
-        initializeAccountConfig();
+        AccountConfigWrite.initializeAccountConfig();
     }
 }

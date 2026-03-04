@@ -359,6 +359,7 @@ pub async fn list_wallets(
 ) -> Result<Vec<WalletItem>, ApiStatus> {
     let pn = parse_u256(page_number)?;
     let ps = parse_u256(page_size)?;
+    tracing::info!("listing wallets for api key: {}", api_key);
     let list = accounts::list_wallets(api_key, pn, ps)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_wallets failed"))?;
@@ -368,8 +369,7 @@ pub async fn list_wallets(
             id: m.id.to_string(),
             name: m.name.clone(),
             description: m.description.clone(),
-            wallet_address: m.wallet_address.clone(),
-            public_key: m.public_key.clone(),
+            wallet_address: bytes_to_hex(m.wallet_address.as_bytes()),
         }
     }).collect();
     Ok(wallet_items)
@@ -388,30 +388,14 @@ pub async fn list_wallets_in_group(
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_wallets_in_group failed"))?;
 
-    let list = list
-        .iter()
-        .map(metadata_to_item)
-        .collect::<Vec<ListMetadataItem>>();
-    let ids = list.iter().map(|m| m.id.clone()).collect::<Vec<String>>();
-    let lookup_results = lookup_data::lookup_wallets_by_key_hashes(&ids).await?;
-
-    let wallet_items = list
-        .iter()
-        .map(|m| {
-            let (wallet_address, pubkey) =
-                match lookup_results.iter().find(|(id, _)| *id == m.id.clone()) {
-                    Some((_, result)) => (result.wallet_address.clone(), result.pubkey.clone()),
-                    None => ("unmanaged".to_string(), "unmanaged".to_string()),
-                };
-            WalletItem {
-                id: m.id.to_string(),
-                name: m.name.clone(),
-                description: m.description.clone(),
-                wallet_address,
-                public_key: pubkey,
-            }
-        })
-        .collect();
+    let wallet_items = list.iter().map(|m| {
+        WalletItem {
+            id: m.id.to_string(),
+            name: m.name.clone(),
+            description: m.description.clone(),
+            wallet_address: bytes_to_hex(m.wallet_address.as_bytes()),
+        }
+    }).collect();
     Ok(wallet_items)
 }
 

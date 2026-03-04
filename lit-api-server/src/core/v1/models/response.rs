@@ -98,8 +98,6 @@ pub struct WalletItem {
     pub name: String,
     pub description: String,
     pub wallet_address: String, // if the item is managed by the LIT-node, this will be the actual IPFS CID, or Wallet Address, or public key, etc.
-    pub public_key: String, // if the item is managed by the LIT-node, this will be the actual IPFS CID, or Wallet Address, or public key, etc.
-                            // pub secret: String, // if the item is managed by the LIT-node, this will be the actual IPFS CID, or Wallet Address, or public key, etc.
 }
 
 /// One item from list_api_keys (AccountConfig.sol UsageApiKey).

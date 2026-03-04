@@ -1,4 +1,4 @@
-/// @title AccountConfigFacet
+/// @title AccountConfigWrite
 /// @author Brendon Paul
 /// @notice Mutable (state-changing) functions for AccountConfig diamond.
 
@@ -10,7 +10,7 @@ import {
 } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {LibAccountConfigStorage} from "./LibAccountConfigStorage.sol";
 
-contract AccountConfigFacet {
+contract AccountConfigWrite {
     using EnumerableSet for EnumerableSet.UintSet;
 
     /// @notice Initializes storage. Must be called once after deployment (e.g. by Diamond constructor).
@@ -43,13 +43,20 @@ contract AccountConfigFacet {
         ];
         account.managed = managed;
         account.creatorWalletAddress = creatorWalletAddress;
-        account.accountMetadata.id = apiKeyHash;
-        account.accountMetadata.name = accountName;
-        account.accountMetadata.description = accountDescription;
+        account.accountApiKey.metadata.id = apiKeyHash;
+        account.accountApiKey.metadata.name = accountName;
+        account.accountApiKey.metadata.description = accountDescription;
+        account.accountApiKey.runActions = false;
+        account.accountApiKey.manageGroups = true;
+        account.accountApiKey.manageWallets = true;
+        account.accountApiKey.manageIPFSIds = true;
+        account.accountApiKey.manageUsageApiKeys = true;
         account.accountApiKey.apiKeyHash = apiKeyHash;
         account.accountApiKey.expiration = block.timestamp + 365 days * 10;
         account.accountApiKey.balance = initialBalance;
         s.allApiKeyHashes[apiKeyHash] = apiKeyHash;
+        s.indexToAccountHash[s.nextAccountCount] = apiKeyHash;
+        s.nextAccountCount++;
     }
 
     function addApiKey(
@@ -58,22 +65,24 @@ contract AccountConfigFacet {
         uint256 expiration,
         uint256 balance
     ) public {
-        revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
+        revertIfNoAccountAccess(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
-        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[
-            accountApiKeyHash
-        ];
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
         LibAccountConfigStorage.UsageApiKey storage apiKeyStorage = s
             .accounts[masterAccountApiKeyHash]
             .usageApiKeys[usageApiKeyHash];
         apiKeyStorage.apiKeyHash = usageApiKeyHash;
         apiKeyStorage.expiration = expiration;
         apiKeyStorage.balance = balance;
-        s
-            .accounts[masterAccountApiKeyHash]
-            .usageApiKeysList
-            .add(usageApiKeyHash);
+        apiKeyStorage.runActions = true;
+        apiKeyStorage.manageGroups = false;
+        apiKeyStorage.manageWallets = false;
+        apiKeyStorage.manageIPFSIds = false;
+        apiKeyStorage.manageUsageApiKeys = false;
+        s.accounts[masterAccountApiKeyHash].usageApiKeysList.add(
+            usageApiKeyHash
+        );
         s.allApiKeyHashes[usageApiKeyHash] = masterAccountApiKeyHash;
     }
 
@@ -86,7 +95,7 @@ contract AccountConfigFacet {
         bool all_wallets_permitted,
         bool all_actions_permitted
     ) public {
-        revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
+        revertIfNoAccountAccess(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         LibAccountConfigStorage.Account storage account = s.accounts[
@@ -202,7 +211,7 @@ contract AccountConfigFacet {
         uint256 groupId,
         uint256 walletAddressHash
     ) public {
-        revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
+        revertIfNoAccountAccess(accountApiKeyHash);
         revertIfWalletDoesNotExist(
             accountApiKeyHash,
             groupId,
@@ -221,7 +230,7 @@ contract AccountConfigFacet {
         string memory name,
         string memory description
     ) public {
-        revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
+        revertIfNoAccountAccess(accountApiKeyHash);
         revertIfUsageApiKeyDoesNotExist(accountApiKeyHash, usageApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
@@ -241,7 +250,7 @@ contract AccountConfigFacet {
         uint256 accountApiKeyHash,
         uint256 usageApiKeyHash
     ) public {
-        revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
+        revertIfNoAccountAccess(accountApiKeyHash);
         revertIfUsageApiKeyDoesNotExist(accountApiKeyHash, usageApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
@@ -255,34 +264,31 @@ contract AccountConfigFacet {
 
     function registerWalletDerivation(
         uint256 accountApiKeyHash,
-        uint256 walletAddressHash,
+        address walletAddress,
         uint256 derivationPath,
         string memory name,
         string memory description
     ) public {
-        revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
+        revertIfNoAccountAccess(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         LibAccountConfigStorage.Account storage account = s.accounts[
             accountApiKeyHash
         ];
-        account.wallet_derivation[walletAddressHash] = derivationPath;
-        account
-            .walletDerivationMetadata[walletAddressHash]
-            .id = walletAddressHash;
-        account.walletDerivationMetadata[walletAddressHash].name = name;
-        account
-            .walletDerivationMetadata[walletAddressHash]
-            .description = description;
-        account.walletAddressHash[account.walletCount] = walletAddressHash;
-        s.allWalletAddressHashes[s.nextWalletCount] = walletAddressHash;
+        s.indexToAccountHash[s.nextAccountCount] = accountApiKeyHash;
+        s.nextAccountCount++;
+        account.walletData[walletAddress].id = derivationPath;
+        account.walletData[walletAddress].name = name;
+        account.walletData[walletAddress].description = description;
+        account.walletAddresses[account.walletCount] = walletAddress;
+        s.allWalletAddresses[s.nextWalletCount] = walletAddress;
         account.walletCount++;
         s.nextWalletCount++;
     }
 
     function debitApiKey(uint256 apiKeyHash, uint256 amount) public {
         checkIfApiPayerOrPricingOperator(msg.sender);
-        revertIfAccountDoesNotExistAndIsMutable(apiKeyHash);
+        revertIfNoAccountAccess(apiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         uint256 masterAccountApiKeyHash = s.allApiKeyHashes[apiKeyHash];
@@ -305,7 +311,7 @@ contract AccountConfigFacet {
 
     function creditApiKey(uint256 apiKeyHash, uint256 amount) public {
         checkIfApiPayerOrPricingOperator(msg.sender);
-        revertIfAccountDoesNotExistAndIsMutable(apiKeyHash);
+        revertIfNoAccountAccess(apiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         uint256 masterAccountApiKeyHash = s.allApiKeyHashes[apiKeyHash];
@@ -334,11 +340,8 @@ contract AccountConfigFacet {
 
     // ----- internal view helpers (revert helpers call view from Views facet conceptually; we duplicate for simplicity) -----
 
-    function revertIfAccountDoesNotExistAndIsMutable(
-        uint256 accountApiKeyHash
-    ) private view {
-        LibAccountConfigStorage.revertIfAccountDoesNotExistAndIsMutable(
-            LibAccountConfigStorage.getStorage(),
+    function revertIfNoAccountAccess(uint256 accountApiKeyHash) private view {
+        LibAccountConfigStorage.revertIfNoAccountAccess(
             accountApiKeyHash,
             msg.sender
         );
@@ -348,9 +351,8 @@ contract AccountConfigFacet {
         uint256 accountApiKeyHash,
         uint256 groupId
     ) private view {
-        revertIfAccountDoesNotExistAndIsMutable(accountApiKeyHash);
+        revertIfNoAccountAccess(accountApiKeyHash);
         LibAccountConfigStorage.revertIfGroupDoesNotExist(
-            LibAccountConfigStorage.getStorage(),
             accountApiKeyHash,
             groupId
         );

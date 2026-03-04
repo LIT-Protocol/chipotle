@@ -70,7 +70,6 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
 /**
  * @typedef {Object} AddUsageApiKeyOptions
  * @property {string} apiKey - Account API key
- * @property {string} usageApiKey - Usage API key to add
  * @property {string} expiration - Expiration (e.g. unix timestamp as decimal string)
  * @property {string} balance - Balance (e.g. wei as decimal string)
  */
@@ -142,8 +141,7 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @property {string} id - ID (hash as stored on chain)
  * @property {string} name - Name
  * @property {string} description - Description
- * @property {string} wallet_address - Wallet address (or IPFS CID / public key as stored)
- * @property {string} public_key - Public key (or CID / address as stored)
+ * @property {string} wallet_address - Wallet address (hex)
  */
 
 /**
@@ -151,9 +149,9 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @property {string} id - ID (hash as stored on chain)
  * @property {string} name - Name
  * @property {string} description - Description
- * @property {string} api_key - Usage API key
  * @property {string} expiration - Expiration (e.g. unix timestamp string)
  * @property {number} balance - Balance (u64)
+ * @property {string} [api_key] - Usage API key (only present when returned by server, e.g. from lookup; not in standard list response)
  */
 
 /**
@@ -218,6 +216,12 @@ export const SHARE_TYPE_BLS = 'Bls';
 /**
  * @typedef {Object} AccountOpResponse - Response for account config operations (add_group, add_pkp_to_group, etc.)
  * @property {boolean} success
+ */
+
+/**
+ * @typedef {Object} AddUsageApiKeyResponse - Response for add_usage_api_key (response.rs AddUsageApiKeyResponse)
+ * @property {boolean} success
+ * @property {string} usage_api_key - The newly created usage API key (returned only once)
  */
 
 /**
@@ -358,6 +362,17 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
+   * GET /core/v1/get_lit_action_ipfs_id/<code>
+   * Returns the IPFS CID (hash) for the given lit action code.
+   * @param {string} code - Lit action JavaScript code
+   * @returns {Promise<string>} IPFS CID (e.g. derived hash of code)
+   */
+  async getLitActionIpfsId(code) {
+    const res = await fetch(`${this.baseUrl}/get_lit_action_ipfs_id/${encodeURIComponent(code)}`);
+    return parseResponse(res, 'get_lit_action_ipfs_id');
+  }
+
+  /**
    * POST /core/v1/lit_action
    * Executes a lit action with the given code and optional params.
    * @param {LitActionOptions} options
@@ -460,9 +475,9 @@ export class LitNodeSimpleApiClient {
 
   /**
    * POST /core/v1/add_usage_api_key
-   * Add a usage API key to an account.
+   * Add a usage API key to an account. Server creates and returns the new key.
    * @param {AddUsageApiKeyOptions} options
-   * @returns {Promise<AccountOpResponse>}
+   * @returns {Promise<AddUsageApiKeyResponse>}
    */
   async addUsageApiKey({ apiKey, expiration, balance }) {
     const body = {
