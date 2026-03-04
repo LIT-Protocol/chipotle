@@ -17,16 +17,17 @@ library LibAccountConfigStorage {
     bytes32 constant ACCOUNT_CONFIG_STORAGE_POSITION =
         keccak256("com.litprotocol.accountconfig.storage");
 
-    error AccountDoesNotExist(uint256 apiKey);
-    error NoAccountAccess(uint256 apiKey, address sender);
-    error AccountAlreadyExists(uint256 apiKey);
-    error GroupDoesNotExist(uint256 apiKey, uint256 groupId);
-    error WalletDoesNotExist(uint256 apiKey, uint256 groupId, uint256 Wallet);
-    error ActionDoesNotExist(uint256 apiKey, uint256 groupId, uint256 action);
-    error UsageApiKeyDoesNotExist(uint256 apiKey, uint256 usageApiKey);
-    error InsufficientBalance(uint256 apiKey, uint256 amount);
+    error AccountDoesNotExist(uint256 apiKeyHash);
+    error NoAccountAccess(uint256 apiKeyHash, address sender);
+    error AccountAlreadyExists(uint256 apiKeyHash);
+    error GroupDoesNotExist(uint256 apiKeyHash, uint256 groupId);
+    error WalletDoesNotExist(uint256 apiKeyHash, uint256 groupId, uint256 Wallet);
+    error ActionDoesNotExist(uint256 apiKeyHash, uint256 groupId, uint256 action);
+    error UsageApiKeyDoesNotExist(uint256 apiKeyHash, uint256 usageApiKeyHash);
+    error InsufficientBalance(uint256 apiKeyHash, uint256 amount);
     error OnlyApiPayer(address caller);
     error OnlyApiPayerOrPricingOperator(address caller);
+    error NotMasterAccount(uint256 apiKeyHash);
 
     struct WalletData {
         uint256 id; // keccak256 of the wallet id - this is used to prove existence of the struct.

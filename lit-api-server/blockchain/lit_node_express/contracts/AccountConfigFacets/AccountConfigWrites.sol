@@ -96,6 +96,7 @@ contract AccountConfigWrite {
         bool all_actions_permitted
     ) public {
         revertIfNoAccountAccess(accountApiKeyHash);
+        revertIfNotMasterAccount(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         LibAccountConfigStorage.Account storage account = s.accounts[
@@ -128,6 +129,7 @@ contract AccountConfigWrite {
         bool all_actions_permitted
     ) public {
         revertIfGroupDoesNotExist(accountApiKeyHash, groupId);
+        revertIfNotMasterAccount(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         LibAccountConfigStorage.Group storage group = s
@@ -145,6 +147,7 @@ contract AccountConfigWrite {
         uint256 walletAddressHash
     ) public {
         revertIfGroupDoesNotExist(accountApiKeyHash, groupId);
+        revertIfNotMasterAccount(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         s.accounts[accountApiKeyHash].groups[groupId].Wallets_hash.add(
@@ -160,6 +163,7 @@ contract AccountConfigWrite {
         string memory description
     ) public {
         revertIfGroupDoesNotExist(accountApiKeyHash, groupId);
+        revertIfNotMasterAccount(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         LibAccountConfigStorage.Account storage account = s.accounts[
@@ -180,6 +184,7 @@ contract AccountConfigWrite {
         string memory description
     ) public {
         revertIfActionDoesNotExist(accountApiKeyHash, groupId, actionHash);
+        revertIfNotMasterAccount(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         LibAccountConfigStorage.Account storage account = s.accounts[
@@ -195,6 +200,7 @@ contract AccountConfigWrite {
         uint256 action
     ) public {
         revertIfActionDoesNotExist(accountApiKeyHash, groupId, action);
+        revertIfNotMasterAccount(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         LibAccountConfigStorage.Account storage account = s.accounts[
@@ -217,6 +223,7 @@ contract AccountConfigWrite {
             groupId,
             walletAddressHash
         );
+        revertIfNotMasterAccount(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         s.accounts[accountApiKeyHash].groups[groupId].Wallets_hash.remove(
@@ -232,6 +239,7 @@ contract AccountConfigWrite {
     ) public {
         revertIfNoAccountAccess(accountApiKeyHash);
         revertIfUsageApiKeyDoesNotExist(accountApiKeyHash, usageApiKeyHash);
+        revertIfNotMasterAccount(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         s
@@ -252,6 +260,7 @@ contract AccountConfigWrite {
     ) public {
         revertIfNoAccountAccess(accountApiKeyHash);
         revertIfUsageApiKeyDoesNotExist(accountApiKeyHash, usageApiKeyHash);
+        revertIfNotMasterAccount(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         LibAccountConfigStorage.Account storage account = s.accounts[
@@ -270,6 +279,7 @@ contract AccountConfigWrite {
         string memory description
     ) public {
         revertIfNoAccountAccess(accountApiKeyHash);
+        revertIfNotMasterAccount(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         LibAccountConfigStorage.Account storage account = s.accounts[
@@ -287,6 +297,7 @@ contract AccountConfigWrite {
     function debitApiKey(uint256 apiKeyHash, uint256 amount) public {
         checkIfApiPayerOrPricingOperator(msg.sender);
         revertIfNoAccountAccess(apiKeyHash);
+        revertIfNotMasterAccount(apiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         uint256 masterAccountApiKeyHash = s.allApiKeyHashes[apiKeyHash];
@@ -310,6 +321,7 @@ contract AccountConfigWrite {
     function creditApiKey(uint256 apiKeyHash, uint256 amount) public {
         checkIfApiPayerOrPricingOperator(msg.sender);
         revertIfNoAccountAccess(apiKeyHash);
+        revertIfNotMasterAccount(apiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
         uint256 masterAccountApiKeyHash = s.allApiKeyHashes[apiKeyHash];
@@ -337,6 +349,14 @@ contract AccountConfigWrite {
     }
 
     // ----- internal view helpers (revert helpers call view from Views facet conceptually; we duplicate for simplicity) -----
+    function revertIfNotMasterAccount(uint256 accountApiKeyHash) private view {
+        LibAccountConfigStorage.AccountConfigStorage
+            storage s = LibAccountConfigStorage.getStorage();
+        if (s.allApiKeyHashes[accountApiKeyHash] != accountApiKeyHash) {
+            revert LibAccountConfigStorage.NotMasterAccount(accountApiKeyHash);
+        }
+    }
+
 
     function revertIfNoAccountAccess(uint256 accountApiKeyHash) private view {
         LibAccountConfigStorage.revertIfNoAccountAccess(
