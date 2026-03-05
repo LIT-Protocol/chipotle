@@ -6,7 +6,11 @@ pub async fn pkp_id_to_derviation_path(api_key: &str, pkp_id: &str) -> Result<St
     let src =
         &hex_to_bytes(pkp_id).map_err(|e| format!("Error converting PKP ID to bytes: {:?}", e))?;
     if src.len() != 20 {
-        return Err(format!("Invalid PKP ID length: {} (expected 20): Ppk Id {}", src.len(), pkp_id));
+        return Err(format!(
+            "Invalid PKP ID length: {} (expected 20): Ppk Id {}",
+            src.len(),
+            pkp_id
+        ));
     }
     let wallet_address = H160::from_slice(src);
     let derivation_u256 =

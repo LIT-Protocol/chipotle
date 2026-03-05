@@ -9,7 +9,6 @@ use crate::accounts::signable_contract::{
 };
 use ethers::types::{H160, U256};
 use ethers::utils::keccak256;
-use lit_core::utils::binary::hex_to_bytes;
 
 pub fn api_key_hash(api_key_base_64: &str) -> U256 {
     U256::from_big_endian(&keccak256(api_key_base_64.as_bytes()))
@@ -17,10 +16,6 @@ pub fn api_key_hash(api_key_base_64: &str) -> U256 {
 
 /// keccak256 of wallet address bytes (hex string with or without 0x) as U256.
 pub fn wallet_address_hash(wallet_address: H160) -> U256 {
-    U256::from_big_endian(&keccak256(wallet_address.as_bytes()))
-}
-
-pub fn derivation_path(wallet_address: H160) -> U256 {
     U256::from_big_endian(&keccak256(wallet_address.as_bytes()))
 }
 
