@@ -3,6 +3,7 @@ use rocket::{Route, get, routes};
 use serde::Serialize;
 
 use super::dstack;
+use dstack_sdk::dstack_client;
 
 /// Response for GET /attestation — per [Phala Get Attestation](https://docs.phala.com/phala-cloud/attestation/get-attestation).
 /// Verifiers fetch this to validate the CVM runs in genuine TEE hardware.
@@ -40,7 +41,7 @@ async fn attestation() -> Result<Json<AttestationResponse>, (rocket::http::Statu
 /// [Phala Get Attestation](https://docs.phala.com/phala-cloud/attestation/get-attestation).
 /// Verifiers use tcb_info.app_compose and compose_hash for compose-hash verification.
 #[get("/info")]
-async fn info() -> Result<Json<dstack::InfoResponse>, (rocket::http::Status, String)> {
+async fn info() -> Result<Json<dstack_client::InfoResponse>, (rocket::http::Status, String)> {
     match dstack::get_info().await {
         Ok(i) => Ok(Json(i)),
         Err(e) => Err((rocket::http::Status::ServiceUnavailable, e)),
