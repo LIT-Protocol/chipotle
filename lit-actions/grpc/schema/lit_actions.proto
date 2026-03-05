@@ -98,18 +98,18 @@ message ExecuteJsResponse {
 
   message SignRequest {
     bytes to_sign = 1;
-    string public_key = 2;
+    string pkp_id = 2;
     string sig_name = 3;
     string signing_scheme = 4;
   }
 
   message AesEncryptRequest {
-    string public_key = 1;
+    string pkp_id = 1;
     string message = 2;    
   }
 
   message AesDecryptRequest {
-    string public_key = 1;
+    string pkp_id = 1;
     string ciphertext = 2;
   }
 

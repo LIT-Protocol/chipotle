@@ -22,7 +22,7 @@ pub struct CreateWalletResponse {
 pub struct SignWithPkpResponse {
     pub signing_scheme: String,
     pub signed_digest: String,
-    pub public_key: String,
+    pub pkp_id: String,
     pub signature: String,
 }
 
@@ -31,7 +31,7 @@ impl From<SignedData> for SignWithPkpResponse {
         Self {
             signing_scheme: signed_data.signing_scheme,
             signed_digest: signed_data.digest,
-            public_key: signed_data.public_key,
+            pkp_id: signed_data.pkp_id,
             signature: signed_data.signature,
         }
     }

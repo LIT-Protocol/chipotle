@@ -50,13 +50,10 @@ impl Client {
                 }
                 .into()
             }
-            UnionResponse::AesEncrypt(AesEncryptRequest {
-                public_key,
-                message,
-            }) => {
+            UnionResponse::AesEncrypt(AesEncryptRequest { pkp_id, message }) => {
                 let encrypted = op_code_helpers::encryption::aes_encrypt_with_pkp(
                     &self.api_key,
-                    &public_key,
+                    &pkp_id,
                     &message,
                 )
                 .await?;
@@ -65,13 +62,10 @@ impl Client {
                 }
                 .into()
             }
-            UnionResponse::AesDecrypt(AesDecryptRequest {
-                public_key,
-                ciphertext,
-            }) => {
+            UnionResponse::AesDecrypt(AesDecryptRequest { pkp_id, ciphertext }) => {
                 let decrypted = op_code_helpers::encryption::aes_decrypt_with_pkp(
                     &self.api_key,
-                    &public_key,
+                    &pkp_id,
                     &ciphertext,
                 )
                 .await?;
@@ -82,13 +76,13 @@ impl Client {
             }
             UnionResponse::Sign(SignRequest {
                 to_sign,
-                public_key,
+                pkp_id,
                 sig_name,
                 signing_scheme,
             }) => {
                 let (sig_name, signed_data) = match op_code_helpers::signing::sign_with_pkp(
                     &self.api_key,
-                    &public_key,
+                    &pkp_id,
                     &to_sign,
                     &sig_name,
                     &signing_scheme,

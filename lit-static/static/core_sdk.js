@@ -21,7 +21,7 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
 /**
  * @typedef {Object} SignWithPkpOptions
  * @property {string} apiKey - Hex-encoded API key (from getApiKey)
- * @property {string} pkpPublicKey - PKP public key
+ * @property {string} pkpId - PKP ID
  * @property {string} message - Message to sign
  * @property {string} [signingScheme='EcdsaK256Sha256'] - Signing scheme (use SIGNING_SCHEME_ECDSA_K256_SHA256)
  */
@@ -57,14 +57,14 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @typedef {Object} AddPkpToGroupOptions
  * @property {string} apiKey - Account API key
  * @property {string} groupId - Group ID (decimal or hex string)
- * @property {string} pkpPublicKey - PKP public key (will be hashed on server)
+ * @property {string} pkpId - PKP ID
  */
 
 /**
  * @typedef {Object} RemovePkpFromGroupOptions
  * @property {string} apiKey - Account API key
  * @property {string} groupId - Group ID (decimal or hex string)
- * @property {string} pkpPublicKey - PKP public key (must match value used when adding)
+ * @property {string} pkpId - PKP ID (must match value used when adding)
  */
 
 /**
@@ -198,7 +198,7 @@ export const SHARE_TYPE_BLS = 'Bls';
  * @typedef {Object} SignWithPkpResponse
  * @property {string} signing_scheme - Signing scheme (e.g. EcdsaK256Sha256)
  * @property {string} signed_digest - Signed digest (hex)
- * @property {string} public_key - Public key (hex)
+ * @property {string} pkp_id - PKP ID
  * @property {string} share_type - 'Ecdsa' | 'Frost' | 'Bls'
  * @property {string} [big_r] - ECDSA big R (optional)
  * @property {string} [compressed_public_key] - Compressed public key (optional)
@@ -347,11 +347,11 @@ export class LitNodeSimpleApiClient {
    * Signs a message with the given PKP using the provided API key.
    * Uses EcdsaK256Sha256 signing scheme by default.
    * @param {SignWithPkpOptions} options
-   * @returns {Promise<SignWithPkpResponse>} { signing_scheme, signed_digest, public_key, share_type, shares, ... }
+   * @returns {Promise<SignWithPkpResponse>} { signing_scheme, signed_digest, pkp_id, signature }
    */
-  async signWithPkp({ apiKey, pkpPublicKey, message, signingScheme = SIGNING_SCHEME_ECDSA_K256_SHA256 }) {
+  async signWithPkp({ apiKey, pkpId, message, signingScheme = SIGNING_SCHEME_ECDSA_K256_SHA256 }) {
     const body = {
-      pkp_public_key: pkpPublicKey,
+      pkp_id: pkpId,
       message,
       signing_scheme: signingScheme,
     };
@@ -443,10 +443,10 @@ export class LitNodeSimpleApiClient {
    * @param {AddPkpToGroupOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async addPkpToGroup({ apiKey, groupId, pkpPublicKey }) {
+  async addPkpToGroup({ apiKey, groupId, pkpId }) {
     const body = {
       group_id: groupId,
-      pkp_public_key: pkpPublicKey,
+      pkp_id: pkpId,
     };
     const res = await fetch(`${this.baseUrl}/add_pkp_to_group`, {
       method: 'POST',
@@ -462,10 +462,10 @@ export class LitNodeSimpleApiClient {
    * @param {RemovePkpFromGroupOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async removePkpFromGroup({ apiKey, groupId, pkpPublicKey }) {
+  async removePkpFromGroup({ apiKey, groupId, pkpId }) {
     const body = {
       group_id: groupId,
-      pkp_public_key: pkpPublicKey,
+      pkp_id: pkpId,
     };
     const res = await fetch(`${this.baseUrl}/remove_pkp_from_group`, {
       method: 'POST',
