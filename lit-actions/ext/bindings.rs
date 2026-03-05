@@ -4,7 +4,6 @@ use std::rc::Rc;
 use deno_core::{OpState, extension, op2};
 use deno_error::JsErrorBox;
 use lit_actions_grpc::proto::*;
-use serde_json::json;
 use tracing::instrument;
 
 use crate::macros::*;
@@ -116,77 +115,6 @@ async fn op_sign(
 #[instrument(skip_all, ret)]
 #[op2(async, reentrant)]
 #[string]
-async fn op_sign_as_action(
-    state: Rc<RefCell<OpState>>,
-    #[buffer(copy)] to_sign: Vec<u8>,
-    #[string] sig_name: String,
-    #[string] signing_scheme: String,
-) -> Result<String, JsErrorBox> {
-    ensure_not_empty!(to_sign, "toSign");
-    ensure_not_blank!(sig_name, "sigName");
-    ensure_not_blank!(signing_scheme, "signingScheme");
-
-    remote_op_async!(op_sign_as_action,
-        state,
-        SignAsActionRequest {
-            to_sign,
-            sig_name,
-            signing_scheme,
-        },
-        UnionRequest::SignAsAction(resp) => Ok(resp.result)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-#[string]
-async fn op_get_action_public_key(
-    state: Rc<RefCell<OpState>>,
-    #[string] signing_scheme: String,
-    #[string] action_ipfs_cid: String,
-) -> Result<String, JsErrorBox> {
-    ensure_not_blank!(signing_scheme, "signingScheme");
-    ensure_not_blank!(action_ipfs_cid, "actionIpfsCid");
-
-    remote_op_async!(op_get_action_public_key,
-        state,
-        GetActionPublicKeyRequest {
-            signing_scheme,
-            action_ipfs_cid,
-        },
-        UnionRequest::GetActionPublicKey(resp) => Ok(resp.result)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-async fn op_verify_action_signature(
-    state: Rc<RefCell<OpState>>,
-    #[string] signing_scheme: String,
-    #[string] action_ipfs_cid: String,
-    #[buffer(copy)] to_sign: Vec<u8>,
-    #[string] sign_output: String,
-) -> Result<bool, JsErrorBox> {
-    ensure_not_empty!(to_sign, "toSign");
-    ensure_not_blank!(signing_scheme, "signingScheme");
-    ensure_not_blank!(action_ipfs_cid, "actionIpfsCid");
-    ensure_not_blank!(sign_output, "signOutput");
-
-    remote_op_async!(op_verify_action_signature,
-        state,
-        VerifyActionSignatureRequest {
-            signing_scheme,
-            action_ipfs_cid,
-            to_sign,
-            sign_output,
-        },
-        UnionRequest::VerifyActionSignature(resp) => Ok(resp.result)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-#[string]
 async fn op_aes_encrypt(
     state: Rc<RefCell<OpState>>,
     #[string] pkp_id: String,
@@ -217,26 +145,6 @@ async fn op_aes_decrypt(
         state,
         AesDecryptRequest { pkp_id, ciphertext },
         UnionRequest::AesDecrypt(resp) => Ok(resp.plaintext)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-#[string]
-async fn op_get_latest_nonce(
-    state: Rc<RefCell<OpState>>,
-    #[serde] address: ethabi::ethereum_types::Address,
-    #[string] chain: String,
-) -> Result<String, JsErrorBox> {
-    ensure_not_blank!(chain);
-
-    remote_op_async!(op_get_latest_nonce,
-        state,
-        GetLatestNonceRequest {
-            address: format!("{address:x}"),
-            chain,
-        },
-        UnionRequest::GetLatestNonce(resp) => Ok(resp.nonce)
     )
 }
 
@@ -280,39 +188,6 @@ async fn op_call_child(
 
 #[instrument(skip_all, ret)]
 #[op2(async, reentrant)]
-#[string]
-async fn op_get_rpc_url(
-    state: Rc<RefCell<OpState>>,
-    #[string] chain: String,
-) -> Result<String, JsErrorBox> {
-    remote_op_async!(op_get_rpc_url,
-        state,
-        GetRpcUrlRequest { chain },
-        UnionRequest::GetRpcUrl(resp) => Ok(resp.result)
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
-#[serde]
-async fn op_encrypt_bls(
-    state: Rc<RefCell<OpState>>,
-    #[serde] access_control_conditions: Vec<serde_json::Value>, // Vec<UnifiedAccessControlConditionItem>
-    #[buffer(copy)] to_encrypt: Vec<u8>,
-    #[string] _key_set_id: String,
-) -> Result<serde_json::Value, JsErrorBox> {
-    remote_op_async!(op_encrypt_bls,
-        state,
-        EncryptBlsRequest {
-            access_control_conditions: serde_json::to_vec(&access_control_conditions).map_err(JsErrorBox::from_err)?,
-            to_encrypt,
-        },
-        UnionRequest::EncryptBls(resp) => Ok(json!({"ciphertext": resp.ciphertext, "dataToEncryptHash": resp.data_to_encrypt_hash}))
-    )
-}
-
-#[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
 async fn op_update_resource_usage(
     state: Rc<RefCell<OpState>>,
     tick: u32,
@@ -347,15 +222,9 @@ extension!(
         op_aes_encrypt,
         op_call_child,
         op_call_contract,
-        op_get_latest_nonce,
         op_increment_fetch_count,
         op_set_response,
         op_sign,
-        op_sign_as_action,
-        op_get_action_public_key,
-        op_verify_action_signature,
-        op_get_rpc_url,
-        op_encrypt_bls,
         op_update_resource_usage,
     ],
     esm_entry_point = "ext:lit_actions/99_patches.js",
@@ -363,9 +232,7 @@ extension!(
         dir "js",
         "00_ethers.js",
         "00_viem.js",
-        "01_uint8arrays.js",
         "02_litActionsSDK.js",
-        "03_jsonwebtoken.js",
         "06_litActionsSDK_viem.js",
         "99_patches.js",
     ],

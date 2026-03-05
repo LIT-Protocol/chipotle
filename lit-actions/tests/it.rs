@@ -104,10 +104,6 @@ impl TestClient {
                 self.messages.put(req);
                 self.messages.take::<AesDecryptResponse>().into()
             }
-            UnionResponse::GetLatestNonce(req) => {
-                self.messages.put(req);
-                self.messages.take::<GetLatestNonceResponse>().into()
-            }
             UnionResponse::CallContract(req) => {
                 self.messages.put(req);
                 self.messages.take::<CallContractResponse>().into()
@@ -116,39 +112,15 @@ impl TestClient {
                 self.messages.put(req);
                 self.messages.take::<CallChildResponse>().into()
             }
-            UnionResponse::GetRpcUrl(req) => {
-                self.messages.put(req);
-                self.messages.take::<GetRpcUrlResponse>().into()
-            }
             UnionResponse::AesEncrypt(req) => {
                 self.messages.put(req);
                 self.messages.take::<AesEncryptResponse>().into()
-            }
-            UnionResponse::EncryptBls(req) => {
-                self.messages.put(req);
-                self.messages.take::<EncryptBlsResponse>().into()
-            }
-            UnionResponse::DecryptBls(req) => {
-                self.messages.put(req);
-                self.messages.take::<DecryptBlsResponse>().into()
             }
             UnionResponse::UpdateResourceUsage(req) => {
                 self.messages.put(req);
                 self.messages.take::<UpdateResourceUsageResponse>().into()
             }
             UnionResponse::Result(_) => unreachable!(), // handled in main loop
-            UnionResponse::SignAsAction(req) => {
-                self.messages.put(req);
-                self.messages.take::<SignAsActionResponse>().into()
-            }
-            UnionResponse::GetActionPublicKey(req) => {
-                self.messages.put(req);
-                self.messages.take::<GetActionPublicKeyResponse>().into()
-            }
-            UnionResponse::VerifyActionSignature(req) => {
-                self.messages.put(req);
-                self.messages.take::<VerifyActionSignatureResponse>().into()
-            }
         }
     }
 
@@ -411,45 +383,6 @@ async fn aes_decrypt(mut client: TestClient) {
 
 #[rstest]
 #[tokio::test]
-async fn get_latest_nonce(mut client: TestClient) {
-    {
-        client
-            .respond_with(GetLatestNonceResponse {
-                nonce: "ignored".to_string(),
-            })
-            .execute_js(
-                r#"(async () => { await LitActions.getLatestNonce({address: "0x4ebde54ba404be158262fbf4901c276c400e4ae3", chain: "some-chain"}) })()"#,
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(
-            client.received::<GetLatestNonceRequest>(),
-            GetLatestNonceRequest {
-                address: "4ebde54ba404be158262fbf4901c276c400e4ae3".to_string(),
-                chain: "some-chain".to_string(),
-            }
-        );
-        assert!(client.received::<ExecutionResult>().success);
-    }
-
-    {
-        let res = client
-            .execute_js(
-                r#"(async () => { await LitActions.getLatestNonce({address: "invalid", chain: "some-chain"}) })()"#,
-            )
-            .await;
-
-        assert_eq!(
-            res.unwrap_err().to_string().lines().next().unwrap(),
-            "Uncaught (in promise) TypeError: invalid length 7, expected a (both 0x-prefixed or not) hex string or byte array containing 20 bytes",
-        );
-        assert_eq!(client.received::<ExecutionResult>().success, false);
-    }
-}
-
-#[rstest]
-#[tokio::test]
 async fn call_child(mut client: TestClient) {
     {
         client
@@ -509,28 +442,6 @@ async fn call_contract(mut client: TestClient) {
             txn: "some-txn".to_string(),
         }
     );
-    assert!(client.received::<ExecutionResult>().success);
-}
-
-#[rstest]
-#[tokio::test]
-async fn jwt_decode(mut client: TestClient) {
-    let code = indoc! {r#"
-        const decoded = jwt.decode(token, { complete: true })
-        LitActions.setResponse({response: decoded.payload.loggedInAs})
-    "#};
-
-    client
-        .respond_with(SetResponseResponse {})
-        .execute_js(ExecutionRequest {
-            code: code.into(),
-            js_params: Some(b"{\"token\":\"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJsb2dnZWRJbkFzIjoiYWRtaW4iLCJpYXQiOjE0MjI3Nzk2Mzh9.gzSraSYS8EXBxLN_oWnFSRgCzcmJmMjLiuyu5CSpyHI\"}".into()),
-            ..Default::default()
-        })
-        .await
-        .unwrap();
-
-    assert_eq!(client.received::<SetResponseRequest>().response, "admin");
     assert!(client.received::<ExecutionResult>().success);
 }
 

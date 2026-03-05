@@ -74,9 +74,6 @@ impl Client {
                 }
                 .into()
             }
-            UnionResponse::GetLatestNonce(GetLatestNonceRequest { .. }) => {
-                bail!("GetLatestNonce is not implemented");
-            }
             UnionResponse::Sign(SignRequest {
                 to_sign,
                 pkp_id,
@@ -110,11 +107,13 @@ impl Client {
                 ipfs_id: _,
                 params: _,
             }) => {
-                // self.pay(LitActionPriceComponent::CallDepth, 1).await?;
+                bail!("CallChild is not implemented - missing IPFS caching");
 
-                // info!(
-                //     "Calling child action: {:?}, self keyset id: {:?}",
-                //     ipfs_id, self.key_set_id
+                // // self.pay(LitActionPriceComponent::CallDepth, 1).await?;
+
+                // tracing::info!(
+                //     "Calling child action: {:?}",
+                //     ipfs_id
                 // );
                 // call_depth += 1;
                 // if call_depth > self.max_call_depth {
@@ -124,7 +123,8 @@ impl Client {
                 //     );
                 // }
 
-                // // Pull down the lit action code from IPFS
+                // TODO: Implement IPFS caching - or pull from Lit-Peer?
+                // Pull down the lit action code from IPFS
                 // let code = crate::utils::web::get_ipfs_file(
                 //     &ipfs_id,
                 //     self.lit_config(),
@@ -137,38 +137,17 @@ impl Client {
                 //     .map(|params| serde_json::from_slice::<serde_json::Value>(&params))
                 //     .transpose()?;
 
-                // let auth_context = {
-                //     let mut ctx = auth_context.clone();
-                //     ctx.action_ipfs_id_stack.push(ipfs_id.clone());
-                //     ctx
-                // };
-
                 // // NB: Using execute_js_inner instead of execute_js to avoid resetting state
-                // let res = Box::pin(self.execute_js_inner(code, globals, &auth_context, call_depth))
+                // let res = Box::pin(self.execute_js_inner(code, globals,  call_depth))
                 //     .await?;
 
                 // CallChildResponse {
                 //     response: res.response,
                 // }
                 // .into()
-                bail!("CallChild is not implemented");
             }
             UnionResponse::CallContract(CallContractRequest { .. }) => {
                 bail!("CallContract is not implemented");
-            }
-            UnionResponse::GetRpcUrl(GetRpcUrlRequest { .. }) => {
-                bail!("GetRpcUrl is not implemented");
-            }
-            UnionResponse::EncryptBls(EncryptBlsRequest {
-                access_control_conditions: _,
-                to_encrypt: _,
-            }) => {
-                // use lit_rust_crypto::blsful::Bls12381G1;
-
-                bail!("EncryptBls is not implemented");
-            }
-            UnionResponse::DecryptBls(DecryptBlsRequest { .. }) => {
-                bail!("DecryptBls is not implemented");
             }
             UnionResponse::UpdateResourceUsage(UpdateResourceUsageRequest {
                 tick: _,
@@ -181,27 +160,6 @@ impl Client {
                 // let cancel_action = r.is_err();
                 let cancel_action = false;
                 UpdateResourceUsageResponse { cancel_action }.into()
-            }
-            UnionResponse::SignAsAction(SignAsActionRequest {
-                to_sign: _,
-                sig_name: _,
-                signing_scheme: _,
-            }) => {
-                bail!("SignAsAction is not implemented");
-            }
-            UnionResponse::GetActionPublicKey(GetActionPublicKeyRequest {
-                signing_scheme: _,
-                action_ipfs_cid: _,
-            }) => {
-                bail!("GetActionPublicKey is not implemented");
-            }
-            UnionResponse::VerifyActionSignature(VerifyActionSignatureRequest {
-                signing_scheme: _,
-                action_ipfs_cid: _,
-                to_sign: _,
-                sign_output: _,
-            }) => {
-                bail!("VerifyActionSignature is not implemented");
             }
             UnionResponse::Result(_) => unreachable!(), // handled in main loop
         })
