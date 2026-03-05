@@ -468,9 +468,11 @@ pub async fn get_chain_info() -> Result<NodeChainConfigResponse, ApiStatus> {
     })
 }
 
+const MAX_API_PAYER_NUMBER: u16 = 10;
+
 pub async fn get_api_payers() -> Result<Vec<String>, ApiStatus> {
     let mut api_payers = Vec::new();
-    for payer_number in 1..=10 {
+    for payer_number in 1u16..=MAX_API_PAYER_NUMBER {
         let api_payer = dstack::v1::get_lit_payer_key(payer_number)
             .await
             .map_err(|e| {
