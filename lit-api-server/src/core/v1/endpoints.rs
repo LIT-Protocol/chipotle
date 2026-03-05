@@ -149,6 +149,7 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         list_wallets_in_group,
         list_actions,
         get_node_chain_config,
+        get_api_payers,
     ]
 }
 
@@ -458,5 +459,13 @@ async fn list_actions(
 async fn get_node_chain_config() -> OpenApiResponse<NodeChainConfigResponse, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(account_management::get_chain_info().await).into(),
+    }
+}
+
+#[openapi(tag = "Account Management")]
+#[get("/get_api_payers")]
+async fn get_api_payers() -> OpenApiResponse<Vec<String>, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(account_management::get_api_payers().await).into(),
     }
 }

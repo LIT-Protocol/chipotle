@@ -25,6 +25,10 @@ contract AccountConfigViews {
         return LibAccountConfigStorage.getStorage().pricing_operator;
     }
 
+    function owner() public view returns (address) {
+        return LibAccountConfigStorage.getStorage().owner;
+    }
+
     function nextWalletCount() public view returns (uint256) {
         return LibAccountConfigStorage.getStorage().nextWalletCount;
     }

@@ -38,7 +38,7 @@ async fn main() -> Result<(), rocket::Error> {
         std::process::exit(1);
     }
 
-    if let Err(e) = accounts::signable_contract::init_chain_clients() {
+    if let Err(e) = accounts::signable_contract::init_chain_clients().await {
         eprintln!("Failed to initialize signing client: {:?}. Exiting.", e);
         std::process::exit(1);
     }

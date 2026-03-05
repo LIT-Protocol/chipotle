@@ -1,6 +1,7 @@
 pub use crate::abstractions::transfer::chain_info::Chain;
 pub use crate::accounts::contracts::account_config_contract::AccountConfig;
 use crate::config::GLOBAL_NODE_CONFIG;
+use crate::dstack::v1::get_lit_payer_key;
 pub use anyhow::Result;
 use ethers::middleware::NonceManagerMiddleware;
 pub use ethers::middleware::SignerMiddleware;
@@ -29,15 +30,16 @@ static GLOBAL_READ_ONLY_CLIENT: OnceLock<Arc<Provider<Http>>> = OnceLock::new();
 
 /// Initialise the global signing client. Must be called once at startup,
 /// after `init_config()`, before any transactions are sent.
-pub(crate) fn init_chain_clients() -> Result<()> {
+pub(crate) async fn init_chain_clients() -> Result<()> {
     let node_config = GLOBAL_NODE_CONFIG
         .get()
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))?;
     let chain_info = node_config.chain.info();
-    let secret = hex_to_bytes(&node_config.secret)?;
+    let secret = get_lit_payer_key(1).await.map_err(|e| anyhow::anyhow!(e))?;
 
     let wallet = LocalWallet::from_bytes(&secret)?.with_chain_id(chain_info.chain_id);
     let address = wallet.address();
+    tracing::info!("API Payer wallet address: {:?}", address);
     let provider = Provider::<Http>::try_from(chain_info.rpc_url)?.interval(Duration::from_secs(2));
     let signer = SignerMiddleware::new(provider, wallet);
 

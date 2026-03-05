@@ -158,8 +158,16 @@
       <div class="results" id="results" style="display: none">
         <h2>Contract values</h2>
         <div class="result-row">
+          <span class="result-label">owner()</span
+          ><span class="result-value" id="val-owner">—</span>
+        </div>
+        <div class="result-row">
           <span class="result-label">api_payer()</span
           ><span class="result-value" id="val-api-payer">—</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">api_payer balance</span
+          ><span class="result-value" id="val-api-payer-balance">—</span>
         </div>
         <div class="result-row">
           <span class="result-label">pricing_operator()</span
@@ -179,6 +187,72 @@
         </div>
       </div>
       <div class="error" id="error" style="display: none"></div>
+    </div>
+
+    <div class="card" style="margin-top: 1.5rem">
+      <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Node Chain Config</h2>
+      <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+        Calls <code>GET /core/v1/get_node_chain_config</code> and displays the node's chain configuration.
+      </p>
+      <div class="form-group">
+        <label for="chain-config-server-url">API server URL</label>
+        <input
+          type="text"
+          id="chain-config-server-url"
+          placeholder="https://api.dev.litprotocol.com"
+          value="http://localhost:8000"
+        />
+      </div>
+      <button type="button" id="btn-get-chain-config">Fetch</button>
+      <div id="chain-config-results" style="display: none; margin-top: 1rem">
+        <div class="result-row"><span class="result-label">chain_name</span><span class="result-value" id="cc-chain-name">—</span></div>
+        <div class="result-row"><span class="result-label">chain_id</span><span class="result-value" id="cc-chain-id">—</span></div>
+        <div class="result-row"><span class="result-label">is_evm</span><span class="result-value" id="cc-is-evm">—</span></div>
+        <div class="result-row"><span class="result-label">testnet</span><span class="result-value" id="cc-testnet">—</span></div>
+        <div class="result-row"><span class="result-label">token</span><span class="result-value" id="cc-token">—</span></div>
+        <div class="result-row"><span class="result-label">rpc_url</span><span class="result-value" id="cc-rpc-url">—</span></div>
+        <div class="result-row"><span class="result-label">contract_address</span><span class="result-value" id="cc-contract-address">—</span></div>
+      </div>
+      <div id="chain-config-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+    </div>
+
+    <div class="card" style="margin-top: 1.5rem">
+      <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Get API Payers</h2>
+      <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+        Calls <code>GET /core/v1/get_api_payers</code> and lists the derived payer wallet addresses.
+      </p>
+      <div class="form-group">
+        <label for="api-server-url">API server URL</label>
+        <input
+          type="text"
+          id="api-server-url"
+          placeholder="https://api.dev.litprotocol.com"
+          value="http://localhost:8000"
+        />
+      </div>
+      <button type="button" id="btn-get-api-payers">Fetch</button>
+      <div id="api-payers-results" style="display: none; margin-top: 1rem">
+        <div id="api-payers-list"></div>
+      </div>
+      <div id="api-payers-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+    </div>
+
+    <div class="card" style="margin-top: 1.5rem">
+      <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Set api_payer</h2>
+      <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+        Calls <code>setApiPayer(address)</code> on the contract. Only the current
+        <code>api_payer</code> can call this. Requires MetaMask.
+      </p>
+      <div class="form-group">
+        <label for="new-api-payer">New api_payer address</label>
+        <input
+          type="text"
+          id="new-api-payer"
+          placeholder="0x…"
+        />
+      </div>
+      <button type="button" id="btn-set-api-payer">Update api_payer</button>
+      <div id="write-status" style="display: none; font-size: 0.85rem; margin-top: 0.75rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.umd.min.js"></script>

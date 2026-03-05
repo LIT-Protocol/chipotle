@@ -127,6 +127,34 @@ function Decrypt({ pkpId, ciphertext }) {
 }
 
 /**
+ * Get the RPC URL for a given blockchain
+ * @name Lit.Actions.getRpcUrl
+ * @function getRpcUrl
+ * @param {Object} params
+ * @param {string} params.chain The chain to get the RPC URL for
+ * @returns {Promise<string>} The RPC URL for the chain
+ */
+function getRpcUrl({ chain }) {
+  return ops.op_get_rpc_url(chain);
+}
+
+/**
+ * Encrypt data using BLS encryption with access control conditions
+ * @name Lit.Actions.encrypt_bls
+ * @function encrypt_bls
+ * @param {Object} params
+ * @param {Array<Object>} params.accessControlConditions The access control conditions that must be met to decrypt
+ * @param {string} params.to_encrypt The message to encrypt
+ * @returns {Promise<{ciphertext: string, dataToEncryptHash: string}>} An object containing the ciphertext and the hash of the data that was encrypted
+ */
+function encrypt_bls({
+  accessControlConditions,
+  to_encrypt,  
+}) {
+  return ops.op_encrypt_bls(accessControlConditions, to_encrypt, "");
+}
+
+/**
  * @name Lit.Actions.Encrypt
  * @function Encrypt
  * @param {Object} params
