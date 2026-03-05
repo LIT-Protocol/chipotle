@@ -19,17 +19,17 @@ function getLatestNonce({ address, chain }) {
  * @function signEcdsa
  * @param {Object} params
  * @param {Uint8Array} params.toSign The message to sign
- * @param {string} params.publicKey The public key of the PKP
+ * @param {string} params.pkpId The ID of the PKP
  * @param {string} params.sigName The name of the signature
  * @returns {Promise<Uint8Array>} The resulting signature
  */
-function signEcdsa({ toSign, publicKey, sigName}) {
-  return sign({ toSign, publicKey, sigName, signingScheme: "EcdsaK256Sha256" });
+function signEcdsa({ toSign, pkpId, sigName}) {
+  return sign({ toSign, pkpId, sigName, signingScheme: "EcdsaK256Sha256" });
 }
 
 /**
  * @param {Uint8array} toSign the message to sign
- * @param {string} publicKey the public key of the PKP
+ * @param {string} pkpId the ID of the PKP
  * @param {string} sigName the name of the signature
  * @param {string} signingScheme the name of the signing scheme
  *   one of the following
@@ -51,10 +51,10 @@ function signEcdsa({ toSign, publicKey, sigName}) {
  * @function sign
  * @returns {Uint8Array} The resulting signature 
  */
-function sign({ toSign, publicKey, sigName, signingScheme }) {
+function sign({ toSign, pkpId, sigName, signingScheme }) {
   return ops.op_sign(
     new Uint8Array(toSign),
-    publicKey,
+    pkpId,
     sigName,
     signingScheme,
   );
@@ -208,12 +208,12 @@ function uint8arrayFromString(...args) {
  * @name Lit.Actions.Decrypt
  * @function Decrypt
  * @param {Object} params
- * @param {string} params.publicKey The public key of the PKP
+ * @param {string} params.pkpId The ID of the PKP
  * @param {string} params.ciphertext The ciphertext to decrypt
  * @returns {Promise<string>} The decrypted plaintext
  */
-function Decrypt({ publicKey, ciphertext }) {
-  return ops.op_aes_decrypt(publicKey, ciphertext);
+function Decrypt({ pkpId, ciphertext }) {
+  return ops.op_aes_decrypt(pkpId, ciphertext);
 }
 
 /**
@@ -248,16 +248,16 @@ function encrypt_bls({
  * @name Lit.Actions.Encrypt
  * @function Encrypt
  * @param {Object} params
- * @param {string} params.publicKey The public key of the PKP
+ * @param {string} params.pkpId The ID of the PKP
  * @param {string} params.message The message to encrypt
  * @returns {Promise<string>} The ciphertext
  */
 
 function Encrypt({
-  publicKey,
+  pkpId,
   message,
 }) {
-  return ops.op_aes_encrypt(publicKey, message);
+  return ops.op_aes_encrypt(pkpId, message);
 }
 
 globalThis.LitActions = {

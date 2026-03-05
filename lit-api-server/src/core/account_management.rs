@@ -11,7 +11,7 @@ use crate::core::v1::models::response::{
     AccountOpResponse, AddUsageApiKeyResponse, ApiKeyItem, CreateWalletResponse, ListMetadataItem,
     NewAccountResponse, NodeChainConfigResponse, WalletItem,
 };
-use crate::dstack::v1::get_key;
+use crate::dstack::v1::get_client_key;
 use elliptic_curve::group::GroupEncoding;
 use ethers::types::{H160, U256};
 use ethers::utils::keccak256;
@@ -48,39 +48,41 @@ fn parse_u256_hex_list(strings: &[String]) -> Result<Vec<U256>, ApiStatus> {
 
 fn get_random_secret() -> [u8; 32] {
     let mut secret: [u8; 32] = [0; 32];
-
     // Get a thread-local random number generator and fill the array.
     rand::thread_rng().fill(&mut secret);
     secret
 }
 
-async fn create_new_wallet() -> Result<(String, H160, [u8; 32]), ApiStatus> {
-    let wallet_seed_id = bytes_to_hex(get_random_secret());
+// Generate a unique derivation path for a new wallet.
+fn generate_unique_derivation_path() -> Result<(U256, String), ApiStatus> {
+    let seed_bytes = get_random_secret();
+    let derivation_bytes = keccak256(seed_bytes);
+    let derivation_u256 = U256::from_big_endian(&derivation_bytes);
+    let derivation_path = bytes_to_hex(derivation_bytes);
+    Ok((derivation_u256, derivation_path))
+}
 
-    let path = format!("clients/{}", wallet_seed_id);
-    let purpose = "client";
-    let key_response = get_key(path.as_str(), purpose)
-        .await
-        .map_err(|e| ApiStatus::internal_server_error(anyhow::anyhow!(e), "get_key failed"))?;
-    let secret = key_response
-        .decode_key()
-        .map_err(|e| ApiStatus::internal_server_error(anyhow::anyhow!(e), "decode_key failed"))?;
-
-    let secret: [u8; 32] = secret.try_into().map_err(|s: Vec<u8>| {
-        ApiStatus::internal_server_error(
-            anyhow::anyhow!("secret wrong length: {}", s.len()),
-            "secret wrong length",
-        )
+// Create a new wallet and return the public key, wallet address, and secret.
+async fn create_new_wallet() -> Result<(String, H160, [u8; 32], U256), ApiStatus> {
+    let (derivation_u256, derivation_path) = generate_unique_derivation_path()?;
+    tracing::info!(
+        "Creating new wallet with derivation path: {}",
+        derivation_path
+    );
+    let secret: [u8; 32] = get_client_key(&derivation_path).await.map_err(|e| {
+        ApiStatus::internal_server_error(anyhow::anyhow!(e), "get_client_key failed")
     })?;
 
-    let secret_key = SecretKey::from_slice(&secret).unwrap();
+    let secret_key = SecretKey::from_slice(&secret).map_err(|e| {
+        ApiStatus::internal_server_error(anyhow::anyhow!(e), "SecretKey::from_slice failed")
+    })?;
     let public_key = secret_key.public_key();
+
     let public_key_bytes = public_key.as_affine().to_bytes();
-
     let public_key_string = bytes_to_hex(public_key_bytes);
-    let wallet_address = accounts::address_from_pubkey_bytes(&public_key_bytes)?;
+    let wallet_address = H160::from_slice(&keccak256(public_key_bytes)[12..]);
 
-    Ok((public_key_string, wallet_address, secret))
+    Ok((public_key_string, wallet_address, secret, derivation_u256))
 }
 
 pub async fn new_account(
@@ -89,7 +91,7 @@ pub async fn new_account(
     let account_name = new_account_request.account_name.clone();
     let account_description = new_account_request.account_description.clone();
 
-    let (_public_key, wallet_address, secret) = create_new_wallet().await?;
+    let (_public_key, wallet_address, secret, derivation_path) = create_new_wallet().await?;
     let api_key = base64_light::base64_encode_bytes(&secret);
 
     if let Err(e) = accounts::new_account(
@@ -104,7 +106,6 @@ pub async fn new_account(
     }
 
     // technically this is NOT a derivaton path at all, but it's a stand-in for now
-    let derivation_path = accounts::derivation_path(wallet_address);
     accounts::register_wallet_derivation(
         &api_key,
         wallet_address,
@@ -128,11 +129,17 @@ pub async fn account_exists(api_key: &str) -> Result<bool, ApiStatus> {
 }
 
 pub async fn create_wallet(api_key: &str) -> Result<CreateWalletResponse, ApiStatus> {
-    let (_public_key, wallet_address, _secret) = create_new_wallet().await?;
+    let (_public_key, wallet_address, _secret, derivation_u256) = create_new_wallet().await?;
 
     // technically this is NOT a derivaton path at all, but it's a stand-in for now
-    let derivation_path = accounts::derivation_path(wallet_address);
-    accounts::register_wallet_derivation(api_key, wallet_address, derivation_path, "", "").await?;
+    accounts::register_wallet_derivation(
+        api_key,
+        wallet_address,
+        derivation_u256,
+        "Wallet",
+        "Wallet",
+    )
+    .await?;
 
     Ok(CreateWalletResponse {
         wallet_address: bytes_to_hex(wallet_address.as_bytes()),
@@ -183,7 +190,14 @@ pub async fn add_pkp_to_group(
     req: Json<AddPkpToGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = parse_u256(&req.group_id)?;
-    let wallet_address = accounts::address_from_pubkey(&req.pkp_public_key)?;
+    let wallet_address_bytes = hex_to_bytes(&req.pkp_id)?;
+    if wallet_address_bytes.len() != 20 {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Invalid PKP ID"),
+            "Invalid PKP ID",
+        ));
+    }
+    let wallet_address = H160::from_slice(&wallet_address_bytes);
     accounts::add_pkp_to_group(api_key, group_id, wallet_address)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "add_pkp_to_group failed"))?;
@@ -195,7 +209,14 @@ pub async fn remove_pkp_from_group(
     req: Json<RemovePkpFromGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = parse_u256(&req.group_id)?;
-    let wallet_address = accounts::address_from_pubkey(&req.pkp_public_key)?;
+    let src = hex_to_bytes(&req.pkp_id)?;
+    if src.len() != 20 {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Invalid PKP ID"),
+            "Invalid PKP ID",
+        ));
+    }
+    let wallet_address = H160::from_slice(&src);
     accounts::remove_pkp_from_group(api_key, group_id, wallet_address)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "remove_pkp_from_group failed"))?;
@@ -209,14 +230,14 @@ pub async fn add_usage_api_key(
     let expiration = parse_u256(&req.expiration)?;
     let balance = parse_u256(&req.balance)?;
 
-    let (_public_key, wallet_address, secret) = create_new_wallet().await?;
+    let (_public_key, wallet_address, secret, derivation_u256) = create_new_wallet().await?;
 
     // technically this is NOT a derivaton path at all, but it's a stand-in for now
-    let derivation_path = accounts::derivation_path(wallet_address);
+
     accounts::register_wallet_derivation(
         api_key,
         wallet_address,
-        derivation_path,
+        derivation_u256,
         "API Key Wallet",
         "Usage API Key Wallet",
     )

@@ -42,13 +42,13 @@ pub struct AddActionToGroupRequest {
 pub struct AddPkpToGroupRequest {
     /// Group ID (decimal or hex string).
     pub group_id: String,
-    pub pkp_public_key: String,
+    pub pkp_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct RemovePkpFromGroupRequest {
     pub group_id: String,
-    pub pkp_public_key: String,
+    pub pkp_id: String,
 }
 
 /// Request for update_group (AccountConfig.updateGroup). API key via header.
@@ -108,7 +108,7 @@ pub struct RemoveUsageApiKeyRequest {
 /// API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct SignWithPKPRequest {
-    pub pkp_public_key: String,
+    pub pkp_id: String,
     pub message: String,
     pub signing_scheme: String,
 }
