@@ -15,17 +15,10 @@ message ExecuteJsRequest {
     IncrementFetchCountResponse increment_fetch_count = 4;
     AesEncryptResponse aes_encrypt = 10;
     AesDecryptResponse aes_decrypt = 11;
-    GetLatestNonceResponse get_latest_nonce = 12;
     CallContractResponse call_contract = 15;
     CallChildResponse call_child = 16;
-    GetRpcUrlResponse get_rpc_url = 21;    
-    EncryptBlsResponse encrypt_bls = 25;
-    DecryptBlsResponse decrypt_bls = 26;
     SignResponse sign = 28;
     UpdateResourceUsageResponse update_resource_usage = 29;
-    SignAsActionResponse sign_as_action = 30;
-    GetActionPublicKeyResponse get_action_public_key = 31;
-    VerifyActionSignatureResponse verify_action_signature = 32;
   }
 
   message ExecutionRequest {
@@ -61,10 +54,6 @@ message ExecuteJsRequest {
     string plaintext = 1;  // hex-encoded
   }
 
-  message GetLatestNonceResponse {
-    string nonce = 1;  // hex-encoded Ethereum U256
-  }
-
   message CallContractResponse {
     string result = 1;
   }
@@ -73,33 +62,8 @@ message ExecuteJsRequest {
     string response = 1;
   }
 
-  message GetRpcUrlResponse {
-    string result = 1;
-  }
-
-  message EncryptBlsResponse {
-    string ciphertext = 1;
-    string data_to_encrypt_hash = 2;
-  }
-
-  message DecryptBlsResponse {
-     string plaintext = 1;
-  }
-
   message UpdateResourceUsageResponse {
     bool cancel_action = 1;
-  }
-
-  message SignAsActionResponse {
-    string result = 1;
-  }
-
-  message GetActionPublicKeyResponse {
-    string result = 1;
-  }
-
-  message VerifyActionSignatureResponse {
-    bool result = 1;
   }
 }
 
@@ -111,17 +75,10 @@ message ExecuteJsResponse {
     IncrementFetchCountRequest increment_fetch_count = 4;
     AesEncryptRequest aes_encrypt = 10;
     AesDecryptRequest aes_decrypt = 11;
-    GetLatestNonceRequest get_latest_nonce = 12;
     CallContractRequest call_contract = 15;
     CallChildRequest call_child = 16;
-    GetRpcUrlRequest get_rpc_url = 21;
-    EncryptBlsRequest encrypt_bls = 25;
-    DecryptBlsRequest decrypt_bls = 26;
     SignRequest sign = 28;
     UpdateResourceUsageRequest update_resource_usage = 29;
-    SignAsActionRequest sign_as_action = 30;
-    GetActionPublicKeyRequest get_action_public_key = 31;
-    VerifyActionSignatureRequest verify_action_signature = 32;
   }
 
   message ExecutionResult {
@@ -156,11 +113,6 @@ message ExecuteJsResponse {
     string ciphertext = 2;
   }
 
-  message GetLatestNonceRequest {
-    string address = 1;  // hex-encoded Ethereum Address
-    string chain = 2;
-  }
-
   message CallContractRequest {
     string chain = 1;
     string txn = 2;
@@ -171,40 +123,8 @@ message ExecuteJsResponse {
     optional bytes params = 2;  // serde_json::Value
   }
 
-  message GetRpcUrlRequest {
-    string chain = 1;
-  }
-
-  message DecryptBlsRequest {
-    bytes access_control_conditions = 1;
-    string ciphertext = 2;
-  }
-
-  message EncryptBlsRequest {
-    bytes access_control_conditions = 1;
-    bytes to_encrypt = 2;
-  }
-
   message UpdateResourceUsageRequest {
     uint32 tick = 1;
     uint32 used_kb = 2;
-  }
-
-  message SignAsActionRequest {
-    bytes to_sign = 1;
-    string sig_name = 2;
-    string signing_scheme = 3;
-  }
-
-  message GetActionPublicKeyRequest {
-    string signing_scheme = 1;
-    string action_ipfs_cid = 2;
-  }
-
-  message VerifyActionSignatureRequest {
-    string signing_scheme = 1;
-    string action_ipfs_cid = 2;
-    bytes to_sign = 3;
-    string sign_output = 4;
   }
 }

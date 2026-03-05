@@ -5,57 +5,23 @@ toc:
 
   - name: Signing
   - signEcdsa
-  - ethPersonalSignMessageEcdsa
   - sign
-  - signAsAction
-  - signAndCombineEcdsa
-  - signAndCombine
-  - verifyActionSignature
-  - name: Checking Permissions
-  - isPermittedAction
-  - isPermittedAddress
-  - isPermittedAuthMethod
-  - getPermittedActions
-  - getPermittedAddresses
-  - getPermittedAuthMethods
-  - getPermittedAuthMethodScopes
 
-  - name: Key Management
+  - name: Encryption
     description: |
-      Accessed via `Lit.Actions.*`.
-  - getActionPublicKey
-  - getLatestNonce
-  - claimKey
-  - pubkeyToTokenId
+      Encryption and decryption functions.  These functions are used to encrypt and decrypt data.  The data is encrypted & decrypted using a symmetric key derived from the secret key of the PKP.
+  - Encrypt
+  - Decrypt
 
   - name: Action Utilities
     description: |
       Helpers available inside actions as `Lit.Actions.*`.
-  - checkConditions
   - setResponse
   - call
   - callContract
-  - broadcastAndCollect
-  - runOnce
-  - getRpcUrl
-  - encrypt
-  - decryptAndCombine
-  - decryptToSingleNode
-  - aesDecrypt
-
-  - name: Data Helpers
-    description: |
-      Utility conversions exposed on `Lit.Actions.*`.
-  - uint8arrayToString
-  - uint8arrayFromString
-  - name: Auth Utilities
-    description: |
-      Authentication context injected as `Lit.Auth.*` during execution.
-
+  
   - name: Runtime Globals
     description: |
       Globals automatically available inside the Lit Action runtime.
   - LitActions
-  - LitAuth
   - ethers
-  - jwt
