@@ -1,7 +1,6 @@
 use crate::accounts;
 use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::api_status::ApiStatus;
-use crate::core::lookup_data;
 use crate::core::v1::models::request::{
     AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest, AddUsageApiKeyRequest,
     NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
@@ -80,21 +79,6 @@ async fn create_new_wallet() -> Result<(String, H160, [u8; 32]), ApiStatus> {
 
     let public_key_string = bytes_to_hex(public_key_bytes);
     let wallet_address = accounts::address_from_pubkey_bytes(&public_key_bytes)?;
-    let wallet_address_string = bytes_to_hex(wallet_address.as_bytes());
-    let wallet_key_hash = accounts::wallet_address_hash(wallet_address).to_string();
-
-    // save to lookup data
-    let secret_string = bytes_to_hex(secret);
-    if let Err(e) = lookup_data::add_wallet(
-        &wallet_key_hash,
-        &public_key_string,
-        &wallet_address_string,
-        &secret_string,
-    )
-    .await
-    {
-        return Err(e.into());
-    }
 
     Ok((public_key_string, wallet_address, secret))
 }
@@ -108,19 +92,11 @@ pub async fn new_account(
     let (_public_key, wallet_address, secret) = create_new_wallet().await?;
     let api_key = base64_light::base64_encode_bytes(&secret);
 
-    let initial_balance = new_account_request
-        .initial_balance
-        .as_deref()
-        .map(parse_u256)
-        .transpose()?
-        .unwrap_or(U256::zero());
-
     if let Err(e) = accounts::new_account(
         &api_key,
         &account_name,
         &account_description,
         wallet_address,
-        initial_balance,
     )
     .await
     {
@@ -248,9 +224,16 @@ pub async fn add_usage_api_key(
 
     let usage_api_key = base64_light::base64_encode_bytes(&secret);
 
-    accounts::add_usage_api_key(api_key, &usage_api_key, expiration, balance)
-        .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "add_usage_api_key failed"))?;
+    accounts::add_usage_api_key(
+        api_key,
+        &usage_api_key,
+        expiration,
+        balance,
+        &req.name,
+        &req.description,
+    )
+    .await
+    .map_err(|e| ApiStatus::internal_server_error(e, "add_usage_api_key failed"))?;
     Ok(AddUsageApiKeyResponse {
         success: true,
         usage_api_key,
@@ -335,7 +318,7 @@ fn metadata_to_item(m: &accounts::Metadata) -> ListMetadataItem {
 
 #[allow(dead_code)]
 fn usage_api_key_to_api_key_item(
-    m: &accounts::contracts::account_config::UsageApiKey,
+    m: &accounts::contracts::account_config_contract::UsageApiKey,
 ) -> ApiKeyItem {
     let mut bytes = [0; 32];
     m.metadata.id.to_big_endian(&mut bytes);
@@ -345,7 +328,6 @@ fn usage_api_key_to_api_key_item(
         id,
         name: m.metadata.name.clone(),
         description: m.metadata.description.clone(),
-        api_key: "".to_string(),
         expiration: m.expiration.to_string(),
         balance: m.balance.as_u64(),
     }
@@ -362,32 +344,14 @@ pub async fn list_api_keys(
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_api_keys failed"))?;
 
-    tracing::info!("list: {:?}", list);
-    let ids = list
-        .iter()
-        .map(|m| m.api_key_hash.to_string())
-        .collect::<Vec<String>>();
-    tracing::info!("ids: {:?}", ids);
-    let lookup_results = lookup_data::get_api_keys_by_key_hashes(&ids).await?;
-    tracing::info!("lookup_results: {:?}", lookup_results);
     let api_key_items = list
         .iter()
-        .map(|m| {
-            let api_key = match lookup_results
-                .iter()
-                .find(|(id, _)| *id == m.api_key_hash.to_string())
-            {
-                Some((_api_key_hash, api_key)) => api_key.clone(),
-                None => "unmanaged".to_string(),
-            };
-            ApiKeyItem {
-                id: m.api_key_hash.to_string(),
-                name: m.metadata.name.clone(),
-                description: m.metadata.description.clone(),
-                api_key,
-                expiration: m.expiration.to_string(),
-                balance: m.balance.as_u64(),
-            }
+        .map(|m| ApiKeyItem {
+            id: m.api_key_hash.to_string(),
+            name: m.metadata.name.clone(),
+            description: m.metadata.description.clone(),
+            expiration: m.expiration.to_string(),
+            balance: m.balance.as_u64(),
         })
         .collect();
     Ok(api_key_items)
@@ -416,31 +380,14 @@ pub async fn list_wallets(
     let list = accounts::list_wallets(api_key, pn, ps)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_wallets failed"))?;
-    tracing::info!("list: {:?}", list);
-    let ids = list
-        .iter()
-        .map(|m| m.id.to_string())
-        .collect::<Vec<String>>();
-    tracing::info!("ids: {:?}", ids);
-    let lookup_results = lookup_data::lookup_wallets_by_key_hashes(&ids).await?;
-    tracing::info!("lookup_results: {:?}", lookup_results);
+
     let wallet_items = list
         .iter()
-        .map(|m| {
-            let (wallet_address, pubkey) = match lookup_results
-                .iter()
-                .find(|(id, _)| *id == m.id.to_string())
-            {
-                Some((_, result)) => (result.wallet_address.clone(), result.pubkey.clone()),
-                None => ("unmanaged".to_string(), "unmanaged".to_string()),
-            };
-            WalletItem {
-                id: m.id.to_string(), // this is the wallet address hash
-                name: m.name.clone(),
-                description: m.description.clone(),
-                wallet_address,
-                public_key: pubkey,
-            }
+        .map(|m| WalletItem {
+            id: m.id.to_string(),
+            name: m.name.clone(),
+            description: m.description.clone(),
+            wallet_address: bytes_to_hex(m.wallet_address.as_bytes()),
         })
         .collect();
     Ok(wallet_items)
@@ -459,28 +406,13 @@ pub async fn list_wallets_in_group(
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_wallets_in_group failed"))?;
 
-    let list = list
-        .iter()
-        .map(metadata_to_item)
-        .collect::<Vec<ListMetadataItem>>();
-    let ids = list.iter().map(|m| m.id.clone()).collect::<Vec<String>>();
-    let lookup_results = lookup_data::lookup_wallets_by_key_hashes(&ids).await?;
-
     let wallet_items = list
         .iter()
-        .map(|m| {
-            let (wallet_address, pubkey) =
-                match lookup_results.iter().find(|(id, _)| *id == m.id.clone()) {
-                    Some((_, result)) => (result.wallet_address.clone(), result.pubkey.clone()),
-                    None => ("unmanaged".to_string(), "unmanaged".to_string()),
-                };
-            WalletItem {
-                id: m.id.to_string(),
-                name: m.name.clone(),
-                description: m.description.clone(),
-                wallet_address,
-                public_key: pubkey,
-            }
+        .map(|m| WalletItem {
+            id: m.id.to_string(),
+            name: m.name.clone(),
+            description: m.description.clone(),
+            wallet_address: bytes_to_hex(m.wallet_address.as_bytes()),
         })
         .collect();
     Ok(wallet_items)

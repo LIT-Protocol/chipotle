@@ -161,7 +161,6 @@ function initLogin() {
   document.getElementById('btn-create-account').addEventListener('click', async () => {
     const name = document.getElementById('new-account-name').value.trim();
     const desc = document.getElementById('new-account-desc').value.trim();
-    const initialBalance = document.getElementById('new-account-initial-balance').value.trim() || undefined;
     hideStatus('login-status');
     if (!name) {
       showStatus('login-status', 'Enter an account name.', 'error');
@@ -175,9 +174,10 @@ function initLogin() {
         'Creating a new Lit Express account and returning an API key.'
       );
       const client = await getClient();
-      const res = await client.newAccount({ accountName: name, accountDescription: desc, initialBalance });
+      const res = await client.newAccount({ accountName: name, accountDescription: desc });
       setApiKey(res.api_key);
-      showStatus('login-status', 'Account created. You are now logged in.', 'success');
+      const walletMsg = res.wallet_address ? ' Wallet: ' + (res.wallet_address.slice(0, 10) + '…' + res.wallet_address.slice(-8)) : '';
+      showStatus('login-status', 'Account created. Copy and store your API key now (shown once): ' + res.api_key + walletMsg, 'success');
       document.getElementById('new-account-name').value = '';
       document.getElementById('new-account-desc').value = '';
     } catch (e) {
@@ -417,13 +417,10 @@ function renderWalletsTable(items) {
   if (empty) empty.style.display = 'none';
   items.forEach((item) => {
     const address = item.wallet_address ?? item.address ?? item.name ?? '';
-    const pubkey = item.public_key ?? '';
-    const pubkeyPreview = pubkey ? keyPreview(pubkey) : '—';
     const description = item.description ?? '';
     const tr = document.createElement('tr');
     tr.innerHTML =
       '<td class="mono cell-address"></td>' +
-      '<td class="mono cell-pubkey"></td>' +
       '<td class="mono">' + escapeHtml(description) + '</td>';
     const addressCell = tr.querySelector('.cell-address');
     const addressCopyBtn = document.createElement('button');
@@ -443,28 +440,6 @@ function renderWalletsTable(items) {
       }
     });
     addressCell.appendChild(addressCopyBtn);
-    const pubkeyCell = tr.querySelector('.cell-pubkey');
-    if (pubkey) {
-      const pubkeyCopyBtn = document.createElement('button');
-      pubkeyCopyBtn.type = 'button';
-      pubkeyCopyBtn.className = 'btn-copy-key';
-      pubkeyCopyBtn.textContent = pubkeyPreview;
-      pubkeyCopyBtn.title = 'Copy full public key';
-      pubkeyCopyBtn.addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(pubkey);
-          const orig = pubkeyCopyBtn.textContent;
-          pubkeyCopyBtn.textContent = 'Copied!';
-          pubkeyCopyBtn.title = 'Copied!';
-          setTimeout(() => { pubkeyCopyBtn.textContent = orig; pubkeyCopyBtn.title = 'Copy full public key'; }, 1500);
-        } catch (_) {
-          pubkeyCopyBtn.title = 'Copy failed';
-        }
-      });
-      pubkeyCell.appendChild(pubkeyCopyBtn);
-    } else {
-      pubkeyCell.textContent = '—';
-    }
     tbody.appendChild(tr);
   });
 }
@@ -487,43 +462,24 @@ function renderUsageKeysTable() {
   }
   if (empty) empty.style.display = 'none';
   items.forEach((item) => {
-    const key = item.usage_api_key ?? item.api_key ?? '';
-    const preview = keyPreview(key);
     const expiration = item.expiration != null ? String(item.expiration) : '—';
     const balance = item.balance != null ? String(item.balance) : '—';
     const tr = document.createElement('tr');
     tr.innerHTML =
-      '<td class="mono cell-key"></td>' +
       '<td>' + escapeHtml(item.name || '') + '</td>' +
       '<td class="mono">' + escapeHtml(item.description || '') + '</td>' +
       '<td class="mono">' + escapeHtml(expiration) + '</td>' +
       '<td class="mono">' + escapeHtml(balance) + '</td>' +
       '<td class="cell-actions"></td>';
-    const keyCell = tr.querySelector('.cell-key');
-    const copyBtn = document.createElement('button');
-    copyBtn.type = 'button';
-    copyBtn.className = 'btn-copy-key';
-    copyBtn.textContent = preview;
-    copyBtn.title = 'Copy full key';
-    copyBtn.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(key);
-        const orig = copyBtn.textContent;
-        copyBtn.textContent = 'Copied!';
-        copyBtn.title = 'Copied!';
-        setTimeout(() => { copyBtn.textContent = orig; copyBtn.title = 'Copy full key'; }, 1500);
-      } catch (_) {
-        copyBtn.title = 'Copy failed';
-      }
-    });
-    keyCell.appendChild(copyBtn);
     const actionsCell = tr.querySelector('.cell-actions');
     const delBtn = document.createElement('button');
     delBtn.type = 'button';
     delBtn.className = 'btn-icon btn-icon-danger';
-    delBtn.title = 'Delete';
+    delBtn.title = (item.usage_api_key ?? item.api_key) ? 'Delete' : 'Delete requires key (add key in this session to remove later)';
     delBtn.innerHTML = ICON_TRASH;
-    delBtn.addEventListener('click', () => confirmAndRemoveUsageKey(normalizeUsageKeyItem(item)));
+    const canRemove = !!(item.usage_api_key ?? item.api_key);
+    if (!canRemove) delBtn.disabled = true;
+    delBtn.addEventListener('click', () => canRemove && confirmAndRemoveUsageKey(normalizeUsageKeyItem(item)));
     actionsCell.appendChild(delBtn);
     tbody.appendChild(tr);
   });
@@ -531,6 +487,7 @@ function renderUsageKeysTable() {
 
 function normalizeUsageKeyItem(item) {
   return {
+    id: item.id,
     usage_api_key: item.usage_api_key ?? item.api_key,
     name: item.name,
     description: item.description,
@@ -549,6 +506,7 @@ async function loadUsageKeys() {
     const client = await getClient();
     const items = await client.listApiKeys({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
     window._usageKeys = items.map((it) => ({
+      id: it.id,
       api_key: it.api_key,
       usage_api_key: it.api_key,
       name: it.name ?? '',
@@ -847,13 +805,28 @@ function openAddUsageKeyModal() {
       const client = await getClient();
       const expiration = '9999999999';
       const balance = '1000000000000000000';
-      const res = await client.addUsageApiKey({ apiKey, usageApiKey: '', expiration, balance });
-      const usageKey = res && res.usage_api_key ? res.usage_api_key : '';
-      if (usageKey && (name || description)) {
-        await client.updateUsageApiKeyMetadata({ apiKey, usageApiKey: usageKey, name, description });
-      }
+      const res = await client.addUsageApiKey({
+        apiKey,
+        usageApiKey: '',
+        expiration,
+        balance,
+        name,
+        description,
+      });
+      const usageKey = res && res.usage_api_key ? res.usage_api_key : '';     
       if (usageKey) {
-        await loadUsageKeys();
+        getUsageKeysStore().push({
+          id: usageKey.slice(0, 12),
+          api_key: usageKey,
+          usage_api_key: usageKey,
+          name: name || '',
+          description: description || '',
+          expiration: '9999999999',
+          balance: 1000000000000000000,
+        });
+        window._statUsageKeys = getUsageKeysStore().length;
+        renderUsageKeysTable();
+        updateStatCards();
       }
       showStatus('overview-status-usage-keys', 'Usage API key added. Copy and store your key now (shown once): ' + usageKey, 'success');
     } catch (e) {
@@ -865,7 +838,8 @@ function openAddUsageKeyModal() {
 }
 
 async function confirmAndRemoveUsageKey(item) {
-  const masked = maskApiKey(item.usage_api_key || '');
+  const keyOrId = item.usage_api_key || item.api_key || item.id || '';
+  const masked = keyOrId ? (keyOrId.length > 12 ? maskApiKey(keyOrId) : keyOrId) : '—';
   const msg = 'Remove usage API key "' + escapeHtml(masked) + '" from this account? This cannot be undone.';
   const confirmed = await confirmDelete(msg);
   if (!confirmed) return;
