@@ -72,6 +72,8 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @property {string} apiKey - Account API key
  * @property {string} expiration - Expiration (e.g. unix timestamp as decimal string)
  * @property {string} balance - Balance (e.g. wei as decimal string)
+ * @property {string} name - Name
+ * @property {string} description - Description
  */
 
 /**
@@ -479,10 +481,12 @@ export class LitNodeSimpleApiClient {
    * @param {AddUsageApiKeyOptions} options
    * @returns {Promise<AddUsageApiKeyResponse>}
    */
-  async addUsageApiKey({ apiKey, expiration, balance }) {
+  async addUsageApiKey({ apiKey, expiration, balance, name, description }) {
     const body = {
       expiration,
       balance,
+      name,
+      description,
     };
     const res = await fetch(`${this.baseUrl}/add_usage_api_key`, {
       method: 'POST',

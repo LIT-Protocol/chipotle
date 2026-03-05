@@ -63,7 +63,9 @@ contract AccountConfigWrite {
         uint256 accountApiKeyHash,
         uint256 usageApiKeyHash,
         uint256 expiration,
-        uint256 balance
+        uint256 balance,
+        string memory name,
+        string memory description
     ) public {
         revertIfNoAccountAccess(accountApiKeyHash);
         LibAccountConfigStorage.AccountConfigStorage
@@ -80,6 +82,9 @@ contract AccountConfigWrite {
         apiKeyStorage.manageWallets = false;
         apiKeyStorage.manageIPFSIds = false;
         apiKeyStorage.manageUsageApiKeys = false;
+        apiKeyStorage.metadata.id = usageApiKeyHash;
+        apiKeyStorage.metadata.name = name;
+        apiKeyStorage.metadata.description = description;
         s.accounts[masterAccountApiKeyHash].usageApiKeysList.add(
             usageApiKeyHash
         );

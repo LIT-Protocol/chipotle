@@ -206,7 +206,7 @@ pub async fn add_usage_api_key(
 
     let usage_api_key = base64_light::base64_encode_bytes(&secret);
 
-    accounts::add_usage_api_key(api_key, &usage_api_key, expiration, balance)
+    accounts::add_usage_api_key(api_key, &usage_api_key, expiration, balance, &req.name, &req.description)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "add_usage_api_key failed"))?;
     Ok(AddUsageApiKeyResponse {

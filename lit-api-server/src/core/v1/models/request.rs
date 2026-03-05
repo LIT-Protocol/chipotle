@@ -95,6 +95,8 @@ pub struct UpdateUsageApiKeyMetadataRequest {
 pub struct AddUsageApiKeyRequest {
     pub expiration: String,
     pub balance: String,
+    pub name: String,
+    pub description: String,
 }
 
 /// API key via header.

@@ -279,6 +279,8 @@ pub async fn add_usage_api_key(
     usage_api_key: &str,
     expiration: U256,
     balance: U256,
+    name: &str,
+    description: &str,
 ) -> Result<bool> {
     let contract = get_signable_account_config_contract().await?;
     tracing::info!(
@@ -296,6 +298,8 @@ pub async fn add_usage_api_key(
         usage_api_key_hash,
         expiration,
         balance,
+        name.to_string(),
+        description.to_string(),
     );
     let tx = function_call.send().await?;
     match tx.await {

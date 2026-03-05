@@ -98,6 +98,9 @@ fn get_abis(abis_folder: &str, abis: &mut Vec<PathBuf>) {
         .unwrap_or_else(|_| panic!("Failed to read directory {:?}", abis_folder));
     for entry in dir.flatten() {
         if entry.file_type().unwrap().is_dir() {
+            if entry.path().to_str().unwrap().ends_with("Facets") {
+                continue;
+            }
             get_abis(entry.path().to_str().unwrap(), abis);
             continue;
         }

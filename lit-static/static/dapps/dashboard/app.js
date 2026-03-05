@@ -177,7 +177,7 @@ function initLogin() {
       const res = await client.newAccount({ accountName: name, accountDescription: desc });
       setApiKey(res.api_key);
       const walletMsg = res.wallet_address ? ' Wallet: ' + (res.wallet_address.slice(0, 10) + '…' + res.wallet_address.slice(-8)) : '';
-      showStatus('login-status', 'Account created. You are now logged in.' + walletMsg, 'success');
+      showStatus('login-status', 'Account created. Copy and store your API key now (shown once): ' + res.api_key + walletMsg, 'success');
       document.getElementById('new-account-name').value = '';
       document.getElementById('new-account-desc').value = '';
     } catch (e) {
@@ -805,11 +805,15 @@ function openAddUsageKeyModal() {
       const client = await getClient();
       const expiration = '9999999999';
       const balance = '1000000000000000000';
-      const res = await client.addUsageApiKey({ apiKey, usageApiKey: '', expiration, balance });
-      const usageKey = res && res.usage_api_key ? res.usage_api_key : '';
-      if (usageKey && (name || description)) {
-        await client.updateUsageApiKeyMetadata({ apiKey, usageApiKey: usageKey, name, description });
-      }
+      const res = await client.addUsageApiKey({
+        apiKey,
+        usageApiKey: '',
+        expiration,
+        balance,
+        name,
+        description,
+      });
+      const usageKey = res && res.usage_api_key ? res.usage_api_key : '';     
       if (usageKey) {
         getUsageKeysStore().push({
           id: usageKey.slice(0, 12),
