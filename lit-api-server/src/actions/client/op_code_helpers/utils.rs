@@ -19,10 +19,6 @@ pub async fn pkp_id_to_derviation_path(api_key: &str, pkp_id: &str) -> Result<St
         return Err("Wallet not found".to_string());
     }
 
-    if derivation_u256 == ethers::types::U256::zero() {
-        return Err("Wallet not found".to_string());
-    }
-
     let mut derivation_bytes = [0; 32];
     derivation_u256.to_big_endian(&mut derivation_bytes);
 
