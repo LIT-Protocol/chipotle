@@ -72,25 +72,6 @@ async fn create_new_wallet() -> Result<(String, H160, [u8; 32], U256), ApiStatus
     let secret: [u8; 32] = get_client_key(&derivation_path).await.map_err(|e| {
         ApiStatus::internal_server_error(anyhow::anyhow!(e), "get_client_key failed")
     })?;
-// Generate a unique derivation path for a new wallet.
-fn generate_unique_derivation_path() -> Result<(U256, String), ApiStatus> {
-    let seed_bytes = get_random_secret();
-    let derivation_bytes = keccak256(seed_bytes);
-    let derivation_u256 = U256::from_big_endian(&derivation_bytes);
-    let derivation_path = bytes_to_hex(derivation_bytes);
-    Ok((derivation_u256, derivation_path))
-}
-
-// Create a new wallet and return the public key, wallet address, and secret.
-async fn create_new_wallet() -> Result<(String, H160, [u8; 32], U256), ApiStatus> {
-    let (derivation_u256, derivation_path) = generate_unique_derivation_path()?;
-    tracing::info!(
-        "Creating new wallet with derivation path: {}",
-        derivation_path
-    );
-    let secret: [u8; 32] = get_client_key(&derivation_path).await.map_err(|e| {
-        ApiStatus::internal_server_error(anyhow::anyhow!(e), "get_client_key failed")
-    })?;
 
     let local_wallet = LocalWallet::from_bytes(&secret).map_err(|e| {
         ApiStatus::internal_server_error(anyhow::anyhow!(e), "LocalWallet::from_bytes failed")

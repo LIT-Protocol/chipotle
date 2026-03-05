@@ -122,8 +122,8 @@ function uint8arrayFromString(string, encoding) {
  * @param {string} params.ciphertext The ciphertext to decrypt
  * @returns {Promise<string>} The decrypted plaintext
  */
-function Decrypt({ publicKey, ciphertext }) {
-  return ops.op_aes_decrypt(publicKey, ciphertext);
+function Decrypt({ pkpId, ciphertext }) {
+  return ops.op_aes_decrypt(pkpId, ciphertext);
 }
 
 /**
