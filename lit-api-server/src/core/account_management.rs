@@ -1,4 +1,3 @@
-use crate::accounts;
 use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::api_status::ApiStatus;
 use crate::core::v1::models::request::{
@@ -12,12 +11,13 @@ use crate::core::v1::models::response::{
     NewAccountResponse, NodeChainConfigResponse, WalletItem,
 };
 use crate::dstack::v1::get_client_key;
+use crate::{accounts, dstack};
 use elliptic_curve::group::GroupEncoding;
+use ethers::signers::{LocalWallet, Signer};
 use ethers::types::{H160, U256};
 use ethers::utils::keccak256;
 use ipfs_hasher::IpfsHasher;
-use k256::SecretKey;
-use lit_core::utils::binary::{bytes_to_hex, hex_to_bytes};
+use lit_core::utils::binary::{bytes_to_0x_hex, bytes_to_hex, hex_to_bytes};
 use rand::Rng;
 use rocket::serde::json::Json;
 
@@ -73,14 +73,12 @@ async fn create_new_wallet() -> Result<(String, H160, [u8; 32], U256), ApiStatus
         ApiStatus::internal_server_error(anyhow::anyhow!(e), "get_client_key failed")
     })?;
 
-    let secret_key = SecretKey::from_slice(&secret).map_err(|e| {
-        ApiStatus::internal_server_error(anyhow::anyhow!(e), "SecretKey::from_slice failed")
+    let local_wallet = LocalWallet::from_bytes(&secret).map_err(|e| {
+        ApiStatus::internal_server_error(anyhow::anyhow!(e), "LocalWallet::from_bytes failed")
     })?;
-    let public_key = secret_key.public_key();
-
-    let public_key_bytes = public_key.as_affine().to_bytes();
-    let public_key_string = bytes_to_hex(public_key_bytes);
-    let wallet_address = H160::from_slice(&keccak256(public_key_bytes)[12..]);
+    let wallet_address = local_wallet.address();
+    let public_key_bytes = local_wallet.signer().verifying_key().as_affine().to_bytes();
+    let public_key_string = bytes_to_0x_hex(public_key_bytes);
 
     Ok((public_key_string, wallet_address, secret, derivation_u256))
 }
@@ -117,7 +115,7 @@ pub async fn new_account(
 
     Ok(NewAccountResponse {
         api_key: api_key.to_string(),
-        wallet_address: bytes_to_hex(wallet_address.as_bytes()),
+        wallet_address: bytes_to_0x_hex(wallet_address.as_bytes()),
     })
 }
 
@@ -142,7 +140,7 @@ pub async fn create_wallet(api_key: &str) -> Result<CreateWalletResponse, ApiSta
     .await?;
 
     Ok(CreateWalletResponse {
-        wallet_address: bytes_to_hex(wallet_address.as_bytes()),
+        wallet_address: bytes_to_0x_hex(wallet_address.as_bytes()),
     })
 }
 
@@ -468,4 +466,22 @@ pub async fn get_chain_info() -> Result<NodeChainConfigResponse, ApiStatus> {
         rpc_url: chain_info.rpc_url.to_string(),
         contract_address: node_config.contract_address.to_string(),
     })
+}
+
+pub async fn get_api_payers() -> Result<Vec<String>, ApiStatus> {
+    let mut api_payers = Vec::new();
+    for payer_number in 1..=10 {
+        let api_payer = dstack::v1::get_lit_payer_key(payer_number)
+            .await
+            .map_err(|e| {
+                ApiStatus::internal_server_error(anyhow::anyhow!(e), "get_api_payers failed")
+            })?;
+
+        let local_wallet = LocalWallet::from_bytes(&api_payer).map_err(|e| {
+            ApiStatus::internal_server_error(anyhow::anyhow!(e), "LocalWallet::from_bytes failed")
+        })?;
+        let wallet_address = local_wallet.address();
+        api_payers.push(bytes_to_0x_hex(wallet_address.as_bytes()));
+    }
+    Ok(api_payers)
 }

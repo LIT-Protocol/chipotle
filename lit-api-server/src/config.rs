@@ -7,7 +7,6 @@ use toml_edit::DocumentMut;
 #[derive(Debug, Clone)]
 pub struct NodeConfig {
     pub chain: Chain,
-    pub secret: String,
     pub contract_address: String,
 }
 
@@ -42,10 +41,6 @@ pub fn init_config() -> Result<(), anyhow::Error> {
         .to_string()
         .trim()
         .replace("\"", "");
-    let secret: String = toml_document["chain"]["secret"]
-        .to_string()
-        .trim()
-        .replace("\"", "");
     let contract_address: String = toml_document["chain"]["contract_address"]
         .to_string()
         .trim()
@@ -67,15 +62,8 @@ pub fn init_config() -> Result<(), anyhow::Error> {
         ));
     }
 
-    if secret.is_empty() {
-        return Err(anyhow::anyhow!(
-            "Secret is empty or not found in NodeConfig.toml"
-        ));
-    }
-
     let node_config = NodeConfig {
         chain,
-        secret,
         contract_address,
     };
 

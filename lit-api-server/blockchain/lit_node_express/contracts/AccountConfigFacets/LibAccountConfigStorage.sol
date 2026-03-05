@@ -27,6 +27,7 @@ library LibAccountConfigStorage {
     error InsufficientBalance(uint256 apiKeyHash, uint256 amount);
     error OnlyApiPayer(address caller);
     error OnlyApiPayerOrPricingOperator(address caller);
+    error OnlyApiPayerOrOwner(address caller);
     error NotMasterAccount(uint256 apiKeyHash);
 
     struct WalletData {
@@ -94,6 +95,7 @@ library LibAccountConfigStorage {
         mapping(uint256 => address) allWalletAddresses; // mapping from a counter to a wallet address hash, allowing us to get a list of all wallet hashes ever generated
         mapping(uint256 => uint256) pricing; // mapping from a pricing item id to it's price
         address api_payer; // account that pays for state mutation made by api calls, optionally mutates state on behalf of an api key holder.
+        address owner; // account that can set the api_payer
         address pricing_operator; // account that can mutate certain state for operational purposes ( like pricing ).
         uint256 nextWalletCount; // counter for creating unique wallet address hashes
         uint256 nextAccountCount; // counter for creating unique account ids

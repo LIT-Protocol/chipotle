@@ -446,3 +446,9 @@ pub async fn credit_api_key(api_key: &str, amount: U256) -> Result<bool> {
         Err(e) => Err(e.into()),
     }
 }
+
+pub async fn get_api_payers() -> Result<Vec<H160>> {
+    let contract = get_read_only_account_config_contract().await?;
+    let api_payer = contract.api_payer().call().await?;
+    Ok(vec![api_payer])
+}

@@ -20,6 +20,7 @@ contract AccountConfigWrite {
         require(s.api_payer == address(0), "already initialized");
         s.api_payer = msg.sender;
         s.pricing_operator = msg.sender;
+        s.owner = msg.sender;
         s.nextWalletCount = 1;
         s.nextAccountCount = 1;
         s.pricing[1] = 1;
@@ -459,5 +460,18 @@ contract AccountConfigWrite {
         if (caller != s.api_payer) {
             revert LibAccountConfigStorage.OnlyApiPayer(caller);
         }
+    }
+
+    function checkIfApiPayerOrOwner(address caller) private view {
+        LibAccountConfigStorage.AccountConfigStorage
+            storage s = LibAccountConfigStorage.getStorage();
+        if (caller != s.api_payer && caller != s.owner) {
+            revert LibAccountConfigStorage.OnlyApiPayerOrOwner(caller);
+        }
+    }
+
+    function setApiPayer(address newApiPayer) public {
+        checkIfApiPayerOrOwner(msg.sender);
+        LibAccountConfigStorage.getStorage().api_payer = newApiPayer;
     }
 }
