@@ -42,10 +42,6 @@
               <label for="new-account-desc">Account description</label>
               <input type="text" id="new-account-desc" class="input" placeholder="Optional">
             </div>
-            <div class="form-group">
-              <label for="new-account-initial-balance">Initial balance (optional)</label>
-              <input type="text" id="new-account-initial-balance" class="input" placeholder="0 ( or some balance to 10000000)">
-            </div>
             <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account</button>
           </div>
         </div>
@@ -173,7 +169,7 @@
               <div class="card-body">
                 <div class="table-wrap">
                   <table class="data-table" id="usage-keys-table">
-                    <thead><tr><th>Key</th><th>Name</th><th>Description</th><th>Expiration</th><th>Balance</th><th class="th-actions"></th></tr></thead>
+                    <thead><tr><th>Name</th><th>Description</th><th>Expiration</th><th>Balance</th><th class="th-actions"></th></tr></thead>
                     <tbody id="usage-keys-tbody"></tbody>
                   </table>
                   <p id="usage-keys-empty" class="empty-state" style="display: none;">No usage API keys.</p>
@@ -251,7 +247,7 @@
               <div class="card-body">
                 <div class="table-wrap">
                   <table class="data-table" id="wallets-table">
-                    <thead><tr><th>Address</th><th>Public key</th><th>Description</th></tr></thead>
+                    <thead><tr><th>PkpId (Address)</th><th>Description</th></tr></thead>
                     <tbody id="wallets-tbody"></tbody>
                   </table>
                   <p id="wallets-empty" class="empty-state" style="display: none;">No wallets.</p>

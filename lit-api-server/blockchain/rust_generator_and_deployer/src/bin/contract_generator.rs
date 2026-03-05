@@ -37,6 +37,9 @@ fn process_folder(input_folder: &str, output_folder: &str) {
     for file in files.flatten() {
         println!("Processing file: {:?}", file.path());
         if file.file_type().unwrap().is_dir() {
+            if file.path().to_str().unwrap().ends_with("Facets") {
+                continue;
+            }
             process_folder(file.path().to_str().unwrap(), output_folder);
             continue;
         }
