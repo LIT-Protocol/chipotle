@@ -24,16 +24,6 @@ pub fn derivation_path(wallet_address: H160) -> U256 {
     U256::from_big_endian(&keccak256(wallet_address.as_bytes()))
 }
 
-pub fn address_from_pubkey(pubkey: &str) -> Result<H160> {
-    let pubkey_bytes = hex_to_bytes(pubkey)?;
-    address_from_pubkey_bytes(&pubkey_bytes)
-}
-
-pub fn address_from_pubkey_bytes(pubkey_bytes: &[u8]) -> Result<H160> {
-    let address = H160::from_slice(&keccak256(pubkey_bytes)[12..]);
-    Ok(address)
-}
-
 /// Create a new account. `initial_balance` is stored on the account's apiKey (AccountConfig.accountApiKey.balance).
 pub async fn new_account(
     api_key: &str,
@@ -347,11 +337,6 @@ pub async fn register_wallet_derivation(
         Ok(_) => Ok(true),
         Err(e) => Err(e.into()),
     }
-}
-
-pub async fn get_wallet_derivation_from_pubkey(api_key: &str, pubkey: &str) -> Result<U256> {
-    let wallet_address = address_from_pubkey(pubkey)?;
-    get_wallet_derivation(api_key, wallet_address).await
 }
 
 /// Get the derivation path for a wallet address under an account (read-only).

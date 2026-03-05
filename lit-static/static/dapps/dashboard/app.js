@@ -420,8 +420,8 @@ function renderWalletsTable(items) {
     const description = item.description ?? '';
     const tr = document.createElement('tr');
     tr.innerHTML =
-      '<td class="mono cell-address"></td>' +
-      '<td class="mono">' + escapeHtml(description) + '</td>';
+      '<td class="mono">' + escapeHtml(description) + '</td>' +
+      '<td class="mono cell-address"></td>';
     const addressCell = tr.querySelector('.cell-address');
     const addressCopyBtn = document.createElement('button');
     addressCopyBtn.type = 'button';

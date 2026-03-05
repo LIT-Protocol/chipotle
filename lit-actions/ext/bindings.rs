@@ -91,13 +91,13 @@ async fn op_increment_fetch_count(state: Rc<RefCell<OpState>>) -> Result<u32, Js
 async fn op_sign(
     state: Rc<RefCell<OpState>>,
     #[buffer(copy)] to_sign: Vec<u8>,
-    #[string] public_key: String,
+    #[string] pkp_id: String,
     #[string] sig_name: String,
     #[string] signing_scheme: String,
     #[string] _key_set_id: String,
 ) -> Result<String, JsErrorBox> {
     ensure_not_empty!(to_sign, "toSign");
-    ensure_not_blank!(public_key, "publicKey");
+    ensure_not_blank!(pkp_id, "pkpId");
     ensure_not_blank!(sig_name, "sigName");
     ensure_not_blank!(signing_scheme, "signingScheme");
 
@@ -105,7 +105,7 @@ async fn op_sign(
         state,
         SignRequest {
             to_sign,
-            public_key,
+            pkp_id,
             sig_name,
             signing_scheme,
         },
@@ -189,15 +189,15 @@ async fn op_verify_action_signature(
 #[string]
 async fn op_aes_encrypt(
     state: Rc<RefCell<OpState>>,
-    #[string] public_key: String,
+    #[string] pkp_id: String,
     #[string] message: String,
 ) -> Result<String, JsErrorBox> {
-    ensure_not_blank!(public_key, "publicKey");
+    ensure_not_blank!(pkp_id, "pkpId");
     ensure_not_blank!(message, "message");
 
     remote_op_async!(op_aes_encrypt,
         state,
-        AesEncryptRequest { public_key, message },
+        AesEncryptRequest { pkp_id, message },
         UnionRequest::AesEncrypt(resp) => Ok(resp.ciphertext)
     )
 }
@@ -207,15 +207,15 @@ async fn op_aes_encrypt(
 #[string]
 async fn op_aes_decrypt(
     state: Rc<RefCell<OpState>>,
-    #[string] public_key: String,
+    #[string] pkp_id: String,
     #[string] ciphertext: String,
 ) -> Result<String, JsErrorBox> {
-    ensure_not_blank!(public_key, "publicKey");
+    ensure_not_blank!(pkp_id, "pkpId");
     ensure_not_empty!(ciphertext);
 
     remote_op_async!(op_aes_decrypt,
         state,
-        AesDecryptRequest { public_key, ciphertext },
+        AesDecryptRequest { pkp_id, ciphertext },
         UnionRequest::AesDecrypt(resp) => Ok(resp.plaintext)
     )
 }

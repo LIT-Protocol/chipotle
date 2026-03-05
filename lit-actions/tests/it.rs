@@ -402,7 +402,7 @@ async fn aes_decrypt(mut client: TestClient) {
     assert_eq!(
         client.received::<AesDecryptRequest>(),
         AesDecryptRequest {
-            public_key: "ignored".to_string(),
+            pkp_id: "ignored".to_string(),
             ciphertext: "456".to_string(),
         }
     );
