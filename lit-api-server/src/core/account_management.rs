@@ -15,7 +15,6 @@ use crate::core::v1::models::response::{
 };
 use crate::dstack::v1::get_client_key;
 use crate::{accounts, dstack};
-use elliptic_curve::group::GroupEncoding;
 use ethers::signers::{LocalWallet, Signer};
 use ethers::types::{H160, U256};
 use ethers::utils::keccak256;
