@@ -474,4 +474,9 @@ contract AccountConfigWrite {
         checkIfApiPayerOrOwner(msg.sender);
         LibAccountConfigStorage.getStorage().api_payer = newApiPayer;
     }
+
+    function setSignerCount(uint256 newSignerCount) public {
+        checkIfApiPayerOrOwner(msg.sender);
+        LibAccountConfigStorage.getStorage().signerCount = newSignerCount;
+    }
 }

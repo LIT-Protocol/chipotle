@@ -68,7 +68,18 @@ impl SignerPool {
 /// Creates `pool_size` signing clients using key indices 1..=pool_size via
 /// `get_lit_payer_key`. Must be called after `init_config()`.
 pub async fn start_signer_pool(pool_size: usize) -> Result<SignerPool> {
-    let node_config = GLOBAL_NODE_CONFIG
+   
+    let (tx, rx) = flume::unbounded::<SigningPoolMessage>();
+
+    let entries = get_signer_entries(pool_size).await?;
+    tokio::spawn(run_pool(entries, rx));
+
+    Ok(SignerPool { tx })
+}
+
+/// Get the signer entries for the signer pool.
+pub async fn get_signer_entries(pool_size: usize) -> Result<Vec<SigningPoolEntry>> {
+ let node_config = GLOBAL_NODE_CONFIG
         .get()
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))?;
     let chain_info = node_config.chain.info();
@@ -93,15 +104,12 @@ pub async fn start_signer_pool(pool_size: usize) -> Result<SignerPool> {
         });
     }
 
-    let (tx, rx) = flume::unbounded::<SigningPoolMessage>();
-
-    tokio::spawn(run_pool(entries, rx));
-
-    Ok(SignerPool { tx })
+    Ok(entries)
 }
 
 async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<SigningPoolMessage>) {
     let stale = Duration::from_secs(STALE_LEASE_SECS);
+    let mut signer_count = entries.len();
     let mut interval = tokio::time::interval(Duration::from_secs(CLEANUP_INTERVAL_SECS));
     interval.tick().await; // discard the immediate first tick
 
@@ -152,6 +160,24 @@ async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<Signin
                 }
             }
             _ = interval.tick() => {
+                let new_signer_count = match crate::accounts::get_signer_count().await {
+                    Ok(count) => count,
+                    Err(e) => {
+                        tracing::error!("signer_pool: failed to get signer count: {e}");
+                        signer_count
+                    }
+                };
+                if new_signer_count > signer_count {
+                    match  get_signer_entries(new_signer_count).await {
+                        Ok(new_entries) => {
+                            entries = new_entries;
+                            signer_count = new_signer_count;
+                        }
+                        Err(e) => {
+                            tracing::error!("signer_pool: failed to get signer entries: {e}");
+                        }
+                    };
+                }
                 let now = Instant::now();
                 for entry in entries.iter_mut() {
                     if let (true, Some(since)) = (entry.in_use, entry.in_use_since)

@@ -44,6 +44,9 @@ contract AccountConfigViews {
     function pricingAt(uint256 index) public view returns (uint256) {
         return LibAccountConfigStorage.getStorage().pricing[index];
     }
+    function signerCount() public view returns (uint256) {
+        return LibAccountConfigStorage.getStorage().signerCount;
+    }
 
     function accountExistsAndIsMutable(
         uint256 apiKeyHash

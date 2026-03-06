@@ -99,6 +99,7 @@ library LibAccountConfigStorage {
         address pricing_operator; // account that can mutate certain state for operational purposes ( like pricing ).
         uint256 nextWalletCount; // counter for creating unique wallet address hashes
         uint256 nextAccountCount; // counter for creating unique account ids
+        uint256 signerCount; // counter for creating unique signer ids
     }
 
     function getStorage()
