@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use crate::accounts::signer_pool::SignerPool;
 use crate::actions::grpc::GrpcClientPool;
 use crate::core::account_management;
 use crate::core::api_status::ApiResult;
@@ -156,10 +159,14 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
 #[openapi(tag = "Account Management")]
 #[post("/new_account", format = "json", data = "<new_account_request>")]
 async fn new_account(
+    signer_pool: &State<Arc<SignerPool>>,
     new_account_request: Json<NewAccountRequest>,
 ) -> OpenApiResponse<NewAccountResponse, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::new_account(new_account_request).await).into(),
+        response: ApiResult(
+            account_management::new_account(signer_pool.inner().clone(), new_account_request).await,
+        )
+        .into(),
     }
 }
 
@@ -173,9 +180,16 @@ async fn account_exists(api_key: ApiKey) -> OpenApiResponse<bool, ErrMessage> {
 
 #[openapi(tag = "Account Management")]
 #[get("/create_wallet")]
-async fn create_wallet(api_key: ApiKey) -> OpenApiResponse<CreateWalletResponse, ErrMessage> {
+async fn create_wallet(
+    signer_pool: &State<Arc<SignerPool>>,
+    api_key: ApiKey,
+) -> OpenApiResponse<CreateWalletResponse, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::create_wallet(api_key.0.as_str()).await).into(),
+        response: ApiResult(
+            account_management::create_wallet(signer_pool.inner().clone(), api_key.0.as_str())
+                .await,
+        )
+        .into(),
     }
 }
 
@@ -225,47 +239,74 @@ async fn get_lit_action_ipfs_id(code: String) -> OpenApiResponse<String, ErrMess
 #[openapi(tag = "Account Management")]
 #[post("/add_group", format = "json", data = "<req>")]
 async fn add_group(
+    signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<AddGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::add_group(api_key.0.as_str(), req).await).into(),
+        response: ApiResult(
+            account_management::add_group(signer_pool.inner().clone(), api_key.0.as_str(), req)
+                .await,
+        )
+        .into(),
     }
 }
 
 #[openapi(tag = "Account Management")]
 #[post("/add_action_to_group", format = "json", data = "<req>")]
 async fn add_action_to_group(
+    signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<AddActionToGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::add_action_to_group(api_key.0.as_str(), req).await)
-            .into(),
+        response: ApiResult(
+            account_management::add_action_to_group(
+                signer_pool.inner().clone(),
+                api_key.0.as_str(),
+                req,
+            )
+            .await,
+        )
+        .into(),
     }
 }
 
 #[openapi(tag = "Account Management")]
 #[post("/add_pkp_to_group", format = "json", data = "<req>")]
 async fn add_pkp_to_group(
+    signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<AddPkpToGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::add_pkp_to_group(api_key.0.as_str(), req).await)
-            .into(),
+        response: ApiResult(
+            account_management::add_pkp_to_group(
+                signer_pool.inner().clone(),
+                api_key.0.as_str(),
+                req,
+            )
+            .await,
+        )
+        .into(),
     }
 }
 
 #[openapi(tag = "Account Management")]
 #[post("/remove_pkp_from_group", format = "json", data = "<req>")]
 async fn remove_pkp_from_group(
+    signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<RemovePkpFromGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
-            account_management::remove_pkp_from_group(api_key.0.as_str(), req).await,
+            account_management::remove_pkp_from_group(
+                signer_pool.inner().clone(),
+                api_key.0.as_str(),
+                req,
+            )
+            .await,
         )
         .into(),
     }
@@ -274,24 +315,38 @@ async fn remove_pkp_from_group(
 #[openapi(tag = "Account Management")]
 #[post("/add_usage_api_key", format = "json", data = "<req>")]
 async fn add_usage_api_key(
+    signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<AddUsageApiKeyRequest>,
 ) -> OpenApiResponse<AddUsageApiKeyResponse, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::add_usage_api_key(api_key.0.as_str(), req).await)
-            .into(),
+        response: ApiResult(
+            account_management::add_usage_api_key(
+                signer_pool.inner().clone(),
+                api_key.0.as_str(),
+                req,
+            )
+            .await,
+        )
+        .into(),
     }
 }
 
 #[openapi(tag = "Account Management")]
 #[post("/remove_usage_api_key", format = "json", data = "<req>")]
 async fn remove_usage_api_key(
+    signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<RemoveUsageApiKeyRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
-            account_management::remove_usage_api_key(api_key.0.as_str(), req).await,
+            account_management::remove_usage_api_key(
+                signer_pool.inner().clone(),
+                api_key.0.as_str(),
+                req,
+            )
+            .await,
         )
         .into(),
     }
@@ -300,23 +355,34 @@ async fn remove_usage_api_key(
 #[openapi(tag = "Account Management")]
 #[post("/update_group", format = "json", data = "<req>")]
 async fn update_group(
+    signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<UpdateGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::update_group(api_key.0.as_str(), req).await).into(),
+        response: ApiResult(
+            account_management::update_group(signer_pool.inner().clone(), api_key.0.as_str(), req)
+                .await,
+        )
+        .into(),
     }
 }
 
 #[openapi(tag = "Account Management")]
 #[post("/remove_action_from_group", format = "json", data = "<req>")]
 async fn remove_action_from_group(
+    signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<RemoveActionFromGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
-            account_management::remove_action_from_group(api_key.0.as_str(), req).await,
+            account_management::remove_action_from_group(
+                signer_pool.inner().clone(),
+                api_key.0.as_str(),
+                req,
+            )
+            .await,
         )
         .into(),
     }
@@ -325,12 +391,18 @@ async fn remove_action_from_group(
 #[openapi(tag = "Account Management")]
 #[post("/update_action_metadata", format = "json", data = "<req>")]
 async fn update_action_metadata(
+    signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<UpdateActionMetadataRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
-            account_management::update_action_metadata(api_key.0.as_str(), req).await,
+            account_management::update_action_metadata(
+                signer_pool.inner().clone(),
+                api_key.0.as_str(),
+                req,
+            )
+            .await,
         )
         .into(),
     }
@@ -339,12 +411,18 @@ async fn update_action_metadata(
 #[openapi(tag = "Account Management")]
 #[post("/update_usage_api_key_metadata", format = "json", data = "<req>")]
 async fn update_usage_api_key_metadata(
+    signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<UpdateUsageApiKeyMetadataRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
-            account_management::update_usage_api_key_metadata(api_key.0.as_str(), req).await,
+            account_management::update_usage_api_key_metadata(
+                signer_pool.inner().clone(),
+                api_key.0.as_str(),
+                req,
+            )
+            .await,
         )
         .into(),
     }

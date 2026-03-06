@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use crate::accounts::signer_pool::SignerPool;
 use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::api_status::ApiStatus;
 use crate::core::v1::models::request::{
@@ -84,6 +87,7 @@ async fn create_new_wallet() -> Result<(String, H160, [u8; 32], U256), ApiStatus
 }
 
 pub async fn new_account(
+    signer_pool: Arc<SignerPool>,
     new_account_request: Json<NewAccountRequest>,
 ) -> Result<NewAccountResponse, ApiStatus> {
     let account_name = new_account_request.account_name.clone();
@@ -93,6 +97,7 @@ pub async fn new_account(
     let api_key = base64_light::base64_encode_bytes(&secret);
 
     if let Err(e) = accounts::new_account(
+        signer_pool.clone(),
         &api_key,
         &account_name,
         &account_description,
@@ -105,6 +110,7 @@ pub async fn new_account(
 
     // technically this is NOT a derivaton path at all, but it's a stand-in for now
     accounts::register_wallet_derivation(
+        signer_pool,
         &api_key,
         wallet_address,
         derivation_path,
@@ -126,11 +132,15 @@ pub async fn account_exists(api_key: &str) -> Result<bool, ApiStatus> {
     Ok(exists)
 }
 
-pub async fn create_wallet(api_key: &str) -> Result<CreateWalletResponse, ApiStatus> {
+pub async fn create_wallet(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+) -> Result<CreateWalletResponse, ApiStatus> {
     let (_public_key, wallet_address, _secret, derivation_u256) = create_new_wallet().await?;
 
     // technically this is NOT a derivaton path at all, but it's a stand-in for now
     accounts::register_wallet_derivation(
+        signer_pool,
         api_key,
         wallet_address,
         derivation_u256,
@@ -151,12 +161,14 @@ pub async fn get_lit_action_ipfs_id(code: String) -> Result<String, ApiStatus> {
 }
 
 pub async fn add_group(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     req: Json<AddGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let permitted_actions = parse_u256_hex_list(&req.permitted_actions)?;
     let pkps = parse_u256_hex_list(&req.pkps)?;
     accounts::add_group(
+        signer_pool,
         api_key,
         &req.group_name,
         &req.group_description,
@@ -171,19 +183,28 @@ pub async fn add_group(
 }
 
 pub async fn add_action_to_group(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     req: Json<AddActionToGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = parse_u256(&req.group_id)?;
     let name = req.name.as_deref().unwrap_or("");
     let description = req.description.as_deref().unwrap_or("");
-    accounts::add_action_to_group(api_key, group_id, &req.action_ipfs_cid, name, description)
-        .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "add_action_to_group failed"))?;
+    accounts::add_action_to_group(
+        signer_pool,
+        api_key,
+        group_id,
+        &req.action_ipfs_cid,
+        name,
+        description,
+    )
+    .await
+    .map_err(|e| ApiStatus::internal_server_error(e, "add_action_to_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
 pub async fn add_pkp_to_group(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     req: Json<AddPkpToGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
@@ -196,13 +217,14 @@ pub async fn add_pkp_to_group(
         ));
     }
     let wallet_address = H160::from_slice(&wallet_address_bytes);
-    accounts::add_pkp_to_group(api_key, group_id, wallet_address)
+    accounts::add_pkp_to_group(signer_pool, api_key, group_id, wallet_address)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "add_pkp_to_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
 pub async fn remove_pkp_from_group(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     req: Json<RemovePkpFromGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
@@ -215,13 +237,14 @@ pub async fn remove_pkp_from_group(
         ));
     }
     let wallet_address = H160::from_slice(&src);
-    accounts::remove_pkp_from_group(api_key, group_id, wallet_address)
+    accounts::remove_pkp_from_group(signer_pool, api_key, group_id, wallet_address)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "remove_pkp_from_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
 pub async fn add_usage_api_key(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     req: Json<AddUsageApiKeyRequest>,
 ) -> Result<AddUsageApiKeyResponse, ApiStatus> {
@@ -233,6 +256,7 @@ pub async fn add_usage_api_key(
     // technically this is NOT a derivaton path at all, but it's a stand-in for now
 
     accounts::register_wallet_derivation(
+        signer_pool.clone(),
         api_key,
         wallet_address,
         derivation_u256,
@@ -244,6 +268,7 @@ pub async fn add_usage_api_key(
     let usage_api_key = base64_light::base64_encode_bytes(&secret);
 
     accounts::add_usage_api_key(
+        signer_pool,
         api_key,
         &usage_api_key,
         expiration,
@@ -260,21 +285,24 @@ pub async fn add_usage_api_key(
 }
 
 pub async fn remove_usage_api_key(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     req: Json<RemoveUsageApiKeyRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    accounts::remove_usage_api_key(api_key, &req.usage_api_key)
+    accounts::remove_usage_api_key(signer_pool, api_key, &req.usage_api_key)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "remove_usage_api_key failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
 pub async fn update_group(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     req: Json<UpdateGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = parse_u256(&req.group_id)?;
     accounts::update_group(
+        signer_pool,
         api_key,
         group_id,
         &req.name,
@@ -288,33 +316,44 @@ pub async fn update_group(
 }
 
 pub async fn remove_action_from_group(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     req: Json<RemoveActionFromGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = parse_u256(&req.group_id)?;
-    accounts::remove_action_from_group_by_cid(api_key, group_id, &req.action_ipfs_cid)
+    accounts::remove_action_from_group_by_cid(signer_pool, api_key, group_id, &req.action_ipfs_cid)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "remove_action_from_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
 pub async fn update_action_metadata(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     req: Json<UpdateActionMetadataRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = parse_u256(&req.group_id)?;
     let action_hash = U256::from_big_endian(&keccak256(&req.action_ipfs_cid));
-    accounts::update_action_metadata(api_key, action_hash, group_id, &req.name, &req.description)
-        .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "update_action_metadata failed"))?;
+    accounts::update_action_metadata(
+        signer_pool,
+        api_key,
+        action_hash,
+        group_id,
+        &req.name,
+        &req.description,
+    )
+    .await
+    .map_err(|e| ApiStatus::internal_server_error(e, "update_action_metadata failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
 pub async fn update_usage_api_key_metadata(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     req: Json<UpdateUsageApiKeyMetadataRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     accounts::update_usage_api_key_metadata(
+        signer_pool,
         api_key,
         &req.usage_api_key,
         &req.name,

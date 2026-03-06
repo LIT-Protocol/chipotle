@@ -1,15 +1,17 @@
 pub use crate::abstractions::transfer::chain_info::Chain;
 pub use crate::accounts::contracts::account_config_contract::AccountConfig;
+use crate::accounts::signer_pool::SignerPool;
 use crate::config::GLOBAL_NODE_CONFIG;
-use crate::dstack::v1::get_lit_payer_key;
 pub use anyhow::Result;
+use ethers::contract::FunctionCall;
 use ethers::middleware::NonceManagerMiddleware;
 pub use ethers::middleware::SignerMiddleware;
 pub use ethers::providers::Http;
 pub use ethers::providers::Provider;
 pub use ethers::signers::LocalWallet;
-use ethers::signers::Signer;
+use ethers::signers::Wallet;
 pub use ethers::types::H160;
+use k256::ecdsa::SigningKey;
 pub use lit_core::utils::binary::hex_to_bytes;
 pub use std::sync::Arc;
 use std::sync::OnceLock;
@@ -24,8 +26,6 @@ use std::time::Duration;
 pub(crate) type SigningClient =
     NonceManagerMiddleware<SignerMiddleware<Provider<Http>, LocalWallet>>;
 
-static GLOBAL_SIGNING_CLIENT: OnceLock<Arc<SigningClient>> = OnceLock::new();
-
 static GLOBAL_READ_ONLY_CLIENT: OnceLock<Arc<Provider<Http>>> = OnceLock::new();
 
 /// Initialise the global signing client. Must be called once at startup,
@@ -35,38 +35,18 @@ pub(crate) async fn init_chain_clients() -> Result<()> {
         .get()
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))?;
     let chain_info = node_config.chain.info();
-    let secret = get_lit_payer_key(1).await.map_err(|e| anyhow::anyhow!(e))?;
-
-    let wallet = LocalWallet::from_bytes(&secret)?.with_chain_id(chain_info.chain_id);
-    let address = wallet.address();
-    tracing::info!("API Payer wallet address: {:?}", address);
-    let provider = Provider::<Http>::try_from(chain_info.rpc_url)?.interval(Duration::from_secs(2));
-    let signer = SignerMiddleware::new(provider, wallet);
-
-    // NonceManagerMiddleware wraps the signer and tracks the nonce in an
-    // AtomicU64. On the first transaction it fetches the current on-chain
-    // nonce; every subsequent call increments it atomically, so concurrent
-    // callers always receive distinct nonces.
-    let nonce_manager = NonceManagerMiddleware::new(signer, address);
-
-    GLOBAL_SIGNING_CLIENT.get_or_init(|| Arc::new(nonce_manager));
 
     let provider = Provider::<Http>::try_from(chain_info.rpc_url)?.interval(Duration::from_secs(2));
     GLOBAL_READ_ONLY_CLIENT.get_or_init(|| Arc::new(provider));
     Ok(())
 }
 
-pub(crate) async fn get_signable_account_config_contract()
--> Result<AccountConfig<SigningClient>, anyhow::Error> {
-    let client = GLOBAL_SIGNING_CLIENT
-        .get()
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "Signing client not initialised — call init_signing_client() at startup"
-            )
-        })?
-        .clone();
-
+pub(crate) async fn get_signable_account_config_contract(
+    signer_pool: Arc<SignerPool>,
+) -> Result<(AccountConfig<SigningClient>, H160), anyhow::Error> {
+    let signer_handle = signer_pool.request().await?;
+    let client = signer_handle.client;
+    let signer_address = signer_handle.address;
     let node_config = GLOBAL_NODE_CONFIG
         .get()
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))?;
@@ -74,7 +54,7 @@ pub(crate) async fn get_signable_account_config_contract()
     let account_config_address = H160::from_slice(&account_config_address);
     let contract = AccountConfig::new(account_config_address, client);
 
-    Ok(contract)
+    Ok((contract, signer_address))
 }
 
 pub(crate) async fn get_read_only_account_config_contract()
@@ -95,4 +75,36 @@ pub(crate) async fn get_read_only_account_config_contract()
     let account_config_address = H160::from_slice(&account_config_address);
     let contract = AccountConfig::new(account_config_address, client);
     Ok(contract)
+}
+
+pub async fn send_transaction(
+    function_call: FunctionCall<
+        Arc<
+            NonceManagerMiddleware<
+                SignerMiddleware<Provider<ethers_providers::Http>, Wallet<SigningKey>>,
+            >,
+        >,
+        NonceManagerMiddleware<
+            SignerMiddleware<Provider<ethers_providers::Http>, Wallet<SigningKey>>,
+        >,
+        (),
+    >,
+    signer_pool: Arc<SignerPool>,
+    signer_address: H160,
+) -> Result<bool> {
+    let tx = match function_call.send().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            signer_pool.release(signer_address).await?;
+            return Err(anyhow::anyhow!("Failed to send transaction: {e}"));
+        }
+    };
+
+    let result = match tx.await {
+        Ok(_) => Ok(true),
+        Err(e) => Err(e.into()),
+    };
+
+    signer_pool.release(signer_address).await?;
+    result
 }

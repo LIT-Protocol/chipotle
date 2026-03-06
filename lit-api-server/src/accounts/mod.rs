@@ -1,12 +1,16 @@
 pub mod contracts;
+use std::sync::Arc;
+
 pub use contracts::account_config_contract::{AccountConfig, Metadata};
 pub mod signable_contract;
+pub mod signer_pool;
 pub use anyhow::Result;
 
 use crate::accounts::contracts::account_config_contract::{UsageApiKey, WalletData};
 use crate::accounts::signable_contract::{
-    get_read_only_account_config_contract, get_signable_account_config_contract,
+    get_read_only_account_config_contract, get_signable_account_config_contract, send_transaction,
 };
+use crate::accounts::signer_pool::SignerPool;
 use ethers::types::{H160, U256};
 use ethers::utils::keccak256;
 
@@ -21,12 +25,14 @@ pub fn wallet_address_hash(wallet_address: H160) -> U256 {
 
 /// Create a new account. `initial_balance` is stored on the account's apiKey (AccountConfig.accountApiKey.balance).
 pub async fn new_account(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     account_name: &str,
     account_description: &str,
     creator_wallet_address: H160,
 ) -> Result<bool> {
-    let contract = get_signable_account_config_contract().await?;
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
     let api_key_hash = api_key_hash(api_key);
 
     let function_call = contract.new_account(
@@ -36,11 +42,7 @@ pub async fn new_account(
         account_description.to_string(),
         creator_wallet_address,
     );
-    let tx = function_call.send().await?;
-    match tx.await {
-        Ok(_) => Ok(true),
-        Err(e) => Err(e.into()),
-    }
+    send_transaction(function_call, signer_pool, signer_address).await
 }
 
 pub async fn account_exists(api_key: &str) -> Result<bool> {
@@ -56,7 +58,9 @@ pub async fn account_exists(api_key: &str) -> Result<bool> {
 /// Add a group to an account with name, description, permitted action CID hashes, wallet hashes, and permission flags.
 /// `permitted_actions` and `wallets` are keccak256 hashes (U256). Use `keccak256(action_ipfs_cid)` and `keccak256(pkp_public_key)` to produce them.
 /// `all_wallets_permitted` and `all_actions_permitted` match AccountConfig.sol Group fields.
+#[allow(clippy::too_many_arguments)]
 pub async fn add_group(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     name: &str,
     description: &str,
@@ -65,7 +69,8 @@ pub async fn add_group(
     all_wallets_permitted: bool,
     all_actions_permitted: bool,
 ) -> Result<bool> {
-    let contract = get_signable_account_config_contract().await?;
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.add_group(
         account_api_key_hash,
@@ -76,22 +81,20 @@ pub async fn add_group(
         all_wallets_permitted,
         all_actions_permitted,
     );
-    let tx = function_call.send().await?;
-    match tx.await {
-        Ok(_) => Ok(true),
-        Err(e) => Err(e.into()),
-    }
+    send_transaction(function_call, signer_pool, signer_address).await
 }
 
 /// Add an action (IPFS CID) to a group with optional metadata. `action_ipfs_cid` is hashed with keccak256; pass the raw CID string.
 pub async fn add_action_to_group(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     group_id: U256,
     action_ipfs_cid: &str,
     name: &str,
     description: &str,
 ) -> Result<bool> {
-    let contract = get_signable_account_config_contract().await?;
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let action_hash = U256::from_big_endian(&keccak256(action_ipfs_cid));
     let function_call = contract.add_action_to_group(
@@ -101,38 +104,38 @@ pub async fn add_action_to_group(
         name.to_string(),
         description.to_string(),
     );
-    let tx = function_call.send().await?;
-    match tx.await {
-        Ok(_) => Ok(true),
-        Err(e) => Err(e.into()),
-    }
+    send_transaction(function_call, signer_pool, signer_address).await
 }
 
 /// Add a wallet (by address hash) to a group. `wallet_address` is hashed with keccak256 (hex with or without 0x).
 pub async fn add_wallet_to_group(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     group_id: U256,
     wallet_address: H160,
 ) -> Result<bool> {
-    let contract = get_signable_account_config_contract().await?;
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let wallet_address_hash = wallet_address_hash(wallet_address);
     let function_call =
         contract.add_wallet_to_group(account_api_key_hash, group_id, wallet_address_hash);
-    let tx = function_call.send().await?;
-    match tx.await {
-        Ok(_) => Ok(true),
-        Err(e) => Err(e.into()),
-    }
+    send_transaction(function_call, signer_pool, signer_address).await
 }
 
 /// Add a PKP to a group (alias for add_wallet_to_group; hashes the given string and adds to group).
-pub async fn add_pkp_to_group(api_key: &str, group_id: U256, wallet_address: H160) -> Result<bool> {
-    add_wallet_to_group(api_key, group_id, wallet_address).await
+pub async fn add_pkp_to_group(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    group_id: U256,
+    wallet_address: H160,
+) -> Result<bool> {
+    add_wallet_to_group(signer_pool, api_key, group_id, wallet_address).await
 }
 
 /// Update group metadata and permission flags (AccountConfig.updateGroup).
 pub async fn update_group(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     group_id: U256,
     name: &str,
@@ -140,7 +143,8 @@ pub async fn update_group(
     all_wallets_permitted: bool,
     all_actions_permitted: bool,
 ) -> Result<bool> {
-    let contract = get_signable_account_config_contract().await?;
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.update_group(
         account_api_key_hash,
@@ -150,49 +154,46 @@ pub async fn update_group(
         all_wallets_permitted,
         all_actions_permitted,
     );
-    let tx = function_call.send().await?;
-    match tx.await {
-        Ok(_) => Ok(true),
-        Err(e) => Err(e.into()),
-    }
+    send_transaction(function_call, signer_pool, signer_address).await
 }
 
 /// Remove an action from a group by action hash (AccountConfig.removeActionFromGroup). `action_hash` is keccak256 of the action (e.g. IPFS CID).
 pub async fn remove_action_from_group(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     group_id: U256,
     action_hash: U256,
 ) -> Result<bool> {
-    let contract = get_signable_account_config_contract().await?;
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let function_call =
         contract.remove_action_from_group(account_api_key_hash, group_id, action_hash);
-    let tx = function_call.send().await?;
-    match tx.await {
-        Ok(_) => Ok(true),
-        Err(e) => Err(e.into()),
-    }
+    send_transaction(function_call, signer_pool, signer_address).await
 }
 
 /// Remove an action from a group by IPFS CID string (hashed with keccak256). Convenience wrapper for remove_action_from_group.
 pub async fn remove_action_from_group_by_cid(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     group_id: U256,
     action_ipfs_cid: &str,
 ) -> Result<bool> {
     let action_hash = U256::from_big_endian(&keccak256(action_ipfs_cid));
-    remove_action_from_group(api_key, group_id, action_hash).await
+    remove_action_from_group(signer_pool, api_key, group_id, action_hash).await
 }
 
 /// Update action metadata (name, description) for an action in a group (AccountConfig.updateActionMetadata). `action_hash` is keccak256 of the action.
 pub async fn update_action_metadata(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     action_hash: U256,
     group_id: U256,
     name: &str,
     description: &str,
 ) -> Result<bool> {
-    let contract = get_signable_account_config_contract().await?;
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.update_action_metadata(
         account_api_key_hash,
@@ -201,21 +202,19 @@ pub async fn update_action_metadata(
         name.to_string(),
         description.to_string(),
     );
-    let tx = function_call.send().await?;
-    match tx.await {
-        Ok(_) => Ok(true),
-        Err(e) => Err(e.into()),
-    }
+    send_transaction(function_call, signer_pool, signer_address).await
 }
 
 /// Update usage API key metadata (name, description) (AccountConfig.updateUsageApiKeyMetadata).
 pub async fn update_usage_api_key_metadata(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     usage_api_key: &str,
     name: &str,
     description: &str,
 ) -> Result<bool> {
-    let contract = get_signable_account_config_contract().await?;
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let usage_api_key_hash = U256::from_big_endian(&keccak256(usage_api_key));
     let function_call = contract.update_usage_api_key_metadata(
@@ -224,42 +223,38 @@ pub async fn update_usage_api_key_metadata(
         name.to_string(),
         description.to_string(),
     );
-    let tx = function_call.send().await?;
-    match tx.await {
-        Ok(_) => Ok(true),
-        Err(e) => Err(e.into()),
-    }
+    send_transaction(function_call, signer_pool, signer_address).await
 }
 
 /// Remove a wallet from a group. `wallet_address` must match the value used when adding (same keccak256 input).
 pub async fn remove_wallet_from_group(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     group_id: U256,
     wallet_address: H160,
 ) -> Result<bool> {
-    let contract = get_signable_account_config_contract().await?;
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let wallet_address_hash = wallet_address_hash(wallet_address);
     let function_call =
         contract.remove_wallet_from_group(account_api_key_hash, group_id, wallet_address_hash);
-    let tx = function_call.send().await?;
-    match tx.await {
-        Ok(_) => Ok(true),
-        Err(e) => Err(e.into()),
-    }
+    send_transaction(function_call, signer_pool, signer_address).await
 }
 
 /// Remove a PKP from a group (alias for remove_wallet_from_group).
 pub async fn remove_pkp_from_group(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     group_id: U256,
     wallet_address: H160,
 ) -> Result<bool> {
-    remove_wallet_from_group(api_key, group_id, wallet_address).await
+    remove_wallet_from_group(signer_pool, api_key, group_id, wallet_address).await
 }
 
 /// Add a usage API key to an account (usageApiKey in AccountConfig.sol).
 pub async fn add_usage_api_key(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     usage_api_key: &str,
     expiration: U256,
@@ -267,7 +262,8 @@ pub async fn add_usage_api_key(
     name: &str,
     description: &str,
 ) -> Result<bool> {
-    let contract = get_signable_account_config_contract().await?;
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
     tracing::info!(
         "Adding usage API key to account: {}, usage_api_key: {}, expiration: {}, balance: {}",
         api_key,
@@ -286,37 +282,36 @@ pub async fn add_usage_api_key(
         name.to_string(),
         description.to_string(),
     );
-    let tx = function_call.send().await?;
-    match tx.await {
-        Ok(_) => Ok(true),
-        Err(e) => Err(e.into()),
-    }
+    send_transaction(function_call, signer_pool, signer_address).await
 }
 
 /// Remove a usage API key from an account.
-pub async fn remove_usage_api_key(api_key: &str, usage_api_key: &str) -> Result<bool> {
-    let contract = get_signable_account_config_contract().await?;
+pub async fn remove_usage_api_key(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    usage_api_key: &str,
+) -> Result<bool> {
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let usage_api_key_hash = api_key_hash(usage_api_key);
 
     let function_call = contract.remove_usage_api_key(account_api_key_hash, usage_api_key_hash);
-    let tx = function_call.send().await?;
-    match tx.await {
-        Ok(_) => Ok(true),
-        Err(e) => Err(e.into()),
-    }
+    send_transaction(function_call, signer_pool, signer_address).await
 }
 
 /// Register the derivation path for a wallet address under an account (AccountConfig.wallet_derivation).
 /// `wallet_address` is the hex address (with or without 0x). `derivation_path` is the path stored on-chain.
 pub async fn register_wallet_derivation(
+    signer_pool: Arc<SignerPool>,
     api_key: &str,
     wallet_address: H160,
     derivation_path: U256,
     name: &str,
     description: &str,
 ) -> Result<bool> {
-    let contract = get_signable_account_config_contract().await?;
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.register_wallet_derivation(
         account_api_key_hash,
@@ -326,12 +321,7 @@ pub async fn register_wallet_derivation(
         description.to_string(),
     );
 
-    let tx = function_call.send().await?;
-    // Wait for the transaction to be confirmed before returning true
-    match tx.await {
-        Ok(_) => Ok(true),
-        Err(e) => Err(e.into()),
-    }
+    send_transaction(function_call, signer_pool, signer_address).await
 }
 
 /// Get the derivation path for a wallet address under an account (read-only).
@@ -425,26 +415,29 @@ pub async fn list_api_keys(
     Ok(page)
 }
 
-pub async fn debit_api_key(api_key: &str, amount: U256) -> Result<bool> {
-    let contract = get_signable_account_config_contract().await?;
+pub async fn debit_api_key(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    amount: U256,
+) -> Result<bool> {
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.debit_api_key(account_api_key_hash, amount);
-    let tx = function_call.send().await?;
-    match tx.await {
-        Ok(_) => Ok(true),
-        Err(e) => Err(e.into()),
-    }
+    send_transaction(function_call, signer_pool, signer_address).await
 }
 
-pub async fn credit_api_key(api_key: &str, amount: U256) -> Result<bool> {
-    let contract = get_signable_account_config_contract().await?;
+pub async fn credit_api_key(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    amount: U256,
+) -> Result<bool> {
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
+
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.credit_api_key(account_api_key_hash, amount);
-    let tx = function_call.send().await?;
-    match tx.await {
-        Ok(_) => Ok(true),
-        Err(e) => Err(e.into()),
-    }
+    send_transaction(function_call, signer_pool, signer_address).await
 }
 
 pub async fn get_api_payers() -> Result<Vec<H160>> {
