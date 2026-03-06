@@ -3,15 +3,13 @@ pub use crate::accounts::contracts::account_config_contract::AccountConfig;
 use crate::accounts::signer_pool::SignerPool;
 use crate::config::GLOBAL_NODE_CONFIG;
 pub use anyhow::Result;
-use ethers::contract::FunctionCall;
+use ethers::contract::builders::ContractCall;
 use ethers::middleware::NonceManagerMiddleware;
 pub use ethers::middleware::SignerMiddleware;
 pub use ethers::providers::Http;
 pub use ethers::providers::Provider;
 pub use ethers::signers::LocalWallet;
-use ethers::signers::Wallet;
 pub use ethers::types::H160;
-use k256::ecdsa::SigningKey;
 pub use lit_core::utils::binary::hex_to_bytes;
 pub use std::sync::Arc;
 use std::sync::OnceLock;
@@ -78,17 +76,7 @@ pub(crate) async fn get_read_only_account_config_contract()
 }
 
 pub async fn send_transaction(
-    function_call: FunctionCall<
-        Arc<
-            NonceManagerMiddleware<
-                SignerMiddleware<Provider<ethers_providers::Http>, Wallet<SigningKey>>,
-            >,
-        >,
-        NonceManagerMiddleware<
-            SignerMiddleware<Provider<ethers_providers::Http>, Wallet<SigningKey>>,
-        >,
-        (),
-    >,
+    function_call: ContractCall<SigningClient, ()>,
     signer_pool: Arc<SignerPool>,
     signer_address: H160,
 ) -> Result<bool> {
