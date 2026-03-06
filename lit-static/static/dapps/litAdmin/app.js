@@ -254,7 +254,6 @@ async function setApiPayer() {
   const contractAddress = (el('contract-address')?.value || '').trim();
   const newApiPayerString = (el('new-api-payer')?.value || '').trim();
   const newApiPayer = ethers.getAddress(newApiPayerString);
-  console.log("newApiPayer:", newApiPayer);
   const btn = el('btn-set-api-payer');
 
   if (!contractAddress) {
@@ -271,15 +270,11 @@ async function setApiPayer() {
 
   try {
     const provider = await connectWallet();
-console.log("provider", provider);
     if (!provider) return;
 
-    
     const signer = await provider.getSigner();
-    console.log("signer:", signer);
     const contract = new ethers.Contract(contractAddress, SET_API_PAYER_ABI, signer);
-    console.log("contract:", contract);
-    
+
     showWriteStatus('Waiting for signature…', false);
     const tx = await contract.setApiPayer(newApiPayer);
 
