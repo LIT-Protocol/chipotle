@@ -68,7 +68,6 @@ impl SignerPool {
 /// Creates `pool_size` signing clients using key indices 1..=pool_size via
 /// `get_lit_payer_key`. Must be called after `init_config()`.
 pub async fn start_signer_pool(pool_size: usize) -> Result<SignerPool> {
-   
     let (tx, rx) = flume::unbounded::<SigningPoolMessage>();
 
     let entries = get_signer_entries(pool_size).await?;
@@ -79,7 +78,7 @@ pub async fn start_signer_pool(pool_size: usize) -> Result<SignerPool> {
 
 /// Get the signer entries for the signer pool.
 pub async fn get_signer_entries(pool_size: usize) -> Result<Vec<SigningPoolEntry>> {
- let node_config = GLOBAL_NODE_CONFIG
+    let node_config = GLOBAL_NODE_CONFIG
         .get()
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))?;
     let chain_info = node_config.chain.info();
