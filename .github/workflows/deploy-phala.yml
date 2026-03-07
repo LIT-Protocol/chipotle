@@ -7,6 +7,7 @@
 # Required secrets:
 #   DOCKERHUB_TOKEN - Docker Hub PAT (Account Settings > Security > Access Tokens)
 #   PHALA_CLOUD_API_KEY - From Phala Cloud Dashboard > API Tokens
+#   PHALA_DSTACKAPP_PRIVATE_KEY - Private key for DstackApp (Onchain KMS on Base)
 #
 # Required vars:
 #   DOCKER_IMAGE - Base image path, e.g. docker.io/username/lit-node-express
@@ -34,16 +35,19 @@ jobs:
       phala_app_name: ${{ steps.set.outputs.phala_app_name }}
       base_url: ${{ steps.set.outputs.base_url }}
       api_root_url: ${{ steps.set.outputs.api_root_url }}
+      instance_type: ${{ steps.set.outputs.instance_type }}
     steps:
       - name: Set deployment target
         id: set
         run: |
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             echo "phala_app_name=lit-api-server" >> "$GITHUB_OUTPUT"
+            echo "instance_type=tdx.large" >> "$GITHUB_OUTPUT"
             BASE_URL="https://api.dev.litprotocol.com"
           elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
-            echo "phala_app_name=lit-api-server-next" >> "$GITHUB_OUTPUT"
-            BASE_URL="https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network"
+            echo "phala_app_name=chipotle-next" >> "$GITHUB_OUTPUT"
+            echo "instance_type=tdx.small" >> "$GITHUB_OUTPUT"
+            BASE_URL="https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network"
           else
             echo "Unsupported branch for deployment"
             exit 1
@@ -121,9 +125,9 @@ jobs:
 
       - name: Prepare docker-compose for deployment (digest-pinned)
         run: |
-          DIGEST_LIT_ACTIONS=$(cat digest-lit-actions.txt)
-          DIGEST_LIT_API_SERVER=$(cat digest-lit-api-server.txt)
-          DIGEST_LIT_STATIC=$(cat digest-lit-static.txt)
+          DIGEST_LIT_ACTIONS=$(cat digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DIGEST_LIT_API_SERVER=$(cat digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DIGEST_LIT_STATIC=$(cat digest-lit-static.txt | tr -d '\n' | sed 's/}[}]*$//')
           sed \
             -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|${{ vars.DOCKER_IMAGE }}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
             -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|${{ vars.DOCKER_IMAGE }}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
@@ -139,14 +143,15 @@ jobs:
       - name: Install Phala CLI
         run: npm install -g phala
 
-      - name: Deploy to Phala Cloud (tdx.large CVM)
+      - name: Deploy to Phala Cloud
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          PHALA_PRIVATE_KEY: ${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}
         run: |
           phala deploy \
             -c docker-compose.deploy.yml \
             --cvm-id ${{ needs.determine-target.outputs.phala_app_name }} \
-            --instance-type tdx.large
+            --private-key "$PHALA_PRIVATE_KEY"
 
   # Give the Phala CLI time to trigger the CVM restart and begin rebooting.
   # Without this, the old instance may still be serving the API when wait-for-api-available
