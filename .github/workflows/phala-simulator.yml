@@ -211,7 +211,7 @@ jobs:
           }
 
           # Copy demo config to checkout (NodeConfig.toml is gitignored); run from lit-api-server dir.
-          cp lit-api-server/NodeConfig.demo.toml lit-api-server/NodeConfig.toml
+          cp lit-api-server/NodeConfig.next.toml lit-api-server/NodeConfig.toml
           (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" "$API_BIN") >> "$SIM_TMP/lit-api-server.log" 2>&1 &
           API_PID=$!
           if ! kill -0 "$API_PID" 2>/dev/null; then
