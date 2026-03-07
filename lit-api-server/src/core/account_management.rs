@@ -15,6 +15,7 @@ use crate::core::v1::models::response::{
 };
 use crate::dstack::v1::get_client_key;
 use crate::{accounts, dstack};
+use elliptic_curve::group::GroupEncoding;
 use ethers::signers::{LocalWallet, Signer};
 use ethers::types::{H160, U256};
 use ethers::utils::keccak256;
@@ -22,7 +23,6 @@ use ipfs_hasher::IpfsHasher;
 use lit_core::utils::binary::{bytes_to_0x_hex, bytes_to_hex, hex_to_bytes};
 use rand::Rng;
 use rocket::serde::json::Json;
-
 /// Parse U256 from decimal string or hex string (with or without 0x prefix).
 fn parse_u256(s: &str) -> Result<U256, ApiStatus> {
     let s = s.trim();

@@ -70,22 +70,25 @@ impl SignerPool {
 pub async fn start_signer_pool(pool_size: usize) -> Result<SignerPool> {
     let (tx, rx) = flume::unbounded::<SigningPoolMessage>();
 
-    let entries = get_signer_entries(pool_size).await?;
+    let entries = get_signer_entries(1, pool_size).await?;
     tokio::spawn(run_pool(entries, rx));
 
     Ok(SignerPool { tx })
 }
 
 /// Get the signer entries for the signer pool.
-pub async fn get_signer_entries(pool_size: usize) -> Result<Vec<SigningPoolEntry>> {
+pub async fn get_signer_entries(
+    start_index: usize,
+    pool_size: usize,
+) -> Result<Vec<SigningPoolEntry>> {
     let node_config = GLOBAL_NODE_CONFIG
         .get()
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))?;
     let chain_info = node_config.chain.info();
 
     let mut entries: Vec<SigningPoolEntry> = Vec::with_capacity(pool_size);
-    for i in 1..=(pool_size as u16) {
-        let secret = get_lit_payer_key(i)
+    for i in start_index..=(start_index + pool_size) {
+        let secret = get_lit_payer_key(i as u16)
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         let wallet = LocalWallet::from_bytes(&secret)?.with_chain_id(chain_info.chain_id);
@@ -167,9 +170,9 @@ async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<Signin
                     }
                 };
                 if new_signer_count > signer_count {
-                    match  get_signer_entries(new_signer_count).await {
+                    match  get_signer_entries(signer_count + 1, new_signer_count - signer_count + 1).await {
                         Ok(new_entries) => {
-                            entries = new_entries;
+                            entries.extend(new_entries);
                             signer_count = new_signer_count;
                         }
                         Err(e) => {
@@ -177,6 +180,10 @@ async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<Signin
                         }
                     };
                 }
+                else if new_signer_count < signer_count {
+                    entries.truncate(new_signer_count);
+                    signer_count = new_signer_count;
+                };
                 let now = Instant::now();
                 for entry in entries.iter_mut() {
                     if let (true, Some(since)) = (entry.in_use, entry.in_use_since)
