@@ -53,6 +53,16 @@ ssh:
 #   just test ecdsa-sign         # runs lit-action-ecdsa-sign.spec.ts
 #   just test smoke integration  # runs both
 #   BASE_URL=.../core/v1 just test
+# Generate Rust bindings from Solidity artifacts (compile + generate).
+[group: 'contracts']
+contracts-generate:
+    make -C lit-api-server/blockchain/lit_node_express generate
+
+# Deploy contracts to Base Sepolia (generate + deploy).
+[group: 'contracts']
+contracts-deploy:
+    make -C lit-api-server/blockchain/lit_node_express deploy
+
 [group: 'test']
 test *names='smoke':
     #!/usr/bin/env sh
