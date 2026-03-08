@@ -225,7 +225,10 @@ jobs:
           kill "$SIM_PID" "$API_PID" 2>/dev/null || true
 
           # Fix empty digests and normalise format (same script used by verify-attestation.yml).
+          # Then clear vm_config: the simulator produces a synthetic value that lacks
+          # spec_version, which the Docker verifier requires. Passing "" skips that check.
           python3 scripts/fix-attestation-event-log.py "$SIM_TMP/attestation.json" \
+            | python3 -c 'import sys,json; d=json.load(sys.stdin); d["vm_config"]=""; print(json.dumps(d))' \
             > "$SIM_TMP/verify-request.json"
 
           # Run verifier via Docker (same image as verify-attestation.yml).
