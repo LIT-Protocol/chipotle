@@ -42,6 +42,14 @@ fmt:
         cargo fmt --manifest-path="$f" --all
     done
 
+[group: 'build']
+clippy:
+    #!/usr/bin/env sh
+    set -eu
+    find . -name Cargo.toml -not -path './.claude/*' -not -path '*node_modules*' | while read f; do
+        cargo clippy --manifest-path="$f" --all --all-targets --fix --allow-dirty -- -D warnings
+    done
+
 [group: 'debug']
 ssh:
     phala ssh
