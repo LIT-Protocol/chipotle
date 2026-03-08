@@ -16,7 +16,7 @@ COPY lit-actions ./lit-actions/
 # Remove tests workspace member (excluded by .dockerignore; not needed for release build)
 RUN sed -i 's/, "tests"//; s/"tests", //' lit-actions/Cargo.toml
 
-RUN cd lit-actions && cargo build --release --features production --bin lit_actions
+RUN cd lit-actions && cargo build --release --bin lit_actions
 
 FROM debian:bookworm-slim AS runtime
 
