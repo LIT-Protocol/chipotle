@@ -17,12 +17,17 @@ generate: compile
 	cd $(RUST_PROJECT) && cargo build --bin contract_generator
 	$(GENERATOR_BIN) artifacts/contracts ../../src/accounts/contracts/
 
-# 3. Deploy contracts. Args: network (1 = Yellowstone, 2 = Base Sepolia), abis_folder
-deploy: generate
+# 3. Deploy contracts to Base mainnet. Args: network (3 = Base), abis_folder
+deploy_base: generate
+	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
+	$(DEPLOYER_BIN) 3 artifacts/contracts $(BASE_DEPLOYER_SECRET)
+
+# 4. Deploy contracts to Base Sepolia. Args: network (2 = Base Sepolia), abis_folder
+deploy_sepolia: generate
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
 	$(DEPLOYER_BIN) 2 artifacts/contracts $(DEPLOYER_SECRET)
 
-# 4. Deploy contracts. Args: network (0 = Anvil), abis_folder
+# 5. Deploy contracts to Anvil. Args: network (0 = Anvil), abis_folder
 deploy_anvil: generate
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
 	$(DEPLOYER_BIN) 0 artifacts/contracts $(ANVIL_SECRET)

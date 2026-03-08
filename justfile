@@ -42,6 +42,14 @@ fmt:
         cargo fmt --manifest-path="$f" --all
     done
 
+[group: 'build']
+clippy:
+    #!/usr/bin/env sh
+    set -eu
+    find . -name Cargo.toml -not -path './.claude/*' -not -path '*node_modules*' | while read f; do
+        cargo clippy --manifest-path="$f" --all --all-targets --fix --allow-dirty -- -D warnings
+    done
+
 [group: 'debug']
 ssh:
     phala ssh
@@ -53,6 +61,16 @@ ssh:
 #   just test ecdsa-sign         # runs lit-action-ecdsa-sign.spec.ts
 #   just test smoke integration  # runs both
 #   BASE_URL=.../core/v1 just test
+# Generate Rust bindings from Solidity artifacts (compile + generate).
+[group: 'contracts']
+contracts-generate:
+    make -C lit-api-server/blockchain/lit_node_express generate
+
+# Deploy contracts to Base Sepolia (generate + deploy).
+[group: 'contracts']
+contracts-deploy:
+    make -C lit-api-server/blockchain/lit_node_express deploy_base
+
 [group: 'test']
 test *names='smoke':
     #!/usr/bin/env sh
