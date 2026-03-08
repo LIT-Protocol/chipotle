@@ -69,7 +69,7 @@ contracts-generate:
 # Deploy contracts to Base Sepolia (generate + deploy).
 [group: 'contracts']
 contracts-deploy:
-    make -C lit-api-server/blockchain/lit_node_express deploy
+    make -C lit-api-server/blockchain/lit_node_express deploy_base
 
 [group: 'test']
 test *names='smoke':
