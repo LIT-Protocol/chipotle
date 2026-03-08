@@ -508,8 +508,9 @@ pub async fn get_chain_info() -> Result<NodeChainConfigResponse, ApiStatus> {
 
 pub async fn get_api_payers() -> Result<Vec<String>, ApiStatus> {
     let mut api_payers = Vec::new();
-    for payer_number in 1..=10 {
-        let api_payer = dstack::v1::get_lit_payer_key(payer_number)
+    let signer_count = accounts::get_signer_count().await?;
+    for payer_number in 1..=signer_count {
+        let api_payer = dstack::v1::get_lit_payer_key(payer_number as u16)
             .await
             .map_err(|e| {
                 ApiStatus::internal_server_error(anyhow::anyhow!(e), "get_api_payers failed")

@@ -23,6 +23,7 @@ contract AccountConfigWrite {
         s.owner = msg.sender;
         s.nextWalletCount = 1;
         s.nextAccountCount = 1;
+        s.signerCount = 1;
         s.pricing[1] = 1;
     }
 

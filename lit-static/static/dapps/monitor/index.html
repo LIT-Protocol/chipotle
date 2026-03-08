@@ -70,6 +70,26 @@
       .form-group input::placeholder {
         color: var(--muted);
       }
+      .form-group select {
+        width: 100%;
+        padding: 0.6rem 0.75rem;
+        font-family: 'Outfit', sans-serif;
+        font-size: 0.85rem;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        cursor: pointer;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2371717a' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 0.75rem center;
+        padding-right: 2rem;
+      }
+      .form-group select:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
       button {
         font-family: 'Outfit', sans-serif;
         font-size: 0.9rem;
@@ -131,29 +151,39 @@
   <body>
     <h1>Lit Node Monitor</h1>
     <p class="subtitle">
-      Read AccountConfig contract state (ABI from AccountConfig.json).
+      Configuration and monitoring for the Lit Node Express server.
     </p>
 
+    <div class="form-group" style="max-width: 640px; margin-bottom: 1.5rem;">
+      <label for="network">Network</label>
+      <select id="network">
+        <option value="http://localhost:8000/core/v1/">Local Development</option>
+        <option value="https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network/core/v1/">Next - Phala</option>
+        <option value="https://36da669c852c9bd4fdea27dd331c07ff776bd125-8000.dstack-pha-prod5.phala.network/core/v1/">Dev - Phala</option>
+      </select>
+    </div>
+
+    <div class="card" style="margin-top: 1.5rem">
+      <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Lit Node Express - Configuration</h2>
+      <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+        <code>GET /get_node_chain_config</code> 
+      </p>
+      <div id="chain-config-results" style="display: none; margin-top: 1rem">
+        <div class="result-row"><span class="result-label">chain_name</span><span class="result-value" id="cc-chain-name">—</span></div>
+        <div class="result-row"><span class="result-label">chain_id</span><span class="result-value" id="cc-chain-id">—</span></div>
+        <div class="result-row"><span class="result-label">is_evm</span><span class="result-value" id="cc-is-evm">—</span></div>
+        <div class="result-row"><span class="result-label">testnet</span><span class="result-value" id="cc-testnet">—</span></div>
+        <div class="result-row"><span class="result-label">token</span><span class="result-value" id="cc-token">—</span></div>
+        <div class="result-row"><span class="result-label">rpc_url</span><span class="result-value" id="cc-rpc-url">—</span></div>
+        <div class="result-row"><span class="result-label">contract_address</span><span class="result-value" id="cc-contract-address">—</span></div>
+      </div>
+      <div id="chain-config-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+    </div>
+
+
     <div class="card">
-      <div class="form-group">
-        <label for="rpc-url">RPC URL</label>
-        <input
-          type="text"
-          id="rpc-url"
-          placeholder="https://sepolia.base.org"
-          value="https://sepolia.base.org"
-        />
-      </div>
-      <div class="form-group">
-        <label for="contract-address">Contract address</label>
-        <input
-          type="text"
-          id="contract-address"
-          placeholder="0x..."
-          value="0x76dba87c24eea6eb64bfa8deb646fb26e8a8837d"
-        />
-      </div>
-      <button type="button" id="btn-fetch">Fetch</button>
+      <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Account Configuration Contract</h2>
+      <input type="hidden" id="contract-address" />
 
       <div class="results" id="results" style="display: none">
         <h2>Contract values</h2>
@@ -189,48 +219,12 @@
       <div class="error" id="error" style="display: none"></div>
     </div>
 
-    <div class="card" style="margin-top: 1.5rem">
-      <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Node Chain Config</h2>
-      <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
-        Calls <code>GET /core/v1/get_node_chain_config</code> and displays the node's chain configuration.
-      </p>
-      <div class="form-group">
-        <label for="chain-config-server-url">API server URL</label>
-        <input
-          type="text"
-          id="chain-config-server-url"
-          placeholder="https://api.dev.litprotocol.com"
-          value="http://localhost:8000"
-        />
-      </div>
-      <button type="button" id="btn-get-chain-config">Fetch</button>
-      <div id="chain-config-results" style="display: none; margin-top: 1rem">
-        <div class="result-row"><span class="result-label">chain_name</span><span class="result-value" id="cc-chain-name">—</span></div>
-        <div class="result-row"><span class="result-label">chain_id</span><span class="result-value" id="cc-chain-id">—</span></div>
-        <div class="result-row"><span class="result-label">is_evm</span><span class="result-value" id="cc-is-evm">—</span></div>
-        <div class="result-row"><span class="result-label">testnet</span><span class="result-value" id="cc-testnet">—</span></div>
-        <div class="result-row"><span class="result-label">token</span><span class="result-value" id="cc-token">—</span></div>
-        <div class="result-row"><span class="result-label">rpc_url</span><span class="result-value" id="cc-rpc-url">—</span></div>
-        <div class="result-row"><span class="result-label">contract_address</span><span class="result-value" id="cc-contract-address">—</span></div>
-      </div>
-      <div id="chain-config-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
-    </div>
 
     <div class="card" style="margin-top: 1.5rem">
-      <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Get API Payers</h2>
+      <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Accounts used to pay for API calls</h2>
       <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
-        Calls <code>GET /core/v1/get_api_payers</code> and lists the derived payer wallet addresses.
+        <code>GET /get_api_payers</code>
       </p>
-      <div class="form-group">
-        <label for="api-server-url">API server URL</label>
-        <input
-          type="text"
-          id="api-server-url"
-          placeholder="https://api.dev.litprotocol.com"
-          value="http://localhost:8000"
-        />
-      </div>
-      <button type="button" id="btn-get-api-payers">Fetch</button>
       <div id="api-payers-results" style="display: none; margin-top: 1rem">
         <div id="api-payers-list"></div>
       </div>

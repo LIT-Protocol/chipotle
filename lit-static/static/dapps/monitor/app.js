@@ -62,19 +62,6 @@ function el(id) {
   return document.getElementById(id);
 }
 
-function showError(msg) {
-  const err = el('error');
-  if (err) {
-    err.textContent = msg;
-    err.style.display = 'block';
-  }
-}
-
-function hideError() {
-  const err = el('error');
-  if (err) err.style.display = 'none';
-}
-
 function setValue(id, text, isEmpty) {
   const node = el(id);
   if (!node) return;
@@ -82,19 +69,134 @@ function setValue(id, text, isEmpty) {
   node.classList.toggle('empty', isEmpty);
 }
 
+// RPC URL populated by getNodeChainConfig; used by fetchContractValues.
+let currentRpcUrl = '';
+
+// ── Network selector ──────────────────────────────────────────────────────────
+
+function getServerUrl() {
+  // Option values include trailing slash; strip it for consistent path joining.
+  return (el('network')?.value || '').replace(/\/$/, '');
+}
+
+// ── getNodeChainConfig ────────────────────────────────────────────────────────
+
+async function getNodeChainConfig(serverUrl) {
+  const resultsEl = el('chain-config-results');
+  const errEl = el('chain-config-error');
+
+  if (errEl) errEl.style.display = 'none';
+  if (resultsEl) resultsEl.style.display = 'block';
+  ['cc-chain-name','cc-chain-id','cc-is-evm','cc-testnet','cc-token','cc-rpc-url','cc-contract-address']
+    .forEach(id => setValue(id, '…', false));
+
+  try {
+    const res = await fetch(`${serverUrl}/get_node_chain_config`);
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    const cfg = await res.json();
+
+    setValue('cc-chain-name',       cfg.chain_name       ?? '—', !cfg.chain_name);
+    setValue('cc-chain-id',         cfg.chain_id != null ? String(cfg.chain_id) : '—', cfg.chain_id == null);
+    setValue('cc-is-evm',           cfg.is_evm   != null ? String(cfg.is_evm)   : '—', cfg.is_evm   == null);
+    setValue('cc-testnet',          cfg.testnet  != null ? String(cfg.testnet)  : '—', cfg.testnet  == null);
+    setValue('cc-token',            cfg.token        ?? '—', !cfg.token);
+    setValue('cc-rpc-url',          cfg.rpc_url      ?? '—', !cfg.rpc_url);
+    setValue('cc-contract-address', cfg.contract_address ?? '—', !cfg.contract_address);
+
+    // Propagate values to the contract card.
+    currentRpcUrl = cfg.rpc_url ?? '';
+    const contractInput = el('contract-address');
+    if (contractInput && cfg.contract_address) contractInput.value = cfg.contract_address;
+  } catch (e) {
+    currentRpcUrl = '';
+    if (resultsEl) resultsEl.style.display = 'none';
+    if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
+  }
+}
+
+// ── getApiPayers ──────────────────────────────────────────────────────────────
+
+async function getApiPayers(serverUrl) {
+  const resultsEl = el('api-payers-results');
+  const listEl = el('api-payers-list');
+  const errEl = el('api-payers-error');
+
+  if (errEl) errEl.style.display = 'none';
+  if (listEl) listEl.innerHTML = '<span style="color:var(--muted);font-family:\'JetBrains Mono\',monospace;font-size:0.85rem">Loading…</span>';
+  if (resultsEl) resultsEl.style.display = 'block';
+
+  try {
+    const res = await fetch(`${serverUrl}/get_api_payers`);
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    const payers = await res.json();
+
+    if (!Array.isArray(payers) || payers.length === 0) {
+      listEl.innerHTML = '<span style="color:var(--muted);font-family:\'JetBrains Mono\',monospace;font-size:0.85rem">No payers returned.</span>';
+      return;
+    }
+
+    listEl.innerHTML = payers.map((addr, i) =>
+      `<div class="result-row">` +
+        `<span class="result-label">Payer ${i + 1}</span>` +
+        `<span class="result-value">${addr}</span>` +
+      `</div>`
+    ).join('');
+  } catch (e) {
+    if (resultsEl) resultsEl.style.display = 'none';
+    if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
+  }
+}
+
+// ── loadNetwork ───────────────────────────────────────────────────────────────
+
+async function loadNetwork() {
+  const serverUrl = getServerUrl();
+  await Promise.all([
+    getNodeChainConfig(serverUrl),
+    getApiPayers(serverUrl),
+  ]);
+  await fetchContractValues();
+}
+
+(function () {
+  const select = el('network');
+  if (!select) return;
+
+  // Pre-select the option whose hostname matches the current page.
+  const host = window.location.hostname;
+  for (const opt of select.options) {
+    try {
+      if (new URL(opt.value).hostname === host) { opt.selected = true; break; }
+    } catch {}
+  }
+
+  select.addEventListener('change', loadNetwork);
+  loadNetwork();
+})();
+
+// ── fetchContractValues ───────────────────────────────────────────────────────
+
+function showError(msg) {
+  const err = el('error');
+  if (err) { err.textContent = msg; err.style.display = 'block'; }
+}
+
+function hideError() {
+  const err = el('error');
+  if (err) err.style.display = 'none';
+}
+
 async function fetchContractValues() {
-  const rpcUrl = (el('rpc-url')?.value || '').trim();
+  const rpcUrl = currentRpcUrl;
   const contractAddress = (el('contract-address')?.value || '').trim();
-  const btn = el('btn-fetch');
   const results = el('results');
 
   if (!rpcUrl || !contractAddress) {
-    showError('Enter RPC URL and contract address.');
+    showError('RPC URL and contract address not yet loaded — select a network first.');
     return;
   }
 
   hideError();
-  if (btn) btn.disabled = true;
   setValue('val-owner', '…', false);
   setValue('val-api-payer', '…', false);
   setValue('val-api-payer-balance', '…', false);
@@ -132,100 +234,10 @@ async function fetchContractValues() {
     setValue('val-index-to-account', indexToAccountHashAt1 != null ? String(indexToAccountHashAt1) : '—', indexToAccountHashAt1 == null);
   } catch (e) {
     showError(e?.message || String(e));
-  } finally {
-    if (btn) btn.disabled = false;
   }
 }
 
-el('btn-fetch')?.addEventListener('click', fetchContractValues);
-
-// ── getNodeChainConfig ───────────────────────────────────────────────────────
-
-async function getNodeChainConfig() {
-  const serverUrl = (el('chain-config-server-url')?.value || '').trim().replace(/\/$/, '');
-  const btn = el('btn-get-chain-config');
-  const resultsEl = el('chain-config-results');
-  const errEl = el('chain-config-error');
-
-  if (!serverUrl) {
-    if (errEl) { errEl.textContent = 'Enter an API server URL.'; errEl.style.display = 'block'; }
-    return;
-  }
-
-  if (errEl) errEl.style.display = 'none';
-  if (btn) btn.disabled = true;
-  if (resultsEl) resultsEl.style.display = 'block';
-  ['cc-chain-name','cc-chain-id','cc-is-evm','cc-testnet','cc-token','cc-rpc-url','cc-contract-address']
-    .forEach(id => setValue(id, '…', false));
-
-  try {
-    const res = await fetch(`${serverUrl}/core/v1/get_node_chain_config`);
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-    const cfg = await res.json();
-
-    setValue('cc-chain-name',       cfg.chain_name       ?? '—', !cfg.chain_name);
-    setValue('cc-chain-id',         cfg.chain_id != null ? String(cfg.chain_id) : '—', cfg.chain_id == null);
-    setValue('cc-is-evm',           cfg.is_evm   != null ? String(cfg.is_evm)   : '—', cfg.is_evm   == null);
-    setValue('cc-testnet',          cfg.testnet  != null ? String(cfg.testnet)  : '—', cfg.testnet  == null);
-    setValue('cc-token',            cfg.token        ?? '—', !cfg.token);
-    setValue('cc-rpc-url',          cfg.rpc_url      ?? '—', !cfg.rpc_url);
-    setValue('cc-contract-address', cfg.contract_address ?? '—', !cfg.contract_address);
-  } catch (e) {
-    if (resultsEl) resultsEl.style.display = 'none';
-    if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-el('btn-get-chain-config')?.addEventListener('click', getNodeChainConfig);
-
-// ── getApiPayers ─────────────────────────────────────────────────────────────
-
-async function getApiPayers() {
-  const serverUrl = (el('api-server-url')?.value || '').trim().replace(/\/$/, '');
-  const btn = el('btn-get-api-payers');
-  const resultsEl = el('api-payers-results');
-  const listEl = el('api-payers-list');
-  const errEl = el('api-payers-error');
-
-  if (!serverUrl) {
-    if (errEl) { errEl.textContent = 'Enter an API server URL.'; errEl.style.display = 'block'; }
-    return;
-  }
-
-  if (errEl) errEl.style.display = 'none';
-  if (btn) btn.disabled = true;
-  if (listEl) listEl.innerHTML = '<span style="color:var(--muted);font-family:\'JetBrains Mono\',monospace;font-size:0.85rem">Loading…</span>';
-  if (resultsEl) resultsEl.style.display = 'block';
-
-  try {
-    const res = await fetch(`${serverUrl}/core/v1/get_api_payers`);
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-    const payers = await res.json();
-
-    if (!Array.isArray(payers) || payers.length === 0) {
-      listEl.innerHTML = '<span style="color:var(--muted);font-family:\'JetBrains Mono\',monospace;font-size:0.85rem">No payers returned.</span>';
-      return;
-    }
-
-    listEl.innerHTML = payers.map((addr, i) =>
-      `<div class="result-row">` +
-        `<span class="result-label">Payer ${i + 1}</span>` +
-        `<span class="result-value">${addr}</span>` +
-      `</div>`
-    ).join('');
-  } catch (e) {
-    if (resultsEl) resultsEl.style.display = 'none';
-    if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
-  } finally {
-    if (btn) btn.disabled = false;
-  }
-}
-
-el('btn-get-api-payers')?.addEventListener('click', getApiPayers);
-
-// ── setApiPayer ──────────────────────────────────────────────────────────────
+// ── setApiPayer ───────────────────────────────────────────────────────────────
 
 function showWriteStatus(msg, isError) {
   const node = el('write-status');
@@ -257,7 +269,7 @@ async function setApiPayer() {
   const btn = el('btn-set-api-payer');
 
   if (!contractAddress) {
-    showWriteStatus('Enter the contract address above first.', true);
+    showWriteStatus('Contract address not yet loaded — select a network first.', true);
     return;
   }
   if (!ethers.isAddress(newApiPayer)) {
@@ -284,7 +296,6 @@ async function setApiPayer() {
     showWriteStatus('Done. api_payer updated to ' + newApiPayer, false);
     el('new-api-payer').value = '';
 
-    // Refresh read values so the new api_payer is visible immediately.
     fetchContractValues();
   } catch (e) {
     showWriteStatus('Error: ' + (e?.reason || e?.message || String(e)), true);

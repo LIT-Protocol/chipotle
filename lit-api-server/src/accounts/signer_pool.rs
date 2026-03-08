@@ -69,7 +69,7 @@ impl SignerPool {
 /// `get_lit_payer_key`. Must be called after `init_config()`.
 pub async fn start_signer_pool(pool_size: usize) -> Result<SignerPool> {
     let (tx, rx) = flume::unbounded::<SigningPoolMessage>();
-
+    
     let entries = get_signer_entries(1, pool_size).await?;
     tokio::spawn(run_pool(entries, rx));
 
