@@ -37,10 +37,9 @@ jobs:
       - uses: actions/checkout@v4
 
       # ── 1. Build the dstack simulator and verifier (cached separately) ────
-      # Each artifact has its own cache keyed by the dstack HEAD SHA (obtained
-      # without cloning via git ls-remote). The verifier cache is shared with
-      # the verify-attestation workflow so a warm hit there avoids rebuilding
-      # here. On full cache hit the clone and all builds are skipped entirely.
+      # Simulator: built from source. Verifier: Docker image (bundles dstack-acpi-tables).
+      # Each cache is keyed by dstack HEAD SHA. The verifier image cache is shared with
+      # verify-attestation workflow so a warm hit there avoids rebuilding here.
       - name: Get dstack HEAD SHA
         id: dstack-sha
         run: |
@@ -54,12 +53,16 @@ jobs:
           path: ${{ github.workspace }}/dstack-cache/simulator
           key: dstack-simulator-${{ steps.dstack-sha.outputs.sha }}-${{ runner.os }}
 
-      - name: Restore verifier cache
+      - name: Restore verifier image cache
         id: verifier-cache
         uses: actions/cache@v4
         with:
-          path: ${{ github.workspace }}/dstack-cache/verifier
-          key: dstack-verifier-${{ steps.dstack-sha.outputs.sha }}-${{ runner.os }}
+          path: dstack-verifier-image.tar
+          key: dstack-verifier-image-${{ steps.dstack-sha.outputs.sha }}-${{ runner.os }}
+
+      - name: Load cached Docker image
+        if: steps.verifier-cache.outputs.cache-hit == 'true'
+        run: docker load < dstack-verifier-image.tar
 
       - name: Fix dstack cache permissions
         if: steps.sim-cache.outputs.cache-hit == 'true' || steps.verifier-cache.outputs.cache-hit == 'true'
@@ -74,9 +77,9 @@ jobs:
           echo "DSTACK_BUILD=$DSTACK_BUILD" >> "$GITHUB_ENV"
           git clone --depth 1 https://github.com/Dstack-TEE/dstack.git "$DSTACK_BUILD"
 
-      # Use stable Rust for the dstack build (it may require features newer than 1.91).
-      - name: Install Rust (stable, for dstack)
-        if: steps.sim-cache.outputs.cache-hit != 'true' || steps.verifier-cache.outputs.cache-hit != 'true'
+      # Use stable Rust for the dstack simulator build (verifier uses Docker, no Rust needed).
+      - name: Install Rust (stable, for dstack simulator)
+        if: steps.sim-cache.outputs.cache-hit != 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build dstack simulator
@@ -95,17 +98,17 @@ jobs:
              "$DSTACK_BUILD/sdk/simulator/dstack.toml" \
              "${{ github.workspace }}/dstack-cache/simulator/"
 
-      - name: Build dstack-verifier
-        if: steps.verifier-cache.outputs.cache-hit != 'true'
-        run: cargo build --manifest-path="$DSTACK_BUILD/verifier/Cargo.toml" --bin dstack-verifier
-
-      - name: Populate verifier cache
+      - name: Build verifier Docker image
         if: steps.verifier-cache.outputs.cache-hit != 'true'
         run: |
-          mkdir -p "${{ github.workspace }}/dstack-cache/verifier"
-          cp "$DSTACK_BUILD/target/debug/dstack-verifier" \
-             "$DSTACK_BUILD/verifier/dstack-verifier.toml" \
-             "${{ github.workspace }}/dstack-cache/verifier/"
+          docker build -t dstack-verifier \
+            --build-arg DSTACK_REV="${{ steps.dstack-sha.outputs.sha }}" \
+            -f "$DSTACK_BUILD/verifier/builder/Dockerfile" \
+            "$DSTACK_BUILD/verifier"
+
+      - name: Save Docker image to cache
+        if: steps.verifier-cache.outputs.cache-hit != 'true'
+        run: docker save dstack-verifier > dstack-verifier-image.tar
 
       - name: Remove dstack build directory
         if: always() && env.DSTACK_BUILD != ''
@@ -175,18 +178,19 @@ jobs:
 
       # ── 3. dstack-verifier end-to-end attestation pipeline ─────────────────
       # Start simulator, start lit-api-server (attestation-only; fetches from simulator),
-      # get attestation from lit-api-server's /attestation endpoint, run dstack-verifier.
-      # Assert quote_verified=true; is_valid will be false (simulator uses a synthetic
-      # OS image hash not published on download.dstack.org) — that is expected.
+      # get attestation from lit-api-server's /attestation endpoint, run dstack-verifier
+      # (via Docker image with dstack-acpi-tables). Assert quote_verified=true;
+      # is_valid will be false (simulator uses a synthetic OS image hash not published
+      # on download.dstack.org) — that is expected.
       - name: Verify attestation pipeline with dstack-verifier
         run: |
           set -eu
           CACHE_DIR="${{ github.workspace }}/dstack-cache"
           SIM_SRC="$CACHE_DIR/simulator"
-          VERIFIER_BIN="$CACHE_DIR/verifier/dstack-verifier"
-          VERIFIER_CFG="$CACHE_DIR/verifier/dstack-verifier.toml"
+          IMAGE_CACHE="$CACHE_DIR/verifier-image-cache"
           API_BIN="$(pwd)/lit-api-server/target/debug/lit-api-server"
 
+          mkdir -p "$IMAGE_CACHE"
           SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
           SIM_SOCK="$SIM_TMP/dstack.sock"
 
@@ -251,14 +255,12 @@ jobs:
             'import sys,json; d=json.load(sys.stdin); q=d["quote"]; q=q[2:] if q.startswith("0x") else q; print(json.dumps({"quote":q,"event_log":d["event_log"],"vm_config":d["vm_config"],"attestation":None}))' \
             > "$VERIFY_FILE"
 
-          # Use workspace for verifier image cache (avoids /tmp permission denied on self-hosted).
-          VERIFIER_CFG_OVERRIDE="$SIM_TMP/verifier.toml"
-          sed "s|image_cache_dir = .*|image_cache_dir = \"${{ github.workspace }}/dstack-cache/verifier-image-cache\"|" "$VERIFIER_CFG" > "$VERIFIER_CFG_OVERRIDE"
-          mkdir -p "${{ github.workspace }}/dstack-cache/verifier-image-cache"
-
-          # Run verifier in oneshot mode. Exits 1 when is_valid=false (expected for
-          # the simulator) — ignore the exit code and check quote_verified directly.
-          "$VERIFIER_BIN" -c "$VERIFIER_CFG_OVERRIDE" --verify "$VERIFY_FILE" || true
+          # Run verifier via Docker (bundles dstack-acpi-tables). Exits 1 when
+          # is_valid=false (expected for simulator) — ignore and check quote_verified.
+          docker run --rm \
+            -v "$SIM_TMP:/data" \
+            -v "$IMAGE_CACHE:/var/lib/dstack-verifier" \
+            dstack-verifier --verify /data/verify-request.json || true
 
           # Assertion: quote_verified must be true.
           RESULT_FILE="${VERIFY_FILE}.verification.json"
