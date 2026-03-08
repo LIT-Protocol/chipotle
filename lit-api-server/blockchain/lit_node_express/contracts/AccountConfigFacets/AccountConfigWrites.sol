@@ -12,19 +12,17 @@ import {LibAccountConfigStorage} from "./LibAccountConfigStorage.sol";
 
 contract AccountConfigWrite {
     using EnumerableSet for EnumerableSet.UintSet;
+    using EnumerableSet for EnumerableSet.AddressSet;
 
     /// @notice Initializes storage. Must be called once after deployment (e.g. by Diamond constructor).
     function initializeAccountConfig() internal {
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
-        require(s.api_payer == address(0), "already initialized");
-        s.api_payer = msg.sender;
-        s.pricing_operator = msg.sender;
+        require(s.api_payers.length() == 0, "already initialized");
+        s.pricingOperator = msg.sender;
         s.owner = msg.sender;
-        s.nextWalletCount = 1;
-        s.nextAccountCount = 1;
-        s.signerCount = 1;
         s.pricing[1] = 1;
+        s.requestedApiPayerCount = 3; // just a default for spinning up a new instance
     }
 
     function newAccount(
@@ -57,8 +55,8 @@ contract AccountConfigWrite {
         account.accountApiKey.expiration = block.timestamp + 365 days * 10;
         account.accountApiKey.balance = 0;
         s.allApiKeyHashes[apiKeyHash] = apiKeyHash;
-        s.indexToAccountHash[s.nextAccountCount] = apiKeyHash;
-        s.nextAccountCount++;
+        s.accountCount++;
+        s.indexToAccountHash[s.accountCount] = apiKeyHash;
     }
 
     function addApiKey(
@@ -296,9 +294,9 @@ contract AccountConfigWrite {
         account.walletData[walletAddress].name = name;
         account.walletData[walletAddress].description = description;
         account.walletAddresses[account.walletCount] = walletAddress;
-        s.allWalletAddresses[s.nextWalletCount] = walletAddress;
         account.walletCount++;
-        s.nextWalletCount++;
+        s.walletCount++;
+        s.allWalletAddresses[s.walletCount] = walletAddress;
     }
 
     function debitApiKey(uint256 apiKeyHash, uint256 amount) public {
@@ -352,7 +350,7 @@ contract AccountConfigWrite {
         checkIfApiPayerOrPricingOperator(msg.sender);
         LibAccountConfigStorage
             .getStorage()
-            .pricing_operator = newPricingOperator;
+            .pricingOperator = newPricingOperator;
     }
 
     // ----- internal view helpers (revert helpers call view from Views facet conceptually; we duplicate for simplicity) -----
@@ -363,7 +361,6 @@ contract AccountConfigWrite {
             revert LibAccountConfigStorage.NotMasterAccount(accountApiKeyHash);
         }
     }
-
 
     function revertIfNoAccountAccess(uint256 accountApiKeyHash) private view {
         LibAccountConfigStorage.revertIfNoAccountAccess(
@@ -458,7 +455,7 @@ contract AccountConfigWrite {
     function checkIfApiPayer(address caller) private view {
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
-        if (caller != s.api_payer) {
+        if (!s.api_payers.contains(caller)) {
             revert LibAccountConfigStorage.OnlyApiPayer(caller);
         }
     }
@@ -466,18 +463,43 @@ contract AccountConfigWrite {
     function checkIfApiPayerOrOwner(address caller) private view {
         LibAccountConfigStorage.AccountConfigStorage
             storage s = LibAccountConfigStorage.getStorage();
-        if (caller != s.api_payer && caller != s.owner) {
+        if (
+            !s.api_payers.contains(caller) &&
+            caller != s.owner &&
+            caller != s.adminApiPayerAccount
+        ) {
             revert LibAccountConfigStorage.OnlyApiPayerOrOwner(caller);
         }
     }
 
-    function setApiPayer(address newApiPayer) public {
+    function setRequestedApiPayerCount(
+        uint256 newRequestedApiPayerCount
+    ) public {
         checkIfApiPayerOrOwner(msg.sender);
-        LibAccountConfigStorage.getStorage().api_payer = newApiPayer;
+        LibAccountConfigStorage.AccountConfigStorage
+            storage s = LibAccountConfigStorage.getStorage();
+        s.requestedApiPayerCount = newRequestedApiPayerCount;
     }
 
-    function setSignerCount(uint256 newSignerCount) public {
+    function setAdminApiPayerAccount(address newAdminApiPayerAccount) public {
         checkIfApiPayerOrOwner(msg.sender);
-        LibAccountConfigStorage.getStorage().signerCount = newSignerCount;
+        LibAccountConfigStorage.AccountConfigStorage
+            storage s = LibAccountConfigStorage.getStorage();
+        s.adminApiPayerAccount = newAdminApiPayerAccount;
+    }
+
+    // setApiPayers is used to add new signers (accounts that pay for state mutation made by api calls) to the list of api payers.
+    function setApiPayers(address[] memory newApiPayers) public {
+        checkIfApiPayerOrOwner(msg.sender);
+
+        LibAccountConfigStorage.AccountConfigStorage
+            storage s = LibAccountConfigStorage.getStorage();
+
+        s.api_payers.clear();
+
+        for (uint256 i = 0; i < newApiPayers.length; i++) {
+            s.api_payers.add(newApiPayers[i]);
+        }
+        
     }
 }

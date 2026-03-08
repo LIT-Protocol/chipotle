@@ -3,16 +3,6 @@
  * ABI subset matches lit-api-server/src/accounts/contracts/AccountConfig.json (view functions only).
  */
 
-const SET_API_PAYER_ABI = [
-  {
-    inputs: [{ internalType: 'address', name: 'newApiPayer', type: 'address' }],
-    name: 'setApiPayer',
-    outputs: [],
-    stateMutability: 'nonpayable',
-    type: 'function',
-  },
-];
-
 const ACCOUNT_CONFIG_VIEW_ABI = [
   {
     inputs: [],
@@ -23,37 +13,58 @@ const ACCOUNT_CONFIG_VIEW_ABI = [
   },
   {
     inputs: [],
-    name: 'api_payer',
+    name: 'pricingOperator',
     outputs: [{ internalType: 'address', name: '', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
     inputs: [],
-    name: 'pricing_operator',
+    name: 'adminApiPayerAccount',
     outputs: [{ internalType: 'address', name: '', type: 'address' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
     inputs: [],
-    name: 'nextAccountCount',
+    name: 'api_payers',
+    outputs: [{ internalType: 'address[]', name: '', type: 'address[]' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    // apiPayerCount() returns api_payers.length() — the actual current payer count.
+    inputs: [],
+    name: 'apiPayerCount',
     outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
     stateMutability: 'view',
     type: 'function',
   },
   {
     inputs: [],
-    name: 'nextWalletCount',
+    name: 'requestedApiPayerCount',
     outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
     stateMutability: 'view',
     type: 'function',
   },
+];
+
+const SET_REQUESTED_API_PAYER_COUNT_ABI = [
   {
-    inputs: [{ internalType: 'uint256', name: 'index', type: 'uint256' }],
-    name: 'indexToAccountHashAt',
-    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
-    stateMutability: 'view',
+    inputs: [{ internalType: 'uint256', name: 'newRequestedApiPayerCount', type: 'uint256' }],
+    name: 'setRequestedApiPayerCount',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+];
+
+const SET_ADMIN_API_PAYER_ABI = [
+  {
+    inputs: [{ internalType: 'address', name: 'newAdminApiPayerAccount', type: 'address' }],
+    name: 'setAdminApiPayerAccount',
+    outputs: [],
+    stateMutability: 'nonpayable',
     type: 'function',
   },
 ];
@@ -131,16 +142,59 @@ async function getApiPayers(serverUrl) {
     const payers = await res.json();
 
     if (!Array.isArray(payers) || payers.length === 0) {
-      listEl.innerHTML = '<span style="color:var(--muted);font-family:\'JetBrains Mono\',monospace;font-size:0.85rem">No payers returned.</span>';
+      let firstPayer = '';
+      try {
+        const fpRes = await fetch(`${serverUrl}/get_admin_api_payer`);
+        if (fpRes.ok) {
+          const fpData = await fpRes.json();
+          if (typeof fpData === 'string' && fpData) firstPayer = fpData;
+        }
+      } catch {}
+      listEl.innerHTML =
+        `<p style="color:var(--muted);font-size:0.85rem;margin:0">No payers configured.</p>` +
+        (firstPayer
+          ? `<p style="font-size:0.85rem;margin:0.5rem 0 0;color:#f87171">` +
+              `Please set the default API payer address: <br> ` +
+              `<span style="font-family:'JetBrains Mono',monospace;word-break:break-all">${firstPayer}</span>` +
+              `<br>Once this account is  set, please fund with native tokens. ` +
+            `</p>`
+          : '');
       return;
     }
 
-    listEl.innerHTML = payers.map((addr, i) =>
-      `<div class="result-row">` +
-        `<span class="result-label">Payer ${i + 1}</span>` +
-        `<span class="result-value">${addr}</span>` +
-      `</div>`
-    ).join('');
+    // Render table immediately, then fill balances as they resolve.
+    listEl.innerHTML =
+      `<table>` +
+        `<thead><tr>` +
+          `<th>Description</th>` +
+          `<th>Wallet</th>` +
+          `<th class="eth">ETH</th>` +
+        `</tr></thead>` +
+        `<tbody>` +
+          payers.map((addr, i) =>
+            `<tr>` +
+              `<td>Payer ${i + 1}</td>` +
+              `<td>${addr}</td>` +
+              `<td class="eth" id="payer-balance-${i}" style="color:var(--muted)">…</td>` +
+            `</tr>`
+          ).join('') +
+        `</tbody>` +
+      `</table>`;
+
+    if (currentRpcUrl) {
+      const provider = new ethers.JsonRpcProvider(currentRpcUrl);
+      payers.forEach(async (addr, i) => {
+        try {
+          const balanceWei = await provider.getBalance(addr);
+          const balEl = document.getElementById(`payer-balance-${i}`);
+          if (balEl) {
+            const eth = parseFloat(ethers.formatEther(balanceWei));
+            balEl.textContent = eth.toFixed(6) + ' ETH';
+            balEl.style.color = '';
+          }
+        } catch {}
+      });
+    }
   } catch (e) {
     if (resultsEl) resultsEl.style.display = 'none';
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
@@ -198,49 +252,91 @@ async function fetchContractValues() {
 
   hideError();
   setValue('val-owner', '…', false);
-  setValue('val-api-payer', '…', false);
-  setValue('val-api-payer-balance', '…', false);
+  setValue('val-owner-balance', '', false);
   setValue('val-pricing-operator', '…', false);
-  setValue('val-next-account-count', '…', false);
-  setValue('val-next-wallet-count', '…', false);
-  setValue('val-index-to-account', '…', false);
+  setValue('val-pricing-operator-balance', '', false);
+  setValue('val-admin-api-payer', '…', false);
+  setValue('val-admin-api-payer-balance', '', false);
+  setValue('val-payer-count', '…', false);
+  setValue('val-requested-api-payer-count', '…', false);
   if (results) results.style.display = 'block';
 
   try {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const contract = new ethers.Contract(contractAddress, ACCOUNT_CONFIG_VIEW_ABI, provider);
 
-    const [owner, apiPayer, pricingOperator, nextAccountCount, nextWalletCount, indexToAccountHashAt1] = await Promise.all([
+    const [owner, pricingOperator, adminApiPayer, apiPayerCount, requestedApiPayerCount, apiPayers] = await Promise.all([
       contract.owner(),
-      contract.api_payer(),
-      contract.pricing_operator(),
-      contract.nextAccountCount(),
-      contract.nextWalletCount(),
-      contract.indexToAccountHashAt(1),
+      contract.pricingOperator(),
+      contract.adminApiPayerAccount(),
+      contract.apiPayerCount(),
+      contract.requestedApiPayerCount(),
+      contract.api_payers(),
     ]);
 
     setValue('val-owner', owner ?? '—', !owner);
-    setValue('val-api-payer', apiPayer ?? '—', !apiPayer);
-
-    if (apiPayer && apiPayer !== ethers.ZeroAddress) {
-      const balanceWei = await provider.getBalance(apiPayer);
-      setValue('val-api-payer-balance', ethers.formatEther(balanceWei) + ' ETH', false);
-    } else {
-      setValue('val-api-payer-balance', '—', true);
-    }
     setValue('val-pricing-operator', pricingOperator ?? '—', !pricingOperator);
-    setValue('val-next-account-count', nextAccountCount != null ? String(nextAccountCount) : '—', nextAccountCount == null);
-    setValue('val-next-wallet-count', nextWalletCount != null ? String(nextWalletCount) : '—', nextWalletCount == null);
-    setValue('val-index-to-account', indexToAccountHashAt1 != null ? String(indexToAccountHashAt1) : '—', indexToAccountHashAt1 == null);
+    setValue('val-admin-api-payer', adminApiPayer ?? '—', !adminApiPayer);
+    setValue('val-payer-count', String(apiPayerCount), false);
+    setValue('val-requested-api-payer-count', String(requestedApiPayerCount), false);
+    populateApiPayerCountDropdown(Number(requestedApiPayerCount));
+    renderApiPayers(apiPayers);
+
+    // Fetch balances asynchronously so they don't block the main display.
+    const balanceTargets = [
+      [owner,        'val-owner-balance'],
+      [pricingOperator, 'val-pricing-operator-balance'],
+      [adminApiPayer,   'val-admin-api-payer-balance'],
+    ];
+    for (const [addr, id] of balanceTargets) {
+      if (!addr || addr === ethers.ZeroAddress) continue;
+      provider.getBalance(addr).then(wei => {
+        const node = el(id);
+        if (node) {
+          node.textContent = parseFloat(ethers.formatEther(wei)).toFixed(6) + ' ETH';
+          node.style.color = '';
+        }
+      }).catch(() => {});
+    }
   } catch (e) {
     showError(e?.message || String(e));
   }
 }
 
-// ── setApiPayer ───────────────────────────────────────────────────────────────
+// ── api_payers() ──────────────────────────────────────────────────────────────
 
-function showWriteStatus(msg, isError) {
-  const node = el('write-status');
+function renderApiPayers(payers) {
+  const listEl = el('contract-api-payers-list');
+  if (!listEl) return;
+
+  if (!Array.isArray(payers) || payers.length === 0) {
+    listEl.innerHTML = '<span style="color:var(--muted);font-family:\'JetBrains Mono\',monospace;font-size:0.85rem">No payers found on contract.</span>';
+    return;
+  }
+
+  listEl.innerHTML =
+    `<table>` +
+      `<thead><tr><th>Index</th><th>Address</th></tr></thead>` +
+      `<tbody>` +
+        payers.map((addr, i) =>
+          `<tr><td>${i}</td><td>${addr}</td></tr>`
+        ).join('') +
+      `</tbody>` +
+    `</table>`;
+}
+
+// ── setRequestedApiPayerCount ─────────────────────────────────────────────────
+
+function populateApiPayerCountDropdown(currentValue) {
+  const select = el('payer-count');
+  if (!select) return;
+  select.innerHTML = Array.from({ length: 20 }, (_, i) => i + 1)
+    .map(n => `<option value="${n}"${n === currentValue ? ' selected' : ''}>${n}</option>`)
+    .join('');
+}
+
+function showSignerCountStatus(msg, isError) {
+  const node = el('payer-count-status');
   if (!node) return;
   node.textContent = msg;
   node.style.color = isError ? '#f87171' : '#34d399';
@@ -248,60 +344,98 @@ function showWriteStatus(msg, isError) {
 }
 
 async function connectWallet() {
-  if (!window.ethereum) {
-    showWriteStatus('Wallet not found. Install a wallet and try again.', true);
-    return null;
-  }
-  try {
-    const provider = new ethers.BrowserProvider(window.ethereum);
-    await provider.send('eth_requestAccounts', []);
-    return provider;
-  } catch (e) {
-    showWriteStatus('Wallet connection rejected: ' + (e?.message || String(e)), true);
-    return null;
-  }
+  if (!window.ethereum) throw new Error('Wallet not found. Install a wallet and try again.');
+  const provider = new ethers.BrowserProvider(window.ethereum);
+  await provider.send('eth_requestAccounts', []);
+  return provider;
 }
 
-async function setApiPayer() {
+// ── setAdminApiPayerAccount ───────────────────────────────────────────────────
+
+function showDefaultApiPayerStatus(msg, isError) {
+  const node = el('default-api-payer-status');
+  if (!node) return;
+  node.textContent = msg;
+  node.style.color = isError ? '#f87171' : '#34d399';
+  node.style.display = msg ? 'block' : 'none';
+}
+
+el('btn-set-default-api-payer')?.addEventListener('click', async () => {
   const contractAddress = (el('contract-address')?.value || '').trim();
-  const newApiPayerString = (el('new-api-payer')?.value || '').trim();
-  const newApiPayer = ethers.getAddress(newApiPayerString);
-  const btn = el('btn-set-api-payer');
+  const btn = el('btn-set-default-api-payer');
+  let newApiPayer;
+
+  try {
+    newApiPayer = ethers.getAddress((el('default-api-payer')?.value || '').trim());
+  } catch {
+    showDefaultApiPayerStatus('Enter a valid Ethereum address.', true);
+    return;
+  }
 
   if (!contractAddress) {
-    showWriteStatus('Contract address not yet loaded — select a network first.', true);
-    return;
-  }
-  if (!ethers.isAddress(newApiPayer)) {
-    showWriteStatus('Enter a valid Ethereum address for the new api_payer.', true);
+    showDefaultApiPayerStatus('Contract address not yet loaded — select a network first.', true);
     return;
   }
 
-  showWriteStatus('Connecting wallet…', false);
-  if (btn) btn.disabled = true;
+  btn.disabled = true;
+  showDefaultApiPayerStatus('Connecting wallet…', false);
 
   try {
     const provider = await connectWallet();
-    if (!provider) return;
-
     const signer = await provider.getSigner();
-    const contract = new ethers.Contract(contractAddress, SET_API_PAYER_ABI, signer);
+    const contract = new ethers.Contract(contractAddress, SET_ADMIN_API_PAYER_ABI, signer);
 
-    showWriteStatus('Waiting for signature…', false);
-    const tx = await contract.setApiPayer(newApiPayer);
+    showDefaultApiPayerStatus('Waiting for signature…', false);
+    const tx = await contract.setAdminApiPayerAccount(newApiPayer);
 
-    showWriteStatus('Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
+    showDefaultApiPayerStatus('Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
     await tx.wait();
 
-    showWriteStatus('Done. api_payer updated to ' + newApiPayer, false);
-    el('new-api-payer').value = '';
-
-    fetchContractValues();
+    showDefaultApiPayerStatus('Done. Default API payer updated to ' + newApiPayer, false);
+    el('default-api-payer').value = '';
   } catch (e) {
-    showWriteStatus('Error: ' + (e?.reason || e?.message || String(e)), true);
+    showDefaultApiPayerStatus('Error: ' + (e?.reason || e?.message || String(e)), true);
   } finally {
-    if (btn) btn.disabled = false;
+    btn.disabled = false;
   }
-}
+});
 
-el('btn-set-api-payer')?.addEventListener('click', setApiPayer);
+el('btn-set-payer-count')?.addEventListener('click', async () => {
+  const select = el('payer-count');
+  const contractAddress = (el('contract-address')?.value || '').trim();
+  const newCount = Number(select?.value);
+  const btn = el('btn-set-payer-count');
+
+  if (!contractAddress) {
+    showSignerCountStatus('Contract address not yet loaded — select a network first.', true);
+    return;
+  }
+  if (!newCount) {
+    showSignerCountStatus('Select a value first.', true);
+    return;
+  }
+
+  btn.disabled = true;
+  select.disabled = true;
+  showSignerCountStatus('Connecting wallet…', false);
+
+  try {
+    const provider = await connectWallet();
+    const signer = await provider.getSigner();
+    const contract = new ethers.Contract(contractAddress, SET_REQUESTED_API_PAYER_COUNT_ABI, signer);
+
+    showSignerCountStatus('Waiting for signature…', false);
+    const tx = await contract.setRequestedApiPayerCount(newCount);
+
+    showSignerCountStatus('Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
+    await tx.wait();
+
+    showSignerCountStatus('Done. Requested payer count updated to ' + newCount, false);
+  } catch (e) {
+    showSignerCountStatus('Error: ' + (e?.reason || e?.message || String(e)), true);
+  } finally {
+    btn.disabled = false;
+    select.disabled = false;
+  }
+});
+

@@ -7,13 +7,15 @@ use ethers::providers::{Http, Provider};
 use ethers::signers::{LocalWallet, Signer};
 use ethers::types::H160;
 
-use crate::accounts::signable_contract::SigningClient;
+use crate::accounts::get_api_payer_count;
+use crate::accounts::signable_contract::{SigningClient, get_admin_api_payer_contract};
 use crate::config::GLOBAL_NODE_CONFIG;
 use crate::dstack::v1::get_lit_payer_key;
 
 const STALE_LEASE_SECS: u64 = 10;
-const CLEANUP_INTERVAL_SECS: u64 = 10;
+const CLEANUP_INTERVAL_SECS: u64 = 5;
 
+#[derive(Clone)]
 pub struct SigningPoolEntry {
     client: Arc<SigningClient>,
     address: H160,
@@ -67,11 +69,17 @@ impl SignerPool {
 ///
 /// Creates `pool_size` signing clients using key indices 1..=pool_size via
 /// `get_lit_payer_key`. Must be called after `init_config()`.
-pub async fn start_signer_pool(pool_size: usize) -> Result<SignerPool> {
+pub async fn start_signer_pool() -> Result<SignerPool> {
     let (tx, rx) = flume::unbounded::<SigningPoolMessage>();
-    
+
+
+    let pool_size = get_api_payer_count().await?;
+    tracing::info!("signer_pool: attempting to start with pool size: {pool_size}");
+
     let entries = get_signer_entries(1, pool_size).await?;
+
     tokio::spawn(run_pool(entries, rx));
+
 
     Ok(SignerPool { tx })
 }
@@ -87,7 +95,7 @@ pub async fn get_signer_entries(
     let chain_info = node_config.chain.info();
 
     let mut entries: Vec<SigningPoolEntry> = Vec::with_capacity(pool_size);
-    for i in start_index..=(start_index + pool_size) {
+    for i in start_index..=(start_index + pool_size - 1) {
         let secret = get_lit_payer_key(i as u16)
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -111,7 +119,8 @@ pub async fn get_signer_entries(
 
 async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<SigningPoolMessage>) {
     let stale = Duration::from_secs(STALE_LEASE_SECS);
-    let mut signer_count = entries.len();
+    let mut payer_count = entries.len();
+    tracing::info!("signer_pool: signer count: {payer_count}");
     let mut interval = tokio::time::interval(Duration::from_secs(CLEANUP_INTERVAL_SECS));
     interval.tick().await; // discard the immediate first tick
 
@@ -162,28 +171,37 @@ async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<Signin
                 }
             }
             _ = interval.tick() => {
-                let new_signer_count = match crate::accounts::get_signer_count().await {
+                tracing::info!("signer_pool: checking for new signer count");
+                let new_api_payer_count = match crate::accounts::get_requested_api_payer_count().await {
                     Ok(count) => count,
                     Err(e) => {
                         tracing::error!("signer_pool: failed to get signer count: {e}");
-                        signer_count
+                        payer_count
                     }
                 };
-                if new_signer_count > signer_count {
-                    match  get_signer_entries(signer_count + 1, new_signer_count - signer_count + 1).await {
+                let signer_count_changed: bool = new_api_payer_count != payer_count;
+                tracing::info!("signer_pool: signer count changed: {signer_count_changed}");
+                if new_api_payer_count > payer_count {
+                    match  get_signer_entries(payer_count + 1 , new_api_payer_count - payer_count ).await {
                         Ok(new_entries) => {
                             entries.extend(new_entries);
-                            signer_count = new_signer_count;
+                            payer_count = new_api_payer_count;
                         }
                         Err(e) => {
                             tracing::error!("signer_pool: failed to get signer entries: {e}");
                         }
                     };
                 }
-                else if new_signer_count < signer_count {
-                    entries.truncate(new_signer_count);
-                    signer_count = new_signer_count;
+                else if new_api_payer_count < payer_count {
+                    entries.truncate(new_api_payer_count);
+                    payer_count = new_api_payer_count;
                 };
+                if signer_count_changed {
+                    match set_api_payers(entries.clone()).await {
+                        Ok(_) => (),
+                        Err(e) => tracing::error!("signer_pool: failed to set api payers: {e}"),
+                    }
+                }
                 let now = Instant::now();
                 for entry in entries.iter_mut() {
                     if let (true, Some(since)) = (entry.in_use, entry.in_use_since)
@@ -201,4 +219,23 @@ async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<Signin
             }
         }
     }
+}
+
+async fn set_api_payers(entries: Vec<SigningPoolEntry>) -> Result<()> {
+    let contract = get_admin_api_payer_contract().await?;
+    let api_payers = entries.iter().map(|e| e.address).collect();
+
+    tracing::info!("signer_pool: setting api payers: {:?}", api_payers);
+
+    let function_call = contract
+        .set_api_payers(api_payers);
+    let tx = function_call.send().await;
+    
+    if let Err(e) = tx
+    {
+        return Err(anyhow::anyhow!("Failed to set api payers: {e}"));
+    }   
+
+    tracing::info!("signer_pool: api payers set successfully");
+    Ok(())
 }

@@ -153,6 +153,7 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         list_actions,
         get_node_chain_config,
         get_api_payers,
+        get_admin_api_payer,
     ]
 }
 
@@ -545,5 +546,13 @@ async fn get_node_chain_config() -> OpenApiResponse<NodeChainConfigResponse, Err
 async fn get_api_payers() -> OpenApiResponse<Vec<String>, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(account_management::get_api_payers().await).into(),
+    }
+}
+
+#[openapi(tag = "Account Management")]
+#[get("/get_admin_api_payer")]
+async fn get_admin_api_payer() -> OpenApiResponse<String, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(account_management::get_admin_api_payer().await).into(),
     }
 }

@@ -442,12 +442,18 @@ pub async fn credit_api_key(
 
 pub async fn get_api_payers() -> Result<Vec<H160>> {
     let contract = get_read_only_account_config_contract().await?;
-    let api_payer = contract.api_payer().call().await?;
-    Ok(vec![api_payer])
+    let api_payers = contract.api_payers().call().await?;
+    Ok(api_payers)
 }
 
-pub async fn get_signer_count() -> Result<usize> {
+pub async fn get_requested_api_payer_count() -> Result<usize> {
     let contract = get_read_only_account_config_contract().await?;
-    let signer_count = contract.signer_count().call().await?;
+    let requested_signer_count = contract.requested_api_payer_count().call().await?;
+    Ok(requested_signer_count.as_usize())
+}
+
+pub async fn get_api_payer_count() -> Result<usize> {
+    let contract = get_read_only_account_config_contract().await?;
+    let signer_count = contract.api_payer_count().call().await?;
     Ok(signer_count.as_usize())
 }

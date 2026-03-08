@@ -15,11 +15,12 @@ use rocket::{State, get, routes, uri};
 use rocket_cors::{AllowedOrigins, Method};
 use rocket_okapi::okapi::openapi3::{OpenApi, Server};
 use rocket_okapi::swagger_ui::{SwaggerUIConfig, make_swagger_ui};
-use std::sync::Arc;
-use std::{collections::HashSet, str::FromStr, time::Duration};
+use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 use tracing::Level;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
+// The default signer count for a new instance when contracts are deployed.
+// Note that if the signers aren't funded, nothing will work until an admin sets the default api payer.
 #[rocket::main]
 #[allow(clippy::result_large_err)]
 async fn main() -> Result<(), rocket::Error> {
@@ -41,13 +42,14 @@ async fn main() -> Result<(), rocket::Error> {
         std::process::exit(1);
     }
 
-    let signer_pool = match start_signer_pool(1).await {
+    let signer_pool = match start_signer_pool().await {
         Ok(pool) => pool,
         Err(e) => {
             eprintln!("Failed to start signer pool: {:?}. Exiting.", e);
             std::process::exit(1);
         }
     };
+
     let signer_pool = Arc::new(signer_pool);
 
     let allowed_methods = HashSet::from([
