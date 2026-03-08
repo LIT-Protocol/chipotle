@@ -225,23 +225,12 @@ jobs:
           kill "$SIM_PID" "$API_PID" 2>/dev/null || true
 
           # Fix empty digests and normalise format (same script used by verify-attestation.yml).
-          # Then inject spec_version into vm_config if missing: the simulator omits spec_version
-          # but the Docker verifier's older serde parser requires it to be present.
+          # Then inject spec_version=1 into vm_config if missing: the simulator omits it but
+          # the Docker verifier's serde parser requires it to be present in VmConfig.
           # (The verifier will still report os_image_hash_verified=false and is_valid=false
           # because the simulator's synthetic OS hash is not published — that is expected.)
           python3 scripts/fix-attestation-event-log.py "$SIM_TMP/attestation.json" \
-            | python3 -c '
-import sys, json
-d = json.load(sys.stdin)
-try:
-    vc = json.loads(d["vm_config"])
-    if "spec_version" not in vc:
-        vc["spec_version"] = 1
-    d["vm_config"] = json.dumps(vc, separators=(",", ":"))
-except Exception:
-    pass
-print(json.dumps(d))
-' \
+            | python3 scripts/inject-spec-version.py \
             > "$SIM_TMP/verify-request.json"
 
           # Run verifier via Docker (same image as verify-attestation.yml).
