@@ -16,6 +16,12 @@ pub async fn get_lit_payer_key(payer_number: u16) -> Result<[u8; 32], String> {
     get_key(path.as_str(), purpose).await
 }
 
+pub async fn get_admin_api_payer_key() -> Result<[u8; 32], String> {
+    let path = "v1/admin_api_payer".to_string();
+    let purpose = "lit_payer";
+    get_key(path.as_str(), purpose).await
+}
+
 async fn get_key(path: &str, purpose: &str) -> Result<[u8; 32], String> {
     let key_response = dstack::get_key(path, purpose)
         .await

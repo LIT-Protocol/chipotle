@@ -6,22 +6,21 @@ pub mod core;
 pub mod dstack;
 pub mod error;
 
+use crate::accounts::signer_pool::start_signer_pool;
 use crate::actions::grpc::GrpcClientPool;
 use moka::future::Cache;
-use rocket::State;
-use rocket::get;
 use rocket::response::Redirect;
-use rocket::routes;
 use rocket::serde::json::Json;
-use rocket::uri;
+use rocket::{State, get, routes, uri};
 use rocket_cors::{AllowedOrigins, Method};
 use rocket_okapi::okapi::openapi3::{OpenApi, Server};
-use rocket_okapi::swagger_ui::SwaggerUIConfig;
-use rocket_okapi::swagger_ui::make_swagger_ui;
-use std::{collections::HashSet, str::FromStr, time::Duration};
+use rocket_okapi::swagger_ui::{SwaggerUIConfig, make_swagger_ui};
+use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 use tracing::Level;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
+// The default signer count for a new instance when contracts are deployed.
+// Note that if the signers aren't funded, nothing will work until an admin sets the default api payer.
 #[rocket::main]
 #[allow(clippy::result_large_err)]
 async fn main() -> Result<(), rocket::Error> {
@@ -42,6 +41,16 @@ async fn main() -> Result<(), rocket::Error> {
         eprintln!("Failed to initialize signing client: {:?}. Exiting.", e);
         std::process::exit(1);
     }
+
+    let signer_pool = match start_signer_pool().await {
+        Ok(pool) => pool,
+        Err(e) => {
+            eprintln!("Failed to start signer pool: {:?}. Exiting.", e);
+            std::process::exit(1);
+        }
+    };
+
+    let signer_pool = Arc::new(signer_pool);
 
     let allowed_methods = HashSet::from([
         Method::from_str("Get").expect("Invalid method: Get"),
@@ -106,7 +115,8 @@ async fn main() -> Result<(), rocket::Error> {
         .manage(openapi_spec)
         .manage(default_http_client())
         // .manage(action_store)
-        .manage(GrpcClientPool::<tonic::transport::Channel>::new());
+        .manage(GrpcClientPool::<tonic::transport::Channel>::new())
+        .manage(signer_pool);
 
     {
         // /attestation at root — per Phala Get Attestation

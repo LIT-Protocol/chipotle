@@ -13,6 +13,7 @@ import {
 
 library LibAccountConfigStorage {
     using EnumerableSet for EnumerableSet.UintSet;
+    using EnumerableSet for EnumerableSet.AddressSet;
 
     bytes32 constant ACCOUNT_CONFIG_STORAGE_POSITION =
         keccak256("com.litprotocol.accountconfig.storage");
@@ -94,11 +95,14 @@ library LibAccountConfigStorage {
         mapping(uint256 => uint256) allApiKeyHashes; // mapping from any api key has to it's master account api key hash
         mapping(uint256 => address) allWalletAddresses; // mapping from a counter to a wallet address hash, allowing us to get a list of all wallet hashes ever generated
         mapping(uint256 => uint256) pricing; // mapping from a pricing item id to it's price
-        address api_payer; // account that pays for state mutation made by api calls, optionally mutates state on behalf of an api key holder.
+        EnumerableSet.AddressSet api_payers; // set of accounts that pays for state mutation made by api calls, optionally mutates state on behalf of an api key holder.
         address owner; // account that can set the api_payer
-        address pricing_operator; // account that can mutate certain state for operational purposes ( like pricing ).
-        uint256 nextWalletCount; // counter for creating unique wallet address hashes
-        uint256 nextAccountCount; // counter for creating unique account ids
+        address pricingOperator; // account that can mutate certain state for operational purposes ( like pricing ).
+        uint256 walletCount; // counter for creating unique wallet address hashes
+        uint256 accountCount; // counter for creating unique account ids
+        address adminApiPayerAccount; // address of the default api payer
+        uint256 requestedApiPayerCount; // number of accounts that are allowed to pay for state mutation made by api calls
+        uint256 rebalanceAmount; // amount of ether to rebalance the api payers with.  If 0, then don't rebalance.
     }
 
     function getStorage()
@@ -127,7 +131,7 @@ library LibAccountConfigStorage {
         Account storage account = s.accounts[masterAccountApiKeyHash];
         if (account.accountApiKey.apiKeyHash != masterAccountApiKeyHash)
             return false;
-        if (sender == s.api_payer && account.managed == true) return true;
+        if (s.api_payers.contains(sender) && account.managed == true) return true;
         return account.creatorWalletAddress == sender;
     }
 
@@ -167,7 +171,7 @@ library LibAccountConfigStorage {
         AccountConfigStorage storage s,
         address caller
     ) internal view {
-        if (caller != s.api_payer && caller != s.pricing_operator) {
+        if (!s.api_payers.contains(caller) && caller != s.pricingOperator) {
             revert OnlyApiPayerOrPricingOperator(caller);
         }
     }

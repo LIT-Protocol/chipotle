@@ -12,28 +12,33 @@ import {LibAccountConfigStorage} from "./LibAccountConfigStorage.sol";
 
 contract AccountConfigViews {
     using EnumerableSet for EnumerableSet.UintSet;
+    using EnumerableSet for EnumerableSet.AddressSet;
     /// @notice Getters for public state (ABI compatibility with original AccountConfig).
-    function api_payer() public view returns (address) {
-        return LibAccountConfigStorage.getStorage().api_payer;
+    function adminApiPayerAccount() public view returns (address) {
+        LibAccountConfigStorage.AccountConfigStorage
+            storage s = LibAccountConfigStorage.getStorage();
+        return s.adminApiPayerAccount;
     }
 
-    function readOnlyApiHelper() internal view returns (address) {
-        return LibAccountConfigStorage.getStorage().api_payer;
+    function api_payers() public view returns (address[] memory) {
+        LibAccountConfigStorage.AccountConfigStorage
+            storage s = LibAccountConfigStorage.getStorage();
+        return s.api_payers.values();
     }
 
-    function pricing_operator() public view returns (address) {
-        return LibAccountConfigStorage.getStorage().pricing_operator;
+    function pricingOperator() public view returns (address) {
+        return LibAccountConfigStorage.getStorage().pricingOperator;
     }
 
     function owner() public view returns (address) {
         return LibAccountConfigStorage.getStorage().owner;
     }
 
-    function nextWalletCount() public view returns (uint256) {
-        return LibAccountConfigStorage.getStorage().nextWalletCount;
+    function walletCount() public view returns (uint256) {
+        return LibAccountConfigStorage.getStorage().walletCount;
     }
-    function nextAccountCount() public view returns (uint256) {
-        return LibAccountConfigStorage.getStorage().nextAccountCount;
+    function accountCount() public view returns (uint256) {
+        return LibAccountConfigStorage.getStorage().accountCount;
     }
     function indexToAccountHashAt(uint256 index) public view returns (uint256) {
         return LibAccountConfigStorage.getStorage().indexToAccountHash[index];
@@ -43,6 +48,17 @@ contract AccountConfigViews {
     }
     function pricingAt(uint256 index) public view returns (uint256) {
         return LibAccountConfigStorage.getStorage().pricing[index];
+    }
+
+    function apiPayerCount() public view returns (uint256) {
+        return LibAccountConfigStorage.getStorage().api_payers.length();
+    }
+    function requestedApiPayerCount() public view returns (uint256) {
+        return LibAccountConfigStorage.getStorage().requestedApiPayerCount;
+    }
+
+    function rebalanceAmount() public view returns (uint256) {
+        return LibAccountConfigStorage.getStorage().rebalanceAmount;
     }
 
     function accountExistsAndIsMutable(
@@ -156,7 +172,8 @@ contract AccountConfigViews {
         LibAccountConfigStorage.Account storage account = getReadOnlyAccount(
             accountApiKeyHash
         );
-        LibAccountConfigStorage.AccountConfigStorage storage s = LibAccountConfigStorage.getStorage();
+        LibAccountConfigStorage.AccountConfigStorage
+            storage s = LibAccountConfigStorage.getStorage();
         LibAccountConfigStorage.Group storage group = account.groups[groupId];
         (uint256 startIndex, uint256 pageLength) = getPageStartAndLength(
             group.Wallets_hash.length(),
