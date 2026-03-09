@@ -1871,15 +1871,7 @@ pub mod account_config {
             self.0
                 .method_hash([141, 165, 203, 91], ())
                 .expect("method not found (this should never happen)")
-        }
-        ///Calls the contract's `owner` (0x8da5cb5b) function
-        pub fn owner(
-            &self,
-        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::Address> {
-            self.0
-                .method_hash([141, 165, 203, 91], ())
-                .expect("method not found (this should never happen)")
-        }
+        }        
         ///Calls the contract's `pricingAt` (0xc1aff899) function
         pub fn pricing_at(
             &self,
@@ -3830,11 +3822,6 @@ pub mod account_config {
     impl ::core::convert::From<NewAccountCall> for AccountConfigCalls {
         fn from(value: NewAccountCall) -> Self {
             Self::NewAccount(value)
-        }
-    }
-    impl ::core::convert::From<OwnerCall> for AccountConfigCalls {
-        fn from(value: OwnerCall) -> Self {
-            Self::Owner(value)
         }
     }
     impl ::core::convert::From<OwnerCall> for AccountConfigCalls {

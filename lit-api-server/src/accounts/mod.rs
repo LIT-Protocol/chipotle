@@ -463,9 +463,3 @@ pub async fn get_rebalance_amount() -> Result<U256> {
     let rebalance_amount = contract.rebalance_amount().call().await?;
     Ok(rebalance_amount)
 }
-
-pub async fn get_api_payers() -> Result<Vec<H160>> {
-    let contract = get_read_only_account_config_contract().await?;
-    let api_payer = contract.api_payer().call().await?;
-    Ok(vec![api_payer])
-}

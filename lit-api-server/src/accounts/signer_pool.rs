@@ -6,7 +6,6 @@ use ethers::middleware::{NonceManagerMiddleware, SignerMiddleware};
 use ethers::providers::{Http, Provider};
 use ethers::signers::{LocalWallet, Signer};
 use ethers::types::{H160, U256};
-use ethers::utils::parse_ether;
 use ethers_providers::Middleware;
 
 use crate::accounts::signable_contract::{
