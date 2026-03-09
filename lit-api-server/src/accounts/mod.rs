@@ -457,3 +457,9 @@ pub async fn get_api_payer_count() -> Result<usize> {
     let signer_count = contract.api_payer_count().call().await?;
     Ok(signer_count.as_usize())
 }
+
+pub async fn get_rebalance_amount() -> Result<U256> {
+    let contract = get_read_only_account_config_contract().await?;
+    let rebalance_amount = contract.rebalance_amount().call().await?;
+    Ok(rebalance_amount)
+}

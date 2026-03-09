@@ -26,13 +26,6 @@ const ACCOUNT_CONFIG_VIEW_ABI = [
     type: 'function',
   },
   {
-    inputs: [],
-    name: 'api_payers',
-    outputs: [{ internalType: 'address[]', name: '', type: 'address[]' }],
-    stateMutability: 'view',
-    type: 'function',
-  },
-  {
     // apiPayerCount() returns api_payers.length() — the actual current payer count.
     inputs: [],
     name: 'apiPayerCount',
@@ -45,6 +38,23 @@ const ACCOUNT_CONFIG_VIEW_ABI = [
     name: 'requestedApiPayerCount',
     outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
     stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
+    name: 'rebalanceAmount',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+];
+
+const SET_REBALANCE_AMOUNT_ABI = [
+  {
+    inputs: [{ internalType: 'uint256', name: 'newRebalanceAmount', type: 'uint256' }],
+    name: 'setRebalanceAmount',
+    outputs: [],
+    stateMutability: 'nonpayable',
     type: 'function',
   },
 ];
@@ -265,13 +275,13 @@ async function fetchContractValues() {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const contract = new ethers.Contract(contractAddress, ACCOUNT_CONFIG_VIEW_ABI, provider);
 
-    const [owner, pricingOperator, adminApiPayer, apiPayerCount, requestedApiPayerCount, apiPayers] = await Promise.all([
+    const [owner, pricingOperator, adminApiPayer, apiPayerCount, requestedApiPayerCount, rebalanceAmountWei] = await Promise.all([
       contract.owner(),
       contract.pricingOperator(),
       contract.adminApiPayerAccount(),
       contract.apiPayerCount(),
       contract.requestedApiPayerCount(),
-      contract.api_payers(),
+      contract.rebalanceAmount(),
     ]);
 
     setValue('val-owner', owner ?? '—', !owner);
@@ -280,7 +290,9 @@ async function fetchContractValues() {
     setValue('val-payer-count', String(apiPayerCount), false);
     setValue('val-requested-api-payer-count', String(requestedApiPayerCount), false);
     populateApiPayerCountDropdown(Number(requestedApiPayerCount));
-    renderApiPayers(apiPayers);
+
+    const rebalanceInput = el('rebalance-amount');
+    if (rebalanceInput) rebalanceInput.value = ethers.formatEther(rebalanceAmountWei);
 
     // Fetch balances asynchronously so they don't block the main display.
     const balanceTargets = [
@@ -301,28 +313,6 @@ async function fetchContractValues() {
   } catch (e) {
     showError(e?.message || String(e));
   }
-}
-
-// ── api_payers() ──────────────────────────────────────────────────────────────
-
-function renderApiPayers(payers) {
-  const listEl = el('contract-api-payers-list');
-  if (!listEl) return;
-
-  if (!Array.isArray(payers) || payers.length === 0) {
-    listEl.innerHTML = '<span style="color:var(--muted);font-family:\'JetBrains Mono\',monospace;font-size:0.85rem">No payers found on contract.</span>';
-    return;
-  }
-
-  listEl.innerHTML =
-    `<table>` +
-      `<thead><tr><th>Index</th><th>Address</th></tr></thead>` +
-      `<tbody>` +
-        payers.map((addr, i) =>
-          `<tr><td>${i}</td><td>${addr}</td></tr>`
-        ).join('') +
-      `</tbody>` +
-    `</table>`;
 }
 
 // ── setRequestedApiPayerCount ─────────────────────────────────────────────────
@@ -395,6 +385,56 @@ el('btn-set-default-api-payer')?.addEventListener('click', async () => {
     el('default-api-payer').value = '';
   } catch (e) {
     showDefaultApiPayerStatus('Error: ' + (e?.reason || e?.message || String(e)), true);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ── setRebalanceAmount ────────────────────────────────────────────────────────
+
+function showRebalanceAmountStatus(msg, isError) {
+  const node = el('rebalance-amount-status');
+  if (!node) return;
+  node.textContent = msg;
+  node.style.color = isError ? '#f87171' : '#34d399';
+  node.style.display = msg ? 'block' : 'none';
+}
+
+el('btn-set-rebalance-amount')?.addEventListener('click', async () => {
+  const contractAddress = (el('contract-address')?.value || '').trim();
+  const btn = el('btn-set-rebalance-amount');
+  const raw = (el('rebalance-amount')?.value || '').trim();
+
+  if (!contractAddress) {
+    showRebalanceAmountStatus('Contract address not yet loaded — select a network first.', true);
+    return;
+  }
+
+  let amountWei;
+  try {
+    amountWei = ethers.parseEther(raw);
+  } catch {
+    showRebalanceAmountStatus('Enter a valid ETH amount (e.g. 0.05).', true);
+    return;
+  }
+
+  btn.disabled = true;
+  showRebalanceAmountStatus('Connecting wallet…', false);
+
+  try {
+    const provider = await connectWallet();
+    const signer = await provider.getSigner();
+    const contract = new ethers.Contract(contractAddress, SET_REBALANCE_AMOUNT_ABI, signer);
+
+    showRebalanceAmountStatus('Waiting for signature…', false);
+    const tx = await contract.setRebalanceAmount(amountWei);
+
+    showRebalanceAmountStatus('Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
+    await tx.wait();
+
+    showRebalanceAmountStatus('Done. Rebalance amount set to ' + ethers.formatEther(amountWei) + ' ETH', false);
+  } catch (e) {
+    showRebalanceAmountStatus('Error: ' + (e?.reason || e?.message || String(e)), true);
   } finally {
     btn.disabled = false;
   }

@@ -506,8 +506,7 @@ pub async fn get_chain_info() -> Result<NodeChainConfigResponse, ApiStatus> {
     })
 }
 
-pub async fn get_api_payers(
-) -> Result<Vec<String>, ApiStatus> {
+pub async fn get_api_payers() -> Result<Vec<String>, ApiStatus> {
     let mut api_payers = Vec::new();
     let payer_count = accounts::get_api_payer_count().await?;
 
@@ -528,9 +527,9 @@ pub async fn get_api_payers(
 }
 
 pub async fn get_admin_api_payer() -> Result<String, ApiStatus> {
-    let admin_api_payer = dstack::v1::get_admin_api_payer_key()
-        .await
-        .map_err(|e| ApiStatus::internal_server_error(anyhow::anyhow!(e), "get_admin_api_payer failed"))?;
+    let admin_api_payer = dstack::v1::get_admin_api_payer_key().await.map_err(|e| {
+        ApiStatus::internal_server_error(anyhow::anyhow!(e), "get_admin_api_payer failed")
+    })?;
     let local_wallet = LocalWallet::from_bytes(&admin_api_payer).map_err(|e| {
         ApiStatus::internal_server_error(anyhow::anyhow!(e), "LocalWallet::from_bytes failed")
     })?;

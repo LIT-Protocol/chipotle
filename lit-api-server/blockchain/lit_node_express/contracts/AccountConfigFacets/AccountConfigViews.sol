@@ -15,12 +15,14 @@ contract AccountConfigViews {
     using EnumerableSet for EnumerableSet.AddressSet;
     /// @notice Getters for public state (ABI compatibility with original AccountConfig).
     function adminApiPayerAccount() public view returns (address) {
-        LibAccountConfigStorage.AccountConfigStorage storage s = LibAccountConfigStorage.getStorage();
+        LibAccountConfigStorage.AccountConfigStorage
+            storage s = LibAccountConfigStorage.getStorage();
         return s.adminApiPayerAccount;
     }
 
     function api_payers() public view returns (address[] memory) {
-        LibAccountConfigStorage.AccountConfigStorage storage s = LibAccountConfigStorage.getStorage();
+        LibAccountConfigStorage.AccountConfigStorage
+            storage s = LibAccountConfigStorage.getStorage();
         return s.api_payers.values();
     }
 
@@ -53,6 +55,10 @@ contract AccountConfigViews {
     }
     function requestedApiPayerCount() public view returns (uint256) {
         return LibAccountConfigStorage.getStorage().requestedApiPayerCount;
+    }
+
+    function rebalanceAmount() public view returns (uint256) {
+        return LibAccountConfigStorage.getStorage().rebalanceAmount;
     }
 
     function accountExistsAndIsMutable(
@@ -166,7 +172,8 @@ contract AccountConfigViews {
         LibAccountConfigStorage.Account storage account = getReadOnlyAccount(
             accountApiKeyHash
         );
-        LibAccountConfigStorage.AccountConfigStorage storage s = LibAccountConfigStorage.getStorage();
+        LibAccountConfigStorage.AccountConfigStorage
+            storage s = LibAccountConfigStorage.getStorage();
         LibAccountConfigStorage.Group storage group = account.groups[groupId];
         (uint256 startIndex, uint256 pageLength) = getPageStartAndLength(
             group.Wallets_hash.length(),

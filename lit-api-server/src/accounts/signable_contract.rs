@@ -65,18 +65,26 @@ where
 }
 
 pub async fn get_admin_api_payer_contract() -> Result<AccountConfig<SigningClient>> {
-    let node_config = GLOBAL_NODE_CONFIG
+    let admin_signer = get_admin_api_signer().await?;
+    let contract = get_account_config_contract::<SigningClient>(Arc::new(admin_signer)).await?;
+    Ok(contract)
+}
+
+pub async fn get_admin_api_signer() -> Result<SigningClient> {
+        let node_config = GLOBAL_NODE_CONFIG
         .get()
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))?;
     let chain_info = node_config.chain.info();
-    let secret = crate::dstack::v1::get_admin_api_payer_key().await.map_err(|e| anyhow::anyhow!("Failed to get admin api payer key: {e}"))?;
+    let secret = crate::dstack::v1::get_admin_api_payer_key()
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to get admin api payer key: {e}"))?;
     let wallet = LocalWallet::from_bytes(&secret)?.with_chain_id(chain_info.chain_id);
     let address = wallet.address();
     let provider = Provider::<Http>::try_from(chain_info.rpc_url)?.interval(Duration::from_secs(2));
     let signer = SignerMiddleware::new(provider, wallet);
-    let nonce_manager = NonceManagerMiddleware::new(signer, address);
-    let contract = get_account_config_contract:: <SigningClient>(Arc::new(nonce_manager)).await?;
-    Ok(contract)
+    let nonce_manager = NonceManagerMiddleware::new(signer, address);    
+
+    Ok(nonce_manager)
 }
 
 pub(crate) async fn get_read_only_account_config_contract()

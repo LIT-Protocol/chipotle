@@ -282,14 +282,13 @@
       </div>
       <button type="button" id="btn-set-default-api-payer">Set Default</button>
       <div id="default-api-payer-status" style="display: none; font-size: 0.85rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
-    </div>
 
-    <div class="card">
-      <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">API Payers (contract)</h2>
-      <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
-        <code>api_payers()</code> — full payer address list read directly from the contract.
-      </p>
-      <div id="contract-api-payers-list"></div>
+      <div class="form-group" style="margin-top: 1.25rem">
+        <label for="rebalance-amount">Rebalance amount (ETH)</label>
+        <input type="text" id="rebalance-amount" placeholder="e.g. 0.05" />
+      </div>
+      <button type="button" id="btn-set-rebalance-amount">Set Rebalance Amount</button>
+      <div id="rebalance-amount-status" style="display: none; font-size: 0.85rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.umd.min.js"></script>

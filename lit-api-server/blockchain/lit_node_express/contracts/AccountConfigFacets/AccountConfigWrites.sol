@@ -500,6 +500,12 @@ contract AccountConfigWrite {
         for (uint256 i = 0; i < newApiPayers.length; i++) {
             s.api_payers.add(newApiPayers[i]);
         }
-        
+    }
+
+    function setRebalanceAmount(uint256 newRebalanceAmount) public {
+        checkIfApiPayerOrOwner(msg.sender);
+        LibAccountConfigStorage.AccountConfigStorage
+            storage s = LibAccountConfigStorage.getStorage();
+        s.rebalanceAmount = newRebalanceAmount;
     }
 }
