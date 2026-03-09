@@ -2,8 +2,8 @@
  * Tests Lit.Actions.signEcdsa() — signs data using a PKP's ECDSA key.
  *
  * Flow:
- *   1. Create a fresh account and wallet (the wallet address IS the PKP public key)
- *   2. Run a Lit Action that calls signEcdsa with that public key
+ *   1. Create a fresh account and wallet (the wallet address IS the PKP ID )
+ *   2. Run a Lit Action that calls signEcdsa with that PKP ID / wallet address
  *   3. Assert the response contains a non-empty hex signature with no error
  *
  * Usage:
@@ -24,8 +24,7 @@ const TO_SIGN = [
   2, 248, 239, 66, 165, 236, 95, 3, 187, 250, 37, 76, 176, 31, 173,
 ];
 
-// publicKey and sigName are injected via jsParams.
-// keySetId is ignored server-side; pass empty string.
+// pkpId and sigName are injected via jsParams.
 const ECDSA_SIGN_CODE = `(async () => {
   const sig = await Lit.Actions.signEcdsa({
     toSign,
@@ -101,9 +100,9 @@ export default function () {
       typeof walletAddress === "string" && walletAddress.length > 0,
   }, "createWallet");
 
-  // ── 3. List wallets to get the raw public key ─────────────────────────────
+  // ── 3. List wallets to get the PKP ID / wallet address ─────────────────────────────
   // createWallet returns only the Ethereum address; listWallets returns the
-  // full WalletItem including the raw uncompressed public key needed by signEcdsa.
+  // full WalletItem including the PKP ID / wallet address.
   const listRes = client.listWallets(
     { page_number: "0", page_size: "10" },
     authHeaders,
