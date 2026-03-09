@@ -44,7 +44,9 @@ pub(crate) async fn get_signable_account_config_contract(
     signer_pool: Arc<SignerPool>,
 ) -> Result<(AccountConfig<SigningClient>, H160), anyhow::Error> {
     let signer_handle = signer_pool.request().await?;
-    let client = signer_handle.client;
+    let client = signer_handle
+        .client
+        .ok_or(anyhow::anyhow!("No signer available"))?;
     let signer_address = signer_handle.address;
     let contract = get_account_config_contract::<SigningClient>(client).await?;
 

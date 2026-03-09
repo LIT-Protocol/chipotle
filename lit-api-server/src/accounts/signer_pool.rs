@@ -31,7 +31,7 @@ pub struct SigningPoolEntry {
 /// Returned by `SignerPool::request`. Contains the signing client and its
 /// address. Pass `address` back to `SignerPool::release` when done.
 pub struct SignerHandle {
-    pub client: Arc<SigningClient>,
+    pub client: Option<Arc<SigningClient>>,
     pub address: H160,
 }
 
@@ -97,6 +97,10 @@ pub async fn get_signer_entries(
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))?;
     let chain_info = node_config.chain.info();
 
+    if pool_size == 0 {
+        return Ok(Vec::new());
+    }
+
     let mut entries: Vec<SigningPoolEntry> = Vec::with_capacity(pool_size);
     for i in start_index..=(start_index + pool_size - 1) {
         let secret = get_lit_payer_key(i as u16)
@@ -132,13 +136,23 @@ async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<Signin
             msg = rx.recv_async() => {
                 match msg {
                     Ok(SigningPoolMessage::Request { reply }) => {
+
+                        if entries.is_empty() {
+                            tracing::warn!("signer_pool: no signers available, returning None");
+                            let _ = reply.send(SignerHandle {
+                                client: None,
+                                address: H160::zero(),
+                            });
+                            continue;
+                        }
+
                         entries.sort_by_key(|k| k.last_request);
                         if let Some(entry) = entries.iter_mut().find(|e| !e.in_use) {
                             entry.in_use = true;
                             entry.in_use_since = Some(Instant::now());
                             tracing::info!("signer_pool: granted lease to {:?}", entry.address);
                             let _ = reply.send(SignerHandle {
-                                client: Arc::clone(&entry.client),
+                                client: Some(Arc::clone(&entry.client)),
                                 address: entry.address,
                             });
                         } else {
@@ -150,7 +164,7 @@ async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<Signin
                                 .min_by_key(|e| e.in_use_since.unwrap_or(Instant::now()))
                             {
                                 let _ = reply.send(SignerHandle {
-                                    client: Arc::clone(&entry.client),
+                                    client: Some(Arc::clone(&entry.client)),
                                     address: entry.address,
                                 });
                             }
