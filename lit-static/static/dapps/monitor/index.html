@@ -134,7 +134,7 @@
         border-bottom: none;
       }
       .result-label {
-        min-width: 180px;
+        min-width: 120px;
         color: var(--muted);
       }
       .result-value {
@@ -224,30 +224,30 @@
       <div class="results" id="results" style="display: none">
         <h2>Contract values</h2>
         <div class="result-row">
-          <span class="result-label">owner()</span
+          <span class="result-label">owner</span
           ><span class="result-value" id="val-owner">—</span
           ><span class="result-value" id="val-owner-balance" style="color:var(--muted);margin-left:auto"></span>
         </div>
         <div class="result-row">
-          <span class="result-label">pricingOperator()</span
+          <span class="result-label">pricing</span
           ><span class="result-value" id="val-pricing-operator">—</span
           ><span class="result-value" id="val-pricing-operator-balance" style="color:var(--muted);margin-left:auto"></span>
         </div>
         <div class="result-row">
-          <span class="result-label">adminApiPayerAccount()</span
+          <span class="result-label">admin Payer</span
           ><span class="result-value" id="val-admin-api-payer">—</span
           ><span class="result-value" id="val-admin-api-payer-balance" style="color:var(--muted);margin-left:auto"></span>
         </div>
         <div class="result-row">
-          <span class="result-label">apiPayerCount()</span
+          <span class="result-label">Actual #</span
           ><span class="result-value" id="val-payer-count">—</span>
         </div>
         <div class="result-row">
-          <span class="result-label">requestedApiPayerCount()</span
+          <span class="result-label">Requested #</span
           ><span class="result-value" id="val-requested-api-payer-count">—</span>
         </div>
         <div class="result-row">
-          <span class="result-label">rebalanceAmount()</span
+          <span class="result-label">Rebalance</span
           ><span class="result-value" id="val-rebalance-amount">—</span>
         </div>
       </div>
@@ -267,10 +267,19 @@
     </div>
 
     <div class="card">
-      <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Set Api Payer Count</h2>
+      <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Api Payer Accounts</h2>
       <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
-        Reads <code>requestedApiPayerCount()</code> on load; confirms by calling <code>setRequestedApiPayerCount(uint256)</code>. Requires MetaMask.
+        Sets the default API payer account. and sets number of payers the node will use to process mutable API calls.  If rebalance is enabled, the node will rebalance the payers to ensure each payer has equal funds, using funds that exist in the admin API payer account.
       </p>
+
+      <div class="form-group" style="margin-top: 1.25rem">
+        <label for="default-api-payer">Admin API payer address</label>
+        <input type="text" id="default-api-payer" placeholder="0x…" />
+      </div>
+      <button type="button" id="btn-set-default-api-payer">Set Default</button>
+      <div id="default-api-payer-status" style="display: none; font-size: 0.85rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
+
+
       <div class="form-group">
         <label for="payer-count">Requested payer count</label>
         <select id="payer-count">
@@ -280,12 +289,6 @@
       <button type="button" id="btn-set-payer-count">Confirm</button>
       <div id="payer-count-status" style="display: none; font-size: 0.85rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
 
-      <div class="form-group" style="margin-top: 1.25rem">
-        <label for="default-api-payer">Admin API payer address</label>
-        <input type="text" id="default-api-payer" placeholder="0x…" />
-      </div>
-      <button type="button" id="btn-set-default-api-payer">Set Default</button>
-      <div id="default-api-payer-status" style="display: none; font-size: 0.85rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
 
       <div class="form-group" style="margin-top: 1.25rem">
         <label for="rebalance-amount">Rebalance amount (ETH)</label>
