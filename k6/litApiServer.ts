@@ -17,7 +17,6 @@ export interface ApiKeyItem {
   id: string;
   name: string;
   description: string;
-  api_key: string;
   expiration: string;
   /** @minimum 0 */
   balance: number;
@@ -31,11 +30,6 @@ export interface NewAccountResponse {
 export interface NewAccountRequest {
   account_name: string;
   account_description: string;
-  /**
-   * Optional initial balance for the account (AccountConfig.accountApiKey.balance). Decimal or hex string; default 0.
-   * @nullable
-   */
-  initial_balance?: string | null;
 }
 
 export interface CreateWalletResponse {
@@ -57,7 +51,7 @@ export interface LitActionSignature {
 export interface SignWithPkpResponse {
   signing_scheme: string;
   signed_digest: string;
-  public_key: string;
+  pkp_id: string;
   signature: string;
 }
 
@@ -119,12 +113,12 @@ export interface AddActionToGroupRequest {
 export interface AddPkpToGroupRequest {
   /** Group ID (decimal or hex string). */
   group_id: string;
-  pkp_public_key: string;
+  pkp_id: string;
 }
 
 export interface RemovePkpFromGroupRequest {
   group_id: string;
-  pkp_public_key: string;
+  pkp_id: string;
 }
 
 /**
@@ -141,6 +135,8 @@ export interface AddUsageApiKeyResponse {
 export interface AddUsageApiKeyRequest {
   expiration: string;
   balance: string;
+  name: string;
+  description: string;
 }
 
 /**
@@ -208,7 +204,6 @@ export interface WalletItem {
   name: string;
   description: string;
   wallet_address: string;
-  public_key: string;
 }
 
 export interface NodeChainConfigResponse {
@@ -1314,6 +1309,66 @@ export class LitApiServerClient {
       response,
       data,
       operationId: "get_node_chain_config",
+    };
+  }
+
+  getApiPayers(requestParameters?: Params): {
+    response: Response;
+    data: string[];
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/get_api_payers`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "GET",
+      k6url.toString(),
+      undefined,
+      mergedRequestParameters,
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "get_api_payers",
+    };
+  }
+
+  getAdminApiPayer(requestParameters?: Params): {
+    response: Response;
+    data: string;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/get_admin_api_payer`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "GET",
+      k6url.toString(),
+      undefined,
+      mergedRequestParameters,
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "get_admin_api_payer",
     };
   }
 

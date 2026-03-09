@@ -2,6 +2,7 @@ pub use crate::abstractions::transfer::chain_info::Chain;
 pub use crate::accounts::contracts::account_config_contract::AccountConfig;
 use crate::accounts::signer_pool::SignerPool;
 use crate::config::GLOBAL_NODE_CONFIG;
+use crate::dstack::v1::get_lit_payer_key;
 pub use anyhow::Result;
 use ethers::contract::builders::ContractCall;
 use ethers::middleware::NonceManagerMiddleware;

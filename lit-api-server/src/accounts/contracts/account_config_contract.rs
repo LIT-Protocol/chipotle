@@ -785,6 +785,22 @@ pub mod account_config {
                     },],
                 ),
                 (
+                    ::std::borrow::ToOwned::to_owned("owner"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("owner"),
+                        inputs: ::std::vec![],
+                        outputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::string::String::new(),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("address"),
+                            ),
+                        },],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                    },],
+                ),
+                (
                     ::std::borrow::ToOwned::to_owned("pricingAt"),
                     ::std::vec![::ethers::core::abi::ethabi::Function {
                         name: ::std::borrow::ToOwned::to_owned("pricingAt"),
@@ -1846,6 +1862,14 @@ pub mod account_config {
                         creator_wallet_address,
                     ),
                 )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `owner` (0x8da5cb5b) function
+        pub fn owner(
+            &self,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::Address> {
+            self.0
+                .method_hash([141, 165, 203, 91], ())
                 .expect("method not found (this should never happen)")
         }
         ///Calls the contract's `owner` (0x8da5cb5b) function
@@ -3492,6 +3516,9 @@ pub mod account_config {
             if let Ok(decoded) = <OwnerCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::Owner(decoded));
             }
+            if let Ok(decoded) = <OwnerCall as ::ethers::core::abi::AbiDecode>::decode(data) {
+                return Ok(Self::Owner(decoded));
+            }
             if let Ok(decoded) = <PricingAtCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::PricingAt(decoded));
             }
@@ -3803,6 +3830,11 @@ pub mod account_config {
     impl ::core::convert::From<NewAccountCall> for AccountConfigCalls {
         fn from(value: NewAccountCall) -> Self {
             Self::NewAccount(value)
+        }
+    }
+    impl ::core::convert::From<OwnerCall> for AccountConfigCalls {
+        fn from(value: OwnerCall) -> Self {
+            Self::Owner(value)
         }
     }
     impl ::core::convert::From<OwnerCall> for AccountConfigCalls {
