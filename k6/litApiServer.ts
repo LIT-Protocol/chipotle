@@ -1342,6 +1342,36 @@ export class LitApiServerClient {
     };
   }
 
+  getAdminApiPayer(requestParameters?: Params): {
+    response: Response;
+    data: string;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/get_admin_api_payer`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "GET",
+      k6url.toString(),
+      undefined,
+      mergedRequestParameters,
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "get_admin_api_payer",
+    };
+  }
+
   /**
    * Merges the provided request parameters with default parameters for the client.
    *
