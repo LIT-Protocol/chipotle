@@ -29,9 +29,8 @@ const TO_SIGN = [
 const ECDSA_SIGN_CODE = `(async () => {
   const sig = await Lit.Actions.signEcdsa({
     toSign,
-    publicKey,
+    pkpId,
     sigName,
-    keySetId: "",
   });
   Lit.Actions.setResponse({ response: JSON.stringify(sig) });
 })();`;
@@ -87,7 +86,6 @@ export default function () {
   const newAccountRes = client.newAccount({
     account_name: "k6-lit-action-ecdsa-sign",
     account_description: "k6 test account",
-    initial_balance: "10000",
   });
   if (!assertOk("newAccount", "POST /new_account", newAccountRes)) return;
   const apiKey = (newAccountRes.data as { api_key: string }).api_key;
@@ -112,18 +110,18 @@ export default function () {
   );
   if (!assertOk("listWallets", "GET /list_wallets", listRes)) return;
   const wallets = listRes.data as Array<{
-    wallet_address: string;
-    public_key: string;
+    wallet_address: string;    
   }>;
-  const wallet = wallets.find((w) => w.wallet_address === walletAddress);
+  const normalize = (addr: string) => addr.replace(/^0x/i, "").toLowerCase();
+  const wallet = wallets.find(
+    (w) => normalize(w.wallet_address) === normalize(walletAddress),
+  );
   checkAndLog(listRes.response, {
     "listWallets finds created wallet": () => wallet !== undefined,
-    "wallet has non-empty public_key": () =>
-      typeof wallet?.public_key === "string" && wallet.public_key.length > 0,
   }, "listWallets");
   if (!wallet) return;
-  const publicKey = wallet.public_key;
-  console.log(`publicKey: ${publicKey}`);
+  const pkpId = wallet.wallet_address;
+  console.log(`pkpId: ${pkpId}`);
 
   // ── 4. Sign with signEcdsa ────────────────────────────────────────────────
   const res = client.litAction(
@@ -131,7 +129,7 @@ export default function () {
       code: ECDSA_SIGN_CODE,
       js_params: {
         toSign: TO_SIGN,
-        publicKey,
+        pkpId,
         sigName: "sig",
       },
     },
