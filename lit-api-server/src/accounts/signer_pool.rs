@@ -224,11 +224,11 @@ async fn check_for_new_api_payer_count(
 
     if let Ok(rebalance_amount) = get_rebalance_amount().await
         && rebalance_amount > U256::zero()
-            && let Err(e) =
-                rebalance_entries(rebalance_amount, old_entries.clone(), entries.clone()).await
-            {
-                tracing::error!("signer_pool: failed to rebalance entries: {e}");
-            }
+        && let Err(e) =
+            rebalance_entries(rebalance_amount, old_entries.clone(), entries.clone()).await
+    {
+        tracing::error!("signer_pool: failed to rebalance entries: {e}");
+    }
 }
 
 async fn set_api_payers(entries: Vec<SigningPoolEntry>) -> Result<()> {

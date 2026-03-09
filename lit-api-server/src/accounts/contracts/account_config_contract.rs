@@ -1871,7 +1871,7 @@ pub mod account_config {
             self.0
                 .method_hash([141, 165, 203, 91], ())
                 .expect("method not found (this should never happen)")
-        }        
+        }
         ///Calls the contract's `pricingAt` (0xc1aff899) function
         pub fn pricing_at(
             &self,
