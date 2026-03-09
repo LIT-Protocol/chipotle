@@ -17,7 +17,7 @@ pub async fn get_lit_payer_key(payer_number: u16) -> Result<[u8; 32], String> {
 }
 
 pub async fn get_admin_api_payer_key() -> Result<[u8; 32], String> {
-    let path = format!("v1/admin_api_payer");
+    let path = "v1/admin_api_payer".to_string();
     let purpose = "lit_payer";
     get_key(path.as_str(), purpose).await
 }

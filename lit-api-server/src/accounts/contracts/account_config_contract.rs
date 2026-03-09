@@ -1582,7 +1582,7 @@ pub mod account_config {
         > {
             let factory = ::ethers::contract::ContractFactory::new(
                 ACCOUNTCONFIG_ABI.clone(),
-                ACCOUNTCONFIG_BYTECODE.clone().into(),
+                ACCOUNTCONFIG_BYTECODE.clone(),
                 client,
             );
             let deployer = factory.deploy(constructor_args)?;

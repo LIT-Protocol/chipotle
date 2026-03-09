@@ -192,7 +192,7 @@ async fn check_for_new_api_payer_count(
         Ok(count) => count,
         Err(e) => {
             tracing::error!("signer_pool: failed to get signer count: {e}");
-            payer_count.clone()
+            *payer_count
         }
     };
 
@@ -222,15 +222,13 @@ async fn check_for_new_api_payer_count(
         return;
     }
 
-    if let Ok(rebalance_amount) = get_rebalance_amount().await {
-        if rebalance_amount > U256::zero() {
-            if let Err(e) =
+    if let Ok(rebalance_amount) = get_rebalance_amount().await
+        && rebalance_amount > U256::zero()
+            && let Err(e) =
                 rebalance_entries(rebalance_amount, old_entries.clone(), entries.clone()).await
             {
                 tracing::error!("signer_pool: failed to rebalance entries: {e}");
             }
-        }
-    }
 }
 
 async fn set_api_payers(entries: Vec<SigningPoolEntry>) -> Result<()> {
