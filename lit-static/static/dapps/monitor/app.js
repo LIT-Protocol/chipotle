@@ -269,6 +269,7 @@ async function fetchContractValues() {
   setValue('val-admin-api-payer-balance', '', false);
   setValue('val-payer-count', '…', false);
   setValue('val-requested-api-payer-count', '…', false);
+  setValue('val-rebalance-amount', '…', false);
   if (results) results.style.display = 'block';
 
   try {
@@ -289,6 +290,7 @@ async function fetchContractValues() {
     setValue('val-admin-api-payer', adminApiPayer ?? '—', !adminApiPayer);
     setValue('val-payer-count', String(apiPayerCount), false);
     setValue('val-requested-api-payer-count', String(requestedApiPayerCount), false);
+    setValue('val-rebalance-amount', ethers.formatEther(rebalanceAmountWei) + ' ETH', false);
     populateApiPayerCountDropdown(Number(requestedApiPayerCount));
 
     const rebalanceInput = el('rebalance-amount');

@@ -9,8 +9,11 @@ use ethers::types::{H160, U256};
 use ethers::utils::parse_ether;
 use ethers_providers::Middleware;
 
+use crate::accounts::signable_contract::{
+    SigningClient, get_admin_api_payer_contract, get_admin_api_signer,
+    get_read_only_account_config_contract,
+};
 use crate::accounts::{get_api_payer_count, get_rebalance_amount};
-use crate::accounts::signable_contract::{SigningClient, get_admin_api_payer_contract, get_admin_api_signer, get_read_only_account_config_contract};
 use crate::config::GLOBAL_NODE_CONFIG;
 use crate::dstack::v1::get_lit_payer_key;
 
@@ -186,7 +189,6 @@ async fn check_for_new_api_payer_count(
     entries: &mut Vec<SigningPoolEntry>,
     payer_count: &mut usize,
 ) {
-    tracing::info!("signer_pool: checking for new api payer count");
     let new_api_payer_count = match crate::accounts::get_requested_api_payer_count().await {
         Ok(count) => count,
         Err(e) => {
@@ -194,9 +196,8 @@ async fn check_for_new_api_payer_count(
             payer_count.clone()
         }
     };
-    
-    if  new_api_payer_count == *payer_count {
-        tracing::info!("signer_pool: api payer count is the same as the current count");
+
+    if new_api_payer_count == *payer_count {
         return;
     }
 
@@ -217,20 +218,20 @@ async fn check_for_new_api_payer_count(
         *payer_count = new_api_payer_count;
     };
 
-    
-    if  let Err(e) = set_api_payers(entries.clone()).await {
+    if let Err(e) = set_api_payers(entries.clone()).await {
         tracing::error!("signer_pool: failed to set api payers: {e}");
         return;
     }
 
     if let Ok(rebalance_amount) = get_rebalance_amount().await {
         if rebalance_amount > U256::zero() {
-            if let Err(e)  = rebalance_entries(old_entries.clone(), entries.clone()).await {
+            if let Err(e) =
+                rebalance_entries(rebalance_amount, old_entries.clone(), entries.clone()).await
+            {
                 tracing::error!("signer_pool: failed to rebalance entries: {e}");
             }
         }
     }
-
 }
 
 async fn set_api_payers(entries: Vec<SigningPoolEntry>) -> Result<()> {
@@ -268,12 +269,14 @@ async fn release_stale_leases(entries: &mut [SigningPoolEntry]) {
     }
 }
 
-async fn rebalance_entries(old_entries:  Vec<SigningPoolEntry>, new_entries: Vec<SigningPoolEntry>) -> Result<()> {
-
+async fn rebalance_entries(
+    rebalance_amount: U256,
+    old_entries: Vec<SigningPoolEntry>,
+    new_entries: Vec<SigningPoolEntry>,
+) -> Result<()> {
     let admin_signer = get_admin_api_signer().await?;
     let read_only_client = get_read_only_account_config_contract().await?;
     let admin_wallet = read_only_client.admin_api_payer_account().call().await?;
-
 
     let chain_info = GLOBAL_NODE_CONFIG
         .get()
@@ -287,36 +290,42 @@ async fn rebalance_entries(old_entries:  Vec<SigningPoolEntry>, new_entries: Vec
     for entry in old_entries.iter() {
         let current_funds = admin_signer.get_balance(entry.address, None).await?;
         if current_funds < gas_required {
-            tracing::error!("signer_pool: not enough funds to rebalance:   {:?} has {current_funds} < {gas_required}", entry.address);
+            tracing::error!(
+                "signer_pool: not enough funds to rebalance:   {:?} has {current_funds} < {gas_required}",
+                entry.address
+            );
             continue;
         }
         let req = ethers::types::Eip1559TransactionRequest::new()
             .to(admin_wallet)
             .value(current_funds - gas_required)
             .chain_id(chain_info.chain_id);
-        
-        let tx = entry.client.send_transaction(req, block_number)
-            .await;
+
+        let tx = entry.client.send_transaction(req, block_number).await;
         match tx {
             Ok(tx) => {
                 tx.await?;
-                tracing::info!("signer_pool: repatriated funds to admin wallet from {:?}", entry.address);
+                tracing::info!(
+                    "signer_pool: repatriated funds to admin wallet from {:?}",
+                    entry.address
+                );
             }
             Err(e) => {
-                tracing::error!("signer_pool: failed to repatriate funds to admin wallet from {:?}: {e}", entry.address);
+                tracing::error!(
+                    "signer_pool: failed to repatriate funds to admin wallet from {:?}: {e}",
+                    entry.address
+                );
             }
         }
     }
 
-    let amount = parse_ether("0.001")?;
     for entry in new_entries.iter() {
         let req = ethers::types::Eip1559TransactionRequest::new()
             .to(entry.address)
-            .value(amount)
+            .value(rebalance_amount)
             .chain_id(chain_info.chain_id);
-        
-        let tx = admin_signer.send_transaction(req, block_number)
-            .await;
+
+        let tx = admin_signer.send_transaction(req, block_number).await;
         match tx {
             Ok(tx) => {
                 tx.await?;
@@ -330,4 +339,3 @@ async fn rebalance_entries(old_entries:  Vec<SigningPoolEntry>, new_entries: Vec
 
     Ok(())
 }
-
