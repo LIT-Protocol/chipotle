@@ -2,8 +2,8 @@
  * Tests Lit.Actions.signEcdsa() — signs data using a PKP's ECDSA key.
  *
  * Flow:
- *   1. Create a fresh account and wallet (wallet address is used as pkpId)
- *   2. Run a Lit Action that calls signEcdsa with the wallet address as pkpId
+ *   1. Create a fresh account and wallet (the wallet address IS the PKP ID )
+ *   2. Run a Lit Action that calls signEcdsa with that PKP ID / wallet address
  *   3. Assert the response contains a non-empty hex signature with no error
  *
  * Usage:

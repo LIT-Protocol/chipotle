@@ -278,7 +278,7 @@ export default function () {
   // ── 14. addUsageApiKey ────────────────────────────────────────────────────
   const expiration = String(Math.floor(Date.now() / 1000) + 86400); // 24 h from now
   const addUsageKeyRes = client.addUsageApiKey(
-    { expiration, balance: "1000000000000000000", name: "k6-usage-key", description: "Integration test usage key" },
+    { expiration, balance: "1000000000000000000", name: "k6-usage-key", description: "Integration test usage key" }, // 1 token in wei
     authHeaders,
   );
   if (!assertOk("addUsageApiKey", "POST /add_usage_api_key", addUsageKeyRes)) return;
