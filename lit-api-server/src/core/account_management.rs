@@ -164,17 +164,30 @@ pub async fn add_group(
     api_key: &str,
     req: Json<AddGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let permitted_actions = parse_u256_hex_list(&req.permitted_actions)?;
-    let pkps = parse_u256_hex_list(&req.pkps)?;
+    let cid_hashes = parse_u256_hex_list(&req.permitted_actions)?;
+    let pkp_ids = req
+        .pkps
+        .iter()
+        .map(|s| {
+            let bytes = hex_to_bytes(s.trim()).map_err(|e| {
+                ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex address in pkps")
+            })?;
+            if bytes.len() != 20 {
+                return Err(ApiStatus::bad_request(
+                    anyhow::anyhow!("address must be 20 bytes"),
+                    "invalid pkp address length",
+                ));
+            }
+            Ok(H160::from_slice(&bytes))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     accounts::add_group(
         signer_pool,
         api_key,
         &req.group_name,
         &req.group_description,
-        permitted_actions,
-        pkps,
-        req.all_wallets_permitted,
-        req.all_actions_permitted,
+        cid_hashes,
+        pkp_ids,
     )
     .await
     .map_err(|e| ApiStatus::internal_server_error(e, "add_group failed"))?;
@@ -306,8 +319,6 @@ pub async fn update_group(
         group_id,
         &req.name,
         &req.description,
-        req.all_wallets_permitted,
-        req.all_actions_permitted,
     )
     .await
     .map_err(|e| ApiStatus::internal_server_error(e, "update_group failed"))?;
@@ -375,7 +386,7 @@ fn metadata_to_item(m: &accounts::Metadata) -> ListMetadataItem {
 
 #[allow(dead_code)]
 fn usage_api_key_to_api_key_item(
-    m: &accounts::contracts::account_config_contract::UsageApiKey,
+    m: &accounts::contracts::account_config_contract::UsageApiKeyReturn,
 ) -> ApiKeyItem {
     let mut bytes = [0; 32];
     m.metadata.id.to_big_endian(&mut bytes);
@@ -444,7 +455,7 @@ pub async fn list_wallets(
             id: m.id.to_string(),
             name: m.name.clone(),
             description: m.description.clone(),
-            wallet_address: bytes_to_hex(m.wallet_address.as_bytes()),
+            wallet_address: bytes_to_hex(m.pkp_id.as_bytes()),
         })
         .collect();
     Ok(wallet_items)
@@ -469,7 +480,7 @@ pub async fn list_wallets_in_group(
             id: m.id.to_string(),
             name: m.name.clone(),
             description: m.description.clone(),
-            wallet_address: bytes_to_hex(m.wallet_address.as_bytes()),
+            wallet_address: bytes_to_hex(m.pkp_id.as_bytes()),
         })
         .collect();
     Ok(wallet_items)

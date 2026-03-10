@@ -107,7 +107,11 @@ library SecurityLib {
 
     function revertIfNotApiPayerOrOwner(address caller) internal view {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        if (!s.api_payers.contains(caller) && caller != s.owner) {
+        if (
+            !s.api_payers.contains(caller) &&
+            caller != s.owner &&
+            caller != s.adminApiPayerAccount
+        ) {
             revert AppStorage.OnlyApiPayerOrOwner(caller);
         }
     }

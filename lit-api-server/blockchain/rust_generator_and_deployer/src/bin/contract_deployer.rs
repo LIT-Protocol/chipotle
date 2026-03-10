@@ -10,13 +10,16 @@ use ethers::abi::Tokenize;
 use ethers::contract::ContractFactory;
 use ethers::prelude::*;
 use ethers::utils::hex::FromHex;
+use ethers::core::types::Address;
+use lit_contracts_minimal_generator::diamond::diamond_cut_facet::FacetCut;
+use lit_contracts_minimal_generator::diamond::diamond_loupe_facet::DiamondLoupeFacet;
 
 
 use std::env;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
-use std::time::Duration;
+// use std::time::Duration;
 
 const ANVIL_RPC: &str = "http://127.0.0.1:8545";
 const ANVIL_CHAIN_ID: u64 = 31337;
@@ -77,7 +80,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     
     deploy_diamond(rpc_url, chain_id, &abis_folder, secret)
         .await
-        .expect("Failed to deploy contracts");
+        .expect("Failed to deploy diamond");
+    
+    // let diamond_address_str = "0xd67c473ffd0a6508a1558801fd712ee661643205";
+    // let diamond_address_bytes = hex::decode(diamond_address_str.replace("0x", "")).unwrap();
+    // let diamond_address = Address::from_slice(&diamond_address_bytes);
+
+    // upate_diamond(rpc_url, chain_id, &abis_folder, secret, diamond_address)
+    //     .await
+    //     .expect("Failed to update diamond");
     Ok(())
 }
 
@@ -222,13 +233,6 @@ pub enum FacetCutAction {
 }
 
 
-#[derive(Debug, Clone, EthAbiType, EthAbiCodec)]
-pub struct FacetCut {
-    pub facet_address: ::ethers::core::types::Address,
-    pub action: u8,
-    pub function_selectors: ::std::vec::Vec<[u8; 4]>,
-}
-
 async fn deploy_diamond(
     rpc_url: &str,
     chain_id: u64,
@@ -251,6 +255,9 @@ async fn deploy_diamond(
     let diamond_cut_facet = deploy_facet_from_json(abis_folder, "DiamondPattern/DiamondCutFacet.sol/DiamondCutFacet.json", client.clone()).await?;
     facet_cuts.push(get_facet_cut(FacetCutAction::Add, &diamond_cut_facet));
 
+    let diamond_loupe_facet = deploy_facet_from_json(abis_folder, "DiamondPattern/DiamondLoupeFacet.sol/DiamondLoupeFacet.json", client.clone()).await?;
+    facet_cuts.push(get_facet_cut(FacetCutAction::Add, &diamond_loupe_facet));
+
     let api_config_facet = deploy_facet_from_json(abis_folder, "AccountConfigFacets/APIConfigFacet.sol/APIConfigFacet.json", client.clone()).await?;
     facet_cuts.push(get_facet_cut(FacetCutAction::Add, &api_config_facet));
 
@@ -272,9 +279,46 @@ async fn deploy_diamond(
         eprintln!("Failed to deploy AccountConfig: {:?}", e);
         return Err(e.into());
     }
+    Ok(())
+}
 
- 
- 
- 
+async fn upate_diamond(
+    rpc_url: &str,
+    chain_id: u64,
+    abis_folder: &str,
+    secret: &str,
+    diamond_address: Address,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let provider = Provider::<Http>::try_from(rpc_url).expect("Failed to create provider");
+    let wallet: LocalWallet = secret.parse::<LocalWallet>()?.with_chain_id(chain_id);
+    let client = SignerMiddleware::new(provider, wallet);
+    let client = std::sync::Arc::new(client);
+    
+    use lit_contracts_minimal_generator::diamond::diamond_cut_facet::DiamondCutFacet;
+
+    let diamond_init = deploy_facet_from_json(abis_folder, "DiamondPattern/DiamondInit.sol/DiamondInit.json", client.clone()).await?;
+    // get the init function from the diamond_init contract
+    let init  = diamond_init.abi().functions_by_name("init").unwrap().first().unwrap().selector();
+
+    let diamond_loop_facet = DiamondLoupeFacet::new(diamond_address, client.clone());
+    let facet_addresses = diamond_loop_facet.facet_addresses().call().await?;
+    println!("Contract {} (before update) has these facet addresses: {:?}", diamond_address, facet_addresses);
+    let diamond_cut_facet = DiamondCutFacet::new(diamond_address, client.clone());
+    let mut facet_cuts = Vec::new();
+
+    let writes_facet = deploy_facet_from_json(abis_folder, "AccountConfigFacets/WritesFacet.sol/WritesFacet.json", client.clone()).await?;
+    let facet_cut = get_facet_cut(FacetCutAction::Replace, &writes_facet);
+    println!("Facet cut to update: {:?} with {} selectors.", facet_cut.facet_address, facet_cut.function_selectors.len());
+    facet_cuts.push(facet_cut);
+
+    println!("Facet cuts to update: {:?}", facet_cuts);
+    println!("Cutting diamond with init: {:?}", init);
+    let tx = diamond_cut_facet.diamond_cut(facet_cuts, diamond_init.address(), Bytes::from(init));
+    let pending_tx = tx.send().await?;
+    let _receipt = pending_tx.await?;
+    println!("Diamond updated.");
+    let facet_addresses = diamond_loop_facet.facet_addresses().call().await?;
+    println!("Contract {} (before update) has these facet addresses: {:?}", diamond_address, facet_addresses);
+
     Ok(())
 }
