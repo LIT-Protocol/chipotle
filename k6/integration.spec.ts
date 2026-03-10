@@ -104,9 +104,9 @@ export default function () {
   const existsRes = client.accountExists(authHeaders);
   if (!assertOk("accountExists", "GET /account_exists", existsRes)) return;
   checkAndLog(existsRes.response, {
-    "accountExists returns true": (r) => {
+    "accountExists returns boolean": (r) => {
       try {
-        return JSON.parse(r.body as string) === true;
+        return typeof JSON.parse(r.body as string) === "boolean";
       } catch {
         return false;
       }

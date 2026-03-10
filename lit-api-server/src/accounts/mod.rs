@@ -45,19 +45,13 @@ pub async fn new_account(
     send_transaction(function_call, signer_pool, signer_address).await
 }
 
-/// Check whether the account identified by `api_key` exists and is mutable
-/// by the server. `accountExistsAndIsMutable` in the contract uses `msg.sender`
-/// to verify that the caller is a registered api_payer, so we must call it
-/// with a pool signer rather than the anonymous read-only provider.
-pub async fn account_exists(signer_pool: Arc<SignerPool>, api_key: &str) -> Result<bool> {
-    let (contract, signer_address) =
-        get_signable_account_config_contract(signer_pool.clone()).await?;
+pub async fn account_exists(api_key: &str) -> Result<bool> {
+    let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let exists = contract
         .account_exists_and_is_mutable(account_api_key_hash)
         .call()
         .await?;
-    signer_pool.release(signer_address).await?;
     Ok(exists)
 }
 
