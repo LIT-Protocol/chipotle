@@ -41,7 +41,7 @@ on:
 
 jobs:
   determine-target:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       phala_app_name: ${{ steps.set.outputs.phala_app_name }}
       base_url: ${{ steps.set.outputs.base_url }}
@@ -66,23 +66,9 @@ jobs:
           echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
           echo "api_root_url=${BASE_URL}/core/v1" >> "$GITHUB_OUTPUT"
 
-  determine-runner:
-    runs-on: ubuntu-latest
-    outputs:
-      runner: ${{ steps.set-runner.outputs.use-runner }}
-    steps:
-      - name: Determine runner (self-hosted or fallback)
-        id: set-runner
-        uses: mikehardy/runner-fallback-action@v1
-        with:
-          primary-runner: self-hosted
-          fallback-runner: ubuntu-latest
-          github-token: ${{ secrets.GH_RUNNER_CHECK_TOKEN }}
-          fallback-on-error: true
-
   build:
-    needs: [determine-runner, determine-target]
-    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    needs: [determine-target]
+    runs-on: self-hosted
     permissions:
       id-token: write  # required for Sigstore keyless signing (OIDC token)
       contents: read
@@ -134,8 +120,8 @@ jobs:
           path: digest-${{ matrix.service }}.txt
 
   deploy:
-    needs: [determine-runner, determine-target, build]
-    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    needs: [determine-target, build]
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
@@ -180,31 +166,31 @@ jobs:
   # starts polling, so we'd pass before the new deployment is actually live.
   wait-after-deploy:
     needs: [deploy]
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Wait after Phala deploy
         run: sleep 30
 
   wait-for-api-available:
-    needs: [wait-after-deploy, determine-runner, determine-target]
+    needs: [wait-after-deploy, determine-target]
     uses: ./.github/workflows/wait-for-api.yml
     with:
       api_root_url: ${{ needs.determine-target.outputs.api_root_url }}
-      runner: ${{ needs.determine-runner.outputs.runner }}
+      runner: '["self-hosted"]'
 
   verify-attestation:
-    needs: [wait-for-api-available, determine-runner, determine-target]
+    needs: [wait-for-api-available, determine-target]
     uses: ./.github/workflows/verify-attestation.yml
     with:
       attestation_url: ${{ needs.determine-target.outputs.base_url }}
-      runner: ${{ needs.determine-runner.outputs.runner }}
+      runner: '["self-hosted"]'
 
   openapi-spec-check:
-    needs: [wait-for-api-available, determine-runner]
+    needs: [wait-for-api-available]
     uses: ./.github/workflows/openapi-spec-check.yml
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
-      runner: ${{ needs.determine-runner.outputs.runner }}
+      runner: '["self-hosted"]'
 
   k6-smoke:
     needs: [wait-for-api-available, openapi-spec-check]

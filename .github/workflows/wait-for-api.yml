@@ -6,7 +6,7 @@
 #     api_root_url: "https://example.com/core/v1"   # OR phala_app_name
 #     # phala_app_name: "lit-api-server"        # CVM name; requires PHALA_CLOUD_API_KEY secret
 #     # timeout: 300  # optional, seconds (default 300)
-#     # runner: '["self-hosted"]'  # optional, JSON array for runs-on (default ubuntu-latest)
+#     # runner: '["self-hosted"]'  # optional, JSON array for runs-on (default self-hosted)
 #   secrets:
 #     PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}  # when using phala_app_name
 
@@ -36,7 +36,7 @@ on:
         description: 'Runner as JSON array (e.g. ["self-hosted"]), to match caller''s runner'
         required: false
         type: string
-        default: '["ubuntu-latest"]'
+        default: '["self-hosted"]'
     secrets:
       PHALA_CLOUD_API_KEY:
         description: "Phala Cloud API key (required when using phala_app_name)"
