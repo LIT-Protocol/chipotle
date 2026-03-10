@@ -23,6 +23,7 @@ services:
     ports:
       - "8000:8000"
     environment:
+      BASE_CHAIN_RPC: ${BASE_CHAIN_RPC}
       ROCKET_ADDRESS: "0.0.0.0"
       ROCKET_PORT: "8000"
     volumes:

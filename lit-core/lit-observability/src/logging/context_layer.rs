@@ -428,7 +428,7 @@ mod tests {
             let _guard = span.enter();
 
             let initial = get_request_context();
-            assert!(initial.is_none() || !initial.as_ref().map_or(false, |c| c.has_context()));
+            assert!(initial.is_none() || !initial.as_ref().is_some_and(|c| c.has_context()));
 
             let expected_req_id = "test-req-id-12345".to_string();
             let expected_corr_id = "test-corr-id-67890".to_string();

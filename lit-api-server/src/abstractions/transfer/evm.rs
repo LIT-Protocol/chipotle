@@ -40,7 +40,7 @@ pub async fn get_address_balance(
 }
 
 async fn get_balance(address: H160, chain: Chain) -> Result<GetBalanceResponse, ApiStatus> {
-    let provider = Provider::<Http>::try_from(chain.info().rpc_url)?;
+    let provider = Provider::<Http>::try_from(chain.rpc_url().as_str())?;
     info!("provider: {:?}", provider);
 
     let block = None;
