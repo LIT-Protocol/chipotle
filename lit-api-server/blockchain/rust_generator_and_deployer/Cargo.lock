@@ -1803,6 +1803,7 @@ name = "lit-contracts-minimal-generator"
 version = "0.1.0"
 dependencies = [
  "ethers",
+ "serde",
  "serde_json",
  "tokio",
 ]

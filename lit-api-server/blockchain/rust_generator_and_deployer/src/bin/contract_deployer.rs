@@ -5,14 +5,18 @@
 //! network: 0 = Anvil, 1 = Yellowstone, 2 = Base Sepolia, 3 = Base
 //! secret: optional; if blank or omitted, uses the default Anvil dev secret.
 
+use ethers::abi::FunctionExt;
+use ethers::abi::Tokenize;
 use ethers::contract::ContractFactory;
 use ethers::prelude::*;
 use ethers::utils::hex::FromHex;
+
 
 use std::env;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
+use std::time::Duration;
 
 const ANVIL_RPC: &str = "http://127.0.0.1:8545";
 const ANVIL_CHAIN_ID: u64 = 31337;
@@ -70,13 +74,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Deploying contracts from folder {} on chain {} with RPC URL {}",
         args[2], abis_folder, rpc_url
     );
-
-    deploy_contracts(rpc_url, chain_id, &abis_folder, secret)
+    
+    deploy_diamond(rpc_url, chain_id, &abis_folder, secret)
         .await
         .expect("Failed to deploy contracts");
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn deploy_contracts(
     rpc_url: &str,
     chain_id: u64,
@@ -89,25 +94,32 @@ async fn deploy_contracts(
     let client = SignerMiddleware::new(provider, wallet);
     let client = std::sync::Arc::new(client);
     let mut abis = Vec::new();
-    get_abis(abis_folder, &mut abis);
+    get_abis(abis_folder, &mut abis, false);
     deploy_abis(abis, client)
         .await
         .expect("Failed to deploy contracts");
     Ok(())
 }
 
-fn get_abis(abis_folder: &str, abis: &mut Vec<PathBuf>) {
+fn get_abis(abis_folder: &str, abis: &mut Vec<PathBuf>, is_facet: bool) {
     let dir = fs::read_dir(abis_folder)
         .unwrap_or_else(|_| panic!("Failed to read directory {:?}", abis_folder));
     for entry in dir.flatten() {
         if entry.file_type().unwrap().is_dir() {
-            if entry.path().to_str().unwrap().ends_with("Facets") {
-                continue;
-            }
-            get_abis(entry.path().to_str().unwrap(), abis);
+            let new_is_facet = match is_facet {
+                true => true, 
+                false => entry.path().to_str().unwrap().ends_with("Facets"),
+            };
+            get_abis(entry.path().to_str().unwrap(), abis, new_is_facet);
             continue;
         }
         if entry.path().to_str().unwrap().ends_with("json") {
+            if entry.path().to_str().unwrap().ends_with("dbg.json") {
+                continue;
+            }
+            // if is_facet && !abis_folder.ends_with("Facet") {
+            //     continue;
+            // }
             abis.push(entry.path());
         }
     }
@@ -118,18 +130,20 @@ async fn deploy_abis(
     client: std::sync::Arc<SignerMiddleware<Provider<Http>, LocalWallet>>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     for abi in abis {
-        deploy_artifact(&abi, client.clone())
+        let error_message = format!("Failed to deploy contract from {:?}", abi.to_str().unwrap());
+        deploy_artifact(&abi, client.clone(), ())
             .await
-            .expect("Failed to deploy contract");
+            .expect(error_message.as_str());
     }
     Ok(())
 }
 
 /// Read ABI and bytecode from a Hardhat/Foundry-style artifact JSON and deploy to the connected chain.
-async fn deploy_artifact(
+async fn deploy_artifact<T: Tokenize>(
     path: &Path,
     client: std::sync::Arc<SignerMiddleware<Provider<Http>, LocalWallet>>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    args: T,
+) -> Result<Contract<SignerMiddleware<Provider<Http>, LocalWallet>>, Box<dyn std::error::Error + Send + Sync>> {
     let name = path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -137,7 +151,14 @@ async fn deploy_artifact(
     let contents = fs::read_to_string(path)?;
     let artifact: serde_json::Value = serde_json::from_str(&contents)?;
 
-    let abi_value = artifact.get("abi").ok_or("artifact missing 'abi'")?;
+    let abi_value = match  artifact.get("abi") {
+        Some(abi) => abi,
+        None => {
+            println!("Skipping {} (no abi)", name);
+            return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "No abi found")));
+        }
+    };
+
     let abi = ethers::abi::Abi::load(abi_value.to_string().as_bytes())?;
 
     let bytecode_hex = artifact
@@ -154,12 +175,14 @@ async fn deploy_artifact(
 
     if bytecode_hex.is_empty() || bytecode_hex == "0x" {
         println!("Skipping {} (no bytecode)", name);
-        return Ok(());
+        return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "No bytecode found")));
     }
 
     let bytecode = Bytes::from_hex(bytecode_hex)?;
     let factory = ContractFactory::new(abi, bytecode, client);
-    let deployer = factory.deploy(())?.legacy();
+    println!("Deploying {} ...", name);
+    let deployer = factory.deploy(args)?.legacy();
+    
     println!(
         "Deploying {} with bytecode size {}.",
         name,
@@ -167,5 +190,91 @@ async fn deploy_artifact(
     );
     let (contract, _receipt) = deployer.send_with_receipt().await?;
     println!("Deployed {} -> {:?}", name, contract.address());
+
+    Ok(contract)
+}
+
+pub async fn deploy_facet_from_json(
+    abis_folder: &str,
+    json_path: &str,
+    client: std::sync::Arc<SignerMiddleware<Provider<Http>, LocalWallet>>,
+) -> Result<Contract<SignerMiddleware<Provider<Http>, LocalWallet>>, Box<dyn std::error::Error + Send + Sync>> {
+    
+    let json_path = format!("{}/{}", abis_folder, json_path);
+    let path = Path::new(&json_path);
+    let facet = deploy_artifact(path, client.clone(), ()).await?;
+    Ok(facet)
+}
+
+pub fn get_facet_cut(action: FacetCutAction, contract: &Contract<SignerMiddleware<Provider<Http>, LocalWallet>>) -> FacetCut {
+    let facet_cut = FacetCut {
+        facet_address: contract.address(),
+        action: action as u8,
+        function_selectors: contract.abi().functions().map(|function| function.selector()).collect(),
+    };
+    return facet_cut;
+}
+
+pub enum FacetCutAction {
+    Add = 0,
+    Replace = 1,
+    Remove = 2,
+}
+
+
+#[derive(Debug, Clone, EthAbiType, EthAbiCodec)]
+pub struct FacetCut {
+    pub facet_address: ::ethers::core::types::Address,
+    pub action: u8,
+    pub function_selectors: ::std::vec::Vec<[u8; 4]>,
+}
+
+async fn deploy_diamond(
+    rpc_url: &str,
+    chain_id: u64,
+    abis_folder: &str,
+    secret: &str,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let provider = Provider::<Http>::try_from(rpc_url).expect("Failed to create provider");
+
+    let wallet: LocalWallet = secret.parse::<LocalWallet>()?.with_chain_id(chain_id);
+    let client = SignerMiddleware::new(provider, wallet);
+    let client = std::sync::Arc::new(client);
+    
+
+    let mut facet_cuts = Vec::new();
+
+    let diamond_init = deploy_facet_from_json(abis_folder, "DiamondPattern/DiamondInit.sol/DiamondInit.json", client.clone()).await?;
+    // get the init function from the diamond_init contract
+    let init  = diamond_init.abi().functions_by_name("init").unwrap().first().unwrap().selector();
+
+    let diamond_cut_facet = deploy_facet_from_json(abis_folder, "DiamondPattern/DiamondCutFacet.sol/DiamondCutFacet.json", client.clone()).await?;
+    facet_cuts.push(get_facet_cut(FacetCutAction::Add, &diamond_cut_facet));
+
+    let api_config_facet = deploy_facet_from_json(abis_folder, "AccountConfigFacets/APIConfigFacet.sol/APIConfigFacet.json", client.clone()).await?;
+    facet_cuts.push(get_facet_cut(FacetCutAction::Add, &api_config_facet));
+
+    let billing_facet = deploy_facet_from_json(abis_folder, "AccountConfigFacets/BillingFacet.sol/BillingFacet.json", client.clone()).await?;
+    facet_cuts.push(get_facet_cut(FacetCutAction::Add, &billing_facet));
+
+    let views_facet = deploy_facet_from_json(abis_folder, "AccountConfigFacets/ViewsFacet.sol/ViewsFacet.json", client.clone()).await?;
+    facet_cuts.push(get_facet_cut(FacetCutAction::Add, &views_facet));
+
+    let writes_facet = deploy_facet_from_json(abis_folder, "AccountConfigFacets/WritesFacet.sol/WritesFacet.json", client.clone()).await?;
+    facet_cuts.push(get_facet_cut(FacetCutAction::Add, &writes_facet));
+
+    let args = (client.address(), facet_cuts, diamond_init.address(), Bytes::from(init));
+
+    let account_config_path = format!("{}/AccountConfig.sol/AccountConfig.json", abis_folder);
+    let account_config_path = Path::new(&account_config_path);
+    let account_config = deploy_artifact(account_config_path, client.clone(), args).await;
+    if let Err(e) = account_config {
+        eprintln!("Failed to deploy AccountConfig: {:?}", e);
+        return Err(e.into());
+    }
+
+ 
+ 
+ 
     Ok(())
 }
