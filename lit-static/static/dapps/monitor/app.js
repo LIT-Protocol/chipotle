@@ -444,6 +444,18 @@ el('btn-set-rebalance-amount')?.addEventListener('click', async () => {
   }
 });
 
+el('cc-rpc-url')?.addEventListener('change', () => fetchContractValues());
+
+el('btn-refresh-contract')?.addEventListener('click', async () => {
+  const btn = el('btn-refresh-contract');
+  btn.disabled = true;
+  try {
+    await fetchContractValues();
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 el('btn-set-payer-count')?.addEventListener('click', async () => {
   const select = el('payer-count');
   const contractAddress = (el('contract-address')?.value || '').trim();
