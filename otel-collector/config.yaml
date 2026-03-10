@@ -1,0 +1,84 @@
+# OpenTelemetry Collector configuration for the lit-protocol Phala sidecar.
+#
+# Receives OTLP (gRPC) from lit-api-server and lit-actions on localhost:4317,
+# enriches spans/metrics/logs with lit-protocol resource attributes, and
+# exports everything to GCP Cloud Monitoring, Cloud Trace, and Cloud Logging
+# via the googlecloud exporter.
+#
+# Authentication: GOOGLE_APPLICATION_CREDENTIALS env var (set by entrypoint.sh
+# from the GCP_SERVICE_ACCOUNT_JSON encrypted Phala secret).
+#
+# See: https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/exporter/googlecloudexporter
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        # Localhost-only; the sidecar shares lit-api-server's network namespace
+        # via docker-compose network_mode: "service:lit-api-server".
+        endpoint: 127.0.0.1:4317
+      http:
+        endpoint: 127.0.0.1:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+  batch:
+    send_batch_size: 512
+    timeout: 5s
+
+  # Stamp every signal with lit-protocol resource attributes.
+  resource:
+    attributes:
+      - key: service.namespace
+        value: lit-protocol
+        action: upsert
+      - key: cloud.provider
+        value: gcp
+        action: upsert
+
+exporters:
+  googlecloud:
+    # GCP_PROJECT_ID is set in docker-compose.phala.yml (non-secret config).
+    project: ${env:GCP_PROJECT_ID}
+
+    log:
+      # Default log name for signals that don't carry their own log name.
+      default_log_name: lit-protocol/app
+
+    # Retry on transient GCP API errors.
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+
+  # Internal collector health — visible in Cloud Logging under lit-protocol/otel-collector.
+  debug:
+    verbosity: basic
+    sampling_initial: 2
+    sampling_thereafter: 500
+
+service:
+  telemetry:
+    logs:
+      level: warn
+
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [googlecloud]
+
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [googlecloud]
+
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [googlecloud, debug]

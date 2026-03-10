@@ -1,0 +1,13 @@
+FROM otel/opentelemetry-collector-contrib:0.104.0
+
+# Copy collector config and credentials-bootstrap entrypoint.
+COPY otel-collector/config.yaml /etc/otelcol-contrib/config.yaml
+COPY otel-collector/entrypoint.sh /entrypoint.sh
+
+# entrypoint.sh needs to be executable; switch to root just for this RUN step,
+# then drop back to the non-root collector user (uid 10001).
+USER root
+RUN chmod +x /entrypoint.sh
+USER 10001
+
+ENTRYPOINT ["/entrypoint.sh"]
