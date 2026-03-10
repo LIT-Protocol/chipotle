@@ -99,9 +99,9 @@ function getServerUrl() {
 }
 
 // ── resolveRpcUrlFromChainlist ───────────────────────────────────────────────────
-// Uses Whatever Origin CORS proxy (free, no domain whitelist) to fetch from chainlistapi.com.
+// Uses AllOrigins CORS proxy (free, no domain whitelist) to fetch from chainlistapi.com.
 
-const CORS_PROXY = 'https://whateverorigin.org/get?url=';
+const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
 
 async function resolveRpcUrlFromChainlist(chainId) {
   if (chainId == null || chainId === '') return null;
@@ -109,8 +109,7 @@ async function resolveRpcUrlFromChainlist(chainId) {
     const url = `${CORS_PROXY}${encodeURIComponent(`https://chainlistapi.com/chains/${chainId}`)}`;
     const res = await fetch(url);
     if (!res.ok) return null;
-    const wrapper = await res.json();
-    const data = typeof wrapper?.contents === 'string' ? JSON.parse(wrapper.contents) : wrapper;
+    const data = await res.json();
     const rpcs = data?.rpc;
     if (!Array.isArray(rpcs)) return null;
     const entry = rpcs.find((r) => {
@@ -248,10 +247,14 @@ async function getApiPayers(serverUrl) {
 
 async function loadNetwork() {
   const serverUrl = getServerUrl();
-  await Promise.all([
-    getNodeChainConfig(serverUrl),
-    getApiPayers(serverUrl),
-  ]);
+  await getNodeChainConfig(serverUrl); // Must run first to populate RPC URL
+  await getApiPayers(serverUrl);
+  await fetchContractValues();
+}
+
+async function refreshBalances() {
+  const serverUrl = getServerUrl();
+  await getApiPayers(serverUrl);
   await fetchContractValues();
 }
 
@@ -475,13 +478,13 @@ el('btn-set-rebalance-amount')?.addEventListener('click', async () => {
   }
 });
 
-el('cc-rpc-url')?.addEventListener('change', () => fetchContractValues());
+el('cc-rpc-url')?.addEventListener('change', () => refreshBalances());
 
 el('btn-refresh-contract')?.addEventListener('click', async () => {
   const btn = el('btn-refresh-contract');
   btn.disabled = true;
   try {
-    await fetchContractValues();
+    await refreshBalances();
   } finally {
     btn.disabled = false;
   }
@@ -518,6 +521,7 @@ el('btn-set-payer-count')?.addEventListener('click', async () => {
     await tx.wait();
 
     showSignerCountStatus('Done. Requested payer count updated to ' + newCount, false);
+    await refreshBalances();
   } catch (e) {
     showSignerCountStatus('Error: ' + (e?.reason || e?.message || String(e)), true);
   } finally {
