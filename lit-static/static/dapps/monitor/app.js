@@ -99,9 +99,9 @@ function getServerUrl() {
 }
 
 // ── resolveRpcUrlFromChainlist ───────────────────────────────────────────────────
-// Uses CORS proxy to fetch from chainlistapi.com (avoids cross-origin restrictions).
+// Uses Whatever Origin CORS proxy (free, no domain whitelist) to fetch from chainlistapi.com.
 
-const CORS_PROXY = 'https://corsproxy.io/?';
+const CORS_PROXY = 'https://whateverorigin.org/get?url=';
 
 async function resolveRpcUrlFromChainlist(chainId) {
   if (chainId == null || chainId === '') return null;
@@ -109,7 +109,8 @@ async function resolveRpcUrlFromChainlist(chainId) {
     const url = `${CORS_PROXY}${encodeURIComponent(`https://chainlistapi.com/chains/${chainId}`)}`;
     const res = await fetch(url);
     if (!res.ok) return null;
-    const data = await res.json();
+    const wrapper = await res.json();
+    const data = typeof wrapper?.contents === 'string' ? JSON.parse(wrapper.contents) : wrapper;
     const rpcs = data?.rpc;
     if (!Array.isArray(rpcs)) return null;
     const entry = rpcs.find((r) => {
