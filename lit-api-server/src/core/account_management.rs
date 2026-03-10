@@ -124,8 +124,11 @@ pub async fn new_account(
     })
 }
 
-pub async fn account_exists(api_key: &str) -> Result<bool, ApiStatus> {
-    let exists = accounts::account_exists(api_key)
+pub async fn account_exists(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+) -> Result<bool, ApiStatus> {
+    let exists = accounts::account_exists(signer_pool, api_key)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "account_exists failed"))?;
     Ok(exists)

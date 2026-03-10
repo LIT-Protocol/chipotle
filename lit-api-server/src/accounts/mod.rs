@@ -8,8 +8,7 @@ pub use anyhow::Result;
 
 use crate::accounts::contracts::account_config_contract::{UsageApiKey, WalletData};
 use crate::accounts::signable_contract::{
-    get_admin_api_payer_contract, get_read_only_account_config_contract,
-    get_signable_account_config_contract, send_transaction,
+    get_read_only_account_config_contract, get_signable_account_config_contract, send_transaction,
 };
 use crate::accounts::signer_pool::SignerPool;
 use ethers::types::{H160, U256};
@@ -46,16 +45,19 @@ pub async fn new_account(
     send_transaction(function_call, signer_pool, signer_address).await
 }
 
-pub async fn account_exists(api_key: &str) -> Result<bool> {
-    // accountExistsAndIsMutable checks msg.sender against api_payers, so we
-    // must call it as a registered api_payer (the admin payer) rather than via
-    // the anonymous read-only provider (which would use address(0)).
-    let contract = get_admin_api_payer_contract().await?;
+/// Check whether the account identified by `api_key` exists and is mutable
+/// by the server. `accountExistsAndIsMutable` in the contract uses `msg.sender`
+/// to verify that the caller is a registered api_payer, so we must call it
+/// with a pool signer rather than the anonymous read-only provider.
+pub async fn account_exists(signer_pool: Arc<SignerPool>, api_key: &str) -> Result<bool> {
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let exists = contract
         .account_exists_and_is_mutable(account_api_key_hash)
         .call()
         .await?;
+    signer_pool.release(signer_address).await?;
     Ok(exists)
 }
 

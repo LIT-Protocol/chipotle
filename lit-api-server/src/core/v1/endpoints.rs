@@ -173,9 +173,16 @@ async fn new_account(
 
 #[openapi(tag = "Account Management")]
 #[get("/account_exists")]
-async fn account_exists(api_key: ApiKey) -> OpenApiResponse<bool, ErrMessage> {
+async fn account_exists(
+    signer_pool: &State<Arc<SignerPool>>,
+    api_key: ApiKey,
+) -> OpenApiResponse<bool, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::account_exists(api_key.0.as_str()).await).into(),
+        response: ApiResult(
+            account_management::account_exists(signer_pool.inner().clone(), api_key.0.as_str())
+                .await,
+        )
+        .into(),
     }
 }
 
