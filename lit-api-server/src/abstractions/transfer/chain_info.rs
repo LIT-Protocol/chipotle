@@ -1,6 +1,7 @@
 use crate::core::v1::models::signing_scheme::SigningScheme;
 use rocket::http::Status;
 use serde::{Deserialize, Serialize};
+use std::env;
 /// EVM chain RPC and wallet info.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 
@@ -1051,6 +1052,19 @@ impl Chain {
                 derivation_path: "m/44'/501'/0'/0'",
             },
         }
+    }
+
+    /// Returns the effective RPC URL for this chain. For Base mainnet, uses
+    /// BASE_CHAIN_RPC env var if set; otherwise uses the default public RPC.
+    pub fn rpc_url(self) -> String {
+        if self == Self::Base {
+            if let Ok(url) = env::var("BASE_CHAIN_RPC") {
+                if !url.trim().is_empty() {
+                    return url;
+                }
+            }
+        }
+        self.info().rpc_url.to_string()
     }
 
     pub fn all_chains() -> &'static [Chain] {

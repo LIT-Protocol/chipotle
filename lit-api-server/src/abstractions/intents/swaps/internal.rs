@@ -210,10 +210,10 @@ pub async fn get_quote_balances(quote_id: &str) -> Result<QuoteBalancesResponse,
         .map_err(|e| ApiStatus::from(e).add_message("Unsupported destination chain."))?;
 
     let pkp_address = swap_request.pkp_address;
-    let src_provider = Provider::<Http>::try_from(src_chain.info().rpc_url).map_err(|e| {
+    let src_provider = Provider::<Http>::try_from(src_chain.rpc_url().as_str()).map_err(|e| {
         ApiStatus::internal_server_error(e.into(), "Failed to create source chain provider.")
     })?;
-    let dst_provider = Provider::<Http>::try_from(dst_chain.info().rpc_url).map_err(|e| {
+    let dst_provider = Provider::<Http>::try_from(dst_chain.rpc_url().as_str()).map_err(|e| {
         ApiStatus::internal_server_error(e.into(), "Failed to create destination chain provider.")
     })?;
 
@@ -293,7 +293,7 @@ async fn get_signable_quote_contract()
 
     let wallet = LocalWallet::from_bytes(&secret)?.with_chain_id(chain_info.chain_id);
 
-    let provider = Provider::<Http>::try_from(chain_info.rpc_url)?;
+    let provider = Provider::<Http>::try_from(chain.rpc_url().as_str())?;
     let signing_provider = SignerMiddleware::new(provider.clone(), wallet);
 
     let client = Arc::new(signing_provider);

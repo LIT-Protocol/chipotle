@@ -501,7 +501,7 @@ pub async fn get_chain_info() -> Result<NodeChainConfigResponse, ApiStatus> {
         is_evm: chain_info.is_evm,
         testnet: chain_info.testnet,
         token: chain_info.token.to_string(),
-        rpc_url: chain_info.rpc_url.to_string(),
+        rpc_url: node_config.chain.rpc_url(),
         contract_address: node_config.contract_address.to_string(),
     })
 }
