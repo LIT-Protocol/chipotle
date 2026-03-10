@@ -163,7 +163,7 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @property {boolean} is_evm - Whether the chain is EVM
  * @property {boolean} testnet - Whether the chain is a testnet
  * @property {string} token - Native token symbol
- * @property {string} rpc_url - RPC URL
+ * @property {string} [rpc_url] - RPC URL (resolved from chainlistapi.com when not in API response)
  * @property {string} contract_address - AccountConfig contract address
  */
 
@@ -281,6 +281,32 @@ async function parseResponse(res, context) {
     return text ? JSON.parse(text) : null;
   } catch (_) {
     throw new Error(`${context}: invalid JSON response`);
+  }
+}
+
+const CHAINLIST_API = 'https://chainlistapi.com';
+
+/**
+ * Resolve a public RPC URL for the given chain ID from chainlistapi.com.
+ * Prefers HTTPS URLs; skips WebSocket (wss://) endpoints.
+ * @param {number} chainId - EVM chain ID
+ * @returns {Promise<string|null>} First HTTP RPC URL, or null if not found
+ */
+export async function resolveRpcUrlFromChainlist(chainId) {
+  if (chainId == null || chainId === '') return null;
+  try {
+    const res = await fetch(`${CHAINLIST_API}/chains/${chainId}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const rpcs = data?.rpc;
+    if (!Array.isArray(rpcs)) return null;
+    const url = rpcs.find((r) => {
+      const u = typeof r === 'string' ? r : r?.url;
+      return typeof u === 'string' && u.startsWith('https://');
+    });
+    return url ? (typeof url === 'string' ? url : url.url) : null;
+  } catch (_) {
+    return null;
   }
 }
 
@@ -686,11 +712,17 @@ export class LitNodeSimpleApiClient {
   /**
    * GET /core/v1/get_node_chain_config
    * Returns the node's chain configuration (chain name, id, RPC URL, contract address, etc.).
+   * When the API does not include rpc_url, it is resolved from chainlistapi.com using chain_id.
    * @returns {Promise<NodeChainConfigResponse>}
    */
   async getNodeChainConfig() {
     const res = await fetch(`${this.baseUrl}/get_node_chain_config`);
-    return parseResponse(res, 'get_node_chain_config');
+    const cfg = await parseResponse(res, 'get_node_chain_config');
+    if (!cfg.rpc_url && cfg.chain_id != null && cfg.is_evm) {
+      const rpcUrl = await resolveRpcUrlFromChainlist(cfg.chain_id);
+      if (rpcUrl) cfg.rpc_url = rpcUrl;
+    }
+    return cfg;
   }
 }
 

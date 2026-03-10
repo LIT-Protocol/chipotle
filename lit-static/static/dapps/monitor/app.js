@@ -98,6 +98,26 @@ function getServerUrl() {
   return (el('network')?.value || '').replace(/\/$/, '');
 }
 
+// ── resolveRpcUrlFromChainlist ───────────────────────────────────────────────────
+
+async function resolveRpcUrlFromChainlist(chainId) {
+  if (chainId == null || chainId === '') return null;
+  try {
+    const res = await fetch(`https://chainlistapi.com/chains/${chainId}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const rpcs = data?.rpc;
+    if (!Array.isArray(rpcs)) return null;
+    const entry = rpcs.find((r) => {
+      const u = typeof r === 'string' ? r : r?.url;
+      return typeof u === 'string' && u.startsWith('https://');
+    });
+    return entry ? (typeof entry === 'string' ? entry : entry.url) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 // ── getNodeChainConfig ────────────────────────────────────────────────────────
 
 async function getNodeChainConfig(serverUrl) {
@@ -121,8 +141,14 @@ async function getNodeChainConfig(serverUrl) {
     setValue('cc-is-evm',           cfg.is_evm   != null ? String(cfg.is_evm)   : '—', cfg.is_evm   == null);
     setValue('cc-testnet',          cfg.testnet  != null ? String(cfg.testnet)  : '—', cfg.testnet  == null);
     setValue('cc-token',            cfg.token        ?? '—', !cfg.token);
+
+    let rpcUrl = cfg.rpc_url ?? '';
+    if (!rpcUrl && cfg.chain_id != null && cfg.is_evm) {
+      rpcUrl = (await resolveRpcUrlFromChainlist(cfg.chain_id)) ?? '';
+    }
     const rpcInput = el('cc-rpc-url');
-    if (rpcInput) rpcInput.value = cfg.rpc_url ?? '';
+    if (rpcInput) rpcInput.value = rpcUrl;
+
     setValue('cc-contract-address', cfg.contract_address ?? '—', !cfg.contract_address);
 
     // Propagate contract address to the contract card.
