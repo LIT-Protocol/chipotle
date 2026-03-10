@@ -26,9 +26,9 @@ pub mod context_layer;
 pub mod event_format;
 pub mod privacy_filter;
 
-pub use event_format::CustomEventFormatter;
 #[cfg(feature = "otlp")]
 pub use context_layer::ContextAwareOtelLogLayer;
 pub use context_layer::{
-    RequestContext, get_request_context, set_request_context, clear_task_request_context,
+    RequestContext, clear_task_request_context, get_request_context, set_request_context,
 };
+pub use event_format::CustomEventFormatter;

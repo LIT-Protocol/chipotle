@@ -1,5 +1,5 @@
-use crate::PRIVACY_MODE_TAG;
 use super::context_layer::get_request_context;
+use crate::PRIVACY_MODE_TAG;
 
 pub struct PrivacyModeLayer;
 

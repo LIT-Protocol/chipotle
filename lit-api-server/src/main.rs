@@ -27,8 +27,7 @@ async fn main() -> Result<(), rocket::Error> {
     let lit_cfg = LitConfig::default();
 
     // Initialize the primary tracing subscriber (stdout + privacy filtering)
-    let subscriber = lit_observability::init_subscriber(&lit_cfg)
-        .expect("Failed to setup tracing");
+    let subscriber = lit_observability::init_subscriber(&lit_cfg).expect("Failed to setup tracing");
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
