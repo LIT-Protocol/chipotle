@@ -90,8 +90,6 @@ function setValue(id, text, isEmpty) {
   node.classList.toggle('empty', isEmpty);
 }
 
-// RPC URL populated by getNodeChainConfig; used by fetchContractValues.
-let currentRpcUrl = '';
 
 // ── Network selector ──────────────────────────────────────────────────────────
 
@@ -108,8 +106,10 @@ async function getNodeChainConfig(serverUrl) {
 
   if (errEl) errEl.style.display = 'none';
   if (resultsEl) resultsEl.style.display = 'block';
-  ['cc-chain-name','cc-chain-id','cc-is-evm','cc-testnet','cc-token','cc-rpc-url','cc-contract-address']
+  ['cc-chain-name','cc-chain-id','cc-is-evm','cc-testnet','cc-token','cc-contract-address']
     .forEach(id => setValue(id, '…', false));
+  const rpcUrlInput = el('cc-rpc-url');
+  if (rpcUrlInput) rpcUrlInput.value = '';
 
   try {
     const res = await fetch(`${serverUrl}/get_node_chain_config`);
@@ -121,15 +121,16 @@ async function getNodeChainConfig(serverUrl) {
     setValue('cc-is-evm',           cfg.is_evm   != null ? String(cfg.is_evm)   : '—', cfg.is_evm   == null);
     setValue('cc-testnet',          cfg.testnet  != null ? String(cfg.testnet)  : '—', cfg.testnet  == null);
     setValue('cc-token',            cfg.token        ?? '—', !cfg.token);
-    setValue('cc-rpc-url',          cfg.rpc_url      ?? '—', !cfg.rpc_url);
+    const rpcInput = el('cc-rpc-url');
+    if (rpcInput) rpcInput.value = cfg.rpc_url ?? '';
     setValue('cc-contract-address', cfg.contract_address ?? '—', !cfg.contract_address);
 
-    // Propagate values to the contract card.
-    currentRpcUrl = cfg.rpc_url ?? '';
+    // Propagate contract address to the contract card.
     const contractInput = el('contract-address');
     if (contractInput && cfg.contract_address) contractInput.value = cfg.contract_address;
   } catch (e) {
-    currentRpcUrl = '';
+    const rpcInput = el('cc-rpc-url');
+    if (rpcInput) rpcInput.value = '';
     if (resultsEl) resultsEl.style.display = 'none';
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
   }
@@ -191,8 +192,9 @@ async function getApiPayers(serverUrl) {
         `</tbody>` +
       `</table>`;
 
-    if (currentRpcUrl) {
-      const provider = new ethers.JsonRpcProvider(currentRpcUrl);
+    const rpcUrl = (el('cc-rpc-url')?.value || '').trim();
+    if (rpcUrl) {
+      const provider = new ethers.JsonRpcProvider(rpcUrl);
       payers.forEach(async (addr, i) => {
         try {
           const balanceWei = await provider.getBalance(addr);
@@ -251,7 +253,7 @@ function hideError() {
 }
 
 async function fetchContractValues() {
-  const rpcUrl = currentRpcUrl;
+  const rpcUrl = (el('cc-rpc-url')?.value || '').trim();
   const contractAddress = (el('contract-address')?.value || '').trim();
   const results = el('results');
 
