@@ -213,7 +213,6 @@ export interface NodeChainConfigResponse {
   is_evm: boolean;
   testnet: boolean;
   token: string;
-  rpc_url: string;
   contract_address: string;
 }
 
