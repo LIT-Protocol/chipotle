@@ -1057,12 +1057,11 @@ impl Chain {
     /// Returns the effective RPC URL for this chain. For Base mainnet, uses
     /// BASE_CHAIN_RPC env var if set; otherwise uses the default public RPC.
     pub fn rpc_url(self) -> String {
-        if self == Self::Base {
-            if let Ok(url) = env::var("BASE_CHAIN_RPC") {
-                if !url.trim().is_empty() {
-                    return url;
-                }
-            }
+        if self == Self::Base
+            && let Ok(url) = env::var("BASE_CHAIN_RPC")
+            && !url.trim().is_empty()
+        {
+            return url;
         }
         self.info().rpc_url.to_string()
     }
