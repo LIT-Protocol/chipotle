@@ -9,7 +9,7 @@ edition.workspace = true
 default = []
 testing = ["ansi", "tracing-log"]
 ansi = []
-tracing-log = []
+tracing-log = ["dep:tracing-log"]
 channels = ["dep:flume", "otlp"]
 otlp = ["dep:opentelemetry-otlp", "dep:opentelemetry_sdk", "dep:tracing-opentelemetry"]
 
@@ -28,6 +28,7 @@ tonic-middleware = "0.2"
 tower = "0.5"
 tracing = { workspace = true, features = ["std"] }
 tracing-appender = "0.2"
+tracing-log = { version = "0.2", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry", "std"] }
 tracing-opentelemetry = { workspace = true, optional = true }
 
