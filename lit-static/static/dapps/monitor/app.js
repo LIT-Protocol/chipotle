@@ -99,11 +99,15 @@ function getServerUrl() {
 }
 
 // ── resolveRpcUrlFromChainlist ───────────────────────────────────────────────────
+// Uses CORS proxy to fetch from chainlistapi.com (avoids cross-origin restrictions).
+
+const CORS_PROXY = 'https://corsproxy.io/?';
 
 async function resolveRpcUrlFromChainlist(chainId) {
   if (chainId == null || chainId === '') return null;
   try {
-    const res = await fetch(`https://chainlistapi.com/chains/${chainId}`);
+    const url = `${CORS_PROXY}${encodeURIComponent(`https://chainlistapi.com/chains/${chainId}`)}`;
+    const res = await fetch(url);
     if (!res.ok) return null;
     const data = await res.json();
     const rpcs = data?.rpc;

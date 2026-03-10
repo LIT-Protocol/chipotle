@@ -163,7 +163,7 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @property {boolean} is_evm - Whether the chain is EVM
  * @property {boolean} testnet - Whether the chain is a testnet
  * @property {string} token - Native token symbol
- * @property {string} [rpc_url] - RPC URL (resolved from chainlistapi.com when not in API response)
+ * @property {string} [rpc_url] - RPC URL (resolved from chainlist when not in API response)
  * @property {string} contract_address - AccountConfig contract address
  */
 
@@ -285,26 +285,28 @@ async function parseResponse(res, context) {
 }
 
 const CHAINLIST_API = 'https://chainlistapi.com';
+const CORS_PROXY = 'https://corsproxy.io/?';
 
 /**
  * Resolve a public RPC URL for the given chain ID from chainlistapi.com.
- * Prefers HTTPS URLs; skips WebSocket (wss://) endpoints.
+ * Uses a CORS proxy to avoid cross-origin restrictions.
  * @param {number} chainId - EVM chain ID
  * @returns {Promise<string|null>} First HTTP RPC URL, or null if not found
  */
 export async function resolveRpcUrlFromChainlist(chainId) {
   if (chainId == null || chainId === '') return null;
   try {
-    const res = await fetch(`${CHAINLIST_API}/chains/${chainId}`);
+    const url = `${CORS_PROXY}${encodeURIComponent(`${CHAINLIST_API}/chains/${chainId}`)}`;
+    const res = await fetch(url);
     if (!res.ok) return null;
     const data = await res.json();
     const rpcs = data?.rpc;
     if (!Array.isArray(rpcs)) return null;
-    const url = rpcs.find((r) => {
+    const entry = rpcs.find((r) => {
       const u = typeof r === 'string' ? r : r?.url;
       return typeof u === 'string' && u.startsWith('https://');
     });
-    return url ? (typeof url === 'string' ? url : url.url) : null;
+    return entry ? (typeof entry === 'string' ? entry : entry.url) : null;
   } catch (_) {
     return null;
   }
