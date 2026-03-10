@@ -285,11 +285,11 @@ async function parseResponse(res, context) {
 }
 
 const CHAINLIST_API = 'https://chainlistapi.com';
-const CORS_PROXY = 'https://corsproxy.io/?';
+const CORS_PROXY = 'https://whateverorigin.org/get?url=';
 
 /**
  * Resolve a public RPC URL for the given chain ID from chainlistapi.com.
- * Uses a CORS proxy to avoid cross-origin restrictions.
+ * Uses Whatever Origin CORS proxy (free, no domain whitelist) to avoid cross-origin restrictions.
  * @param {number} chainId - EVM chain ID
  * @returns {Promise<string|null>} First HTTP RPC URL, or null if not found
  */
@@ -299,7 +299,8 @@ export async function resolveRpcUrlFromChainlist(chainId) {
     const url = `${CORS_PROXY}${encodeURIComponent(`${CHAINLIST_API}/chains/${chainId}`)}`;
     const res = await fetch(url);
     if (!res.ok) return null;
-    const data = await res.json();
+    const wrapper = await res.json();
+    const data = typeof wrapper?.contents === 'string' ? JSON.parse(wrapper.contents) : wrapper;
     const rpcs = data?.rpc;
     if (!Array.isArray(rpcs)) return null;
     const entry = rpcs.find((r) => {
