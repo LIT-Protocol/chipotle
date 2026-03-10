@@ -8,7 +8,8 @@ pub use anyhow::Result;
 
 use crate::accounts::contracts::account_config_contract::{UsageApiKey, WalletData};
 use crate::accounts::signable_contract::{
-    get_read_only_account_config_contract, get_signable_account_config_contract, send_transaction,
+    get_admin_api_payer_contract, get_read_only_account_config_contract,
+    get_signable_account_config_contract, send_transaction,
 };
 use crate::accounts::signer_pool::SignerPool;
 use ethers::types::{H160, U256};
@@ -46,7 +47,10 @@ pub async fn new_account(
 }
 
 pub async fn account_exists(api_key: &str) -> Result<bool> {
-    let contract = get_read_only_account_config_contract().await?;
+    // accountExistsAndIsMutable checks msg.sender against api_payers, so we
+    // must call it as a registered api_payer (the admin payer) rather than via
+    // the anonymous read-only provider (which would use address(0)).
+    let contract = get_admin_api_payer_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let exists = contract
         .account_exists_and_is_mutable(account_api_key_hash)
