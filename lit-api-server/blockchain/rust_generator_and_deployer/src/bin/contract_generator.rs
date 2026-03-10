@@ -35,6 +35,9 @@ fn process_folder(input_folder: &str, output_folder: &str) {
 
     let files = result.unwrap();
     for file in files.flatten() {
+        if file.path().to_str().unwrap().contains("DiamondPattern") {
+            continue;
+        }
         println!("Processing file: {:?}", file.path());
         if file.file_type().unwrap().is_dir() {
             if file.path().to_str().unwrap().ends_with("Facets") {
@@ -45,6 +48,7 @@ fn process_folder(input_folder: &str, output_folder: &str) {
         }
         let file_path = file.path().canonicalize().unwrap();
         let file_name = file.file_name();
+
 
         let abi_source = file_path.to_str().unwrap();
         let result = Abigen::from_file(abi_source);

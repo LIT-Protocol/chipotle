@@ -18,407 +18,1817 @@ pub mod account_config {
     #[allow(deprecated)]
     fn __abi() -> ::ethers::core::abi::Abi {
         ::ethers::core::abi::ethabi::Contract {
-            constructor: ::core::option::Option::Some(::ethers::core::abi::ethabi::Constructor {
-                inputs: ::std::vec![
-                    ::ethers::core::abi::ethabi::Param {
-                        name: ::std::borrow::ToOwned::to_owned("owner"),
-                        kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                        internal_type: ::core::option::Option::Some(
-                            ::std::borrow::ToOwned::to_owned("address"),
-                        ),
-                    },
-                    ::ethers::core::abi::ethabi::Param {
-                        name: ::std::borrow::ToOwned::to_owned("_diamondCut"),
-                        kind: ::ethers::core::abi::ethabi::ParamType::Array(
-                            ::std::boxed::Box::new(
-                                ::ethers::core::abi::ethabi::ParamType::Tuple(
-                                    ::std::vec![
-                                        ::ethers::core::abi::ethabi::ParamType::Address,
-                                        ::ethers::core::abi::ethabi::ParamType::Uint(8usize),
-                                        ::ethers::core::abi::ethabi::ParamType::Array(
-                                            ::std::boxed::Box::new(
-                                                ::ethers::core::abi::ethabi::ParamType::FixedBytes(4usize),
-                                            ),
-                                        ),
-                                    ],
-                                ),
-                            ),
-                        ),
-                        internal_type: ::core::option::Option::Some(
-                            ::std::borrow::ToOwned::to_owned(
-                                "struct IDiamond.FacetCut[]",
-                            ),
-                        ),
-                    },
-                    ::ethers::core::abi::ethabi::Param {
-                        name: ::std::borrow::ToOwned::to_owned("_init"),
-                        kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                        internal_type: ::core::option::Option::Some(
-                            ::std::borrow::ToOwned::to_owned("address"),
-                        ),
-                    },
-                    ::ethers::core::abi::ethabi::Param {
-                        name: ::std::borrow::ToOwned::to_owned("_calldata"),
-                        kind: ::ethers::core::abi::ethabi::ParamType::Bytes,
-                        internal_type: ::core::option::Option::Some(
-                            ::std::borrow::ToOwned::to_owned("bytes"),
-                        ),
-                    },
-                ],
-            }),
-            functions: ::std::collections::BTreeMap::new(),
-            events: ::core::convert::From::from([
+            constructor: ::core::option::Option::None,
+            functions: ::core::convert::From::from([
                 (
-                    ::std::borrow::ToOwned::to_owned("DiamondCut"),
+                    ::std::borrow::ToOwned::to_owned("accountCount"),
                     ::std::vec![
-                        ::ethers::core::abi::ethabi::Event {
-                            name: ::std::borrow::ToOwned::to_owned("DiamondCut"),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::EventParam {
-                                    name: ::std::borrow::ToOwned::to_owned("_diamondCut"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
-                                        ::std::boxed::Box::new(
-                                            ::ethers::core::abi::ethabi::ParamType::Tuple(
-                                                ::std::vec![
-                                                    ::ethers::core::abi::ethabi::ParamType::Address,
-                                                    ::ethers::core::abi::ethabi::ParamType::Uint(8usize),
-                                                    ::ethers::core::abi::ethabi::ParamType::Array(
-                                                        ::std::boxed::Box::new(
-                                                            ::ethers::core::abi::ethabi::ParamType::FixedBytes(4usize),
-                                                        ),
-                                                    ),
-                                                ],
-                                            ),
-                                        ),
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("accountCount"),
+                            inputs: ::std::vec![],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
                                     ),
-                                    indexed: false,
-                                },
-                                ::ethers::core::abi::ethabi::EventParam {
-                                    name: ::std::borrow::ToOwned::to_owned("_init"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                                    indexed: false,
-                                },
-                                ::ethers::core::abi::ethabi::EventParam {
-                                    name: ::std::borrow::ToOwned::to_owned("_calldata"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Bytes,
-                                    indexed: false,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
                                 },
                             ],
-                            anonymous: false,
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
                         },
                     ],
                 ),
                 (
-                    ::std::borrow::ToOwned::to_owned("OwnershipTransferred"),
+                    ::std::borrow::ToOwned::to_owned("accountExistsAndIsMutable"),
                     ::std::vec![
-                        ::ethers::core::abi::ethabi::Event {
+                        ::ethers::core::abi::ethabi::Function {
                             name: ::std::borrow::ToOwned::to_owned(
-                                "OwnershipTransferred",
-                            ),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::EventParam {
-                                    name: ::std::borrow::ToOwned::to_owned("previousOwner"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                                    indexed: true,
-                                },
-                                ::ethers::core::abi::ethabi::EventParam {
-                                    name: ::std::borrow::ToOwned::to_owned("newOwner"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                                    indexed: true,
-                                },
-                            ],
-                            anonymous: false,
-                        },
-                    ],
-                ),
-            ]),
-            errors: ::core::convert::From::from([
-                (
-                    ::std::borrow::ToOwned::to_owned(
-                        "CannotAddFunctionToDiamondThatAlreadyExists",
-                    ),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
-                            name: ::std::borrow::ToOwned::to_owned(
-                                "CannotAddFunctionToDiamondThatAlreadyExists",
+                                "accountExistsAndIsMutable",
                             ),
                             inputs: ::std::vec![
                                 ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_selector"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::FixedBytes(
-                                        4usize,
+                                    name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
                                     ),
                                     internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("bytes4"),
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
                                     ),
                                 },
                             ],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Bool,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("bool"),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
                         },
                     ],
                 ),
                 (
-                    ::std::borrow::ToOwned::to_owned("CannotAddSelectorsToZeroAddress"),
+                    ::std::borrow::ToOwned::to_owned("addActionToGroup"),
                     ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
-                            name: ::std::borrow::ToOwned::to_owned(
-                                "CannotAddSelectorsToZeroAddress",
-                            ),
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("addActionToGroup"),
                             inputs: ::std::vec![
                                 ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_selectors"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
-                                        ::std::boxed::Box::new(
-                                            ::ethers::core::abi::ethabi::ParamType::FixedBytes(4usize),
-                                        ),
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
                                     ),
                                     internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("bytes4[]"),
-                                    ),
-                                },
-                            ],
-                        },
-                    ],
-                ),
-                (
-                    ::std::borrow::ToOwned::to_owned(
-                        "CannotRemoveFunctionThatDoesNotExist",
-                    ),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
-                            name: ::std::borrow::ToOwned::to_owned(
-                                "CannotRemoveFunctionThatDoesNotExist",
-                            ),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_selector"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::FixedBytes(
-                                        4usize,
-                                    ),
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("bytes4"),
-                                    ),
-                                },
-                            ],
-                        },
-                    ],
-                ),
-                (
-                    ::std::borrow::ToOwned::to_owned("CannotRemoveImmutableFunction"),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
-                            name: ::std::borrow::ToOwned::to_owned(
-                                "CannotRemoveImmutableFunction",
-                            ),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_selector"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::FixedBytes(
-                                        4usize,
-                                    ),
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("bytes4"),
-                                    ),
-                                },
-                            ],
-                        },
-                    ],
-                ),
-                (
-                    ::std::borrow::ToOwned::to_owned(
-                        "CannotReplaceFunctionThatDoesNotExists",
-                    ),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
-                            name: ::std::borrow::ToOwned::to_owned(
-                                "CannotReplaceFunctionThatDoesNotExists",
-                            ),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_selector"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::FixedBytes(
-                                        4usize,
-                                    ),
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("bytes4"),
-                                    ),
-                                },
-                            ],
-                        },
-                    ],
-                ),
-                (
-                    ::std::borrow::ToOwned::to_owned(
-                        "CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet",
-                    ),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
-                            name: ::std::borrow::ToOwned::to_owned(
-                                "CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet",
-                            ),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_selector"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::FixedBytes(
-                                        4usize,
-                                    ),
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("bytes4"),
-                                    ),
-                                },
-                            ],
-                        },
-                    ],
-                ),
-                (
-                    ::std::borrow::ToOwned::to_owned(
-                        "CannotReplaceFunctionsFromFacetWithZeroAddress",
-                    ),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
-                            name: ::std::borrow::ToOwned::to_owned(
-                                "CannotReplaceFunctionsFromFacetWithZeroAddress",
-                            ),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_selectors"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
-                                        ::std::boxed::Box::new(
-                                            ::ethers::core::abi::ethabi::ParamType::FixedBytes(4usize),
-                                        ),
-                                    ),
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("bytes4[]"),
-                                    ),
-                                },
-                            ],
-                        },
-                    ],
-                ),
-                (
-                    ::std::borrow::ToOwned::to_owned("CannotReplaceImmutableFunction"),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
-                            name: ::std::borrow::ToOwned::to_owned(
-                                "CannotReplaceImmutableFunction",
-                            ),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_selector"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::FixedBytes(
-                                        4usize,
-                                    ),
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("bytes4"),
-                                    ),
-                                },
-                            ],
-                        },
-                    ],
-                ),
-                (
-                    ::std::borrow::ToOwned::to_owned("FunctionNotFound"),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
-                            name: ::std::borrow::ToOwned::to_owned("FunctionNotFound"),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_functionSelector"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::FixedBytes(
-                                        4usize,
-                                    ),
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("bytes4"),
-                                    ),
-                                },
-                            ],
-                        },
-                    ],
-                ),
-                (
-                    ::std::borrow::ToOwned::to_owned("IncorrectFacetCutAction"),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
-                            name: ::std::borrow::ToOwned::to_owned(
-                                "IncorrectFacetCutAction",
-                            ),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_action"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(8usize),
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("uint8"),
-                                    ),
-                                },
-                            ],
-                        },
-                    ],
-                ),
-                (
-                    ::std::borrow::ToOwned::to_owned("InitializationFunctionReverted"),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
-                            name: ::std::borrow::ToOwned::to_owned(
-                                "InitializationFunctionReverted",
-                            ),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned(
-                                        "_initializationContractAddress",
-                                    ),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("address"),
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
                                     ),
                                 },
                                 ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_calldata"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Bytes,
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("bytes"),
+                                    name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
                                     ),
-                                },
-                            ],
-                        },
-                    ],
-                ),
-                (
-                    ::std::borrow::ToOwned::to_owned("NoBytecodeAtAddress"),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
-                            name: ::std::borrow::ToOwned::to_owned(
-                                "NoBytecodeAtAddress",
-                            ),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_contractAddress"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
                                     internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("address"),
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
                                     ),
                                 },
                                 ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_message"),
+                                    name: ::std::borrow::ToOwned::to_owned("action"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("name"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("string"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("description"),
                                     kind: ::ethers::core::abi::ethabi::ParamType::String,
                                     internal_type: ::core::option::Option::Some(
                                         ::std::borrow::ToOwned::to_owned("string"),
                                     ),
                                 },
                             ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
                         },
                     ],
                 ),
                 (
-                    ::std::borrow::ToOwned::to_owned(
-                        "NoSelectorsProvidedForFacetForCut",
-                    ),
+                    ::std::borrow::ToOwned::to_owned("addGroup"),
                     ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("addGroup"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("name"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("string"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("description"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("string"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("cidHashes"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                        ::std::boxed::Box::new(
+                                            ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                        ),
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256[]"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pkpIds"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                        ::std::boxed::Box::new(
+                                            ::ethers::core::abi::ethabi::ParamType::Address,
+                                        ),
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("address[]"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("addPkpToGroup"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("addPkpToGroup"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pkpId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("address"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("adminApiPayerAccount"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
                             name: ::std::borrow::ToOwned::to_owned(
-                                "NoSelectorsProvidedForFacetForCut",
+                                "adminApiPayerAccount",
+                            ),
+                            inputs: ::std::vec![],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("address"),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("allPkpIdsAt"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("allPkpIdsAt"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("index"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("address"),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("apiPayerCount"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("apiPayerCount"),
+                            inputs: ::std::vec![],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("api_payers"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("api_payers"),
+                            inputs: ::std::vec![],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                        ::std::boxed::Box::new(
+                                            ::ethers::core::abi::ethabi::ParamType::Address,
+                                        ),
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("address[]"),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("creditApiKey"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("creditApiKey"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("amount"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("debitApiKey"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("debitApiKey"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("amount"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("getPricing"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("getPricing"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pricingItemId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("getWalletDerivation"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "getWalletDerivation",
                             ),
                             inputs: ::std::vec![
                                 ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_facetAddress"),
+                                    name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("walletAddress"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("address"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("indexToAccountHashAt"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "indexToAccountHashAt",
+                            ),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("index"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("listActions"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("listActions"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pageNumber"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pageSize"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                        ::std::boxed::Box::new(
+                                            ::ethers::core::abi::ethabi::ParamType::Tuple(
+                                                ::std::vec![
+                                                    ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                                    ::ethers::core::abi::ethabi::ParamType::String,
+                                                    ::ethers::core::abi::ethabi::ParamType::String,
+                                                ],
+                                            ),
+                                        ),
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned(
+                                            "struct AppStorage.Metadata[]",
+                                        ),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("listApiKeys"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("listApiKeys"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pageNumber"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pageSize"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                        ::std::boxed::Box::new(
+                                            ::ethers::core::abi::ethabi::ParamType::Tuple(
+                                                ::std::vec![
+                                                    ::ethers::core::abi::ethabi::ParamType::Tuple(
+                                                        ::std::vec![
+                                                            ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                                            ::ethers::core::abi::ethabi::ParamType::String,
+                                                            ::ethers::core::abi::ethabi::ParamType::String,
+                                                        ],
+                                                    ),
+                                                    ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                                    ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                                    ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                                    ::ethers::core::abi::ethabi::ParamType::Array(
+                                                        ::std::boxed::Box::new(
+                                                            ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                                        ),
+                                                    ),
+                                                    ::ethers::core::abi::ethabi::ParamType::Bool,
+                                                    ::ethers::core::abi::ethabi::ParamType::Bool,
+                                                    ::ethers::core::abi::ethabi::ParamType::Bool,
+                                                    ::ethers::core::abi::ethabi::ParamType::Array(
+                                                        ::std::boxed::Box::new(
+                                                            ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                                        ),
+                                                    ),
+                                                    ::ethers::core::abi::ethabi::ParamType::Array(
+                                                        ::std::boxed::Box::new(
+                                                            ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                                        ),
+                                                    ),
+                                                    ::ethers::core::abi::ethabi::ParamType::Array(
+                                                        ::std::boxed::Box::new(
+                                                            ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                                        ),
+                                                    ),
+                                                ],
+                                            ),
+                                        ),
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned(
+                                            "struct ViewsFacet.UsageApiKeyReturn[]",
+                                        ),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("listGroupContents"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("listGroupContents"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Tuple(
+                                        ::std::vec![
+                                            ::ethers::core::abi::ethabi::ParamType::Tuple(
+                                                ::std::vec![
+                                                    ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                                    ::ethers::core::abi::ethabi::ParamType::String,
+                                                    ::ethers::core::abi::ethabi::ParamType::String,
+                                                ],
+                                            ),
+                                            ::ethers::core::abi::ethabi::ParamType::Array(
+                                                ::std::boxed::Box::new(
+                                                    ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                                ),
+                                            ),
+                                            ::ethers::core::abi::ethabi::ParamType::Array(
+                                                ::std::boxed::Box::new(
+                                                    ::ethers::core::abi::ethabi::ParamType::Address,
+                                                ),
+                                            ),
+                                        ],
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned(
+                                            "struct ViewsFacet.GroupReturn",
+                                        ),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("listGroups"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("listGroups"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pageNumber"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pageSize"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                        ::std::boxed::Box::new(
+                                            ::ethers::core::abi::ethabi::ParamType::Tuple(
+                                                ::std::vec![
+                                                    ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                                    ::ethers::core::abi::ethabi::ParamType::String,
+                                                    ::ethers::core::abi::ethabi::ParamType::String,
+                                                ],
+                                            ),
+                                        ),
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned(
+                                            "struct AppStorage.Metadata[]",
+                                        ),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("listPkps"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("listPkps"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pageNumber"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pageSize"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                        ::std::boxed::Box::new(
+                                            ::ethers::core::abi::ethabi::ParamType::Tuple(
+                                                ::std::vec![
+                                                    ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                                    ::ethers::core::abi::ethabi::ParamType::Address,
+                                                    ::ethers::core::abi::ethabi::ParamType::String,
+                                                    ::ethers::core::abi::ethabi::ParamType::String,
+                                                ],
+                                            ),
+                                        ),
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned(
+                                            "struct AppStorage.PkpData[]",
+                                        ),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("listWalletsInGroup"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("listWalletsInGroup"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pageNumber"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pageSize"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                        ::std::boxed::Box::new(
+                                            ::ethers::core::abi::ethabi::ParamType::Tuple(
+                                                ::std::vec![
+                                                    ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                                    ::ethers::core::abi::ethabi::ParamType::Address,
+                                                    ::ethers::core::abi::ethabi::ParamType::String,
+                                                    ::ethers::core::abi::ethabi::ParamType::String,
+                                                ],
+                                            ),
+                                        ),
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned(
+                                            "struct AppStorage.PkpData[]",
+                                        ),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("newAccount"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("newAccount"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("managed"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Bool,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("bool"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountName"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("string"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned(
+                                        "accountDescription",
+                                    ),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("string"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned(
+                                        "creatorWalletAddress",
+                                    ),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("address"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("pkpCount"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("pkpCount"),
+                            inputs: ::std::vec![],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("pricingAt"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("pricingAt"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("index"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("pricingOperator"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("pricingOperator"),
+                            inputs: ::std::vec![],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("address"),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("rebalanceAmount"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("rebalanceAmount"),
+                            inputs: ::std::vec![],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("registerWalletDerivation"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "registerWalletDerivation",
+                            ),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pkpId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("address"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("derivationPath"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("name"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("string"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("description"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("string"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("removeActionFromGroup"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "removeActionFromGroup",
+                            ),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("action"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("removePkpFromGroup"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("removePkpFromGroup"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pkpId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("address"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("removeUsageApiKey"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("removeUsageApiKey"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("usageApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("requestedApiPayerCount"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "requestedApiPayerCount",
+                            ),
+                            inputs: ::std::vec![],
+                            outputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::string::String::new(),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("setAdminApiPayerAccount"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "setAdminApiPayerAccount",
+                            ),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned(
+                                        "newAdminApiPayerAccount",
+                                    ),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("address"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("setApiPayers"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("setApiPayers"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("newApiPayers"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                        ::std::boxed::Box::new(
+                                            ::ethers::core::abi::ethabi::ParamType::Address,
+                                        ),
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("address[]"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("setPricing"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("setPricing"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pricingItemId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("price"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("setPricingOperator"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("setPricingOperator"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned(
+                                        "newPricingOperator",
+                                    ),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("address"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("setRebalanceAmount"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("setRebalanceAmount"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned(
+                                        "newRebalanceAmount",
+                                    ),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("setRequestedApiPayerCount"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "setRequestedApiPayerCount",
+                            ),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned(
+                                        "newRequestedApiPayerCount",
+                                    ),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("setUsageApiKey"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("setUsageApiKey"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("usageApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("expiration"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("balance"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("name"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("string"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("description"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("string"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("createGroups"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Bool,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("bool"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("deleteGroups"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Bool,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("bool"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("createPKPs"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Bool,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("bool"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned(
+                                        "manageIPFSIdsInGroups",
+                                    ),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                        ::std::boxed::Box::new(
+                                            ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                        ),
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256[]"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("addPkpToGroups"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                        ::std::boxed::Box::new(
+                                            ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                        ),
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256[]"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned(
+                                        "removePkpFromGroups",
+                                    ),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                        ::std::boxed::Box::new(
+                                            ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                        ),
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256[]"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("executeInGroups"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                        ::std::boxed::Box::new(
+                                            ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                        ),
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256[]"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("updateActionMetadata"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "updateActionMetadata",
+                            ),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("actionHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("name"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("string"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("description"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("string"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("updateGroup"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned("updateGroup"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("name"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("string"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("description"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("string"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("updateUsageApiKeyMetadata"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::Function {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "updateUsageApiKeyMetadata",
+                            ),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("usageApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("name"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("string"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("description"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("string"),
+                                    ),
+                                },
+                            ],
+                            outputs: ::std::vec![],
+                            constant: ::core::option::Option::None,
+                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                        },
+                    ],
+                ),
+            ]),
+            events: ::std::collections::BTreeMap::new(),
+            errors: ::core::convert::From::from([
+                (
+                    ::std::borrow::ToOwned::to_owned("AccountAlreadyExists"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::AbiError {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "AccountAlreadyExists",
+                            ),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("AccountDoesNotExist"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::AbiError {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "AccountDoesNotExist",
+                            ),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("ActionDoesNotExist"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::AbiError {
+                            name: ::std::borrow::ToOwned::to_owned("ActionDoesNotExist"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("cidHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("GroupDoesNotExist"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::AbiError {
+                            name: ::std::borrow::ToOwned::to_owned("GroupDoesNotExist"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("InsufficientBalance"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::AbiError {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "InsufficientBalance",
+                            ),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("amount"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("NoAccountAccess"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::AbiError {
+                            name: ::std::borrow::ToOwned::to_owned("NoAccountAccess"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("sender"),
                                     kind: ::ethers::core::abi::ethabi::ParamType::Address,
                                     internal_type: ::core::option::Option::Some(
                                         ::std::borrow::ToOwned::to_owned("address"),
@@ -429,20 +1839,121 @@ pub mod account_config {
                     ],
                 ),
                 (
-                    ::std::borrow::ToOwned::to_owned(
-                        "RemoveFacetAddressMustBeZeroAddress",
-                    ),
+                    ::std::borrow::ToOwned::to_owned("NotMasterAccount"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::AbiError {
+                            name: ::std::borrow::ToOwned::to_owned("NotMasterAccount"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                            ],
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("OnlyApiPayerOrOwner"),
                     ::std::vec![
                         ::ethers::core::abi::ethabi::AbiError {
                             name: ::std::borrow::ToOwned::to_owned(
-                                "RemoveFacetAddressMustBeZeroAddress",
+                                "OnlyApiPayerOrOwner",
                             ),
                             inputs: ::std::vec![
                                 ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_facetAddress"),
+                                    name: ::std::borrow::ToOwned::to_owned("caller"),
                                     kind: ::ethers::core::abi::ethabi::ParamType::Address,
                                     internal_type: ::core::option::Option::Some(
                                         ::std::borrow::ToOwned::to_owned("address"),
+                                    ),
+                                },
+                            ],
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("OnlyApiPayerOrPricingOperator"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::AbiError {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "OnlyApiPayerOrPricingOperator",
+                            ),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("caller"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("address"),
+                                    ),
+                                },
+                            ],
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("PkpDoesNotExist"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::AbiError {
+                            name: ::std::borrow::ToOwned::to_owned("PkpDoesNotExist"),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("pkpId"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("address"),
+                                    ),
+                                },
+                            ],
+                        },
+                    ],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("UsageApiKeyDoesNotExist"),
+                    ::std::vec![
+                        ::ethers::core::abi::ethabi::AbiError {
+                            name: ::std::borrow::ToOwned::to_owned(
+                                "UsageApiKeyDoesNotExist",
+                            ),
+                            inputs: ::std::vec![
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
+                                    ),
+                                },
+                                ::ethers::core::abi::ethabi::Param {
+                                    name: ::std::borrow::ToOwned::to_owned("usageApiKeyHash"),
+                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
+                                        256usize,
+                                    ),
+                                    internal_type: ::core::option::Option::Some(
+                                        ::std::borrow::ToOwned::to_owned("uint256"),
                                     ),
                                 },
                             ],
@@ -451,24 +1962,12 @@ pub mod account_config {
                 ),
             ]),
             receive: false,
-            fallback: true,
+            fallback: false,
         }
     }
     ///The parsed JSON ABI of the contract.
     pub static ACCOUNTCONFIG_ABI: ::ethers::contract::Lazy<::ethers::core::abi::Abi> = ::ethers::contract::Lazy::new(
         __abi,
-    );
-    #[rustfmt::skip]
-    const __BYTECODE: &[u8] = b"`\x80`@R4a\t\xA2Wa\x0EE\x808\x03\x80a\0\x19\x81a\n\xB0V[\x92\x839\x81\x01\x90`\x80\x81\x83\x03\x12a\t\xA2Wa\x002\x81a\n\xD5V[` \x82\x01Q\x90\x92\x90`\x01`\x01`@\x1B\x03\x81\x11a\t\xA2W\x82\x01\x92\x81`\x1F\x85\x01\x12\x15a\t\xA2W\x83Q\x91a\0ja\0e\x84a\n\xE9V[a\n\xB0V[\x94` \x86\x85\x81R\x01` \x81\x95`\x05\x1B\x83\x01\x01\x91\x83\x83\x11a\t\xA2W` \x81\x01\x91[\x83\x83\x10a\t\xA7WPPPPa\0\xA1`@\x85\x01a\n\xD5V[``\x85\x01Q\x90\x94`\x01`\x01`@\x1B\x03\x82\x11a\t\xA2W\x01\x81`\x1F\x82\x01\x12\x15a\t\xA2W\x80Qa\0\xD0a\0e\x82a\x0B\0V[\x92\x81\x84R` \x82\x84\x01\x01\x11a\t\xA2Wa\0\xF3\x91` \x80\x85\x99\x98\x96\x95\x01\x91\x01a\x0B\x1BV[\x7F\xC8\xFC\xAD\x8D\xB8M<\xC1\x8BLA\xD5Q\xEA\x0E\xE6m\xD5\x99\xCD\xE0h\xD9\x98\xE5}^\t3,\x13\x1F\x80T`\x01`\x01`\xA0\x1B\x03\x92\x83\x16`\x01`\x01`\xA0\x1B\x03\x19\x82\x16\x81\x17\x90\x92U\x90\x91\x82\x91\x16\x7F\x8B\xE0\x07\x9CS\x16Y\x14\x13D\xCD\x1F\xD0\xA4\xF2\x84\x19I\x7F\x97\"\xA3\xDA\xAF\xE3\xB4\x18okdW\xE0`\0\x80\xA3`\0\x93[\x80Q\x85\x10\x15a\x07tW`@a\x01t\x86\x83a\x0B>V[Q\x01Q\x92`\x01`\x01`\xA0\x1B\x03a\x01\x8A\x87\x84a\x0B>V[QQ\x16\x94\x84Q\x15a\x07_W` a\x01\xA1\x88\x85a\x0B>V[Q\x01Q`\x03\x81\x10\x15a\x07IW`\0\x81a\x03\xC2WPP\x85\x15a\x03\x9CWa\xFF\xFF`\0\x80Q` a\x0E%\x839\x81Q\x91RT\x16\x93a\x02\x1Ba\x01\xDE``a\n\xB0V[`$\x81R\x7FLibDiamondCut: Add facet has no ` \x82\x01Rccode`\xE0\x1B`@\x82\x01R\x88a\r\x04V[`\0\x94[\x86Q\x86\x10\x15a\x03\x85W`\x01`\x01`\xE0\x1B\x03\x19a\x02;\x87\x89a\x0B>V[Q\x16`\0\x81\x81R`\0\x80Q` a\x0E\x05\x839\x81Q\x91R` R`@\x90 T`\x01`\x01`\xA0\x1B\x03\x16a\x03qWa\x02\xD1a\x02qa\n\x91V[\x8A\x81Ra\xFF\xFF\x93\x90\x93\x16` \x80\x85\x01\x82\x81R`\0\x85\x81R`\0\x80Q` a\x0E\x05\x839\x81Q\x91R\x90\x92R`@\x90\x91 \x94Q\x85T\x91Q`\x01`\x01`\xB0\x1B\x03\x19\x90\x92\x16`\x01`\x01`\xA0\x1B\x03\x91\x90\x91\x16\x17`\xA0\x91\x90\x91\x1Ba\xFF\xFF`\xA0\x1B\x16\x17\x90\x93UV[`\0\x80Q` a\x0E%\x839\x81Q\x91RT\x90h\x01\0\0\0\0\0\0\0\0\x82\x10\x15a\x03[Wa\x03\x13\x82`\x01a\x030\x94\x01`\0\x80Q` a\x0E%\x839\x81Q\x91RUa\x0B\xCBV[\x90\x91\x90c\xFF\xFF\xFF\xFF\x83T\x91`\x03\x1B\x92`\xE0\x1C\x83\x1B\x92\x1B\x19\x16\x17\x90UV[a\xFF\xFF\x81\x14a\x03EW`\x01\x95\x86\x01\x95\x01a\x02\x1FV[cNH{q`\xE0\x1B`\0R`\x11`\x04R`$`\0\xFD[cNH{q`\xE0\x1B`\0R`A`\x04R`$`\0\xFD[c\xEB\xBF]\x07`\xE0\x1B`\0R`\x04R`$`\0\xFD[P\x94P\x94P\x94`\x01\x91\x96\x92P[\x01\x93\x91\x90\x94a\x01_V[`@Qc\x02\xB8\xDA\x07`\xE2\x1B\x81R` `\x04\x82\x01R\x80a\x03\xBE`$\x82\x01\x88a\x0BhV[\x03\x90\xFD[P\x95\x97\x95`\x01\x81\x03a\x05-WP\x87\x15a\x05\x0BW\x92\x94\x92a\x04&a\x03\xE5``a\n\xB0V[`(\x81R\x7FLibDiamondCut: Replace facet has` \x82\x01Rg no code`\xC0\x1B`@\x82\x01R\x89a\r\x04V[`\x01`\x01`\xA0\x1B\x03\x88\x16\x95`\0[\x86Q\x81\x10\x15a\x04\xFBW`\x01`\x01`\xE0\x1B\x03\x19a\x04P\x82\x89a\x0B>V[Q\x16`\0\x81\x81R`\0\x80Q` a\x0E\x05\x839\x81Q\x91R` R`@\x90 T`\x01`\x01`\xA0\x1B\x03\x160\x81\x14a\x04\xE6W\x8B\x81\x14a\x04\xD1W\x15a\x04\xBDW`\0\x90\x81R`\0\x80Q` a\x0E\x05\x839\x81Q\x91R` R`@\x90 \x80T`\x01`\x01`\xA0\x1B\x03\x19\x16\x89\x17\x90U`\x01\x01a\x044V[cty\xF99`\xE0\x1B`\0R`\x04R`$`\0\xFD[Pc\x1A\xC6\xCE\x8D`\xE1\x1B`\0R`\x04R`$`\0\xFD[Pc)\x01\x80m`\xE1\x1B`\0R`\x04R`$`\0\xFD[P\x94P\x94P\x94`\x01\x91\x96Pa\x03\x92V[`@Qc\xCD\x98\xA9o`\xE0\x1B\x81R` `\x04\x82\x01R\x80a\x03\xBE`$\x82\x01\x88a\x0BhV[`\0\x96\x95\x96\x94\x91\x92\x93\x94`\x02\x82\x14`\0\x14a\x07/WPP`\0\x80Q` a\x0E%\x839\x81Q\x91RT\x97\x80a\x07\x1BWP`\0[\x86Q\x81\x10\x15a\x07\x0BW`\x01`\x01`\xE0\x1B\x03\x19a\x05z\x82\x89a\x0B>V[Q\x16\x90\x81`\0R`\0\x80Q` a\x0E\x05\x839\x81Q\x91R` R`@`\0 \x99a\x05\xA1a\n\x91V[\x9AT\x9A`\x01\x80`\xA0\x1B\x03\x8C\x16\x80\x82Ra\xFF\xFF` \x83\x01\x9D`\xA0\x1C\x16\x8DR\x15a\x06\xF6WQ`\x01`\x01`\xA0\x1B\x03\x160\x14a\x06\xE1W\x80\x15a\x03EW`\0\x19\x01\x99\x8Aa\xFF\xFF\x82Q\x16\x03a\x06kW[P`\0\x80Q` a\x0E%\x839\x81Q\x91RT\x91\x82\x15a\x06UW`\x01\x92`\0\x19\x01a\x06\x13\x81a\x0B\xCBV[c\xFF\xFF\xFF\xFF\x82T\x91`\x03\x1B\x1B\x19\x16\x90U`\0\x80Q` a\x0E%\x839\x81Q\x91RU`\0R`\0\x80Q` a\x0E\x05\x839\x81Q\x91R` R`\0`@\x81 U\x01a\x05^V[cNH{q`\xE0\x1B`\0R`1`\x04R`$`\0\xFD[a\x06\xDB\x90a\xFF\xFFa\x06{\x8Da\x0B\xCBV[\x90T\x90`\x03\x1B\x1C`\xE0\x1B\x91a\x06\x96\x83a\x03\x13\x84\x84Q\x16a\x0B\xCBV[Q`\x01`\x01`\xE0\x1B\x03\x19\x90\x92\x16`\0\x90\x81R`\0\x80Q` a\x0E\x05\x839\x81Q\x91R` R`@\x90 \x80Ta\xFF\xFF`\xA0\x1B\x19\x16\x91\x90\x92\x16`\xA0\x1Ba\xFF\xFF`\xA0\x1B\x16\x17\x90UV[8a\x05\xEBV[\x82c\r\xF5\xFDa`\xE3\x1B`\0R`\x04R`$`\0\xFD[\x83cz\x08\xA2-`\xE0\x1B`\0R`\x04R`$`\0\xFD[P\x93\x92\x96P\x93P\x93`\x01\x90a\x03\x92V[c\xD0\x91\xBC\x81`\xE0\x1B`\0R`\x04R`$`\0\xFD[`\xFF\x92PPc?\xF4\xD2\x0F`\xE1\x1B`\0R\x16`\x04R`$`\0\xFD[cNH{q`\xE0\x1B`\0R`!`\x04R`$`\0\xFD[\x85c\xE7g\xF9\x1F`\xE0\x1B`\0R`\x04R`$`\0\xFD[\x91\x85\x91\x92`@Q\x90``\x82\x01\x90``\x83RQ\x80\x91R`\x80\x82\x01`\x80\x82`\x05\x1B\x84\x01\x01\x96\x91`\0[\x81\x81\x10a\tBWPPPP`\x01`\x01`\xA0\x1B\x03\x82\x16` \x82\x01R\x80\x85\x03`@\x82\x01R\x92\x93a\x07\xF9\x93\x7F\x8F\xAAp\x87\x86q\xCC\xD2\x12\xD2\x07q\xB7\x95\xC5\n\xF8\xFD?\xF6\xCF'\xF4\xBD\xE5~]M\xE0\xAE\xB6s\x91\x81\x90a\x07\xF1\x90\x86a\x0B\xA6V[\x03\x90\xA1a\x0C&V[\x7F\x17\x1D\xEF\x12\xE8,\x8F3Q\xE4\xC7\x9BxT\xBE\x19\xAD`\xA7[\x88\x8Ft\xB9f\x0C\x07\xCDta\x968Ta\x08\xFDW\x7F\x17\x1D\xEF\x12\xE8,\x8F3Q\xE4\xC7\x9BxT\xBE\x19\xAD`\xA7[\x88\x8Ft\xB9f\x0C\x07\xCDta\x96;\x80T`\x01`\x01`\xA0\x1B\x03\x19\x90\x81\x16\x83\x17\x90\x91U\x7F\x17\x1D\xEF\x12\xE8,\x8F3Q\xE4\xC7\x9BxT\xBE\x19\xAD`\xA7[\x88\x8Ft\xB9f\x0C\x07\xCDta\x96:\x80T\x90\x91\x16\x90\x91\x17\x90U`\x01`\0\x81\x90R\x7F\x17\x1D\xEF\x12\xE8,\x8F3Q\xE4\xC7\x9BxT\xBE\x19\xAD`\xA7[\x88\x8Ft\xB9f\x0C\x07\xCDta\x967` R\x7F\xE0\xD3(7K\xF3\x04\xDBT\xBC\xD5\xE1?\x87\x8A\xFE\xBBS<\xE5\xDE\xDD\xE0\x8C\xF4]\0\x8F'\x88\xE3\x0EU`\x03\x7F\x17\x1D\xEF\x12\xE8,\x8F3Q\xE4\xC7\x9BxT\xBE\x19\xAD`\xA7[\x88\x8Ft\xB9f\x0C\x07\xCDta\x96?U`@Q`\xC1\x90\x81a\rD\x829\xF3[`@QbF\x1B\xCD`\xE5\x1B\x81R` `\x04\x82\x01R`\x13`$\x82\x01R\x7Falready initialized\0\0\0\0\0\0\0\0\0\0\0\0\0`D\x82\x01R`d\x90\xFD[\x84\x89\x03`\x7F\x19\x01\x83R\x83Q\x80Q`\x01`\x01`\xA0\x1B\x03\x16\x8AR` \x81\x01Q\x94\x99\x93\x94\x92\x93\x91\x92\x91\x90`\x03\x83\x10\x15a\x07IWa\t\x96\x82```@` \x95\x94`\x01\x97\x87\x80\x97\x01R\x01Q\x91\x81`@\x82\x01R\x01\x90a\x0BhV[\x9A\x01\x94\x01\x92\x91\x01a\x07\x9BV[`\0\x80\xFD[\x82Q`\x01`\x01`@\x1B\x03\x81\x11a\t\xA2W\x82\x01``\x81\x87\x03`\x1F\x19\x01\x12a\t\xA2W`@Q\x90``\x82\x01`\x01`\x01`@\x1B\x03\x81\x11\x83\x82\x10\x17a\x03[W`@Ra\t\xF0` \x82\x01a\n\xD5V[\x82R`@\x81\x01Q`\x03\x81\x10\x15a\t\xA2W` \x83\x01R``\x81\x01Q`\x01`\x01`@\x1B\x03\x81\x11a\t\xA2W` \x91\x01\x01\x86`\x1F\x82\x01\x12\x15a\t\xA2W\x80Qa\n6a\0e\x82a\n\xE9V[\x91` \x80\x84\x84\x81R\x01\x92`\x05\x1B\x82\x01\x01\x90\x89\x82\x11a\t\xA2W` \x01\x91[\x81\x83\x10a\npWPPP`@\x82\x01R\x81R` \x92\x83\x01\x92\x01a\0\x8AV[\x82Q`\x01`\x01`\xE0\x1B\x03\x19\x81\x16\x81\x03a\t\xA2W\x81R` \x92\x83\x01\x92\x01a\nSV[`@\x80Q\x91\x90\x82\x01`\x01`\x01`@\x1B\x03\x81\x11\x83\x82\x10\x17a\x03[W`@RV[`@Q\x91\x90`\x1F\x01`\x1F\x19\x16\x82\x01`\x01`\x01`@\x1B\x03\x81\x11\x83\x82\x10\x17a\x03[W`@RV[Q\x90`\x01`\x01`\xA0\x1B\x03\x82\x16\x82\x03a\t\xA2WV[`\x01`\x01`@\x1B\x03\x81\x11a\x03[W`\x05\x1B` \x01\x90V[`\x01`\x01`@\x1B\x03\x81\x11a\x03[W`\x1F\x01`\x1F\x19\x16` \x01\x90V[`\0[\x83\x81\x10a\x0B.WPP`\0\x91\x01RV[\x81\x81\x01Q\x83\x82\x01R` \x01a\x0B\x1EV[\x80Q\x82\x10\x15a\x0BRW` \x91`\x05\x1B\x01\x01\x90V[cNH{q`\xE0\x1B`\0R`2`\x04R`$`\0\xFD[\x90` \x80\x83Q\x92\x83\x81R\x01\x92\x01\x90`\0[\x81\x81\x10a\x0B\x86WPPP\x90V[\x82Q`\x01`\x01`\xE0\x1B\x03\x19\x16\x84R` \x93\x84\x01\x93\x90\x92\x01\x91`\x01\x01a\x0ByV[\x90` \x91a\x0B\xBF\x81Q\x80\x92\x81\x85R\x85\x80\x86\x01\x91\x01a\x0B\x1BV[`\x1F\x01`\x1F\x19\x16\x01\x01\x90V[\x90`\0\x80Q` a\x0E%\x839\x81Q\x91RT\x82\x10\x15a\x0BRW`\0\x80Q` a\x0E%\x839\x81Q\x91R`\0R`\x03\x82\x90\x1C\x7F\xC0\xD7'a\x0E\xA1bA\xEF\xF4D}\x08\xBB\x1BE\x95\xF7\xD2\xECE\x15($7\xA1;}\r\xF4\xB9\"\x01\x91`\x02\x1B`\x1C\x16\x90V[`\x01`\x01`\xA0\x1B\x03\x81\x16\x91\x90\x82\x15a\x0C\xFFW`\0\x80\x91a\x0C\x8Aa\x0CI``a\n\xB0V[`(\x81R\x7FLibDiamondCut: _init address has` \x82\x01Rg no code`\xC0\x1B`@\x82\x01R\x82a\r\x04V[\x83Q\x90` \x85\x01\x90Z\xF4\x91=\x15a\x0C\xF7W=\x92a\x0C\xA9a\0e\x85a\x0B\0V[\x93\x84R=`\0` \x86\x01>[\x15a\x0C\xBFWPPPV[\x82Q\x15a\x0C\xCEW\x82Q` \x84\x01\xFD[a\x03\xBE`@Q\x92\x83\x92c\x19!\x05\xD7`\xE0\x1B\x84R`\x04\x84\x01R`@`$\x84\x01R`D\x83\x01\x90a\x0B\xA6V[``\x92a\x0C\xB5V[PPPV[\x80;\x15a\r\x0FWPPV[`@\x80Qc\x91\x984\xB9`\xE0\x1B\x81R`\x01`\x01`\xA0\x1B\x03\x90\x92\x16`\x04\x83\x01R`$\x82\x01R\x90\x81\x90a\x03\xBE\x90`D\x83\x01\x90a\x0B\xA6V\xFE`\x80`@R4`\x86W`\0\x805`\x01`\x01`\xE0\x1B\x03\x19\x16\x80\x82R\x7F\xC8\xFC\xAD\x8D\xB8M<\xC1\x8BLA\xD5Q\xEA\x0E\xE6m\xD5\x99\xCD\xE0h\xD9\x98\xE5}^\t3,\x13\x1C` R`@\x90\x91 T`\x01`\x01`\xA0\x1B\x03\x16\x90\x81\x15`rW`\0\x80\x836\x82\x807\x816\x91Z\xF4=`\0\x80>\x15`mW=`\0\xF3[=`\0\xFD[c\n\x82\xDDs`\xE3\x1B`\0R`\x04R`$`\0\xFD[`\0\x80\xFD\xFE\xA2dipfsX\"\x12 \xBF\xB7'\xC2\xD7\xAA\x159\xACW\xD5\xE0\xA0\xE3\xE8P\x01nv\x92\x12p\xCC\xCCW\xA9\xC3\x10E?\x01fdsolcC\0\x08\x1C\x003\xC8\xFC\xAD\x8D\xB8M<\xC1\x8BLA\xD5Q\xEA\x0E\xE6m\xD5\x99\xCD\xE0h\xD9\x98\xE5}^\t3,\x13\x1C\xC8\xFC\xAD\x8D\xB8M<\xC1\x8BLA\xD5Q\xEA\x0E\xE6m\xD5\x99\xCD\xE0h\xD9\x98\xE5}^\t3,\x13\x1D";
-    /// The bytecode of the contract.
-    pub static ACCOUNTCONFIG_BYTECODE: ::ethers::core::types::Bytes = ::ethers::core::types::Bytes::from_static(
-        __BYTECODE,
-    );
-    #[rustfmt::skip]
-    const __DEPLOYED_BYTECODE: &[u8] = b"`\x80`@R4`\x86W`\0\x805`\x01`\x01`\xE0\x1B\x03\x19\x16\x80\x82R\x7F\xC8\xFC\xAD\x8D\xB8M<\xC1\x8BLA\xD5Q\xEA\x0E\xE6m\xD5\x99\xCD\xE0h\xD9\x98\xE5}^\t3,\x13\x1C` R`@\x90\x91 T`\x01`\x01`\xA0\x1B\x03\x16\x90\x81\x15`rW`\0\x80\x836\x82\x807\x816\x91Z\xF4=`\0\x80>\x15`mW=`\0\xF3[=`\0\xFD[c\n\x82\xDDs`\xE3\x1B`\0R`\x04R`$`\0\xFD[`\0\x80\xFD\xFE\xA2dipfsX\"\x12 \xBF\xB7'\xC2\xD7\xAA\x159\xACW\xD5\xE0\xA0\xE3\xE8P\x01nv\x92\x12p\xCC\xCCW\xA9\xC3\x10E?\x01fdsolcC\0\x08\x1C\x003";
-    /// The deployed bytecode of the contract.
-    pub static ACCOUNTCONFIG_DEPLOYED_BYTECODE: ::ethers::core::types::Bytes = ::ethers::core::types::Bytes::from_static(
-        __DEPLOYED_BYTECODE,
     );
     pub struct AccountConfig<M>(::ethers::contract::Contract<M>);
     impl<M> ::core::clone::Clone for AccountConfig<M> {
@@ -509,74 +2008,502 @@ pub mod account_config {
                 ),
             )
         }
-        /// Constructs the general purpose `Deployer` instance based on the provided constructor arguments and sends it.
-        /// Returns a new instance of a deployer that returns an instance of this contract after sending the transaction
-        ///
-        /// Notes:
-        /// - If there are no constructor arguments, you should pass `()` as the argument.
-        /// - The default poll duration is 7 seconds.
-        /// - The default number of confirmations is 1 block.
-        ///
-        ///
-        /// # Example
-        ///
-        /// Generate contract bindings with `abigen!` and deploy a new contract instance.
-        ///
-        /// *Note*: this requires a `bytecode` and `abi` object in the `greeter.json` artifact.
-        ///
-        /// ```ignore
-        /// # async fn deploy<M: ethers::providers::Middleware>(client: ::std::sync::Arc<M>) {
-        ///     abigen!(Greeter, "../greeter.json");
-        ///
-        ///    let greeter_contract = Greeter::deploy(client, "Hello world!".to_string()).unwrap().send().await.unwrap();
-        ///    let msg = greeter_contract.greet().call().await.unwrap();
-        /// # }
-        /// ```
-        pub fn deploy<T: ::ethers::core::abi::Tokenize>(
-            client: ::std::sync::Arc<M>,
-            constructor_args: T,
-        ) -> ::core::result::Result<
-            ::ethers::contract::builders::ContractDeployer<M, Self>,
-            ::ethers::contract::ContractError<M>,
-        > {
-            let factory = ::ethers::contract::ContractFactory::new(
-                ACCOUNTCONFIG_ABI.clone(),
-                ACCOUNTCONFIG_BYTECODE.clone().into(),
-                client,
-            );
-            let deployer = factory.deploy(constructor_args)?;
-            let deployer = ::ethers::contract::ContractDeployer::new(deployer);
-            Ok(deployer)
-        }
-        ///Gets the contract's `DiamondCut` event
-        pub fn diamond_cut_filter(
+        ///Calls the contract's `accountCount` (0xe4af29fc) function
+        pub fn account_count(
             &self,
-        ) -> ::ethers::contract::builders::Event<
-            ::std::sync::Arc<M>,
-            M,
-            DiamondCutFilter,
-        > {
-            self.0.event()
+        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::U256> {
+            self.0
+                .method_hash([228, 175, 41, 252], ())
+                .expect("method not found (this should never happen)")
         }
-        ///Gets the contract's `OwnershipTransferred` event
-        pub fn ownership_transferred_filter(
+        ///Calls the contract's `accountExistsAndIsMutable` (0x719fac43) function
+        pub fn account_exists_and_is_mutable(
             &self,
-        ) -> ::ethers::contract::builders::Event<
-            ::std::sync::Arc<M>,
-            M,
-            OwnershipTransferredFilter,
-        > {
-            self.0.event()
+            api_key_hash: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, bool> {
+            self.0
+                .method_hash([113, 159, 172, 67], api_key_hash)
+                .expect("method not found (this should never happen)")
         }
-        /// Returns an `Event` builder for all the events of this contract.
-        pub fn events(
+        ///Calls the contract's `addActionToGroup` (0x2fa92e41) function
+        pub fn add_action_to_group(
             &self,
-        ) -> ::ethers::contract::builders::Event<
-            ::std::sync::Arc<M>,
+            account_api_key_hash: ::ethers::core::types::U256,
+            group_id: ::ethers::core::types::U256,
+            action: ::ethers::core::types::U256,
+            name: ::std::string::String,
+            description: ::std::string::String,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash(
+                    [47, 169, 46, 65],
+                    (account_api_key_hash, group_id, action, name, description),
+                )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `addGroup` (0x2b12dee6) function
+        pub fn add_group(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            name: ::std::string::String,
+            description: ::std::string::String,
+            cid_hashes: ::std::vec::Vec<::ethers::core::types::U256>,
+            pkp_ids: ::std::vec::Vec<::ethers::core::types::Address>,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash(
+                    [43, 18, 222, 230],
+                    (account_api_key_hash, name, description, cid_hashes, pkp_ids),
+                )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `addPkpToGroup` (0x7817d782) function
+        pub fn add_pkp_to_group(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            group_id: ::ethers::core::types::U256,
+            pkp_id: ::ethers::core::types::Address,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash(
+                    [120, 23, 215, 130],
+                    (account_api_key_hash, group_id, pkp_id),
+                )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `adminApiPayerAccount` (0x383603fe) function
+        pub fn admin_api_payer_account(
+            &self,
+        ) -> ::ethers::contract::builders::ContractCall<
             M,
-            AccountConfigEvents,
+            ::ethers::core::types::Address,
         > {
-            self.0.event_with_filter(::core::default::Default::default())
+            self.0
+                .method_hash([56, 54, 3, 254], ())
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `allPkpIdsAt` (0x62feae44) function
+        pub fn all_pkp_ids_at(
+            &self,
+            index: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<
+            M,
+            ::ethers::core::types::Address,
+        > {
+            self.0
+                .method_hash([98, 254, 174, 68], index)
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `apiPayerCount` (0xb8037ffe) function
+        pub fn api_payer_count(
+            &self,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::U256> {
+            self.0
+                .method_hash([184, 3, 127, 254], ())
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `api_payers` (0x93c8bc43) function
+        pub fn api_payers(
+            &self,
+        ) -> ::ethers::contract::builders::ContractCall<
+            M,
+            ::std::vec::Vec<::ethers::core::types::Address>,
+        > {
+            self.0
+                .method_hash([147, 200, 188, 67], ())
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `creditApiKey` (0x683f2de8) function
+        pub fn credit_api_key(
+            &self,
+            api_key_hash: ::ethers::core::types::U256,
+            amount: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([104, 63, 45, 232], (api_key_hash, amount))
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `debitApiKey` (0x40b4d453) function
+        pub fn debit_api_key(
+            &self,
+            api_key_hash: ::ethers::core::types::U256,
+            amount: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([64, 180, 212, 83], (api_key_hash, amount))
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `getPricing` (0xc12f1a42) function
+        pub fn get_pricing(
+            &self,
+            pricing_item_id: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::U256> {
+            self.0
+                .method_hash([193, 47, 26, 66], pricing_item_id)
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `getWalletDerivation` (0x90222cad) function
+        pub fn get_wallet_derivation(
+            &self,
+            api_key_hash: ::ethers::core::types::U256,
+            wallet_address: ::ethers::core::types::Address,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::U256> {
+            self.0
+                .method_hash([144, 34, 44, 173], (api_key_hash, wallet_address))
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `indexToAccountHashAt` (0x6fe1fb84) function
+        pub fn index_to_account_hash_at(
+            &self,
+            index: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::U256> {
+            self.0
+                .method_hash([111, 225, 251, 132], index)
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `listActions` (0x542970ed) function
+        pub fn list_actions(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            group_id: ::ethers::core::types::U256,
+            page_number: ::ethers::core::types::U256,
+            page_size: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::std::vec::Vec<Metadata>> {
+            self.0
+                .method_hash(
+                    [84, 41, 112, 237],
+                    (account_api_key_hash, group_id, page_number, page_size),
+                )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `listApiKeys` (0xc704668c) function
+        pub fn list_api_keys(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            page_number: ::ethers::core::types::U256,
+            page_size: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<
+            M,
+            ::std::vec::Vec<UsageApiKeyReturn>,
+        > {
+            self.0
+                .method_hash(
+                    [199, 4, 102, 140],
+                    (account_api_key_hash, page_number, page_size),
+                )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `listGroupContents` (0x6fe9572e) function
+        pub fn list_group_contents(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            group_id: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, GroupReturn> {
+            self.0
+                .method_hash([111, 233, 87, 46], (account_api_key_hash, group_id))
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `listGroups` (0xf75c8b2d) function
+        pub fn list_groups(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            page_number: ::ethers::core::types::U256,
+            page_size: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::std::vec::Vec<Metadata>> {
+            self.0
+                .method_hash(
+                    [247, 92, 139, 45],
+                    (account_api_key_hash, page_number, page_size),
+                )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `listPkps` (0x50409001) function
+        pub fn list_pkps(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            page_number: ::ethers::core::types::U256,
+            page_size: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::std::vec::Vec<PkpData>> {
+            self.0
+                .method_hash(
+                    [80, 64, 144, 1],
+                    (account_api_key_hash, page_number, page_size),
+                )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `listWalletsInGroup` (0x291ff1ea) function
+        pub fn list_wallets_in_group(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            group_id: ::ethers::core::types::U256,
+            page_number: ::ethers::core::types::U256,
+            page_size: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::std::vec::Vec<PkpData>> {
+            self.0
+                .method_hash(
+                    [41, 31, 241, 234],
+                    (account_api_key_hash, group_id, page_number, page_size),
+                )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `newAccount` (0x79312245) function
+        pub fn new_account(
+            &self,
+            api_key_hash: ::ethers::core::types::U256,
+            managed: bool,
+            account_name: ::std::string::String,
+            account_description: ::std::string::String,
+            creator_wallet_address: ::ethers::core::types::Address,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash(
+                    [121, 49, 34, 69],
+                    (
+                        api_key_hash,
+                        managed,
+                        account_name,
+                        account_description,
+                        creator_wallet_address,
+                    ),
+                )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `pkpCount` (0x223a7962) function
+        pub fn pkp_count(
+            &self,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::U256> {
+            self.0
+                .method_hash([34, 58, 121, 98], ())
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `pricingAt` (0xc1aff899) function
+        pub fn pricing_at(
+            &self,
+            index: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::U256> {
+            self.0
+                .method_hash([193, 175, 248, 153], index)
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `pricingOperator` (0xcb53ad26) function
+        pub fn pricing_operator(
+            &self,
+        ) -> ::ethers::contract::builders::ContractCall<
+            M,
+            ::ethers::core::types::Address,
+        > {
+            self.0
+                .method_hash([203, 83, 173, 38], ())
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `rebalanceAmount` (0x3150289b) function
+        pub fn rebalance_amount(
+            &self,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::U256> {
+            self.0
+                .method_hash([49, 80, 40, 155], ())
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `registerWalletDerivation` (0x92141552) function
+        pub fn register_wallet_derivation(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            pkp_id: ::ethers::core::types::Address,
+            derivation_path: ::ethers::core::types::U256,
+            name: ::std::string::String,
+            description: ::std::string::String,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash(
+                    [146, 20, 21, 82],
+                    (account_api_key_hash, pkp_id, derivation_path, name, description),
+                )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `removeActionFromGroup` (0x5d861c72) function
+        pub fn remove_action_from_group(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            group_id: ::ethers::core::types::U256,
+            action: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash(
+                    [93, 134, 28, 114],
+                    (account_api_key_hash, group_id, action),
+                )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `removePkpFromGroup` (0x4a42c40a) function
+        pub fn remove_pkp_from_group(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            group_id: ::ethers::core::types::U256,
+            pkp_id: ::ethers::core::types::Address,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([74, 66, 196, 10], (account_api_key_hash, group_id, pkp_id))
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `removeUsageApiKey` (0xc5f5b984) function
+        pub fn remove_usage_api_key(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            usage_api_key_hash: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash(
+                    [197, 245, 185, 132],
+                    (account_api_key_hash, usage_api_key_hash),
+                )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `requestedApiPayerCount` (0x34b7f87a) function
+        pub fn requested_api_payer_count(
+            &self,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::U256> {
+            self.0
+                .method_hash([52, 183, 248, 122], ())
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `setAdminApiPayerAccount` (0xc001bc79) function
+        pub fn set_admin_api_payer_account(
+            &self,
+            new_admin_api_payer_account: ::ethers::core::types::Address,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([192, 1, 188, 121], new_admin_api_payer_account)
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `setApiPayers` (0xae8c49a5) function
+        pub fn set_api_payers(
+            &self,
+            new_api_payers: ::std::vec::Vec<::ethers::core::types::Address>,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([174, 140, 73, 165], new_api_payers)
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `setPricing` (0xca05588a) function
+        pub fn set_pricing(
+            &self,
+            pricing_item_id: ::ethers::core::types::U256,
+            price: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([202, 5, 88, 138], (pricing_item_id, price))
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `setPricingOperator` (0xe6ad2928) function
+        pub fn set_pricing_operator(
+            &self,
+            new_pricing_operator: ::ethers::core::types::Address,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([230, 173, 41, 40], new_pricing_operator)
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `setRebalanceAmount` (0xfdbfc9b7) function
+        pub fn set_rebalance_amount(
+            &self,
+            new_rebalance_amount: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([253, 191, 201, 183], new_rebalance_amount)
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `setRequestedApiPayerCount` (0x52067859) function
+        pub fn set_requested_api_payer_count(
+            &self,
+            new_requested_api_payer_count: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([82, 6, 120, 89], new_requested_api_payer_count)
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `setUsageApiKey` (0x2da0cf16) function
+        pub fn set_usage_api_key(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            usage_api_key_hash: ::ethers::core::types::U256,
+            expiration: ::ethers::core::types::U256,
+            balance: ::ethers::core::types::U256,
+            name: ::std::string::String,
+            description: ::std::string::String,
+            create_groups: bool,
+            delete_groups: bool,
+            create_pk_ps: bool,
+            manage_ipfs_ids_in_groups: ::std::vec::Vec<::ethers::core::types::U256>,
+            add_pkp_to_groups: ::std::vec::Vec<::ethers::core::types::U256>,
+            remove_pkp_from_groups: ::std::vec::Vec<::ethers::core::types::U256>,
+            execute_in_groups: ::std::vec::Vec<::ethers::core::types::U256>,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash(
+                    [45, 160, 207, 22],
+                    (
+                        account_api_key_hash,
+                        usage_api_key_hash,
+                        expiration,
+                        balance,
+                        name,
+                        description,
+                        create_groups,
+                        delete_groups,
+                        create_pk_ps,
+                        manage_ipfs_ids_in_groups,
+                        add_pkp_to_groups,
+                        remove_pkp_from_groups,
+                        execute_in_groups,
+                    ),
+                )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `updateActionMetadata` (0xa6b6b672) function
+        pub fn update_action_metadata(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            action_hash: ::ethers::core::types::U256,
+            group_id: ::ethers::core::types::U256,
+            name: ::std::string::String,
+            description: ::std::string::String,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash(
+                    [166, 182, 182, 114],
+                    (account_api_key_hash, action_hash, group_id, name, description),
+                )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `updateGroup` (0x851b2a54) function
+        pub fn update_group(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            group_id: ::ethers::core::types::U256,
+            name: ::std::string::String,
+            description: ::std::string::String,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash(
+                    [133, 27, 42, 84],
+                    (account_api_key_hash, group_id, name, description),
+                )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `updateUsageApiKeyMetadata` (0x6a3d77a9) function
+        pub fn update_usage_api_key_metadata(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            usage_api_key_hash: ::ethers::core::types::U256,
+            name: ::std::string::String,
+            description: ::std::string::String,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash(
+                    [106, 61, 119, 169],
+                    (account_api_key_hash, usage_api_key_hash, name, description),
+                )
+                .expect("method not found (this should never happen)")
         }
     }
     impl<M: ::ethers::providers::Middleware> From<::ethers::contract::Contract<M>>
@@ -585,7 +2512,41 @@ pub mod account_config {
             Self::new(contract.address(), contract.client())
         }
     }
-    ///Custom Error type `CannotAddFunctionToDiamondThatAlreadyExists` with signature `CannotAddFunctionToDiamondThatAlreadyExists(bytes4)` and selector `0xebbf5d07`
+    ///Custom Error type `AccountAlreadyExists` with signature `AccountAlreadyExists(uint256)` and selector `0x8be1f3fb`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthError,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[etherror(name = "AccountAlreadyExists", abi = "AccountAlreadyExists(uint256)")]
+    pub struct AccountAlreadyExists {
+        pub api_key_hash: ::ethers::core::types::U256,
+    }
+    ///Custom Error type `AccountDoesNotExist` with signature `AccountDoesNotExist(uint256)` and selector `0xd4a84737`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthError,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[etherror(name = "AccountDoesNotExist", abi = "AccountDoesNotExist(uint256)")]
+    pub struct AccountDoesNotExist {
+        pub api_key_hash: ::ethers::core::types::U256,
+    }
+    ///Custom Error type `ActionDoesNotExist` with signature `ActionDoesNotExist(uint256,uint256,uint256)` and selector `0xef25d02d`
     #[derive(
         Clone,
         ::ethers::contract::EthError,
@@ -599,13 +2560,33 @@ pub mod account_config {
         Hash
     )]
     #[etherror(
-        name = "CannotAddFunctionToDiamondThatAlreadyExists",
-        abi = "CannotAddFunctionToDiamondThatAlreadyExists(bytes4)"
+        name = "ActionDoesNotExist",
+        abi = "ActionDoesNotExist(uint256,uint256,uint256)"
     )]
-    pub struct CannotAddFunctionToDiamondThatAlreadyExists {
-        pub selector: [u8; 4],
+    pub struct ActionDoesNotExist {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub group_id: ::ethers::core::types::U256,
+        pub cid_hash: ::ethers::core::types::U256,
     }
-    ///Custom Error type `CannotAddSelectorsToZeroAddress` with signature `CannotAddSelectorsToZeroAddress(bytes4[])` and selector `0x0ae3681c`
+    ///Custom Error type `GroupDoesNotExist` with signature `GroupDoesNotExist(uint256,uint256)` and selector `0x931a85b3`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthError,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[etherror(name = "GroupDoesNotExist", abi = "GroupDoesNotExist(uint256,uint256)")]
+    pub struct GroupDoesNotExist {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub group_id: ::ethers::core::types::U256,
+    }
+    ///Custom Error type `InsufficientBalance` with signature `InsufficientBalance(uint256,uint256)` and selector `0xcf479181`
     #[derive(
         Clone,
         ::ethers::contract::EthError,
@@ -619,13 +2600,66 @@ pub mod account_config {
         Hash
     )]
     #[etherror(
-        name = "CannotAddSelectorsToZeroAddress",
-        abi = "CannotAddSelectorsToZeroAddress(bytes4[])"
+        name = "InsufficientBalance",
+        abi = "InsufficientBalance(uint256,uint256)"
     )]
-    pub struct CannotAddSelectorsToZeroAddress {
-        pub selectors: ::std::vec::Vec<[u8; 4]>,
+    pub struct InsufficientBalance {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub amount: ::ethers::core::types::U256,
     }
-    ///Custom Error type `CannotRemoveFunctionThatDoesNotExist` with signature `CannotRemoveFunctionThatDoesNotExist(bytes4)` and selector `0x7a08a22d`
+    ///Custom Error type `NoAccountAccess` with signature `NoAccountAccess(uint256,address)` and selector `0x7b0f9c07`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthError,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[etherror(name = "NoAccountAccess", abi = "NoAccountAccess(uint256,address)")]
+    pub struct NoAccountAccess {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub sender: ::ethers::core::types::Address,
+    }
+    ///Custom Error type `NotMasterAccount` with signature `NotMasterAccount(uint256)` and selector `0x1d0932ee`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthError,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[etherror(name = "NotMasterAccount", abi = "NotMasterAccount(uint256)")]
+    pub struct NotMasterAccount {
+        pub api_key_hash: ::ethers::core::types::U256,
+    }
+    ///Custom Error type `OnlyApiPayerOrOwner` with signature `OnlyApiPayerOrOwner(address)` and selector `0x2d87faed`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthError,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[etherror(name = "OnlyApiPayerOrOwner", abi = "OnlyApiPayerOrOwner(address)")]
+    pub struct OnlyApiPayerOrOwner {
+        pub caller: ::ethers::core::types::Address,
+    }
+    ///Custom Error type `OnlyApiPayerOrPricingOperator` with signature `OnlyApiPayerOrPricingOperator(address)` and selector `0x9ed88e07`
     #[derive(
         Clone,
         ::ethers::contract::EthError,
@@ -639,13 +2673,13 @@ pub mod account_config {
         Hash
     )]
     #[etherror(
-        name = "CannotRemoveFunctionThatDoesNotExist",
-        abi = "CannotRemoveFunctionThatDoesNotExist(bytes4)"
+        name = "OnlyApiPayerOrPricingOperator",
+        abi = "OnlyApiPayerOrPricingOperator(address)"
     )]
-    pub struct CannotRemoveFunctionThatDoesNotExist {
-        pub selector: [u8; 4],
+    pub struct OnlyApiPayerOrPricingOperator {
+        pub caller: ::ethers::core::types::Address,
     }
-    ///Custom Error type `CannotRemoveImmutableFunction` with signature `CannotRemoveImmutableFunction(bytes4)` and selector `0x6fafeb08`
+    ///Custom Error type `PkpDoesNotExist` with signature `PkpDoesNotExist(uint256,uint256,address)` and selector `0x2593917a`
     #[derive(
         Clone,
         ::ethers::contract::EthError,
@@ -659,13 +2693,15 @@ pub mod account_config {
         Hash
     )]
     #[etherror(
-        name = "CannotRemoveImmutableFunction",
-        abi = "CannotRemoveImmutableFunction(bytes4)"
+        name = "PkpDoesNotExist",
+        abi = "PkpDoesNotExist(uint256,uint256,address)"
     )]
-    pub struct CannotRemoveImmutableFunction {
-        pub selector: [u8; 4],
+    pub struct PkpDoesNotExist {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub group_id: ::ethers::core::types::U256,
+        pub pkp_id: ::ethers::core::types::Address,
     }
-    ///Custom Error type `CannotReplaceFunctionThatDoesNotExists` with signature `CannotReplaceFunctionThatDoesNotExists(bytes4)` and selector `0x7479f939`
+    ///Custom Error type `UsageApiKeyDoesNotExist` with signature `UsageApiKeyDoesNotExist(uint256,uint256)` and selector `0x748e712a`
     #[derive(
         Clone,
         ::ethers::contract::EthError,
@@ -679,187 +2715,12 @@ pub mod account_config {
         Hash
     )]
     #[etherror(
-        name = "CannotReplaceFunctionThatDoesNotExists",
-        abi = "CannotReplaceFunctionThatDoesNotExists(bytes4)"
+        name = "UsageApiKeyDoesNotExist",
+        abi = "UsageApiKeyDoesNotExist(uint256,uint256)"
     )]
-    pub struct CannotReplaceFunctionThatDoesNotExists {
-        pub selector: [u8; 4],
-    }
-    ///Custom Error type `CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet` with signature `CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet(bytes4)` and selector `0x358d9d1a`
-    #[derive(
-        Clone,
-        ::ethers::contract::EthError,
-        ::ethers::contract::EthDisplay,
-        serde::Serialize,
-        serde::Deserialize,
-        Default,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash
-    )]
-    #[etherror(
-        name = "CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet",
-        abi = "CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet(bytes4)"
-    )]
-    pub struct CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet {
-        pub selector: [u8; 4],
-    }
-    ///Custom Error type `CannotReplaceFunctionsFromFacetWithZeroAddress` with signature `CannotReplaceFunctionsFromFacetWithZeroAddress(bytes4[])` and selector `0xcd98a96f`
-    #[derive(
-        Clone,
-        ::ethers::contract::EthError,
-        ::ethers::contract::EthDisplay,
-        serde::Serialize,
-        serde::Deserialize,
-        Default,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash
-    )]
-    #[etherror(
-        name = "CannotReplaceFunctionsFromFacetWithZeroAddress",
-        abi = "CannotReplaceFunctionsFromFacetWithZeroAddress(bytes4[])"
-    )]
-    pub struct CannotReplaceFunctionsFromFacetWithZeroAddress {
-        pub selectors: ::std::vec::Vec<[u8; 4]>,
-    }
-    ///Custom Error type `CannotReplaceImmutableFunction` with signature `CannotReplaceImmutableFunction(bytes4)` and selector `0x520300da`
-    #[derive(
-        Clone,
-        ::ethers::contract::EthError,
-        ::ethers::contract::EthDisplay,
-        serde::Serialize,
-        serde::Deserialize,
-        Default,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash
-    )]
-    #[etherror(
-        name = "CannotReplaceImmutableFunction",
-        abi = "CannotReplaceImmutableFunction(bytes4)"
-    )]
-    pub struct CannotReplaceImmutableFunction {
-        pub selector: [u8; 4],
-    }
-    ///Custom Error type `FunctionNotFound` with signature `FunctionNotFound(bytes4)` and selector `0x5416eb98`
-    #[derive(
-        Clone,
-        ::ethers::contract::EthError,
-        ::ethers::contract::EthDisplay,
-        serde::Serialize,
-        serde::Deserialize,
-        Default,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash
-    )]
-    #[etherror(name = "FunctionNotFound", abi = "FunctionNotFound(bytes4)")]
-    pub struct FunctionNotFound {
-        pub function_selector: [u8; 4],
-    }
-    ///Custom Error type `IncorrectFacetCutAction` with signature `IncorrectFacetCutAction(uint8)` and selector `0x7fe9a41e`
-    #[derive(
-        Clone,
-        ::ethers::contract::EthError,
-        ::ethers::contract::EthDisplay,
-        serde::Serialize,
-        serde::Deserialize,
-        Default,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash
-    )]
-    #[etherror(name = "IncorrectFacetCutAction", abi = "IncorrectFacetCutAction(uint8)")]
-    pub struct IncorrectFacetCutAction {
-        pub action: u8,
-    }
-    ///Custom Error type `InitializationFunctionReverted` with signature `InitializationFunctionReverted(address,bytes)` and selector `0x192105d7`
-    #[derive(
-        Clone,
-        ::ethers::contract::EthError,
-        ::ethers::contract::EthDisplay,
-        serde::Serialize,
-        serde::Deserialize,
-        Default,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash
-    )]
-    #[etherror(
-        name = "InitializationFunctionReverted",
-        abi = "InitializationFunctionReverted(address,bytes)"
-    )]
-    pub struct InitializationFunctionReverted {
-        pub initialization_contract_address: ::ethers::core::types::Address,
-        pub calldata: ::ethers::core::types::Bytes,
-    }
-    ///Custom Error type `NoBytecodeAtAddress` with signature `NoBytecodeAtAddress(address,string)` and selector `0x919834b9`
-    #[derive(
-        Clone,
-        ::ethers::contract::EthError,
-        ::ethers::contract::EthDisplay,
-        serde::Serialize,
-        serde::Deserialize,
-        Default,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash
-    )]
-    #[etherror(
-        name = "NoBytecodeAtAddress",
-        abi = "NoBytecodeAtAddress(address,string)"
-    )]
-    pub struct NoBytecodeAtAddress {
-        pub contract_address: ::ethers::core::types::Address,
-        pub message: ::std::string::String,
-    }
-    ///Custom Error type `NoSelectorsProvidedForFacetForCut` with signature `NoSelectorsProvidedForFacetForCut(address)` and selector `0xe767f91f`
-    #[derive(
-        Clone,
-        ::ethers::contract::EthError,
-        ::ethers::contract::EthDisplay,
-        serde::Serialize,
-        serde::Deserialize,
-        Default,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash
-    )]
-    #[etherror(
-        name = "NoSelectorsProvidedForFacetForCut",
-        abi = "NoSelectorsProvidedForFacetForCut(address)"
-    )]
-    pub struct NoSelectorsProvidedForFacetForCut {
-        pub facet_address: ::ethers::core::types::Address,
-    }
-    ///Custom Error type `RemoveFacetAddressMustBeZeroAddress` with signature `RemoveFacetAddressMustBeZeroAddress(address)` and selector `0xd091bc81`
-    #[derive(
-        Clone,
-        ::ethers::contract::EthError,
-        ::ethers::contract::EthDisplay,
-        serde::Serialize,
-        serde::Deserialize,
-        Default,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash
-    )]
-    #[etherror(
-        name = "RemoveFacetAddressMustBeZeroAddress",
-        abi = "RemoveFacetAddressMustBeZeroAddress(address)"
-    )]
-    pub struct RemoveFacetAddressMustBeZeroAddress {
-        pub facet_address: ::ethers::core::types::Address,
+    pub struct UsageApiKeyDoesNotExist {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub usage_api_key_hash: ::ethers::core::types::U256,
     }
     ///Container type for all of the contract's custom errors
     #[derive(
@@ -873,26 +2734,17 @@ pub mod account_config {
         Hash
     )]
     pub enum AccountConfigErrors {
-        CannotAddFunctionToDiamondThatAlreadyExists(
-            CannotAddFunctionToDiamondThatAlreadyExists,
-        ),
-        CannotAddSelectorsToZeroAddress(CannotAddSelectorsToZeroAddress),
-        CannotRemoveFunctionThatDoesNotExist(CannotRemoveFunctionThatDoesNotExist),
-        CannotRemoveImmutableFunction(CannotRemoveImmutableFunction),
-        CannotReplaceFunctionThatDoesNotExists(CannotReplaceFunctionThatDoesNotExists),
-        CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet(
-            CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet,
-        ),
-        CannotReplaceFunctionsFromFacetWithZeroAddress(
-            CannotReplaceFunctionsFromFacetWithZeroAddress,
-        ),
-        CannotReplaceImmutableFunction(CannotReplaceImmutableFunction),
-        FunctionNotFound(FunctionNotFound),
-        IncorrectFacetCutAction(IncorrectFacetCutAction),
-        InitializationFunctionReverted(InitializationFunctionReverted),
-        NoBytecodeAtAddress(NoBytecodeAtAddress),
-        NoSelectorsProvidedForFacetForCut(NoSelectorsProvidedForFacetForCut),
-        RemoveFacetAddressMustBeZeroAddress(RemoveFacetAddressMustBeZeroAddress),
+        AccountAlreadyExists(AccountAlreadyExists),
+        AccountDoesNotExist(AccountDoesNotExist),
+        ActionDoesNotExist(ActionDoesNotExist),
+        GroupDoesNotExist(GroupDoesNotExist),
+        InsufficientBalance(InsufficientBalance),
+        NoAccountAccess(NoAccountAccess),
+        NotMasterAccount(NotMasterAccount),
+        OnlyApiPayerOrOwner(OnlyApiPayerOrOwner),
+        OnlyApiPayerOrPricingOperator(OnlyApiPayerOrPricingOperator),
+        PkpDoesNotExist(PkpDoesNotExist),
+        UsageApiKeyDoesNotExist(UsageApiKeyDoesNotExist),
         /// The standard solidity revert string, with selector
         /// Error(string) -- 0x08c379a0
         RevertString(::std::string::String),
@@ -907,79 +2759,60 @@ pub mod account_config {
             ) {
                 return Ok(Self::RevertString(decoded));
             }
-            if let Ok(decoded) = <CannotAddFunctionToDiamondThatAlreadyExists as ::ethers::core::abi::AbiDecode>::decode(
+            if let Ok(decoded) = <AccountAlreadyExists as ::ethers::core::abi::AbiDecode>::decode(
                 data,
             ) {
-                return Ok(Self::CannotAddFunctionToDiamondThatAlreadyExists(decoded));
+                return Ok(Self::AccountAlreadyExists(decoded));
             }
-            if let Ok(decoded) = <CannotAddSelectorsToZeroAddress as ::ethers::core::abi::AbiDecode>::decode(
+            if let Ok(decoded) = <AccountDoesNotExist as ::ethers::core::abi::AbiDecode>::decode(
                 data,
             ) {
-                return Ok(Self::CannotAddSelectorsToZeroAddress(decoded));
+                return Ok(Self::AccountDoesNotExist(decoded));
             }
-            if let Ok(decoded) = <CannotRemoveFunctionThatDoesNotExist as ::ethers::core::abi::AbiDecode>::decode(
+            if let Ok(decoded) = <ActionDoesNotExist as ::ethers::core::abi::AbiDecode>::decode(
                 data,
             ) {
-                return Ok(Self::CannotRemoveFunctionThatDoesNotExist(decoded));
+                return Ok(Self::ActionDoesNotExist(decoded));
             }
-            if let Ok(decoded) = <CannotRemoveImmutableFunction as ::ethers::core::abi::AbiDecode>::decode(
+            if let Ok(decoded) = <GroupDoesNotExist as ::ethers::core::abi::AbiDecode>::decode(
                 data,
             ) {
-                return Ok(Self::CannotRemoveImmutableFunction(decoded));
+                return Ok(Self::GroupDoesNotExist(decoded));
             }
-            if let Ok(decoded) = <CannotReplaceFunctionThatDoesNotExists as ::ethers::core::abi::AbiDecode>::decode(
+            if let Ok(decoded) = <InsufficientBalance as ::ethers::core::abi::AbiDecode>::decode(
                 data,
             ) {
-                return Ok(Self::CannotReplaceFunctionThatDoesNotExists(decoded));
+                return Ok(Self::InsufficientBalance(decoded));
             }
-            if let Ok(decoded) = <CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet as ::ethers::core::abi::AbiDecode>::decode(
+            if let Ok(decoded) = <NoAccountAccess as ::ethers::core::abi::AbiDecode>::decode(
                 data,
             ) {
-                return Ok(
-                    Self::CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet(
-                        decoded,
-                    ),
-                );
+                return Ok(Self::NoAccountAccess(decoded));
             }
-            if let Ok(decoded) = <CannotReplaceFunctionsFromFacetWithZeroAddress as ::ethers::core::abi::AbiDecode>::decode(
+            if let Ok(decoded) = <NotMasterAccount as ::ethers::core::abi::AbiDecode>::decode(
                 data,
             ) {
-                return Ok(Self::CannotReplaceFunctionsFromFacetWithZeroAddress(decoded));
+                return Ok(Self::NotMasterAccount(decoded));
             }
-            if let Ok(decoded) = <CannotReplaceImmutableFunction as ::ethers::core::abi::AbiDecode>::decode(
+            if let Ok(decoded) = <OnlyApiPayerOrOwner as ::ethers::core::abi::AbiDecode>::decode(
                 data,
             ) {
-                return Ok(Self::CannotReplaceImmutableFunction(decoded));
+                return Ok(Self::OnlyApiPayerOrOwner(decoded));
             }
-            if let Ok(decoded) = <FunctionNotFound as ::ethers::core::abi::AbiDecode>::decode(
+            if let Ok(decoded) = <OnlyApiPayerOrPricingOperator as ::ethers::core::abi::AbiDecode>::decode(
                 data,
             ) {
-                return Ok(Self::FunctionNotFound(decoded));
+                return Ok(Self::OnlyApiPayerOrPricingOperator(decoded));
             }
-            if let Ok(decoded) = <IncorrectFacetCutAction as ::ethers::core::abi::AbiDecode>::decode(
+            if let Ok(decoded) = <PkpDoesNotExist as ::ethers::core::abi::AbiDecode>::decode(
                 data,
             ) {
-                return Ok(Self::IncorrectFacetCutAction(decoded));
+                return Ok(Self::PkpDoesNotExist(decoded));
             }
-            if let Ok(decoded) = <InitializationFunctionReverted as ::ethers::core::abi::AbiDecode>::decode(
+            if let Ok(decoded) = <UsageApiKeyDoesNotExist as ::ethers::core::abi::AbiDecode>::decode(
                 data,
             ) {
-                return Ok(Self::InitializationFunctionReverted(decoded));
-            }
-            if let Ok(decoded) = <NoBytecodeAtAddress as ::ethers::core::abi::AbiDecode>::decode(
-                data,
-            ) {
-                return Ok(Self::NoBytecodeAtAddress(decoded));
-            }
-            if let Ok(decoded) = <NoSelectorsProvidedForFacetForCut as ::ethers::core::abi::AbiDecode>::decode(
-                data,
-            ) {
-                return Ok(Self::NoSelectorsProvidedForFacetForCut(decoded));
-            }
-            if let Ok(decoded) = <RemoveFacetAddressMustBeZeroAddress as ::ethers::core::abi::AbiDecode>::decode(
-                data,
-            ) {
-                return Ok(Self::RemoveFacetAddressMustBeZeroAddress(decoded));
+                return Ok(Self::UsageApiKeyDoesNotExist(decoded));
             }
             Err(::ethers::core::abi::Error::InvalidData.into())
         }
@@ -987,46 +2820,37 @@ pub mod account_config {
     impl ::ethers::core::abi::AbiEncode for AccountConfigErrors {
         fn encode(self) -> ::std::vec::Vec<u8> {
             match self {
-                Self::CannotAddFunctionToDiamondThatAlreadyExists(element) => {
+                Self::AccountAlreadyExists(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
-                Self::CannotAddSelectorsToZeroAddress(element) => {
+                Self::AccountDoesNotExist(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
-                Self::CannotRemoveFunctionThatDoesNotExist(element) => {
+                Self::ActionDoesNotExist(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
-                Self::CannotRemoveImmutableFunction(element) => {
+                Self::GroupDoesNotExist(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
-                Self::CannotReplaceFunctionThatDoesNotExists(element) => {
+                Self::InsufficientBalance(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
-                Self::CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet(
-                    element,
-                ) => ::ethers::core::abi::AbiEncode::encode(element),
-                Self::CannotReplaceFunctionsFromFacetWithZeroAddress(element) => {
+                Self::NoAccountAccess(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
-                Self::CannotReplaceImmutableFunction(element) => {
+                Self::NotMasterAccount(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
-                Self::FunctionNotFound(element) => {
+                Self::OnlyApiPayerOrOwner(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
-                Self::IncorrectFacetCutAction(element) => {
+                Self::OnlyApiPayerOrPricingOperator(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
-                Self::InitializationFunctionReverted(element) => {
+                Self::PkpDoesNotExist(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
-                Self::NoBytecodeAtAddress(element) => {
-                    ::ethers::core::abi::AbiEncode::encode(element)
-                }
-                Self::NoSelectorsProvidedForFacetForCut(element) => {
-                    ::ethers::core::abi::AbiEncode::encode(element)
-                }
-                Self::RemoveFacetAddressMustBeZeroAddress(element) => {
+                Self::UsageApiKeyDoesNotExist(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
                 Self::RevertString(s) => ::ethers::core::abi::AbiEncode::encode(s),
@@ -1038,59 +2862,47 @@ pub mod account_config {
             match selector {
                 [0x08, 0xc3, 0x79, 0xa0] => true,
                 _ if selector
-                    == <CannotAddFunctionToDiamondThatAlreadyExists as ::ethers::contract::EthError>::selector() => {
+                    == <AccountAlreadyExists as ::ethers::contract::EthError>::selector() => {
                     true
                 }
                 _ if selector
-                    == <CannotAddSelectorsToZeroAddress as ::ethers::contract::EthError>::selector() => {
+                    == <AccountDoesNotExist as ::ethers::contract::EthError>::selector() => {
                     true
                 }
                 _ if selector
-                    == <CannotRemoveFunctionThatDoesNotExist as ::ethers::contract::EthError>::selector() => {
+                    == <ActionDoesNotExist as ::ethers::contract::EthError>::selector() => {
                     true
                 }
                 _ if selector
-                    == <CannotRemoveImmutableFunction as ::ethers::contract::EthError>::selector() => {
+                    == <GroupDoesNotExist as ::ethers::contract::EthError>::selector() => {
                     true
                 }
                 _ if selector
-                    == <CannotReplaceFunctionThatDoesNotExists as ::ethers::contract::EthError>::selector() => {
+                    == <InsufficientBalance as ::ethers::contract::EthError>::selector() => {
                     true
                 }
                 _ if selector
-                    == <CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet as ::ethers::contract::EthError>::selector() => {
+                    == <NoAccountAccess as ::ethers::contract::EthError>::selector() => {
                     true
                 }
                 _ if selector
-                    == <CannotReplaceFunctionsFromFacetWithZeroAddress as ::ethers::contract::EthError>::selector() => {
+                    == <NotMasterAccount as ::ethers::contract::EthError>::selector() => {
                     true
                 }
                 _ if selector
-                    == <CannotReplaceImmutableFunction as ::ethers::contract::EthError>::selector() => {
+                    == <OnlyApiPayerOrOwner as ::ethers::contract::EthError>::selector() => {
                     true
                 }
                 _ if selector
-                    == <FunctionNotFound as ::ethers::contract::EthError>::selector() => {
+                    == <OnlyApiPayerOrPricingOperator as ::ethers::contract::EthError>::selector() => {
                     true
                 }
                 _ if selector
-                    == <IncorrectFacetCutAction as ::ethers::contract::EthError>::selector() => {
+                    == <PkpDoesNotExist as ::ethers::contract::EthError>::selector() => {
                     true
                 }
                 _ if selector
-                    == <InitializationFunctionReverted as ::ethers::contract::EthError>::selector() => {
-                    true
-                }
-                _ if selector
-                    == <NoBytecodeAtAddress as ::ethers::contract::EthError>::selector() => {
-                    true
-                }
-                _ if selector
-                    == <NoSelectorsProvidedForFacetForCut as ::ethers::contract::EthError>::selector() => {
-                    true
-                }
-                _ if selector
-                    == <RemoveFacetAddressMustBeZeroAddress as ::ethers::contract::EthError>::selector() => {
+                    == <UsageApiKeyDoesNotExist as ::ethers::contract::EthError>::selector() => {
                     true
                 }
                 _ => false,
@@ -1100,44 +2912,29 @@ pub mod account_config {
     impl ::core::fmt::Display for AccountConfigErrors {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             match self {
-                Self::CannotAddFunctionToDiamondThatAlreadyExists(element) => {
+                Self::AccountAlreadyExists(element) => {
                     ::core::fmt::Display::fmt(element, f)
                 }
-                Self::CannotAddSelectorsToZeroAddress(element) => {
+                Self::AccountDoesNotExist(element) => {
                     ::core::fmt::Display::fmt(element, f)
                 }
-                Self::CannotRemoveFunctionThatDoesNotExist(element) => {
+                Self::ActionDoesNotExist(element) => {
                     ::core::fmt::Display::fmt(element, f)
                 }
-                Self::CannotRemoveImmutableFunction(element) => {
+                Self::GroupDoesNotExist(element) => ::core::fmt::Display::fmt(element, f),
+                Self::InsufficientBalance(element) => {
                     ::core::fmt::Display::fmt(element, f)
                 }
-                Self::CannotReplaceFunctionThatDoesNotExists(element) => {
+                Self::NoAccountAccess(element) => ::core::fmt::Display::fmt(element, f),
+                Self::NotMasterAccount(element) => ::core::fmt::Display::fmt(element, f),
+                Self::OnlyApiPayerOrOwner(element) => {
                     ::core::fmt::Display::fmt(element, f)
                 }
-                Self::CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet(
-                    element,
-                ) => ::core::fmt::Display::fmt(element, f),
-                Self::CannotReplaceFunctionsFromFacetWithZeroAddress(element) => {
+                Self::OnlyApiPayerOrPricingOperator(element) => {
                     ::core::fmt::Display::fmt(element, f)
                 }
-                Self::CannotReplaceImmutableFunction(element) => {
-                    ::core::fmt::Display::fmt(element, f)
-                }
-                Self::FunctionNotFound(element) => ::core::fmt::Display::fmt(element, f),
-                Self::IncorrectFacetCutAction(element) => {
-                    ::core::fmt::Display::fmt(element, f)
-                }
-                Self::InitializationFunctionReverted(element) => {
-                    ::core::fmt::Display::fmt(element, f)
-                }
-                Self::NoBytecodeAtAddress(element) => {
-                    ::core::fmt::Display::fmt(element, f)
-                }
-                Self::NoSelectorsProvidedForFacetForCut(element) => {
-                    ::core::fmt::Display::fmt(element, f)
-                }
-                Self::RemoveFacetAddressMustBeZeroAddress(element) => {
+                Self::PkpDoesNotExist(element) => ::core::fmt::Display::fmt(element, f),
+                Self::UsageApiKeyDoesNotExist(element) => {
                     ::core::fmt::Display::fmt(element, f)
                 }
                 Self::RevertString(s) => ::core::fmt::Display::fmt(s, f),
@@ -1149,88 +2946,65 @@ pub mod account_config {
             Self::RevertString(value)
         }
     }
-    impl ::core::convert::From<CannotAddFunctionToDiamondThatAlreadyExists>
-    for AccountConfigErrors {
-        fn from(value: CannotAddFunctionToDiamondThatAlreadyExists) -> Self {
-            Self::CannotAddFunctionToDiamondThatAlreadyExists(value)
+    impl ::core::convert::From<AccountAlreadyExists> for AccountConfigErrors {
+        fn from(value: AccountAlreadyExists) -> Self {
+            Self::AccountAlreadyExists(value)
         }
     }
-    impl ::core::convert::From<CannotAddSelectorsToZeroAddress> for AccountConfigErrors {
-        fn from(value: CannotAddSelectorsToZeroAddress) -> Self {
-            Self::CannotAddSelectorsToZeroAddress(value)
+    impl ::core::convert::From<AccountDoesNotExist> for AccountConfigErrors {
+        fn from(value: AccountDoesNotExist) -> Self {
+            Self::AccountDoesNotExist(value)
         }
     }
-    impl ::core::convert::From<CannotRemoveFunctionThatDoesNotExist>
-    for AccountConfigErrors {
-        fn from(value: CannotRemoveFunctionThatDoesNotExist) -> Self {
-            Self::CannotRemoveFunctionThatDoesNotExist(value)
+    impl ::core::convert::From<ActionDoesNotExist> for AccountConfigErrors {
+        fn from(value: ActionDoesNotExist) -> Self {
+            Self::ActionDoesNotExist(value)
         }
     }
-    impl ::core::convert::From<CannotRemoveImmutableFunction> for AccountConfigErrors {
-        fn from(value: CannotRemoveImmutableFunction) -> Self {
-            Self::CannotRemoveImmutableFunction(value)
+    impl ::core::convert::From<GroupDoesNotExist> for AccountConfigErrors {
+        fn from(value: GroupDoesNotExist) -> Self {
+            Self::GroupDoesNotExist(value)
         }
     }
-    impl ::core::convert::From<CannotReplaceFunctionThatDoesNotExists>
-    for AccountConfigErrors {
-        fn from(value: CannotReplaceFunctionThatDoesNotExists) -> Self {
-            Self::CannotReplaceFunctionThatDoesNotExists(value)
+    impl ::core::convert::From<InsufficientBalance> for AccountConfigErrors {
+        fn from(value: InsufficientBalance) -> Self {
+            Self::InsufficientBalance(value)
         }
     }
-    impl ::core::convert::From<CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet>
-    for AccountConfigErrors {
-        fn from(
-            value: CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet,
-        ) -> Self {
-            Self::CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet(value)
+    impl ::core::convert::From<NoAccountAccess> for AccountConfigErrors {
+        fn from(value: NoAccountAccess) -> Self {
+            Self::NoAccountAccess(value)
         }
     }
-    impl ::core::convert::From<CannotReplaceFunctionsFromFacetWithZeroAddress>
-    for AccountConfigErrors {
-        fn from(value: CannotReplaceFunctionsFromFacetWithZeroAddress) -> Self {
-            Self::CannotReplaceFunctionsFromFacetWithZeroAddress(value)
+    impl ::core::convert::From<NotMasterAccount> for AccountConfigErrors {
+        fn from(value: NotMasterAccount) -> Self {
+            Self::NotMasterAccount(value)
         }
     }
-    impl ::core::convert::From<CannotReplaceImmutableFunction> for AccountConfigErrors {
-        fn from(value: CannotReplaceImmutableFunction) -> Self {
-            Self::CannotReplaceImmutableFunction(value)
+    impl ::core::convert::From<OnlyApiPayerOrOwner> for AccountConfigErrors {
+        fn from(value: OnlyApiPayerOrOwner) -> Self {
+            Self::OnlyApiPayerOrOwner(value)
         }
     }
-    impl ::core::convert::From<FunctionNotFound> for AccountConfigErrors {
-        fn from(value: FunctionNotFound) -> Self {
-            Self::FunctionNotFound(value)
+    impl ::core::convert::From<OnlyApiPayerOrPricingOperator> for AccountConfigErrors {
+        fn from(value: OnlyApiPayerOrPricingOperator) -> Self {
+            Self::OnlyApiPayerOrPricingOperator(value)
         }
     }
-    impl ::core::convert::From<IncorrectFacetCutAction> for AccountConfigErrors {
-        fn from(value: IncorrectFacetCutAction) -> Self {
-            Self::IncorrectFacetCutAction(value)
+    impl ::core::convert::From<PkpDoesNotExist> for AccountConfigErrors {
+        fn from(value: PkpDoesNotExist) -> Self {
+            Self::PkpDoesNotExist(value)
         }
     }
-    impl ::core::convert::From<InitializationFunctionReverted> for AccountConfigErrors {
-        fn from(value: InitializationFunctionReverted) -> Self {
-            Self::InitializationFunctionReverted(value)
+    impl ::core::convert::From<UsageApiKeyDoesNotExist> for AccountConfigErrors {
+        fn from(value: UsageApiKeyDoesNotExist) -> Self {
+            Self::UsageApiKeyDoesNotExist(value)
         }
     }
-    impl ::core::convert::From<NoBytecodeAtAddress> for AccountConfigErrors {
-        fn from(value: NoBytecodeAtAddress) -> Self {
-            Self::NoBytecodeAtAddress(value)
-        }
-    }
-    impl ::core::convert::From<NoSelectorsProvidedForFacetForCut>
-    for AccountConfigErrors {
-        fn from(value: NoSelectorsProvidedForFacetForCut) -> Self {
-            Self::NoSelectorsProvidedForFacetForCut(value)
-        }
-    }
-    impl ::core::convert::From<RemoveFacetAddressMustBeZeroAddress>
-    for AccountConfigErrors {
-        fn from(value: RemoveFacetAddressMustBeZeroAddress) -> Self {
-            Self::RemoveFacetAddressMustBeZeroAddress(value)
-        }
-    }
+    ///Container type for all input parameters for the `accountCount` function with signature `accountCount()` and selector `0xe4af29fc`
     #[derive(
         Clone,
-        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthCall,
         ::ethers::contract::EthDisplay,
         serde::Serialize,
         serde::Deserialize,
@@ -1240,18 +3014,12 @@ pub mod account_config {
         Eq,
         Hash
     )]
-    #[ethevent(
-        name = "DiamondCut",
-        abi = "DiamondCut((address,uint8,bytes4[])[],address,bytes)"
-    )]
-    pub struct DiamondCutFilter {
-        pub diamond_cut: ::std::vec::Vec<FacetCut>,
-        pub init: ::ethers::core::types::Address,
-        pub calldata: ::ethers::core::types::Bytes,
-    }
+    #[ethcall(name = "accountCount", abi = "accountCount()")]
+    pub struct AccountCountCall;
+    ///Container type for all input parameters for the `accountExistsAndIsMutable` function with signature `accountExistsAndIsMutable(uint256)` and selector `0x719fac43`
     #[derive(
         Clone,
-        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthCall,
         ::ethers::contract::EthDisplay,
         serde::Serialize,
         serde::Deserialize,
@@ -1261,17 +3029,750 @@ pub mod account_config {
         Eq,
         Hash
     )]
-    #[ethevent(
-        name = "OwnershipTransferred",
-        abi = "OwnershipTransferred(address,address)"
+    #[ethcall(
+        name = "accountExistsAndIsMutable",
+        abi = "accountExistsAndIsMutable(uint256)"
     )]
-    pub struct OwnershipTransferredFilter {
-        #[ethevent(indexed)]
-        pub previous_owner: ::ethers::core::types::Address,
-        #[ethevent(indexed)]
-        pub new_owner: ::ethers::core::types::Address,
+    pub struct AccountExistsAndIsMutableCall {
+        pub api_key_hash: ::ethers::core::types::U256,
     }
-    ///Container type for all of the contract's events
+    ///Container type for all input parameters for the `addActionToGroup` function with signature `addActionToGroup(uint256,uint256,uint256,string,string)` and selector `0x2fa92e41`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(
+        name = "addActionToGroup",
+        abi = "addActionToGroup(uint256,uint256,uint256,string,string)"
+    )]
+    pub struct AddActionToGroupCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub group_id: ::ethers::core::types::U256,
+        pub action: ::ethers::core::types::U256,
+        pub name: ::std::string::String,
+        pub description: ::std::string::String,
+    }
+    ///Container type for all input parameters for the `addGroup` function with signature `addGroup(uint256,string,string,uint256[],address[])` and selector `0x2b12dee6`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(
+        name = "addGroup",
+        abi = "addGroup(uint256,string,string,uint256[],address[])"
+    )]
+    pub struct AddGroupCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub name: ::std::string::String,
+        pub description: ::std::string::String,
+        pub cid_hashes: ::std::vec::Vec<::ethers::core::types::U256>,
+        pub pkp_ids: ::std::vec::Vec<::ethers::core::types::Address>,
+    }
+    ///Container type for all input parameters for the `addPkpToGroup` function with signature `addPkpToGroup(uint256,uint256,address)` and selector `0x7817d782`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "addPkpToGroup", abi = "addPkpToGroup(uint256,uint256,address)")]
+    pub struct AddPkpToGroupCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub group_id: ::ethers::core::types::U256,
+        pub pkp_id: ::ethers::core::types::Address,
+    }
+    ///Container type for all input parameters for the `adminApiPayerAccount` function with signature `adminApiPayerAccount()` and selector `0x383603fe`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "adminApiPayerAccount", abi = "adminApiPayerAccount()")]
+    pub struct AdminApiPayerAccountCall;
+    ///Container type for all input parameters for the `allPkpIdsAt` function with signature `allPkpIdsAt(uint256)` and selector `0x62feae44`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "allPkpIdsAt", abi = "allPkpIdsAt(uint256)")]
+    pub struct AllPkpIdsAtCall {
+        pub index: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `apiPayerCount` function with signature `apiPayerCount()` and selector `0xb8037ffe`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "apiPayerCount", abi = "apiPayerCount()")]
+    pub struct ApiPayerCountCall;
+    ///Container type for all input parameters for the `api_payers` function with signature `api_payers()` and selector `0x93c8bc43`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "api_payers", abi = "api_payers()")]
+    pub struct ApiPayersCall;
+    ///Container type for all input parameters for the `creditApiKey` function with signature `creditApiKey(uint256,uint256)` and selector `0x683f2de8`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "creditApiKey", abi = "creditApiKey(uint256,uint256)")]
+    pub struct CreditApiKeyCall {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub amount: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `debitApiKey` function with signature `debitApiKey(uint256,uint256)` and selector `0x40b4d453`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "debitApiKey", abi = "debitApiKey(uint256,uint256)")]
+    pub struct DebitApiKeyCall {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub amount: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `getPricing` function with signature `getPricing(uint256)` and selector `0xc12f1a42`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "getPricing", abi = "getPricing(uint256)")]
+    pub struct GetPricingCall {
+        pub pricing_item_id: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `getWalletDerivation` function with signature `getWalletDerivation(uint256,address)` and selector `0x90222cad`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(
+        name = "getWalletDerivation",
+        abi = "getWalletDerivation(uint256,address)"
+    )]
+    pub struct GetWalletDerivationCall {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub wallet_address: ::ethers::core::types::Address,
+    }
+    ///Container type for all input parameters for the `indexToAccountHashAt` function with signature `indexToAccountHashAt(uint256)` and selector `0x6fe1fb84`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "indexToAccountHashAt", abi = "indexToAccountHashAt(uint256)")]
+    pub struct IndexToAccountHashAtCall {
+        pub index: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `listActions` function with signature `listActions(uint256,uint256,uint256,uint256)` and selector `0x542970ed`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(
+        name = "listActions",
+        abi = "listActions(uint256,uint256,uint256,uint256)"
+    )]
+    pub struct ListActionsCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub group_id: ::ethers::core::types::U256,
+        pub page_number: ::ethers::core::types::U256,
+        pub page_size: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `listApiKeys` function with signature `listApiKeys(uint256,uint256,uint256)` and selector `0xc704668c`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "listApiKeys", abi = "listApiKeys(uint256,uint256,uint256)")]
+    pub struct ListApiKeysCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub page_number: ::ethers::core::types::U256,
+        pub page_size: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `listGroupContents` function with signature `listGroupContents(uint256,uint256)` and selector `0x6fe9572e`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "listGroupContents", abi = "listGroupContents(uint256,uint256)")]
+    pub struct ListGroupContentsCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub group_id: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `listGroups` function with signature `listGroups(uint256,uint256,uint256)` and selector `0xf75c8b2d`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "listGroups", abi = "listGroups(uint256,uint256,uint256)")]
+    pub struct ListGroupsCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub page_number: ::ethers::core::types::U256,
+        pub page_size: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `listPkps` function with signature `listPkps(uint256,uint256,uint256)` and selector `0x50409001`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "listPkps", abi = "listPkps(uint256,uint256,uint256)")]
+    pub struct ListPkpsCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub page_number: ::ethers::core::types::U256,
+        pub page_size: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `listWalletsInGroup` function with signature `listWalletsInGroup(uint256,uint256,uint256,uint256)` and selector `0x291ff1ea`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(
+        name = "listWalletsInGroup",
+        abi = "listWalletsInGroup(uint256,uint256,uint256,uint256)"
+    )]
+    pub struct ListWalletsInGroupCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub group_id: ::ethers::core::types::U256,
+        pub page_number: ::ethers::core::types::U256,
+        pub page_size: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `newAccount` function with signature `newAccount(uint256,bool,string,string,address)` and selector `0x79312245`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(
+        name = "newAccount",
+        abi = "newAccount(uint256,bool,string,string,address)"
+    )]
+    pub struct NewAccountCall {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub managed: bool,
+        pub account_name: ::std::string::String,
+        pub account_description: ::std::string::String,
+        pub creator_wallet_address: ::ethers::core::types::Address,
+    }
+    ///Container type for all input parameters for the `pkpCount` function with signature `pkpCount()` and selector `0x223a7962`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "pkpCount", abi = "pkpCount()")]
+    pub struct PkpCountCall;
+    ///Container type for all input parameters for the `pricingAt` function with signature `pricingAt(uint256)` and selector `0xc1aff899`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "pricingAt", abi = "pricingAt(uint256)")]
+    pub struct PricingAtCall {
+        pub index: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `pricingOperator` function with signature `pricingOperator()` and selector `0xcb53ad26`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "pricingOperator", abi = "pricingOperator()")]
+    pub struct PricingOperatorCall;
+    ///Container type for all input parameters for the `rebalanceAmount` function with signature `rebalanceAmount()` and selector `0x3150289b`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "rebalanceAmount", abi = "rebalanceAmount()")]
+    pub struct RebalanceAmountCall;
+    ///Container type for all input parameters for the `registerWalletDerivation` function with signature `registerWalletDerivation(uint256,address,uint256,string,string)` and selector `0x92141552`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(
+        name = "registerWalletDerivation",
+        abi = "registerWalletDerivation(uint256,address,uint256,string,string)"
+    )]
+    pub struct RegisterWalletDerivationCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub pkp_id: ::ethers::core::types::Address,
+        pub derivation_path: ::ethers::core::types::U256,
+        pub name: ::std::string::String,
+        pub description: ::std::string::String,
+    }
+    ///Container type for all input parameters for the `removeActionFromGroup` function with signature `removeActionFromGroup(uint256,uint256,uint256)` and selector `0x5d861c72`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(
+        name = "removeActionFromGroup",
+        abi = "removeActionFromGroup(uint256,uint256,uint256)"
+    )]
+    pub struct RemoveActionFromGroupCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub group_id: ::ethers::core::types::U256,
+        pub action: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `removePkpFromGroup` function with signature `removePkpFromGroup(uint256,uint256,address)` and selector `0x4a42c40a`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(
+        name = "removePkpFromGroup",
+        abi = "removePkpFromGroup(uint256,uint256,address)"
+    )]
+    pub struct RemovePkpFromGroupCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub group_id: ::ethers::core::types::U256,
+        pub pkp_id: ::ethers::core::types::Address,
+    }
+    ///Container type for all input parameters for the `removeUsageApiKey` function with signature `removeUsageApiKey(uint256,uint256)` and selector `0xc5f5b984`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "removeUsageApiKey", abi = "removeUsageApiKey(uint256,uint256)")]
+    pub struct RemoveUsageApiKeyCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub usage_api_key_hash: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `requestedApiPayerCount` function with signature `requestedApiPayerCount()` and selector `0x34b7f87a`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "requestedApiPayerCount", abi = "requestedApiPayerCount()")]
+    pub struct RequestedApiPayerCountCall;
+    ///Container type for all input parameters for the `setAdminApiPayerAccount` function with signature `setAdminApiPayerAccount(address)` and selector `0xc001bc79`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(
+        name = "setAdminApiPayerAccount",
+        abi = "setAdminApiPayerAccount(address)"
+    )]
+    pub struct SetAdminApiPayerAccountCall {
+        pub new_admin_api_payer_account: ::ethers::core::types::Address,
+    }
+    ///Container type for all input parameters for the `setApiPayers` function with signature `setApiPayers(address[])` and selector `0xae8c49a5`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "setApiPayers", abi = "setApiPayers(address[])")]
+    pub struct SetApiPayersCall {
+        pub new_api_payers: ::std::vec::Vec<::ethers::core::types::Address>,
+    }
+    ///Container type for all input parameters for the `setPricing` function with signature `setPricing(uint256,uint256)` and selector `0xca05588a`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "setPricing", abi = "setPricing(uint256,uint256)")]
+    pub struct SetPricingCall {
+        pub pricing_item_id: ::ethers::core::types::U256,
+        pub price: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `setPricingOperator` function with signature `setPricingOperator(address)` and selector `0xe6ad2928`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "setPricingOperator", abi = "setPricingOperator(address)")]
+    pub struct SetPricingOperatorCall {
+        pub new_pricing_operator: ::ethers::core::types::Address,
+    }
+    ///Container type for all input parameters for the `setRebalanceAmount` function with signature `setRebalanceAmount(uint256)` and selector `0xfdbfc9b7`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "setRebalanceAmount", abi = "setRebalanceAmount(uint256)")]
+    pub struct SetRebalanceAmountCall {
+        pub new_rebalance_amount: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `setRequestedApiPayerCount` function with signature `setRequestedApiPayerCount(uint256)` and selector `0x52067859`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(
+        name = "setRequestedApiPayerCount",
+        abi = "setRequestedApiPayerCount(uint256)"
+    )]
+    pub struct SetRequestedApiPayerCountCall {
+        pub new_requested_api_payer_count: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `setUsageApiKey` function with signature `setUsageApiKey(uint256,uint256,uint256,uint256,string,string,bool,bool,bool,uint256[],uint256[],uint256[],uint256[])` and selector `0x2da0cf16`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(
+        name = "setUsageApiKey",
+        abi = "setUsageApiKey(uint256,uint256,uint256,uint256,string,string,bool,bool,bool,uint256[],uint256[],uint256[],uint256[])"
+    )]
+    pub struct SetUsageApiKeyCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub usage_api_key_hash: ::ethers::core::types::U256,
+        pub expiration: ::ethers::core::types::U256,
+        pub balance: ::ethers::core::types::U256,
+        pub name: ::std::string::String,
+        pub description: ::std::string::String,
+        pub create_groups: bool,
+        pub delete_groups: bool,
+        pub create_pk_ps: bool,
+        pub manage_ipfs_ids_in_groups: ::std::vec::Vec<::ethers::core::types::U256>,
+        pub add_pkp_to_groups: ::std::vec::Vec<::ethers::core::types::U256>,
+        pub remove_pkp_from_groups: ::std::vec::Vec<::ethers::core::types::U256>,
+        pub execute_in_groups: ::std::vec::Vec<::ethers::core::types::U256>,
+    }
+    ///Container type for all input parameters for the `updateActionMetadata` function with signature `updateActionMetadata(uint256,uint256,uint256,string,string)` and selector `0xa6b6b672`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(
+        name = "updateActionMetadata",
+        abi = "updateActionMetadata(uint256,uint256,uint256,string,string)"
+    )]
+    pub struct UpdateActionMetadataCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub action_hash: ::ethers::core::types::U256,
+        pub group_id: ::ethers::core::types::U256,
+        pub name: ::std::string::String,
+        pub description: ::std::string::String,
+    }
+    ///Container type for all input parameters for the `updateGroup` function with signature `updateGroup(uint256,uint256,string,string)` and selector `0x851b2a54`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(name = "updateGroup", abi = "updateGroup(uint256,uint256,string,string)")]
+    pub struct UpdateGroupCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub group_id: ::ethers::core::types::U256,
+        pub name: ::std::string::String,
+        pub description: ::std::string::String,
+    }
+    ///Container type for all input parameters for the `updateUsageApiKeyMetadata` function with signature `updateUsageApiKeyMetadata(uint256,uint256,string,string)` and selector `0x6a3d77a9`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    #[ethcall(
+        name = "updateUsageApiKeyMetadata",
+        abi = "updateUsageApiKeyMetadata(uint256,uint256,string,string)"
+    )]
+    pub struct UpdateUsageApiKeyMetadataCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub usage_api_key_hash: ::ethers::core::types::U256,
+        pub name: ::std::string::String,
+        pub description: ::std::string::String,
+    }
+    ///Container type for all of the contract's call
     #[derive(
         Clone,
         ::ethers::contract::EthAbiType,
@@ -1282,44 +3783,659 @@ pub mod account_config {
         Eq,
         Hash
     )]
-    pub enum AccountConfigEvents {
-        DiamondCutFilter(DiamondCutFilter),
-        OwnershipTransferredFilter(OwnershipTransferredFilter),
+    pub enum AccountConfigCalls {
+        AccountCount(AccountCountCall),
+        AccountExistsAndIsMutable(AccountExistsAndIsMutableCall),
+        AddActionToGroup(AddActionToGroupCall),
+        AddGroup(AddGroupCall),
+        AddPkpToGroup(AddPkpToGroupCall),
+        AdminApiPayerAccount(AdminApiPayerAccountCall),
+        AllPkpIdsAt(AllPkpIdsAtCall),
+        ApiPayerCount(ApiPayerCountCall),
+        ApiPayers(ApiPayersCall),
+        CreditApiKey(CreditApiKeyCall),
+        DebitApiKey(DebitApiKeyCall),
+        GetPricing(GetPricingCall),
+        GetWalletDerivation(GetWalletDerivationCall),
+        IndexToAccountHashAt(IndexToAccountHashAtCall),
+        ListActions(ListActionsCall),
+        ListApiKeys(ListApiKeysCall),
+        ListGroupContents(ListGroupContentsCall),
+        ListGroups(ListGroupsCall),
+        ListPkps(ListPkpsCall),
+        ListWalletsInGroup(ListWalletsInGroupCall),
+        NewAccount(NewAccountCall),
+        PkpCount(PkpCountCall),
+        PricingAt(PricingAtCall),
+        PricingOperator(PricingOperatorCall),
+        RebalanceAmount(RebalanceAmountCall),
+        RegisterWalletDerivation(RegisterWalletDerivationCall),
+        RemoveActionFromGroup(RemoveActionFromGroupCall),
+        RemovePkpFromGroup(RemovePkpFromGroupCall),
+        RemoveUsageApiKey(RemoveUsageApiKeyCall),
+        RequestedApiPayerCount(RequestedApiPayerCountCall),
+        SetAdminApiPayerAccount(SetAdminApiPayerAccountCall),
+        SetApiPayers(SetApiPayersCall),
+        SetPricing(SetPricingCall),
+        SetPricingOperator(SetPricingOperatorCall),
+        SetRebalanceAmount(SetRebalanceAmountCall),
+        SetRequestedApiPayerCount(SetRequestedApiPayerCountCall),
+        SetUsageApiKey(SetUsageApiKeyCall),
+        UpdateActionMetadata(UpdateActionMetadataCall),
+        UpdateGroup(UpdateGroupCall),
+        UpdateUsageApiKeyMetadata(UpdateUsageApiKeyMetadataCall),
     }
-    impl ::ethers::contract::EthLogDecode for AccountConfigEvents {
-        fn decode_log(
-            log: &::ethers::core::abi::RawLog,
-        ) -> ::core::result::Result<Self, ::ethers::core::abi::Error> {
-            if let Ok(decoded) = DiamondCutFilter::decode_log(log) {
-                return Ok(AccountConfigEvents::DiamondCutFilter(decoded));
+    impl ::ethers::core::abi::AbiDecode for AccountConfigCalls {
+        fn decode(
+            data: impl AsRef<[u8]>,
+        ) -> ::core::result::Result<Self, ::ethers::core::abi::AbiError> {
+            let data = data.as_ref();
+            if let Ok(decoded) = <AccountCountCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::AccountCount(decoded));
             }
-            if let Ok(decoded) = OwnershipTransferredFilter::decode_log(log) {
-                return Ok(AccountConfigEvents::OwnershipTransferredFilter(decoded));
+            if let Ok(decoded) = <AccountExistsAndIsMutableCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::AccountExistsAndIsMutable(decoded));
             }
-            Err(::ethers::core::abi::Error::InvalidData)
+            if let Ok(decoded) = <AddActionToGroupCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::AddActionToGroup(decoded));
+            }
+            if let Ok(decoded) = <AddGroupCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::AddGroup(decoded));
+            }
+            if let Ok(decoded) = <AddPkpToGroupCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::AddPkpToGroup(decoded));
+            }
+            if let Ok(decoded) = <AdminApiPayerAccountCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::AdminApiPayerAccount(decoded));
+            }
+            if let Ok(decoded) = <AllPkpIdsAtCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::AllPkpIdsAt(decoded));
+            }
+            if let Ok(decoded) = <ApiPayerCountCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::ApiPayerCount(decoded));
+            }
+            if let Ok(decoded) = <ApiPayersCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::ApiPayers(decoded));
+            }
+            if let Ok(decoded) = <CreditApiKeyCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::CreditApiKey(decoded));
+            }
+            if let Ok(decoded) = <DebitApiKeyCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::DebitApiKey(decoded));
+            }
+            if let Ok(decoded) = <GetPricingCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::GetPricing(decoded));
+            }
+            if let Ok(decoded) = <GetWalletDerivationCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::GetWalletDerivation(decoded));
+            }
+            if let Ok(decoded) = <IndexToAccountHashAtCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::IndexToAccountHashAt(decoded));
+            }
+            if let Ok(decoded) = <ListActionsCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::ListActions(decoded));
+            }
+            if let Ok(decoded) = <ListApiKeysCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::ListApiKeys(decoded));
+            }
+            if let Ok(decoded) = <ListGroupContentsCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::ListGroupContents(decoded));
+            }
+            if let Ok(decoded) = <ListGroupsCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::ListGroups(decoded));
+            }
+            if let Ok(decoded) = <ListPkpsCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::ListPkps(decoded));
+            }
+            if let Ok(decoded) = <ListWalletsInGroupCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::ListWalletsInGroup(decoded));
+            }
+            if let Ok(decoded) = <NewAccountCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::NewAccount(decoded));
+            }
+            if let Ok(decoded) = <PkpCountCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::PkpCount(decoded));
+            }
+            if let Ok(decoded) = <PricingAtCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::PricingAt(decoded));
+            }
+            if let Ok(decoded) = <PricingOperatorCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::PricingOperator(decoded));
+            }
+            if let Ok(decoded) = <RebalanceAmountCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::RebalanceAmount(decoded));
+            }
+            if let Ok(decoded) = <RegisterWalletDerivationCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::RegisterWalletDerivation(decoded));
+            }
+            if let Ok(decoded) = <RemoveActionFromGroupCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::RemoveActionFromGroup(decoded));
+            }
+            if let Ok(decoded) = <RemovePkpFromGroupCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::RemovePkpFromGroup(decoded));
+            }
+            if let Ok(decoded) = <RemoveUsageApiKeyCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::RemoveUsageApiKey(decoded));
+            }
+            if let Ok(decoded) = <RequestedApiPayerCountCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::RequestedApiPayerCount(decoded));
+            }
+            if let Ok(decoded) = <SetAdminApiPayerAccountCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::SetAdminApiPayerAccount(decoded));
+            }
+            if let Ok(decoded) = <SetApiPayersCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::SetApiPayers(decoded));
+            }
+            if let Ok(decoded) = <SetPricingCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::SetPricing(decoded));
+            }
+            if let Ok(decoded) = <SetPricingOperatorCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::SetPricingOperator(decoded));
+            }
+            if let Ok(decoded) = <SetRebalanceAmountCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::SetRebalanceAmount(decoded));
+            }
+            if let Ok(decoded) = <SetRequestedApiPayerCountCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::SetRequestedApiPayerCount(decoded));
+            }
+            if let Ok(decoded) = <SetUsageApiKeyCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::SetUsageApiKey(decoded));
+            }
+            if let Ok(decoded) = <UpdateActionMetadataCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::UpdateActionMetadata(decoded));
+            }
+            if let Ok(decoded) = <UpdateGroupCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::UpdateGroup(decoded));
+            }
+            if let Ok(decoded) = <UpdateUsageApiKeyMetadataCall as ::ethers::core::abi::AbiDecode>::decode(
+                data,
+            ) {
+                return Ok(Self::UpdateUsageApiKeyMetadata(decoded));
+            }
+            Err(::ethers::core::abi::Error::InvalidData.into())
         }
     }
-    impl ::core::fmt::Display for AccountConfigEvents {
+    impl ::ethers::core::abi::AbiEncode for AccountConfigCalls {
+        fn encode(self) -> Vec<u8> {
+            match self {
+                Self::AccountCount(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::AccountExistsAndIsMutable(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::AddActionToGroup(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::AddGroup(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::AddPkpToGroup(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::AdminApiPayerAccount(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::AllPkpIdsAt(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::ApiPayerCount(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::ApiPayers(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::CreditApiKey(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::DebitApiKey(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::GetPricing(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::GetWalletDerivation(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::IndexToAccountHashAt(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::ListActions(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::ListApiKeys(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::ListGroupContents(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::ListGroups(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::ListPkps(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::ListWalletsInGroup(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::NewAccount(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::PkpCount(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::PricingAt(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::PricingOperator(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::RebalanceAmount(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::RegisterWalletDerivation(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::RemoveActionFromGroup(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::RemovePkpFromGroup(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::RemoveUsageApiKey(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::RequestedApiPayerCount(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::SetAdminApiPayerAccount(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::SetApiPayers(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::SetPricing(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::SetPricingOperator(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::SetRebalanceAmount(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::SetRequestedApiPayerCount(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::SetUsageApiKey(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::UpdateActionMetadata(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::UpdateGroup(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::UpdateUsageApiKeyMetadata(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+            }
+        }
+    }
+    impl ::core::fmt::Display for AccountConfigCalls {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             match self {
-                Self::DiamondCutFilter(element) => ::core::fmt::Display::fmt(element, f),
-                Self::OwnershipTransferredFilter(element) => {
+                Self::AccountCount(element) => ::core::fmt::Display::fmt(element, f),
+                Self::AccountExistsAndIsMutable(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::AddActionToGroup(element) => ::core::fmt::Display::fmt(element, f),
+                Self::AddGroup(element) => ::core::fmt::Display::fmt(element, f),
+                Self::AddPkpToGroup(element) => ::core::fmt::Display::fmt(element, f),
+                Self::AdminApiPayerAccount(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::AllPkpIdsAt(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ApiPayerCount(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ApiPayers(element) => ::core::fmt::Display::fmt(element, f),
+                Self::CreditApiKey(element) => ::core::fmt::Display::fmt(element, f),
+                Self::DebitApiKey(element) => ::core::fmt::Display::fmt(element, f),
+                Self::GetPricing(element) => ::core::fmt::Display::fmt(element, f),
+                Self::GetWalletDerivation(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::IndexToAccountHashAt(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::ListActions(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ListApiKeys(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ListGroupContents(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ListGroups(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ListPkps(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ListWalletsInGroup(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::NewAccount(element) => ::core::fmt::Display::fmt(element, f),
+                Self::PkpCount(element) => ::core::fmt::Display::fmt(element, f),
+                Self::PricingAt(element) => ::core::fmt::Display::fmt(element, f),
+                Self::PricingOperator(element) => ::core::fmt::Display::fmt(element, f),
+                Self::RebalanceAmount(element) => ::core::fmt::Display::fmt(element, f),
+                Self::RegisterWalletDerivation(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::RemoveActionFromGroup(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::RemovePkpFromGroup(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::RemoveUsageApiKey(element) => ::core::fmt::Display::fmt(element, f),
+                Self::RequestedApiPayerCount(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::SetAdminApiPayerAccount(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::SetApiPayers(element) => ::core::fmt::Display::fmt(element, f),
+                Self::SetPricing(element) => ::core::fmt::Display::fmt(element, f),
+                Self::SetPricingOperator(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::SetRebalanceAmount(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::SetRequestedApiPayerCount(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::SetUsageApiKey(element) => ::core::fmt::Display::fmt(element, f),
+                Self::UpdateActionMetadata(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::UpdateGroup(element) => ::core::fmt::Display::fmt(element, f),
+                Self::UpdateUsageApiKeyMetadata(element) => {
                     ::core::fmt::Display::fmt(element, f)
                 }
             }
         }
     }
-    impl ::core::convert::From<DiamondCutFilter> for AccountConfigEvents {
-        fn from(value: DiamondCutFilter) -> Self {
-            Self::DiamondCutFilter(value)
+    impl ::core::convert::From<AccountCountCall> for AccountConfigCalls {
+        fn from(value: AccountCountCall) -> Self {
+            Self::AccountCount(value)
         }
     }
-    impl ::core::convert::From<OwnershipTransferredFilter> for AccountConfigEvents {
-        fn from(value: OwnershipTransferredFilter) -> Self {
-            Self::OwnershipTransferredFilter(value)
+    impl ::core::convert::From<AccountExistsAndIsMutableCall> for AccountConfigCalls {
+        fn from(value: AccountExistsAndIsMutableCall) -> Self {
+            Self::AccountExistsAndIsMutable(value)
         }
     }
-    ///`FacetCut(address,uint8,bytes4[])`
+    impl ::core::convert::From<AddActionToGroupCall> for AccountConfigCalls {
+        fn from(value: AddActionToGroupCall) -> Self {
+            Self::AddActionToGroup(value)
+        }
+    }
+    impl ::core::convert::From<AddGroupCall> for AccountConfigCalls {
+        fn from(value: AddGroupCall) -> Self {
+            Self::AddGroup(value)
+        }
+    }
+    impl ::core::convert::From<AddPkpToGroupCall> for AccountConfigCalls {
+        fn from(value: AddPkpToGroupCall) -> Self {
+            Self::AddPkpToGroup(value)
+        }
+    }
+    impl ::core::convert::From<AdminApiPayerAccountCall> for AccountConfigCalls {
+        fn from(value: AdminApiPayerAccountCall) -> Self {
+            Self::AdminApiPayerAccount(value)
+        }
+    }
+    impl ::core::convert::From<AllPkpIdsAtCall> for AccountConfigCalls {
+        fn from(value: AllPkpIdsAtCall) -> Self {
+            Self::AllPkpIdsAt(value)
+        }
+    }
+    impl ::core::convert::From<ApiPayerCountCall> for AccountConfigCalls {
+        fn from(value: ApiPayerCountCall) -> Self {
+            Self::ApiPayerCount(value)
+        }
+    }
+    impl ::core::convert::From<ApiPayersCall> for AccountConfigCalls {
+        fn from(value: ApiPayersCall) -> Self {
+            Self::ApiPayers(value)
+        }
+    }
+    impl ::core::convert::From<CreditApiKeyCall> for AccountConfigCalls {
+        fn from(value: CreditApiKeyCall) -> Self {
+            Self::CreditApiKey(value)
+        }
+    }
+    impl ::core::convert::From<DebitApiKeyCall> for AccountConfigCalls {
+        fn from(value: DebitApiKeyCall) -> Self {
+            Self::DebitApiKey(value)
+        }
+    }
+    impl ::core::convert::From<GetPricingCall> for AccountConfigCalls {
+        fn from(value: GetPricingCall) -> Self {
+            Self::GetPricing(value)
+        }
+    }
+    impl ::core::convert::From<GetWalletDerivationCall> for AccountConfigCalls {
+        fn from(value: GetWalletDerivationCall) -> Self {
+            Self::GetWalletDerivation(value)
+        }
+    }
+    impl ::core::convert::From<IndexToAccountHashAtCall> for AccountConfigCalls {
+        fn from(value: IndexToAccountHashAtCall) -> Self {
+            Self::IndexToAccountHashAt(value)
+        }
+    }
+    impl ::core::convert::From<ListActionsCall> for AccountConfigCalls {
+        fn from(value: ListActionsCall) -> Self {
+            Self::ListActions(value)
+        }
+    }
+    impl ::core::convert::From<ListApiKeysCall> for AccountConfigCalls {
+        fn from(value: ListApiKeysCall) -> Self {
+            Self::ListApiKeys(value)
+        }
+    }
+    impl ::core::convert::From<ListGroupContentsCall> for AccountConfigCalls {
+        fn from(value: ListGroupContentsCall) -> Self {
+            Self::ListGroupContents(value)
+        }
+    }
+    impl ::core::convert::From<ListGroupsCall> for AccountConfigCalls {
+        fn from(value: ListGroupsCall) -> Self {
+            Self::ListGroups(value)
+        }
+    }
+    impl ::core::convert::From<ListPkpsCall> for AccountConfigCalls {
+        fn from(value: ListPkpsCall) -> Self {
+            Self::ListPkps(value)
+        }
+    }
+    impl ::core::convert::From<ListWalletsInGroupCall> for AccountConfigCalls {
+        fn from(value: ListWalletsInGroupCall) -> Self {
+            Self::ListWalletsInGroup(value)
+        }
+    }
+    impl ::core::convert::From<NewAccountCall> for AccountConfigCalls {
+        fn from(value: NewAccountCall) -> Self {
+            Self::NewAccount(value)
+        }
+    }
+    impl ::core::convert::From<PkpCountCall> for AccountConfigCalls {
+        fn from(value: PkpCountCall) -> Self {
+            Self::PkpCount(value)
+        }
+    }
+    impl ::core::convert::From<PricingAtCall> for AccountConfigCalls {
+        fn from(value: PricingAtCall) -> Self {
+            Self::PricingAt(value)
+        }
+    }
+    impl ::core::convert::From<PricingOperatorCall> for AccountConfigCalls {
+        fn from(value: PricingOperatorCall) -> Self {
+            Self::PricingOperator(value)
+        }
+    }
+    impl ::core::convert::From<RebalanceAmountCall> for AccountConfigCalls {
+        fn from(value: RebalanceAmountCall) -> Self {
+            Self::RebalanceAmount(value)
+        }
+    }
+    impl ::core::convert::From<RegisterWalletDerivationCall> for AccountConfigCalls {
+        fn from(value: RegisterWalletDerivationCall) -> Self {
+            Self::RegisterWalletDerivation(value)
+        }
+    }
+    impl ::core::convert::From<RemoveActionFromGroupCall> for AccountConfigCalls {
+        fn from(value: RemoveActionFromGroupCall) -> Self {
+            Self::RemoveActionFromGroup(value)
+        }
+    }
+    impl ::core::convert::From<RemovePkpFromGroupCall> for AccountConfigCalls {
+        fn from(value: RemovePkpFromGroupCall) -> Self {
+            Self::RemovePkpFromGroup(value)
+        }
+    }
+    impl ::core::convert::From<RemoveUsageApiKeyCall> for AccountConfigCalls {
+        fn from(value: RemoveUsageApiKeyCall) -> Self {
+            Self::RemoveUsageApiKey(value)
+        }
+    }
+    impl ::core::convert::From<RequestedApiPayerCountCall> for AccountConfigCalls {
+        fn from(value: RequestedApiPayerCountCall) -> Self {
+            Self::RequestedApiPayerCount(value)
+        }
+    }
+    impl ::core::convert::From<SetAdminApiPayerAccountCall> for AccountConfigCalls {
+        fn from(value: SetAdminApiPayerAccountCall) -> Self {
+            Self::SetAdminApiPayerAccount(value)
+        }
+    }
+    impl ::core::convert::From<SetApiPayersCall> for AccountConfigCalls {
+        fn from(value: SetApiPayersCall) -> Self {
+            Self::SetApiPayers(value)
+        }
+    }
+    impl ::core::convert::From<SetPricingCall> for AccountConfigCalls {
+        fn from(value: SetPricingCall) -> Self {
+            Self::SetPricing(value)
+        }
+    }
+    impl ::core::convert::From<SetPricingOperatorCall> for AccountConfigCalls {
+        fn from(value: SetPricingOperatorCall) -> Self {
+            Self::SetPricingOperator(value)
+        }
+    }
+    impl ::core::convert::From<SetRebalanceAmountCall> for AccountConfigCalls {
+        fn from(value: SetRebalanceAmountCall) -> Self {
+            Self::SetRebalanceAmount(value)
+        }
+    }
+    impl ::core::convert::From<SetRequestedApiPayerCountCall> for AccountConfigCalls {
+        fn from(value: SetRequestedApiPayerCountCall) -> Self {
+            Self::SetRequestedApiPayerCount(value)
+        }
+    }
+    impl ::core::convert::From<SetUsageApiKeyCall> for AccountConfigCalls {
+        fn from(value: SetUsageApiKeyCall) -> Self {
+            Self::SetUsageApiKey(value)
+        }
+    }
+    impl ::core::convert::From<UpdateActionMetadataCall> for AccountConfigCalls {
+        fn from(value: UpdateActionMetadataCall) -> Self {
+            Self::UpdateActionMetadata(value)
+        }
+    }
+    impl ::core::convert::From<UpdateGroupCall> for AccountConfigCalls {
+        fn from(value: UpdateGroupCall) -> Self {
+            Self::UpdateGroup(value)
+        }
+    }
+    impl ::core::convert::From<UpdateUsageApiKeyMetadataCall> for AccountConfigCalls {
+        fn from(value: UpdateUsageApiKeyMetadataCall) -> Self {
+            Self::UpdateUsageApiKeyMetadata(value)
+        }
+    }
+    ///Container type for all return fields from the `accountCount` function with signature `accountCount()` and selector `0xe4af29fc`
     #[derive(
         Clone,
         ::ethers::contract::EthAbiType,
@@ -1332,9 +4448,352 @@ pub mod account_config {
         Eq,
         Hash
     )]
-    pub struct FacetCut {
-        pub facet_address: ::ethers::core::types::Address,
-        pub action: u8,
-        pub function_selectors: ::std::vec::Vec<[u8; 4]>,
+    pub struct AccountCountReturn(pub ::ethers::core::types::U256);
+    ///Container type for all return fields from the `accountExistsAndIsMutable` function with signature `accountExistsAndIsMutable(uint256)` and selector `0x719fac43`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct AccountExistsAndIsMutableReturn(pub bool);
+    ///Container type for all return fields from the `adminApiPayerAccount` function with signature `adminApiPayerAccount()` and selector `0x383603fe`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct AdminApiPayerAccountReturn(pub ::ethers::core::types::Address);
+    ///Container type for all return fields from the `allPkpIdsAt` function with signature `allPkpIdsAt(uint256)` and selector `0x62feae44`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct AllPkpIdsAtReturn(pub ::ethers::core::types::Address);
+    ///Container type for all return fields from the `apiPayerCount` function with signature `apiPayerCount()` and selector `0xb8037ffe`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct ApiPayerCountReturn(pub ::ethers::core::types::U256);
+    ///Container type for all return fields from the `api_payers` function with signature `api_payers()` and selector `0x93c8bc43`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct ApiPayersReturn(pub ::std::vec::Vec<::ethers::core::types::Address>);
+    ///Container type for all return fields from the `getPricing` function with signature `getPricing(uint256)` and selector `0xc12f1a42`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct GetPricingReturn(pub ::ethers::core::types::U256);
+    ///Container type for all return fields from the `getWalletDerivation` function with signature `getWalletDerivation(uint256,address)` and selector `0x90222cad`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct GetWalletDerivationReturn(pub ::ethers::core::types::U256);
+    ///Container type for all return fields from the `indexToAccountHashAt` function with signature `indexToAccountHashAt(uint256)` and selector `0x6fe1fb84`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct IndexToAccountHashAtReturn(pub ::ethers::core::types::U256);
+    ///Container type for all return fields from the `listActions` function with signature `listActions(uint256,uint256,uint256,uint256)` and selector `0x542970ed`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct ListActionsReturn(pub ::std::vec::Vec<Metadata>);
+    ///Container type for all return fields from the `listApiKeys` function with signature `listApiKeys(uint256,uint256,uint256)` and selector `0xc704668c`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct ListApiKeysReturn(pub ::std::vec::Vec<UsageApiKeyReturn>);
+    ///Container type for all return fields from the `listGroupContents` function with signature `listGroupContents(uint256,uint256)` and selector `0x6fe9572e`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct ListGroupContentsReturn(pub GroupReturn);
+    ///Container type for all return fields from the `listGroups` function with signature `listGroups(uint256,uint256,uint256)` and selector `0xf75c8b2d`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct ListGroupsReturn(pub ::std::vec::Vec<Metadata>);
+    ///Container type for all return fields from the `listPkps` function with signature `listPkps(uint256,uint256,uint256)` and selector `0x50409001`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct ListPkpsReturn(pub ::std::vec::Vec<PkpData>);
+    ///Container type for all return fields from the `listWalletsInGroup` function with signature `listWalletsInGroup(uint256,uint256,uint256,uint256)` and selector `0x291ff1ea`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct ListWalletsInGroupReturn(pub ::std::vec::Vec<PkpData>);
+    ///Container type for all return fields from the `pkpCount` function with signature `pkpCount()` and selector `0x223a7962`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct PkpCountReturn(pub ::ethers::core::types::U256);
+    ///Container type for all return fields from the `pricingAt` function with signature `pricingAt(uint256)` and selector `0xc1aff899`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct PricingAtReturn(pub ::ethers::core::types::U256);
+    ///Container type for all return fields from the `pricingOperator` function with signature `pricingOperator()` and selector `0xcb53ad26`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct PricingOperatorReturn(pub ::ethers::core::types::Address);
+    ///Container type for all return fields from the `rebalanceAmount` function with signature `rebalanceAmount()` and selector `0x3150289b`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct RebalanceAmountReturn(pub ::ethers::core::types::U256);
+    ///Container type for all return fields from the `requestedApiPayerCount` function with signature `requestedApiPayerCount()` and selector `0x34b7f87a`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct RequestedApiPayerCountReturn(pub ::ethers::core::types::U256);
+    ///`Metadata(uint256,string,string)`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct Metadata {
+        pub id: ::ethers::core::types::U256,
+        pub name: ::std::string::String,
+        pub description: ::std::string::String,
+    }
+    ///`PkpData(uint256,address,string,string)`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct PkpData {
+        pub id: ::ethers::core::types::U256,
+        pub pkp_id: ::ethers::core::types::Address,
+        pub name: ::std::string::String,
+        pub description: ::std::string::String,
+    }
+    ///`GroupReturn((uint256,string,string),uint256[],address[])`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct GroupReturn {
+        pub metadata: Metadata,
+        pub cid_hash: ::std::vec::Vec<::ethers::core::types::U256>,
+        pub pkp_id: ::std::vec::Vec<::ethers::core::types::Address>,
+    }
+    ///`UsageApiKeyReturn((uint256,string,string),uint256,uint256,uint256,uint256[],bool,bool,bool,uint256[],uint256[],uint256[])`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash
+    )]
+    pub struct UsageApiKeyReturn {
+        pub metadata: Metadata,
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub expiration: ::ethers::core::types::U256,
+        pub balance: ::ethers::core::types::U256,
+        pub execute_in_groups: ::std::vec::Vec<::ethers::core::types::U256>,
+        pub create_groups: bool,
+        pub delete_groups: bool,
+        pub create_pk_ps: bool,
+        pub manage_ipfs_ids_in_groups: ::std::vec::Vec<::ethers::core::types::U256>,
+        pub add_pkp_to_groups: ::std::vec::Vec<::ethers::core::types::U256>,
+        pub remove_pkp_from_groups: ::std::vec::Vec<::ethers::core::types::U256>,
     }
 }

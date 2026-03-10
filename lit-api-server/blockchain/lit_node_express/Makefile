@@ -12,8 +12,11 @@ ANVIL_SECRET := 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff
 
 compile:
 	npx hardhat compile
-#	#  node generate-diamond-abi.mjs
-# still using hardhat v2 for now
+	node generate-diamond-abi.mjs
+
+#1.1 generate and compile
+generate_and_compile: generate
+	npx hardhat compile
 
 # 2. Generate Rust bindings from artifacts. Args: input_folder, output_folder
 generate: compile
@@ -21,21 +24,16 @@ generate: compile
 	$(GENERATOR_BIN) artifacts/contracts ../../src/accounts/contracts/
 
 # 3. Deploy contracts to Base mainnet. Args: network (3 = Base), abis_folder
-deploy_base: generate
+deploy_base: generate_and_compile
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
 	$(DEPLOYER_BIN) 3 artifacts/contracts $(BASE_DEPLOYER_SECRET)
 
 # 4. Deploy contracts to Base Sepolia. Args: network (2 = Base Sepolia), abis_folder
-deploy_sepolia: generate
+deploy_sepolia: generate_and_compile
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
 	$(DEPLOYER_BIN) 2 artifacts/contracts $(DEPLOYER_SECRET)
 
 # 5. Deploy contracts to Anvil. Args: network (0 = Anvil), abis_folder
-deploy_anvil: generate
+deploy_anvil: generate_and_compile
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
 	$(DEPLOYER_BIN) 0 artifacts/contracts $(ANVIL_SECRET)
-
-diamond_generate: compile
-	cd $(RUST_PROJECT) && cargo build --bin contract_generator
-	$(GENERATOR_BIN) artifacts/interfaces ./src/
-

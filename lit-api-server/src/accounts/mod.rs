@@ -11,7 +11,7 @@ use crate::accounts::signable_contract::{
     get_read_only_account_config_contract, get_signable_account_config_contract, send_transaction,
 };
 use crate::accounts::signer_pool::SignerPool;
-use ethers::types::{H160, U256};
+use ethers::types::{Address, H160, U256};
 use ethers::utils::keccak256;
 
 pub fn api_key_hash(api_key_base_64: &str) -> U256 {
@@ -65,7 +65,7 @@ pub async fn add_group(
     name: &str,
     description: &str,
     permitted_actions: Vec<U256>,
-    wallets: Vec<U256>,
+    pkp_ids: Vec<Address>,
     all_wallets_permitted: bool,
     all_actions_permitted: bool,
 ) -> Result<bool> {
@@ -77,9 +77,7 @@ pub async fn add_group(
         name.to_string(),
         description.to_string(),
         permitted_actions,
-        wallets,
-        all_wallets_permitted,
-        all_actions_permitted,
+        pkp_ids,
     );
     send_transaction(function_call, signer_pool, signer_address).await
 }
@@ -140,8 +138,6 @@ pub async fn update_group(
     group_id: U256,
     name: &str,
     description: &str,
-    all_wallets_permitted: bool,
-    all_actions_permitted: bool,
 ) -> Result<bool> {
     let (contract, signer_address) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
@@ -151,8 +147,6 @@ pub async fn update_group(
         group_id,
         name.to_string(),
         description.to_string(),
-        all_wallets_permitted,
-        all_actions_permitted,
     );
     send_transaction(function_call, signer_pool, signer_address).await
 }
