@@ -1061,7 +1061,7 @@ impl Chain {
             && let Ok(url) = env::var("BASE_CHAIN_RPC")
             && !url.trim().is_empty()
         {
-            return url;
+            return url.trim().to_string();
         }
         self.info().rpc_url.to_string()
     }
