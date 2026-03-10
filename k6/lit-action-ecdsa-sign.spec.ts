@@ -2,8 +2,8 @@
  * Tests Lit.Actions.signEcdsa() — signs data using a PKP's ECDSA key.
  *
  * Flow:
- *   1. Create a fresh account and wallet (the wallet address IS the PKP public key)
- *   2. Run a Lit Action that calls signEcdsa with that public key
+ *   1. Create a fresh account and wallet (wallet address is used as pkpId)
+ *   2. Run a Lit Action that calls signEcdsa with the wallet address as pkpId
  *   3. Assert the response contains a non-empty hex signature with no error
  *
  * Usage:
@@ -24,14 +24,12 @@ const TO_SIGN = [
   2, 248, 239, 66, 165, 236, 95, 3, 187, 250, 37, 76, 176, 31, 173,
 ];
 
-// publicKey and sigName are injected via jsParams.
-// keySetId is ignored server-side; pass empty string.
+// pkpId (wallet address) and sigName are injected via jsParams.
 const ECDSA_SIGN_CODE = `(async () => {
   const sig = await Lit.Actions.signEcdsa({
     toSign,
-    publicKey,
+    pkpId,
     sigName,
-    keySetId: "",
   });
   Lit.Actions.setResponse({ response: JSON.stringify(sig) });
 })();`;
@@ -87,7 +85,6 @@ export default function () {
   const newAccountRes = client.newAccount({
     account_name: "k6-lit-action-ecdsa-sign",
     account_description: "k6 test account",
-    initial_balance: "10000",
   });
   if (!assertOk("newAccount", "POST /new_account", newAccountRes)) return;
   const apiKey = (newAccountRes.data as { api_key: string }).api_key;
@@ -103,35 +100,16 @@ export default function () {
       typeof walletAddress === "string" && walletAddress.length > 0,
   }, "createWallet");
 
-  // ── 3. List wallets to get the raw public key ─────────────────────────────
-  // createWallet returns only the Ethereum address; listWallets returns the
-  // full WalletItem including the raw uncompressed public key needed by signEcdsa.
-  const listRes = client.listWallets(
-    { page_number: "0", page_size: "10" },
-    authHeaders,
-  );
-  if (!assertOk("listWallets", "GET /list_wallets", listRes)) return;
-  const wallets = listRes.data as Array<{
-    wallet_address: string;
-    public_key: string;
-  }>;
-  const wallet = wallets.find((w) => w.wallet_address === walletAddress);
-  checkAndLog(listRes.response, {
-    "listWallets finds created wallet": () => wallet !== undefined,
-    "wallet has non-empty public_key": () =>
-      typeof wallet?.public_key === "string" && wallet.public_key.length > 0,
-  }, "listWallets");
-  if (!wallet) return;
-  const publicKey = wallet.public_key;
-  console.log(`publicKey: ${publicKey}`);
+  // ── 3. Sign with signEcdsa ────────────────────────────────────────────────
+  // signEcdsa identifies the key by pkpId (wallet address) since migration in #67.
+  console.log(`pkpId (walletAddress): ${walletAddress}`);
 
-  // ── 4. Sign with signEcdsa ────────────────────────────────────────────────
   const res = client.litAction(
     {
       code: ECDSA_SIGN_CODE,
       js_params: {
         toSign: TO_SIGN,
-        publicKey,
+        pkpId: walletAddress,
         sigName: "sig",
       },
     },

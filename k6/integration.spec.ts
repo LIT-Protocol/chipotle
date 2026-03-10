@@ -88,7 +88,6 @@ export default function () {
   const newAccountRes = client.newAccount({
     account_name: "k6-integration-test",
     account_description: "Integration test account",
-    initial_balance: "10000",
   });
   if (!assertOk("newAccount", "POST /new_account", newAccountRes)) return;
   const newAccountData = newAccountRes.data as { api_key: string; wallet_address: string };
@@ -223,7 +222,7 @@ export default function () {
 
   // ── 11. addPkpToGroup ─────────────────────────────────────────────────────
   const addPkpRes = client.addPkpToGroup(
-    { group_id: groupId, pkp_public_key: walletAddress },
+    { group_id: groupId, pkp_id: walletAddress },
     authHeaders,
   );
   if (!assertOk("addPkpToGroup", "POST /add_pkp_to_group", addPkpRes)) return;
@@ -279,7 +278,7 @@ export default function () {
   // ── 14. addUsageApiKey ────────────────────────────────────────────────────
   const expiration = String(Math.floor(Date.now() / 1000) + 86400); // 24 h from now
   const addUsageKeyRes = client.addUsageApiKey(
-    { expiration, balance: "1000000000000000000" }, // 1 token in wei
+    { expiration, balance: "1000000000000000000", name: "k6-usage-key", description: "Integration test usage key" },
     authHeaders,
   );
   if (!assertOk("addUsageApiKey", "POST /add_usage_api_key", addUsageKeyRes)) return;
@@ -395,7 +394,7 @@ export default function () {
 
   // ── 20. removePkpFromGroup ────────────────────────────────────────────────
   const removePkpRes = client.removePkpFromGroup(
-    { group_id: groupId, pkp_public_key: walletAddress },
+    { group_id: groupId, pkp_id: walletAddress },
     authHeaders,
   );
   if (!assertOk("removePkpFromGroup", "POST /remove_pkp_from_group", removePkpRes)) return;
