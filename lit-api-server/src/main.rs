@@ -24,7 +24,7 @@ use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 #[rocket::main]
 #[allow(clippy::result_large_err)]
 async fn main() -> Result<(), rocket::Error> {
-    let lit_cfg = LitConfig::default().expect("Failed to load LitConfig");
+    let lit_cfg = LitConfig::default();
 
     // Initialize the primary tracing subscriber (stdout + privacy filtering)
     let subscriber = lit_observability::init_subscriber(&lit_cfg)

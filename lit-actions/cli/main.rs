@@ -60,16 +60,18 @@ fn main() -> Result<()> {
 async fn init_observability(args: &Args) -> Result<ObservabilityProviders> {
     use lit_api_core::config::LitApiConfig;
     use lit_core::config::{LitConfig, LitConfigBuilder, envs::LitEnv};
-    use lit_observability::{LitObservabilityConfig, logging::simple_logging_subscriber};
+    use lit_observability::LitObservabilityConfig;
     use tracing_subscriber::util::SubscriberInitExt;
 
-    // NB: constructing LitConfig requires lit.env, but the value isn't used by simple_logging_subscriber
+    // NB: constructing LitConfig requires lit.env, but the value isn't used by init_subscriber
     let mut builder = LitConfigBuilder::default().set_override("lit.env", LitEnv::Dev.to_string());
     builder = <LitConfig as LitObservabilityConfig>::apply_defaults(builder)?;
     let cfg = <LitConfig as LitApiConfig>::from_builder(builder)?;
 
     if !args.enable_observability_export {
-        simple_logging_subscriber(&cfg, Some("lit-actions -".to_string()))?.init();
+        lit_observability::init_subscriber(&cfg)
+            .map_err(|e| anyhow::anyhow!("Failed to init subscriber: {}", e))?
+            .init();
         return Ok(ObservabilityProviders::default());
     }
 
@@ -78,7 +80,7 @@ async fn init_observability(args: &Args) -> Result<ObservabilityProviders> {
         "lit-actions",
     )]);
 
-    let (tracing_provider, metrics_provider, subscriber, logger_provider) =
+    let (tracing_provider, metrics_provider, logger_provider) =
         lit_observability::create_providers(
             &cfg,
             otel_resource.clone(),
@@ -91,7 +93,9 @@ async fn init_observability(args: &Args) -> Result<ObservabilityProviders> {
     global::set_text_map_propagator(TraceContextPropagator::new());
     global::set_tracer_provider(tracing_provider);
     global::set_meter_provider(metrics_provider.clone());
-    subscriber.init();
+    lit_observability::init_subscriber(&cfg)
+        .map_err(|e| anyhow::anyhow!("Failed to init subscriber: {}", e))?
+        .init();
 
     Ok(ObservabilityProviders::new(
         metrics_provider,

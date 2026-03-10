@@ -10,7 +10,7 @@ default = []
 testing = ["ansi", "tracing-log"]
 ansi = []
 tracing-log = []
-channels = ["dep:flume"]
+channels = ["dep:flume", "otlp"]
 otlp = ["dep:opentelemetry-otlp", "dep:opentelemetry_sdk", "dep:tracing-opentelemetry"]
 
 [dependencies]
