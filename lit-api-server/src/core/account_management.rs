@@ -48,6 +48,16 @@ fn parse_u256_hex_list(strings: &[String]) -> Result<Vec<U256>, ApiStatus> {
         .collect::<Result<Vec<_>, _>>()
 }
 
+fn parse_h160_hex_list(strings: &[String]) -> Result<Vec<H160>, ApiStatus> {
+    strings
+        .iter()
+        .map(|s| {
+            let bytes = hex_to_bytes(s.trim()).map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex in list"))?;
+            Ok(H160::from_slice(&bytes))
+        })
+        .collect::<Result<Vec<_>, _>>()
+}
+
 fn get_random_secret() -> [u8; 32] {
     let mut secret: [u8; 32] = [0; 32];
     // Get a thread-local random number generator and fill the array.
@@ -164,23 +174,15 @@ pub async fn add_group(
     api_key: &str,
     req: Json<AddGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let cid_hashes = parse_u256_hex_list(&req.permitted_actions)?;
-    let pkp_ids = req
-        .pkps
-        .iter()
-        .map(|s| {
-            let bytes = hex_to_bytes(s.trim()).map_err(|e| {
-                ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex address in pkps")
-            })?;
-            if bytes.len() != 20 {
-                return Err(ApiStatus::bad_request(
-                    anyhow::anyhow!("address must be 20 bytes"),
-                    "invalid pkp address length",
-                ));
-            }
-            Ok(H160::from_slice(&bytes))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let cid_hashes = match req.all_actions_permitted  {
+        true => vec![U256::zero()],
+        false => parse_u256_hex_list(&req.permitted_actions)?,
+    };
+    let pkp_ids = match req.all_wallets_permitted {
+        true => vec![H160::zero()],
+        false => parse_h160_hex_list(&req.pkps)?,
+    };
+
     accounts::add_group(
         signer_pool,
         api_key,
