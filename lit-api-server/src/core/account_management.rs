@@ -23,7 +23,7 @@ use elliptic_curve::group::GroupEncoding;
 use ethers::signers::{LocalWallet, Signer};
 use ethers::types::{H160, U256};
 use ipfs_hasher::IpfsHasher;
-use lit_core::utils::binary::{bytes_to_0x_hex, bytes_to_hex, hex_to_bytes};
+use lit_core::utils::binary::{bytes_to_0x_hex, hex_to_bytes};
 use rocket::serde::json::Json;
 
 // Create a new wallet and return the public key, wallet address, and secret.
@@ -363,7 +363,7 @@ fn metadata_to_item(
     m.id.to_big_endian(&mut bytes);
 
     ListMetadataItem {
-        id: bytes_to_hex(bytes),
+        id: bytes_to_0x_hex(bytes),
         name: m.name.clone(),
         description: m.description.clone(),
     }
@@ -375,7 +375,7 @@ fn usage_api_key_to_api_key_item(
 ) -> ApiKeyItem {
     let mut bytes = [0; 32];
     m.metadata.id.to_big_endian(&mut bytes);
-    let id = bytes_to_hex(bytes);
+    let id = bytes_to_0x_hex(bytes);
 
     ApiKeyItem {
         id,
@@ -440,7 +440,7 @@ pub async fn list_wallets(
             id: m.id.to_string(),
             name: m.name.clone(),
             description: m.description.clone(),
-            wallet_address: bytes_to_hex(m.pkp_id.as_bytes()),
+            wallet_address: bytes_to_0x_hex(m.pkp_id.as_bytes()),
         })
         .collect();
     Ok(wallet_items)
@@ -465,7 +465,7 @@ pub async fn list_wallets_in_group(
             id: m.id.to_string(),
             name: m.name.clone(),
             description: m.description.clone(),
-            wallet_address: bytes_to_hex(m.pkp_id.as_bytes()),
+            wallet_address: bytes_to_0x_hex(m.pkp_id.as_bytes()),
         })
         .collect();
     Ok(wallet_items)

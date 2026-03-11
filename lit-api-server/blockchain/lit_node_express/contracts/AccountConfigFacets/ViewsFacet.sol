@@ -328,6 +328,12 @@ contract ViewsFacet {
         AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[
             apiKeyHash
         ];
+
+        //  wildcard scenario
+        if (usageApiKey.executeInGroups.contains(0)) {
+            return true;
+        }
+
         for (uint256 i = 0; i < groupIds.length; i++) {
             if (usageApiKey.executeInGroups.contains(groupIds[i])) {
                 return true;

@@ -450,7 +450,7 @@ async fn upate_diamond(
     println!("Diamond updated.");
     let facet_addresses = diamond_loop_facet.facet_addresses().call().await?;
     println!(
-        "Contract {} (before update) has these facet addresses: {:?}",
+        "Contract {} (after update) has these facet addresses: {:?}",
         diamond_address, facet_addresses
     );
 
