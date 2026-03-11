@@ -71,14 +71,26 @@ contract WritesFacet {
         apiKeyStorage.createGroups = createGroups;
         apiKeyStorage.deleteGroups = deleteGroups;
         apiKeyStorage.createPKPs = createPKPs;
+        for (uint256 i = apiKeyStorage.manageIPFSIdsInGroups.length(); i > 0; i--) {
+            apiKeyStorage.manageIPFSIdsInGroups.remove(apiKeyStorage.manageIPFSIdsInGroups.at(i - 1));
+        }
         for (uint256 i = 0; i < manageIPFSIdsInGroups.length; i++) {
             apiKeyStorage.manageIPFSIdsInGroups.add(manageIPFSIdsInGroups[i]);
+        }
+        for (uint256 i = apiKeyStorage.addPkpToGroups.length(); i > 0; i--) {
+            apiKeyStorage.addPkpToGroups.remove(apiKeyStorage.addPkpToGroups.at(i - 1));
         }
         for (uint256 i = 0; i < addPkpToGroups.length; i++) {
             apiKeyStorage.addPkpToGroups.add(addPkpToGroups[i]);
         }
+        for (uint256 i = apiKeyStorage.removePkpFromGroups.length(); i > 0; i--) {
+            apiKeyStorage.removePkpFromGroups.remove(apiKeyStorage.removePkpFromGroups.at(i - 1));
+        }
         for (uint256 i = 0; i < removePkpFromGroups.length; i++) {
             apiKeyStorage.removePkpFromGroups.add(removePkpFromGroups[i]);
+        }
+        for (uint256 i = apiKeyStorage.executeInGroups.length(); i > 0; i--) {
+            apiKeyStorage.executeInGroups.remove(apiKeyStorage.executeInGroups.at(i - 1));
         }
         for (uint256 i = 0; i < executeInGroups.length; i++) {
             apiKeyStorage.executeInGroups.add(executeInGroups[i]);
