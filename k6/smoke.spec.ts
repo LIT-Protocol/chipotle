@@ -3,8 +3,8 @@
  * Use: k6 run smoke.spec.ts
  */
 import type { Response } from "k6/http";
-import { checkAndLog } from "../check.ts";
-import { LitApiServerClient } from "../litApiServer.ts";
+import { checkAndLog } from "./check.ts";
+import { LitApiServerClient } from "./litApiServer.ts";
 
 const baseUrl =
   __ENV.BASE_URL ||
