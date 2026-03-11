@@ -64,12 +64,25 @@ for (const facet of FACETS) {
   console.log(`  + ${facet} (${artifact.abi?.length ?? 0} entries from ${artifactPath})`);
 }
 
-// Write to the same place hardhat-diamond-abi would have written it
+// Write to the same place hardhat-diamond-abi would have written it.
+// Preserve bytecode from the compiled AccountConfig.sol so the deployer can deploy it.
 const outDir = path.join(ARTIFACTS_DIR, `${OUT_NAME}.sol`);
 fs.mkdirSync(outDir, { recursive: true });
 const outPath = path.join(outDir, `${OUT_NAME}.json`);
-fs.writeFileSync(
-  outPath,
-  JSON.stringify({ contractName: OUT_NAME, abi: combined }, null, 2),
-);
+let compiled = {};
+try {
+  compiled = JSON.parse(fs.readFileSync(outPath, "utf8"));
+} catch {
+  console.warn(`No pre-existing ${OUT_NAME}.json; run "npx hardhat compile" first.`);
+}
+// Preserve constructor from compiled AccountConfig.sol (needed for deployment)
+const constructorItem = (compiled.abi ?? []).find((item) => item.type === "constructor");
+const abi = constructorItem ? [constructorItem, ...combined] : combined;
+
+const output = {
+  ...compiled,
+  contractName: OUT_NAME,
+  abi,
+};
+fs.writeFileSync(outPath, JSON.stringify(output, null, 2));
 console.log(`\nDiamond ABI written → ${outPath} (${combined.length} total entries)`);
