@@ -1,5 +1,6 @@
-# Nightly maintenance: scan every self-hosted runner in the org for Rust crate
-# workspaces and run `cargo clean` to reclaim disk space.
+# Nightly maintenance on every self-hosted runner in the org:
+#   1. Scan for Rust crate workspaces and run `cargo clean`
+#   2. Run `docker system prune -f` to remove unused Docker objects
 #
 # Runs at 3:00 AM Pacific Standard Time (11:00 UTC).  During Pacific Daylight
 # Time (summer) this fires at 4:00 AM PT instead; adjust the cron to `0 10`
@@ -14,7 +15,7 @@
 #   (e.g. via `./config.sh --labels <runner-name>`).  The matrix job uses
 #   `runs-on: [self-hosted, <name>]` to pin each job to a specific machine.
 
-name: Nightly Cargo Clean
+name: Nightly Runner Cleanup
 
 on:
   schedule:
@@ -45,9 +46,9 @@ jobs:
           echo "Discovered runners: $matrix"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
-  # ── 2. Run cargo clean on each runner in parallel ────────────────────────
+  # ── 2. Run cleanup tasks on each runner in parallel ──────────────────────
   cargo-clean:
-    name: "cargo clean @ ${{ matrix.runner }}"
+    name: "cleanup @ ${{ matrix.runner }}"
     needs: list-runners
     if: ${{ needs.list-runners.outputs.matrix != '[]' && needs.list-runners.outputs.matrix != '' }}
 
@@ -61,7 +62,7 @@ jobs:
     runs-on: ["self-hosted", "${{ matrix.runner }}"]
 
     steps:
-      - name: Scan work directory and run cargo clean
+      - name: cargo clean
         shell: bash
         run: |
           set -euo pipefail
@@ -117,7 +118,7 @@ jobs:
 
           echo ""
           echo "───────────────────────────────────────"
-          echo "Crates found  : $found"
+          echo "Crates found         : $found"
           echo "Successfully cleaned : $cleaned"
           echo "Failed               : $failed"
           echo "───────────────────────────────────────"
@@ -128,4 +129,16 @@ jobs:
 
           if [[ $found -eq 0 ]]; then
             echo "No Cargo.toml files found under $work_root — nothing to clean."
+          fi
+
+      - name: docker system prune
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Running docker system prune -f on $RUNNER_NAME ..."
+          if docker system prune -f 2>&1; then
+            echo "✓ docker system prune succeeded"
+          else
+            echo "::warning title=docker prune::docker system prune failed on $RUNNER_NAME (exit $?)"
           fi
