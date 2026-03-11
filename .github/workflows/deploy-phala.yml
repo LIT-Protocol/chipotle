@@ -219,3 +219,9 @@ jobs:
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
 
+  k6-lit-action-encrypt-decrypt:
+    needs: [wait-for-api-available, k6-lit-action-ecdsa-sign]
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/k6-lit-action-encrypt-decrypt.yml
+    with:
+      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
