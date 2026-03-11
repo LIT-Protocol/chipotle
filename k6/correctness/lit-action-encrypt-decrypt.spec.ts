@@ -14,8 +14,8 @@
  *   BASE_URL=https://your-instance/core/v1 k6 run k6/lit-action-encrypt-decrypt.spec.ts
  */
 import type { Response } from "k6/http";
-import { checkAndLog } from "./check.ts";
-import { LitApiServerClient } from "./litApiServer.ts";
+import { checkAndLog } from "../check.ts";
+import { LitApiServerClient } from "../litApiServer.ts";
 
 const BASE_URL =
   __ENV.BASE_URL ||

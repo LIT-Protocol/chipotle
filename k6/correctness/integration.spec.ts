@@ -7,8 +7,8 @@
  *   BASE_URL=https://your-instance.phala.network/core/v1 k6 run k6/integration.spec.ts
  */
 import type { Response } from "k6/http";
-import { checkAndLog } from "./check.ts";
-import { LitApiServerClient } from "./litApiServer.ts";
+import { checkAndLog } from "../check.ts";
+import { LitApiServerClient } from "../litApiServer.ts";
 
 const BASE_URL =
   __ENV.BASE_URL ||

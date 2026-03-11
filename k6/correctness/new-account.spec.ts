@@ -1,14 +1,14 @@
 /**
- * High-concurrency test: creates new accounts only.
- * Intended for load testing account creation (e.g. 10 VUs) without failure.
+ * Correctness test: creates new accounts concurrently.
+ * Verifies account creation succeeds under light concurrency (2 VUs).
  *
- * Use: k6 run k6/new-account.spec.ts
- *      BASE_URL=https://your-instance.phala.network/core/v1 k6 run k6/new-account.spec.ts
+ * Use: k6 run k6/correctness/new-account.spec.ts
+ *      BASE_URL=https://your-instance.phala.network/core/v1 k6 run k6/correctness/new-account.spec.ts
  */
 import type { Response } from "k6/http";
 import { sleep } from "k6";
-import { checkAndLog } from "./check.ts";
-import { LitApiServerClient } from "./litApiServer.ts";
+import { checkAndLog } from "../check.ts";
+import { LitApiServerClient } from "../litApiServer.ts";
 
 const baseUrl =
   __ENV.BASE_URL ||
@@ -16,10 +16,10 @@ const baseUrl =
 
 export const options = {
   vus: 2,
-  iterations: 10,
+  iterations: 4,
   thresholds: {
     http_req_failed: ["rate==0"],
-    http_reqs: ["count>=10"],
+    http_reqs: ["count>=4"],
     checks: ["rate==1"],
   },
 };
@@ -35,8 +35,7 @@ export default function () {
 
   const newAccountRes = client.newAccount({
     account_name: accountName,
-    account_description: "k6 new-account load test",
-    initial_balance: "10000",
+    account_description: "k6 new-account correctness test",
   });
 
   if (!assertOk("newAccount", "POST /new_account", newAccountRes)) return;

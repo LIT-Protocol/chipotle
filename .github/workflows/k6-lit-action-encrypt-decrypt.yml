@@ -29,4 +29,4 @@ jobs:
       - name: lit-action-encrypt-decrypt.spec.ts
         env:
           BASE_URL: ${{ inputs.api_root_url }}
-        run: k6 run k6/lit-action-encrypt-decrypt.spec.ts
+        run: k6 run k6/correctness/lit-action-encrypt-decrypt.spec.ts
