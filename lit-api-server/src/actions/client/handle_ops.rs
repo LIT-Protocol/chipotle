@@ -51,6 +51,12 @@ impl Client {
                 .into()
             }
             UnionResponse::AesEncrypt(AesEncryptRequest { pkp_id, message }) => {
+                if !op_code_helpers::can_use_wallet_in_action(&self.api_key, &self.ipfs_id, &pkp_id)
+                    .await?
+                {
+                    bail!("API key cannot use selected wallet in selected action");
+                }
+
                 let encrypted = op_code_helpers::encryption::aes_encrypt_with_pkp(
                     &self.api_key,
                     &pkp_id,
@@ -63,6 +69,12 @@ impl Client {
                 .into()
             }
             UnionResponse::AesDecrypt(AesDecryptRequest { pkp_id, ciphertext }) => {
+                if !op_code_helpers::can_use_wallet_in_action(&self.api_key, &self.ipfs_id, &pkp_id)
+                    .await?
+                {
+                    bail!("API key cannot use selected wallet in selected action");
+                }
+
                 let decrypted = op_code_helpers::encryption::aes_decrypt_with_pkp(
                     &self.api_key,
                     &pkp_id,

@@ -1,8 +1,9 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cd ./lit-actions && cargo check 2>&1 | head -60)",
-      "Bash(cd ./lit-api-server && cargo check 2>&1 | head -30)"
+      "Bash(npm install:*)",
+      "Bash(make compile:*)",
+      "Bash(cargo build:*)"
     ]
   }
 }

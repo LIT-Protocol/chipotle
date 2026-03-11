@@ -433,17 +433,12 @@ async fn update_usage_api_key_metadata(
 #[get("/list_api_keys?<page_number>&<page_size>")]
 async fn list_api_keys(
     api_key: ApiKey,
-    page_number: String,
-    page_size: String,
+    page_number: u64,
+    page_size: u64,
 ) -> OpenApiResponse<Vec<ApiKeyItem>, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
-            account_management::list_api_keys(
-                api_key.0.as_str(),
-                page_number.as_str(),
-                page_size.as_str(),
-            )
-            .await,
+            account_management::list_api_keys(api_key.0.as_str(), page_number, page_size).await,
         )
         .into(),
     }
@@ -453,17 +448,12 @@ async fn list_api_keys(
 #[get("/list_groups?<page_number>&<page_size>")]
 async fn list_groups(
     api_key: ApiKey,
-    page_number: String,
-    page_size: String,
+    page_number: u64,
+    page_size: u64,
 ) -> OpenApiResponse<Vec<ListMetadataItem>, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
-            account_management::list_groups(
-                api_key.0.as_str(),
-                page_number.as_str(),
-                page_size.as_str(),
-            )
-            .await,
+            account_management::list_groups(api_key.0.as_str(), page_number, page_size).await,
         )
         .into(),
     }
@@ -473,17 +463,12 @@ async fn list_groups(
 #[get("/list_wallets?<page_number>&<page_size>")]
 async fn list_wallets(
     api_key: ApiKey,
-    page_number: String,
-    page_size: String,
+    page_number: u64,
+    page_size: u64,
 ) -> OpenApiResponse<Vec<WalletItem>, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
-            account_management::list_wallets(
-                api_key.0.as_str(),
-                page_number.as_str(),
-                page_size.as_str(),
-            )
-            .await,
+            account_management::list_wallets(api_key.0.as_str(), page_number, page_size).await,
         )
         .into(),
     }
@@ -494,16 +479,16 @@ async fn list_wallets(
 async fn list_wallets_in_group(
     api_key: ApiKey,
     group_id: String,
-    page_number: String,
-    page_size: String,
+    page_number: u64,
+    page_size: u64,
 ) -> OpenApiResponse<Vec<WalletItem>, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
             account_management::list_wallets_in_group(
                 api_key.0.as_str(),
                 group_id.as_str(),
-                page_number.as_str(),
-                page_size.as_str(),
+                page_number,
+                page_size,
             )
             .await,
         )
@@ -516,16 +501,16 @@ async fn list_wallets_in_group(
 async fn list_actions(
     api_key: ApiKey,
     group_id: String,
-    page_number: String,
-    page_size: String,
+    page_number: u64,
+    page_size: u64,
 ) -> OpenApiResponse<Vec<ListMetadataItem>, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
             account_management::list_actions(
                 api_key.0.as_str(),
                 group_id.as_str(),
-                page_number.as_str(),
-                page_size.as_str(),
+                page_number,
+                page_size,
             )
             .await,
         )

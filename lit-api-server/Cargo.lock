@@ -4524,6 +4524,7 @@ dependencies = [
  "serde",
  "serde_bare",
  "serde_json",
+ "sha3 0.10.8",
  "sqlx",
  "tdx-quote",
  "tokio",
