@@ -138,9 +138,4 @@ export default function () {
     "decrypted plaintext matches challenge": () =>
       decryptBody.response === challenge,
   }, "litAction/decrypt");
-
-  console.log(`challenge:  ${challenge}`);
-  console.log(`ciphertext: ${ciphertext}`);
-  console.log(`plaintext:  ${decryptBody.response}`);
-  console.log(`match: ${decryptBody.response === challenge}`);
 }
