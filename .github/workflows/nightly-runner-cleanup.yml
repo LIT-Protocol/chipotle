@@ -114,6 +114,14 @@ jobs:
               echo "   ✗ cargo clean failed (exit $?)"
               failed=$((failed + 1))
             fi
+
+            echo "   building: $crate_dir"
+            if (cd "$crate_dir" && cargo build --all-features 2>&1); then
+              echo "   ✓ cargo build --all-features succeeded"
+            else
+              echo "   ✗ cargo build --all-features failed (exit $?)"
+              echo "::warning title=cargo build::cargo build --all-features failed in $crate_dir on ${{ matrix.runner.name }}"
+            fi
           done < <(find "$work_root" \
             -maxdepth 6 \
             -name "Cargo.toml" \
