@@ -1,0 +1,131 @@
+# Nightly maintenance: scan every self-hosted runner in the org for Rust crate
+# workspaces and run `cargo clean` to reclaim disk space.
+#
+# Runs at 3:00 AM Pacific Standard Time (11:00 UTC).  During Pacific Daylight
+# Time (summer) this fires at 4:00 AM PT instead; adjust the cron to `0 10`
+# if strict PDT alignment is needed.
+#
+# Prerequisites
+# ─────────────
+# • A repository secret named GH_ORG_ADMIN_TOKEN must exist.
+#   The token needs the `manage_runners:org` (or `admin:org`) scope so that
+#   the first job can call GET /orgs/{org}/actions/runners.
+# • Self-hosted runners must have their runner **name** registered as a label
+#   (e.g. via `./config.sh --labels <runner-name>`).  The matrix job uses
+#   `runs-on: [self-hosted, <name>]` to pin each job to a specific machine.
+
+name: Nightly Cargo Clean
+
+on:
+  schedule:
+    - cron: "0 11 * * *"   # 03:00 PST / 04:00 PDT
+  workflow_dispatch:        # manual trigger for testing
+
+jobs:
+  # ── 1. Enumerate every self-hosted runner in the org ─────────────────────
+  list-runners:
+    name: List self-hosted runners
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.runners.outputs.matrix }}
+
+    steps:
+      - name: Query org runners via GitHub API
+        id: runners
+        env:
+          GH_TOKEN: ${{ secrets.GH_ORG_ADMIN_TOKEN }}
+        run: |
+          # Collect the name of every runner (online or offline — we want to
+          # clean all of them so disk space is reclaimed even on idle machines).
+          matrix=$(gh api \
+            "/orgs/${{ github.repository_owner }}/actions/runners" \
+            --paginate \
+            --jq '[.runners[].name]')
+
+          echo "Discovered runners: $matrix"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  # ── 2. Run cargo clean on each runner in parallel ────────────────────────
+  cargo-clean:
+    name: "cargo clean @ ${{ matrix.runner }}"
+    needs: list-runners
+    if: ${{ needs.list-runners.outputs.matrix != '[]' && needs.list-runners.outputs.matrix != '' }}
+
+    strategy:
+      fail-fast: false          # keep cleaning other runners even if one fails
+      matrix:
+        runner: ${{ fromJson(needs.list-runners.outputs.matrix) }}
+
+    # Targets the specific runner by name-label so each machine is visited
+    # exactly once.
+    runs-on: ["self-hosted", "${{ matrix.runner }}"]
+
+    steps:
+      - name: Scan work directory and run cargo clean
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "═══════════════════════════════════════"
+          echo "Runner : $RUNNER_NAME"
+          echo "Host   : $(hostname)"
+          echo "═══════════════════════════════════════"
+
+          # RUNNER_WORKSPACE is set by the Actions agent to the repo-specific
+          # subdirectory inside _work (e.g. /opt/runner/_work/my-repo/my-repo).
+          # Going up two levels gives us the root _work directory that contains
+          # all checked-out repositories for this runner.
+          if [[ -z "${RUNNER_WORKSPACE:-}" ]]; then
+            echo "RUNNER_WORKSPACE is not set; cannot determine work root." >&2
+            exit 1
+          fi
+
+          work_root="${RUNNER_WORKSPACE%/*/*}"   # strip /<repo>/<repo>  →  _work
+          # Fallback: if the double-strip collapsed too far, use single strip.
+          if [[ ! -d "$work_root" ]]; then
+            work_root="${RUNNER_WORKSPACE%/*}"
+          fi
+
+          echo "Work root: $work_root"
+          echo ""
+
+          found=0
+          cleaned=0
+          failed=0
+
+          # -not -path "*/registry/*"   skips the global Cargo registry cache
+          # -not -path "*/.cargo/*"      skips ~/.cargo build artifacts
+          # -maxdepth 6                  avoids runaway recursion in deep trees
+          while IFS= read -r -d '' cargo_toml; do
+            crate_dir="$(dirname "$cargo_toml")"
+            found=$((found + 1))
+            echo "── Found: $crate_dir"
+
+            if (cd "$crate_dir" && cargo clean 2>&1); then
+              echo "   ✓ cargo clean succeeded"
+              cleaned=$((cleaned + 1))
+            else
+              echo "   ✗ cargo clean failed (exit $?)"
+              failed=$((failed + 1))
+            fi
+          done < <(find "$work_root" \
+            -maxdepth 6 \
+            -name "Cargo.toml" \
+            -not -path "*/registry/*" \
+            -not -path "*/.cargo/*" \
+            -print0 2>/dev/null)
+
+          echo ""
+          echo "───────────────────────────────────────"
+          echo "Crates found  : $found"
+          echo "Successfully cleaned : $cleaned"
+          echo "Failed               : $failed"
+          echo "───────────────────────────────────────"
+
+          if [[ $failed -gt 0 ]]; then
+            echo "::warning title=cargo clean::$failed crate(s) failed to clean on $RUNNER_NAME"
+          fi
+
+          if [[ $found -eq 0 ]]; then
+            echo "No Cargo.toml files found under $work_root — nothing to clean."
+          fi
