@@ -8,7 +8,7 @@
 #
 # Prerequisites
 # ─────────────
-# • A repository secret named GH_ORG_ADMIN_TOKEN must exist.
+# • A repository secret named RUNNER_CHECK_TOKEN_RO must exist.
 #   The token needs the `manage_runners:org` (or `admin:org`) scope so that
 #   the first job can call GET /orgs/{org}/actions/runners.
 # • Runners are targeted via their `hostname:<host>` + `username:<user>` labels
@@ -35,7 +35,7 @@ jobs:
       - name: Query org runners via GitHub API
         id: runners
         env:
-          GH_TOKEN: ${{ secrets.GH_ORG_ADMIN_TOKEN }}
+          GH_TOKEN: ${{ secrets.RUNNER_CHECK_TOKEN_RO }}
         run: |
           # Build a matrix of {name, hostname, username} objects — one per runner.
           # hostname:… and username:… labels are auto-applied by vbem/multi-runners
