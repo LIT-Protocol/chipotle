@@ -17,18 +17,31 @@ pub fn generate_unique_derivation_path() -> (U256, String) {
     let seed_bytes = get_random_secret();
     let derivation_bytes = keccak256(seed_bytes);
     let derivation_u256 = U256::from_big_endian(&derivation_bytes);
-    let derivation_path = bytes_to_hex(derivation_bytes);
+    // feels redundant, but it's a good way to ensure the derivation path is always the same for a given seed
+    let derivation_path = u256_to_derviation_path(derivation_u256);
     (derivation_u256, derivation_path)
 }
 
-pub fn evm_address(public_key: &str) -> Result<H160> {
+fn u256_to_bytes(u256: U256) -> [u8; 32] {
+    let mut bytes = [0; 32];
+    u256.to_big_endian(&mut bytes);
+    bytes
+}
 
+pub fn u256_to_derviation_path(u256: U256) -> String {
+    bytes_to_hex(u256_to_bytes(u256))
+}
+
+pub fn evm_address_from_public_key(public_key: &str) -> Result<H160> {
     if public_key.len() < 32 {
-        return Err(anyhow::anyhow!("Invalid public key length: {}", public_key.len()));
+        return Err(anyhow::anyhow!(
+            "Invalid public key length: {}",
+            public_key.len()
+        ));
     }
 
     let pkp_address = hex::decode(&public_key.replace("0x", "")[2..])?;
-    let pkp_address = keccak256(&pkp_address);    
+    let pkp_address = keccak256(&pkp_address);
     let pkp_address = H160::from_slice(&pkp_address[12..]);
     Ok(pkp_address)
 }

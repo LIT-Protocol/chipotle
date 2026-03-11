@@ -37,6 +37,11 @@ async fn create_new_wallet() -> Result<(String, H160, [u8; 32], U256), ApiStatus
         ApiStatus::internal_server_error(anyhow::anyhow!(e), "get_client_key failed")
     })?;
 
+    tracing::info!(
+        "Secret bytes keccak256: {:?}",
+        ethers::utils::keccak256(&secret)
+    );
+
     let local_wallet = LocalWallet::from_bytes(&secret).map_err(|e| {
         ApiStatus::internal_server_error(anyhow::anyhow!(e), "LocalWallet::from_bytes failed")
     })?;
@@ -99,6 +104,7 @@ pub async fn create_wallet(
 ) -> Result<CreateWalletResponse, ApiStatus> {
     let (_public_key, wallet_address, _secret, derivation_u256) = create_new_wallet().await?;
 
+    tracing::info!("Creating wallet with address: {:?}", wallet_address);
     // technically this is NOT a derivaton path at all, but it's a stand-in for now
     accounts::register_wallet_derivation(
         signer_pool,

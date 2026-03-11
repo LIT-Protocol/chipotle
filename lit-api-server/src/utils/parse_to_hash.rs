@@ -22,7 +22,18 @@ pub fn string_to_hashed_u256(s: &str) -> Result<U256, ApiStatus> {
     parse_u256(s)
 }
 
-pub fn string_to_h160(s: &str) -> Result<H160, ApiStatus> {
+pub fn pkp_id_to_h160(s: &str) -> Result<H160, ApiStatus> {
+    wallet_string_to_h160(s)
+}
+
+pub fn wallet_string_to_h160(s: &str) -> Result<H160, ApiStatus> {
+    if !(s.starts_with("0x") || s.starts_with("0X")) {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("H160 address must be prefixed with 0x: {}", s),
+            "Unable to parse H160 address",
+        ));
+    }
+
     parse_h160(s).map_err(|e| {
         ApiStatus::bad_request(
             anyhow::anyhow!("Unable to parse wallet address: {}", e),
