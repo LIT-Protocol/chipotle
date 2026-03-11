@@ -372,7 +372,8 @@ contract ViewsFacet {
                 account.groupList.at(i)
             ];
             if (
-                group.cidHash.contains(cidHash) &&
+                (group.cidHash.contains(cidHash) ||
+                    group.cidHash.contains(0)) &&
                 (group.pkpId.contains(walletAddress) ||
                     group.pkpId.contains(address(0)))
             ) {

@@ -209,7 +209,7 @@ pub mod diamond_multi_init {
         > {
             let factory = ::ethers::contract::ContractFactory::new(
                 DIAMONDMULTIINIT_ABI.clone(),
-                DIAMONDMULTIINIT_BYTECODE.clone().into(),
+                DIAMONDMULTIINIT_BYTECODE.clone(),
                 client,
             );
             let deployer = factory.deploy(constructor_args)?;

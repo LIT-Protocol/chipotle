@@ -29,14 +29,18 @@ generate: compile
 # 3. Deploy contracts to Base mainnet. Args: network (3 = Base), abis_folder
 deploy_base: clean generate
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
-	$(DEPLOYER_BIN) 3 artifacts/contracts $(BASE_DEPLOYER_SECRET)
+	$(DEPLOYER_BIN) deploy base artifacts/contracts $(BASE_DEPLOYER_SECRET)
 
 # 4. Deploy contracts to Base Sepolia. Args: network (2 = Base Sepolia), abis_folder
 deploy_sepolia: clean generate
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
-	$(DEPLOYER_BIN) 2 artifacts/contracts $(DEPLOYER_SECRET)
+	$(DEPLOYER_BIN) deploy base-sepolia artifacts/contracts $(DEPLOYER_SECRET)
 
 # 5. Deploy contracts to Anvil. Args: network (0 = Anvil), abis_folder
 deploy_anvil: clean generate
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
-	$(DEPLOYER_BIN) 0 artifacts/contracts $(ANVIL_SECRET)
+	$(DEPLOYER_BIN) deploy anvil artifacts/contracts $(ANVIL_SECRET)
+
+upgrade_sepolia: clean generate
+	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
+	$(DEPLOYER_BIN) upgrade base-sepolia artifacts/contracts $(DEPLOYER_SECRET)

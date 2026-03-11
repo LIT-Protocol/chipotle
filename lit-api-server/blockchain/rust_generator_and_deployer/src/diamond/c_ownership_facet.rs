@@ -196,7 +196,7 @@ pub mod ownership_facet {
         > {
             let factory = ::ethers::contract::ContractFactory::new(
                 OWNERSHIPFACET_ABI.clone(),
-                OWNERSHIPFACET_BYTECODE.clone().into(),
+                OWNERSHIPFACET_BYTECODE.clone(),
                 client,
             );
             let deployer = factory.deploy(constructor_args)?;

@@ -115,7 +115,7 @@ pub mod diamond_init {
         > {
             let factory = ::ethers::contract::ContractFactory::new(
                 DIAMONDINIT_ABI.clone(),
-                DIAMONDINIT_BYTECODE.clone().into(),
+                DIAMONDINIT_BYTECODE.clone(),
                 client,
             );
             let deployer = factory.deploy(constructor_args)?;

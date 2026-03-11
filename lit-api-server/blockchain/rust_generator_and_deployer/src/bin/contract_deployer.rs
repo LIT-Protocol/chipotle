@@ -11,8 +11,8 @@ use ethers::contract::ContractFactory;
 use ethers::core::types::Address;
 use ethers::prelude::*;
 use ethers::utils::hex::FromHex;
-use lit_contracts_minimal_generator::diamond::diamond_cut_facet::FacetCut;
-use lit_contracts_minimal_generator::diamond::diamond_loupe_facet::DiamondLoupeFacet;
+use lit_contracts_minimal_generator::diamond::c_diamond_cut_facet::FacetCut;
+use lit_contracts_minimal_generator::diamond::c_diamond_loupe_facet::DiamondLoupeFacet;
 
 use std::env;
 use std::fs;
@@ -34,12 +34,13 @@ const DEFAULT_SECRET: &str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efc
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
-    if args.len() < 3 {
+    if args.len() < 4 {
         eprintln!(
-            "Usage: {} <network> <abis_folder> [secret]",
+            "Usage: {} <action> <network> <abis_folder> [secret]",
             args.first().unwrap_or(&"deploy".into())
         );
-        eprintln!("  network   - 0 = Anvil, 1 = Yellowstone, 2 = Base Sepolia, 3 = Base");
+        eprintln!("  action    -  deploy, update");
+        eprintln!("  network   -  anvil, yellowstone, base-sepolia, or base");
         eprintln!(
             "  abis_folder - folder containing contract artifact JSON files (abi + bytecode)"
         );
@@ -48,27 +49,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         std::process::exit(1);
     }
-    let network: u16 = match args[1].parse() {
-        Ok(n) => n,
-        Err(_) => {
-            eprintln!("network must be 0, 1, 2, or 3 (got: {:?})", args[1]);
-            std::process::exit(1);
-        }
-    };
-    let (rpc_url, chain_id) = match network {
-        0 => (ANVIL_RPC, ANVIL_CHAIN_ID),
-        1 => (YELLOWSTONE_RPC, YELLOWSTONE_CHAIN_ID),
-        2 => (BASE_SEPOLIA_RPC, BASE_SEPOLIA_CHAIN_ID),
-        3 => (BASE_RPC, BASE_CHAIN_ID),
+    let action: String = args[1].to_string().to_lowercase();
+    if action != "deploy" && action != "update" {
+        eprintln!("action must be deploy or update");
+        std::process::exit(1);
+    }
+    let network: String = args[2].to_string().to_lowercase();
+
+    let (rpc_url, chain_id) = match network.as_str() {
+        "anvil" => (ANVIL_RPC, ANVIL_CHAIN_ID),
+        "yellowstone" => (YELLOWSTONE_RPC, YELLOWSTONE_CHAIN_ID),
+        "base-sepolia" => (BASE_SEPOLIA_RPC, BASE_SEPOLIA_CHAIN_ID),
+        "base" => (BASE_RPC, BASE_CHAIN_ID),
         _ => {
-            eprintln!("network must be 0 (Anvil), 1 (Yellowstone), 2 (Base Sepolia), or 3 (Base)");
+            eprintln!("network must be anvil, yellowstone, base-sepolia, or base");
             std::process::exit(1);
         }
     };
 
-    let abis_folder = args[2].trim_end_matches('/').to_string();
+    let abis_folder = args[3].trim_end_matches('/').to_string();
     let secret = args
-        .get(3)
+        .get(4)
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .unwrap_or(DEFAULT_SECRET);
@@ -77,17 +78,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args[2], abis_folder, rpc_url
     );
 
-    // deploy_diamond(rpc_url, chain_id, &abis_folder, secret)
-    //     .await
-    //     .expect("Failed to deploy diamond");
+    if action == "deploy" {
+        deploy_diamond(rpc_url, chain_id, &abis_folder, secret)
+            .await
+            .expect("Failed to deploy diamond");
+    }
+    if action == "update" {
+        let diamond_address_str = "0x17788103ca8f9bc39c43b70b601dac99be5a63cb";
+        let diamond_address_bytes = hex::decode(diamond_address_str.replace("0x", "")).unwrap();
+        let diamond_address = Address::from_slice(&diamond_address_bytes);
 
-    let diamond_address_str = "0x17788103ca8f9bc39c43b70b601dac99be5a63cb";
-    let diamond_address_bytes = hex::decode(diamond_address_str.replace("0x", "")).unwrap();
-    let diamond_address = Address::from_slice(&diamond_address_bytes);
-
-    upate_diamond(rpc_url, chain_id, &abis_folder, secret, diamond_address)
-        .await
-        .expect("Failed to update diamond");
+        upate_diamond(rpc_url, chain_id, &abis_folder, secret, diamond_address)
+            .await
+            .expect("Failed to update diamond");
+    }
     Ok(())
 }
 
@@ -168,10 +172,7 @@ async fn deploy_artifact<T: Tokenize>(
         Some(abi) => abi,
         None => {
             println!("Skipping {} (no abi)", name);
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "No abi found",
-            )));
+            return Err(Box::new(std::io::Error::other("No abi found")));
         }
     };
 
@@ -191,10 +192,7 @@ async fn deploy_artifact<T: Tokenize>(
 
     if bytecode_hex.is_empty() || bytecode_hex == "0x" {
         println!("Skipping {} (no bytecode)", name);
-        return Err(Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            "No bytecode found",
-        )));
+        return Err(Box::new(std::io::Error::other("No bytecode found")));
     }
 
     let bytecode = Bytes::from_hex(bytecode_hex)?;
@@ -364,7 +362,7 @@ async fn deploy_diamond(
     let account_config = deploy_artifact(account_config_path, client.clone(), args).await;
     if let Err(e) = account_config {
         eprintln!("Failed to deploy AccountConfig: {:?}", e);
-        return Err(e.into());
+        return Err(e);
     }
     Ok(())
 }
@@ -381,7 +379,7 @@ async fn upate_diamond(
     let client = SignerMiddleware::new(provider, wallet);
     let client = std::sync::Arc::new(client);
 
-    use lit_contracts_minimal_generator::diamond::diamond_cut_facet::DiamondCutFacet;
+    use lit_contracts_minimal_generator::diamond::c_diamond_cut_facet::DiamondCutFacet;
 
     let diamond_init = deploy_facet_from_json(
         abis_folder,

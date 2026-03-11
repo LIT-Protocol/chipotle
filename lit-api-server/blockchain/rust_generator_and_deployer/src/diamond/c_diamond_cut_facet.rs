@@ -555,7 +555,7 @@ pub mod diamond_cut_facet {
         > {
             let factory = ::ethers::contract::ContractFactory::new(
                 DIAMONDCUTFACET_ABI.clone(),
-                DIAMONDCUTFACET_BYTECODE.clone().into(),
+                DIAMONDCUTFACET_BYTECODE.clone(),
                 client,
             );
             let deployer = factory.deploy(constructor_args)?;
