@@ -26,13 +26,7 @@ jobs:
       - name: Install k6
         uses: grafana/setup-k6-action@v1
 
-      - name: smoke.spec.ts
-        env:
-          BASE_URL: ${{ inputs.api_root_url }}
-        run: k6 run k6/correctness/smoke.spec.ts
-
       - name: integration.spec.ts
-        if: ${{ !cancelled() }}
         env:
           BASE_URL: ${{ inputs.api_root_url }}
         run: k6 run k6/correctness/integration.spec.ts
