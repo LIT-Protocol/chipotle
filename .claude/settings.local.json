@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /Users/brendonpaul/GitHub/lit-node-express/lit-actions && cargo check 2>&1 | head -60)",
+      "Bash(cd /Users/brendonpaul/GitHub/lit-node-express/lit-api-server && cargo check 2>&1 | head -30)"
+    ]
+  }
+}

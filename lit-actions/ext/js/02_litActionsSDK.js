@@ -1,52 +1,5 @@
 import * as ops from 'ext:core/ops';
 /**
- * Ask the Lit Node to sign any data using the ECDSA Algorithm with its private key. The resulting signature will be returned to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
- * @name Lit.Actions.signEcdsa
- * @function signEcdsa
- * @param {Object} params
- * @param {Uint8Array} params.toSign The message to sign
- * @param {string} params.pkpId The ID of the PKP
- * @param {string} params.sigName The name of the signature
- * @returns {Promise<Uint8Array>} The resulting signature
- */
-function signEcdsa({ toSign, pkpId, sigName}) {
-  return sign({ toSign, pkpId, sigName, signingScheme: "EcdsaK256Sha256" });
-}
-
-/**
- * @param {Uint8array} toSign the message to sign
- * @param {string} pkpId the ID of the PKP
- * @param {string} sigName the name of the signature
- * @param {string} signingScheme the name of the signing scheme
- *   one of the following
- *   "EcdsaK256Sha256"
- *   "EcdsaP256Sha256"
- *   "EcdsaP384Sha384"
- *   "SchnorrEd25519Sha512"
- *   "SchnorrK256Sha256"
- *   "SchnorrP256Sha256"
- *   "SchnorrP384Sha384"
- *   "SchnorrRistretto25519Sha512"
- *   "SchnorrEd448Shake256"
- *   "SchnorrRedJubjubBlake2b512"
- *   "SchnorrK256Taproot"
- *   "SchnorrRedDecaf377Blake2b512"
- *   "SchnorrkelSubstrate"
- *   "Bls12381G1ProofOfPossession"
- * @name Lit.Actions.sign
- * @function sign
- * @returns {Uint8Array} The resulting signature 
- */
-function sign({ toSign, pkpId, sigName, signingScheme }) {
-  return ops.op_sign(
-    new Uint8Array(toSign),
-    pkpId,
-    sigName,
-    signingScheme,
-  );
-}
-
-/**
  * Set the response returned to the client
  * @name Lit.Actions.setResponse
  * @function setResponse
@@ -55,32 +8,6 @@ function sign({ toSign, pkpId, sigName, signingScheme }) {
  */
 function setResponse({ response }) {
   return ops.op_set_response(response);
-}
-
-/**
- * Call a child Lit Action
- * @name Lit.Actions.call
- * @function call
- * @param {Object} params
- * @param {string} params.ipfsId The IPFS ID of the Lit Action to call
- * @param {Object=} params.params Optional parameters to pass to the child Lit Action
- * @returns {Promise<string>} The response from the child Lit Action.  Note that any signatures performed by the child Lit Action will be automatically combined and returned with the parent Lit Action to the Lit JS SDK client.
- */
-function call({ ipfsId, params }) {
-  return ops.op_call_child(ipfsId, params);
-}
-
-/**
- * Call a smart contract
- * @name Lit.Actions.callContract
- * @function callContract
- * @param {Object} params
- * @param {string} params.chain The name of the chain to use.  Check out the lit docs "Supported Blockchains" page to find the name.  For example, "ethereum"
- * @param {string} params.txn The RLP Encoded txn, as a hex string
- * @returns {Promise<string>} The response from calling the contract
- */
-function callContract({ chain, txn }) {
-  return ops.op_call_contract(chain, txn);
 }
 
 /**
@@ -173,11 +100,7 @@ function Encrypt({
 globalThis.LitActions = {
   Encrypt,
   Decrypt,
-  sign,
-  signEcdsa,
   setResponse,
-  call,
-  callContract,
   uint8arrayToString,
   uint8arrayFromString,
 };

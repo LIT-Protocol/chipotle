@@ -5315,6 +5315,7 @@ dependencies = [
  "dashmap 6.1.0",
  "derive_more",
  "flume",
+ "hyper-util",
  "lit-core",
  "lit-core-derive",
  "lit-logging",
@@ -5329,6 +5330,7 @@ dependencies = [
  "tower 0.5.2",
  "tracing",
  "tracing-appender",
+ "tracing-log",
  "tracing-opentelemetry",
  "tracing-subscriber",
 ]

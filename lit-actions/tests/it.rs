@@ -96,21 +96,9 @@ impl TestClient {
                 self.messages.put(req);
                 self.messages.take::<IncrementFetchCountResponse>().into()
             }
-            UnionResponse::Sign(req) => {
-                self.messages.put(req);
-                self.messages.take::<SignResponse>().into()
-            }
             UnionResponse::AesDecrypt(req) => {
                 self.messages.put(req);
                 self.messages.take::<AesDecryptResponse>().into()
-            }
-            UnionResponse::CallContract(req) => {
-                self.messages.put(req);
-                self.messages.take::<CallContractResponse>().into()
-            }
-            UnionResponse::CallChild(req) => {
-                self.messages.put(req);
-                self.messages.take::<CallChildResponse>().into()
             }
             UnionResponse::AesEncrypt(req) => {
                 self.messages.put(req);
@@ -225,7 +213,6 @@ async fn lit_namespace_protection(mut client: TestClient) {
         run(() => delete globalThis.LitHeaders);
 
         run(() => delete Lit.Actions);
-        run(() => delete Lit.Actions.signEcdsa);
         run(() => delete Lit.Headers);
 
         run(() => Lit = {});
@@ -366,7 +353,7 @@ async fn aes_decrypt(mut client: TestClient) {
     client
         .respond_with(AesDecryptResponse { plaintext: "ignored".to_string() })
         .execute_js(
-            r#"(async () => { await LitActions.aesDecrypt({ publicKey: "ignored", ciphertext: "456"}) })()"#,
+            r#"(async () => { await LitActions.Decrypt({ pkpId: "ignored", ciphertext: "456"}) })()"#,
         )
         .await
         .unwrap();
@@ -376,70 +363,6 @@ async fn aes_decrypt(mut client: TestClient) {
         AesDecryptRequest {
             pkp_id: "ignored".to_string(),
             ciphertext: "456".to_string(),
-        }
-    );
-    assert!(client.received::<ExecutionResult>().success);
-}
-
-#[rstest]
-#[tokio::test]
-async fn call_child(mut client: TestClient) {
-    {
-        client
-            .respond_with(CallChildResponse {
-                response: "ignored".to_string(),
-            })
-            .execute_js(r#"(async () => { await LitActions.call({ipfsId: "some-id", params: {"foo": "bar"}}) })()"#)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            client.received::<CallChildRequest>(),
-            CallChildRequest {
-                ipfs_id: "some-id".to_string(),
-                params: Some(b"{\"foo\":\"bar\"}".into()),
-            }
-        );
-        assert!(client.received::<ExecutionResult>().success);
-    }
-
-    // Omit params
-    {
-        client
-            .respond_with(CallChildResponse {
-                response: "ignored".to_string(),
-            })
-            .execute_js(r#"(async () => { await LitActions.call({ipfsId: "some-id"}) })()"#)
-            .await
-            .unwrap();
-
-        assert_eq!(
-            client.received::<CallChildRequest>(),
-            CallChildRequest {
-                ipfs_id: "some-id".to_string(),
-                params: None,
-            }
-        );
-        assert!(client.received::<ExecutionResult>().success);
-    }
-}
-
-#[rstest]
-#[tokio::test]
-async fn call_contract(mut client: TestClient) {
-    client
-        .respond_with(CallContractResponse {
-            result: "ignored".to_string(),
-        })
-        .execute_js(r#"(async () => { await LitActions.callContract({chain: "some-chain", txn: "some-txn"}) })()"#)
-        .await
-        .unwrap();
-
-    assert_eq!(
-        client.received::<CallContractRequest>(),
-        CallContractRequest {
-            chain: "some-chain".to_string(),
-            txn: "some-txn".to_string(),
         }
     );
     assert!(client.received::<ExecutionResult>().success);
@@ -528,8 +451,7 @@ async fn async_await(mut client: TestClient) {
     let code = indoc! {r#"
         (async () => {
             const fulfilled = await Promise.all([
-                LitActions.sign({toSign: [1,2,3], publicKey: "some-key", sigName: "some-sig", signingScheme: "EcdsaK256Sha256"}),
-                LitActions.aesDecrypt({publicKey: "some-key", ciphertext: "456"}),
+                LitActions.Decrypt({pkpId: "some-key", ciphertext: "456"}),
                 LitActions.setResponse({response: await "OK"})
             ])
             console.log(fulfilled)
@@ -539,9 +461,6 @@ async fn async_await(mut client: TestClient) {
     for _ in 0..20 {
         client
             .respond_with(PrintResponse {})
-            .respond_with(SignResponse {
-                success: "success".to_string(),
-            })
             .respond_with(AesDecryptResponse {
                 plaintext: "456".to_string(),
             })
@@ -550,7 +469,6 @@ async fn async_await(mut client: TestClient) {
             .await
             .unwrap();
 
-        assert_eq!(client.received::<SignRequest>().sig_name, "some-sig");
         assert_eq!(
             client.received::<AesDecryptRequest>().ciphertext,
             "456".to_string()
@@ -558,7 +476,7 @@ async fn async_await(mut client: TestClient) {
         assert_eq!(client.received::<SetResponseRequest>().response, "OK");
         assert_eq!(
             client.received::<PrintRequest>().message,
-            "[ \"success\", \"456\", null ]\n"
+            "[ \"456\", null ]\n"
         );
         assert!(client.received::<ExecutionResult>().success);
     }
