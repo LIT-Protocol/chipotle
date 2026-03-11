@@ -11,11 +11,13 @@ ANVIL_SECRET := 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff
 # 1. Compile Solidity contracts with Hardhat and generate combined Diamond ABI
 
 compile:
+	npx hardhat clean
 	npx hardhat compile
 	node generate-diamond-abi.mjs
 
 #1.1 generate and compile
 generate_and_compile: generate
+    npx hardhat clean
 	npx hardhat compile
 
 # 2. Generate Rust bindings from artifacts. Args: input_folder, output_folder
