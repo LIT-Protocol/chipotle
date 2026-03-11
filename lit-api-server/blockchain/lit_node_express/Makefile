@@ -43,4 +43,4 @@ deploy_anvil: clean generate
 
 upgrade_sepolia: clean generate
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
-	$(DEPLOYER_BIN) upgrade base-sepolia artifacts/contracts $(DEPLOYER_SECRET)
+	$(DEPLOYER_BIN) update base-sepolia artifacts/contracts $(DEPLOYER_SECRET)
