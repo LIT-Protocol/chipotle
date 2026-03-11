@@ -77,10 +77,7 @@ fn parse_h160(s: &str) -> Result<H160, ApiStatus> {
             .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex for H160"))?;
         if bytes.len() != 20 {
             return Err(ApiStatus::bad_request(
-                anyhow::anyhow!(
-                    "invalid H160: expected 20 bytes, got {}",
-                    bytes.len()
-                ),
+                anyhow::anyhow!("invalid H160: expected 20 bytes, got {}", bytes.len()),
                 "invalid H160: address must be exactly 20 bytes",
             ));
         }
@@ -113,10 +110,7 @@ fn parse_h160_hex_list(strings: &[String]) -> Result<Vec<H160>, ApiStatus> {
                 .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex in list"))?;
             if bytes.len() != 20 {
                 return Err(ApiStatus::bad_request(
-                    anyhow::anyhow!(
-                        "invalid H160: expected 20 bytes, got {}",
-                        bytes.len()
-                    ),
+                    anyhow::anyhow!("invalid H160: expected 20 bytes, got {}", bytes.len()),
                     "invalid H160: address must be exactly 20 bytes",
                 ));
             }
