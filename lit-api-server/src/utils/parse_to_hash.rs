@@ -54,7 +54,9 @@ fn string_to_bytes_to_hash_to_u256(s: &str) -> Result<U256, ApiStatus> {
     Ok(U256::from_big_endian(&bytes))
 }
 
-/// Parse U256 from decimal string or hex string (with or without 0x prefix).
+/// Parse U256 from a `0x`-prefixed hex string or a decimal string.
+/// Inputs without a `0x`/`0X` prefix are treated as base-10 decimal;
+/// hex strings must include the prefix.
 fn parse_u256(s: &str) -> Result<U256, ApiStatus> {
     let s = s.trim();
     if s.starts_with("0x") || s.starts_with("0X") {
@@ -75,8 +77,11 @@ fn parse_h160(s: &str) -> Result<H160, ApiStatus> {
             .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex for H160"))?;
         if bytes.len() != 20 {
             return Err(ApiStatus::bad_request(
-                anyhow::anyhow!("expected 20-byte address, got {} bytes", bytes.len()),
-                "invalid address length",
+                anyhow::anyhow!(
+                    "invalid H160: expected 20 bytes, got {}",
+                    bytes.len()
+                ),
+                "invalid H160: address must be exactly 20 bytes",
             ));
         }
         Ok(H160::from_slice(&bytes))
@@ -108,8 +113,11 @@ fn parse_h160_hex_list(strings: &[String]) -> Result<Vec<H160>, ApiStatus> {
                 .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex in list"))?;
             if bytes.len() != 20 {
                 return Err(ApiStatus::bad_request(
-                    anyhow::anyhow!("expected 20-byte address, got {} bytes", bytes.len()),
-                    "invalid address length in list",
+                    anyhow::anyhow!(
+                        "invalid H160: expected 20 bytes, got {}",
+                        bytes.len()
+                    ),
+                    "invalid H160: address must be exactly 20 bytes",
                 ));
             }
             Ok(H160::from_slice(&bytes))

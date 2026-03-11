@@ -216,7 +216,12 @@ pub async fn add_usage_api_key(
 ) -> Result<AddUsageApiKeyResponse, ApiStatus> {
     let ten_years_from_now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
+        .map_err(|e| {
+            ApiStatus::internal_server_error(
+                anyhow::anyhow!(e),
+                "System clock is before the Unix epoch",
+            )
+        })?
         .as_secs()
         + 3600 * 24 * 365 * 10;
     let expiration = U256::from(ten_years_from_now);
