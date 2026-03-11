@@ -15,7 +15,7 @@ message ExecuteJsRequest {
     IncrementFetchCountResponse increment_fetch_count = 4;
     UpdateResourceUsageResponse update_resource_usage = 5;
     AesEncryptResponse aes_encrypt = 10;
-    AesDecryptResponse aes_decrypt = 11;    
+    AesDecryptResponse aes_decrypt = 11;
   }
 
   message ExecutionRequest {
