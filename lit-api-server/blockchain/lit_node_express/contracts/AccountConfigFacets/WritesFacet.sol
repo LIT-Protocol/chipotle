@@ -11,7 +11,7 @@ import {
 import {AppStorage} from "./AppStorage.sol";
 import {SecurityLib} from "./SecurityLib.sol";
 
-contract WritesFacet  {
+contract WritesFacet {
     using EnumerableSet for EnumerableSet.UintSet;
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -114,7 +114,7 @@ contract WritesFacet  {
         }
         for (uint256 i = 0; i < pkpIds.length; i++) {
             group.pkpId.add(pkpIds[i]);
-        }        
+        }
     }
 
     function updateGroup(
@@ -123,7 +123,11 @@ contract WritesFacet  {
         string memory name,
         string memory description
     ) public {
-        SecurityLib.revertIfGroupDoesNotExist(accountApiKeyHash, groupId, msg.sender);
+        SecurityLib.revertIfGroupDoesNotExist(
+            accountApiKeyHash,
+            groupId,
+            msg.sender
+        );
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         AppStorage.Group storage group = s.accounts[accountApiKeyHash].groups[
@@ -138,7 +142,11 @@ contract WritesFacet  {
         uint256 groupId,
         address pkpId
     ) public {
-        SecurityLib.revertIfGroupDoesNotExist(accountApiKeyHash, groupId, msg.sender);
+        SecurityLib.revertIfGroupDoesNotExist(
+            accountApiKeyHash,
+            groupId,
+            msg.sender
+        );
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         s.accounts[accountApiKeyHash].groups[groupId].pkpId.add(pkpId);
@@ -151,7 +159,11 @@ contract WritesFacet  {
         string memory name,
         string memory description
     ) public {
-        SecurityLib.revertIfGroupDoesNotExist(accountApiKeyHash, groupId, msg.sender);
+        SecurityLib.revertIfGroupDoesNotExist(
+            accountApiKeyHash,
+            groupId,
+            msg.sender
+        );
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         AppStorage.Account storage account = s.accounts[accountApiKeyHash];
@@ -208,7 +220,12 @@ contract WritesFacet  {
         address pkpId
     ) public {
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
-        SecurityLib.revertIfPkpDoesNotExist(accountApiKeyHash, groupId, pkpId, msg.sender);
+        SecurityLib.revertIfPkpDoesNotExist(
+            accountApiKeyHash,
+            groupId,
+            pkpId,
+            msg.sender
+        );
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         s.accounts[accountApiKeyHash].groups[groupId].pkpId.remove(pkpId);
@@ -221,7 +238,10 @@ contract WritesFacet  {
         string memory description
     ) public {
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
-        SecurityLib.revertIfUsageApiKeyDoesNotExist(accountApiKeyHash, usageApiKeyHash);
+        SecurityLib.revertIfUsageApiKeyDoesNotExist(
+            accountApiKeyHash,
+            usageApiKeyHash
+        );
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         s
@@ -241,7 +261,10 @@ contract WritesFacet  {
         uint256 usageApiKeyHash
     ) public {
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
-        SecurityLib.revertIfUsageApiKeyDoesNotExist(accountApiKeyHash, usageApiKeyHash);
+        SecurityLib.revertIfUsageApiKeyDoesNotExist(
+            accountApiKeyHash,
+            usageApiKeyHash
+        );
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         AppStorage.Account storage account = s.accounts[accountApiKeyHash];

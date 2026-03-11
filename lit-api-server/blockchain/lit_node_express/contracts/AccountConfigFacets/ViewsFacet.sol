@@ -10,7 +10,7 @@ import {
 } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {AppStorage} from "./AppStorage.sol";
 
-contract ViewsFacet  {
+contract ViewsFacet {
     using EnumerableSet for EnumerableSet.UintSet;
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -303,7 +303,6 @@ contract ViewsFacet  {
         uint256 apiKeyHash,
         uint256 cidHash
     ) public view returns (bool) {
-
         uint256[] memory groupIds = groupIdsForAction(apiKeyHash, cidHash);
         return apiKeyCanExecuteForAnyGroup(apiKeyHash, groupIds);
     }
@@ -313,7 +312,11 @@ contract ViewsFacet  {
         uint256 cidHash,
         address walletAddress
     ) public view returns (bool) {
-        uint256[] memory groupIds = groupIdsForActionAndWallet(apiKeyHash, cidHash, walletAddress);
+        uint256[] memory groupIds = groupIdsForActionAndWallet(
+            apiKeyHash,
+            cidHash,
+            walletAddress
+        );
         return apiKeyCanExecuteForAnyGroup(apiKeyHash, groupIds);
     }
 
@@ -322,7 +325,9 @@ contract ViewsFacet  {
         uint256[] memory groupIds
     ) public view returns (bool) {
         AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
-        AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[apiKeyHash];
+        AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[
+            apiKeyHash
+        ];
         for (uint256 i = 0; i < groupIds.length; i++) {
             if (usageApiKey.executeInGroups.contains(groupIds[i])) {
                 return true;
@@ -334,13 +339,15 @@ contract ViewsFacet  {
     function groupIdsForAction(
         uint256 apiKeyHash,
         uint256 cidHash
-    ) internal view returns (uint256[] memory) {
+    ) public view returns (uint256[] memory) {
         AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
         uint256[] memory groupIds = new uint256[](account.groupList.length());
         uint256 groupCount = 0;
         for (uint256 i = 0; i < account.groupList.length(); i++) {
-            AppStorage.Group storage group = account.groups[account.groupList.at(i)];
-            if (group.cidHash.contains(cidHash)) {
+            AppStorage.Group storage group = account.groups[
+                account.groupList.at(i)
+            ];
+            if (group.cidHash.contains(cidHash) || group.cidHash.contains(0)) {
                 groupIds[groupCount] = account.groupList.at(i);
                 groupCount++;
             }
@@ -356,13 +363,19 @@ contract ViewsFacet  {
         uint256 apiKeyHash,
         uint256 cidHash,
         address walletAddress
-    ) internal view returns (uint256[] memory) {
+    ) public view returns (uint256[] memory) {
         AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
         uint256[] memory groupIds = new uint256[](account.groupList.length());
         uint256 groupCount = 0;
         for (uint256 i = 0; i < account.groupList.length(); i++) {
-            AppStorage.Group storage group = account.groups[account.groupList.at(i)];
-            if (group.cidHash.contains(cidHash) && group.pkpId.contains(walletAddress)) {
+            AppStorage.Group storage group = account.groups[
+                account.groupList.at(i)
+            ];
+            if (
+                group.cidHash.contains(cidHash) &&
+                (group.pkpId.contains(walletAddress) ||
+                    group.pkpId.contains(address(0)))
+            ) {
                 groupIds[groupCount] = account.groupList.at(i);
                 groupCount++;
             }

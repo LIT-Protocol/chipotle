@@ -11,7 +11,7 @@ import {
 import {AppStorage} from "./AppStorage.sol";
 import {SecurityLib} from "./SecurityLib.sol";
 
-contract APIConfigFacet  {
+contract APIConfigFacet {
     using EnumerableSet for EnumerableSet.UintSet;
     using EnumerableSet for EnumerableSet.AddressSet;
 

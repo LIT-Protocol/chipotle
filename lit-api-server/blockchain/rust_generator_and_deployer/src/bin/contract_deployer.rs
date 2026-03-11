@@ -418,22 +418,21 @@ async fn upate_diamond(
 
     let mut facet_cuts = Vec::new();
 
-    let writes_facet = deploy_facet_from_json(
-        abis_folder,
-        "AccountConfigFacets/WritesFacet.sol/WritesFacet.json",
-        client.clone(),
-    )
-    .await?;
-    let facet_cuts_for_contract = get_facet_cuts(&writes_facet, existing_selectors);
-    // let facet_cut = get_facet_cut(FacetCutAction::Replace, &writes_facet);
-
-    // let views_facet = deploy_facet_from_json(
+    // let writes_facet = deploy_facet_from_json(
     //     abis_folder,
-    //     "AccountConfigFacets/ViewsFacet.sol/ViewsFacet.json",
+    //     "AccountConfigFacets/WritesFacet.sol/WritesFacet.json",
     //     client.clone(),
     // )
     // .await?;
-    // let facet_cuts_for_contract = get_facet_cuts(&views_facet, existing_selectors);
+    // let facet_cuts_for_contract = get_facet_cuts(&writes_facet, existing_selectors);
+
+    let views_facet = deploy_facet_from_json(
+        abis_folder,
+        "AccountConfigFacets/ViewsFacet.sol/ViewsFacet.json",
+        client.clone(),
+    )
+    .await?;
+    let facet_cuts_for_contract = get_facet_cuts(&views_facet, existing_selectors);
 
     for facet_cut in &facet_cuts_for_contract {
         println!(

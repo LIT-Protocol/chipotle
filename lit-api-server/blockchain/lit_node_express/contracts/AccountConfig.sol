@@ -10,14 +10,14 @@ import {AppStorage} from "./AccountConfigFacets/AppStorage.sol";
 import {
     EnumerableSet
 } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
-import { LibDiamond } from "../libraries/LibDiamond.sol";
-import { IDiamondCut } from "../interfaces/IDiamondCut.sol";
-import { IDiamondLoupe } from "../interfaces/IDiamondLoupe.sol";
+import {LibDiamond} from "../libraries/LibDiamond.sol";
+import {IDiamondCut} from "../interfaces/IDiamondCut.sol";
+import {IDiamondLoupe} from "../interfaces/IDiamondLoupe.sol";
 
 // When no function exists for function called
 error FunctionNotFound(bytes4 _functionSelector);
 
-contract AccountConfig  {
+contract AccountConfig {
     using EnumerableSet for EnumerableSet.AddressSet;
 
     constructor(
@@ -25,7 +25,7 @@ contract AccountConfig  {
         IDiamondCut.FacetCut[] memory _diamondCut,
         address _init,
         bytes memory _calldata
-    ){
+    ) {
         LibDiamond.setContractOwner(owner);
         LibDiamond.diamondCut(_diamondCut, _init, _calldata);
 
@@ -37,7 +37,7 @@ contract AccountConfig  {
         s.requestedApiPayerCount = 3; // just a default for spinning up a new instance
     }
 
-      // Find facet for function that is called and execute the
+    // Find facet for function that is called and execute the
     // function if a facet is found and return any value.
     fallback() external {
         LibDiamond.DiamondStorage storage ds;
@@ -72,4 +72,3 @@ contract AccountConfig  {
         }
     }
 }
-

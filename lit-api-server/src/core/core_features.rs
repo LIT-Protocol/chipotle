@@ -28,7 +28,7 @@ pub async fn sign_with_pkp(
 
 #[instrument(
     level = "debug",
-    skip(api_key, grpc_client_pool, ipfs_cache, http_client),
+    skip(api_key, grpc_client_pool, ipfs_cache, http_client, lit_action_request),
     err
 )]
 pub async fn lit_action(

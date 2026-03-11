@@ -246,10 +246,10 @@ pub async fn add_usage_api_key(
         true,   // create_groups
         true,   // delete_groups
         true,   // create_pk_ps
-        vec![], // manage_ipfs_ids_in_groups
-        vec![], // add_pkp_to_groups
-        vec![], // remove_pkp_from_groups
-        vec![], // execute_in_groups
+        vec![U256::zero()], // manage_ipfs_ids_in_groups
+        vec![U256::zero()], // add_pkp_to_groups
+        vec![U256::zero()], // remove_pkp_from_groups
+        vec![U256::zero()], // execute_in_groups
     );
     send_transaction(function_call, signer_pool, signer_address).await
 }

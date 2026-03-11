@@ -327,9 +327,31 @@ pub async fn update_usage_api_key_metadata(
     Ok(AccountOpResponse { success: true })
 }
 
-fn metadata_to_item(m: &accounts::Metadata) -> ListMetadataItem {
+fn wallet_metadata_to_item(m: &accounts::Metadata) -> ListMetadataItem {
+    metadata_to_item(m, "n/a", "Any", "Any wallet in this account.")
+}
+
+fn action_metadata_to_item(m: &accounts::Metadata) -> ListMetadataItem {
+    metadata_to_item(m, "n/a", "Any", "Any action received.")
+}
+
+fn group_metadata_to_item(m: &accounts::Metadata) -> ListMetadataItem {
+    metadata_to_item(m, "n/a", "Any", "Any group in this account.")
+}
+
+fn metadata_to_item(m: &accounts::Metadata, wildcard_id: &str, wildcard_name: &str, wildcard_description: &str) -> ListMetadataItem {
+    
+    if m.id == U256::zero() {
+        return ListMetadataItem {
+            id: wildcard_id.to_string(),
+            name: wildcard_name.to_string(),
+            description: wildcard_description.to_string(),
+        };
+    }
+    
     let mut bytes = [0; 32];
     m.id.to_big_endian(&mut bytes);
+
     ListMetadataItem {
         id: bytes_to_hex(bytes),
         name: m.name.clone(),
@@ -388,7 +410,7 @@ pub async fn list_groups(
     let list = accounts::list_groups(api_key, pn, ps)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_groups failed"))?;
-    Ok(list.iter().map(metadata_to_item).collect())
+    Ok(list.iter().map(group_metadata_to_item).collect())
 }
 
 pub async fn list_wallets(
@@ -451,7 +473,9 @@ pub async fn list_actions(
     let list = accounts::list_actions(api_key, gid, pn, ps)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?;
-    Ok(list.iter().map(metadata_to_item).collect())
+
+    let list = list.iter().map(action_metadata_to_item).collect();
+    Ok(list)
 }
 
 pub async fn get_chain_info() -> Result<NodeChainConfigResponse, ApiStatus> {

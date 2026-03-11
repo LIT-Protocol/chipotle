@@ -12,7 +12,7 @@ import {
 import {AppStorage} from "./AppStorage.sol";
 import {SecurityLib} from "./SecurityLib.sol";
 
-contract BillingFacet  {
+contract BillingFacet {
     using EnumerableSet for EnumerableSet.UintSet;
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -64,8 +64,6 @@ contract BillingFacet  {
 
     function setPricingOperator(address newPricingOperator) public {
         SecurityLib.revertIfNotApiPayerOrPricingOperator(msg.sender);
-        AppStorage
-            .getStorage()
-            .pricingOperator = newPricingOperator;
+        AppStorage.getStorage().pricingOperator = newPricingOperator;
     }
 }
