@@ -1,283 +1,1331 @@
 {
-  "_format": "hh-sol-artifact-1",
   "contractName": "AccountConfig",
-  "sourceName": "contracts/AccountConfig.sol",
   "abi": [
     {
       "inputs": [
         {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "AccountAlreadyExists",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "groupId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "cidHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "ActionDoesNotExist",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "groupId",
+          "type": "uint256"
+        }
+      ],
+      "name": "GroupDoesNotExist",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
           "internalType": "address",
-          "name": "owner",
+          "name": "sender",
           "type": "address"
-        },
-        {
-          "components": [
-            {
-              "internalType": "address",
-              "name": "facetAddress",
-              "type": "address"
-            },
-            {
-              "internalType": "enum IDiamond.FacetCutAction",
-              "name": "action",
-              "type": "uint8"
-            },
-            {
-              "internalType": "bytes4[]",
-              "name": "functionSelectors",
-              "type": "bytes4[]"
-            }
-          ],
-          "internalType": "struct IDiamond.FacetCut[]",
-          "name": "_diamondCut",
-          "type": "tuple[]"
-        },
-        {
-          "internalType": "address",
-          "name": "_init",
-          "type": "address"
-        },
-        {
-          "internalType": "bytes",
-          "name": "_calldata",
-          "type": "bytes"
         }
       ],
-      "stateMutability": "nonpayable",
-      "type": "constructor"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "bytes4",
-          "name": "_selector",
-          "type": "bytes4"
-        }
-      ],
-      "name": "CannotAddFunctionToDiamondThatAlreadyExists",
+      "name": "NoAccountAccess",
       "type": "error"
     },
     {
       "inputs": [
         {
-          "internalType": "bytes4[]",
-          "name": "_selectors",
-          "type": "bytes4[]"
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
         }
       ],
-      "name": "CannotAddSelectorsToZeroAddress",
-      "type": "error"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "bytes4",
-          "name": "_selector",
-          "type": "bytes4"
-        }
-      ],
-      "name": "CannotRemoveFunctionThatDoesNotExist",
-      "type": "error"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "bytes4",
-          "name": "_selector",
-          "type": "bytes4"
-        }
-      ],
-      "name": "CannotRemoveImmutableFunction",
-      "type": "error"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "bytes4",
-          "name": "_selector",
-          "type": "bytes4"
-        }
-      ],
-      "name": "CannotReplaceFunctionThatDoesNotExists",
-      "type": "error"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "bytes4",
-          "name": "_selector",
-          "type": "bytes4"
-        }
-      ],
-      "name": "CannotReplaceFunctionWithTheSameFunctionFromTheSameFacet",
-      "type": "error"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "bytes4[]",
-          "name": "_selectors",
-          "type": "bytes4[]"
-        }
-      ],
-      "name": "CannotReplaceFunctionsFromFacetWithZeroAddress",
-      "type": "error"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "bytes4",
-          "name": "_selector",
-          "type": "bytes4"
-        }
-      ],
-      "name": "CannotReplaceImmutableFunction",
-      "type": "error"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "bytes4",
-          "name": "_functionSelector",
-          "type": "bytes4"
-        }
-      ],
-      "name": "FunctionNotFound",
-      "type": "error"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "uint8",
-          "name": "_action",
-          "type": "uint8"
-        }
-      ],
-      "name": "IncorrectFacetCutAction",
+      "name": "NotMasterAccount",
       "type": "error"
     },
     {
       "inputs": [
         {
           "internalType": "address",
-          "name": "_initializationContractAddress",
+          "name": "caller",
           "type": "address"
-        },
-        {
-          "internalType": "bytes",
-          "name": "_calldata",
-          "type": "bytes"
         }
       ],
-      "name": "InitializationFunctionReverted",
+      "name": "OnlyApiPayerOrOwner",
       "type": "error"
     },
     {
       "inputs": [
         {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "groupId",
+          "type": "uint256"
+        },
+        {
           "internalType": "address",
-          "name": "_contractAddress",
+          "name": "pkpId",
           "type": "address"
+        }
+      ],
+      "name": "PkpDoesNotExist",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "usageApiKeyHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "UsageApiKeyDoesNotExist",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "groupId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "action",
+          "type": "uint256"
         },
         {
           "internalType": "string",
-          "name": "_message",
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "description",
           "type": "string"
         }
       ],
-      "name": "NoBytecodeAtAddress",
-      "type": "error"
+      "name": "addActionToGroup",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
     },
     {
       "inputs": [
         {
-          "internalType": "address",
-          "name": "_facetAddress",
-          "type": "address"
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "string",
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "description",
+          "type": "string"
+        },
+        {
+          "internalType": "uint256[]",
+          "name": "cidHashes",
+          "type": "uint256[]"
+        },
+        {
+          "internalType": "address[]",
+          "name": "pkpIds",
+          "type": "address[]"
         }
       ],
-      "name": "NoSelectorsProvidedForFacetForCut",
-      "type": "error"
+      "name": "addGroup",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
     },
     {
       "inputs": [
         {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "groupId",
+          "type": "uint256"
+        },
+        {
           "internalType": "address",
-          "name": "_facetAddress",
+          "name": "pkpId",
           "type": "address"
         }
       ],
-      "name": "RemoveFacetAddressMustBeZeroAddress",
+      "name": "addPkpToGroup",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bool",
+          "name": "managed",
+          "type": "bool"
+        },
+        {
+          "internalType": "string",
+          "name": "accountName",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "accountDescription",
+          "type": "string"
+        },
+        {
+          "internalType": "address",
+          "name": "creatorWalletAddress",
+          "type": "address"
+        }
+      ],
+      "name": "newAccount",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "pkpId",
+          "type": "address"
+        },
+        {
+          "internalType": "uint256",
+          "name": "derivationPath",
+          "type": "uint256"
+        },
+        {
+          "internalType": "string",
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "description",
+          "type": "string"
+        }
+      ],
+      "name": "registerWalletDerivation",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "groupId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "action",
+          "type": "uint256"
+        }
+      ],
+      "name": "removeActionFromGroup",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "groupId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "pkpId",
+          "type": "address"
+        }
+      ],
+      "name": "removePkpFromGroup",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "usageApiKeyHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "removeUsageApiKey",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "usageApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "expiration",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "balance",
+          "type": "uint256"
+        },
+        {
+          "internalType": "string",
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "description",
+          "type": "string"
+        },
+        {
+          "internalType": "bool",
+          "name": "createGroups",
+          "type": "bool"
+        },
+        {
+          "internalType": "bool",
+          "name": "deleteGroups",
+          "type": "bool"
+        },
+        {
+          "internalType": "bool",
+          "name": "createPKPs",
+          "type": "bool"
+        },
+        {
+          "internalType": "uint256[]",
+          "name": "manageIPFSIdsInGroups",
+          "type": "uint256[]"
+        },
+        {
+          "internalType": "uint256[]",
+          "name": "addPkpToGroups",
+          "type": "uint256[]"
+        },
+        {
+          "internalType": "uint256[]",
+          "name": "removePkpFromGroups",
+          "type": "uint256[]"
+        },
+        {
+          "internalType": "uint256[]",
+          "name": "executeInGroups",
+          "type": "uint256[]"
+        }
+      ],
+      "name": "setUsageApiKey",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "actionHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "groupId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "string",
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "description",
+          "type": "string"
+        }
+      ],
+      "name": "updateActionMetadata",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "groupId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "string",
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "description",
+          "type": "string"
+        }
+      ],
+      "name": "updateGroup",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "usageApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "string",
+          "name": "name",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "description",
+          "type": "string"
+        }
+      ],
+      "name": "updateUsageApiKeyMetadata",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "AccountDoesNotExist",
       "type": "error"
     },
     {
-      "anonymous": false,
+      "inputs": [],
+      "name": "accountCount",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
       "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "accountExistsAndIsMutable",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "adminApiPayerAccount",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "index",
+          "type": "uint256"
+        }
+      ],
+      "name": "allPkpIdsAt",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256[]",
+          "name": "groupIds",
+          "type": "uint256[]"
+        }
+      ],
+      "name": "apiKeyCanExecuteForAnyGroup",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "apiPayerCount",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "api_payers",
+      "outputs": [
+        {
+          "internalType": "address[]",
+          "name": "",
+          "type": "address[]"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "cidHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "canExecuteAction",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "cidHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "walletAddress",
+          "type": "address"
+        }
+      ],
+      "name": "canUseWalletInAction",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "walletAddress",
+          "type": "address"
+        }
+      ],
+      "name": "getWalletDerivation",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "index",
+          "type": "uint256"
+        }
+      ],
+      "name": "indexToAccountHashAt",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "groupId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "pageNumber",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "pageSize",
+          "type": "uint256"
+        }
+      ],
+      "name": "listActions",
+      "outputs": [
         {
           "components": [
             {
+              "internalType": "uint256",
+              "name": "id",
+              "type": "uint256"
+            },
+            {
+              "internalType": "string",
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "internalType": "string",
+              "name": "description",
+              "type": "string"
+            }
+          ],
+          "internalType": "struct AppStorage.Metadata[]",
+          "name": "",
+          "type": "tuple[]"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "pageNumber",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "pageSize",
+          "type": "uint256"
+        }
+      ],
+      "name": "listApiKeys",
+      "outputs": [
+        {
+          "components": [
+            {
+              "components": [
+                {
+                  "internalType": "uint256",
+                  "name": "id",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "string",
+                  "name": "name",
+                  "type": "string"
+                },
+                {
+                  "internalType": "string",
+                  "name": "description",
+                  "type": "string"
+                }
+              ],
+              "internalType": "struct AppStorage.Metadata",
+              "name": "metadata",
+              "type": "tuple"
+            },
+            {
+              "internalType": "uint256",
+              "name": "apiKeyHash",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "expiration",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256",
+              "name": "balance",
+              "type": "uint256"
+            },
+            {
+              "internalType": "uint256[]",
+              "name": "executeInGroups",
+              "type": "uint256[]"
+            },
+            {
+              "internalType": "bool",
+              "name": "createGroups",
+              "type": "bool"
+            },
+            {
+              "internalType": "bool",
+              "name": "deleteGroups",
+              "type": "bool"
+            },
+            {
+              "internalType": "bool",
+              "name": "createPKPs",
+              "type": "bool"
+            },
+            {
+              "internalType": "uint256[]",
+              "name": "manageIPFSIdsInGroups",
+              "type": "uint256[]"
+            },
+            {
+              "internalType": "uint256[]",
+              "name": "addPkpToGroups",
+              "type": "uint256[]"
+            },
+            {
+              "internalType": "uint256[]",
+              "name": "removePkpFromGroups",
+              "type": "uint256[]"
+            }
+          ],
+          "internalType": "struct ViewsFacet.UsageApiKeyReturn[]",
+          "name": "",
+          "type": "tuple[]"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "groupId",
+          "type": "uint256"
+        }
+      ],
+      "name": "listGroupContents",
+      "outputs": [
+        {
+          "components": [
+            {
+              "components": [
+                {
+                  "internalType": "uint256",
+                  "name": "id",
+                  "type": "uint256"
+                },
+                {
+                  "internalType": "string",
+                  "name": "name",
+                  "type": "string"
+                },
+                {
+                  "internalType": "string",
+                  "name": "description",
+                  "type": "string"
+                }
+              ],
+              "internalType": "struct AppStorage.Metadata",
+              "name": "metadata",
+              "type": "tuple"
+            },
+            {
+              "internalType": "uint256[]",
+              "name": "cidHash",
+              "type": "uint256[]"
+            },
+            {
+              "internalType": "address[]",
+              "name": "pkpId",
+              "type": "address[]"
+            }
+          ],
+          "internalType": "struct ViewsFacet.GroupReturn",
+          "name": "",
+          "type": "tuple"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "pageNumber",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "pageSize",
+          "type": "uint256"
+        }
+      ],
+      "name": "listGroups",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "id",
+              "type": "uint256"
+            },
+            {
+              "internalType": "string",
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "internalType": "string",
+              "name": "description",
+              "type": "string"
+            }
+          ],
+          "internalType": "struct AppStorage.Metadata[]",
+          "name": "",
+          "type": "tuple[]"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "pageNumber",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "pageSize",
+          "type": "uint256"
+        }
+      ],
+      "name": "listPkps",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "id",
+              "type": "uint256"
+            },
+            {
               "internalType": "address",
-              "name": "facetAddress",
+              "name": "pkpId",
               "type": "address"
             },
             {
-              "internalType": "enum IDiamond.FacetCutAction",
-              "name": "action",
-              "type": "uint8"
+              "internalType": "string",
+              "name": "name",
+              "type": "string"
             },
             {
-              "internalType": "bytes4[]",
-              "name": "functionSelectors",
-              "type": "bytes4[]"
+              "internalType": "string",
+              "name": "description",
+              "type": "string"
             }
           ],
-          "indexed": false,
-          "internalType": "struct IDiamond.FacetCut[]",
-          "name": "_diamondCut",
+          "internalType": "struct AppStorage.PkpData[]",
+          "name": "",
           "type": "tuple[]"
-        },
-        {
-          "indexed": false,
-          "internalType": "address",
-          "name": "_init",
-          "type": "address"
-        },
-        {
-          "indexed": false,
-          "internalType": "bytes",
-          "name": "_calldata",
-          "type": "bytes"
         }
       ],
-      "name": "DiamondCut",
-      "type": "event"
+      "stateMutability": "view",
+      "type": "function"
     },
     {
-      "anonymous": false,
       "inputs": [
         {
-          "indexed": true,
-          "internalType": "address",
-          "name": "previousOwner",
-          "type": "address"
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
         },
         {
-          "indexed": true,
+          "internalType": "uint256",
+          "name": "groupId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "pageNumber",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "pageSize",
+          "type": "uint256"
+        }
+      ],
+      "name": "listWalletsInGroup",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "id",
+              "type": "uint256"
+            },
+            {
+              "internalType": "address",
+              "name": "pkpId",
+              "type": "address"
+            },
+            {
+              "internalType": "string",
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "internalType": "string",
+              "name": "description",
+              "type": "string"
+            }
+          ],
+          "internalType": "struct AppStorage.PkpData[]",
+          "name": "",
+          "type": "tuple[]"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "pkpCount",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "index",
+          "type": "uint256"
+        }
+      ],
+      "name": "pricingAt",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "pricingOperator",
+      "outputs": [
+        {
           "internalType": "address",
-          "name": "newOwner",
+          "name": "",
           "type": "address"
         }
       ],
-      "name": "OwnershipTransferred",
-      "type": "event"
+      "stateMutability": "view",
+      "type": "function"
     },
     {
+      "inputs": [],
+      "name": "rebalanceAmount",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "requestedApiPayerCount",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "newAdminApiPayerAccount",
+          "type": "address"
+        }
+      ],
+      "name": "setAdminApiPayerAccount",
+      "outputs": [],
       "stateMutability": "nonpayable",
-      "type": "fallback"
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address[]",
+          "name": "newApiPayers",
+          "type": "address[]"
+        }
+      ],
+      "name": "setApiPayers",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "newRebalanceAmount",
+          "type": "uint256"
+        }
+      ],
+      "name": "setRebalanceAmount",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "newRequestedApiPayerCount",
+          "type": "uint256"
+        }
+      ],
+      "name": "setRequestedApiPayerCount",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "InsufficientBalance",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        }
+      ],
+      "name": "OnlyApiPayerOrPricingOperator",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "creditApiKey",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "amount",
+          "type": "uint256"
+        }
+      ],
+      "name": "debitApiKey",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "pricingItemId",
+          "type": "uint256"
+        }
+      ],
+      "name": "getPricing",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "pricingItemId",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "price",
+          "type": "uint256"
+        }
+      ],
+      "name": "setPricing",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "newPricingOperator",
+          "type": "address"
+        }
+      ],
+      "name": "setPricingOperator",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
     }
-  ],
-  "bytecode": "0x6080604052346109a257610e458038038061001981610ab0565b9283398101906080818303126109a25761003281610ad5565b60208201519092906001600160401b0381116109a25782019281601f850112156109a25783519161006a61006584610ae9565b610ab0565b94602086858152016020819560051b830101918383116109a25760208101915b8383106109a757505050506100a160408501610ad5565b606085015190946001600160401b0382116109a2570181601f820112156109a25780516100d061006582610b00565b92818452602082840101116109a2576100f3916020808599989695019101610b1b565b7fc8fcad8db84d3cc18b4c41d551ea0ee66dd599cde068d998e57d5e09332c131f80546001600160a01b039283166001600160a01b03198216811790925590918291167f8be0079c531659141344cd1fd0a4f28419497f9722a3daafe3b4186f6b6457e0600080a36000935b80518510156107745760406101748683610b3e565b510151926001600160a01b0361018a8784610b3e565b5151169484511561075f5760206101a18885610b3e565b5101516003811015610749576000816103c2575050851561039c5761ffff600080516020610e2583398151915254169361021b6101de6060610ab0565b602481527f4c69624469616d6f6e644375743a2041646420666163657420686173206e6f20602082015263636f646560e01b604082015288610d04565b6000945b8651861015610385576001600160e01b031961023b8789610b3e565b51166000818152600080516020610e0583398151915260205260409020546001600160a01b0316610371576102d1610271610a91565b8a815261ffff9390931660208085018281526000858152600080516020610e0583398151915290925260409091209451855491516001600160b01b03199092166001600160a01b03919091161760a09190911b61ffff60a01b1617909355565b600080516020610e2583398151915254906801000000000000000082101561035b576103138260016103309401600080516020610e2583398151915255610bcb565b90919063ffffffff83549160031b9260e01c831b921b1916179055565b61ffff8114610345576001958601950161021f565b634e487b7160e01b600052601160045260246000fd5b634e487b7160e01b600052604160045260246000fd5b63ebbf5d0760e01b60005260045260246000fd5b5094509450946001919692505b019391909461015f565b6040516302b8da0760e21b815260206004820152806103be6024820188610b68565b0390fd5b509597956001810361052d5750871561050b579294926104266103e56060610ab0565b602881527f4c69624469616d6f6e644375743a205265706c61636520666163657420686173602082015267206e6f20636f646560c01b604082015289610d04565b6001600160a01b0388169560005b86518110156104fb576001600160e01b03196104508289610b3e565b51166000818152600080516020610e0583398151915260205260409020546001600160a01b03163081146104e6578b81146104d157156104bd576000908152600080516020610e058339815191526020526040902080546001600160a01b03191689179055600101610434565b637479f93960e01b60005260045260246000fd5b50631ac6ce8d60e11b60005260045260246000fd5b50632901806d60e11b60005260045260246000fd5b5094509450946001919650610392565b60405163cd98a96f60e01b815260206004820152806103be6024820188610b68565b600096959694919293946002821460001461072f575050600080516020610e2583398151915254978061071b575060005b865181101561070b576001600160e01b031961057a8289610b3e565b51169081600052600080516020610e058339815191526020526040600020996105a1610a91565b9a549a60018060a01b038c1680825261ffff602083019d60a01c168d52156106f657516001600160a01b031630146106e15780156103455760001901998a61ffff8251160361066b575b50600080516020610e2583398151915254918215610655576001926000190161061381610bcb565b63ffffffff82549160031b1b19169055600080516020610e2583398151915255600052600080516020610e05833981519152602052600060408120550161055e565b634e487b7160e01b600052603160045260246000fd5b6106db9061ffff61067b8d610bcb565b90549060031b1c60e01b916106968361031384845116610bcb565b516001600160e01b03199092166000908152600080516020610e0583398151915260205260409020805461ffff60a01b19169190921660a01b61ffff60a01b16179055565b386105eb565b82630df5fd6160e31b60005260045260246000fd5b83637a08a22d60e01b60005260045260246000fd5b5093929650935093600190610392565b63d091bc8160e01b60005260045260246000fd5b60ff925050633ff4d20f60e11b6000521660045260246000fd5b634e487b7160e01b600052602160045260246000fd5b8563e767f91f60e01b60005260045260246000fd5b9185919260405190606082019060608352518091526080820160808260051b840101969160005b81811061094257505050506001600160a01b0382166020820152808503604082015292936107f9937f8faa70878671ccd212d20771b795c50af8fd3ff6cf27f4bde57e5d4de0aeb6739181906107f19086610ba6565b0390a1610c26565b7f171def12e82c8f3351e4c79b7854be19ad60a75b888f74b9660c07cd74619638546108fd577f171def12e82c8f3351e4c79b7854be19ad60a75b888f74b9660c07cd7461963b80546001600160a01b031990811683179091557f171def12e82c8f3351e4c79b7854be19ad60a75b888f74b9660c07cd7461963a80549091169091179055600160008190527f171def12e82c8f3351e4c79b7854be19ad60a75b888f74b9660c07cd746196376020527fe0d328374bf304db54bcd5e13f878afebb533ce5dedde08cf45d008f2788e30e5560037f171def12e82c8f3351e4c79b7854be19ad60a75b888f74b9660c07cd7461963f5560405160c19081610d448239f35b60405162461bcd60e51b815260206004820152601360248201527f616c726561647920696e697469616c697a6564000000000000000000000000006044820152606490fd5b848903607f19018352835180516001600160a01b03168a5260208101519499939492939192919060038310156107495761099682606060406020959460019787809701520151918160408201520190610b68565b9a01940192910161079b565b600080fd5b82516001600160401b0381116109a25782016060818703601f1901126109a25760405190606082016001600160401b0381118382101761035b576040526109f060208201610ad5565b8252604081015160038110156109a257602083015260608101516001600160401b0381116109a257602091010186601f820112156109a2578051610a3661006582610ae9565b9160208084848152019260051b820101908982116109a257602001915b818310610a7057505050604082015281526020928301920161008a565b82516001600160e01b0319811681036109a257815260209283019201610a53565b60408051919082016001600160401b0381118382101761035b57604052565b6040519190601f01601f191682016001600160401b0381118382101761035b57604052565b51906001600160a01b03821682036109a257565b6001600160401b03811161035b5760051b60200190565b6001600160401b03811161035b57601f01601f191660200190565b60005b838110610b2e5750506000910152565b8181015183820152602001610b1e565b8051821015610b525760209160051b010190565b634e487b7160e01b600052603260045260246000fd5b906020808351928381520192019060005b818110610b865750505090565b82516001600160e01b031916845260209384019390920191600101610b79565b90602091610bbf81518092818552858086019101610b1b565b601f01601f1916010190565b90600080516020610e2583398151915254821015610b5257600080516020610e25833981519152600052600382901c7fc0d727610ea16241eff4447d08bb1b4595f7d2ec4515282437a13b7d0df4b922019160021b601c1690565b6001600160a01b03811691908215610cff5760008091610c8a610c496060610ab0565b602881527f4c69624469616d6f6e644375743a205f696e6974206164647265737320686173602082015267206e6f20636f646560c01b604082015282610d04565b83519060208501905af4913d15610cf7573d92610ca961006585610b00565b9384523d6000602086013e5b15610cbf57505050565b825115610cce57825160208401fd5b6103be60405192839263192105d760e01b84526004840152604060248401526044830190610ba6565b606092610cb5565b505050565b803b15610d0f575050565b6040805163919834b960e01b81526001600160a01b03909216600483015260248201529081906103be906044830190610ba656fe608060405234608657600080356001600160e01b0319168082527fc8fcad8db84d3cc18b4c41d551ea0ee66dd599cde068d998e57d5e09332c131c6020526040909120546001600160a01b031690811560725760008083368280378136915af43d6000803e15606d573d6000f35b3d6000fd5b630a82dd7360e31b60005260045260246000fd5b600080fdfea2646970667358221220bfb727c2d7aa1539ac57d5e0a0e3e850016e76921270cccc57a9c310453f016664736f6c634300081c0033c8fcad8db84d3cc18b4c41d551ea0ee66dd599cde068d998e57d5e09332c131cc8fcad8db84d3cc18b4c41d551ea0ee66dd599cde068d998e57d5e09332c131d",
-  "deployedBytecode": "0x608060405234608657600080356001600160e01b0319168082527fc8fcad8db84d3cc18b4c41d551ea0ee66dd599cde068d998e57d5e09332c131c6020526040909120546001600160a01b031690811560725760008083368280378136915af43d6000803e15606d573d6000f35b3d6000fd5b630a82dd7360e31b60005260045260246000fd5b600080fdfea2646970667358221220bfb727c2d7aa1539ac57d5e0a0e3e850016e76921270cccc57a9c310453f016664736f6c634300081c0033",
-  "linkReferences": {},
-  "deployedLinkReferences": {}
+  ]
 }

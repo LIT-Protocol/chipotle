@@ -103,6 +103,7 @@ contract WritesFacet  {
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         AppStorage.Account storage account = s.accounts[accountApiKeyHash];
+        account.groupCount++;
         account.groupList.add(account.groupCount);
         AppStorage.Group storage group = account.groups[account.groupCount];
         group.metadata.id = account.groupCount;
@@ -113,8 +114,7 @@ contract WritesFacet  {
         }
         for (uint256 i = 0; i < pkpIds.length; i++) {
             group.pkpId.add(pkpIds[i]);
-        }
-        account.groupCount++;
+        }        
     }
 
     function updateGroup(

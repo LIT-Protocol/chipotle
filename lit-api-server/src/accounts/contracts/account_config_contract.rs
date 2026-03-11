@@ -227,6 +227,41 @@ pub mod account_config {
                     },],
                 ),
                 (
+                    ::std::borrow::ToOwned::to_owned("apiKeyCanExecuteForAnyGroup"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("apiKeyCanExecuteForAnyGroup",),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("groupIds"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                    ::std::boxed::Box::new(
+                                        ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                    ),
+                                ),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256[]"),
+                                ),
+                            },
+                        ],
+                        outputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::string::String::new(),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Bool,
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("bool"),
+                            ),
+                        },],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                    },],
+                ),
+                (
                     ::std::borrow::ToOwned::to_owned("apiPayerCount"),
                     ::std::vec![::ethers::core::abi::ethabi::Function {
                         name: ::std::borrow::ToOwned::to_owned("apiPayerCount"),
@@ -256,6 +291,75 @@ pub mod account_config {
                             ),
                             internal_type: ::core::option::Option::Some(
                                 ::std::borrow::ToOwned::to_owned("address[]"),
+                            ),
+                        },],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("canExecuteAction"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("canExecuteAction"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("cidHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                        ],
+                        outputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::string::String::new(),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Bool,
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("bool"),
+                            ),
+                        },],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("canUseWalletInAction"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("canUseWalletInAction",),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("cidHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("walletAddress"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("address"),
+                                ),
+                            },
+                        ],
+                        outputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::string::String::new(),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Bool,
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("bool"),
                             ),
                         },],
                         constant: ::core::option::Option::None,
@@ -1675,6 +1779,16 @@ pub mod account_config {
                 .method_hash([98, 254, 174, 68], index)
                 .expect("method not found (this should never happen)")
         }
+        ///Calls the contract's `apiKeyCanExecuteForAnyGroup` (0x01b099df) function
+        pub fn api_key_can_execute_for_any_group(
+            &self,
+            api_key_hash: ::ethers::core::types::U256,
+            group_ids: ::std::vec::Vec<::ethers::core::types::U256>,
+        ) -> ::ethers::contract::builders::ContractCall<M, bool> {
+            self.0
+                .method_hash([1, 176, 153, 223], (api_key_hash, group_ids))
+                .expect("method not found (this should never happen)")
+        }
         ///Calls the contract's `apiPayerCount` (0xb8037ffe) function
         pub fn api_payer_count(
             &self,
@@ -1692,6 +1806,27 @@ pub mod account_config {
         > {
             self.0
                 .method_hash([147, 200, 188, 67], ())
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `canExecuteAction` (0xff1fe00c) function
+        pub fn can_execute_action(
+            &self,
+            api_key_hash: ::ethers::core::types::U256,
+            cid_hash: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, bool> {
+            self.0
+                .method_hash([255, 31, 224, 12], (api_key_hash, cid_hash))
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `canUseWalletInAction` (0x25284ac1) function
+        pub fn can_use_wallet_in_action(
+            &self,
+            api_key_hash: ::ethers::core::types::U256,
+            cid_hash: ::ethers::core::types::U256,
+            wallet_address: ::ethers::core::types::Address,
+        ) -> ::ethers::contract::builders::ContractCall<M, bool> {
+            self.0
+                .method_hash([37, 40, 74, 193], (api_key_hash, cid_hash, wallet_address))
                 .expect("method not found (this should never happen)")
         }
         ///Calls the contract's `creditApiKey` (0x683f2de8) function
@@ -2695,6 +2830,27 @@ pub mod account_config {
     pub struct AllPkpIdsAtCall {
         pub index: ::ethers::core::types::U256,
     }
+    ///Container type for all input parameters for the `apiKeyCanExecuteForAnyGroup` function with signature `apiKeyCanExecuteForAnyGroup(uint256,uint256[])` and selector `0x01b099df`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(
+        name = "apiKeyCanExecuteForAnyGroup",
+        abi = "apiKeyCanExecuteForAnyGroup(uint256,uint256[])"
+    )]
+    pub struct ApiKeyCanExecuteForAnyGroupCall {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub group_ids: ::std::vec::Vec<::ethers::core::types::U256>,
+    }
     ///Container type for all input parameters for the `apiPayerCount` function with signature `apiPayerCount()` and selector `0xb8037ffe`
     #[derive(
         Clone,
@@ -2725,6 +2881,46 @@ pub mod account_config {
     )]
     #[ethcall(name = "api_payers", abi = "api_payers()")]
     pub struct ApiPayersCall;
+    ///Container type for all input parameters for the `canExecuteAction` function with signature `canExecuteAction(uint256,uint256)` and selector `0xff1fe00c`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(name = "canExecuteAction", abi = "canExecuteAction(uint256,uint256)")]
+    pub struct CanExecuteActionCall {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub cid_hash: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `canUseWalletInAction` function with signature `canUseWalletInAction(uint256,uint256,address)` and selector `0x25284ac1`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(
+        name = "canUseWalletInAction",
+        abi = "canUseWalletInAction(uint256,uint256,address)"
+    )]
+    pub struct CanUseWalletInActionCall {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub cid_hash: ::ethers::core::types::U256,
+        pub wallet_address: ::ethers::core::types::Address,
+    }
     ///Container type for all input parameters for the `creditApiKey` function with signature `creditApiKey(uint256,uint256)` and selector `0x683f2de8`
     #[derive(
         Clone,
@@ -3354,8 +3550,11 @@ pub mod account_config {
         AddPkpToGroup(AddPkpToGroupCall),
         AdminApiPayerAccount(AdminApiPayerAccountCall),
         AllPkpIdsAt(AllPkpIdsAtCall),
+        ApiKeyCanExecuteForAnyGroup(ApiKeyCanExecuteForAnyGroupCall),
         ApiPayerCount(ApiPayerCountCall),
         ApiPayers(ApiPayersCall),
+        CanExecuteAction(CanExecuteActionCall),
+        CanUseWalletInAction(CanUseWalletInActionCall),
         CreditApiKey(CreditApiKeyCall),
         DebitApiKey(DebitApiKeyCall),
         GetPricing(GetPricingCall),
@@ -3422,12 +3621,27 @@ pub mod account_config {
             if let Ok(decoded) = <AllPkpIdsAtCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::AllPkpIdsAt(decoded));
             }
+            if let Ok(decoded) =
+                <ApiKeyCanExecuteForAnyGroupCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::ApiKeyCanExecuteForAnyGroup(decoded));
+            }
             if let Ok(decoded) = <ApiPayerCountCall as ::ethers::core::abi::AbiDecode>::decode(data)
             {
                 return Ok(Self::ApiPayerCount(decoded));
             }
             if let Ok(decoded) = <ApiPayersCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::ApiPayers(decoded));
+            }
+            if let Ok(decoded) =
+                <CanExecuteActionCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::CanExecuteAction(decoded));
+            }
+            if let Ok(decoded) =
+                <CanUseWalletInActionCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::CanUseWalletInAction(decoded));
             }
             if let Ok(decoded) = <CreditApiKeyCall as ::ethers::core::abi::AbiDecode>::decode(data)
             {
@@ -3577,8 +3791,15 @@ pub mod account_config {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
                 Self::AllPkpIdsAt(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::ApiKeyCanExecuteForAnyGroup(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
                 Self::ApiPayerCount(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::ApiPayers(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::CanExecuteAction(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::CanUseWalletInAction(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
                 Self::CreditApiKey(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::DebitApiKey(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::GetPricing(element) => ::ethers::core::abi::AbiEncode::encode(element),
@@ -3649,8 +3870,11 @@ pub mod account_config {
                 Self::AddPkpToGroup(element) => ::core::fmt::Display::fmt(element, f),
                 Self::AdminApiPayerAccount(element) => ::core::fmt::Display::fmt(element, f),
                 Self::AllPkpIdsAt(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ApiKeyCanExecuteForAnyGroup(element) => ::core::fmt::Display::fmt(element, f),
                 Self::ApiPayerCount(element) => ::core::fmt::Display::fmt(element, f),
                 Self::ApiPayers(element) => ::core::fmt::Display::fmt(element, f),
+                Self::CanExecuteAction(element) => ::core::fmt::Display::fmt(element, f),
+                Self::CanUseWalletInAction(element) => ::core::fmt::Display::fmt(element, f),
                 Self::CreditApiKey(element) => ::core::fmt::Display::fmt(element, f),
                 Self::DebitApiKey(element) => ::core::fmt::Display::fmt(element, f),
                 Self::GetPricing(element) => ::core::fmt::Display::fmt(element, f),
@@ -3720,6 +3944,11 @@ pub mod account_config {
             Self::AllPkpIdsAt(value)
         }
     }
+    impl ::core::convert::From<ApiKeyCanExecuteForAnyGroupCall> for AccountConfigCalls {
+        fn from(value: ApiKeyCanExecuteForAnyGroupCall) -> Self {
+            Self::ApiKeyCanExecuteForAnyGroup(value)
+        }
+    }
     impl ::core::convert::From<ApiPayerCountCall> for AccountConfigCalls {
         fn from(value: ApiPayerCountCall) -> Self {
             Self::ApiPayerCount(value)
@@ -3728,6 +3957,16 @@ pub mod account_config {
     impl ::core::convert::From<ApiPayersCall> for AccountConfigCalls {
         fn from(value: ApiPayersCall) -> Self {
             Self::ApiPayers(value)
+        }
+    }
+    impl ::core::convert::From<CanExecuteActionCall> for AccountConfigCalls {
+        fn from(value: CanExecuteActionCall) -> Self {
+            Self::CanExecuteAction(value)
+        }
+    }
+    impl ::core::convert::From<CanUseWalletInActionCall> for AccountConfigCalls {
+        fn from(value: CanUseWalletInActionCall) -> Self {
+            Self::CanUseWalletInAction(value)
         }
     }
     impl ::core::convert::From<CreditApiKeyCall> for AccountConfigCalls {
@@ -3941,6 +4180,20 @@ pub mod account_config {
         Hash,
     )]
     pub struct AllPkpIdsAtReturn(pub ::ethers::core::types::Address);
+    ///Container type for all return fields from the `apiKeyCanExecuteForAnyGroup` function with signature `apiKeyCanExecuteForAnyGroup(uint256,uint256[])` and selector `0x01b099df`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    pub struct ApiKeyCanExecuteForAnyGroupReturn(pub bool);
     ///Container type for all return fields from the `apiPayerCount` function with signature `apiPayerCount()` and selector `0xb8037ffe`
     #[derive(
         Clone,
@@ -3969,6 +4222,34 @@ pub mod account_config {
         Hash,
     )]
     pub struct ApiPayersReturn(pub ::std::vec::Vec<::ethers::core::types::Address>);
+    ///Container type for all return fields from the `canExecuteAction` function with signature `canExecuteAction(uint256,uint256)` and selector `0xff1fe00c`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    pub struct CanExecuteActionReturn(pub bool);
+    ///Container type for all return fields from the `canUseWalletInAction` function with signature `canUseWalletInAction(uint256,uint256,address)` and selector `0x25284ac1`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    pub struct CanUseWalletInActionReturn(pub bool);
     ///Container type for all return fields from the `getPricing` function with signature `getPricing(uint256)` and selector `0xc12f1a42`
     #[derive(
         Clone,

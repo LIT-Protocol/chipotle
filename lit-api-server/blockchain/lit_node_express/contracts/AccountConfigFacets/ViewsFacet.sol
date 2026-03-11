@@ -298,4 +298,79 @@ contract ViewsFacet  {
         ];
         return account;
     }
+
+    function canExecuteAction(
+        uint256 apiKeyHash,
+        uint256 cidHash
+    ) public view returns (bool) {
+
+        uint256[] memory groupIds = groupIdsForAction(apiKeyHash, cidHash);
+        return apiKeyCanExecuteForAnyGroup(apiKeyHash, groupIds);
+    }
+
+    function canUseWalletInAction(
+        uint256 apiKeyHash,
+        uint256 cidHash,
+        address walletAddress
+    ) public view returns (bool) {
+        uint256[] memory groupIds = groupIdsForActionAndWallet(apiKeyHash, cidHash, walletAddress);
+        return apiKeyCanExecuteForAnyGroup(apiKeyHash, groupIds);
+    }
+
+    function apiKeyCanExecuteForAnyGroup(
+        uint256 apiKeyHash,
+        uint256[] memory groupIds
+    ) public view returns (bool) {
+        AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
+        AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[apiKeyHash];
+        for (uint256 i = 0; i < groupIds.length; i++) {
+            if (usageApiKey.executeInGroups.contains(groupIds[i])) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    function groupIdsForAction(
+        uint256 apiKeyHash,
+        uint256 cidHash
+    ) internal view returns (uint256[] memory) {
+        AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
+        uint256[] memory groupIds = new uint256[](account.groupList.length());
+        uint256 groupCount = 0;
+        for (uint256 i = 0; i < account.groupList.length(); i++) {
+            AppStorage.Group storage group = account.groups[account.groupList.at(i)];
+            if (group.cidHash.contains(cidHash)) {
+                groupIds[groupCount] = account.groupList.at(i);
+                groupCount++;
+            }
+        }
+        uint256[] memory returnGroups = new uint256[](groupCount);
+        for (uint256 i = 0; i < groupCount; i++) {
+            returnGroups[i] = groupIds[i];
+        }
+        return returnGroups;
+    }
+
+    function groupIdsForActionAndWallet(
+        uint256 apiKeyHash,
+        uint256 cidHash,
+        address walletAddress
+    ) internal view returns (uint256[] memory) {
+        AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
+        uint256[] memory groupIds = new uint256[](account.groupList.length());
+        uint256 groupCount = 0;
+        for (uint256 i = 0; i < account.groupList.length(); i++) {
+            AppStorage.Group storage group = account.groups[account.groupList.at(i)];
+            if (group.cidHash.contains(cidHash) && group.pkpId.contains(walletAddress)) {
+                groupIds[groupCount] = account.groupList.at(i);
+                groupCount++;
+            }
+        }
+        uint256[] memory returnGroups = new uint256[](groupCount);
+        for (uint256 i = 0; i < groupCount; i++) {
+            returnGroups[i] = groupIds[i];
+        }
+        return returnGroups;
+    }
 }

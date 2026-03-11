@@ -1011,11 +1011,14 @@ function initActionRunner() {
   if (!btn || !outputEl) return;
 
   btn.addEventListener('click', async () => {
-    const apiKey = getApiKey();
+    const accountKey = getApiKey();
+    const usageKeyEl = document.getElementById('action-runner-usage-key');
+    const usageKey = usageKeyEl?.value?.trim() ?? '';
+    const apiKey = usageKey || accountKey;
     const code = codeEl?.value?.trim() ?? '';
     const paramsRaw = paramsEl?.value?.trim() ?? '';
 
-    if (!apiKey) {
+    if (!accountKey) {
       hideStatus('action-runner-status');
       outputEl.textContent = 'Log in first to execute Lit Actions.';
       outputEl.className = 'action-runner-output error';

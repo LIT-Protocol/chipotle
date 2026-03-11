@@ -77,17 +77,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         args[2], abis_folder, rpc_url
     );
 
-    deploy_diamond(rpc_url, chain_id, &abis_folder, secret)
-        .await
-        .expect("Failed to deploy diamond");
-
-    // let diamond_address_str = "0xd67c473ffd0a6508a1558801fd712ee661643205";
-    // let diamond_address_bytes = hex::decode(diamond_address_str.replace("0x", "")).unwrap();
-    // let diamond_address = Address::from_slice(&diamond_address_bytes);
-
-    // upate_diamond(rpc_url, chain_id, &abis_folder, secret, diamond_address)
+    // deploy_diamond(rpc_url, chain_id, &abis_folder, secret)
     //     .await
-    //     .expect("Failed to update diamond");
+    //     .expect("Failed to deploy diamond");
+
+    let diamond_address_str = "0x17788103ca8f9bc39c43b70b601dac99be5a63cb";
+    let diamond_address_bytes = hex::decode(diamond_address_str.replace("0x", "")).unwrap();
+    let diamond_address = Address::from_slice(&diamond_address_bytes);
+
+    upate_diamond(rpc_url, chain_id, &abis_folder, secret, diamond_address)
+        .await
+        .expect("Failed to update diamond");
     Ok(())
 }
 
@@ -227,20 +227,46 @@ pub async fn deploy_facet_from_json(
     Ok(facet)
 }
 
-pub fn get_facet_cut(
-    action: FacetCutAction,
+pub fn get_facet_cuts(
     contract: &Contract<SignerMiddleware<Provider<Http>, LocalWallet>>,
-) -> FacetCut {
-    let facet_cut = FacetCut {
-        facet_address: contract.address(),
-        action: action as u8,
-        function_selectors: contract
-            .abi()
-            .functions()
-            .map(|function| function.selector())
-            .collect(),
-    };
-    return facet_cut;
+    existing_selectors: Vec<[u8; 4]>,
+) -> Vec<FacetCut> {
+    let mut facet_cuts = Vec::new();
+
+    let selectors: Vec<[u8; 4]> = contract
+        .abi()
+        .functions()
+        .map(|function| function.selector())
+        .collect();
+
+    let replace_selectors: Vec<[u8; 4]> = selectors
+        .iter()
+        .filter(|selector| existing_selectors.contains(selector))
+        .cloned()
+        .collect();
+
+    if !replace_selectors.is_empty() {
+        facet_cuts.push(FacetCut {
+            facet_address: contract.address(),
+            action: FacetCutAction::Replace as u8,
+            function_selectors: replace_selectors,
+        });
+    }
+
+    let add_selectors: Vec<[u8; 4]> = selectors
+        .iter()
+        .filter(|selector| !existing_selectors.contains(selector))
+        .cloned()
+        .collect();
+    if !add_selectors.is_empty() {
+        facet_cuts.push(FacetCut {
+            facet_address: contract.address(),
+            action: FacetCutAction::Add as u8,
+            function_selectors: add_selectors,
+        });
+    }
+
+    facet_cuts
 }
 
 pub enum FacetCutAction {
@@ -284,7 +310,7 @@ async fn deploy_diamond(
         client.clone(),
     )
     .await?;
-    facet_cuts.push(get_facet_cut(FacetCutAction::Add, &diamond_cut_facet));
+    facet_cuts.extend(get_facet_cuts(&diamond_cut_facet, Vec::new()));
 
     let diamond_loupe_facet = deploy_facet_from_json(
         abis_folder,
@@ -292,7 +318,7 @@ async fn deploy_diamond(
         client.clone(),
     )
     .await?;
-    facet_cuts.push(get_facet_cut(FacetCutAction::Add, &diamond_loupe_facet));
+    facet_cuts.extend(get_facet_cuts(&diamond_loupe_facet, Vec::new()));
 
     let api_config_facet = deploy_facet_from_json(
         abis_folder,
@@ -300,7 +326,7 @@ async fn deploy_diamond(
         client.clone(),
     )
     .await?;
-    facet_cuts.push(get_facet_cut(FacetCutAction::Add, &api_config_facet));
+    facet_cuts.extend(get_facet_cuts(&api_config_facet, Vec::new()));
 
     let billing_facet = deploy_facet_from_json(
         abis_folder,
@@ -308,7 +334,7 @@ async fn deploy_diamond(
         client.clone(),
     )
     .await?;
-    facet_cuts.push(get_facet_cut(FacetCutAction::Add, &billing_facet));
+    facet_cuts.extend(get_facet_cuts(&billing_facet, Vec::new()));
 
     let views_facet = deploy_facet_from_json(
         abis_folder,
@@ -316,7 +342,7 @@ async fn deploy_diamond(
         client.clone(),
     )
     .await?;
-    facet_cuts.push(get_facet_cut(FacetCutAction::Add, &views_facet));
+    facet_cuts.extend(get_facet_cuts(&views_facet, Vec::new()));
 
     let writes_facet = deploy_facet_from_json(
         abis_folder,
@@ -324,7 +350,7 @@ async fn deploy_diamond(
         client.clone(),
     )
     .await?;
-    facet_cuts.push(get_facet_cut(FacetCutAction::Add, &writes_facet));
+    facet_cuts.extend(get_facet_cuts(&writes_facet, Vec::new()));
 
     let args = (
         client.address(),
@@ -374,11 +400,22 @@ async fn upate_diamond(
 
     let diamond_loop_facet = DiamondLoupeFacet::new(diamond_address, client.clone());
     let facet_addresses = diamond_loop_facet.facet_addresses().call().await?;
+
     println!(
         "Contract {} (before update) has these facet addresses: {:?}",
         diamond_address, facet_addresses
     );
     let diamond_cut_facet = DiamondCutFacet::new(diamond_address, client.clone());
+
+    let mut existing_selectors: Vec<[u8; 4]> = Vec::new();
+    for facet_address in facet_addresses {
+        let selectors = diamond_loop_facet
+            .facet_function_selectors(facet_address)
+            .call()
+            .await?;
+        existing_selectors.extend(selectors);
+    }
+
     let mut facet_cuts = Vec::new();
 
     let writes_facet = deploy_facet_from_json(
@@ -387,15 +424,28 @@ async fn upate_diamond(
         client.clone(),
     )
     .await?;
-    let facet_cut = get_facet_cut(FacetCutAction::Replace, &writes_facet);
-    println!(
-        "Facet cut to update: {:?} with {} selectors.",
-        facet_cut.facet_address,
-        facet_cut.function_selectors.len()
-    );
-    facet_cuts.push(facet_cut);
+    let facet_cuts_for_contract = get_facet_cuts(&writes_facet, existing_selectors);
+    // let facet_cut = get_facet_cut(FacetCutAction::Replace, &writes_facet);
 
-    println!("Facet cuts to update: {:?}", facet_cuts);
+    // let views_facet = deploy_facet_from_json(
+    //     abis_folder,
+    //     "AccountConfigFacets/ViewsFacet.sol/ViewsFacet.json",
+    //     client.clone(),
+    // )
+    // .await?;
+    // let facet_cuts_for_contract = get_facet_cuts(&views_facet, existing_selectors);
+
+    for facet_cut in &facet_cuts_for_contract {
+        println!(
+            "Facet cut {:?}, action {}, selector count: { }",
+            facet_cut.facet_address,
+            facet_cut.action,
+            facet_cut.function_selectors.len()
+        );
+    }
+
+    facet_cuts.extend(facet_cuts_for_contract);
+
     println!("Cutting diamond with init: {:?}", init);
     let tx = diamond_cut_facet.diamond_cut(facet_cuts, diamond_init.address(), Bytes::from(init));
     let pending_tx = tx.send().await?;

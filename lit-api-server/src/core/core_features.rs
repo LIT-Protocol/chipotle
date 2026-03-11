@@ -1,3 +1,4 @@
+use crate::accounts::can_execute_action;
 use crate::actions::client::ClientBuilder;
 use crate::actions::client::models::DenoExecutionEnv;
 use crate::actions::grpc::GrpcClientPool;
@@ -6,6 +7,7 @@ use crate::core::v1::models::request::{LitActionRequest, SignWithPKPRequest};
 use crate::core::v1::models::response::{
     LitActionResponse, LitActionSignature, SignWithPkpResponse,
 };
+use crate::utils::parse_to_hash::ipfs_cid_to_u256;
 use ipfs_hasher::IpfsHasher;
 use moka::future::Cache;
 use rocket::serde::json::Json;
@@ -38,6 +40,14 @@ pub async fn lit_action(
 ) -> Result<LitActionResponse, ApiStatus> {
     let request_id = Some("test".to_string());
 
+    let code_to_run = lit_action_request.code.clone();
+    let derived_ipfs_id = get_lit_action_ipfs_id(code_to_run.clone());
+    let cid_hash = ipfs_cid_to_u256(&derived_ipfs_id)?;
+    if !can_execute_action(api_key, cid_hash).await? {
+        let msg = format!("API key {api_key} cannot execute specified action ({derived_ipfs_id}/{cid_hash}).");
+        return Err(ApiStatus::forbidden(msg).into());
+    }
+
     let deno_execution_env = DenoExecutionEnv {
         ipfs_cache: Some(moka::future::Cache::clone(ipfs_cache)),
         http_client: Some(reqwest::Client::clone(http_client)),
@@ -54,9 +64,6 @@ pub async fn lit_action(
         Ok(client) => client,
         Err(e) => return Err(anyhow::anyhow!("failed to build client: {:?}", e).into()),
     };
-
-    let code_to_run = lit_action_request.code.clone();
-    let derived_ipfs_id = get_lit_action_ipfs_id(code_to_run.clone()).await?;
 
     let js_params = lit_action_request.js_params.clone();
     let execution_options = crate::actions::client::models::ExecutionOptions {
@@ -91,8 +98,8 @@ pub async fn lit_action(
     Ok(lit_action_response)
 }
 
-async fn get_lit_action_ipfs_id(code: String) -> Result<String, ApiStatus> {
+fn get_lit_action_ipfs_id(code: String) -> String {
     let ipfs_hasher = IpfsHasher::default();
     let derived_ipfs_id = ipfs_hasher.compute(code.as_bytes());
-    Ok(derived_ipfs_id)
+    derived_ipfs_id
 }

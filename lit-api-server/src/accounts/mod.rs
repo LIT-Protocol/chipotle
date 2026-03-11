@@ -11,17 +11,9 @@ use crate::accounts::signable_contract::{
     get_read_only_account_config_contract, get_signable_account_config_contract, send_transaction,
 };
 use crate::accounts::signer_pool::SignerPool;
+use crate::utils::parse_to_hash::ipfs_cid_to_u256;
 use ethers::types::{Address, H160, U256};
-use ethers::utils::keccak256;
-
-pub fn api_key_hash(api_key_base_64: &str) -> U256 {
-    U256::from_big_endian(&keccak256(api_key_base_64.as_bytes()))
-}
-
-/// keccak256 of wallet address bytes (hex string with or without 0x) as U256.
-pub fn wallet_address_hash(wallet_address: H160) -> U256 {
-    U256::from_big_endian(&keccak256(wallet_address.as_bytes()))
-}
+use crate::utils::parse_to_hash::api_key_hash;
 
 /// Create a new account. `initial_balance` is stored on the account's apiKey (AccountConfig.accountApiKey.balance).
 pub async fn new_account(
@@ -92,7 +84,7 @@ pub async fn add_action_to_group(
     let (contract, signer_address) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
-    let action_hash = U256::from_big_endian(&keccak256(action_ipfs_cid));
+    let action_hash = ipfs_cid_to_u256(action_ipfs_cid).map_err(|e| anyhow::anyhow!("Unable to parse action IPFS CID: {}", e))?;
     let function_call = contract.add_action_to_group(
         account_api_key_hash,
         group_id,
@@ -159,7 +151,7 @@ pub async fn remove_action_from_group_by_cid(
     group_id: U256,
     action_ipfs_cid: &str,
 ) -> Result<bool> {
-    let action_hash = U256::from_big_endian(&keccak256(action_ipfs_cid));
+    let action_hash = ipfs_cid_to_u256(action_ipfs_cid).map_err(|e| anyhow::anyhow!("Unable to parse action IPFS CID: {}", e))?;
     remove_action_from_group(signer_pool, api_key, group_id, action_hash).await
 }
 
@@ -196,7 +188,7 @@ pub async fn update_usage_api_key_metadata(
     let (contract, signer_address) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
-    let usage_api_key_hash = U256::from_big_endian(&keccak256(usage_api_key));
+    let usage_api_key_hash = api_key_hash(usage_api_key);
     let function_call = contract.update_usage_api_key_metadata(
         account_api_key_hash,
         usage_api_key_hash,
@@ -437,4 +429,28 @@ pub async fn get_rebalance_amount() -> Result<U256> {
     let contract = get_read_only_account_config_contract().await?;
     let rebalance_amount = contract.rebalance_amount().call().await?;
     Ok(rebalance_amount)
+}
+
+pub async fn can_execute_action(api_key: &str, cid_hash: U256) -> Result<bool> {
+    let contract = get_read_only_account_config_contract().await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let can_execute = contract
+        .can_execute_action(account_api_key_hash, cid_hash)
+        .call()
+        .await?;
+    Ok(can_execute)
+}
+
+pub async fn can_use_wallet_in_action(
+    api_key: &str,
+    cid_hash: U256,
+    wallet_address: H160,
+) -> Result<bool> {
+    let contract = get_read_only_account_config_contract().await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let can_use = contract
+        .can_use_wallet_in_action(account_api_key_hash, cid_hash, wallet_address)
+        .call()
+        .await?;
+    Ok(can_use)
 }
