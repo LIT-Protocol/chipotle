@@ -11,7 +11,7 @@ import {
     EnumerableSet
 } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
-library LibAccountConfigStorage {
+library AppStorage {
     using EnumerableSet for EnumerableSet.UintSet;
     using EnumerableSet for EnumerableSet.AddressSet;
 
@@ -22,8 +22,12 @@ library LibAccountConfigStorage {
     error NoAccountAccess(uint256 apiKeyHash, address sender);
     error AccountAlreadyExists(uint256 apiKeyHash);
     error GroupDoesNotExist(uint256 apiKeyHash, uint256 groupId);
-    error WalletDoesNotExist(uint256 apiKeyHash, uint256 groupId, uint256 Wallet);
-    error ActionDoesNotExist(uint256 apiKeyHash, uint256 groupId, uint256 action);
+    error PkpDoesNotExist(uint256 apiKeyHash, uint256 groupId, address pkpId);
+    error ActionDoesNotExist(
+        uint256 apiKeyHash,
+        uint256 groupId,
+        uint256 cidHash
+    );
     error UsageApiKeyDoesNotExist(uint256 apiKeyHash, uint256 usageApiKeyHash);
     error InsufficientBalance(uint256 apiKeyHash, uint256 amount);
     error OnlyApiPayer(address caller);
@@ -31,11 +35,11 @@ library LibAccountConfigStorage {
     error OnlyApiPayerOrOwner(address caller);
     error NotMasterAccount(uint256 apiKeyHash);
 
-    struct WalletData {
-        uint256 id; // keccak256 of the wallet id - this is used to prove existence of the struct.
-        string name; // name of the wallet
-        string description; // description of the wallet
-        address walletAddress; // address of the wallet
+    struct PkpData {
+        uint256 id; // keccak256 of the pkp id - this is used to prove existence of the struct.
+        address pkpId; // address of the pkp - also the wallet address
+        string name; // name of the pkp
+        string description; // description of the pkp
     }
 
     /// @notice Metadata struct for account, group, action, and wallet.
@@ -50,21 +54,21 @@ library LibAccountConfigStorage {
         Metadata metadata; // name and description of the usage api key
         uint256 apiKeyHash; // keccak256 of the base64 encoded api key
         uint256 expiration; // expiration date of the api key
-        uint256 balance; // balance of the api key - funds that it holds for payment?
-        bool runActions; // whether the api key can run actions
-        bool manageGroups; // whether the api key can manage groups
-        bool manageWallets; // whether the api key can manage wallets
-        bool manageIPFSIds; // whether the api key can manage IPFS IDs
-        bool manageUsageApiKeys; // whether the api key can manage other usage api keys
+        uint256 balance; // balance of the api key - currently using stripe to manage this.  will be 0.
+        EnumerableSet.UintSet executeInGroups; // whether the api key can run actions  ( the value is the group id)
+        bool createGroups; // whether the api key can create groups
+        bool deleteGroups; // whether the api key can delete groups
+        bool createPKPs; // whether the api key can create PKPs
+        EnumerableSet.UintSet manageIPFSIdsInGroups; // whether the api key can manage IPFS IDs in groups ( the value is the group id)
+        EnumerableSet.UintSet addPkpToGroups; // whether the api key can add PKPs to groups ( the value is the group id)
+        EnumerableSet.UintSet removePkpFromGroups; // whether the api key can remove PKPs from groups ( the value is the group id)
     }
 
     /// @notice Group struct for groups.
     struct Group {
         Metadata metadata; // name and description of the group
-        EnumerableSet.UintSet permitted_actions_cid_hash; // keccak256 of an action ipfs cid
-        EnumerableSet.UintSet Wallets_hash; // keccak256 of a Wallet public key
-        bool all_wallets_permitted; // whether all wallets are permitted to use the group
-        bool all_actions_permitted; // whether all actions are permitted to use the group
+        EnumerableSet.UintSet cidHash; // keccak256 of an action ipfs cid.  0x0 is the wildcard for all actions.
+        EnumerableSet.AddressSet pkpId; // keccak256 of a Wallet address.  0x0 is the wildcard for all wallets.
     }
 
     /// @notice Account struct for accounts.
@@ -80,10 +84,10 @@ library LibAccountConfigStorage {
         // Actions are the CID hashes of the actions that are permitted to be used in the group
         EnumerableSet.UintSet actionHashesList; // set of actions that the account is a member of
         mapping(uint256 => Metadata) actionMetadata; // mapping from a keccak256 of an action ipfs cid to it's metadata
-        mapping(uint256 => address) walletAddresses; // mapping from an index ( walletCount) to a wallet address allowing us to get a list of all wallet hashes for this account
-        mapping(address => Metadata) walletData; // mapping from a wallet address to it's metadata.  the ID is the derivationPath.
+        mapping(uint256 => address) pkpIds; // mapping from an index ( pkpCount) to a pkp id allowing us to get a list of all pkp ids for this account
+        mapping(address => Metadata) pkpData; // mapping from a wallet address to it's metadata.  the ID is the derivationPath.
         bool managed; // whether the LIT-node can help manage the key.
-        uint256 walletCount; // counter for creating unique wallet address hashes
+        uint256 pkpCount; // counter for creating unique pkp ids
         uint256 actionCount; // counter for creating unique action ids
         uint256 groupCount; // counter for creating unique group ids
     }
@@ -93,12 +97,12 @@ library LibAccountConfigStorage {
         mapping(uint256 => Account) accounts; // mapping from a given api key to it's config
         mapping(uint256 => uint256) indexToAccountHash; // mapping from an index to an account hash
         mapping(uint256 => uint256) allApiKeyHashes; // mapping from any api key has to it's master account api key hash
-        mapping(uint256 => address) allWalletAddresses; // mapping from a counter to a wallet address hash, allowing us to get a list of all wallet hashes ever generated
+        mapping(uint256 => address) allPkpIds; // mapping from a counter to a pkp id, allowing us to get a list of all pkp ids ever generated
         mapping(uint256 => uint256) pricing; // mapping from a pricing item id to it's price
         EnumerableSet.AddressSet api_payers; // set of accounts that pays for state mutation made by api calls, optionally mutates state on behalf of an api key holder.
         address owner; // account that can set the api_payer
         address pricingOperator; // account that can mutate certain state for operational purposes ( like pricing ).
-        uint256 walletCount; // counter for creating unique wallet address hashes
+        uint256 pkpCount; // counter for creating unique pkp ids
         uint256 accountCount; // counter for creating unique account ids
         address adminApiPayerAccount; // address of the default api payer
         uint256 requestedApiPayerCount; // number of accounts that are allowed to pay for state mutation made by api calls
@@ -131,7 +135,8 @@ library LibAccountConfigStorage {
         Account storage account = s.accounts[masterAccountApiKeyHash];
         if (account.accountApiKey.apiKeyHash != masterAccountApiKeyHash)
             return false;
-        if (s.api_payers.contains(sender) && account.managed == true) return true;
+        if (s.api_payers.contains(sender) && account.managed == true)
+            return true;
         return account.creatorWalletAddress == sender;
     }
 

@@ -30,7 +30,7 @@ ethers-providers = "2"
 flume = "0.11.0"
 futures = "0.3.31"
 hex = "0.4"
-
+sha3 = "0.10"
 ipfs-hasher = "0.13.0"
 # lazy_static = "1.5.0"
 # hd-keys-curves-wasm = { version = "1.0.5", default-features = false, features = ["bls", "k256", "p256", "p384", "curve25519", "ed448", "jubjub", "decaf377", "pasta"] }

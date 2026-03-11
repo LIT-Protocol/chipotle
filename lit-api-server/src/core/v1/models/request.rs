@@ -93,8 +93,6 @@ pub struct UpdateUsageApiKeyMetadataRequest {
 /// Request for add_usage_api_key. expiration and balance as decimal strings (e.g. unix timestamp, wei). API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AddUsageApiKeyRequest {
-    pub expiration: String,
-    pub balance: String,
     pub name: String,
     pub description: String,
 }
