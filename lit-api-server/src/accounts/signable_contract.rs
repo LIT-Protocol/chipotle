@@ -33,9 +33,9 @@ pub(crate) async fn init_chain_clients() -> Result<()> {
     let node_config = GLOBAL_NODE_CONFIG
         .get()
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))?;
-    let chain_info = node_config.chain.info();
+    let rpc_url = node_config.chain.rpc_url();
 
-    let provider = Provider::<Http>::try_from(chain_info.rpc_url)?.interval(Duration::from_secs(2));
+    let provider = Provider::<Http>::try_from(rpc_url.as_str())?.interval(Duration::from_secs(2));
     GLOBAL_READ_ONLY_CLIENT.get_or_init(|| Arc::new(provider));
     Ok(())
 }
@@ -82,7 +82,8 @@ pub async fn get_admin_api_signer() -> Result<SigningClient> {
         .map_err(|e| anyhow::anyhow!("Failed to get admin api payer key: {e}"))?;
     let wallet = LocalWallet::from_bytes(&secret)?.with_chain_id(chain_info.chain_id);
     let address = wallet.address();
-    let provider = Provider::<Http>::try_from(chain_info.rpc_url)?.interval(Duration::from_secs(2));
+    let rpc_url = node_config.chain.rpc_url();
+    let provider = Provider::<Http>::try_from(rpc_url.as_str())?.interval(Duration::from_secs(2));
     let signer = SignerMiddleware::new(provider, wallet);
     let nonce_manager = NonceManagerMiddleware::new(signer, address);
 

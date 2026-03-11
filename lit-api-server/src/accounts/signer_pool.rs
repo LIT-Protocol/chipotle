@@ -108,8 +108,9 @@ pub async fn get_signer_entries(
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         let wallet = LocalWallet::from_bytes(&secret)?.with_chain_id(chain_info.chain_id);
         let address = wallet.address();
+        let rpc_url = node_config.chain.rpc_url();
         let provider =
-            Provider::<Http>::try_from(chain_info.rpc_url)?.interval(Duration::from_secs(2));
+            Provider::<Http>::try_from(rpc_url.as_str())?.interval(Duration::from_secs(2));
         let signer = SignerMiddleware::new(provider, wallet);
         let nonce_manager = NonceManagerMiddleware::new(signer, address);
         tracing::info!("signer_pool: created signer {} address={:?}", i, address);

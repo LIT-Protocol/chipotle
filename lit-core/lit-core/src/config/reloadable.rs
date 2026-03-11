@@ -73,16 +73,16 @@ mod tests {
         let cfg = reloader.load();
 
         assert_eq!(cfg.env().clone(), LitEnv::Dev);
-        assert_eq!(cfg.is_dev(), true);
+        assert!(cfg.is_dev());
         assert_eq!(cfg.config().get_string("simple.dummy").unwrap(), "default".to_string());
-        assert_eq!(cfg.config().get_bool("simple.other").unwrap(), true);
+        assert!(cfg.config().get_bool("simple.other").unwrap());
 
         let cfg = reloader.reload().unwrap();
 
         assert_eq!(cfg.env().clone(), LitEnv::Dev);
-        assert_eq!(cfg.is_dev(), true);
+        assert!(cfg.is_dev());
         assert_eq!(cfg.config().get_string("simple.dummy").unwrap(), "default".to_string());
-        assert_eq!(cfg.config().get_bool("simple.other").unwrap(), true);
+        assert!(cfg.config().get_bool("simple.other").unwrap());
     }
 
     // Util

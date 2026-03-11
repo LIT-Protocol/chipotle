@@ -6,6 +6,7 @@ pub mod core;
 pub mod dstack;
 pub mod error;
 
+use crate::abstractions::transfer::chain_info::Chain;
 use crate::accounts::signer_pool::start_signer_pool;
 use crate::actions::grpc::GrpcClientPool;
 use moka::future::Cache;
@@ -35,6 +36,17 @@ async fn main() -> Result<(), rocket::Error> {
     if let Err(e) = config::init_config() {
         eprintln!("Failed to initialize node configuration: {:?}. Exiting.", e);
         std::process::exit(1);
+    }
+
+    for chain in Chain::all_chains() {
+        let info = chain.info();
+        let rpc_url = chain.rpc_url();
+        tracing::debug!(
+            chain = %info.chain_name,
+            chain_id = info.chain_id,
+            "RPC: {}",
+            rpc_url
+        );
     }
 
     if let Err(e) = accounts::signable_contract::init_chain_clients().await {
