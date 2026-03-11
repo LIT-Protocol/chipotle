@@ -4,12 +4,8 @@
 
 *   [Welcome][1]
 *   [Signing][2]
-*   [signEcdsa][3]
-    *   [Parameters][4]
 *   [ethPersonalSignMessageEcdsa][5]
     *   [Parameters][6]
-*   [sign][7]
-    *   [Parameters][8]
 *   [signAsAction][9]
     *   [Parameters][10]
 *   [signAndCombineEcdsa][11]
@@ -47,10 +43,6 @@
     *   [Parameters][43]
 *   [setResponse][44]
     *   [Parameters][45]
-*   [call][46]
-    *   [Parameters][47]
-*   [callContract][48]
-    *   [Parameters][49]
 *   [broadcastAndCollect][50]
     *   [Parameters][51]
 *   [runOnce][52]
@@ -91,21 +83,6 @@ Welcome to the Lit Actions SDK Docs.  These functions can be used inside a Lit A
 
 
 
-## Lit.Actions.signEcdsa
-
-Ask the Lit Node to sign any data using the ECDSA Algorithm with it's private key share.  The resulting signature share will be returned to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.toSign` **[Uint8Array][83]** The data to sign.  Should be an array of 8-bit integers.
-    *   `params.publicKey` **[string][84]** The public key of the PKP you wish to sign with
-    *   `params.sigName` **[string][84]** You can put any string here.  This is used to identify the signature in the response by the Lit JS SDK.  This is useful if you are signing multiple messages at once.  When you get the final signature out, it will be in an object with this signature name as the key.
-    *   `params.keySetId` **[string][84]** The key set id to use
-
-Returns **[Promise][85]<[string][84]>** This function will return the string "success" if it works.  The signature share is returned behind the scenes to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
-
 ## Lit.Actions.ethPersonalSignMessageEcdsa
 
 Ask the Lit Node to sign a message using the eth\_personalSign algorithm.  The resulting signature share will be returned to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
@@ -120,32 +97,6 @@ Ask the Lit Node to sign a message using the eth\_personalSign algorithm.  The r
     *   `params.keySetId` **[string][84]** The key set id to use
 
 Returns **[Promise][85]<[string][84]>** This function will return the string "success" if it works.  The signature share is returned behind the scenes to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
-
-## Lit.Actions.sign
-
-### Parameters
-
-*   `toSign` **[Uint8array][83]** the message to sign
-*   `publicKey` **[string][84]** the public key of the PKP
-*   `sigName` **[string][84]** the name of the signature
-*   `signingScheme` **[string][84]** the name of the signing scheme
-    one of the following
-    "EcdsaK256Sha256"
-    "EcdsaP256Sha256"
-    "EcdsaP384Sha384"
-    "SchnorrEd25519Sha512"
-    "SchnorrK256Sha256"
-    "SchnorrP256Sha256"
-    "SchnorrP384Sha384"
-    "SchnorrRistretto25519Sha512"
-    "SchnorrEd448Shake256"
-    "SchnorrRedJubjubBlake2b512"
-    "SchnorrK256Taproot"
-    "SchnorrRedDecaf377Blake2b512"
-    "SchnorrkelSubstrate"
-    "Bls12381G1ProofOfPossession"
-
-Returns **[Uint8array][83]** The resulting signature share
 
 ## Lit.Actions.signAsAction
 
@@ -423,32 +374,6 @@ Set the response returned to the client
 
     *   `params.response` **[string][84]** The response to send to the client.  You can put any string here, like you could use JSON.stringify on a JS object and send it here.
 
-## Lit.Actions.call
-
-Call a child Lit Action
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.ipfsId` **[string][84]** The IPFS ID of the Lit Action to call
-    *   `params.params` **[Object][82]?** Optional parameters to pass to the child Lit Action
-
-Returns **[Promise][85]<[string][84]>** The response from the child Lit Action.  Note that any signatures performed by the child Lit Action will be automatically combined and returned with the parent Lit Action to the Lit JS SDK client.
-
-## Lit.Actions.callContract
-
-Call a smart contract
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.chain` **[string][84]** The name of the chain to use.  Check out the lit docs "Supported Blockchains" page to find the name.  For example, "ethereum"
-    *   `params.txn` **[string][84]** The RLP Encoded txn, as a hex string
-
-Returns **[Promise][85]<[string][84]>** The response from calling the contract
-
 ## Lit.Actions.broadcastAndCollect
 
 Broadcast a message to all connected clients and collect their responses
@@ -653,17 +578,9 @@ Type: [string][84]
 
 [2]: #signing
 
-[3]: #signecdsa
-
-[4]: #parameters
-
 [5]: #ethpersonalsignmessageecdsa
 
 [6]: #parameters-1
-
-[7]: #sign
-
-[8]: #parameters-2
 
 [9]: #signasaction
 
@@ -738,14 +655,6 @@ Type: [string][84]
 [44]: #setresponse
 
 [45]: #parameters-19
-
-[46]: #call
-
-[47]: #parameters-20
-
-[48]: #callcontract
-
-[49]: #parameters-21
 
 [50]: #broadcastandcollect
 
