@@ -1,4 +1,3 @@
-pub mod abstractions;
 pub mod accounts;
 pub mod actions;
 pub mod config;
@@ -7,9 +6,9 @@ pub mod dstack;
 pub mod error;
 pub mod utils;
 
-use crate::abstractions::transfer::chain_info::Chain;
 use crate::accounts::signer_pool::start_signer_pool;
 use crate::actions::grpc::GrpcClientPool;
+use crate::utils::chain_info::Chain;
 use moka::future::Cache;
 use rocket::response::Redirect;
 use rocket::serde::json::Json;
@@ -112,11 +111,6 @@ async fn main() -> Result<(), rocket::Error> {
             routes![openapi_json, openapi_json_redirect, swagger_ui_redirect],
         )
         .mount("/core/v1/", core_routes)
-        .mount("/transfer/v1/", abstractions::transfer::endpoints::routes())
-        .mount(
-            "/swaps/v1/",
-            abstractions::intents::swaps::endpoints::routes(),
-        )
         .mount(
             "/core/v1/swagger-ui/",
             make_swagger_ui(&SwaggerUIConfig {

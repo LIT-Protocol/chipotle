@@ -1,3 +1,4 @@
+pub mod chain_info;
 pub mod parse_to_hash;
 use anyhow::Result;
 use ethers::types::{H160, U256};
