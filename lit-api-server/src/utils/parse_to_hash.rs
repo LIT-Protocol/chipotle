@@ -54,7 +54,9 @@ fn string_to_bytes_to_hash_to_u256(s: &str) -> Result<U256, ApiStatus> {
     Ok(U256::from_big_endian(&bytes))
 }
 
-/// Parse U256 from decimal string or hex string (with or without 0x prefix).
+/// Parse U256 from a `0x`-prefixed hex string or a decimal string.
+/// Inputs without a `0x`/`0X` prefix are treated as base-10 decimal;
+/// hex strings must include the prefix.
 fn parse_u256(s: &str) -> Result<U256, ApiStatus> {
     let s = s.trim();
     if s.starts_with("0x") || s.starts_with("0X") {
