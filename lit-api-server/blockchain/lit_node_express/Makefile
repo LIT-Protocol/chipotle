@@ -18,7 +18,7 @@ compile:
 
 #1.1 generate and compile
 generate_and_compile: generate
-    npx hardhat clean
+	npx hardhat clean
 	npx hardhat compile
 
 # 2. Generate Rust bindings from artifacts. Args: input_folder, output_folder
