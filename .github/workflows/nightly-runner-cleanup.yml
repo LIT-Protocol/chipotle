@@ -11,9 +11,10 @@
 # • A repository secret named GH_ORG_ADMIN_TOKEN must exist.
 #   The token needs the `manage_runners:org` (or `admin:org`) scope so that
 #   the first job can call GET /orgs/{org}/actions/runners.
-# • Self-hosted runners must have their runner **name** registered as a label
-#   (e.g. via `./config.sh --labels <runner-name>`).  The matrix job uses
-#   `runs-on: [self-hosted, <name>]` to pin each job to a specific machine.
+# • Runners are targeted via their `hostname:<host>` + `username:<user>` labels
+#   (e.g. hostname:ovh-staging-4 + username:runner-0), which vbem/multi-runners
+#   registers automatically.  Each cleanup job is pinned to a specific machine
+#   using runs-on: [self-hosted, "hostname:…", "username:…"].
 
 name: Nightly Runner Cleanup
 
@@ -36,19 +37,24 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GH_ORG_ADMIN_TOKEN }}
         run: |
-          # Collect the name of every runner (online or offline — we want to
-          # clean all of them so disk space is reclaimed even on idle machines).
+          # Build a matrix of {name, hostname, username} objects — one per runner.
+          # hostname:… and username:… labels are auto-applied by vbem/multi-runners
+          # and together uniquely identify a single runner process on a machine.
           matrix=$(gh api \
             "/orgs/${{ github.repository_owner }}/actions/runners" \
             --paginate \
-            --jq '[.runners[].name]')
+            --jq '[.runners[] | {
+              name: .name,
+              hostname: (.labels[] | select(.name | startswith("hostname:")) | .name),
+              username: (.labels[] | select(.name | startswith("username:")) | .name)
+            }]')
 
           echo "Discovered runners: $matrix"
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   # ── 2. Run cleanup tasks on each runner in parallel ──────────────────────
   cargo-clean:
-    name: "cleanup @ ${{ matrix.runner }}"
+    name: "cleanup @ ${{ matrix.runner.name }}"
     needs: list-runners
     if: ${{ needs.list-runners.outputs.matrix != '[]' && needs.list-runners.outputs.matrix != '' }}
 
@@ -57,9 +63,8 @@ jobs:
       matrix:
         runner: ${{ fromJson(needs.list-runners.outputs.matrix) }}
 
-    # Targets the specific runner by name-label so each machine is visited
-    # exactly once.
-    runs-on: ["self-hosted", "${{ matrix.runner }}"]
+    # hostname:… + username:… uniquely identify one runner process on one machine.
+    runs-on: ["self-hosted", "${{ matrix.runner.hostname }}", "${{ matrix.runner.username }}"]
 
     steps:
       - name: cargo clean
@@ -124,7 +129,7 @@ jobs:
           echo "───────────────────────────────────────"
 
           if [[ $failed -gt 0 ]]; then
-            echo "::warning title=cargo clean::$failed crate(s) failed to clean on $RUNNER_NAME"
+            echo "::warning title=cargo clean::$failed crate(s) failed to clean on ${{ matrix.runner.name }}"
           fi
 
           if [[ $found -eq 0 ]]; then
@@ -140,5 +145,5 @@ jobs:
           if sudo docker system prune -f 2>&1; then
             echo "✓ docker system prune succeeded"
           else
-            echo "::warning title=docker prune::docker system prune failed on $RUNNER_NAME (exit $?)"
+            echo "::warning title=docker prune::docker system prune failed on ${{ matrix.runner.name }} (exit $?)"
           fi
