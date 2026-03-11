@@ -8,12 +8,11 @@
 use ethers::abi::FunctionExt;
 use ethers::abi::Tokenize;
 use ethers::contract::ContractFactory;
+use ethers::core::types::Address;
 use ethers::prelude::*;
 use ethers::utils::hex::FromHex;
-use ethers::core::types::Address;
 use lit_contracts_minimal_generator::diamond::diamond_cut_facet::FacetCut;
 use lit_contracts_minimal_generator::diamond::diamond_loupe_facet::DiamondLoupeFacet;
-
 
 use std::env;
 use std::fs;
@@ -77,11 +76,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "Deploying contracts from folder {} on chain {} with RPC URL {}",
         args[2], abis_folder, rpc_url
     );
-    
+
     deploy_diamond(rpc_url, chain_id, &abis_folder, secret)
         .await
         .expect("Failed to deploy diamond");
-    
+
     // let diamond_address_str = "0xd67c473ffd0a6508a1558801fd712ee661643205";
     // let diamond_address_bytes = hex::decode(diamond_address_str.replace("0x", "")).unwrap();
     // let diamond_address = Address::from_slice(&diamond_address_bytes);
@@ -118,7 +117,7 @@ fn get_abis(abis_folder: &str, abis: &mut Vec<PathBuf>, is_facet: bool) {
     for entry in dir.flatten() {
         if entry.file_type().unwrap().is_dir() {
             let new_is_facet = match is_facet {
-                true => true, 
+                true => true,
                 false => entry.path().to_str().unwrap().ends_with("Facets"),
             };
             get_abis(entry.path().to_str().unwrap(), abis, new_is_facet);
@@ -154,7 +153,10 @@ async fn deploy_artifact<T: Tokenize>(
     path: &Path,
     client: std::sync::Arc<SignerMiddleware<Provider<Http>, LocalWallet>>,
     args: T,
-) -> Result<Contract<SignerMiddleware<Provider<Http>, LocalWallet>>, Box<dyn std::error::Error + Send + Sync>> {
+) -> Result<
+    Contract<SignerMiddleware<Provider<Http>, LocalWallet>>,
+    Box<dyn std::error::Error + Send + Sync>,
+> {
     let name = path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -162,11 +164,14 @@ async fn deploy_artifact<T: Tokenize>(
     let contents = fs::read_to_string(path)?;
     let artifact: serde_json::Value = serde_json::from_str(&contents)?;
 
-    let abi_value = match  artifact.get("abi") {
+    let abi_value = match artifact.get("abi") {
         Some(abi) => abi,
         None => {
             println!("Skipping {} (no abi)", name);
-            return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "No abi found")));
+            return Err(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "No abi found",
+            )));
         }
     };
 
@@ -186,14 +191,17 @@ async fn deploy_artifact<T: Tokenize>(
 
     if bytecode_hex.is_empty() || bytecode_hex == "0x" {
         println!("Skipping {} (no bytecode)", name);
-        return Err(Box::new(std::io::Error::new(std::io::ErrorKind::Other, "No bytecode found")));
+        return Err(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "No bytecode found",
+        )));
     }
 
     let bytecode = Bytes::from_hex(bytecode_hex)?;
     let factory = ContractFactory::new(abi, bytecode, client);
     println!("Deploying {} ...", name);
     let deployer = factory.deploy(args)?.legacy();
-    
+
     println!(
         "Deploying {} with bytecode size {}.",
         name,
@@ -209,19 +217,28 @@ pub async fn deploy_facet_from_json(
     abis_folder: &str,
     json_path: &str,
     client: std::sync::Arc<SignerMiddleware<Provider<Http>, LocalWallet>>,
-) -> Result<Contract<SignerMiddleware<Provider<Http>, LocalWallet>>, Box<dyn std::error::Error + Send + Sync>> {
-    
+) -> Result<
+    Contract<SignerMiddleware<Provider<Http>, LocalWallet>>,
+    Box<dyn std::error::Error + Send + Sync>,
+> {
     let json_path = format!("{}/{}", abis_folder, json_path);
     let path = Path::new(&json_path);
     let facet = deploy_artifact(path, client.clone(), ()).await?;
     Ok(facet)
 }
 
-pub fn get_facet_cut(action: FacetCutAction, contract: &Contract<SignerMiddleware<Provider<Http>, LocalWallet>>) -> FacetCut {
+pub fn get_facet_cut(
+    action: FacetCutAction,
+    contract: &Contract<SignerMiddleware<Provider<Http>, LocalWallet>>,
+) -> FacetCut {
     let facet_cut = FacetCut {
         facet_address: contract.address(),
         action: action as u8,
-        function_selectors: contract.abi().functions().map(|function| function.selector()).collect(),
+        function_selectors: contract
+            .abi()
+            .functions()
+            .map(|function| function.selector())
+            .collect(),
     };
     return facet_cut;
 }
@@ -231,7 +248,6 @@ pub enum FacetCutAction {
     Replace = 1,
     Remove = 2,
 }
-
 
 async fn deploy_diamond(
     rpc_url: &str,
@@ -244,33 +260,78 @@ async fn deploy_diamond(
     let wallet: LocalWallet = secret.parse::<LocalWallet>()?.with_chain_id(chain_id);
     let client = SignerMiddleware::new(provider, wallet);
     let client = std::sync::Arc::new(client);
-    
 
     let mut facet_cuts = Vec::new();
 
-    let diamond_init = deploy_facet_from_json(abis_folder, "DiamondPattern/DiamondInit.sol/DiamondInit.json", client.clone()).await?;
+    let diamond_init = deploy_facet_from_json(
+        abis_folder,
+        "DiamondPattern/DiamondInit.sol/DiamondInit.json",
+        client.clone(),
+    )
+    .await?;
     // get the init function from the diamond_init contract
-    let init  = diamond_init.abi().functions_by_name("init").unwrap().first().unwrap().selector();
+    let init = diamond_init
+        .abi()
+        .functions_by_name("init")
+        .unwrap()
+        .first()
+        .unwrap()
+        .selector();
 
-    let diamond_cut_facet = deploy_facet_from_json(abis_folder, "DiamondPattern/DiamondCutFacet.sol/DiamondCutFacet.json", client.clone()).await?;
+    let diamond_cut_facet = deploy_facet_from_json(
+        abis_folder,
+        "DiamondPattern/DiamondCutFacet.sol/DiamondCutFacet.json",
+        client.clone(),
+    )
+    .await?;
     facet_cuts.push(get_facet_cut(FacetCutAction::Add, &diamond_cut_facet));
 
-    let diamond_loupe_facet = deploy_facet_from_json(abis_folder, "DiamondPattern/DiamondLoupeFacet.sol/DiamondLoupeFacet.json", client.clone()).await?;
+    let diamond_loupe_facet = deploy_facet_from_json(
+        abis_folder,
+        "DiamondPattern/DiamondLoupeFacet.sol/DiamondLoupeFacet.json",
+        client.clone(),
+    )
+    .await?;
     facet_cuts.push(get_facet_cut(FacetCutAction::Add, &diamond_loupe_facet));
 
-    let api_config_facet = deploy_facet_from_json(abis_folder, "AccountConfigFacets/APIConfigFacet.sol/APIConfigFacet.json", client.clone()).await?;
+    let api_config_facet = deploy_facet_from_json(
+        abis_folder,
+        "AccountConfigFacets/APIConfigFacet.sol/APIConfigFacet.json",
+        client.clone(),
+    )
+    .await?;
     facet_cuts.push(get_facet_cut(FacetCutAction::Add, &api_config_facet));
 
-    let billing_facet = deploy_facet_from_json(abis_folder, "AccountConfigFacets/BillingFacet.sol/BillingFacet.json", client.clone()).await?;
+    let billing_facet = deploy_facet_from_json(
+        abis_folder,
+        "AccountConfigFacets/BillingFacet.sol/BillingFacet.json",
+        client.clone(),
+    )
+    .await?;
     facet_cuts.push(get_facet_cut(FacetCutAction::Add, &billing_facet));
 
-    let views_facet = deploy_facet_from_json(abis_folder, "AccountConfigFacets/ViewsFacet.sol/ViewsFacet.json", client.clone()).await?;
+    let views_facet = deploy_facet_from_json(
+        abis_folder,
+        "AccountConfigFacets/ViewsFacet.sol/ViewsFacet.json",
+        client.clone(),
+    )
+    .await?;
     facet_cuts.push(get_facet_cut(FacetCutAction::Add, &views_facet));
 
-    let writes_facet = deploy_facet_from_json(abis_folder, "AccountConfigFacets/WritesFacet.sol/WritesFacet.json", client.clone()).await?;
+    let writes_facet = deploy_facet_from_json(
+        abis_folder,
+        "AccountConfigFacets/WritesFacet.sol/WritesFacet.json",
+        client.clone(),
+    )
+    .await?;
     facet_cuts.push(get_facet_cut(FacetCutAction::Add, &writes_facet));
 
-    let args = (client.address(), facet_cuts, diamond_init.address(), Bytes::from(init));
+    let args = (
+        client.address(),
+        facet_cuts,
+        diamond_init.address(),
+        Bytes::from(init),
+    );
 
     let account_config_path = format!("{}/AccountConfig.sol/AccountConfig.json", abis_folder);
     let account_config_path = Path::new(&account_config_path);
@@ -293,22 +354,45 @@ async fn upate_diamond(
     let wallet: LocalWallet = secret.parse::<LocalWallet>()?.with_chain_id(chain_id);
     let client = SignerMiddleware::new(provider, wallet);
     let client = std::sync::Arc::new(client);
-    
+
     use lit_contracts_minimal_generator::diamond::diamond_cut_facet::DiamondCutFacet;
 
-    let diamond_init = deploy_facet_from_json(abis_folder, "DiamondPattern/DiamondInit.sol/DiamondInit.json", client.clone()).await?;
+    let diamond_init = deploy_facet_from_json(
+        abis_folder,
+        "DiamondPattern/DiamondInit.sol/DiamondInit.json",
+        client.clone(),
+    )
+    .await?;
     // get the init function from the diamond_init contract
-    let init  = diamond_init.abi().functions_by_name("init").unwrap().first().unwrap().selector();
+    let init = diamond_init
+        .abi()
+        .functions_by_name("init")
+        .unwrap()
+        .first()
+        .unwrap()
+        .selector();
 
     let diamond_loop_facet = DiamondLoupeFacet::new(diamond_address, client.clone());
     let facet_addresses = diamond_loop_facet.facet_addresses().call().await?;
-    println!("Contract {} (before update) has these facet addresses: {:?}", diamond_address, facet_addresses);
+    println!(
+        "Contract {} (before update) has these facet addresses: {:?}",
+        diamond_address, facet_addresses
+    );
     let diamond_cut_facet = DiamondCutFacet::new(diamond_address, client.clone());
     let mut facet_cuts = Vec::new();
 
-    let writes_facet = deploy_facet_from_json(abis_folder, "AccountConfigFacets/WritesFacet.sol/WritesFacet.json", client.clone()).await?;
+    let writes_facet = deploy_facet_from_json(
+        abis_folder,
+        "AccountConfigFacets/WritesFacet.sol/WritesFacet.json",
+        client.clone(),
+    )
+    .await?;
     let facet_cut = get_facet_cut(FacetCutAction::Replace, &writes_facet);
-    println!("Facet cut to update: {:?} with {} selectors.", facet_cut.facet_address, facet_cut.function_selectors.len());
+    println!(
+        "Facet cut to update: {:?} with {} selectors.",
+        facet_cut.facet_address,
+        facet_cut.function_selectors.len()
+    );
     facet_cuts.push(facet_cut);
 
     println!("Facet cuts to update: {:?}", facet_cuts);
@@ -318,7 +402,10 @@ async fn upate_diamond(
     let _receipt = pending_tx.await?;
     println!("Diamond updated.");
     let facet_addresses = diamond_loop_facet.facet_addresses().call().await?;
-    println!("Contract {} (before update) has these facet addresses: {:?}", diamond_address, facet_addresses);
+    println!(
+        "Contract {} (before update) has these facet addresses: {:?}",
+        diamond_address, facet_addresses
+    );
 
     Ok(())
 }

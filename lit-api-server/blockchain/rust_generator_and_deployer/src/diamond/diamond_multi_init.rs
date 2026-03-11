@@ -7,142 +7,120 @@ pub use diamond_multi_init::*;
     clippy::upper_case_acronyms,
     clippy::type_complexity,
     dead_code,
-    non_camel_case_types,
+    non_camel_case_types
 )]
 pub mod diamond_multi_init {
     const _: () = {
-        ::core::include_bytes!(
-            "./DiamondMultiInit.json",
-        );
+        ::core::include_bytes!("./DiamondMultiInit.json",);
     };
     #[allow(deprecated)]
     fn __abi() -> ::ethers::core::abi::Abi {
         ::ethers::core::abi::ethabi::Contract {
             constructor: ::core::option::Option::None,
-            functions: ::core::convert::From::from([
-                (
-                    ::std::borrow::ToOwned::to_owned("multiInit"),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::Function {
-                            name: ::std::borrow::ToOwned::to_owned("multiInit"),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_addresses"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
-                                        ::std::boxed::Box::new(
-                                            ::ethers::core::abi::ethabi::ParamType::Address,
-                                        ),
-                                    ),
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("address[]"),
-                                    ),
-                                },
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_calldata"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Array(
-                                        ::std::boxed::Box::new(
-                                            ::ethers::core::abi::ethabi::ParamType::Bytes,
-                                        ),
-                                    ),
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("bytes[]"),
-                                    ),
-                                },
-                            ],
-                            outputs: ::std::vec![],
-                            constant: ::core::option::Option::None,
-                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+            functions: ::core::convert::From::from([(
+                ::std::borrow::ToOwned::to_owned("multiInit"),
+                ::std::vec![::ethers::core::abi::ethabi::Function {
+                    name: ::std::borrow::ToOwned::to_owned("multiInit"),
+                    inputs: ::std::vec![
+                        ::ethers::core::abi::ethabi::Param {
+                            name: ::std::borrow::ToOwned::to_owned("_addresses"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                ::std::boxed::Box::new(
+                                    ::ethers::core::abi::ethabi::ParamType::Address,
+                                ),
+                            ),
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("address[]"),
+                            ),
+                        },
+                        ::ethers::core::abi::ethabi::Param {
+                            name: ::std::borrow::ToOwned::to_owned("_calldata"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                ::std::boxed::Box::new(
+                                    ::ethers::core::abi::ethabi::ParamType::Bytes,
+                                ),
+                            ),
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("bytes[]"),
+                            ),
                         },
                     ],
-                ),
-            ]),
+                    outputs: ::std::vec![],
+                    constant: ::core::option::Option::None,
+                    state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                },],
+            )]),
             events: ::std::collections::BTreeMap::new(),
             errors: ::core::convert::From::from([
                 (
-                    ::std::borrow::ToOwned::to_owned(
-                        "AddressAndCalldataLengthDoNotMatch",
-                    ),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
-                            name: ::std::borrow::ToOwned::to_owned(
-                                "AddressAndCalldataLengthDoNotMatch",
-                            ),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_addressesLength"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
-                                        256usize,
-                                    ),
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("uint256"),
-                                    ),
-                                },
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_calldataLength"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Uint(
-                                        256usize,
-                                    ),
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("uint256"),
-                                    ),
-                                },
-                            ],
-                        },
-                    ],
+                    ::std::borrow::ToOwned::to_owned("AddressAndCalldataLengthDoNotMatch"),
+                    ::std::vec![::ethers::core::abi::ethabi::AbiError {
+                        name: ::std::borrow::ToOwned::to_owned(
+                            "AddressAndCalldataLengthDoNotMatch",
+                        ),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("_addressesLength"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("_calldataLength"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                        ],
+                    },],
                 ),
                 (
                     ::std::borrow::ToOwned::to_owned("InitializationFunctionReverted"),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
-                            name: ::std::borrow::ToOwned::to_owned(
-                                "InitializationFunctionReverted",
-                            ),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned(
-                                        "_initializationContractAddress",
-                                    ),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("address"),
-                                    ),
-                                },
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_calldata"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Bytes,
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("bytes"),
-                                    ),
-                                },
-                            ],
-                        },
-                    ],
+                    ::std::vec![::ethers::core::abi::ethabi::AbiError {
+                        name: ::std::borrow::ToOwned::to_owned("InitializationFunctionReverted",),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned(
+                                    "_initializationContractAddress",
+                                ),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("address"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("_calldata"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Bytes,
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("bytes"),
+                                ),
+                            },
+                        ],
+                    },],
                 ),
                 (
                     ::std::borrow::ToOwned::to_owned("NoBytecodeAtAddress"),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
-                            name: ::std::borrow::ToOwned::to_owned(
-                                "NoBytecodeAtAddress",
-                            ),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_contractAddress"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("address"),
-                                    ),
-                                },
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_message"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::String,
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("string"),
-                                    ),
-                                },
-                            ],
-                        },
-                    ],
+                    ::std::vec![::ethers::core::abi::ethabi::AbiError {
+                        name: ::std::borrow::ToOwned::to_owned("NoBytecodeAtAddress",),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("_contractAddress"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("address"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("_message"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("string"),
+                                ),
+                            },
+                        ],
+                    },],
                 ),
             ]),
             receive: false,
@@ -150,21 +128,18 @@ pub mod diamond_multi_init {
         }
     }
     ///The parsed JSON ABI of the contract.
-    pub static DIAMONDMULTIINIT_ABI: ::ethers::contract::Lazy<
-        ::ethers::core::abi::Abi,
-    > = ::ethers::contract::Lazy::new(__abi);
+    pub static DIAMONDMULTIINIT_ABI: ::ethers::contract::Lazy<::ethers::core::abi::Abi> =
+        ::ethers::contract::Lazy::new(__abi);
     #[rustfmt::skip]
     const __BYTECODE: &[u8] = b"`\x80\x80`@R4`\x15Wa\x03m\x90\x81a\0\x1B\x829\xF3[`\0\x80\xFD\xFE`\x80`@R`\x046\x10\x15a\0\x12W`\0\x80\xFD[`\x005`\xE0\x1Ccn\x02\xFA<\x14a\0'W`\0\x80\xFD[4a\x01]W`@6`\x03\x19\x01\x12a\x01]W`\x045g\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x81\x11a\x01]Wa\0X\x906\x90`\x04\x01a\x01bV[`$5g\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x81\x11a\x01]Wa\0x\x906\x90`\x04\x01a\x01bV[\x90\x91\x81\x81\x03a\x01FW\x916\x81\x90\x03`\x1E\x19\x01\x90`\0[\x84\x81\x10\x15a\x01DW`\0`\x05\x82\x90\x1B\x87\x81\x015\x90`\x01`\x01`\xA0\x1B\x03\x82\x16\x82\x03a\x01(W\x86\x84\x10\x15a\x010W\x84\x015\x85\x81\x12\x15a\x01(W\x84\x01\x91\x825g\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x81\x11a\x01,W` \x84\x01\x816\x03\x81\x13a\x01(Wa\0\xF7a\0\xF2\x83a\x01\xCFV[a\x01\x93V[\x94\x82\x86R` \x836\x92\x01\x01\x11a\x01(W\x91` \x82a\x01\"\x95\x93\x87\x95\x83`\x01\x9A\x99\x017\x84\x01\x01Ra\x02,V[\x01a\0\x8EV[\x82\x80\xFD[P\x80\xFD[cNH{q`\xE0\x1B\x83R`2`\x04R`$\x83\xFD[\0[c9\xA0p\xB3`\xE1\x1B`\0R`\x04R`$R`D`\0\xFD[`\0\x80\xFD[\x91\x81`\x1F\x84\x01\x12\x15a\x01]W\x825\x91g\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x83\x11a\x01]W` \x80\x85\x01\x94\x84`\x05\x1B\x01\x01\x11a\x01]WV[`@Q\x91\x90`\x1F\x01`\x1F\x19\x16\x82\x01g\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x81\x11\x83\x82\x10\x17a\x01\xB9W`@RV[cNH{q`\xE0\x1B`\0R`A`\x04R`$`\0\xFD[g\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x81\x11a\x01\xB9W`\x1F\x01`\x1F\x19\x16` \x01\x90V[\x91\x90\x82Q\x92\x83\x82R`\0[\x84\x81\x10a\x02\x17WPP\x82`\0` \x80\x94\x95\x84\x01\x01R`\x1F\x80\x19\x91\x01\x16\x01\x01\x90V[\x80` \x80\x92\x84\x01\x01Q\x82\x82\x86\x01\x01R\x01a\x01\xF6V[`\x01`\x01`\xA0\x1B\x03\x81\x16\x91\x90\x82\x15a\x032Wa\x02H``a\x01\x93V[`(\x81R\x7FLibDiamondCut: _init address has` \x82\x01Rg no code`\xC0\x1B`@\x82\x01R\x81;\x15a\x03\x08WP`\0\x80\x91\x83Q\x90` \x85\x01\x90Z\xF4\x91=\x15a\x03\0W=\x92a\x02\xAEa\0\xF2\x85a\x01\xCFV[\x93\x84R=`\0` \x86\x01>[\x15a\x02\xC4WPPPV[\x82Q\x15a\x02\xD3W\x82Q` \x84\x01\xFD[a\x02\xFC`@Q\x92\x83\x92c\x19!\x05\xD7`\xE0\x1B\x84R`\x04\x84\x01R`@`$\x84\x01R`D\x83\x01\x90a\x01\xEBV[\x03\x90\xFD[``\x92a\x02\xBAV[\x83a\x02\xFC`@Q\x92\x83\x92c\x91\x984\xB9`\xE0\x1B\x84R`\x04\x84\x01R`@`$\x84\x01R`D\x83\x01\x90a\x01\xEBV[PPPV\xFE\xA2dipfsX\"\x12 \xEBID\xA8\x06U\x13\xF6\x19J\xD4\xE4\xE0Rztt\xCA\x92\xC53\x85\x1C\x0BC{`\xE8\x12\xEA\0\x1BdsolcC\0\x08\x1C\x003";
     /// The bytecode of the contract.
-    pub static DIAMONDMULTIINIT_BYTECODE: ::ethers::core::types::Bytes = ::ethers::core::types::Bytes::from_static(
-        __BYTECODE,
-    );
+    pub static DIAMONDMULTIINIT_BYTECODE: ::ethers::core::types::Bytes =
+        ::ethers::core::types::Bytes::from_static(__BYTECODE);
     #[rustfmt::skip]
     const __DEPLOYED_BYTECODE: &[u8] = b"`\x80`@R`\x046\x10\x15a\0\x12W`\0\x80\xFD[`\x005`\xE0\x1Ccn\x02\xFA<\x14a\0'W`\0\x80\xFD[4a\x01]W`@6`\x03\x19\x01\x12a\x01]W`\x045g\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x81\x11a\x01]Wa\0X\x906\x90`\x04\x01a\x01bV[`$5g\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x81\x11a\x01]Wa\0x\x906\x90`\x04\x01a\x01bV[\x90\x91\x81\x81\x03a\x01FW\x916\x81\x90\x03`\x1E\x19\x01\x90`\0[\x84\x81\x10\x15a\x01DW`\0`\x05\x82\x90\x1B\x87\x81\x015\x90`\x01`\x01`\xA0\x1B\x03\x82\x16\x82\x03a\x01(W\x86\x84\x10\x15a\x010W\x84\x015\x85\x81\x12\x15a\x01(W\x84\x01\x91\x825g\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x81\x11a\x01,W` \x84\x01\x816\x03\x81\x13a\x01(Wa\0\xF7a\0\xF2\x83a\x01\xCFV[a\x01\x93V[\x94\x82\x86R` \x836\x92\x01\x01\x11a\x01(W\x91` \x82a\x01\"\x95\x93\x87\x95\x83`\x01\x9A\x99\x017\x84\x01\x01Ra\x02,V[\x01a\0\x8EV[\x82\x80\xFD[P\x80\xFD[cNH{q`\xE0\x1B\x83R`2`\x04R`$\x83\xFD[\0[c9\xA0p\xB3`\xE1\x1B`\0R`\x04R`$R`D`\0\xFD[`\0\x80\xFD[\x91\x81`\x1F\x84\x01\x12\x15a\x01]W\x825\x91g\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x83\x11a\x01]W` \x80\x85\x01\x94\x84`\x05\x1B\x01\x01\x11a\x01]WV[`@Q\x91\x90`\x1F\x01`\x1F\x19\x16\x82\x01g\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x81\x11\x83\x82\x10\x17a\x01\xB9W`@RV[cNH{q`\xE0\x1B`\0R`A`\x04R`$`\0\xFD[g\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF\x81\x11a\x01\xB9W`\x1F\x01`\x1F\x19\x16` \x01\x90V[\x91\x90\x82Q\x92\x83\x82R`\0[\x84\x81\x10a\x02\x17WPP\x82`\0` \x80\x94\x95\x84\x01\x01R`\x1F\x80\x19\x91\x01\x16\x01\x01\x90V[\x80` \x80\x92\x84\x01\x01Q\x82\x82\x86\x01\x01R\x01a\x01\xF6V[`\x01`\x01`\xA0\x1B\x03\x81\x16\x91\x90\x82\x15a\x032Wa\x02H``a\x01\x93V[`(\x81R\x7FLibDiamondCut: _init address has` \x82\x01Rg no code`\xC0\x1B`@\x82\x01R\x81;\x15a\x03\x08WP`\0\x80\x91\x83Q\x90` \x85\x01\x90Z\xF4\x91=\x15a\x03\0W=\x92a\x02\xAEa\0\xF2\x85a\x01\xCFV[\x93\x84R=`\0` \x86\x01>[\x15a\x02\xC4WPPPV[\x82Q\x15a\x02\xD3W\x82Q` \x84\x01\xFD[a\x02\xFC`@Q\x92\x83\x92c\x19!\x05\xD7`\xE0\x1B\x84R`\x04\x84\x01R`@`$\x84\x01R`D\x83\x01\x90a\x01\xEBV[\x03\x90\xFD[``\x92a\x02\xBAV[\x83a\x02\xFC`@Q\x92\x83\x92c\x91\x984\xB9`\xE0\x1B\x84R`\x04\x84\x01R`@`$\x84\x01R`D\x83\x01\x90a\x01\xEBV[PPPV\xFE\xA2dipfsX\"\x12 \xEBID\xA8\x06U\x13\xF6\x19J\xD4\xE4\xE0Rztt\xCA\x92\xC53\x85\x1C\x0BC{`\xE8\x12\xEA\0\x1BdsolcC\0\x08\x1C\x003";
     /// The deployed bytecode of the contract.
-    pub static DIAMONDMULTIINIT_DEPLOYED_BYTECODE: ::ethers::core::types::Bytes = ::ethers::core::types::Bytes::from_static(
-        __DEPLOYED_BYTECODE,
-    );
+    pub static DIAMONDMULTIINIT_DEPLOYED_BYTECODE: ::ethers::core::types::Bytes =
+        ::ethers::core::types::Bytes::from_static(__DEPLOYED_BYTECODE);
     pub struct DiamondMultiInit<M>(::ethers::contract::Contract<M>);
     impl<M> ::core::clone::Clone for DiamondMultiInit<M> {
         fn clone(&self) -> Self {
@@ -196,13 +171,11 @@ pub mod diamond_multi_init {
             address: T,
             client: ::std::sync::Arc<M>,
         ) -> Self {
-            Self(
-                ::ethers::contract::Contract::new(
-                    address.into(),
-                    DIAMONDMULTIINIT_ABI.clone(),
-                    client,
-                ),
-            )
+            Self(::ethers::contract::Contract::new(
+                address.into(),
+                DIAMONDMULTIINIT_ABI.clone(),
+                client,
+            ))
         }
         /// Constructs the general purpose `Deployer` instance based on the provided constructor arguments and sends it.
         /// Returns a new instance of a deployer that returns an instance of this contract after sending the transaction
@@ -255,7 +228,8 @@ pub mod diamond_multi_init {
         }
     }
     impl<M: ::ethers::providers::Middleware> From<::ethers::contract::Contract<M>>
-    for DiamondMultiInit<M> {
+        for DiamondMultiInit<M>
+    {
         fn from(contract: ::ethers::contract::Contract<M>) -> Self {
             Self::new(contract.address(), contract.client())
         }
@@ -271,7 +245,7 @@ pub mod diamond_multi_init {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     #[etherror(
         name = "AddressAndCalldataLengthDoNotMatch",
@@ -292,7 +266,7 @@ pub mod diamond_multi_init {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     #[etherror(
         name = "InitializationFunctionReverted",
@@ -313,7 +287,7 @@ pub mod diamond_multi_init {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     #[etherror(
         name = "NoBytecodeAtAddress",
@@ -332,7 +306,7 @@ pub mod diamond_multi_init {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     pub enum DiamondMultiInitErrors {
         AddressAndCalldataLengthDoNotMatch(AddressAndCalldataLengthDoNotMatch),
@@ -347,24 +321,24 @@ pub mod diamond_multi_init {
             data: impl AsRef<[u8]>,
         ) -> ::core::result::Result<Self, ::ethers::core::abi::AbiError> {
             let data = data.as_ref();
-            if let Ok(decoded) = <::std::string::String as ::ethers::core::abi::AbiDecode>::decode(
-                data,
-            ) {
+            if let Ok(decoded) =
+                <::std::string::String as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
                 return Ok(Self::RevertString(decoded));
             }
-            if let Ok(decoded) = <AddressAndCalldataLengthDoNotMatch as ::ethers::core::abi::AbiDecode>::decode(
-                data,
-            ) {
+            if let Ok(decoded) =
+                <AddressAndCalldataLengthDoNotMatch as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
                 return Ok(Self::AddressAndCalldataLengthDoNotMatch(decoded));
             }
-            if let Ok(decoded) = <InitializationFunctionReverted as ::ethers::core::abi::AbiDecode>::decode(
-                data,
-            ) {
+            if let Ok(decoded) =
+                <InitializationFunctionReverted as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
                 return Ok(Self::InitializationFunctionReverted(decoded));
             }
-            if let Ok(decoded) = <NoBytecodeAtAddress as ::ethers::core::abi::AbiDecode>::decode(
-                data,
-            ) {
+            if let Ok(decoded) =
+                <NoBytecodeAtAddress as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
                 return Ok(Self::NoBytecodeAtAddress(decoded));
             }
             Err(::ethers::core::abi::Error::InvalidData.into())
@@ -415,9 +389,7 @@ pub mod diamond_multi_init {
                 Self::InitializationFunctionReverted(element) => {
                     ::core::fmt::Display::fmt(element, f)
                 }
-                Self::NoBytecodeAtAddress(element) => {
-                    ::core::fmt::Display::fmt(element, f)
-                }
+                Self::NoBytecodeAtAddress(element) => ::core::fmt::Display::fmt(element, f),
                 Self::RevertString(s) => ::core::fmt::Display::fmt(s, f),
             }
         }
@@ -427,14 +399,12 @@ pub mod diamond_multi_init {
             Self::RevertString(value)
         }
     }
-    impl ::core::convert::From<AddressAndCalldataLengthDoNotMatch>
-    for DiamondMultiInitErrors {
+    impl ::core::convert::From<AddressAndCalldataLengthDoNotMatch> for DiamondMultiInitErrors {
         fn from(value: AddressAndCalldataLengthDoNotMatch) -> Self {
             Self::AddressAndCalldataLengthDoNotMatch(value)
         }
     }
-    impl ::core::convert::From<InitializationFunctionReverted>
-    for DiamondMultiInitErrors {
+    impl ::core::convert::From<InitializationFunctionReverted> for DiamondMultiInitErrors {
         fn from(value: InitializationFunctionReverted) -> Self {
             Self::InitializationFunctionReverted(value)
         }
@@ -455,7 +425,7 @@ pub mod diamond_multi_init {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     #[ethcall(name = "multiInit", abi = "multiInit(address[],bytes[])")]
     pub struct MultiInitCall {

@@ -7,13 +7,11 @@ pub use ownership_facet::*;
     clippy::upper_case_acronyms,
     clippy::type_complexity,
     dead_code,
-    non_camel_case_types,
+    non_camel_case_types
 )]
 pub mod ownership_facet {
     const _: () = {
-        ::core::include_bytes!(
-            "./OwnershipFacet.json",
-        );
+        ::core::include_bytes!("./OwnershipFacet.json",);
     };
     #[allow(deprecated)]
     fn __abi() -> ::ethers::core::abi::Abi {
@@ -22,134 +20,113 @@ pub mod ownership_facet {
             functions: ::core::convert::From::from([
                 (
                     ::std::borrow::ToOwned::to_owned("owner"),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::Function {
-                            name: ::std::borrow::ToOwned::to_owned("owner"),
-                            inputs: ::std::vec![],
-                            outputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("owner_"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("address"),
-                                    ),
-                                },
-                            ],
-                            constant: ::core::option::Option::None,
-                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
-                        },
-                    ],
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("owner"),
+                        inputs: ::std::vec![],
+                        outputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::borrow::ToOwned::to_owned("owner_"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("address"),
+                            ),
+                        },],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                    },],
                 ),
                 (
                     ::std::borrow::ToOwned::to_owned("transferOwnership"),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::Function {
-                            name: ::std::borrow::ToOwned::to_owned("transferOwnership"),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_newOwner"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("address"),
-                                    ),
-                                },
-                            ],
-                            outputs: ::std::vec![],
-                            constant: ::core::option::Option::None,
-                            state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
-                        },
-                    ],
-                ),
-            ]),
-            events: ::core::convert::From::from([
-                (
-                    ::std::borrow::ToOwned::to_owned("OwnershipTransferred"),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::Event {
-                            name: ::std::borrow::ToOwned::to_owned(
-                                "OwnershipTransferred",
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("transferOwnership"),
+                        inputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::borrow::ToOwned::to_owned("_newOwner"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("address"),
                             ),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::EventParam {
-                                    name: ::std::borrow::ToOwned::to_owned("previousOwner"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                                    indexed: true,
-                                },
-                                ::ethers::core::abi::ethabi::EventParam {
-                                    name: ::std::borrow::ToOwned::to_owned("newOwner"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                                    indexed: true,
-                                },
-                            ],
-                            anonymous: false,
-                        },
-                        ::ethers::core::abi::ethabi::Event {
-                            name: ::std::borrow::ToOwned::to_owned(
-                                "OwnershipTransferred",
+                        },],
+                        outputs: ::std::vec![],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                    },],
+                ),
+            ]),
+            events: ::core::convert::From::from([(
+                ::std::borrow::ToOwned::to_owned("OwnershipTransferred"),
+                ::std::vec![
+                    ::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("OwnershipTransferred",),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("previousOwner"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("newOwner"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                indexed: true,
+                            },
+                        ],
+                        anonymous: false,
+                    },
+                    ::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("OwnershipTransferred",),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("previousOwner"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("newOwner"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                indexed: true,
+                            },
+                        ],
+                        anonymous: false,
+                    },
+                ],
+            )]),
+            errors: ::core::convert::From::from([(
+                ::std::borrow::ToOwned::to_owned("NotContractOwner"),
+                ::std::vec![::ethers::core::abi::ethabi::AbiError {
+                    name: ::std::borrow::ToOwned::to_owned("NotContractOwner"),
+                    inputs: ::std::vec![
+                        ::ethers::core::abi::ethabi::Param {
+                            name: ::std::borrow::ToOwned::to_owned("_user"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("address"),
                             ),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::EventParam {
-                                    name: ::std::borrow::ToOwned::to_owned("previousOwner"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                                    indexed: true,
-                                },
-                                ::ethers::core::abi::ethabi::EventParam {
-                                    name: ::std::borrow::ToOwned::to_owned("newOwner"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                                    indexed: true,
-                                },
-                            ],
-                            anonymous: false,
+                        },
+                        ::ethers::core::abi::ethabi::Param {
+                            name: ::std::borrow::ToOwned::to_owned("_contractOwner"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("address"),
+                            ),
                         },
                     ],
-                ),
-            ]),
-            errors: ::core::convert::From::from([
-                (
-                    ::std::borrow::ToOwned::to_owned("NotContractOwner"),
-                    ::std::vec![
-                        ::ethers::core::abi::ethabi::AbiError {
-                            name: ::std::borrow::ToOwned::to_owned("NotContractOwner"),
-                            inputs: ::std::vec![
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_user"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("address"),
-                                    ),
-                                },
-                                ::ethers::core::abi::ethabi::Param {
-                                    name: ::std::borrow::ToOwned::to_owned("_contractOwner"),
-                                    kind: ::ethers::core::abi::ethabi::ParamType::Address,
-                                    internal_type: ::core::option::Option::Some(
-                                        ::std::borrow::ToOwned::to_owned("address"),
-                                    ),
-                                },
-                            ],
-                        },
-                    ],
-                ),
-            ]),
+                },],
+            )]),
             receive: false,
             fallback: false,
         }
     }
     ///The parsed JSON ABI of the contract.
-    pub static OWNERSHIPFACET_ABI: ::ethers::contract::Lazy<::ethers::core::abi::Abi> = ::ethers::contract::Lazy::new(
-        __abi,
-    );
+    pub static OWNERSHIPFACET_ABI: ::ethers::contract::Lazy<::ethers::core::abi::Abi> =
+        ::ethers::contract::Lazy::new(__abi);
     #[rustfmt::skip]
     const __BYTECODE: &[u8] = b"`\x80\x80`@R4`\x15Wa\x01f\x90\x81a\0\x1B\x829\xF3[`\0\x80\xFD\xFE`\x80\x80`@R`\x046\x10\x15a\0\x13W`\0\x80\xFD[`\x005`\xE0\x1C\x90\x81c\x8D\xA5\xCB[\x14a\0\xDFWPc\xF2\xFD\xE3\x8B\x14a\x005W`\0\x80\xFD[4a\0\xDAW` 6`\x03\x19\x01\x12a\0\xDAW`\x045`\x01`\x01`\xA0\x1B\x03\x81\x16\x90\x81\x90\x03a\0\xDAW`\0\x80Q` a\x01\x11\x839\x81Q\x91RT`\x01`\x01`\xA0\x1B\x03\x81\x16\x903\x82\x90\x03a\0\xC1W`\x01`\x01`\xA0\x1B\x03\x19\x16\x82\x17`\0\x80Q` a\x01\x11\x839\x81Q\x91RU\x7F\x8B\xE0\x07\x9CS\x16Y\x14\x13D\xCD\x1F\xD0\xA4\xF2\x84\x19I\x7F\x97\"\xA3\xDA\xAF\xE3\xB4\x18okdW\xE0`\0\x80\xA3\0[Pc\xFFA'\xCB`\xE0\x1B`\0R3`\x04R`$R`D`\0\xFD[`\0\x80\xFD[4a\0\xDAW`\x006`\x03\x19\x01\x12a\0\xDAW`\0\x80Q` a\x01\x11\x839\x81Q\x91RT`\x01`\x01`\xA0\x1B\x03\x16\x81R` \x90\xF3\xFE\xC8\xFC\xAD\x8D\xB8M<\xC1\x8BLA\xD5Q\xEA\x0E\xE6m\xD5\x99\xCD\xE0h\xD9\x98\xE5}^\t3,\x13\x1F\xA2dipfsX\"\x12 \xAB\xB6\xDA{L\xEE\xB9\xA3\xDA\xD8\xB5\x7F\xB76\x83\x86\x0E[\xBA_\xEF\xA3\x91\xFC\xB4\xD2)\x9A\x9B\xA0\"FdsolcC\0\x08\x1C\x003";
     /// The bytecode of the contract.
-    pub static OWNERSHIPFACET_BYTECODE: ::ethers::core::types::Bytes = ::ethers::core::types::Bytes::from_static(
-        __BYTECODE,
-    );
+    pub static OWNERSHIPFACET_BYTECODE: ::ethers::core::types::Bytes =
+        ::ethers::core::types::Bytes::from_static(__BYTECODE);
     #[rustfmt::skip]
     const __DEPLOYED_BYTECODE: &[u8] = b"`\x80\x80`@R`\x046\x10\x15a\0\x13W`\0\x80\xFD[`\x005`\xE0\x1C\x90\x81c\x8D\xA5\xCB[\x14a\0\xDFWPc\xF2\xFD\xE3\x8B\x14a\x005W`\0\x80\xFD[4a\0\xDAW` 6`\x03\x19\x01\x12a\0\xDAW`\x045`\x01`\x01`\xA0\x1B\x03\x81\x16\x90\x81\x90\x03a\0\xDAW`\0\x80Q` a\x01\x11\x839\x81Q\x91RT`\x01`\x01`\xA0\x1B\x03\x81\x16\x903\x82\x90\x03a\0\xC1W`\x01`\x01`\xA0\x1B\x03\x19\x16\x82\x17`\0\x80Q` a\x01\x11\x839\x81Q\x91RU\x7F\x8B\xE0\x07\x9CS\x16Y\x14\x13D\xCD\x1F\xD0\xA4\xF2\x84\x19I\x7F\x97\"\xA3\xDA\xAF\xE3\xB4\x18okdW\xE0`\0\x80\xA3\0[Pc\xFFA'\xCB`\xE0\x1B`\0R3`\x04R`$R`D`\0\xFD[`\0\x80\xFD[4a\0\xDAW`\x006`\x03\x19\x01\x12a\0\xDAW`\0\x80Q` a\x01\x11\x839\x81Q\x91RT`\x01`\x01`\xA0\x1B\x03\x16\x81R` \x90\xF3\xFE\xC8\xFC\xAD\x8D\xB8M<\xC1\x8BLA\xD5Q\xEA\x0E\xE6m\xD5\x99\xCD\xE0h\xD9\x98\xE5}^\t3,\x13\x1F\xA2dipfsX\"\x12 \xAB\xB6\xDA{L\xEE\xB9\xA3\xDA\xD8\xB5\x7F\xB76\x83\x86\x0E[\xBA_\xEF\xA3\x91\xFC\xB4\xD2)\x9A\x9B\xA0\"FdsolcC\0\x08\x1C\x003";
     /// The deployed bytecode of the contract.
-    pub static OWNERSHIPFACET_DEPLOYED_BYTECODE: ::ethers::core::types::Bytes = ::ethers::core::types::Bytes::from_static(
-        __DEPLOYED_BYTECODE,
-    );
+    pub static OWNERSHIPFACET_DEPLOYED_BYTECODE: ::ethers::core::types::Bytes =
+        ::ethers::core::types::Bytes::from_static(__DEPLOYED_BYTECODE);
     pub struct OwnershipFacet<M>(::ethers::contract::Contract<M>);
     impl<M> ::core::clone::Clone for OwnershipFacet<M> {
         fn clone(&self) -> Self {
@@ -181,13 +158,11 @@ pub mod ownership_facet {
             address: T,
             client: ::std::sync::Arc<M>,
         ) -> Self {
-            Self(
-                ::ethers::contract::Contract::new(
-                    address.into(),
-                    OWNERSHIPFACET_ABI.clone(),
-                    client,
-                ),
-            )
+            Self(::ethers::contract::Contract::new(
+                address.into(),
+                OWNERSHIPFACET_ABI.clone(),
+                client,
+            ))
         }
         /// Constructs the general purpose `Deployer` instance based on the provided constructor arguments and sends it.
         /// Returns a new instance of a deployer that returns an instance of this contract after sending the transaction
@@ -231,10 +206,7 @@ pub mod ownership_facet {
         ///Calls the contract's `owner` (0x8da5cb5b) function
         pub fn owner(
             &self,
-        ) -> ::ethers::contract::builders::ContractCall<
-            M,
-            ::ethers::core::types::Address,
-        > {
+        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::Address> {
             self.0
                 .method_hash([141, 165, 203, 91], ())
                 .expect("method not found (this should never happen)")
@@ -251,26 +223,22 @@ pub mod ownership_facet {
         ///Gets the contract's `OwnershipTransferred` event
         pub fn ownership_transferred_2_filter(
             &self,
-        ) -> ::ethers::contract::builders::Event<
-            ::std::sync::Arc<M>,
-            M,
-            OwnershipTransferred2Filter,
-        > {
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, OwnershipTransferred2Filter>
+        {
             self.0.event()
         }
         /// Returns an `Event` builder for all the events of this contract.
         pub fn events(
             &self,
-        ) -> ::ethers::contract::builders::Event<
-            ::std::sync::Arc<M>,
-            M,
-            OwnershipFacetEvents,
-        > {
-            self.0.event_with_filter(::core::default::Default::default())
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, OwnershipFacetEvents>
+        {
+            self.0
+                .event_with_filter(::core::default::Default::default())
         }
     }
     impl<M: ::ethers::providers::Middleware> From<::ethers::contract::Contract<M>>
-    for OwnershipFacet<M> {
+        for OwnershipFacet<M>
+    {
         fn from(contract: ::ethers::contract::Contract<M>) -> Self {
             Self::new(contract.address(), contract.client())
         }
@@ -286,7 +254,7 @@ pub mod ownership_facet {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     #[etherror(name = "NotContractOwner", abi = "NotContractOwner(address,address)")]
     pub struct NotContractOwner {
@@ -303,7 +271,7 @@ pub mod ownership_facet {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     #[ethevent(
         name = "OwnershipTransferred",
@@ -324,7 +292,7 @@ pub mod ownership_facet {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     pub enum OwnershipFacetEvents {
         OwnershipTransferred2Filter(OwnershipTransferred2Filter),
@@ -342,9 +310,7 @@ pub mod ownership_facet {
     impl ::core::fmt::Display for OwnershipFacetEvents {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             match self {
-                Self::OwnershipTransferred2Filter(element) => {
-                    ::core::fmt::Display::fmt(element, f)
-                }
+                Self::OwnershipTransferred2Filter(element) => ::core::fmt::Display::fmt(element, f),
             }
         }
     }
@@ -364,7 +330,7 @@ pub mod ownership_facet {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     #[ethcall(name = "owner", abi = "owner()")]
     pub struct OwnerCall;
@@ -379,7 +345,7 @@ pub mod ownership_facet {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     #[ethcall(name = "transferOwnership", abi = "transferOwnership(address)")]
     pub struct TransferOwnershipCall {
@@ -394,7 +360,7 @@ pub mod ownership_facet {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     pub enum OwnershipFacetCalls {
         Owner(OwnerCall),
@@ -405,14 +371,12 @@ pub mod ownership_facet {
             data: impl AsRef<[u8]>,
         ) -> ::core::result::Result<Self, ::ethers::core::abi::AbiError> {
             let data = data.as_ref();
-            if let Ok(decoded) = <OwnerCall as ::ethers::core::abi::AbiDecode>::decode(
-                data,
-            ) {
+            if let Ok(decoded) = <OwnerCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::Owner(decoded));
             }
-            if let Ok(decoded) = <TransferOwnershipCall as ::ethers::core::abi::AbiDecode>::decode(
-                data,
-            ) {
+            if let Ok(decoded) =
+                <TransferOwnershipCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
                 return Ok(Self::TransferOwnership(decoded));
             }
             Err(::ethers::core::abi::Error::InvalidData.into())
@@ -422,9 +386,7 @@ pub mod ownership_facet {
         fn encode(self) -> Vec<u8> {
             match self {
                 Self::Owner(element) => ::ethers::core::abi::AbiEncode::encode(element),
-                Self::TransferOwnership(element) => {
-                    ::ethers::core::abi::AbiEncode::encode(element)
-                }
+                Self::TransferOwnership(element) => ::ethers::core::abi::AbiEncode::encode(element),
             }
         }
     }
@@ -457,7 +419,7 @@ pub mod ownership_facet {
         Debug,
         PartialEq,
         Eq,
-        Hash
+        Hash,
     )]
     pub struct OwnerReturn {
         pub owner: ::ethers::core::types::Address,

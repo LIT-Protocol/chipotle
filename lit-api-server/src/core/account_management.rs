@@ -313,15 +313,9 @@ pub async fn update_group(
     req: Json<UpdateGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = parse_u256(&req.group_id)?;
-    accounts::update_group(
-        signer_pool,
-        api_key,
-        group_id,
-        &req.name,
-        &req.description,
-    )
-    .await
-    .map_err(|e| ApiStatus::internal_server_error(e, "update_group failed"))?;
+    accounts::update_group(signer_pool, api_key, group_id, &req.name, &req.description)
+        .await
+        .map_err(|e| ApiStatus::internal_server_error(e, "update_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
