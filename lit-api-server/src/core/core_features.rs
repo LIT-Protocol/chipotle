@@ -59,6 +59,7 @@ pub async fn lit_action(
         .js_env(deno_execution_env)
         .request_id(request_id.clone())
         .api_key(api_key.to_string())
+        .ipfs_id(derived_ipfs_id.clone())
         .client_grpc_channels((*grpc_client_pool).clone())
         .build()
         .map_err(|e| e.to_string())
