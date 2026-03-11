@@ -52,7 +52,8 @@ fn parse_h160_hex_list(strings: &[String]) -> Result<Vec<H160>, ApiStatus> {
     strings
         .iter()
         .map(|s| {
-            let bytes = hex_to_bytes(s.trim()).map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex in list"))?;
+            let bytes = hex_to_bytes(s.trim())
+                .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex in list"))?;
             Ok(H160::from_slice(&bytes))
         })
         .collect::<Result<Vec<_>, _>>()
@@ -174,7 +175,7 @@ pub async fn add_group(
     api_key: &str,
     req: Json<AddGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let cid_hashes = match req.all_actions_permitted  {
+    let cid_hashes = match req.all_actions_permitted {
         true => vec![U256::zero()],
         false => parse_u256_hex_list(&req.permitted_actions)?,
     };
