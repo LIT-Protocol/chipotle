@@ -117,6 +117,8 @@ pub struct NodeChainConfigResponse {
     pub is_evm: bool,
     pub testnet: bool,
     pub token: String,
+    #[serde(skip_serializing)]
+    #[schemars(skip)]
     pub rpc_url: String,
     pub contract_address: String,
 }

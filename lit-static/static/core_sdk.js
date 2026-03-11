@@ -163,7 +163,7 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @property {boolean} is_evm - Whether the chain is EVM
  * @property {boolean} testnet - Whether the chain is a testnet
  * @property {string} token - Native token symbol
- * @property {string} rpc_url - RPC URL
+ * @property {string} [rpc_url] - RPC URL (resolved from chainlist when not in API response)
  * @property {string} contract_address - AccountConfig contract address
  */
 
@@ -281,6 +281,35 @@ async function parseResponse(res, context) {
     return text ? JSON.parse(text) : null;
   } catch (_) {
     throw new Error(`${context}: invalid JSON response`);
+  }
+}
+
+const CHAINLIST_API = 'https://chainlistapi.com';
+const CORS_PROXY = 'https://whateverorigin.org/get?url=';
+
+/**
+ * Resolve a public RPC URL for the given chain ID from chainlistapi.com.
+ * Uses Whatever Origin CORS proxy (free, no domain whitelist) to avoid cross-origin restrictions.
+ * @param {number} chainId - EVM chain ID
+ * @returns {Promise<string|null>} First HTTP RPC URL, or null if not found
+ */
+export async function resolveRpcUrlFromChainlist(chainId) {
+  if (chainId == null || chainId === '') return null;
+  try {
+    const url = `${CORS_PROXY}${encodeURIComponent(`${CHAINLIST_API}/chains/${chainId}`)}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const wrapper = await res.json();
+    const data = typeof wrapper?.contents === 'string' ? JSON.parse(wrapper.contents) : wrapper;
+    const rpcs = data?.rpc;
+    if (!Array.isArray(rpcs)) return null;
+    const entry = rpcs.find((r) => {
+      const u = typeof r === 'string' ? r : r?.url;
+      return typeof u === 'string' && u.startsWith('https://');
+    });
+    return entry ? (typeof entry === 'string' ? entry : entry.url) : null;
+  } catch (_) {
+    return null;
   }
 }
 
@@ -686,11 +715,17 @@ export class LitNodeSimpleApiClient {
   /**
    * GET /core/v1/get_node_chain_config
    * Returns the node's chain configuration (chain name, id, RPC URL, contract address, etc.).
+   * When the API does not include rpc_url, it is resolved from chainlistapi.com using chain_id.
    * @returns {Promise<NodeChainConfigResponse>}
    */
   async getNodeChainConfig() {
     const res = await fetch(`${this.baseUrl}/get_node_chain_config`);
-    return parseResponse(res, 'get_node_chain_config');
+    const cfg = await parseResponse(res, 'get_node_chain_config');
+    if (!cfg.rpc_url && cfg.chain_id != null && cfg.is_evm) {
+      const rpcUrl = await resolveRpcUrlFromChainlist(cfg.chain_id);
+      if (rpcUrl) cfg.rpc_url = rpcUrl;
+    }
+    return cfg;
   }
 }
 

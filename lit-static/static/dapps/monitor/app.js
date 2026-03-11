@@ -98,6 +98,31 @@ function getServerUrl() {
   return (el('network')?.value || '').replace(/\/$/, '');
 }
 
+// ── resolveRpcUrlFromChainlist ───────────────────────────────────────────────────
+// Uses Whatever Origin CORS proxy (free, no domain whitelist) to fetch from chainlistapi.com.
+
+const CORS_PROXY = 'https://whateverorigin.org/get?url=';
+
+async function resolveRpcUrlFromChainlist(chainId) {
+  if (chainId == null || chainId === '') return null;
+  try {
+    const url = `${CORS_PROXY}${encodeURIComponent(`https://chainlistapi.com/chains/${chainId}`)}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const wrapper = await res.json();
+    const data = typeof wrapper?.contents === 'string' ? JSON.parse(wrapper.contents) : wrapper;
+    const rpcs = data?.rpc;
+    if (!Array.isArray(rpcs)) return null;
+    const entry = rpcs.find((r) => {
+      const u = typeof r === 'string' ? r : r?.url;
+      return typeof u === 'string' && u.startsWith('https://');
+    });
+    return entry ? (typeof entry === 'string' ? entry : entry.url) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
 // ── getNodeChainConfig ────────────────────────────────────────────────────────
 
 async function getNodeChainConfig(serverUrl) {
@@ -121,8 +146,14 @@ async function getNodeChainConfig(serverUrl) {
     setValue('cc-is-evm',           cfg.is_evm   != null ? String(cfg.is_evm)   : '—', cfg.is_evm   == null);
     setValue('cc-testnet',          cfg.testnet  != null ? String(cfg.testnet)  : '—', cfg.testnet  == null);
     setValue('cc-token',            cfg.token        ?? '—', !cfg.token);
+
+    let rpcUrl = cfg.rpc_url ?? '';
+    if (!rpcUrl && cfg.chain_id != null && cfg.is_evm) {
+      rpcUrl = (await resolveRpcUrlFromChainlist(cfg.chain_id)) ?? '';
+    }
     const rpcInput = el('cc-rpc-url');
-    if (rpcInput) rpcInput.value = cfg.rpc_url ?? '';
+    if (rpcInput) rpcInput.value = rpcUrl;
+
     setValue('cc-contract-address', cfg.contract_address ?? '—', !cfg.contract_address);
 
     // Propagate contract address to the contract card.
@@ -217,10 +248,14 @@ async function getApiPayers(serverUrl) {
 
 async function loadNetwork() {
   const serverUrl = getServerUrl();
-  await Promise.all([
-    getNodeChainConfig(serverUrl),
-    getApiPayers(serverUrl),
-  ]);
+  await getNodeChainConfig(serverUrl); // Must run first to populate RPC URL
+  await getApiPayers(serverUrl);
+  await fetchContractValues();
+}
+
+async function refreshBalances() {
+  const serverUrl = getServerUrl();
+  await getApiPayers(serverUrl);
   await fetchContractValues();
 }
 
@@ -442,13 +477,13 @@ el('btn-set-rebalance-amount')?.addEventListener('click', async () => {
   }
 });
 
-el('cc-rpc-url')?.addEventListener('change', () => fetchContractValues());
+el('cc-rpc-url')?.addEventListener('change', () => refreshBalances());
 
 el('btn-refresh-contract')?.addEventListener('click', async () => {
   const btn = el('btn-refresh-contract');
   btn.disabled = true;
   try {
-    await fetchContractValues();
+    await refreshBalances();
   } finally {
     btn.disabled = false;
   }
@@ -485,6 +520,7 @@ el('btn-set-payer-count')?.addEventListener('click', async () => {
     await tx.wait();
 
     showSignerCountStatus('Done. Requested payer count updated to ' + newCount, false);
+    await refreshBalances();
   } catch (e) {
     showSignerCountStatus('Error: ' + (e?.reason || e?.message || String(e)), true);
   } finally {
