@@ -37,11 +37,6 @@ async fn create_new_wallet() -> Result<(String, H160, [u8; 32], U256), ApiStatus
         ApiStatus::internal_server_error(anyhow::anyhow!(e), "get_client_key failed")
     })?;
 
-    tracing::info!(
-        "Secret bytes keccak256: {:?}",
-        ethers::utils::keccak256(&secret)
-    );
-
     let local_wallet = LocalWallet::from_bytes(&secret).map_err(|e| {
         ApiStatus::internal_server_error(anyhow::anyhow!(e), "LocalWallet::from_bytes failed")
     })?;

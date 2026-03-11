@@ -1,16 +1,13 @@
 use crate::{
-    actions::client::models::SignedData,
-    core::pkp_id_to_derviation_path,
+    actions::client::models::SignedData, core::pkp_id_to_derviation_path,
     dstack::v1::get_client_key,
-    utils::{evm_address_from_public_key, parse_to_hash::wallet_string_to_h160},
 };
 use anyhow::Result;
-use elliptic_curve::group::GroupEncoding;
 use k256::ecdsa::{
     Signature, SigningKey,
-    signature::{DigestVerifier, Signer, hazmat::PrehashVerifier},
+    signature::{Signer, hazmat::PrehashVerifier},
 };
-use lit_core::utils::binary::{bytes_to_0x_hex, bytes_to_hex};
+use lit_core::utils::binary::bytes_to_hex;
 
 pub async fn sign_with_pkp(
     api_key: &str,
@@ -22,11 +19,6 @@ pub async fn sign_with_pkp(
     let derivation_path = pkp_id_to_derviation_path(api_key, pkp_id).await?;
     let secret_bytes = get_client_key(&derivation_path).await?;
 
-    tracing::info!(
-        "Secret bytes keccak256: {:?}",
-        ethers::utils::keccak256(&secret_bytes)
-    );
-
     if to_sign.len() != 32 {
         return Err(format!("To sign must be 32 bytes, got {}", to_sign.len()));
     }
@@ -37,14 +29,6 @@ pub async fn sign_with_pkp(
     };
 
     let verifying_key = signing_key.verifying_key();
-    // let public_key_bytes = verifying_key.as_affine().to_bytes();
-    // let public_key_string = bytes_to_0x_hex(&public_key_bytes);
-
-    // let pkp_id_address = wallet_string_to_h160(pkp_id)
-    //     .map_err(|e| format!("Error converting PKP ID to EVM address: {:?}", e))?;
-    // let evm_address = evm_address_from_public_key(&public_key_string)
-    //     .map_err(|e| format!("Error converting public key to EVM address: {:?}", e))?;
-    // 3. Hash the message using Keccak256
     use sha3::{Digest, Keccak256};
     let mut hasher = Keccak256::new();
     hasher.update(to_sign);
