@@ -3,7 +3,6 @@ use std::sync::Arc;
 use crate::accounts::signer_pool::SignerPool;
 use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::api_status::ApiStatus;
-use crate::utils::generate_unique_derivation_path;
 use crate::core::v1::models::request::{
     AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest, AddUsageApiKeyRequest,
     NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
@@ -15,7 +14,10 @@ use crate::core::v1::models::response::{
     NewAccountResponse, NodeChainConfigResponse, WalletItem,
 };
 use crate::dstack::v1::get_client_key;
-use crate::utils::parse_to_hash::{hex_array_to_h160_array, hex_array_to_u256_array, ipfs_cid_to_u256, string_group_id_to_u256};
+use crate::utils::generate_unique_derivation_path;
+use crate::utils::parse_to_hash::{
+    hex_array_to_h160_array, hex_array_to_u256_array, ipfs_cid_to_u256, string_group_id_to_u256,
+};
 use crate::{accounts, dstack};
 use elliptic_curve::group::GroupEncoding;
 use ethers::signers::{LocalWallet, Signer};
@@ -212,7 +214,11 @@ pub async fn add_usage_api_key(
     api_key: &str,
     req: Json<AddUsageApiKeyRequest>,
 ) -> Result<AddUsageApiKeyResponse, ApiStatus> {
-    let ten_years_from_now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() + 3600 * 24 * 365 * 10;
+    let ten_years_from_now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        + 3600 * 24 * 365 * 10;
     let expiration = U256::from(ten_years_from_now);
     let balance = U256::from(10000000);
 

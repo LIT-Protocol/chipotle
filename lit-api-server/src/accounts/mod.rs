@@ -11,9 +11,9 @@ use crate::accounts::signable_contract::{
     get_read_only_account_config_contract, get_signable_account_config_contract, send_transaction,
 };
 use crate::accounts::signer_pool::SignerPool;
+use crate::utils::parse_to_hash::api_key_hash;
 use crate::utils::parse_to_hash::ipfs_cid_to_u256;
 use ethers::types::{Address, H160, U256};
-use crate::utils::parse_to_hash::api_key_hash;
 
 /// Create a new account. `initial_balance` is stored on the account's apiKey (AccountConfig.accountApiKey.balance).
 pub async fn new_account(
@@ -84,7 +84,8 @@ pub async fn add_action_to_group(
     let (contract, signer_address) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
-    let action_hash = ipfs_cid_to_u256(action_ipfs_cid).map_err(|e| anyhow::anyhow!("Unable to parse action IPFS CID: {}", e))?;
+    let action_hash = ipfs_cid_to_u256(action_ipfs_cid)
+        .map_err(|e| anyhow::anyhow!("Unable to parse action IPFS CID: {}", e))?;
     let function_call = contract.add_action_to_group(
         account_api_key_hash,
         group_id,
@@ -151,7 +152,8 @@ pub async fn remove_action_from_group_by_cid(
     group_id: U256,
     action_ipfs_cid: &str,
 ) -> Result<bool> {
-    let action_hash = ipfs_cid_to_u256(action_ipfs_cid).map_err(|e| anyhow::anyhow!("Unable to parse action IPFS CID: {}", e))?;
+    let action_hash = ipfs_cid_to_u256(action_ipfs_cid)
+        .map_err(|e| anyhow::anyhow!("Unable to parse action IPFS CID: {}", e))?;
     remove_action_from_group(signer_pool, api_key, group_id, action_hash).await
 }
 

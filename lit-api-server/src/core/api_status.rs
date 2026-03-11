@@ -5,7 +5,8 @@ use rocket_okapi::{
     response::OpenApiResponderInner,
 };
 use rocket_responder::{
-    ApiResponse, bad_request, forbidden, internal_server_error, not_found, ok, payment_required, unauthorized
+    ApiResponse, bad_request, forbidden, internal_server_error, not_found, ok, payment_required,
+    unauthorized,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;

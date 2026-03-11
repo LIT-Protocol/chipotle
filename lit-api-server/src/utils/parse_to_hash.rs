@@ -1,6 +1,9 @@
 use crate::core::api_status::ApiStatus;
-use ethers::{types::{H160, U256}, utils::keccak256};
-use lit_core::utils::binary::{ hex_to_bytes};
+use ethers::{
+    types::{H160, U256},
+    utils::keccak256,
+};
+use lit_core::utils::binary::hex_to_bytes;
 
 pub fn api_key_hash(api_key_base_64: &str) -> U256 {
     U256::from_big_endian(&keccak256(api_key_base_64.as_bytes()))
@@ -19,22 +22,36 @@ pub fn string_to_hashed_u256(s: &str) -> Result<U256, ApiStatus> {
 }
 
 pub fn string_to_h160(s: &str) -> Result<H160, ApiStatus> {
-    parse_h160(s).map_err(|e| ApiStatus::bad_request(anyhow::anyhow!("Unable to parse wallet address: {}", e), "Unable to parse wallet address"))
+    parse_h160(s).map_err(|e| {
+        ApiStatus::bad_request(
+            anyhow::anyhow!("Unable to parse wallet address: {}", e),
+            "Unable to parse wallet address",
+        )
+    })
 }
 
 pub fn ipfs_cid_to_u256(ipfs_id: &str) -> Result<U256, ApiStatus> {
-    string_to_bytes_to_hash_to_u256(ipfs_id).map_err(|e| ApiStatus::bad_request(anyhow::anyhow!("Unable to parse IPFS ID: {}", e), "Parsing error."))
+    string_to_bytes_to_hash_to_u256(ipfs_id).map_err(|e| {
+        ApiStatus::bad_request(
+            anyhow::anyhow!("Unable to parse IPFS ID: {}", e),
+            "Parsing error.",
+        )
+    })
 }
 
 pub fn string_group_id_to_u256(group_id: &str) -> Result<U256, ApiStatus> {
-    parse_u256(group_id).map_err(|e| ApiStatus::bad_request(anyhow::anyhow!("Unable to parse group ID: {}", e), "Unable to parse group ID"))
+    parse_u256(group_id).map_err(|e| {
+        ApiStatus::bad_request(
+            anyhow::anyhow!("Unable to parse group ID: {}", e),
+            "Unable to parse group ID",
+        )
+    })
 }
 
 fn string_to_bytes_to_hash_to_u256(s: &str) -> Result<U256, ApiStatus> {
     let bytes = keccak256(s.as_bytes());
     Ok(U256::from_big_endian(&bytes))
 }
-
 
 /// Parse U256 from decimal string or hex string (with or without 0x prefix).
 fn parse_u256(s: &str) -> Result<U256, ApiStatus> {

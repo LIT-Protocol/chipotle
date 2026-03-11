@@ -44,7 +44,9 @@ pub async fn lit_action(
     let derived_ipfs_id = get_lit_action_ipfs_id(code_to_run.clone());
     let cid_hash = ipfs_cid_to_u256(&derived_ipfs_id)?;
     if !can_execute_action(api_key, cid_hash).await? {
-        let msg = format!("API key {api_key} cannot execute specified action ({derived_ipfs_id}/{cid_hash}).");
+        let msg = format!(
+            "API key {api_key} cannot execute specified action ({derived_ipfs_id}/{cid_hash})."
+        );
         return Err(ApiStatus::forbidden(msg).into());
     }
 
