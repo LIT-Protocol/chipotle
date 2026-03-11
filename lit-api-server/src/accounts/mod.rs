@@ -52,10 +52,9 @@ pub async fn account_exists(api_key: &str) -> Result<bool> {
     let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let api_payers = get_api_payers().await?;
-    let from = api_payers
-        .first()
-        .copied()
-        .ok_or_else(|| anyhow::anyhow!("No api_payers configured; cannot simulate account_exists"))?;
+    let from = api_payers.first().copied().ok_or_else(|| {
+        anyhow::anyhow!("No api_payers configured; cannot simulate account_exists")
+    })?;
     let exists = contract
         .account_exists_and_is_mutable(account_api_key_hash)
         .from(from)
