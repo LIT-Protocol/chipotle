@@ -192,9 +192,14 @@ jobs:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
       runner: '["self-hosted"]'
 
-  k6-correctness:
+  k6-smoke:
     needs: [wait-for-api-available, openapi-spec-check]
-    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/k6-smoke.yml
+    with:
+      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+
+  k6-correctness:
+    needs: [wait-for-api-available, k6-smoke]
     uses: ./.github/workflows/correctness.yml
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
