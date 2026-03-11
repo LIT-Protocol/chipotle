@@ -251,9 +251,9 @@ pub async fn add_usage_api_key(
         balance,
         name.to_string(),
         description.to_string(),
-        true,   // create_groups
-        true,   // delete_groups
-        true,   // create_pk_ps
+        true,               // create_groups
+        true,               // delete_groups
+        true,               // create_pk_ps
         vec![U256::zero()], // manage_ipfs_ids_in_groups
         vec![U256::zero()], // add_pkp_to_groups
         vec![U256::zero()], // remove_pkp_from_groups

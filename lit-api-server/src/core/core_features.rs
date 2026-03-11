@@ -47,7 +47,7 @@ pub async fn lit_action(
         let msg = format!(
             "API key {api_key} cannot execute specified action ({derived_ipfs_id}/{cid_hash})."
         );
-        return Err(ApiStatus::forbidden(msg).into());
+        return Err(ApiStatus::forbidden(msg));
     }
 
     let deno_execution_env = DenoExecutionEnv {
@@ -102,6 +102,5 @@ pub async fn lit_action(
 
 fn get_lit_action_ipfs_id(code: String) -> String {
     let ipfs_hasher = IpfsHasher::default();
-    let derived_ipfs_id = ipfs_hasher.compute(code.as_bytes());
-    derived_ipfs_id
+    ipfs_hasher.compute(code.as_bytes())
 }

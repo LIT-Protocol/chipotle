@@ -327,6 +327,7 @@ pub async fn update_usage_api_key_metadata(
     Ok(AccountOpResponse { success: true })
 }
 
+#[allow(dead_code)]
 fn wallet_metadata_to_item(m: &accounts::Metadata) -> ListMetadataItem {
     metadata_to_item(m, "n/a", "Any", "Any wallet in this account.")
 }
@@ -339,8 +340,12 @@ fn group_metadata_to_item(m: &accounts::Metadata) -> ListMetadataItem {
     metadata_to_item(m, "n/a", "Any", "Any group in this account.")
 }
 
-fn metadata_to_item(m: &accounts::Metadata, wildcard_id: &str, wildcard_name: &str, wildcard_description: &str) -> ListMetadataItem {
-    
+fn metadata_to_item(
+    m: &accounts::Metadata,
+    wildcard_id: &str,
+    wildcard_name: &str,
+    wildcard_description: &str,
+) -> ListMetadataItem {
     if m.id == U256::zero() {
         return ListMetadataItem {
             id: wildcard_id.to_string(),
@@ -348,7 +353,7 @@ fn metadata_to_item(m: &accounts::Metadata, wildcard_id: &str, wildcard_name: &s
             description: wildcard_description.to_string(),
         };
     }
-    
+
     let mut bytes = [0; 32];
     m.id.to_big_endian(&mut bytes);
 

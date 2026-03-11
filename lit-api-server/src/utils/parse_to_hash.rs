@@ -13,7 +13,8 @@ pub fn hex_array_to_u256_array(hex_array: &[String]) -> Result<Vec<U256>, ApiSta
     parse_u256_hex_list(hex_array)
 }
 
-pub fn hex_array_to_h160_array(hex_array: &Vec<String>) -> Result<Vec<H160>, ApiStatus> {
+#[allow(dead_code)]
+pub fn hex_array_to_h160_array(hex_array: &[String]) -> Result<Vec<H160>, ApiStatus> {
     parse_h160_hex_list(hex_array)
 }
 

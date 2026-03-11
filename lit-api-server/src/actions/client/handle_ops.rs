@@ -54,10 +54,7 @@ impl Client {
                 if !op_code_helpers::can_use_wallet_in_action(&self.api_key, &self.ipfs_id, &pkp_id)
                     .await?
                 {
-                    return Err(anyhow::anyhow!(
-                        "API key cannot use selected wallet in selected action"
-                    )
-                    .into());
+                    bail!("API key cannot use selected wallet in selected action");
                 }
 
                 let encrypted = op_code_helpers::encryption::aes_encrypt_with_pkp(
@@ -75,10 +72,7 @@ impl Client {
                 if !op_code_helpers::can_use_wallet_in_action(&self.api_key, &self.ipfs_id, &pkp_id)
                     .await?
                 {
-                    return Err(anyhow::anyhow!(
-                        "API key cannot use selected wallet in selected action"
-                    )
-                    .into());
+                    bail!("API key cannot use selected wallet in selected action");
                 }
 
                 let decrypted = op_code_helpers::encryption::aes_decrypt_with_pkp(
@@ -101,10 +95,7 @@ impl Client {
                 if !op_code_helpers::can_use_wallet_in_action(&self.api_key, &self.ipfs_id, &pkp_id)
                     .await?
                 {
-                    return Err(anyhow::anyhow!(
-                        "API key cannot use selected wallet in selected action"
-                    )
-                    .into());
+                    bail!("API key cannot use selected wallet in selected action");
                 }
 
                 let (sig_name, signed_data) = match op_code_helpers::signing::sign_with_pkp(
