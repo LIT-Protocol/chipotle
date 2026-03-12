@@ -21,7 +21,7 @@ if [ -z "$GCP_PROJECT_ID" ]; then
     exit 1
 fi
 
-CREDS_FILE=$(mktemp /tmp/gcp-creds-XXXXXX.json)
+CREDS_FILE=$(mktemp /tmp/gcp-creds-XXXXXX)
 cleanup() { rm -f "$CREDS_FILE"; }
 trap cleanup EXIT INT TERM
 
