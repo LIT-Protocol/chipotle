@@ -28,8 +28,9 @@ pub use tonic_middleware;
 /// `log_level` is the minimum log level (e.g. "info", "debug"). Overridden by `RUST_LOG`.
 pub fn init_subscriber(
     log_level: &str,
-) -> Result<impl Subscriber + Send + Sync + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>>
-{
+) -> Result<
+    impl Subscriber + Send + Sync + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
+> {
     let level_filter = EnvFilter::try_from_default_env()
         .or_else(|_e| EnvFilter::from_str(log_level))
         .map_err(|e| {
@@ -63,11 +64,15 @@ pub async fn create_providers(
     let tracing_provider =
         tracing::init_tracing_provider(net::init_tonic_exporter_builder(endpoint)?, trace_config)?;
 
-    let meter_provider =
-        metrics::init_metrics_provider(net::init_tonic_exporter_builder(endpoint)?, resource.clone())?;
+    let meter_provider = metrics::init_metrics_provider(
+        net::init_tonic_exporter_builder(endpoint)?,
+        resource.clone(),
+    )?;
 
-    let logger_provider =
-        logging::init_logger_provider(net::init_tonic_exporter_builder(endpoint)?, resource.clone())?;
+    let logger_provider = logging::init_logger_provider(
+        net::init_tonic_exporter_builder(endpoint)?,
+        resource.clone(),
+    )?;
 
     Ok((tracing_provider, meter_provider, logger_provider))
 }

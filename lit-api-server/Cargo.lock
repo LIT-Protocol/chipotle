@@ -4511,6 +4511,7 @@ dependencies = [
  "lit-actions-grpc",
  "lit-core",
  "lit-core-derive",
+ "lit-observability",
  "moka",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
@@ -4595,7 +4596,7 @@ version = "0.1.0"
 dependencies = [
  "dashmap",
  "derive_more 2.1.1",
- "hyper-util",
+ "flume",
  "lit-core",
  "lit-core-derive",
  "lit-logging",
@@ -4610,7 +4611,6 @@ dependencies = [
  "tower 0.5.3",
  "tracing",
  "tracing-appender",
- "tracing-log",
  "tracing-opentelemetry",
  "tracing-subscriber",
 ]

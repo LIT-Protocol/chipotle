@@ -23,8 +23,7 @@ fn main() -> anyhow::Result<()> {
 
     let observability_rt = tokio::runtime::Runtime::new().expect("failed to create runtime");
 
-    let observability_providers =
-        observability_rt.block_on(async { init_observability().await });
+    let observability_providers = observability_rt.block_on(async { init_observability().await });
     debug!(?args);
 
     lit_actions_server::init_v8();
@@ -51,8 +50,7 @@ fn main() -> anyhow::Result<()> {
 async fn init_observability() -> ObservabilityProviders {
     use tracing_subscriber::util::SubscriberInitExt;
 
-    let log_level =
-        std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+    let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
 
     let init_stdout = || match lit_observability::init_subscriber(&log_level) {
         Ok(s) => s.init(),

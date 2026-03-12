@@ -2186,6 +2186,7 @@ dependencies = [
  "tower 0.5.2",
  "tracing",
  "tracing-appender",
+ "tracing-log",
  "tracing-opentelemetry",
  "tracing-subscriber",
 ]

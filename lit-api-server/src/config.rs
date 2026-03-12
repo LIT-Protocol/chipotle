@@ -21,7 +21,10 @@ pub fn read_observability_config() -> ObservabilityConfig {
 
     // Fast path: both values from env, no file read needed.
     if let (Some(ll), Some(ep)) = (log_level.as_ref(), telemetry_endpoint.as_ref()) {
-        return ObservabilityConfig { log_level: ll.clone(), telemetry_endpoint: ep.clone() };
+        return ObservabilityConfig {
+            log_level: ll.clone(),
+            telemetry_endpoint: ep.clone(),
+        };
     }
 
     let toml_path = Path::new("NodeConfig.toml");
@@ -33,13 +36,15 @@ pub fn read_observability_config() -> ObservabilityConfig {
         None
     };
 
-    let file_log_level = doc.as_ref()
+    let file_log_level = doc
+        .as_ref()
         .and_then(|d| d.get("observability"))
         .and_then(|o| o.get("log_level"))
         .and_then(|v| v.as_str())
         .map(str::to_string);
 
-    let file_endpoint = doc.as_ref()
+    let file_endpoint = doc
+        .as_ref()
         .and_then(|d| d.get("observability"))
         .and_then(|o| o.get("telemetry_endpoint"))
         .and_then(|v| v.as_str())
