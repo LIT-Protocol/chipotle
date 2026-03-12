@@ -27,7 +27,7 @@ pub async fn deploy_facet_from_json(
 
 pub fn get_facet_cuts(
     contract: &Contract<SignerMiddleware<Provider<Http>, LocalWallet>>,
-    existing_selectors: &Vec<[u8; 4]>,
+    existing_selectors: &[[u8; 4]],
     display: bool,
 ) -> Vec<FacetCut> {
     let mut facet_cuts = Vec::new();
@@ -95,7 +95,7 @@ pub async fn deploy_diamond(
     let wallet: LocalWallet = secret.parse::<LocalWallet>()?.with_chain_id(chain_id);
     let client = SignerMiddleware::new(provider, wallet);
     let client = std::sync::Arc::new(client);
-    let existing_selectors = Vec::<[u8; 4]>::new();
+    let existing_selectors = &Vec::<[u8; 4]>::new();
     let display = false;
 
     let mut facet_cuts = Vec::new();
