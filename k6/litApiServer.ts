@@ -38,9 +38,12 @@ export interface CreateWalletResponse {
   wallet_address: string;
 }
 
+export type LitActionResponseNamedOutput = { [key: string]: string };
+
 export interface LitActionResponse {
   response: string;
   logs: string;
+  named_output?: LitActionResponseNamedOutput;
   has_error: boolean;
 }
 
