@@ -1,17 +1,10 @@
 #[cfg(feature = "otlp")]
-use lit_core::{config::LitConfig, error::Result};
+use lit_core::error::Result;
 #[cfg(feature = "otlp")]
 use opentelemetry_otlp::{TonicExporterBuilder, WithExportConfig};
 
 #[cfg(feature = "otlp")]
-const DEFAULT_EXPORTER_ENDPOINT: &str = "http://127.0.0.1:4317";
-
-#[cfg(feature = "otlp")]
-pub(crate) fn init_tonic_exporter_builder(cfg: &LitConfig) -> Result<TonicExporterBuilder> {
-    let endpoint = cfg
-        .get_string("telemetry.endpoint")
-        .unwrap_or_else(|_| DEFAULT_EXPORTER_ENDPOINT.to_string());
-
+pub(crate) fn init_tonic_exporter_builder(endpoint: &str) -> Result<TonicExporterBuilder> {
     Ok(opentelemetry_otlp::new_exporter().tonic().with_endpoint(endpoint))
 }
 

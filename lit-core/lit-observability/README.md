@@ -32,7 +32,20 @@ graph TD
 
 ## Configuration
 
-If the `otlp` layer is used, the endpoint can be configured via `LIT_TELEMETRY__ENDPOINT` (defaults to `http://127.0.0.1:4317`).
+`init_subscriber` and `create_providers` accept plain strings — callers supply the log level and
+collector endpoint directly. There is no LitConfig dependency in this crate.
+
+**lit-api-server** reads these from `NodeConfig.toml` under `[observability]`, with env var
+overrides (`RUST_LOG`, `LIT_TELEMETRY_ENDPOINT`) taking precedence:
+
+```toml
+[observability]
+log_level = "info"
+telemetry_endpoint = "http://otel-collector:4317"
+```
+
+**lit-actions** reads the same env vars (`RUST_LOG`, `LIT_TELEMETRY_ENDPOINT`), defaulting to
+`"info"` and `"http://127.0.0.1:4317"` respectively.
 
 ## Migration Notes
 

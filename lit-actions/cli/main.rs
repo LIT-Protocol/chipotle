@@ -49,36 +49,19 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn init_observability() -> ObservabilityProviders {
-    use lit_api_core::config::LitApiConfig;
-    use lit_core::config::{LitConfig, LitConfigBuilder, envs::LitEnv};
-    use lit_observability::LitObservabilityConfig;
     use tracing_subscriber::util::SubscriberInitExt;
 
-    // NB: constructing LitConfig requires lit.env, but the value isn't used by init_subscriber
-    let mut builder = LitConfigBuilder::default().set_override("lit.env", LitEnv::Dev.to_string());
-    builder = match <LitConfig as LitObservabilityConfig>::apply_defaults(builder) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("Failed to build observability config: {e}");
-            return ObservabilityProviders::default();
-        }
-    };
-    let cfg = match <LitConfig as LitApiConfig>::from_builder(builder) {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Failed to build observability config: {e}");
-            return ObservabilityProviders::default();
-        }
-    };
+    let log_level =
+        std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
 
-    let init_stdout = |cfg: &LitConfig| match lit_observability::init_subscriber(cfg) {
+    let init_stdout = || match lit_observability::init_subscriber(&log_level) {
         Ok(s) => s.init(),
         Err(e) => eprintln!("Failed to init tracing subscriber: {e}"),
     };
 
     #[cfg(not(feature = "otlp"))]
     {
-        init_stdout(&cfg);
+        init_stdout();
         return ObservabilityProviders::default();
     }
 
@@ -92,11 +75,14 @@ async fn init_observability() -> ObservabilityProviders {
         };
         use tracing_subscriber::layer::SubscriberExt;
 
+        let endpoint = std::env::var("LIT_TELEMETRY_ENDPOINT")
+            .unwrap_or_else(|_| "http://127.0.0.1:4317".to_string());
+
         let otel_resource = Resource::new(vec![KeyValue::new(SERVICE_NAME, "lit-actions")]);
 
         let (tracing_provider, metrics_provider, logger_provider) =
             match lit_observability::create_providers(
-                &cfg,
+                &endpoint,
                 otel_resource.clone(),
                 sdktrace::Config::default().with_resource(otel_resource),
             )
@@ -105,7 +91,7 @@ async fn init_observability() -> ObservabilityProviders {
                 Ok(providers) => providers,
                 Err(e) => {
                     eprintln!("OTLP init failed ({e}), falling back to stdout-only logging");
-                    init_stdout(&cfg);
+                    init_stdout();
                     return ObservabilityProviders::default();
                 }
             };
@@ -115,7 +101,7 @@ async fn init_observability() -> ObservabilityProviders {
         global::set_meter_provider(metrics_provider.clone());
 
         let otel_log_layer = ContextAwareOtelLogLayer::new(&logger_provider);
-        match lit_observability::init_subscriber(&cfg) {
+        match lit_observability::init_subscriber(&log_level) {
             Ok(s) => s.with(otel_log_layer).init(),
             Err(e) => eprintln!("Failed to init tracing subscriber: {e}"),
         }

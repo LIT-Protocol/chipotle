@@ -9,7 +9,6 @@ pub mod error;
 use crate::abstractions::transfer::chain_info::Chain;
 use crate::accounts::signer_pool::start_signer_pool;
 use crate::actions::grpc::GrpcClientPool;
-use lit_core::config::LitConfig;
 use moka::future::Cache;
 use rocket::response::Redirect;
 use rocket::serde::json::Json;
@@ -24,7 +23,7 @@ use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 #[rocket::main]
 #[allow(clippy::result_large_err)]
 async fn main() -> Result<(), rocket::Error> {
-    let lit_cfg = LitConfig::default();
+    let obs = config::read_observability_config();
 
     // Initialize the primary tracing subscriber (stdout + privacy filtering).
     // When built with --features otlp, also initializes OTLP providers and wires
@@ -32,7 +31,7 @@ async fn main() -> Result<(), rocket::Error> {
     #[cfg(not(feature = "otlp"))]
     {
         let subscriber =
-            lit_observability::init_subscriber(&lit_cfg).expect("Failed to setup tracing");
+            lit_observability::init_subscriber(&obs.log_level).expect("Failed to setup tracing");
         tracing::subscriber::set_global_default(subscriber)
             .expect("setting default subscriber failed");
     }
@@ -49,7 +48,7 @@ async fn main() -> Result<(), rocket::Error> {
 
         let otel_resource = Resource::new(vec![KeyValue::new(SERVICE_NAME, "lit-api-server")]);
         match lit_observability::create_providers(
-            &lit_cfg,
+            &obs.telemetry_endpoint,
             otel_resource.clone(),
             sdktrace::Config::default().with_resource(otel_resource),
         )
@@ -61,7 +60,7 @@ async fn main() -> Result<(), rocket::Error> {
                 global::set_meter_provider(metrics_provider.clone());
 
                 let otel_log_layer = ContextAwareOtelLogLayer::new(&logger_provider);
-                let subscriber = lit_observability::init_subscriber(&lit_cfg)
+                let subscriber = lit_observability::init_subscriber(&obs.log_level)
                     .expect("Failed to setup tracing")
                     .with(otel_log_layer);
                 tracing::subscriber::set_global_default(subscriber)
@@ -71,7 +70,7 @@ async fn main() -> Result<(), rocket::Error> {
             }
             Err(e) => {
                 eprintln!("OTLP init failed ({e}), falling back to stdout-only logging");
-                let subscriber = lit_observability::init_subscriber(&lit_cfg)
+                let subscriber = lit_observability::init_subscriber(&obs.log_level)
                     .expect("Failed to setup tracing");
                 tracing::subscriber::set_global_default(subscriber)
                     .expect("setting default subscriber failed");

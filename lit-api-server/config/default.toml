@@ -1,5 +1,0 @@
-[logging]
-level = "info"
-
-[telemetry]
-endpoint = "http://otel-collector:4317"

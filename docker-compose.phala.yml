@@ -2,8 +2,8 @@
 # lit-actions and lit-api-server share gRPC Unix socket at /tmp/lit_actions.sock.
 # lit-static serves SDKs, docs, dapps on port 8001.
 # otel-collector runs on the compose bridge network, receives OTLP on 0.0.0.0:4317,
-# and forwards telemetry to GCP. Both lit-api-server and lit-actions reach it at
-# http://otel-collector:4317 via the LIT_TELEMETRY__ENDPOINT env var.
+# and forwards telemetry to GCP. lit-actions reaches it via LIT_TELEMETRY_ENDPOINT;
+# lit-api-server reads the endpoint from NodeConfig.toml ([observability] telemetry_endpoint).
 # Uses tdx.large instance type via phala deploy --instance-type tdx.large
 #
 # Image placeholders (DOCKER_IMAGE_*) are substituted with @sha256: digests by
@@ -23,7 +23,7 @@ services:
       - --socket
       - /tmp/lit_actions.sock
     environment:
-      LIT_TELEMETRY__ENDPOINT: http://otel-collector:4317
+      LIT_TELEMETRY_ENDPOINT: http://otel-collector:4317
     volumes:
       - lit-socket:/tmp
     depends_on:
@@ -42,11 +42,11 @@ services:
       BASE_CHAIN_RPC: ${BASE_CHAIN_RPC}
       ROCKET_ADDRESS: "0.0.0.0"
       ROCKET_PORT: "8000"
-      LIT_TELEMETRY__ENDPOINT: http://otel-collector:4317
     volumes:
       - lit-socket:/tmp
       - /var/run/dstack.sock:/var/run/dstack.sock
-      # Uncomment to override NodeConfig.toml with production config (chain, contract_address, secret):
+      # Mount NodeConfig.toml for production config (chain, contract_address) and
+      # optional observability overrides ([observability] log_level, telemetry_endpoint):
       # - ./NodeConfig.toml:/app/NodeConfig.toml:ro
     depends_on:
       lit-actions:
