@@ -50,7 +50,7 @@ pub struct ExecutionState {
     pub fetch_count: u32,
     #[serde(skip)]
     pub sign_count: u32,
-    #[serde(skip)]
+    #[serde(default)]
     pub named_output: HashMap<String, String>,
     #[serde(skip)]
     pub claim_count: u32,
