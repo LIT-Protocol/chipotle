@@ -1,4 +1,3 @@
-pub mod chain_info;
 pub mod parse_to_hash;
 use anyhow::Result;
 use ethers::types::{H160, U256};
@@ -31,6 +30,13 @@ fn u256_to_bytes(u256: U256) -> [u8; 32] {
 
 pub fn u256_to_derviation_path(u256: U256) -> String {
     bytes_to_hex(u256_to_bytes(u256))
+}
+
+pub fn generate_lit_action_derivation_path(ipfs_id: &str) -> String {
+    let ipfs_id_bytes = ipfs_id.as_bytes();
+    let ipfs_id_hash = keccak256(ipfs_id_bytes);
+    let ipfs_id_hash_u256 = U256::from_big_endian(&ipfs_id_hash);
+    u256_to_derviation_path(ipfs_id_hash_u256)
 }
 
 pub fn evm_address_from_public_key(public_key: &str) -> Result<H160> {

@@ -3,28 +3,13 @@ use crate::actions::client::ClientBuilder;
 use crate::actions::client::models::DenoExecutionEnv;
 use crate::actions::grpc::GrpcClientPool;
 use crate::core::api_status::ApiStatus;
-use crate::core::v1::models::request::{LitActionRequest, SignWithPKPRequest};
-use crate::core::v1::models::response::{
-    LitActionResponse, LitActionSignature, SignWithPkpResponse,
-};
+use crate::core::v1::models::request::LitActionRequest;
+use crate::core::v1::models::response::LitActionResponse;
 use crate::utils::parse_to_hash::ipfs_cid_to_u256;
 use ipfs_hasher::IpfsHasher;
 use moka::future::Cache;
 use rocket::serde::json::Json;
 use tracing::instrument;
-
-fn not_configured() -> ApiStatus {
-    ApiStatus::internal_server_error(
-        anyhow::anyhow!("Lit testnet not configured"),
-        "This operation is not available.",
-    )
-}
-
-pub async fn sign_with_pkp(
-    _sign_request: Json<SignWithPKPRequest>,
-) -> Result<SignWithPkpResponse, ApiStatus> {
-    Err(not_configured())
-}
 
 #[instrument(
     level = "debug",
@@ -80,19 +65,7 @@ pub async fn lit_action(
         Err(e) => return Err(anyhow::anyhow!("Actions failed with : {:?}", e).into()),
     };
 
-    tracing::info!("Signed data: {:?}", result.signed_data);
-
-    let signatures = result
-        .signed_data
-        .iter()
-        .map(|(name, signed_data)| LitActionSignature {
-            name: name.clone(),
-            data: signed_data.clone().into(),
-        })
-        .collect();
-
     let lit_action_response = LitActionResponse {
-        signatures,
         response: result.response,
         logs: result.logs,
         has_error: false,

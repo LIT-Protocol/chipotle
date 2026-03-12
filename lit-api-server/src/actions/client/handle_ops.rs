@@ -86,86 +86,38 @@ impl Client {
                 }
                 .into()
             }
-            UnionResponse::Sign(SignRequest {
-                to_sign,
-                pkp_id,
-                sig_name,
-                signing_scheme,
-            }) => {
+            UnionResponse::GetPrivateKey(GetPrivateKeyRequest { pkp_id }) => {
                 if !op_code_helpers::can_use_wallet_in_action(&self.api_key, &self.ipfs_id, &pkp_id)
                     .await?
                 {
                     bail!("API key cannot use selected wallet in selected action");
                 }
-
-                let (sig_name, signed_data) = match op_code_helpers::signing::sign_with_pkp(
-                    &self.api_key,
-                    &pkp_id,
-                    &to_sign,
-                    &sig_name,
-                    &signing_scheme,
-                )
-                .await
-                {
-                    Ok((sig_name, signed_data)) => (sig_name, signed_data),
-                    Err(e) => bail!("Error signing: {:?}", e),
-                };
-
-                let hex_signature = signed_data.signature.clone();
-
-                self.state.sign_count += 1;
-                self.state.signed_data.insert(sig_name, signed_data);
-
-                SignResponse {
-                    success: hex_signature,
-                }
-                .into()
+                let secret = op_code_helpers::private_keys::get_private_key(&self.api_key, &pkp_id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                GetPrivateKeyResponse { secret }.into()
             }
-            UnionResponse::CallChild(CallChildRequest {
-                ipfs_id: _,
-                params: _,
+            UnionResponse::GetLitActionPrivateKey(GetLitActionPrivateKeyRequest {}) => {
+                let secret =
+                    op_code_helpers::private_keys::get_lit_action_private_key(&self.ipfs_id)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                GetLitActionPrivateKeyResponse { secret }.into()
+            }
+            UnionResponse::GetLitActionPublicKey(GetLitActionPublicKeyRequest { ipfs_id }) => {
+                let public_key = op_code_helpers::private_keys::get_lit_action_public_key(&ipfs_id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                GetLitActionPublicKeyResponse { public_key }.into()
+            }
+            UnionResponse::GetLitActionWalletAddress(GetLitActionWalletAddressRequest {
+                ipfs_id,
             }) => {
-                bail!("CallChild is not implemented - missing IPFS caching");
-
-                // // self.pay(LitActionPriceComponent::CallDepth, 1).await?;
-
-                // tracing::info!(
-                //     "Calling child action: {:?}",
-                //     ipfs_id
-                // );
-                // call_depth += 1;
-                // if call_depth > self.max_call_depth {
-                //     bail!(
-                //         "The recursion limit of a child action is {} and you have attempted to exceed that limit.",
-                //         self.max_call_depth
-                //     );
-                // }
-
-                // TODO: Implement IPFS caching - or pull from Lit-Peer?
-                // Pull down the lit action code from IPFS
-                // let code = crate::utils::web::get_ipfs_file(
-                //     &ipfs_id,
-                //     self.lit_config(),
-                //     self.ipfs_cache()?,
-                //     self.http_cache()?,
-                // )
-                // .await?;
-
-                // let globals = params
-                //     .map(|params| serde_json::from_slice::<serde_json::Value>(&params))
-                //     .transpose()?;
-
-                // // NB: Using execute_js_inner instead of execute_js to avoid resetting state
-                // let res = Box::pin(self.execute_js_inner(code, globals,  call_depth))
-                //     .await?;
-
-                // CallChildResponse {
-                //     response: res.response,
-                // }
-                // .into()
-            }
-            UnionResponse::CallContract(CallContractRequest { .. }) => {
-                bail!("CallContract is not implemented");
+                let wallet_address =
+                    op_code_helpers::private_keys::get_lit_action_wallet_address(&ipfs_id)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                GetLitActionWalletAddressResponse { wallet_address }.into()
             }
             UnionResponse::UpdateResourceUsage(UpdateResourceUsageRequest {
                 tick: _,

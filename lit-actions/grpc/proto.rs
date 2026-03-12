@@ -120,11 +120,12 @@ macro_rules! decl_op {
 }
 
 decl_op!(AesDecrypt);
-decl_op!(CallChild);
-decl_op!(CallContract);
+decl_op!(AesEncrypt);
+decl_op!(GetPrivateKey);
+decl_op!(GetLitActionPrivateKey);
+decl_op!(GetLitActionPublicKey);
+decl_op!(GetLitActionWalletAddress);
 decl_op!(IncrementFetchCount);
 decl_op!(Print);
 decl_op!(SetResponse);
-decl_op!(Sign);
-decl_op!(AesEncrypt);
 decl_op!(UpdateResourceUsage);
