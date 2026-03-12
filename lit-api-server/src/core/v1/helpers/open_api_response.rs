@@ -13,15 +13,27 @@ pub struct OpenApiResponse<T: Serialize + JsonSchema, E: Serialize + JsonSchema>
 impl<T: Serialize + JsonSchema, E: Serialize + JsonSchema> OpenApiResponderInner
     for OpenApiResponse<T, E>
 {
+    #[allow(clippy::field_reassign_with_default)]
     fn responses(
         generator: &mut OpenApiGenerator,
     ) -> std::result::Result<rocket_okapi::okapi::openapi3::Responses, OpenApiError> {
         let mut responses = rocket_okapi::okapi::openapi3::Responses::default();
-        let schema = generator.json_schema::<T>();
+        let success_schema = generator.json_schema::<T>();
+        let error_schema = generator.json_schema::<E>();
+
+        let mut combined_schema = rocket_okapi::okapi::openapi3::SchemaObject::default();
+        combined_schema.subschemas = Some(Box::new(schemars::schema::SubschemaValidation {
+            one_of: Some(vec![
+                schemars::schema::Schema::Object(success_schema),
+                schemars::schema::Schema::Object(error_schema),
+            ]),
+            ..Default::default()
+        }));
+
         rocket_okapi::util::add_default_response_schema(
             &mut responses,
             "application/json".to_string(),
-            schema,
+            combined_schema,
         );
         Ok(responses)
     }
