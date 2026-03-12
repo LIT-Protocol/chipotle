@@ -17,8 +17,6 @@ receivers:
         # All interfaces so lit-api-server and lit-actions can both reach the
         # collector via the otel-collector hostname on the compose bridge network.
         endpoint: 0.0.0.0:4317
-      http:
-        endpoint: 0.0.0.0:4318
 
 processors:
   memory_limiter:
