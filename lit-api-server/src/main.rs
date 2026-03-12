@@ -26,10 +26,50 @@ use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 async fn main() -> Result<(), rocket::Error> {
     let lit_cfg = LitConfig::default();
 
-    // Initialize the primary tracing subscriber (stdout + privacy filtering)
-    let subscriber = lit_observability::init_subscriber(&lit_cfg).expect("Failed to setup tracing");
+    // Initialize the primary tracing subscriber (stdout + privacy filtering).
+    // When built with --features otlp, also initializes OTLP providers and wires
+    // tracing events into the OTel log pipeline via ContextAwareOtelLogLayer.
+    #[cfg(not(feature = "otlp"))]
+    {
+        let subscriber =
+            lit_observability::init_subscriber(&lit_cfg).expect("Failed to setup tracing");
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("setting default subscriber failed");
+    }
 
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    #[cfg(feature = "otlp")]
+    let _otlp_providers = {
+        use lit_observability::{
+            logging::ContextAwareOtelLogLayer,
+            opentelemetry::{KeyValue, global},
+            opentelemetry_sdk::{Resource, propagation::TraceContextPropagator, trace as sdktrace},
+            opentelemetry_semantic_conventions::resource::SERVICE_NAME,
+        };
+        use tracing_subscriber::layer::SubscriberExt;
+
+        let otel_resource = Resource::new(vec![KeyValue::new(SERVICE_NAME, "lit-api-server")]);
+        let (tracing_provider, metrics_provider, logger_provider) =
+            lit_observability::create_providers(
+                &lit_cfg,
+                otel_resource.clone(),
+                sdktrace::Config::default().with_resource(otel_resource),
+            )
+            .await
+            .expect("Failed to create OTLP providers");
+
+        global::set_text_map_propagator(TraceContextPropagator::new());
+        global::set_tracer_provider(tracing_provider);
+        global::set_meter_provider(metrics_provider.clone());
+
+        let otel_log_layer = ContextAwareOtelLogLayer::new(&logger_provider);
+        let subscriber = lit_observability::init_subscriber(&lit_cfg)
+            .expect("Failed to setup tracing")
+            .with(otel_log_layer);
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("setting default subscriber failed");
+
+        (metrics_provider, logger_provider)
+    };
 
     if !cfg!(feature = "production") {
         tracing::warn!(

@@ -29,7 +29,10 @@ pub use opentelemetry_semantic_conventions;
 pub use tonic_middleware;
 
 /// Initializes the primary tracing subscriber with fmt (stdout) and privacy filtering.
-pub fn init_subscriber(cfg: &LitConfig) -> Result<impl Subscriber> {
+pub fn init_subscriber(
+    cfg: &LitConfig,
+) -> Result<impl Subscriber + Send + Sync + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>>
+{
     let cfg_log_level = cfg.get_string("logging.level").unwrap_or_else(|_| "info".to_string());
     let level_filter = EnvFilter::try_from_default_env()
         .or_else(|_e| EnvFilter::from_str(cfg_log_level.as_str()))

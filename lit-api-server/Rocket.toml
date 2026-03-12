@@ -1,3 +1,3 @@
 [default]
 logging = { level = "info" }
-telemetry = { endpoint = "http://127.0.0.1:4317" }
+telemetry = { endpoint = "http://otel-collector:4317" }

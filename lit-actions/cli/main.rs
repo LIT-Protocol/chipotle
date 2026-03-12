@@ -93,8 +93,12 @@ async fn init_observability(args: &Args) -> Result<ObservabilityProviders> {
     global::set_text_map_propagator(TraceContextPropagator::new());
     global::set_tracer_provider(tracing_provider);
     global::set_meter_provider(metrics_provider.clone());
+
+    let otel_log_layer = lit_observability::logging::ContextAwareOtelLogLayer::new(&logger_provider);
+    use tracing_subscriber::layer::SubscriberExt;
     lit_observability::init_subscriber(&cfg)
         .map_err(|e| anyhow::anyhow!("Failed to init subscriber: {}", e))?
+        .with(otel_log_layer)
         .init();
 
     Ok(ObservabilityProviders::new(
