@@ -20,9 +20,8 @@ pub fn read_observability_config() -> Result<ObservabilityConfig> {
     let log_level = env::var("RUST_LOG").unwrap_or_else(|_| "trace".to_string());
 
     #[cfg(feature = "otlp")]
-    let telemetry_endpoint = env::var("LIT_TELEMETRY_ENDPOINT").map_err(|_| {
-        anyhow::anyhow!("LIT_TELEMETRY_ENDPOINT is not set")
-    })?;
+    let telemetry_endpoint = env::var("LIT_TELEMETRY_ENDPOINT")
+        .map_err(|_| anyhow::anyhow!("LIT_TELEMETRY_ENDPOINT is not set"))?;
 
     Ok(ObservabilityConfig {
         log_level,
