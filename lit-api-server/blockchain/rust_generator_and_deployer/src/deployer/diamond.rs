@@ -95,7 +95,7 @@ pub async fn deploy_diamond(
     let wallet: LocalWallet = secret.parse::<LocalWallet>()?.with_chain_id(chain_id);
     let client = SignerMiddleware::new(provider, wallet);
     let client = std::sync::Arc::new(client);
-    let existing_selectors = &Vec::new();
+    let existing_selectors = Vec::<[u8; 4]>::new();
     let display = false;
 
     let mut facet_cuts = Vec::new();
