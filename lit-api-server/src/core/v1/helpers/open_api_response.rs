@@ -13,6 +13,7 @@ pub struct OpenApiResponse<T: Serialize + JsonSchema, E: Serialize + JsonSchema>
 impl<T: Serialize + JsonSchema, E: Serialize + JsonSchema> OpenApiResponderInner
     for OpenApiResponse<T, E>
 {
+    #[allow(clippy::field_reassign_with_default)]
     fn responses(
         generator: &mut OpenApiGenerator,
     ) -> std::result::Result<rocket_okapi::okapi::openapi3::Responses, OpenApiError> {
