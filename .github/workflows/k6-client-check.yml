@@ -39,23 +39,23 @@ jobs:
 
       - name: Generate OpenAPI spec from sources
         working-directory: lit-api-server
-        run: cargo run --bin openapi_spec > /tmp/openapi-from-source.json
+        run: cargo run --bin openapi_spec > "${{ runner.temp }}/openapi-from-source.json"
 
       - name: Generate k6 client from spec
         run: |
           npm install -g @grafana/openapi-to-k6
-          openapi-to-k6 --verbose /tmp/openapi-from-source.json /tmp/k6-generated
+          openapi-to-k6 --verbose "${{ runner.temp }}/openapi-from-source.json" "${{ runner.temp }}/k6-generated"
 
       - name: Compare with committed litApiServer.ts
         run: |
-          if ! diff -q /tmp/k6-generated/litApiServer.ts ./k6/litApiServer.ts; then
+          if ! diff -q "${{ runner.temp }}/k6-generated/litApiServer.ts" ./k6/litApiServer.ts; then
             echo "::error::k6/litApiServer.ts is out of date. Run 'openapi-to-k6' to regenerate it from the current OpenAPI spec."
             echo ""
             echo "To fix, run from the repo root:"
-            echo "  cd lit-api-server && cargo run --bin openapi_spec > /tmp/spec.json"
-            echo "  openapi-to-k6 /tmp/spec.json ./k6"
+            echo "  cd lit-api-server && cargo run --bin openapi_spec > spec.json"
+            echo "  openapi-to-k6 spec.json ./k6"
             echo ""
-            diff /tmp/k6-generated/litApiServer.ts ./k6/litApiServer.ts || true
+            diff "${{ runner.temp }}/k6-generated/litApiServer.ts" ./k6/litApiServer.ts || true
             exit 1
           fi
           echo "k6/litApiServer.ts is up to date with sources"
