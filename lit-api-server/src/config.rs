@@ -1,4 +1,4 @@
-use crate::abstractions::transfer::chain_info::Chain;
+use crate::utils::chain_info::Chain;
 use anyhow::Result;
 use std::path::Path;
 use std::{env, fs};
