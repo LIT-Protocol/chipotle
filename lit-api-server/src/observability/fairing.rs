@@ -7,10 +7,10 @@
 use rocket::fairing::{Fairing, Info, Kind};
 use rocket::http::Header;
 use rocket::{Request, Response};
-use rocket_okapi::request::{OpenApiFromRequest, RequestHeaderInput};
 use rocket_okapi::Result as RocketOkapiResult;
 use rocket_okapi::r#gen::OpenApiGenerator;
 use rocket_okapi::okapi::openapi3::{Object, Parameter, ParameterValue};
+use rocket_okapi::request::{OpenApiFromRequest, RequestHeaderInput};
 use tracing::info_span;
 use uuid::Uuid;
 
@@ -78,8 +78,7 @@ impl<'r> OpenApiFromRequest<'r> for CorrelationId {
             name: HEADER_X_CORRELATION_ID.to_owned(),
             location: "header".to_owned(),
             description: Some(
-                "Correlation ID for request tracing. Auto-generated if not provided."
-                    .to_owned(),
+                "Correlation ID for request tracing. Auto-generated if not provided.".to_owned(),
             ),
             required,
             deprecated: false,
@@ -185,9 +184,7 @@ mod tests {
     /// is created when a request arrives and propagated to the response.
     #[tokio::test]
     async fn span_id_created_and_propagated_end_to_end() {
-        let client = Client::tracked(test_rocket())
-            .await
-            .expect("valid rocket");
+        let client = Client::tracked(test_rocket()).await.expect("valid rocket");
 
         let response = client.get("/test-span").dispatch().await;
         assert_eq!(response.status().code, 200);
@@ -208,9 +205,7 @@ mod tests {
     /// Data requirement: X-Request-Id MUST be attached to both success and failure responses.
     #[tokio::test]
     async fn x_request_id_on_success_response() {
-        let client = Client::tracked(test_rocket())
-            .await
-            .expect("valid rocket");
+        let client = Client::tracked(test_rocket()).await.expect("valid rocket");
 
         let response = client.get("/test-span").dispatch().await;
         assert_eq!(response.status().code, 200);
@@ -224,9 +219,7 @@ mod tests {
     /// Data requirement: X-Request-Id MUST be attached to both success and failure responses.
     #[tokio::test]
     async fn x_request_id_on_failure_response() {
-        let client = Client::tracked(test_rocket())
-            .await
-            .expect("valid rocket");
+        let client = Client::tracked(test_rocket()).await.expect("valid rocket");
 
         let response = client.get("/test-error").dispatch().await;
         assert_eq!(response.status().code, 500);
@@ -240,9 +233,7 @@ mod tests {
     /// Data requirement: X-Request-Id MUST be on 404 (catcher) responses.
     #[tokio::test]
     async fn x_request_id_on_404_response() {
-        let client = Client::tracked(test_rocket())
-            .await
-            .expect("valid rocket");
+        let client = Client::tracked(test_rocket()).await.expect("valid rocket");
 
         let response = client.get("/nonexistent-path").dispatch().await;
         assert_eq!(response.status().code, 404);
@@ -256,9 +247,7 @@ mod tests {
     /// Data requirement: When user provides X-Correlation-Id, it must be propagated to the response.
     #[tokio::test]
     async fn x_correlation_id_propagated_when_user_provides_it() {
-        let client = Client::tracked(test_rocket())
-            .await
-            .expect("valid rocket");
+        let client = Client::tracked(test_rocket()).await.expect("valid rocket");
 
         let user_correlation_id = "user-correlation-abc-123";
         let response = client
@@ -286,9 +275,7 @@ mod tests {
     /// Data requirement: X-Correlation-Id MUST NOT be on response when user did not provide it.
     #[tokio::test]
     async fn x_correlation_id_absent_when_user_does_not_provide_it() {
-        let client = Client::tracked(test_rocket())
-            .await
-            .expect("valid rocket");
+        let client = Client::tracked(test_rocket()).await.expect("valid rocket");
 
         let response = client.get("/test-span").dispatch().await;
         assert_eq!(response.status().code, 200);
@@ -303,9 +290,7 @@ mod tests {
     /// Data requirement: X-Correlation-Id MUST NOT be on response when header was missing.
     #[tokio::test]
     async fn x_correlation_id_absent_when_header_missing() {
-        let client = Client::tracked(test_rocket())
-            .await
-            .expect("valid rocket");
+        let client = Client::tracked(test_rocket()).await.expect("valid rocket");
 
         // No X-Correlation-Id header at all
         let response = client
@@ -317,7 +302,10 @@ mod tests {
         assert_eq!(response.status().code, 200);
 
         assert!(
-            response.headers().get_one(HEADER_X_CORRELATION_ID).is_none(),
+            response
+                .headers()
+                .get_one(HEADER_X_CORRELATION_ID)
+                .is_none(),
             "X-Correlation-Id MUST NOT be attached when header was missing in request"
         );
     }
@@ -326,14 +314,15 @@ mod tests {
     /// X-Request-Id, it must be ignored and a new random UUID created.
     #[tokio::test]
     async fn user_provided_x_request_id_ignored_new_uuid_created() {
-        let client = Client::tracked(test_rocket())
-            .await
-            .expect("valid rocket");
+        let client = Client::tracked(test_rocket()).await.expect("valid rocket");
 
         let user_sent_request_id = "550e8400-e29b-41d4-a716-446655440000";
         let response = client
             .get("/test-span")
-            .header(rocket::http::Header::new(HEADER_X_REQUEST_ID, user_sent_request_id))
+            .header(rocket::http::Header::new(
+                HEADER_X_REQUEST_ID,
+                user_sent_request_id,
+            ))
             .dispatch()
             .await;
 
