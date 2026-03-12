@@ -3,9 +3,10 @@ use std::sync::Arc;
 use crate::accounts::signer_pool::SignerPool;
 use crate::actions::grpc::GrpcClientPool;
 use crate::core::account_management;
-use crate::core::api_status::ApiResult;
-use crate::core::api_status::ErrMessage;
 use crate::core::core_features;
+use crate::core::v1::guards::apikey::ApiKey;
+use crate::core::v1::helpers::api_status::{ApiResult, ErrMessage};
+use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{
     AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest, AddUsageApiKeyRequest,
     LitActionRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
@@ -21,111 +22,11 @@ use crate::core::v1::models::response::{
 use moka::future::Cache;
 use rocket::Route;
 use rocket::State;
-use rocket::http::Status;
-use rocket::request::{FromRequest, Outcome, Request};
-use rocket::response::Responder;
 use rocket::serde::json::Json;
 use rocket::{get, post};
-use rocket_okapi::OpenApiError;
-use rocket_okapi::Result as RocketOkapiResult;
-use rocket_okapi::r#gen::OpenApiGenerator;
 use rocket_okapi::okapi::openapi3::OpenApi;
-use rocket_okapi::okapi::openapi3::{Object, Parameter, ParameterValue};
 use rocket_okapi::openapi;
 use rocket_okapi::openapi_get_routes_spec;
-use rocket_okapi::request::{OpenApiFromRequest, RequestHeaderInput};
-use rocket_okapi::response::OpenApiResponderInner;
-use rocket_responder::ApiResponse;
-use schemars::JsonSchema;
-use serde::Serialize;
-
-/// Request guard that extracts the API key from `Authorization: Bearer <key>` or `X-Api-Key: <key>`.
-#[derive(Clone, Debug)]
-pub struct ApiKey(pub String);
-
-#[rocket::async_trait]
-impl<'r> FromRequest<'r> for ApiKey {
-    type Error = ();
-
-    async fn from_request(request: &'r Request<'_>) -> Outcome<ApiKey, Self::Error> {
-        let auth = request.headers().get_one("Authorization");
-        if let Some(v) = auth {
-            let v = v.trim();
-            if let Some(key) = v.strip_prefix("Bearer ") {
-                let key = key.trim();
-                if !key.is_empty() {
-                    return Outcome::Success(ApiKey(key.to_string()));
-                }
-            }
-        }
-        if let Some(key) = request.headers().get_one("X-Api-Key") {
-            let key = key.trim();
-            if !key.is_empty() {
-                return Outcome::Success(ApiKey(key.to_string()));
-            }
-        }
-        Outcome::Error((Status::Unauthorized, ()))
-    }
-}
-
-impl<'r> OpenApiFromRequest<'r> for ApiKey {
-    fn from_request_input(
-        generator: &mut OpenApiGenerator,
-        _name: String,
-        required: bool,
-    ) -> RocketOkapiResult<RequestHeaderInput> {
-        let schema = generator.json_schema::<String>();
-        Ok(RequestHeaderInput::Parameter(Parameter {
-            name: "X-Api-Key".to_owned(),
-            location: "header".to_owned(),
-            description: Some(
-                "Account or usage API key. Alternatively use Authorization: Bearer <key>."
-                    .to_owned(),
-            ),
-            required,
-            deprecated: false,
-            allow_empty_value: false,
-            value: ParameterValue::Schema {
-                style: None,
-                explode: None,
-                allow_reserved: false,
-                schema,
-                example: None,
-                examples: None,
-            },
-            extensions: Object::default(),
-        }))
-    }
-}
-
-struct OpenApiResponse<T: Serialize + JsonSchema, E: Serialize + JsonSchema> {
-    response: ApiResponse<T, E>,
-}
-
-impl<T: Serialize + JsonSchema, E: Serialize + JsonSchema> OpenApiResponderInner
-    for OpenApiResponse<T, E>
-{
-    fn responses(
-        generator: &mut OpenApiGenerator,
-    ) -> std::result::Result<rocket_okapi::okapi::openapi3::Responses, OpenApiError> {
-        let mut responses = rocket_okapi::okapi::openapi3::Responses::default();
-        let schema = generator.json_schema::<T>();
-        rocket_okapi::util::add_default_response_schema(
-            &mut responses,
-            "application/json".to_string(),
-            schema,
-        );
-        Ok(responses)
-    }
-}
-
-impl<'r, T: Serialize + JsonSchema, E: Serialize + JsonSchema> Responder<'r, 'static>
-    for OpenApiResponse<T, E>
-{
-    fn respond_to(self, request: &'r rocket::Request<'_>) -> rocket::response::Result<'static> {
-        self.response.respond_to(request)
-    }
-}
 
 /// Returns Core v1 routes and the OpenAPI spec for them. Mount routes at `/core/v1/` and serve the spec at `/openapi.json` (or use it for Swagger UI).
 pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {

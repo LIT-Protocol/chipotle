@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::accounts::signer_pool::SignerPool;
 use crate::config::GLOBAL_NODE_CONFIG;
-use crate::core::api_status::ApiStatus;
+use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::{
     AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest, AddUsageApiKeyRequest,
     NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
@@ -15,7 +15,7 @@ use crate::core::v1::models::response::{
 };
 use crate::dstack::v1::get_client_key;
 use crate::utils::generate_unique_derivation_path;
-use crate::utils::parse_to_hash::{
+use crate::utils::parse_with_hash::{
     hex_array_to_h160_array, hex_array_to_u256_array, ipfs_cid_to_u256, string_group_id_to_u256,
 };
 use crate::{accounts, dstack};
