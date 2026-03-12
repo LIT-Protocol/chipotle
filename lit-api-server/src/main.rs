@@ -172,7 +172,7 @@ async fn main() -> Result<(), rocket::Error> {
             .mount("/dstack/v1/", dstack::v1::endpoints::routes());
     }
 
-    r.launch().await?;
+    let launch_result = r.launch().await;
 
     #[cfg(feature = "otlp")]
     if let Some((tracing_provider, metrics_provider, logger_provider)) = _otlp_providers {
@@ -187,7 +187,7 @@ async fn main() -> Result<(), rocket::Error> {
         }
     }
 
-    Ok(())
+    launch_result.map(|_| ())
 }
 
 #[get("/core/v1/openapi.json")]
