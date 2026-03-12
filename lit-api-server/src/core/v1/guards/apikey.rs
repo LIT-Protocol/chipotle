@@ -20,12 +20,13 @@ impl<'r> FromRequest<'r> for ApiKey {
             // Parse "Authorization" header in a case-insensitive way for the "Bearer" scheme.
             let mut parts = v.split_whitespace();
             if let (Some(scheme), Some(key_part)) = (parts.next(), parts.next())
-                && scheme.eq_ignore_ascii_case("bearer") {
-                    let key = key_part.trim();
-                    if !key.is_empty() {
-                        return Outcome::Success(ApiKey(key.to_string()));
-                    }
+                && scheme.eq_ignore_ascii_case("bearer")
+            {
+                let key = key_part.trim();
+                if !key.is_empty() {
+                    return Outcome::Success(ApiKey(key.to_string()));
                 }
+            }
         }
         if let Some(key) = request.headers().get_one("X-Api-Key") {
             let key = key.trim();
