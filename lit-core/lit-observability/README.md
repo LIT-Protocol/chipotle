@@ -59,6 +59,6 @@ The `grpc::MetricsMiddleware` that previously auto-tracked gRPC request latency 
 
 ```rust
 // Basic initialization
-let (subscriber, _guards) = lit_observability::init_subscriber(cfg);
+let subscriber = lit_observability::init_subscriber("info").expect("Failed to init subscriber");
 tracing::subscriber::set_global_default(subscriber).expect("Set subscriber failed");
 ```
