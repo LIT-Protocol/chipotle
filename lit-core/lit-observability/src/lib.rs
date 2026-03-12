@@ -7,11 +7,6 @@ use tracing_subscriber::{fmt, prelude::*};
 use lit_core::error::Result;
 pub const PRIVACY_MODE_TAG: &str = "lit_privacy_mode";
 
-/// Default `RUST_LOG` filter: application code at TRACE, noisy networking/protocol
-/// crates at INFO to suppress low-value per-frame / per-packet diagnostics.
-pub const DEFAULT_LOG_FILTER: &str =
-    "trace,h2=info,hyper=info,hyper_util=info,tonic=info,tower=info,reqwest=info,rustls=info,tokio_util=info";
-
 #[cfg(feature = "channels")]
 pub mod channels;
 mod error;

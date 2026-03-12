@@ -52,8 +52,7 @@ fn main() -> anyhow::Result<()> {
 async fn init_observability() -> ObservabilityProviders {
     use tracing_subscriber::util::SubscriberInitExt;
 
-    let log_level = std::env::var("RUST_LOG")
-        .unwrap_or_else(|_| lit_observability::DEFAULT_LOG_FILTER.to_string());
+    let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "trace".to_string());
 
     let init_stdout = || {
         lit_observability::init_subscriber(&log_level)
