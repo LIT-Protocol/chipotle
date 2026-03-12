@@ -17,7 +17,8 @@ pub struct ObservabilityConfig {
 ///
 /// Returns an error if a required value is absent.
 pub fn read_observability_config() -> Result<ObservabilityConfig> {
-    let log_level = env::var("RUST_LOG").unwrap_or_else(|_| "trace".to_string());
+    let log_level = env::var("RUST_LOG")
+        .unwrap_or_else(|_| lit_observability::DEFAULT_LOG_FILTER.to_string());
 
     #[cfg(feature = "otlp")]
     let telemetry_endpoint = env::var("LIT_TELEMETRY_ENDPOINT")
