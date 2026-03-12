@@ -21,7 +21,9 @@ if [ -z "$GCP_PROJECT_ID" ]; then
     exit 1
 fi
 
-CREDS_FILE=/tmp/gcp-service-account.json
+CREDS_FILE=$(mktemp /tmp/gcp-creds-XXXXXX.json)
+cleanup() { rm -f "$CREDS_FILE"; }
+trap cleanup EXIT INT TERM
 
 # Support both raw JSON (starts with '{') and base64-encoded JSON.
 first_char=$(echo "$GCP_SERVICE_ACCOUNT_JSON" | head -c1)
