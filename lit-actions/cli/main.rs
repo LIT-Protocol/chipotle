@@ -54,15 +54,16 @@ async fn init_observability() -> ObservabilityProviders {
 
     let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "trace".to_string());
 
-    let init_stdout = || match lit_observability::init_subscriber(&log_level) {
-        Ok(s) => s.init(),
-        Err(e) => eprintln!("Failed to init tracing subscriber: {e}"),
+    let init_stdout = || {
+        lit_observability::init_subscriber(&log_level)
+            .expect("Failed to init tracing subscriber (invalid RUST_LOG or filter config)")
+            .init()
     };
 
     #[cfg(not(feature = "otlp"))]
     {
         init_stdout();
-        return ObservabilityProviders::default();
+        return ObservabilityProviders::default(); // All None
     }
 
     #[cfg(feature = "otlp")]
@@ -106,10 +107,10 @@ async fn init_observability() -> ObservabilityProviders {
         global::set_meter_provider(metrics_provider.clone());
 
         let otel_log_layer = ContextAwareOtelLogLayer::new(&logger_provider);
-        match lit_observability::init_subscriber(&log_level) {
-            Ok(s) => s.with(otel_log_layer).init(),
-            Err(e) => eprintln!("Failed to init tracing subscriber: {e}"),
-        }
+        lit_observability::init_subscriber(&log_level)
+            .expect("Failed to init tracing subscriber (invalid RUST_LOG or filter config)")
+            .with(otel_log_layer)
+            .init();
 
         ObservabilityProviders::new(tracing_provider, metrics_provider, logger_provider)
     }

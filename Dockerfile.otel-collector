@@ -1,13 +1,27 @@
+ARG GRPC_HEALTH_PROBE_VERSION=v0.4.46
+
+# Download grpc_health_probe static binary (distroless base has no shell/wget).
+FROM alpine:3.19 AS grpc-probe
+ARG GRPC_HEALTH_PROBE_VERSION
+RUN apk add --no-cache wget && \
+    wget -qO /grpc_health_probe \
+      "https://github.com/grpc-ecosystem/grpc-health-probe/releases/download/${GRPC_HEALTH_PROBE_VERSION}/grpc_health_probe-linux-amd64" && \
+    chmod +x /grpc_health_probe
+
 FROM otel/opentelemetry-collector-contrib:0.104.0
+
+# Copy grpc_health_probe for OTLP gRPC (port 4317) healthcheck.
+COPY --from=grpc-probe /grpc_health_probe /usr/local/bin/grpc_health_probe
 
 # Copy collector config and credentials-bootstrap entrypoint.
 COPY otel-collector/config.yaml /etc/otelcol-contrib/config.yaml
 COPY otel-collector/entrypoint.sh /entrypoint.sh
 
-# entrypoint.sh needs to be executable; switch to root just for this RUN step,
-# then drop back to the non-root collector user (uid 10001).
 USER root
 RUN chmod +x /entrypoint.sh
 USER 10001
+
+HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=3 \
+  CMD ["/usr/local/bin/grpc_health_probe", "-addr=localhost:4317"]
 
 ENTRYPOINT ["/entrypoint.sh"]

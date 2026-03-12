@@ -28,7 +28,7 @@ services:
       - lit-socket:/tmp
     depends_on:
       otel-collector:
-        condition: service_started
+        condition: service_healthy
         required: false
     restart: unless-stopped
 
@@ -39,20 +39,21 @@ services:
     ports:
       - "8000:8000"
     environment:
-      BASE_CHAIN_RPC: ${BASE_CHAIN_RPC}
+      LIT_TELEMETRY_ENDPOINT: http://otel-collector:4317
       ROCKET_ADDRESS: "0.0.0.0"
       ROCKET_PORT: "8000"
+      # BASE_CHAIN_RPC is populated via an encrypted secret passed in through the Phala CLI/UI
+      BASE_CHAIN_RPC: ${BASE_CHAIN_RPC}
     volumes:
       - lit-socket:/tmp
       - /var/run/dstack.sock:/var/run/dstack.sock
-      # Mount NodeConfig.toml for production config (chain, contract_address) and
-      # optional observability overrides ([observability] log_level, telemetry_endpoint):
+      # Optional overide for NodeConfig.toml (chain, contract_address).
       # - ./NodeConfig.toml:/app/NodeConfig.toml:ro
     depends_on:
       lit-actions:
         condition: service_started
       otel-collector:
-        condition: service_started
+        condition: service_healthy
         required: false
     restart: unless-stopped
 

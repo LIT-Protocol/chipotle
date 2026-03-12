@@ -1,5 +1,5 @@
 #!/bin/sh
-# OTel Collector sidecar entrypoint.
+# OTel Collector entrypoint.
 #
 # Writes GCP service account credentials from the encrypted secret env var
 # GCP_SERVICE_ACCOUNT_JSON (raw JSON or base64-encoded JSON) to a temp file,
