@@ -17,11 +17,16 @@ impl<T: Serialize + JsonSchema, E: Serialize + JsonSchema> OpenApiResponderInner
         generator: &mut OpenApiGenerator,
     ) -> std::result::Result<rocket_okapi::okapi::openapi3::Responses, OpenApiError> {
         let mut responses = rocket_okapi::okapi::openapi3::Responses::default();
-        let schema = generator.json_schema::<T>();
+        let success_schema = generator.json_schema::<T>();
+        let error_schema = generator.json_schema::<E>();
+
+        let mut combined_schema = rocket_okapi::okapi::openapi3::SchemaObject::default();
+        combined_schema.one_of = Some(vec![success_schema, error_schema]);
+
         rocket_okapi::util::add_default_response_schema(
             &mut responses,
             "application/json".to_string(),
-            schema,
+            combined_schema,
         );
         Ok(responses)
     }
