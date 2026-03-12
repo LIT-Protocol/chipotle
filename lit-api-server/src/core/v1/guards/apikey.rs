@@ -17,10 +17,14 @@ impl<'r> FromRequest<'r> for ApiKey {
         let auth = request.headers().get_one("Authorization");
         if let Some(v) = auth {
             let v = v.trim();
-            if let Some(key) = v.strip_prefix("Bearer ") {
-                let key = key.trim();
-                if !key.is_empty() {
-                    return Outcome::Success(ApiKey(key.to_string()));
+            // Parse "Authorization" header in a case-insensitive way for the "Bearer" scheme.
+            let mut parts = v.split_whitespace();
+            if let (Some(scheme), Some(key_part)) = (parts.next(), parts.next()) {
+                if scheme.eq_ignore_ascii_case("bearer") {
+                    let key = key_part.trim();
+                    if !key.is_empty() {
+                        return Outcome::Success(ApiKey(key.to_string()));
+                    }
                 }
             }
         }
