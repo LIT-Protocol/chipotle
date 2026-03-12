@@ -19,7 +19,7 @@ import { IERC165 } from "../../interfaces/IERC165.sol";
 // of your diamond. Add parameters to the init function if you need to.
 
 // Adding parameters to the `init` or other functions you add here can make a single deployed
-// DiamondInit contract reusable accross upgrades, and can be used for multiple diamonds.
+// DiamondInit contract reusable across upgrades, and can be used for multiple diamonds.
 
 contract DiamondInit {
     // You can add parameters to this function in order to pass in
