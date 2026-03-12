@@ -3,8 +3,10 @@ use std::sync::Arc;
 use crate::accounts::signer_pool::SignerPool;
 use crate::actions::grpc::GrpcClientPool;
 use crate::core::account_management;
-use crate::core::v1::helpers::api_status::{ApiResult, ErrMessage};
 use crate::core::core_features;
+use crate::core::v1::guards::apikey::ApiKey;
+use crate::core::v1::helpers::api_status::{ApiResult, ErrMessage};
+use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{
     AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest, AddUsageApiKeyRequest,
     LitActionRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
@@ -25,16 +27,13 @@ use rocket::{get, post};
 use rocket_okapi::okapi::openapi3::OpenApi;
 use rocket_okapi::openapi;
 use rocket_okapi::openapi_get_routes_spec;
-use crate::core::v1::helpers::open_api_response::OpenApiResponse;
-use crate::core::v1::guards::apikey::ApiKey;
-
 
 /// Returns Core v1 routes and the OpenAPI spec for them. Mount routes at `/core/v1/` and serve the spec at `/openapi.json` (or use it for Swagger UI).
 pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
     openapi_get_routes_spec![
         list_api_keys,
         new_account,
-        account_exists,
+        master_api_key_is_valid,
         create_wallet,
         lit_action,
         get_lit_action_ipfs_id,
@@ -73,8 +72,8 @@ async fn new_account(
 }
 
 #[openapi(tag = "Account Management")]
-#[get("/account_exists")]
-async fn account_exists(api_key: ApiKey) -> OpenApiResponse<bool, ErrMessage> {
+#[get("/master_api_key_is_valid")]
+async fn master_api_key_is_valid(api_key: ApiKey) -> OpenApiResponse<bool, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(account_management::account_exists(api_key.0.as_str()).await).into(),
     }
@@ -120,10 +119,10 @@ async fn lit_action(
 }
 
 #[openapi(tag = "Account Management")]
-#[get("/get_lit_action_ipfs_id/<code>")]
-async fn get_lit_action_ipfs_id(code: String) -> OpenApiResponse<String, ErrMessage> {
+#[post("/get_lit_action_ipfs_id", format = "json", data = "<code>")]
+async fn get_lit_action_ipfs_id(code: Json<String>) -> OpenApiResponse<String, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::get_lit_action_ipfs_id(code).await).into(),
+        response: ApiResult(account_management::get_lit_action_ipfs_id(code.0).await).into(),
     }
 }
 
