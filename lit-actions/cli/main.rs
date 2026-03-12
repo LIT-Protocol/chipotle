@@ -63,7 +63,7 @@ async fn init_observability() -> ObservabilityProviders {
     #[cfg(not(feature = "otlp"))]
     {
         init_stdout();
-        return ObservabilityProviders::default(); // All None
+        ObservabilityProviders::default() // All None
     }
 
     #[cfg(feature = "otlp")]
