@@ -22,7 +22,6 @@ services:
       - lit_actions
       - --socket
       - /tmp/lit_actions.sock
-      - --enable-observability-export
     environment:
       LIT_TELEMETRY__ENDPOINT: http://otel-collector:4317
     volumes:
@@ -61,8 +60,8 @@ services:
   # services on the compose bridge, then exports to GCP Cloud Monitoring,
   # Cloud Trace, and Cloud Logging.
   #
-  # NOTE: lit-api-server must be built with --features otlp for OTLP emission.
-  # Without that feature, stdout logs are still captured by the container runtime.
+  # NOTE: both lit-api-server and lit-actions must be built with --features otlp
+  # for OTLP emission. Without that feature they fall back to stdout logging.
   otel-collector:
     image: ${DOCKER_IMAGE_OTEL_COLLECTOR}
     environment:
