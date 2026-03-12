@@ -10,66 +10,18 @@ pub struct ObservabilityConfig {
     pub telemetry_endpoint: String,
 }
 
-/// Reads observability settings from the environment or NodeConfig.toml.
+/// Reads observability settings from environment variables.
 ///
-/// - `log_level`: required. Source priority: `RUST_LOG` env var → `[observability] log_level`
-///   in NodeConfig.toml.
-/// - `telemetry_endpoint` (otlp builds only): required. Source priority:
-///   `LIT_TELEMETRY_ENDPOINT` env var → `[observability] telemetry_endpoint` in NodeConfig.toml.
+/// - `log_level`: `RUST_LOG` env var, defaults to `"trace"`.
+/// - `telemetry_endpoint` (otlp builds only): `LIT_TELEMETRY_ENDPOINT` env var, required.
 ///
-/// Returns an error if any required value is absent from both sources.
+/// Returns an error if a required value is absent.
 pub fn read_observability_config() -> Result<ObservabilityConfig> {
-    let env_log_level = env::var("RUST_LOG").ok();
-    #[cfg(feature = "otlp")]
-    let env_endpoint = env::var("LIT_TELEMETRY_ENDPOINT").ok();
-
-    // Fast path: all required values already in env, skip file I/O.
-    #[cfg(not(feature = "otlp"))]
-    if let Some(ll) = env_log_level {
-        return Ok(ObservabilityConfig { log_level: ll });
-    }
-    #[cfg(feature = "otlp")]
-    if let (Some(ll), Some(ep)) = (env_log_level.as_ref(), env_endpoint.as_ref()) {
-        return Ok(ObservabilityConfig {
-            log_level: ll.clone(),
-            telemetry_endpoint: ep.clone(),
-        });
-    }
-
-    let toml_path = Path::new("NodeConfig.toml");
-    let doc = if toml_path.exists() {
-        fs::read_to_string(toml_path)
-            .ok()
-            .and_then(|s| s.parse::<DocumentMut>().ok())
-    } else {
-        None
-    };
-
-    let obs = doc.as_ref().and_then(|d| d.get("observability"));
-
-    let file_log_level = obs
-        .and_then(|o| o.get("log_level"))
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-
-    let log_level = env_log_level.or(file_log_level).ok_or_else(|| {
-        anyhow::anyhow!(
-            "log level not configured: set RUST_LOG or [observability] log_level in NodeConfig.toml"
-        )
-    })?;
+    let log_level = env::var("RUST_LOG").unwrap_or_else(|_| "trace".to_string());
 
     #[cfg(feature = "otlp")]
-    let file_endpoint = obs
-        .and_then(|o| o.get("telemetry_endpoint"))
-        .and_then(|v| v.as_str())
-        .map(str::to_string);
-
-    #[cfg(feature = "otlp")]
-    let telemetry_endpoint = env_endpoint.or(file_endpoint).ok_or_else(|| {
-        anyhow::anyhow!(
-            "telemetry endpoint not configured: set LIT_TELEMETRY_ENDPOINT or \
-             [observability] telemetry_endpoint in NodeConfig.toml"
-        )
+    let telemetry_endpoint = env::var("LIT_TELEMETRY_ENDPOINT").map_err(|_| {
+        anyhow::anyhow!("LIT_TELEMETRY_ENDPOINT is not set")
     })?;
 
     Ok(ObservabilityConfig {

@@ -52,7 +52,7 @@ fn main() -> anyhow::Result<()> {
 async fn init_observability() -> ObservabilityProviders {
     use tracing_subscriber::util::SubscriberInitExt;
 
-    let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string());
+    let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "trace".to_string());
 
     let init_stdout = || match lit_observability::init_subscriber(&log_level) {
         Ok(s) => s.init(),
@@ -75,8 +75,13 @@ async fn init_observability() -> ObservabilityProviders {
         };
         use tracing_subscriber::layer::SubscriberExt;
 
-        let endpoint = std::env::var("LIT_TELEMETRY_ENDPOINT")
-            .unwrap_or_else(|_| "http://127.0.0.1:4317".to_string());
+        let endpoint = match std::env::var("LIT_TELEMETRY_ENDPOINT") {
+            Ok(ep) => ep,
+            Err(_) => {
+                eprintln!("LIT_TELEMETRY_ENDPOINT is not set. Exiting.");
+                std::process::exit(1);
+            }
+        };
 
         let otel_resource = Resource::new(vec![KeyValue::new(SERVICE_NAME, "lit-actions")]);
 
