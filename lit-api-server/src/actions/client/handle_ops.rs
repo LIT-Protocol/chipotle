@@ -122,7 +122,7 @@ impl Client {
             }
             UnionResponse::AddNamedOutput(AddNamedOutputRequest { name, value }) => {
                 
-                if self.state.named_output.len() > self.max_named_output_count as usize {
+                if self.state.named_output.len() >= self.max_named_output_count as usize {
                     bail!(
                         "You may not add more than {} named outputs per session and you have attempted to exceed that limit.",
                         self.max_named_output_count
