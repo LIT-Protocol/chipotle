@@ -3,7 +3,9 @@ use lit_core::utils::unix::raise_fd_limit;
 use tracing::{debug, error, info};
 
 #[cfg(feature = "otlp")]
-use lit_observability::opentelemetry_sdk::{logs::LoggerProvider, metrics::SdkMeterProvider};
+use lit_observability::opentelemetry_sdk::{
+    logs::LoggerProvider, metrics::SdkMeterProvider, trace::TracerProvider,
+};
 
 #[derive(Debug, Parser)]
 struct Args {
@@ -95,7 +97,7 @@ async fn init_observability() -> ObservabilityProviders {
             };
 
         global::set_text_map_propagator(TraceContextPropagator::new());
-        global::set_tracer_provider(tracing_provider);
+        global::set_tracer_provider(tracing_provider.clone());
         global::set_meter_provider(metrics_provider.clone());
 
         let otel_log_layer = ContextAwareOtelLogLayer::new(&logger_provider);
@@ -104,12 +106,14 @@ async fn init_observability() -> ObservabilityProviders {
             Err(e) => eprintln!("Failed to init tracing subscriber: {e}"),
         }
 
-        ObservabilityProviders::new(metrics_provider, logger_provider)
+        ObservabilityProviders::new(tracing_provider, metrics_provider, logger_provider)
     }
 }
 
 #[derive(Default)]
 struct ObservabilityProviders {
+    #[cfg(feature = "otlp")]
+    tracing_provider: Option<TracerProvider>,
     #[cfg(feature = "otlp")]
     meter_provider: Option<SdkMeterProvider>,
     #[cfg(feature = "otlp")]
@@ -118,8 +122,13 @@ struct ObservabilityProviders {
 
 impl ObservabilityProviders {
     #[cfg(feature = "otlp")]
-    fn new(meter_provider: SdkMeterProvider, logger_provider: LoggerProvider) -> Self {
+    fn new(
+        tracing_provider: TracerProvider,
+        meter_provider: SdkMeterProvider,
+        logger_provider: LoggerProvider,
+    ) -> Self {
         Self {
+            tracing_provider: Some(tracing_provider),
             meter_provider: Some(meter_provider),
             logger_provider: Some(logger_provider),
         }
@@ -128,6 +137,11 @@ impl ObservabilityProviders {
     fn shutdown(self) {
         #[cfg(feature = "otlp")]
         {
+            if let Some(tracing_provider) = self.tracing_provider
+                && let Err(e) = tracing_provider.shutdown()
+            {
+                error!("Failed to shutdown tracing provider: {:?}", e);
+            }
             if let Some(meter_provider) = self.meter_provider
                 && let Err(e) = meter_provider.shutdown()
             {
