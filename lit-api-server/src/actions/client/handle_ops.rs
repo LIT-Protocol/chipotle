@@ -5,7 +5,6 @@ use tracing::{instrument, trace};
 
 use super::Client;
 
-
 impl Client {
     #[instrument(level = "debug", skip(self), err)]
     pub async fn handle_op(
@@ -121,7 +120,6 @@ impl Client {
                 GetLitActionWalletAddressResponse { wallet_address }.into()
             }
             UnionResponse::AddNamedOutput(AddNamedOutputRequest { name, value }) => {
-                
                 if self.state.named_output.len() >= self.max_named_output_count as usize {
                     bail!(
                         "You may not add more than {} named outputs per session and you have attempted to exceed that limit.",
