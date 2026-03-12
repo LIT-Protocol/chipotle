@@ -7,7 +7,8 @@ import * as ops from 'ext:core/ops';
  * @param {string} params.response The response to send to the client.  You can put any string here, like you could use JSON.stringify on a JS object and send it here.
  */
 function setResponse({ response }) {
-  return ops.op_set_response(response);
+  let stringifiedResponse = JSON.stringify (response);
+  return ops.op_set_response(stringifiedResponse);
 }
 
 /**

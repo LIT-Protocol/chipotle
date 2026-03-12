@@ -922,13 +922,32 @@ function initActions() {
 }
 
 // ----- Sidebar scroll -----
+const ACTION_RUNNER_ID = 'action-runner';
+const MAIN_SECTION_IDS = ['overview', 'usage-keys', 'groups', 'actions', 'wallets'];
+
+function setActionRunnerVisible(visible) {
+  const actionRunnerSection = document.getElementById('section-' + ACTION_RUNNER_ID);
+  if (actionRunnerSection) actionRunnerSection.style.display = visible ? '' : 'none';
+  MAIN_SECTION_IDS.forEach((id) => {
+    const el = document.getElementById('section-' + id);
+    if (el) el.style.display = visible ? 'none' : '';
+  });
+}
+
 function initSidebar() {
   document.querySelectorAll('.sidebar-link[data-scroll]').forEach((a) => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
       const id = a.getAttribute('data-scroll');
-      const el = document.getElementById('section-' + id);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (id === ACTION_RUNNER_ID) {
+        setActionRunnerVisible(true);
+        const el = document.getElementById('section-' + id);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else {
+        setActionRunnerVisible(false);
+        const el = document.getElementById('section-' + id);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     });
   });
 }

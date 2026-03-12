@@ -19,7 +19,7 @@ pub struct CreateWalletResponse {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LitActionResponse {
-    pub response: String,
+    pub response: serde_json::Value,
     pub logs: String,
     pub has_error: bool,
 }
