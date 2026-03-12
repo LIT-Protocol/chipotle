@@ -18,13 +18,13 @@
             "name": "page_number",
             "in": "query",
             "required": true,
-            "schema": { "type": "string" }
+            "schema": { "type": "integer", "format": "uint64", "minimum": 0.0 }
           },
           {
             "name": "page_size",
             "in": "query",
             "required": true,
-            "schema": { "type": "string" }
+            "schema": { "type": "integer", "format": "uint64", "minimum": 0.0 }
           },
           {
             "name": "X-Api-Key",
@@ -40,8 +40,13 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": { "$ref": "#/components/schemas/ApiKeyItem" }
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/ApiKeyItem" }
+                    },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
                 }
               }
             }
@@ -66,7 +71,12 @@
             "description": "",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/NewAccountResponse" }
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/NewAccountResponse" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
+                }
               }
             }
           }
@@ -90,7 +100,14 @@
           "default": {
             "description": "",
             "content": {
-              "application/json": { "schema": { "type": "boolean" } }
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    { "type": "boolean" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
+                }
+              }
             }
           }
         }
@@ -115,7 +132,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CreateWalletResponse"
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/CreateWalletResponse" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
                 }
               }
             }
@@ -149,7 +169,12 @@
             "description": "",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/LitActionResponse" }
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/LitActionResponse" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
+                }
               }
             }
           }
@@ -172,7 +197,14 @@
           "default": {
             "description": "",
             "content": {
-              "application/json": { "schema": { "type": "string" } }
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    { "type": "string" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
+                }
+              }
             }
           }
         }
@@ -204,7 +236,12 @@
             "description": "",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/AccountOpResponse" }
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/AccountOpResponse" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
+                }
               }
             }
           }
@@ -239,7 +276,12 @@
             "description": "",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/AccountOpResponse" }
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/AccountOpResponse" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
+                }
               }
             }
           }
@@ -272,7 +314,12 @@
             "description": "",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/AccountOpResponse" }
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/AccountOpResponse" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
+                }
               }
             }
           }
@@ -307,7 +354,12 @@
             "description": "",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/AccountOpResponse" }
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/AccountOpResponse" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
+                }
               }
             }
           }
@@ -341,7 +393,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AddUsageApiKeyResponse"
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/AddUsageApiKeyResponse" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
                 }
               }
             }
@@ -377,7 +432,12 @@
             "description": "",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/AccountOpResponse" }
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/AccountOpResponse" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
+                }
               }
             }
           }
@@ -410,7 +470,12 @@
             "description": "",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/AccountOpResponse" }
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/AccountOpResponse" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
+                }
               }
             }
           }
@@ -445,7 +510,12 @@
             "description": "",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/AccountOpResponse" }
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/AccountOpResponse" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
+                }
               }
             }
           }
@@ -480,7 +550,12 @@
             "description": "",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/AccountOpResponse" }
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/AccountOpResponse" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
+                }
               }
             }
           }
@@ -515,7 +590,12 @@
             "description": "",
             "content": {
               "application/json": {
-                "schema": { "$ref": "#/components/schemas/AccountOpResponse" }
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/AccountOpResponse" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
+                }
               }
             }
           }
@@ -531,13 +611,13 @@
             "name": "page_number",
             "in": "query",
             "required": true,
-            "schema": { "type": "string" }
+            "schema": { "type": "integer", "format": "uint64", "minimum": 0.0 }
           },
           {
             "name": "page_size",
             "in": "query",
             "required": true,
-            "schema": { "type": "string" }
+            "schema": { "type": "integer", "format": "uint64", "minimum": 0.0 }
           },
           {
             "name": "X-Api-Key",
@@ -553,8 +633,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": { "$ref": "#/components/schemas/ListMetadataItem" }
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ListMetadataItem"
+                      }
+                    },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
                 }
               }
             }
@@ -571,13 +658,13 @@
             "name": "page_number",
             "in": "query",
             "required": true,
-            "schema": { "type": "string" }
+            "schema": { "type": "integer", "format": "uint64", "minimum": 0.0 }
           },
           {
             "name": "page_size",
             "in": "query",
             "required": true,
-            "schema": { "type": "string" }
+            "schema": { "type": "integer", "format": "uint64", "minimum": 0.0 }
           },
           {
             "name": "X-Api-Key",
@@ -593,8 +680,13 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": { "$ref": "#/components/schemas/WalletItem" }
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/WalletItem" }
+                    },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
                 }
               }
             }
@@ -617,13 +709,13 @@
             "name": "page_number",
             "in": "query",
             "required": true,
-            "schema": { "type": "string" }
+            "schema": { "type": "integer", "format": "uint64", "minimum": 0.0 }
           },
           {
             "name": "page_size",
             "in": "query",
             "required": true,
-            "schema": { "type": "string" }
+            "schema": { "type": "integer", "format": "uint64", "minimum": 0.0 }
           },
           {
             "name": "X-Api-Key",
@@ -639,8 +731,13 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": { "$ref": "#/components/schemas/WalletItem" }
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/WalletItem" }
+                    },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
                 }
               }
             }
@@ -663,13 +760,13 @@
             "name": "page_number",
             "in": "query",
             "required": true,
-            "schema": { "type": "string" }
+            "schema": { "type": "integer", "format": "uint64", "minimum": 0.0 }
           },
           {
             "name": "page_size",
             "in": "query",
             "required": true,
-            "schema": { "type": "string" }
+            "schema": { "type": "integer", "format": "uint64", "minimum": 0.0 }
           },
           {
             "name": "X-Api-Key",
@@ -685,8 +782,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": { "$ref": "#/components/schemas/ListMetadataItem" }
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ListMetadataItem"
+                      }
+                    },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
                 }
               }
             }
@@ -704,7 +808,10 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NodeChainConfigResponse"
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/NodeChainConfigResponse" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
                 }
               }
             }
@@ -721,7 +828,12 @@
             "description": "",
             "content": {
               "application/json": {
-                "schema": { "type": "array", "items": { "type": "string" } }
+                "schema": {
+                  "oneOf": [
+                    { "type": "array", "items": { "type": "string" } },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
+                }
               }
             }
           }
@@ -736,7 +848,14 @@
           "default": {
             "description": "",
             "content": {
-              "application/json": { "schema": { "type": "string" } }
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    { "type": "string" },
+                    { "$ref": "#/components/schemas/ErrMessage" }
+                  ]
+                }
+              }
             }
           }
         }
@@ -757,6 +876,7 @@
           "balance": { "type": "integer", "format": "uint64", "minimum": 0.0 }
         }
       },
+      "ErrMessage": { "type": "string" },
       "NewAccountResponse": {
         "type": "object",
         "required": ["api_key", "wallet_address"],
@@ -780,33 +900,16 @@
       },
       "LitActionResponse": {
         "type": "object",
-        "required": ["has_error", "logs", "response", "signatures"],
+        "required": ["has_error", "logs", "response"],
         "properties": {
-          "signatures": {
-            "type": "array",
-            "items": { "$ref": "#/components/schemas/LitActionSignature" }
-          },
           "response": { "type": "string" },
           "logs": { "type": "string" },
+          "named_output": {
+            "default": {},
+            "type": "object",
+            "additionalProperties": { "type": "string" }
+          },
           "has_error": { "type": "boolean" }
-        }
-      },
-      "LitActionSignature": {
-        "type": "object",
-        "required": ["data", "name"],
-        "properties": {
-          "name": { "type": "string" },
-          "data": { "$ref": "#/components/schemas/SignWithPkpResponse" }
-        }
-      },
-      "SignWithPkpResponse": {
-        "type": "object",
-        "required": ["pkp_id", "signature", "signed_digest", "signing_scheme"],
-        "properties": {
-          "signing_scheme": { "type": "string" },
-          "signed_digest": { "type": "string" },
-          "pkp_id": { "type": "string" },
-          "signature": { "type": "string" }
         }
       },
       "LitActionRequest": {
@@ -916,10 +1019,8 @@
       "AddUsageApiKeyRequest": {
         "description": "Request for add_usage_api_key. expiration and balance as decimal strings (e.g. unix timestamp, wei). API key via header.",
         "type": "object",
-        "required": ["balance", "description", "expiration", "name"],
+        "required": ["description", "name"],
         "properties": {
-          "expiration": { "type": "string" },
-          "balance": { "type": "string" },
           "name": { "type": "string" },
           "description": { "type": "string" }
         }
@@ -1009,7 +1110,6 @@
           "chain_name",
           "contract_address",
           "is_evm",
-          "rpc_url",
           "testnet",
           "token"
         ],
@@ -1019,7 +1119,6 @@
           "is_evm": { "type": "boolean" },
           "testnet": { "type": "boolean" },
           "token": { "type": "string" },
-          "rpc_url": { "type": "string" },
           "contract_address": { "type": "string" }
         }
       }
