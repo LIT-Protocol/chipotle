@@ -17,7 +17,7 @@ COPY --from=grpc-probe /grpc_health_probe /usr/local/bin/grpc_health_probe
 COPY otel-collector/config.yaml /etc/otelcol-contrib/config.yaml
 COPY otel-collector/entrypoint.sh /entrypoint.sh
 
-USER root
+USER 0
 RUN chmod +x /entrypoint.sh
 USER 10001
 
