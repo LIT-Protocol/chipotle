@@ -1,4 +1,3 @@
-use crate::actions::client::models::SignedData;
 use rocket_okapi::okapi::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -19,33 +18,7 @@ pub struct CreateWalletResponse {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct SignWithPkpResponse {
-    pub signing_scheme: String,
-    pub signed_digest: String,
-    pub pkp_id: String,
-    pub signature: String,
-}
-
-impl From<SignedData> for SignWithPkpResponse {
-    fn from(signed_data: SignedData) -> Self {
-        Self {
-            signing_scheme: signed_data.signing_scheme,
-            signed_digest: signed_data.digest,
-            pkp_id: signed_data.pkp_id,
-            signature: signed_data.signature,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct LitActionSignature {
-    pub name: String,
-    pub data: SignWithPkpResponse,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LitActionResponse {
-    pub signatures: Vec<LitActionSignature>,
     pub response: String,
     pub logs: String,
     pub has_error: bool,

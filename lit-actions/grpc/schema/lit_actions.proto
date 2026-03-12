@@ -16,6 +16,10 @@ message ExecuteJsRequest {
     UpdateResourceUsageResponse update_resource_usage = 5;
     AesEncryptResponse aes_encrypt = 10;
     AesDecryptResponse aes_decrypt = 11;
+    GetPrivateKeyResponse get_private_key = 12;
+    GetLitActionPrivateKeyResponse get_lit_action_private_key = 13;
+    GetLitActionPublicKeyResponse get_lit_action_public_key = 14;
+    GetLitActionWalletAddressResponse get_lit_action_wallet_address = 15;
   }
 
   message ExecutionRequest {
@@ -50,6 +54,22 @@ message ExecuteJsRequest {
   message AesDecryptResponse {
     string plaintext = 1;  // hex-encoded
   }
+    
+  message GetPrivateKeyResponse {
+    string secret = 1;
+  } 
+
+  message GetLitActionPrivateKeyResponse {
+    string secret = 1;
+  }
+
+  message GetLitActionPublicKeyResponse {
+    string public_key = 1;
+  }
+
+  message GetLitActionWalletAddressResponse {
+    string wallet_address = 1;
+  }
 }
 
 message ExecuteJsResponse {
@@ -61,6 +81,11 @@ message ExecuteJsResponse {
     UpdateResourceUsageRequest update_resource_usage = 5;
     AesEncryptRequest aes_encrypt = 10;
     AesDecryptRequest aes_decrypt = 11;    
+    GetPrivateKeyRequest get_private_key = 12;
+    GetLitActionPrivateKeyRequest get_lit_action_private_key = 13;
+    GetLitActionPublicKeyRequest get_lit_action_public_key = 14;
+    GetLitActionWalletAddressRequest get_lit_action_wallet_address = 15;
+
   }
 
   message ExecutionResult {
@@ -91,5 +116,19 @@ message ExecuteJsResponse {
   message AesDecryptRequest {
     string pkp_id = 1;
     string ciphertext = 2;
+  }
+
+  message GetPrivateKeyRequest {
+    string pkp_id = 1;
+  } 
+
+  message GetLitActionPrivateKeyRequest {}
+
+  message GetLitActionPublicKeyRequest {
+    string ipfs_id = 1;
+  }
+
+  message GetLitActionWalletAddressRequest {
+    string ipfs_id = 1;
   }
 }
