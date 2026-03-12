@@ -56,7 +56,7 @@ async fn main() -> Result<(), rocket::Error> {
         {
             Ok((tracing_provider, metrics_provider, logger_provider)) => {
                 global::set_text_map_propagator(TraceContextPropagator::new());
-                global::set_tracer_provider(tracing_provider);
+                global::set_tracer_provider(tracing_provider.clone());
                 global::set_meter_provider(metrics_provider.clone());
 
                 let otel_log_layer = ContextAwareOtelLogLayer::new(&logger_provider);
@@ -66,7 +66,7 @@ async fn main() -> Result<(), rocket::Error> {
                 tracing::subscriber::set_global_default(subscriber)
                     .expect("setting default subscriber failed");
 
-                Some((metrics_provider, logger_provider))
+                Some((tracing_provider, metrics_provider, logger_provider))
             }
             Err(e) => {
                 eprintln!("OTLP init failed ({e}), falling back to stdout-only logging");
@@ -176,7 +176,10 @@ async fn main() -> Result<(), rocket::Error> {
     r.launch().await?;
 
     #[cfg(feature = "otlp")]
-    if let Some((metrics_provider, logger_provider)) = _otlp_providers {
+    if let Some((tracing_provider, metrics_provider, logger_provider)) = _otlp_providers {
+        if let Err(e) = tracing_provider.shutdown() {
+            eprintln!("Failed to shutdown tracing provider: {e}");
+        }
         if let Err(e) = metrics_provider.shutdown() {
             eprintln!("Failed to shutdown metrics provider: {e}");
         }
