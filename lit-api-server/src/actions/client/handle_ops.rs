@@ -104,11 +104,10 @@ impl Client {
                         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
                 GetLitActionPrivateKeyResponse { secret }.into()
             }
-            UnionResponse::GetLitActionPublicKey(GetLitActionPublicKeyRequest { ipfs_id: _ }) => {
-                let public_key =
-                    op_code_helpers::private_keys::get_lit_action_public_key(&self.ipfs_id)
-                        .await
-                        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+            UnionResponse::GetLitActionPublicKey(GetLitActionPublicKeyRequest { ipfs_id }) => {
+                let public_key = op_code_helpers::private_keys::get_lit_action_public_key(&ipfs_id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
                 GetLitActionPublicKeyResponse { public_key }.into()
             }
             UnionResponse::GetLitActionWalletAddress(GetLitActionWalletAddressRequest {
