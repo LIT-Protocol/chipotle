@@ -4,6 +4,7 @@ use lit_api_server::actions::grpc::GrpcClientPool;
 use lit_api_server::config;
 use lit_api_server::core;
 use lit_api_server::dstack;
+use lit_api_server::observability;
 use lit_api_server::utils::chain_info::Chain;
 use moka::future::Cache;
 use rocket::response::Redirect;
@@ -143,6 +144,7 @@ async fn main() -> Result<(), rocket::Error> {
     let (core_routes, openapi_spec) = core::v1::endpoints::routes_with_spec();
 
     let mut r = rocket::build()
+        .attach(observability::ObservabilityFairing::new())
         .attach(cors)
         .mount(
             "/",
