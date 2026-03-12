@@ -22,7 +22,6 @@ const BASE_URL =
   "https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network/core/v1";
 
 const SIMPLE_ENDPOINT = `${BASE_URL}/get_node_chain_config`;
-const LIT_ACTION_ENDPOINT = `${BASE_URL}/lit_action`;
 const HELLO_WORLD_CODE = 'Lit.Actions.setResponse({response: "Hello World!"})';
 
 // UUID v4 pattern: 8-4-4-4-12 hex digits, version nibble = 4, variant bits = 8/9/a/b
@@ -161,20 +160,13 @@ export default function () {
   // ── 7. lit_action: headers survive api-server → lit-actions → response ─
   {
     const userCorrelationId = "e2e-lit-action-corr-456";
-    const res = http.request(
-      "POST",
-      LIT_ACTION_ENDPOINT,
-      JSON.stringify({ code: HELLO_WORLD_CODE, js_params: null }),
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "X-Api-Key": apiKey,
-          "X-Correlation-Id": userCorrelationId,
-        },
-      },
+    const laRes = client.litAction(
+      { code: HELLO_WORLD_CODE, js_params: null },
+      { "X-Api-Key": apiKey } as any,
+      { headers: { "X-Correlation-Id": userCorrelationId } },
     );
-    checkAndLog(res, {
-      "lit_action: status 2xx": (r) => r.status >= 200 && r.status < 300,
+    if (!assertOk("lit_action+corr", "POST /lit_action", laRes)) return;
+    checkAndLog(laRes.response, {
       "lit_action: X-Request-Id present": (r) =>
         r.headers["X-Request-Id"] !== undefined &&
         r.headers["X-Request-Id"] !== "",
@@ -194,20 +186,12 @@ export default function () {
 
   // ── 8. lit_action: no correlation header when not sent ─────────────────
   {
-    const res = http.request(
-      "POST",
-      LIT_ACTION_ENDPOINT,
-      JSON.stringify({ code: HELLO_WORLD_CODE, js_params: null }),
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "X-Api-Key": apiKey,
-        },
-      },
+    const laRes = client.litAction(
+      { code: HELLO_WORLD_CODE, js_params: null },
+      { "X-Api-Key": apiKey } as any,
     );
-    checkAndLog(res, {
-      "lit_action no-corr: status 2xx": (r) =>
-        r.status >= 200 && r.status < 300,
+    if (!assertOk("lit_action no-corr", "POST /lit_action", laRes)) return;
+    checkAndLog(laRes.response, {
       "lit_action no-corr: X-Request-Id present": (r) =>
         UUID_V4_RE.test(r.headers["X-Request-Id"] || ""),
       "lit_action no-corr: X-Correlation-Id absent": (r) =>
@@ -219,19 +203,13 @@ export default function () {
   // ── 9. lit_action: user X-Request-Id ignored through full roundtrip ───
   {
     const userRequestId = "550e8400-e29b-41d4-a716-446655440000";
-    const res = http.request(
-      "POST",
-      LIT_ACTION_ENDPOINT,
-      JSON.stringify({ code: HELLO_WORLD_CODE, js_params: null }),
-      {
-        headers: {
-          "Content-Type": "application/json",
-          "X-Api-Key": apiKey,
-          "X-Request-Id": userRequestId,
-        },
-      },
+    const laRes = client.litAction(
+      { code: HELLO_WORLD_CODE, js_params: null },
+      { "X-Api-Key": apiKey } as any,
+      { headers: { "X-Request-Id": userRequestId } },
     );
-    checkAndLog(res, {
+    if (!assertOk("lit_action ignore-rid", "POST /lit_action", laRes)) return;
+    checkAndLog(laRes.response, {
       "lit_action: user X-Request-Id ignored": (r) =>
         r.headers["X-Request-Id"] !== userRequestId,
       "lit_action: server X-Request-Id is UUID v4": (r) =>
