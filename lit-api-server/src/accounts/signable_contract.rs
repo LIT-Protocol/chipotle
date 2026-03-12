@@ -29,7 +29,7 @@ static GLOBAL_READ_ONLY_CLIENT: OnceLock<Arc<Provider<Http>>> = OnceLock::new();
 
 /// Initialise the global signing client. Must be called once at startup,
 /// after `init_config()`, before any transactions are sent.
-pub(crate) async fn init_chain_clients() -> Result<()> {
+pub async fn init_chain_clients() -> Result<()> {
     let node_config = GLOBAL_NODE_CONFIG
         .get()
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))?;
