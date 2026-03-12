@@ -5,6 +5,7 @@ pub mod config;
 pub mod core;
 pub mod dstack;
 pub mod error;
+pub mod observability;
 pub mod utils;
 
 use crate::abstractions::transfer::chain_info::Chain;
@@ -148,6 +149,7 @@ async fn main() -> Result<(), rocket::Error> {
     let (core_routes, openapi_spec) = core::v1::endpoints::routes_with_spec();
 
     let mut r = rocket::build()
+        .attach(observability::ObservabilityFairing::new())
         .attach(cors)
         .mount(
             "/",
