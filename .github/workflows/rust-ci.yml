@@ -76,3 +76,34 @@ jobs:
       - name: build
         working-directory: ${{ matrix.crate }}
         run: cargo build --all-features
+
+  contract-bindings:
+    name: contract-bindings
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reset workspace to HEAD
+        run: git checkout HEAD -- .
+
+      - uses: dtolnay/rust-toolchain@1.91
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install contract dependencies
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npm ci
+
+      - name: Generate contract bindings
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: make generate
+
+      - name: Check for uncommitted changes
+        run: |
+          git diff --exit-code -- lit-api-server/src/accounts/contracts/ || {
+            echo "::error::Contract bindings are out of date. Run 'make generate' in lit-api-server/blockchain/lit_node_express/ and commit the changes."
+            git diff --stat -- lit-api-server/src/accounts/contracts/
+            exit 1
+          }
