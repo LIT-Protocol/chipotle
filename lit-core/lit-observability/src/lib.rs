@@ -31,11 +31,10 @@ pub fn init_subscriber(
 ) -> Result<
     impl Subscriber + Send + Sync + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
 > {
-    let level_filter = EnvFilter::try_from_default_env()
-        .or_else(|_e| EnvFilter::from_str(log_level))
-        .map_err(|e| {
-            error::unexpected_err(e.to_string(), Some("Could not create filter".to_string()))
-        })?;
+    let level_filter =
+        EnvFilter::try_from_default_env().or_else(|_e| EnvFilter::from_str(log_level)).map_err(
+            |e| error::unexpected_err(e.to_string(), Some("Could not create filter".to_string())),
+        )?;
 
     let custom_formatter = logging::CustomEventFormatter::default();
 
