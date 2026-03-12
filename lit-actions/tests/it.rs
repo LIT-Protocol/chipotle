@@ -84,6 +84,26 @@ impl TestClient {
 
     fn handle_op(&mut self, op: UnionResponse) -> ExecuteJsRequest {
         match op {
+            UnionResponse::GetPrivateKey(req) => {
+                self.messages.put(req);
+                self.messages.take::<GetPrivateKeyResponse>().into()
+            }
+            UnionResponse::GetLitActionPrivateKey(req) => {
+                self.messages.put(req);
+                self.messages
+                    .take::<GetLitActionPrivateKeyResponse>()
+                    .into()
+            }
+            UnionResponse::GetLitActionPublicKey(req) => {
+                self.messages.put(req);
+                self.messages.take::<GetLitActionPublicKeyResponse>().into()
+            }
+            UnionResponse::GetLitActionWalletAddress(req) => {
+                self.messages.put(req);
+                self.messages
+                    .take::<GetLitActionWalletAddressResponse>()
+                    .into()
+            }
             UnionResponse::SetResponse(req) => {
                 self.messages.put(req);
                 self.messages.take::<SetResponseResponse>().into()

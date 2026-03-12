@@ -9,14 +9,14 @@ use crate::core::core_features;
 use crate::core::v1::models::request::{
     AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest, AddUsageApiKeyRequest,
     LitActionRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
-    RemoveUsageApiKeyRequest, SignWithPKPRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
+    RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
     UpdateUsageApiKeyMetadataRequest,
 };
 use crate::core::v1::models::response::ApiKeyItem;
 use crate::core::v1::models::response::WalletItem;
 use crate::core::v1::models::response::{
     AccountOpResponse, AddUsageApiKeyResponse, CreateWalletResponse, ListMetadataItem,
-    LitActionResponse, NewAccountResponse, NodeChainConfigResponse, SignWithPkpResponse,
+    LitActionResponse, NewAccountResponse, NodeChainConfigResponse,
 };
 use moka::future::Cache;
 use rocket::Route;
@@ -130,7 +130,6 @@ impl<'r, T: Serialize + JsonSchema, E: Serialize + JsonSchema> Responder<'r, 'st
 /// Returns Core v1 routes and the OpenAPI spec for them. Mount routes at `/core/v1/` and serve the spec at `/openapi.json` (or use it for Swagger UI).
 pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
     openapi_get_routes_spec![
-        // sign_with_pkp,
         list_api_keys,
         new_account,
         account_exists,
@@ -191,17 +190,6 @@ async fn create_wallet(
                 .await,
         )
         .into(),
-    }
-}
-
-#[allow(dead_code)]
-#[openapi(tag = "Signing")]
-#[post("/sign_with_pkp", format = "json", data = "<sign_request>")]
-async fn sign_with_pkp(
-    sign_request: Json<SignWithPKPRequest>,
-) -> OpenApiResponse<SignWithPkpResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(core_features::sign_with_pkp(sign_request).await).into(),
     }
 }
 

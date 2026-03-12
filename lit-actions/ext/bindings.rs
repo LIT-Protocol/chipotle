@@ -122,6 +122,65 @@ async fn op_aes_decrypt(
 
 #[instrument(skip_all, ret)]
 #[op2(async, reentrant)]
+#[string]
+async fn op_get_private_key(
+    state: Rc<RefCell<OpState>>,
+    #[string] pkp_id: String,
+) -> Result<String, JsErrorBox> {
+    ensure_not_blank!(pkp_id, "pkpId");
+
+    remote_op_async!(op_get_private_key,
+        state,
+        GetPrivateKeyRequest { pkp_id },
+        UnionRequest::GetPrivateKey(resp) => Ok(resp.secret)
+    )
+}
+
+#[instrument(skip_all, ret)]
+#[op2(async, reentrant)]
+#[string]
+async fn op_get_lit_action_private_key(state: Rc<RefCell<OpState>>) -> Result<String, JsErrorBox> {
+    remote_op_async!(op_get_lit_action_private_key,
+        state,
+        GetLitActionPrivateKeyRequest {},
+        UnionRequest::GetLitActionPrivateKey(resp) => Ok(resp.secret)
+    )
+}
+
+#[instrument(skip_all, ret)]
+#[op2(async, reentrant)]
+#[string]
+async fn op_get_lit_action_public_key(
+    state: Rc<RefCell<OpState>>,
+    #[string] ipfs_id: String,
+) -> Result<String, JsErrorBox> {
+    ensure_not_blank!(ipfs_id, "ipfsId");
+
+    remote_op_async!(op_get_lit_action_public_key,
+        state,
+        GetLitActionPublicKeyRequest { ipfs_id },
+        UnionRequest::GetLitActionPublicKey(resp) => Ok(resp.public_key)
+    )
+}
+
+#[instrument(skip_all, ret)]
+#[op2(async, reentrant)]
+#[string]
+async fn op_get_lit_action_wallet_address(
+    state: Rc<RefCell<OpState>>,
+    #[string] ipfs_id: String,
+) -> Result<String, JsErrorBox> {
+    ensure_not_blank!(ipfs_id, "ipfsId");
+
+    remote_op_async!(op_get_lit_action_wallet_address,
+        state,
+        GetLitActionWalletAddressRequest { ipfs_id },
+        UnionRequest::GetLitActionWalletAddress(resp) => Ok(resp.wallet_address)
+    )
+}
+
+#[instrument(skip_all, ret)]
+#[op2(async, reentrant)]
 async fn op_update_resource_usage(
     state: Rc<RefCell<OpState>>,
     tick: u32,
@@ -154,6 +213,10 @@ extension!(
     ops = [
         op_aes_decrypt,
         op_aes_encrypt,
+        op_get_lit_action_private_key,
+        op_get_lit_action_public_key,
+        op_get_lit_action_wallet_address,
+        op_get_private_key,
         op_increment_fetch_count,
         op_set_response,
         op_update_resource_usage,

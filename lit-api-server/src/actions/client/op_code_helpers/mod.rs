@@ -1,7 +1,7 @@
 use crate::utils::parse_to_hash::{ipfs_cid_to_u256, wallet_string_to_h160};
 use anyhow::Result;
 pub mod encryption;
-pub mod signing;
+pub mod private_keys;
 
 pub async fn can_use_wallet_in_action(
     api_key: &str,

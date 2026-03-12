@@ -9,6 +9,12 @@ pub async fn get_client_key(derivation_path: &str) -> Result<[u8; 32], String> {
     get_key(path.as_str(), purpose).await
 }
 
+pub async fn get_lit_action_key(ipfs_id: &str) -> Result<[u8; 32], String> {
+    let path = format!("v1/lit_action_{}", ipfs_id);
+    let purpose = "lit_action";
+    get_key(path.as_str(), purpose).await
+}
+
 /// Get the client key for a given payer number.
 pub async fn get_lit_payer_key(payer_number: u16) -> Result<[u8; 32], String> {
     let path = format!("v1/payer_{}", payer_number);

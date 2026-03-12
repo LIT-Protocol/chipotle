@@ -86,6 +86,40 @@ impl Client {
                 }
                 .into()
             }
+            UnionResponse::GetPrivateKey(GetPrivateKeyRequest { pkp_id }) => {
+                if !op_code_helpers::can_use_wallet_in_action(&self.api_key, &self.ipfs_id, &pkp_id)
+                    .await?
+                {
+                    bail!("API key cannot use selected wallet in selected action");
+                }
+                let secret = op_code_helpers::private_keys::get_private_key(&self.api_key, &pkp_id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                GetPrivateKeyResponse { secret }.into()
+            }
+            UnionResponse::GetLitActionPrivateKey(GetLitActionPrivateKeyRequest {}) => {
+                let secret =
+                    op_code_helpers::private_keys::get_lit_action_private_key(&self.ipfs_id)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                GetLitActionPrivateKeyResponse { secret }.into()
+            }
+            UnionResponse::GetLitActionPublicKey(GetLitActionPublicKeyRequest { ipfs_id: _ }) => {
+                let public_key =
+                    op_code_helpers::private_keys::get_lit_action_public_key(&self.ipfs_id)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                GetLitActionPublicKeyResponse { public_key }.into()
+            }
+            UnionResponse::GetLitActionWalletAddress(GetLitActionWalletAddressRequest {
+                ipfs_id,
+            }) => {
+                let wallet_address =
+                    op_code_helpers::private_keys::get_lit_action_wallet_address(&ipfs_id)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                GetLitActionWalletAddressResponse { wallet_address }.into()
+            }
             UnionResponse::UpdateResourceUsage(UpdateResourceUsageRequest {
                 tick: _,
                 used_kb: _,

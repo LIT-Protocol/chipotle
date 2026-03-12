@@ -1,4 +1,3 @@
-use crate::core::v1::models::response::SignWithPkpResponse;
 use rocket_okapi::okapi::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -105,14 +104,6 @@ pub struct RemoveUsageApiKeyRequest {
 
 /// API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct SignWithPKPRequest {
-    pub pkp_id: String,
-    pub message: String,
-    pub signing_scheme: String,
-}
-
-/// API key via header.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LitActionRequest {
     pub code: String,
     pub js_params: Option<serde_json::Value>,
@@ -129,10 +120,4 @@ pub struct DecryptRequest {
     pub api_key: String,
     pub ciphertext: String,
     pub data_to_encrypt_hash: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct CombineSignatureSharesRequest {
-    pub api_key: String,
-    pub share_date: SignWithPkpResponse,
 }
