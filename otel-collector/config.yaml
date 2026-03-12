@@ -47,13 +47,6 @@ exporters:
       # Default log name for signals that don't carry their own log name.
       default_log_name: lit-protocol/app
 
-    # Retry on transient GCP API errors.
-    retry_on_failure:
-      enabled: true
-      initial_interval: 5s
-      max_interval: 30s
-      max_elapsed_time: 300s
-
   # Internal collector health — visible in Cloud Logging under lit-protocol/otel-collector.
   debug:
     verbosity: basic
