@@ -1,9 +1,14 @@
 //! Deploy contracts from a folder of ABI JSON artifacts to a chain.
 //!
-//! Usage: deploy <network> <abis_folder> [secret]
+//! Usage: deploy --action=<action> --network=<network> --abifolder=<abifolder> [--secret=<secret>] [--address=<address>]
 //!
-//! network: 0 = Anvil, 1 = Yellowstone, 2 = Base Sepolia, 3 = Base
-//! secret: optional; if blank or omitted, uses the default Anvil dev secret.
+//! action:    deploy or update
+//! network:   anvil, yellowstone, base-sepolia, or base
+//! abifolder: folder containing contract artifact JSON files (abi + bytecode)
+//! secret:    optional; deployer private key (hex). If blank or omitted, uses default Anvil dev secret.
+//! address:   required for the update action; the diamond contract address to update.
+
+use crate::common::{parse_named_args, get_network_and_chain_id};
 
 use ethers::abi::FunctionExt;
 use ethers::abi::Tokenize;
@@ -20,62 +25,58 @@ use std::path::Path;
 use std::path::PathBuf;
 // use std::time::Duration;
 
-const ANVIL_RPC: &str = "http://127.0.0.1:8545";
-const ANVIL_CHAIN_ID: u64 = 31337;
-const YELLOWSTONE_RPC: &str = "https://yellowstone-rpc.litprotocol.com";
-const YELLOWSTONE_CHAIN_ID: u64 = 175188;
-const BASE_SEPOLIA_RPC: &str = "https://sepolia.base.org";
-const BASE_SEPOLIA_CHAIN_ID: u64 = 84532;
-const BASE_RPC: &str = "https://mainnet.base.org";
-const BASE_CHAIN_ID: u64 = 8453;
 /// Default Anvil account #0 private key (well-known for local dev)
 const DEFAULT_SECRET: &str = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
-    if args.len() < 4 {
-        eprintln!(
-            "Usage: {} <action> <network> <abis_folder> [secret]",
-            args.first().unwrap_or(&"deploy".into())
-        );
-        eprintln!("  action    -  deploy, update");
-        eprintln!("  network   -  anvil, yellowstone, base-sepolia, or base");
-        eprintln!(
-            "  abis_folder - folder containing contract artifact JSON files (abi + bytecode)"
-        );
-        eprintln!(
-            "  secret    - optional; deployer private key (hex). If blank or omitted, uses default."
-        );
-        std::process::exit(1);
-    }
-    let action: String = args[1].to_string().to_lowercase();
-    if action != "deploy" && action != "update" {
-        eprintln!("action must be deploy or update");
-        std::process::exit(1);
-    }
-    let network: String = args[2].to_string().to_lowercase();
+    let named = parse_named_args(&args);
 
-    let (rpc_url, chain_id) = match network.as_str() {
-        "anvil" => (ANVIL_RPC, ANVIL_CHAIN_ID),
-        "yellowstone" => (YELLOWSTONE_RPC, YELLOWSTONE_CHAIN_ID),
-        "base-sepolia" => (BASE_SEPOLIA_RPC, BASE_SEPOLIA_CHAIN_ID),
-        "base" => (BASE_RPC, BASE_CHAIN_ID),
-        _ => {
-            eprintln!("network must be anvil, yellowstone, base-sepolia, or base");
-            std::process::exit(1);
-        }
+    let bin = args.first().map(|s| s.as_str()).unwrap_or("deploy");
+    let usage = || {
+        eprintln!(
+            "Usage: {} --action=<action> --network=<network> --abifolder=<abifolder> [--secret=<secret>] [--address=<address>]",
+            bin
+        );
+        eprintln!("  --action    deploy or update");
+        eprintln!("  --network   anvil, yellowstone, base-sepolia, or base");
+        eprintln!("  --abifolder folder containing contract artifact JSON files (abi + bytecode)");
+        eprintln!("  --secret    optional for Anvil/Hardhat; deployer private key (hex). If blank or omitted, uses default Anvil dev secret.");
+        eprintln!("  --address   diamond contract address (required for update action)");
+        std::process::exit(1);
     };
 
-    let abis_folder = args[3].trim_end_matches('/').to_string();
-    let secret = args
-        .get(4)
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .unwrap_or(DEFAULT_SECRET);
+    let action = match named.get("action") {
+        Some(a) => a.to_lowercase(),
+        None => { eprintln!("Missing required arg: --action"); usage(); unreachable!() }
+    };
+    if action != "deploy" && action != "update" {
+        eprintln!("--action must be deploy or update");
+        std::process::exit(1);
+    }
+
+    let network = match named.get("network") {
+        Some(n) => n.to_lowercase(),
+        None => { eprintln!("Missing required arg: --network"); usage(); unreachable!() }
+    };
+    
+    let (rpc_url, chain_id) = get_network_and_chain_id(network.as_str());
+
+    let abis_folder = match named.get("abifolder") {
+        Some(f) => f.trim_end_matches('/').to_string(),
+        None => { eprintln!("Missing required arg: --abifolder"); usage(); unreachable!() }
+    };
+
+    let secret_owned = named
+        .get("secret")
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let secret: &str = secret_owned.as_deref().unwrap_or(DEFAULT_SECRET);
+
     println!(
-        "Deploying contracts from folder {} on chain {} with RPC URL {}",
-        args[2], abis_folder, rpc_url
+        "Deploying contracts from folder {} on network {} with RPC URL {}",
+        abis_folder, network, rpc_url
     );
 
     if action == "deploy" {
@@ -84,8 +85,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("Failed to deploy diamond");
     }
     if action == "update" {
-        let diamond_address_str = "0x17788103ca8f9bc39c43b70b601dac99be5a63cb";
-        let diamond_address_bytes = hex::decode(diamond_address_str.replace("0x", "")).unwrap();
+        let diamond_address_str = match named.get("address") {
+            Some(a) => a.clone(),
+            None => { eprintln!("Missing required arg: --address (required for update action)"); std::process::exit(1); }
+        };
+        let diamond_address_bytes = hex::decode(diamond_address_str.trim_start_matches("0x"))
+            .expect("Invalid --address hex");
         let diamond_address = Address::from_slice(&diamond_address_bytes);
 
         upate_diamond(rpc_url, chain_id, &abis_folder, secret, diamond_address)
