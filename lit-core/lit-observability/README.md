@@ -32,7 +32,15 @@ graph TD
 
 ## Configuration
 
-If the `otlp` layer is used, the endpoint can be configured via `LIT_CONFIG_TELEMETRY_ENDPOINT` (defaults to `http://127.0.0.1:4317`).
+If the `otlp` layer is used, the endpoint can be configured via `LIT_TELEMETRY__ENDPOINT` (defaults to `http://127.0.0.1:4317`).
+
+## Migration Notes
+
+### `MetricsMiddleware` removed
+
+The `grpc::MetricsMiddleware` that previously auto-tracked gRPC request latency has been removed as part of the UDS→OTLP sidecar migration. Any gRPC server that was wrapping its service with `MetricsMiddleware` will no longer emit `request.latency` histograms automatically.
+
+**Replacement**: instrument gRPC handlers explicitly with `tracing` spans (picked up by `TracingMiddleware` and forwarded to the otel-collector as traces), or add application-level OTel metric counters/histograms where latency tracking is needed.
 
 ## Usage
 

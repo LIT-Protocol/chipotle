@@ -175,6 +175,17 @@ async fn main() -> Result<(), rocket::Error> {
     }
 
     r.launch().await?;
+
+    #[cfg(feature = "otlp")]
+    if let Some((metrics_provider, logger_provider)) = _otlp_providers {
+        if let Err(e) = metrics_provider.shutdown() {
+            eprintln!("Failed to shutdown metrics provider: {e}");
+        }
+        if let Err(e) = logger_provider.shutdown() {
+            eprintln!("Failed to shutdown logger provider: {e}");
+        }
+    }
+
     Ok(())
 }
 
