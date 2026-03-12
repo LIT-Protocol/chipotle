@@ -15,11 +15,7 @@ COPY --from=grpc-probe /grpc_health_probe /usr/local/bin/grpc_health_probe
 
 # Copy collector config and credentials-bootstrap entrypoint.
 COPY otel-collector/config.yaml /etc/otelcol-contrib/config.yaml
-COPY otel-collector/entrypoint.sh /entrypoint.sh
-
-USER 0
-RUN chmod +x /entrypoint.sh
-USER 10001
+COPY --chmod=755 otel-collector/entrypoint.sh /entrypoint.sh
 
 HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=3 \
   CMD ["/usr/local/bin/grpc_health_probe", "-addr=localhost:4317"]
