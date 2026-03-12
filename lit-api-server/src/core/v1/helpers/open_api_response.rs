@@ -6,7 +6,6 @@ use rocket_responder::ApiResponse;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-
 pub struct OpenApiResponse<T: Serialize + JsonSchema, E: Serialize + JsonSchema> {
     pub response: ApiResponse<T, E>,
 }

@@ -1,9 +1,5 @@
-<<<<<<< HEAD
-pub mod parse_with_hash;
-=======
 pub mod chain_info;
-pub mod parse_to_hash;
->>>>>>> 91593f09658afda20bb98635a651657c783f716b
+pub mod parse_with_hash;
 use anyhow::Result;
 use ethers::types::{H160, U256};
 use ethers::utils::keccak256;
