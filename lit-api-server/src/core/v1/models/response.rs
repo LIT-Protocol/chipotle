@@ -23,6 +23,8 @@ pub struct CreateWalletResponse {
 pub struct LitActionResponse {
     pub response: String,
     pub logs: String,
+    #[serde(default)]
+    #[schemars(default)]
     pub named_output: HashMap<String, String>,
     pub has_error: bool,
 }
