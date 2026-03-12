@@ -43,6 +43,6 @@ pub async fn get_lit_action_wallet_address(ipfs_id: &str) -> Result<String> {
     let local_wallet = LocalWallet::from_bytes(&secret_bytes)
         .map_err(|e| anyhow::anyhow!("Unable to convert secret bytes to local wallet: {e}"))?;
     let wallet_address = local_wallet.address();
-    let wallet_address = bytes_to_0x_hex(wallet_address.as_bytes());
+    let wallet_address = wallet_address.to_string();
     Ok(wallet_address)
 }

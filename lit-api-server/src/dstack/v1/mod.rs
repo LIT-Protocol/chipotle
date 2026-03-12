@@ -1,4 +1,6 @@
 use ethers::utils::keccak256;
+
+use crate::utils::generate_lit_action_derivation_path;
 mod dstack;
 pub mod endpoints;
 
@@ -10,7 +12,9 @@ pub async fn get_client_key(derivation_path: &str) -> Result<[u8; 32], String> {
 }
 
 pub async fn get_lit_action_key(ipfs_id: &str) -> Result<[u8; 32], String> {
-    let path = format!("v1/lit_action_{}", ipfs_id);
+    let ipfs_with_prefix = format!("lit_action_{}", ipfs_id);
+    let derivation_path = generate_lit_action_derivation_path(ipfs_with_prefix.as_str());
+    let path = format!("v1/{}", derivation_path);
     let purpose = "lit_action";
     get_key(path.as_str(), purpose).await
 }
