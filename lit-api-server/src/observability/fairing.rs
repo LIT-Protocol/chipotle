@@ -149,6 +149,8 @@ impl Fairing for ObservabilityFairing {
         if !ctx.request_id.is_empty() {
             res.set_header(Header::new(HEADER_X_REQUEST_ID, ctx.request_id.clone()));
         }
+        // Clear task-local context to prevent stale entries if tokio reuses this task ID.
+        lit_observability::logging::clear_task_request_context();
     }
 }
 
