@@ -22,6 +22,8 @@ export interface ApiKeyItem {
   balance: number;
 }
 
+export type ErrMessage = string;
+
 export interface NewAccountResponse {
   api_key: string;
   wallet_address: string;
@@ -37,22 +39,9 @@ export interface CreateWalletResponse {
 }
 
 export interface LitActionResponse {
-  signatures: LitActionSignature[];
   response: string;
   logs: string;
   has_error: boolean;
-}
-
-export interface LitActionSignature {
-  name: string;
-  data: SignWithPkpResponse;
-}
-
-export interface SignWithPkpResponse {
-  signing_scheme: string;
-  signed_digest: string;
-  pkp_id: string;
-  signature: string;
 }
 
 /**
@@ -133,8 +122,6 @@ export interface AddUsageApiKeyResponse {
  * Request for add_usage_api_key. expiration and balance as decimal strings (e.g. unix timestamp, wei). API key via header.
  */
 export interface AddUsageApiKeyRequest {
-  expiration: string;
-  balance: string;
   name: string;
   description: string;
 }
@@ -217,8 +204,14 @@ export interface NodeChainConfigResponse {
 }
 
 export type ListApiKeysParams = {
-  page_number: string;
-  page_size: string;
+  /**
+   * @minimum 0
+   */
+  page_number: number;
+  /**
+   * @minimum 0
+   */
+  page_size: number;
 };
 
 export type ListApiKeysHeaders = {
@@ -228,12 +221,18 @@ export type ListApiKeysHeaders = {
   "X-Api-Key": string;
 };
 
+export type ListApiKeysDefault = ApiKeyItem[] | ErrMessage;
+
+export type NewAccountDefault = NewAccountResponse | ErrMessage;
+
 export type AccountExistsHeaders = {
   /**
    * Account or usage API key. Alternatively use Authorization: Bearer <key>.
    */
   "X-Api-Key": string;
 };
+
+export type AccountExistsDefault = boolean | ErrMessage;
 
 export type CreateWalletHeaders = {
   /**
@@ -242,12 +241,18 @@ export type CreateWalletHeaders = {
   "X-Api-Key": string;
 };
 
+export type CreateWalletDefault = CreateWalletResponse | ErrMessage;
+
 export type LitActionHeaders = {
   /**
    * Account or usage API key. Alternatively use Authorization: Bearer <key>.
    */
   "X-Api-Key": string;
 };
+
+export type LitActionDefault = LitActionResponse | ErrMessage;
+
+export type GetLitActionIpfsIdDefault = string | ErrMessage;
 
 export type AddGroupHeaders = {
   /**
@@ -256,12 +261,16 @@ export type AddGroupHeaders = {
   "X-Api-Key": string;
 };
 
+export type AddGroupDefault = AccountOpResponse | ErrMessage;
+
 export type AddActionToGroupHeaders = {
   /**
    * Account or usage API key. Alternatively use Authorization: Bearer <key>.
    */
   "X-Api-Key": string;
 };
+
+export type AddActionToGroupDefault = AccountOpResponse | ErrMessage;
 
 export type AddPkpToGroupHeaders = {
   /**
@@ -270,12 +279,16 @@ export type AddPkpToGroupHeaders = {
   "X-Api-Key": string;
 };
 
+export type AddPkpToGroupDefault = AccountOpResponse | ErrMessage;
+
 export type RemovePkpFromGroupHeaders = {
   /**
    * Account or usage API key. Alternatively use Authorization: Bearer <key>.
    */
   "X-Api-Key": string;
 };
+
+export type RemovePkpFromGroupDefault = AccountOpResponse | ErrMessage;
 
 export type AddUsageApiKeyHeaders = {
   /**
@@ -284,12 +297,16 @@ export type AddUsageApiKeyHeaders = {
   "X-Api-Key": string;
 };
 
+export type AddUsageApiKeyDefault = AddUsageApiKeyResponse | ErrMessage;
+
 export type RemoveUsageApiKeyHeaders = {
   /**
    * Account or usage API key. Alternatively use Authorization: Bearer <key>.
    */
   "X-Api-Key": string;
 };
+
+export type RemoveUsageApiKeyDefault = AccountOpResponse | ErrMessage;
 
 export type UpdateGroupHeaders = {
   /**
@@ -298,12 +315,16 @@ export type UpdateGroupHeaders = {
   "X-Api-Key": string;
 };
 
+export type UpdateGroupDefault = AccountOpResponse | ErrMessage;
+
 export type RemoveActionFromGroupHeaders = {
   /**
    * Account or usage API key. Alternatively use Authorization: Bearer <key>.
    */
   "X-Api-Key": string;
 };
+
+export type RemoveActionFromGroupDefault = AccountOpResponse | ErrMessage;
 
 export type UpdateActionMetadataHeaders = {
   /**
@@ -312,6 +333,8 @@ export type UpdateActionMetadataHeaders = {
   "X-Api-Key": string;
 };
 
+export type UpdateActionMetadataDefault = AccountOpResponse | ErrMessage;
+
 export type UpdateUsageApiKeyMetadataHeaders = {
   /**
    * Account or usage API key. Alternatively use Authorization: Bearer <key>.
@@ -319,9 +342,17 @@ export type UpdateUsageApiKeyMetadataHeaders = {
   "X-Api-Key": string;
 };
 
+export type UpdateUsageApiKeyMetadataDefault = AccountOpResponse | ErrMessage;
+
 export type ListGroupsParams = {
-  page_number: string;
-  page_size: string;
+  /**
+   * @minimum 0
+   */
+  page_number: number;
+  /**
+   * @minimum 0
+   */
+  page_size: number;
 };
 
 export type ListGroupsHeaders = {
@@ -331,9 +362,17 @@ export type ListGroupsHeaders = {
   "X-Api-Key": string;
 };
 
+export type ListGroupsDefault = ListMetadataItem[] | ErrMessage;
+
 export type ListWalletsParams = {
-  page_number: string;
-  page_size: string;
+  /**
+   * @minimum 0
+   */
+  page_number: number;
+  /**
+   * @minimum 0
+   */
+  page_size: number;
 };
 
 export type ListWalletsHeaders = {
@@ -343,10 +382,18 @@ export type ListWalletsHeaders = {
   "X-Api-Key": string;
 };
 
+export type ListWalletsDefault = WalletItem[] | ErrMessage;
+
 export type ListWalletsInGroupParams = {
   group_id: string;
-  page_number: string;
-  page_size: string;
+  /**
+   * @minimum 0
+   */
+  page_number: number;
+  /**
+   * @minimum 0
+   */
+  page_size: number;
 };
 
 export type ListWalletsInGroupHeaders = {
@@ -356,10 +403,18 @@ export type ListWalletsInGroupHeaders = {
   "X-Api-Key": string;
 };
 
+export type ListWalletsInGroupDefault = WalletItem[] | ErrMessage;
+
 export type ListActionsParams = {
   group_id: string;
-  page_number: string;
-  page_size: string;
+  /**
+   * @minimum 0
+   */
+  page_number: number;
+  /**
+   * @minimum 0
+   */
+  page_size: number;
 };
 
 export type ListActionsHeaders = {
@@ -368,6 +423,14 @@ export type ListActionsHeaders = {
    */
   "X-Api-Key": string;
 };
+
+export type ListActionsDefault = ListMetadataItem[] | ErrMessage;
+
+export type GetNodeChainConfigDefault = NodeChainConfigResponse | ErrMessage;
+
+export type GetApiPayersDefault = string[] | ErrMessage;
+
+export type GetAdminApiPayerDefault = string | ErrMessage;
 
 /**
  * This is the base client to use for interacting with the API.
@@ -391,7 +454,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: ApiKeyItem[];
+    data: ListApiKeysDefault;
     operationId: string;
   } {
     const k6url = new URL(
@@ -435,7 +498,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: NewAccountResponse;
+    data: NewAccountDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/new_account`);
@@ -474,7 +537,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: boolean;
+    data: AccountExistsDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/account_exists`);
@@ -514,7 +577,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: CreateWalletResponse;
+    data: CreateWalletDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/create_wallet`);
@@ -555,7 +618,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: LitActionResponse;
+    data: LitActionDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/lit_action`);
@@ -601,7 +664,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: string;
+    data: GetLitActionIpfsIdDefault;
     operationId: string;
   } {
     const k6url = new URL(
@@ -637,7 +700,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: AccountOpResponse;
+    data: AddGroupDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/add_group`);
@@ -684,7 +747,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: AccountOpResponse;
+    data: AddActionToGroupDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/add_action_to_group`);
@@ -731,7 +794,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: AccountOpResponse;
+    data: AddPkpToGroupDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/add_pkp_to_group`);
@@ -778,7 +841,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: AccountOpResponse;
+    data: RemovePkpFromGroupDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/remove_pkp_from_group`);
@@ -825,7 +888,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: AddUsageApiKeyResponse;
+    data: AddUsageApiKeyDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/add_usage_api_key`);
@@ -872,7 +935,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: AccountOpResponse;
+    data: RemoveUsageApiKeyDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/remove_usage_api_key`);
@@ -919,7 +982,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: AccountOpResponse;
+    data: UpdateGroupDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/update_group`);
@@ -966,7 +1029,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: AccountOpResponse;
+    data: RemoveActionFromGroupDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/remove_action_from_group`);
@@ -1013,7 +1076,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: AccountOpResponse;
+    data: UpdateActionMetadataDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/update_action_metadata`);
@@ -1060,7 +1123,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: AccountOpResponse;
+    data: UpdateUsageApiKeyMetadataDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/update_usage_api_key_metadata`);
@@ -1107,7 +1170,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: ListMetadataItem[];
+    data: ListGroupsDefault;
     operationId: string;
   } {
     const k6url = new URL(
@@ -1152,7 +1215,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: WalletItem[];
+    data: ListWalletsDefault;
     operationId: string;
   } {
     const k6url = new URL(
@@ -1197,7 +1260,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: WalletItem[];
+    data: ListWalletsInGroupDefault;
     operationId: string;
   } {
     const k6url = new URL(
@@ -1242,7 +1305,7 @@ export class LitApiServerClient {
     requestParameters?: Params,
   ): {
     response: Response;
-    data: ListMetadataItem[];
+    data: ListActionsDefault;
     operationId: string;
   } {
     const k6url = new URL(
@@ -1283,7 +1346,7 @@ export class LitApiServerClient {
 
   getNodeChainConfig(requestParameters?: Params): {
     response: Response;
-    data: NodeChainConfigResponse;
+    data: GetNodeChainConfigDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/get_node_chain_config`);
@@ -1313,7 +1376,7 @@ export class LitApiServerClient {
 
   getApiPayers(requestParameters?: Params): {
     response: Response;
-    data: string[];
+    data: GetApiPayersDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/get_api_payers`);
@@ -1343,7 +1406,7 @@ export class LitApiServerClient {
 
   getAdminApiPayer(requestParameters?: Params): {
     response: Response;
-    data: string;
+    data: GetAdminApiPayerDefault;
     operationId: string;
   } {
     const k6url = new URL(this.cleanBaseUrl + `/get_admin_api_payer`);

@@ -1,3 +1,5 @@
 [chain]
 name = "base"
-contract_address = "0x6c4989c3c2aab271444b4b7b4ec3aca6da1bf1e5"
+contract_address = "0x98e501fab2d60a5119a185e1563f10cb54bc6068"
+
+# contract_address = "0x6c4989c3c2aab271444b4b7b4ec3aca6da1bf1e5" # old contracts, TODO: about 10 USD still sitting in api-payer signers
