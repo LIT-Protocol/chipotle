@@ -1,31 +1,44 @@
 use ethers::prelude::*;
+use lit_contracts_minimal_generator::args::parse_named_args;
 use std::env;
 use std::fs::{copy, create_dir_all, read_dir, write};
 use std::path::Path;
-use crate::common::parse_named_args;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
     let named = parse_named_args(&args);
 
-    let bin = args.first().map(|s| s.as_str()).unwrap_or("generate_contracts");
+    let bin = args
+        .first()
+        .map(|s| s.as_str())
+        .unwrap_or("generate_contracts");
     let usage = || {
         eprintln!(
             "Usage: {} --abifolder=<abifolder> --outputfolder=<outputfolder>",
             bin
         );
         eprintln!("  --abifolder    folder containing ABI files (e.g. ../lit-blockchain/abis/)");
-        eprintln!("  --outputfolder folder to write generated .rs files (e.g. ../lit-blockchain/src/contracts/)");
+        eprintln!(
+            "  --outputfolder folder to write generated .rs files (e.g. ../lit-blockchain/src/contracts/)"
+        );
         std::process::exit(1);
     };
 
     let input_folder = match named.get("abifolder") {
         Some(f) => f.trim_end_matches('/').to_string(),
-        None => { eprintln!("Missing required arg: --abifolder"); usage(); unreachable!() }
+        None => {
+            eprintln!("Missing required arg: --abifolder");
+            usage();
+            unreachable!()
+        }
     };
     let output_folder = match named.get("outputfolder") {
         Some(f) => f.trim_end_matches('/').to_string(),
-        None => { eprintln!("Missing required arg: --outputfolder"); usage(); unreachable!() }
+        None => {
+            eprintln!("Missing required arg: --outputfolder");
+            usage();
+            unreachable!()
+        }
     };
 
     if !Path::new(&output_folder).exists() {
