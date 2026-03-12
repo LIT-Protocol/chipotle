@@ -21,7 +21,13 @@ impl<T: Serialize + JsonSchema, E: Serialize + JsonSchema> OpenApiResponderInner
         let error_schema = generator.json_schema::<E>();
 
         let mut combined_schema = rocket_okapi::okapi::openapi3::SchemaObject::default();
-        combined_schema.one_of = Some(vec![success_schema, error_schema]);
+        combined_schema.subschemas = Some(Box::new(schemars::schema::SubschemaValidation {
+            one_of: Some(vec![
+                schemars::schema::Schema::Object(success_schema),
+                schemars::schema::Schema::Object(error_schema),
+            ]),
+            ..Default::default()
+        }));
 
         rocket_okapi::util::add_default_response_schema(
             &mut responses,
