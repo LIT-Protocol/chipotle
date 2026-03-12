@@ -1,4 +1,4 @@
-use crate::utils::parse_to_hash::{ipfs_cid_to_u256, wallet_string_to_h160};
+use crate::utils::parse_with_hash::{ipfs_cid_to_u256, wallet_string_to_h160};
 use anyhow::Result;
 pub mod encryption;
 pub mod private_keys;

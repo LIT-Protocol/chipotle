@@ -11,8 +11,8 @@ use crate::accounts::signable_contract::{
     get_read_only_account_config_contract, get_signable_account_config_contract, send_transaction,
 };
 use crate::accounts::signer_pool::SignerPool;
-use crate::utils::parse_to_hash::api_key_hash;
-use crate::utils::parse_to_hash::ipfs_cid_to_u256;
+use crate::utils::parse_with_hash::api_key_hash;
+use crate::utils::parse_with_hash::ipfs_cid_to_u256;
 use ethers::types::{Address, H160, U256};
 
 /// Create a new account. `initial_balance` is stored on the account's apiKey (AccountConfig.accountApiKey.balance).

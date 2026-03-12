@@ -1,6 +1,6 @@
 use super::chain_info::Chain;
 use super::models::{GetBalanceResponse, TransferRequest, TransferResponse};
-use crate::core::api_status::ApiStatus;
+use crate::core::v1::helpers::api_status::ApiStatus;
 use rocket::serde::json::Json;
 
 // const TPRV: &str = "prv8ZgxMBicQKsPfEr2kLSUC5JG5UcFQvgFpYd3ntCUk4QUb35DdZTpQZmHPcMdD9kERXjCoT5Pw7WEJwNxRD1o6ZecamNFokodcnoPRHpaRS4";

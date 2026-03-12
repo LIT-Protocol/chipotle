@@ -1,7 +1,6 @@
-use crate::utils::{parse_to_hash::pkp_id_to_h160, u256_to_derviation_path};
+use crate::utils::{parse_with_hash::pkp_id_to_h160, u256_to_derviation_path};
 
 pub mod account_management;
-pub mod api_status;
 pub mod core_features;
 pub mod v1;
 

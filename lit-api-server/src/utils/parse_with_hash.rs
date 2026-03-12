@@ -1,4 +1,4 @@
-use crate::core::api_status::ApiStatus;
+use crate::core::v1::helpers::api_status::ApiStatus;
 use ethers::{
     types::{H160, U256},
     utils::keccak256,
