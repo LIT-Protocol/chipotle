@@ -28,7 +28,9 @@ services:
     volumes:
       - lit-socket:/tmp
     depends_on:
-      - otel-collector
+      otel-collector:
+        condition: service_started
+        required: false
     restart: unless-stopped
 
   lit-api-server:
@@ -48,8 +50,11 @@ services:
       # Uncomment to override NodeConfig.toml with production config (chain, contract_address, secret):
       # - ./NodeConfig.toml:/app/NodeConfig.toml:ro
     depends_on:
-      - lit-actions
-      - otel-collector
+      lit-actions:
+        condition: service_started
+      otel-collector:
+        condition: service_started
+        required: false
     restart: unless-stopped
 
   # OTel Collector — receives OTLP (gRPC/HTTP) on 0.0.0.0:4317/4318 from all
