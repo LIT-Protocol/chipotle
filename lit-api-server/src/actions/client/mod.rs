@@ -28,6 +28,9 @@ const DEFAULT_MAX_SIGN_COUNT: u32 = 10; // 10 signature requests per action exec
 const DEFAULT_MAX_BROADCAST_AND_COLLECT_COUNT: u32 = 30;
 const DEFAULT_MAX_CALL_DEPTH: u32 = 5;
 const DEFAULT_MAX_RETRIES: u32 = 3;
+const DEFAULT_MAX_NAMED_OUTPUT_COUNT: u32 = 100;
+const DEFAULT_MAX_NAMED_OUTPUT_VALUE_LENGTH: usize = 1024; // 1KB
+const DEFAULT_MAX_NAMED_OUTPUT_NAME_LENGTH: usize = 1024; // 1KB
 
 #[derive(Debug, Default, Clone, Builder, Serialize, Deserialize)]
 pub struct Client {
@@ -57,6 +60,12 @@ pub struct Client {
     max_code_length: usize,
     #[builder(default = "DEFAULT_MAX_RESPONSE_LENGTH")]
     max_response_length: usize,
+    #[builder(default = "DEFAULT_MAX_NAMED_OUTPUT_COUNT")]
+    max_named_output_count: u32,
+    #[builder(default = "DEFAULT_MAX_NAMED_OUTPUT_VALUE_LENGTH")]
+    max_named_output_value_length: usize,
+    #[builder(default = "DEFAULT_MAX_NAMED_OUTPUT_NAME_LENGTH")]
+    max_named_output_name_length: usize,
     #[builder(default = "DEFAULT_MAX_CONSOLE_LOG_LENGTH")]
     max_console_log_length: usize,
     #[builder(default = "DEFAULT_MAX_FETCH_COUNT")]

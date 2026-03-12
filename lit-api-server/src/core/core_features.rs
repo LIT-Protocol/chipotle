@@ -69,6 +69,7 @@ pub async fn lit_action(
         response: result.response,
         logs: result.logs,
         has_error: false,
+        named_output: result.named_output,
     };
 
     Ok(lit_action_response)

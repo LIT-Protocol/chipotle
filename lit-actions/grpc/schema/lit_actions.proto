@@ -20,6 +20,7 @@ message ExecuteJsRequest {
     GetLitActionPrivateKeyResponse get_lit_action_private_key = 13;
     GetLitActionPublicKeyResponse get_lit_action_public_key = 14;
     GetLitActionWalletAddressResponse get_lit_action_wallet_address = 15;
+    AddNamedOutputResponse add_named_output = 16;
   }
 
   message ExecutionRequest {
@@ -70,6 +71,8 @@ message ExecuteJsRequest {
   message GetLitActionWalletAddressResponse {
     string wallet_address = 1;
   }
+
+  message AddNamedOutputResponse {}
 }
 
 message ExecuteJsResponse {
@@ -85,7 +88,7 @@ message ExecuteJsResponse {
     GetLitActionPrivateKeyRequest get_lit_action_private_key = 13;
     GetLitActionPublicKeyRequest get_lit_action_public_key = 14;
     GetLitActionWalletAddressRequest get_lit_action_wallet_address = 15;
-
+    AddNamedOutputRequest add_named_output = 16;
   }
 
   message ExecutionResult {
@@ -130,5 +133,10 @@ message ExecuteJsResponse {
 
   message GetLitActionWalletAddressRequest {
     string ipfs_id = 1;
+  }
+
+  message AddNamedOutputRequest {
+    string name = 1;
+    string value = 2;
   }
 }

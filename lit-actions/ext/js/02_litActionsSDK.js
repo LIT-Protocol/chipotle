@@ -85,7 +85,21 @@ function getLitActionWalletAddress({ ipfsId }) {
   return ops.op_get_lit_action_wallet_address(ipfsId);
 }
 
+/**
+ * Add a named output to the result returned to the client
+ * @name Lit.Actions.addNamedOutput
+ * @function addNamedOutput
+ * @param {Object} params
+ * @param {string} params.name The name of the output
+ * @param {string} params.value The value of the output
+ * @returns {Promise<void>}
+ */
+function addNamedOutput({ name, value }) {
+  return ops.op_add_named_output(name, value);
+}
+
 globalThis.LitActions = {
+  addNamedOutput,
   Encrypt,
   Decrypt,
   getPrivateKey,

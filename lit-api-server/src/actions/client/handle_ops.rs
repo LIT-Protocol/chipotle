@@ -5,6 +5,7 @@ use tracing::{instrument, trace};
 
 use super::Client;
 
+
 impl Client {
     #[instrument(level = "debug", skip(self), err)]
     pub async fn handle_op(
@@ -118,6 +119,32 @@ impl Client {
                         .await
                         .map_err(|e| anyhow::anyhow!(e.to_string()))?;
                 GetLitActionWalletAddressResponse { wallet_address }.into()
+            }
+            UnionResponse::AddNamedOutput(AddNamedOutputRequest { name, value }) => {
+                
+                if self.state.named_output.len() > self.max_named_output_count as usize {
+                    bail!(
+                        "You may not add more than {} named outputs per session and you have attempted to exceed that limit.",
+                        self.max_named_output_count
+                    );
+                }
+
+                if value.len() > self.max_named_output_value_length {
+                    bail!(
+                        "Named output value is too long. Max length is {} bytes",
+                        self.max_named_output_value_length
+                    );
+                }
+
+                if name.len() > self.max_named_output_name_length {
+                    bail!(
+                        "Named output name is too long. Max length is {} bytes",
+                        self.max_named_output_name_length
+                    );
+                }
+
+                self.state.named_output.insert(name, value);
+                AddNamedOutputResponse {}.into()
             }
             UnionResponse::UpdateResourceUsage(UpdateResourceUsageRequest {
                 tick: _,

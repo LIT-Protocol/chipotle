@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use rocket_okapi::okapi::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -21,6 +23,7 @@ pub struct CreateWalletResponse {
 pub struct LitActionResponse {
     pub response: String,
     pub logs: String,
+    pub named_output: HashMap<String, String>,
     pub has_error: bool,
 }
 

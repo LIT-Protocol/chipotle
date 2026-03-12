@@ -119,6 +119,7 @@ macro_rules! decl_op {
     };
 }
 
+decl_op!(AddNamedOutput);
 decl_op!(AesDecrypt);
 decl_op!(AesEncrypt);
 decl_op!(GetPrivateKey);

@@ -31,8 +31,11 @@ pub async fn get_lit_action_public_key(ipfs_id: &str) -> Result<String> {
         .map_err(|e| anyhow::anyhow!("Unable to get lit action public key: {e}"))?;
     let local_wallet = LocalWallet::from_bytes(&secret_bytes)
         .map_err(|e| anyhow::anyhow!("Unable to convert secret bytes to local wallet: {e}"))?;
-    let public_key_bytes = local_wallet.signer().verifying_key().to_sec1_bytes();
-    let public_key = bytes_to_0x_hex(&public_key_bytes);
+    let public_key_bytes = local_wallet
+        .signer()
+        .verifying_key()
+        .to_encoded_point(false);
+    let public_key = bytes_to_0x_hex(public_key_bytes.to_bytes());
     Ok(public_key)
 }
 
@@ -43,6 +46,6 @@ pub async fn get_lit_action_wallet_address(ipfs_id: &str) -> Result<String> {
     let local_wallet = LocalWallet::from_bytes(&secret_bytes)
         .map_err(|e| anyhow::anyhow!("Unable to convert secret bytes to local wallet: {e}"))?;
     let wallet_address = local_wallet.address();
-    let wallet_address = wallet_address.to_string();
+    let wallet_address = format!("{:?}", wallet_address);
     Ok(wallet_address)
 }

@@ -104,6 +104,10 @@ impl TestClient {
                     .take::<GetLitActionWalletAddressResponse>()
                     .into()
             }
+            UnionResponse::AddNamedOutput(req) => {
+                self.messages.put(req);
+                self.messages.take::<AddNamedOutputResponse>().into()
+            }
             UnionResponse::SetResponse(req) => {
                 self.messages.put(req);
                 self.messages.take::<SetResponseResponse>().into()
@@ -363,6 +367,27 @@ async fn fetch(mut client: TestClient) {
     assert_eq!(
         client.received::<IncrementFetchCountRequest>(),
         IncrementFetchCountRequest {}
+    );
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+#[rstest]
+#[tokio::test]
+async fn add_named_output(mut client: TestClient) {
+    client
+        .respond_with(AddNamedOutputResponse {})
+        .execute_js(
+            r#"(async () => { await LitActions.addNamedOutput({ name: "myOutput", value: "hello" }) })()"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        client.received::<AddNamedOutputRequest>(),
+        AddNamedOutputRequest {
+            name: "myOutput".to_string(),
+            value: "hello".to_string(),
+        }
     );
     assert!(client.received::<ExecutionResult>().success);
 }

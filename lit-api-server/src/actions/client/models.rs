@@ -51,7 +51,7 @@ pub struct ExecutionState {
     #[serde(skip)]
     pub sign_count: u32,
     #[serde(skip)]
-    pub signed_data: HashMap<String, SignedData>,
+    pub named_output: HashMap<String, String>,
     #[serde(skip)]
     pub claim_count: u32,
     // pub claim_data: HashMap<String, response::JsonPKPClaimKeyResponse>,

@@ -181,6 +181,22 @@ async fn op_get_lit_action_wallet_address(
 
 #[instrument(skip_all, ret)]
 #[op2(async, reentrant)]
+async fn op_add_named_output(
+    state: Rc<RefCell<OpState>>,
+    #[string] name: String,
+    #[string] value: String,
+) -> Result<(), JsErrorBox> {
+    ensure_not_blank!(name, "name");
+
+    remote_op_async!(op_add_named_output,
+        state,
+        AddNamedOutputRequest { name, value },
+        UnionRequest::AddNamedOutput(_) => Ok(())
+    )
+}
+
+#[instrument(skip_all, ret)]
+#[op2(async, reentrant)]
 async fn op_update_resource_usage(
     state: Rc<RefCell<OpState>>,
     tick: u32,
@@ -211,6 +227,7 @@ extension!(
     lit_actions,
     deps = [runtime],
     ops = [
+        op_add_named_output,
         op_aes_decrypt,
         op_aes_encrypt,
         op_get_lit_action_private_key,
