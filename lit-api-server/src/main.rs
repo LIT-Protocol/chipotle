@@ -1,14 +1,10 @@
-pub mod accounts;
-pub mod actions;
-pub mod config;
-pub mod core;
-pub mod dstack;
-pub mod error;
-pub mod utils;
-
-use crate::accounts::signer_pool::start_signer_pool;
-use crate::actions::grpc::GrpcClientPool;
-use crate::utils::chain_info::Chain;
+use lit_api_server::accounts;
+use lit_api_server::accounts::signer_pool::start_signer_pool;
+use lit_api_server::actions::grpc::GrpcClientPool;
+use lit_api_server::config;
+use lit_api_server::core;
+use lit_api_server::dstack;
+use lit_api_server::utils::chain_info::Chain;
 use moka::future::Cache;
 use rocket::response::Redirect;
 use rocket::serde::json::Json;
