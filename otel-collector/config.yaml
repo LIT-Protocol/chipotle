@@ -10,6 +10,10 @@
 #
 # See: https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/exporter/googlecloudexporter
 
+extensions:
+  health_check:
+    endpoint: 0.0.0.0:13133
+
 receivers:
   otlp:
     protocols:
@@ -54,6 +58,7 @@ exporters:
     sampling_thereafter: 500
 
 service:
+  extensions: [health_check]
   telemetry:
     logs:
       level: warn
