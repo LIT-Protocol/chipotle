@@ -92,7 +92,7 @@ deploy-new name=(app_name): docker-push _check_phala
     if [ -f .env ]; then set -a && . ./.env && set +a; fi
     [ -n "${PHALA_PRIVATE_KEY}" ] || { echo "error: PHALA_PRIVATE_KEY not set. Copy .env.example to .env and set your DstackApp key."; exit 1; }
     phala deploy -c docker-compose.deploy.yml -n "$APP_NAME" --instance-type {{instance_type}} \
-        --image dstack-0.5.4.1 \
+        --image dstack-0.5.6 \
         --kms base --private-key "${PHALA_PRIVATE_KEY}"
 
 # Run locally with Docker Compose (no Phala Cloud)
