@@ -62,7 +62,7 @@ impl<'r> rocket::request::FromRequest<'r> for CorrelationId {
     type Error = std::convert::Infallible;
 
     async fn from_request(req: &'r Request<'_>) -> rocket::request::Outcome<Self, Self::Error> {
-        let ctx = req.local_cache(|| RequestTracingContext::dummy());
+        let ctx = req.local_cache(RequestTracingContext::dummy);
         rocket::request::Outcome::Success(CorrelationId(ctx.user_provided_correlation_id.clone()))
     }
 }
@@ -142,7 +142,7 @@ impl Fairing for ObservabilityFairing {
     }
 
     async fn on_response<'r>(&self, req: &'r Request<'_>, res: &mut Response<'r>) {
-        let ctx = req.local_cache(|| RequestTracingContext::dummy());
+        let ctx = req.local_cache(RequestTracingContext::dummy);
         if let Some(ref id) = ctx.user_provided_correlation_id {
             res.set_header(Header::new(HEADER_X_CORRELATION_ID, id.clone()));
         }
