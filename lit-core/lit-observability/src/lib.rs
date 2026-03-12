@@ -35,12 +35,7 @@ pub fn init_subscriber(
         .or_else(|_e| EnvFilter::from_str(log_level))
         .map_err(|e| {
             error::unexpected_err(e.to_string(), Some("Could not create filter".to_string()))
-        })?
-        .add_directive("hyper=error".parse().unwrap())
-        .add_directive("tonic=error".parse().unwrap())
-        .add_directive("tower=error".parse().unwrap())
-        .add_directive("h2=error".parse().unwrap())
-        .add_directive("reqwest=error".parse().unwrap());
+        })?;
 
     let custom_formatter = logging::CustomEventFormatter::default();
 
