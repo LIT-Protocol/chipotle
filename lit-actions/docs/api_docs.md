@@ -3,25 +3,78 @@
 ### Table of Contents
 
 *   [Welcome][1]
-*   [Encryption][2]
-*   [Encrypt][3]
+*   [Signing][2]
+*   [signEcdsa][3]
     *   [Parameters][4]
-*   [Decrypt][5]
+*   [sign][5]
     *   [Parameters][6]
-*   [Action Utilities][7]
-*   [setResponse][8]
+*   [Encryption][7]
+*   [Encrypt][8]
     *   [Parameters][9]
-*   [Runtime Globals][10]
-*   [LitActions][11]
-*   [ethers][12]
-*   [uint8arrayToString][13]
+*   [Decrypt][10]
+    *   [Parameters][11]
+*   [Action Utilities][12]
+*   [setResponse][13]
     *   [Parameters][14]
-*   [uint8arrayFromString][15]
+*   [call][15]
     *   [Parameters][16]
+*   [callContract][17]
+    *   [Parameters][18]
+*   [Runtime Globals][19]
+*   [LitActions][20]
+*   [ethers][21]
+*   [uint8arrayToString][22]
+    *   [Parameters][23]
+*   [uint8arrayFromString][24]
+    *   [Parameters][25]
 
 ## Welcome
 
-Welcome to the Lit Actions SDK Docs.  These functions can be used inside a Lit Action.  You should prefix each function with "Lit.Actions." so to call "isPermittedAction()" you should do "Lit.Actions.isPermittedAction()"  To understand how these functions fit together, please view the documentation for this SDK, located at [https://developer.litprotocol.com/][17]
+Welcome to the Lit Actions SDK Docs.  These functions can be used inside a Lit Action.  You should prefix each function with "Lit.Actions." so to call "isPermittedAction()" you should do "Lit.Actions.isPermittedAction()"  To understand how these functions fit together, please view the documentation for this SDK, located at [https://developer.litprotocol.com/][26]
+
+## Signing
+
+
+
+## Lit.Actions.signEcdsa
+
+Ask the Lit Node to sign any data using the ECDSA Algorithm with its private key. The resulting signature will be returned to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
+
+### Parameters
+
+*   `params` **[Object][27]**&#x20;
+
+    *   `params.toSign` **[Uint8Array][28]** The message to sign
+    *   `params.publicKey` **[string][29]** The public key of the PKP
+    *   `params.sigName` **[string][29]** The name of the signature
+
+Returns **[Promise][30]<[Uint8Array][28]>** The resulting signature
+
+## Lit.Actions.sign
+
+### Parameters
+
+*   `toSign` **[Uint8array][28]** the message to sign
+*   `publicKey` **[string][29]** the public key of the PKP
+*   `sigName` **[string][29]** the name of the signature
+*   `signingScheme` **[string][29]** the name of the signing scheme
+    one of the following
+    "EcdsaK256Sha256"
+    "EcdsaP256Sha256"
+    "EcdsaP384Sha384"
+    "SchnorrEd25519Sha512"
+    "SchnorrK256Sha256"
+    "SchnorrP256Sha256"
+    "SchnorrP384Sha384"
+    "SchnorrRistretto25519Sha512"
+    "SchnorrEd448Shake256"
+    "SchnorrRedJubjubBlake2b512"
+    "SchnorrK256Taproot"
+    "SchnorrRedDecaf377Blake2b512"
+    "SchnorrkelSubstrate"
+    "Bls12381G1ProofOfPossession"
+
+Returns **[Uint8Array][28]** The resulting signature
 
 ## Encryption
 
@@ -31,12 +84,12 @@ Encryption and decryption functions.  These functions are used to encrypt and de
 
 ### Parameters
 
-*   `params` **[Object][18]**&#x20;
+*   `params` **[Object][27]**&#x20;
 
-    *   `params.publicKey` **[string][19]** The public key of the PKP
-    *   `params.message` **[string][19]** The message to encrypt
+    *   `params.publicKey` **[string][29]** The public key of the PKP
+    *   `params.message` **[string][29]** The message to encrypt
 
-Returns **[Promise][20]<[string][19]>** The ciphertext
+Returns **[Promise][30]<[string][29]>** The ciphertext
 
 ## Lit.Actions.Decrypt
 
@@ -44,12 +97,12 @@ Decrypt data using AES with a symmetric key
 
 ### Parameters
 
-*   `params` **[Object][18]**&#x20;
+*   `params` **[Object][27]**&#x20;
 
-    *   `params.publicKey` **[string][19]** The public key of the PKP
-    *   `params.ciphertext` **[string][19]** The ciphertext to decrypt
+    *   `params.publicKey` **[string][29]** The public key of the PKP
+    *   `params.ciphertext` **[string][29]** The ciphertext to decrypt
 
-Returns **[Promise][20]<[string][19]>** The decrypted plaintext
+Returns **[Promise][30]<[string][29]>** The decrypted plaintext
 
 ## Action Utilities
 
@@ -61,9 +114,35 @@ Set the response returned to the client
 
 ### Parameters
 
-*   `params` **[Object][18]**&#x20;
+*   `params` **[Object][27]**&#x20;
 
-    *   `params.response` **[string][19]** The response to send to the client.  You can put any string here, like you could use JSON.stringify on a JS object and send it here.
+    *   `params.response` **[string][29]** The response to send to the client.  You can put any string here, like you could use JSON.stringify on a JS object and send it here.
+
+## Lit.Actions.call
+
+Call a child Lit Action
+
+### Parameters
+
+*   `params` **[Object][27]**&#x20;
+
+    *   `params.ipfsId` **[string][29]** The IPFS ID of the Lit Action to call
+    *   `params.params` **[Object][27]?** Optional parameters to pass to the child Lit Action
+
+Returns **[Promise][30]<[string][29]>** The response from the child Lit Action.  Note that any signatures performed by the child Lit Action will be automatically combined and returned with the parent Lit Action to the Lit JS SDK client.
+
+## Lit.Actions.callContract
+
+Call a smart contract
+
+### Parameters
+
+*   `params` **[Object][27]**&#x20;
+
+    *   `params.chain` **[string][29]** The name of the chain to use.  Check out the lit docs "Supported Blockchains" page to find the name.  For example, "ethereum"
+    *   `params.txn` **[string][29]** The RLP Encoded txn, as a hex string
+
+Returns **[Promise][30]<[string][29]>** The response from calling the contract
 
 ## Runtime Globals
 
@@ -85,10 +164,10 @@ Convert a Uint8Array to a string.
 
 ### Parameters
 
-*   `array` **[Uint8Array][21]** The Uint8Array to convert
-*   `encoding` **[string][19]** The encoding to use (utf8 supported) (optional, default `'utf8'`)
+*   `array` **[Uint8Array][28]** The Uint8Array to convert
+*   `encoding` **[string][29]** The encoding to use (utf8 supported) (optional, default `'utf8'`)
 
-Returns **[string][19]** The string representation of the Uint8Array
+Returns **[string][29]** The string representation of the Uint8Array
 
 ## Lit.Actions.uint8arrayFromString
 
@@ -96,49 +175,67 @@ Convert a string to a Uint8Array.
 
 ### Parameters
 
-*   `string` **[string][19]** The string to convert
-*   `encoding` **[string][19]** The encoding to use (utf8 supported) (optional, default `'utf8'`)
+*   `string` **[string][29]** The string to convert
+*   `encoding` **[string][29]** The encoding to use (utf8 supported) (optional, default `'utf8'`)
 
-Returns **[Uint8Array][21]** The Uint8Array representation of the string
+Returns **[Uint8Array][28]** The Uint8Array representation of the string
 
 [1]: #welcome
 
-[2]: #encryption
+[2]: #signing
 
-[3]: #encrypt
+[3]: #signecdsa
 
 [4]: #parameters
 
-[5]: #decrypt
+[5]: #sign
 
 [6]: #parameters-1
 
-[7]: #action-utilities
+[7]: #encryption
 
-[8]: #setresponse
+[8]: #encrypt
 
 [9]: #parameters-2
 
-[10]: #runtime-globals
+[10]: #decrypt
 
-[11]: #litactions
+[11]: #parameters-3
 
-[12]: #ethers
+[12]: #action-utilities
 
-[13]: #uint8arraytostring
+[13]: #setresponse
 
-[14]: #parameters-3
+[14]: #parameters-4
 
-[15]: #uint8arrayfromstring
+[15]: #call
 
-[16]: #parameters-4
+[16]: #parameters-5
 
-[17]: https://developer.litprotocol.com/
+[17]: #callcontract
 
-[18]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object
+[18]: #parameters-6
 
-[19]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String
+[19]: #runtime-globals
 
-[20]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Promise
+[20]: #litactions
 
-[21]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array
+[21]: #ethers
+
+[22]: #uint8arraytostring
+
+[23]: #parameters-7
+
+[24]: #uint8arrayfromstring
+
+[25]: #parameters-8
+
+[26]: https://developer.litprotocol.com/
+
+[27]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object
+
+[28]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array
+
+[29]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String
+
+[30]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Promise

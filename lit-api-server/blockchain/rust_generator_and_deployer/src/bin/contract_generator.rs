@@ -35,9 +35,6 @@ fn process_folder(input_folder: &str, output_folder: &str) {
 
     let files = result.unwrap();
     for file in files.flatten() {
-        if file.path().to_str().unwrap().contains("DiamondPattern") {
-            continue;
-        }
         println!("Processing file: {:?}", file.path());
         if file.file_type().unwrap().is_dir() {
             if file.path().to_str().unwrap().ends_with("Facets") {

@@ -33,8 +33,6 @@ const DEFAULT_MAX_RETRIES: u32 = 3;
 pub struct Client {
     #[builder(default, setter(into))]
     api_key: String,
-    #[builder(default, setter(into))]
-    ipfs_id: String,
     // Config
     #[builder(default, setter(into, strip_option))]
     socket_path: Option<PathBuf>,

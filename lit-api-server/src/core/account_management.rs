@@ -14,21 +14,59 @@ use crate::core::v1::models::response::{
     NewAccountResponse, NodeChainConfigResponse, WalletItem,
 };
 use crate::dstack::v1::get_client_key;
-use crate::utils::generate_unique_derivation_path;
-use crate::utils::parse_to_hash::{
-    hex_array_to_h160_array, hex_array_to_u256_array, ipfs_cid_to_u256, string_group_id_to_u256,
-};
 use crate::{accounts, dstack};
 use elliptic_curve::group::GroupEncoding;
 use ethers::signers::{LocalWallet, Signer};
 use ethers::types::{H160, U256};
+use ethers::utils::keccak256;
 use ipfs_hasher::IpfsHasher;
-use lit_core::utils::binary::{bytes_to_0x_hex, hex_to_bytes};
+use lit_core::utils::binary::{bytes_to_0x_hex, bytes_to_hex, hex_to_bytes};
+use rand::Rng;
 use rocket::serde::json::Json;
+/// Parse U256 from decimal string or hex string (with or without 0x prefix).
+fn parse_u256(s: &str) -> Result<U256, ApiStatus> {
+    let s = s.trim();
+    if s.starts_with("0x") || s.starts_with("0X") {
+        let bytes = hex_to_bytes(s)
+            .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex for U256"))?;
+        Ok(U256::from_big_endian(&bytes))
+    } else {
+        U256::from_dec_str(s)
+            .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid decimal for U256"))
+    }
+}
+
+/// Parse vec of hex strings to Vec<U256> (for permitted_actions / pkps hashes).
+fn parse_u256_hex_list(strings: &[String]) -> Result<Vec<U256>, ApiStatus> {
+    strings
+        .iter()
+        .map(|s| {
+            let bytes = hex_to_bytes(s.trim())
+                .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex in list"))?;
+            Ok(U256::from_big_endian(&bytes))
+        })
+        .collect::<Result<Vec<_>, _>>()
+}
+
+fn get_random_secret() -> [u8; 32] {
+    let mut secret: [u8; 32] = [0; 32];
+    // Get a thread-local random number generator and fill the array.
+    rand::thread_rng().fill(&mut secret);
+    secret
+}
+
+// Generate a unique derivation path for a new wallet.
+fn generate_unique_derivation_path() -> Result<(U256, String), ApiStatus> {
+    let seed_bytes = get_random_secret();
+    let derivation_bytes = keccak256(seed_bytes);
+    let derivation_u256 = U256::from_big_endian(&derivation_bytes);
+    let derivation_path = bytes_to_hex(derivation_bytes);
+    Ok((derivation_u256, derivation_path))
+}
 
 // Create a new wallet and return the public key, wallet address, and secret.
 async fn create_new_wallet() -> Result<(String, H160, [u8; 32], U256), ApiStatus> {
-    let (derivation_u256, derivation_path) = generate_unique_derivation_path();
+    let (derivation_u256, derivation_path) = generate_unique_derivation_path()?;
     tracing::info!(
         "Creating new wallet with derivation path: {}",
         derivation_path
@@ -99,7 +137,6 @@ pub async fn create_wallet(
 ) -> Result<CreateWalletResponse, ApiStatus> {
     let (_public_key, wallet_address, _secret, derivation_u256) = create_new_wallet().await?;
 
-    tracing::info!("Creating wallet with address: {:?}", wallet_address);
     // technically this is NOT a derivaton path at all, but it's a stand-in for now
     accounts::register_wallet_derivation(
         signer_pool,
@@ -127,22 +164,17 @@ pub async fn add_group(
     api_key: &str,
     req: Json<AddGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let cid_hashes = match req.all_actions_permitted {
-        true => vec![U256::zero()],
-        false => hex_array_to_u256_array(&req.permitted_actions)?,
-    };
-    let pkp_ids = match req.all_wallets_permitted {
-        true => vec![H160::zero()],
-        false => hex_array_to_h160_array(&req.pkps)?,
-    };
-
+    let permitted_actions = parse_u256_hex_list(&req.permitted_actions)?;
+    let pkps = parse_u256_hex_list(&req.pkps)?;
     accounts::add_group(
         signer_pool,
         api_key,
         &req.group_name,
         &req.group_description,
-        cid_hashes,
-        pkp_ids,
+        permitted_actions,
+        pkps,
+        req.all_wallets_permitted,
+        req.all_actions_permitted,
     )
     .await
     .map_err(|e| ApiStatus::internal_server_error(e, "add_group failed"))?;
@@ -154,7 +186,7 @@ pub async fn add_action_to_group(
     api_key: &str,
     req: Json<AddActionToGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let group_id = string_group_id_to_u256(&req.group_id)?;
+    let group_id = parse_u256(&req.group_id)?;
     let name = req.name.as_deref().unwrap_or("");
     let description = req.description.as_deref().unwrap_or("");
     accounts::add_action_to_group(
@@ -175,7 +207,7 @@ pub async fn add_pkp_to_group(
     api_key: &str,
     req: Json<AddPkpToGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let group_id = string_group_id_to_u256(&req.group_id)?;
+    let group_id = parse_u256(&req.group_id)?;
     let wallet_address_bytes = hex_to_bytes(&req.pkp_id)?;
     if wallet_address_bytes.len() != 20 {
         return Err(ApiStatus::bad_request(
@@ -195,7 +227,7 @@ pub async fn remove_pkp_from_group(
     api_key: &str,
     req: Json<RemovePkpFromGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let group_id = string_group_id_to_u256(&req.group_id)?;
+    let group_id = parse_u256(&req.group_id)?;
     let src = hex_to_bytes(&req.pkp_id)?;
     if src.len() != 20 {
         return Err(ApiStatus::bad_request(
@@ -215,18 +247,8 @@ pub async fn add_usage_api_key(
     api_key: &str,
     req: Json<AddUsageApiKeyRequest>,
 ) -> Result<AddUsageApiKeyResponse, ApiStatus> {
-    let ten_years_from_now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| {
-            ApiStatus::internal_server_error(
-                anyhow::anyhow!(e),
-                "System clock is before the Unix epoch",
-            )
-        })?
-        .as_secs()
-        + 3600 * 24 * 365 * 10;
-    let expiration = U256::from(ten_years_from_now);
-    let balance = U256::from(10000000);
+    let expiration = parse_u256(&req.expiration)?;
+    let balance = parse_u256(&req.balance)?;
 
     let (_public_key, wallet_address, secret, derivation_u256) = create_new_wallet().await?;
 
@@ -277,10 +299,18 @@ pub async fn update_group(
     api_key: &str,
     req: Json<UpdateGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let group_id = string_group_id_to_u256(&req.group_id)?;
-    accounts::update_group(signer_pool, api_key, group_id, &req.name, &req.description)
-        .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "update_group failed"))?;
+    let group_id = parse_u256(&req.group_id)?;
+    accounts::update_group(
+        signer_pool,
+        api_key,
+        group_id,
+        &req.name,
+        &req.description,
+        req.all_wallets_permitted,
+        req.all_actions_permitted,
+    )
+    .await
+    .map_err(|e| ApiStatus::internal_server_error(e, "update_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
@@ -289,7 +319,7 @@ pub async fn remove_action_from_group(
     api_key: &str,
     req: Json<RemoveActionFromGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let group_id = string_group_id_to_u256(&req.group_id)?;
+    let group_id = parse_u256(&req.group_id)?;
     accounts::remove_action_from_group_by_cid(signer_pool, api_key, group_id, &req.action_ipfs_cid)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "remove_action_from_group failed"))?;
@@ -301,8 +331,8 @@ pub async fn update_action_metadata(
     api_key: &str,
     req: Json<UpdateActionMetadataRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let group_id = string_group_id_to_u256(&req.group_id)?;
-    let action_hash = ipfs_cid_to_u256(&req.action_ipfs_cid)?;
+    let group_id = parse_u256(&req.group_id)?;
+    let action_hash = U256::from_big_endian(&keccak256(&req.action_ipfs_cid));
     accounts::update_action_metadata(
         signer_pool,
         api_key,
@@ -333,38 +363,11 @@ pub async fn update_usage_api_key_metadata(
     Ok(AccountOpResponse { success: true })
 }
 
-#[allow(dead_code)]
-fn wallet_metadata_to_item(m: &accounts::Metadata) -> ListMetadataItem {
-    metadata_to_item(m, "n/a", "Any", "Any wallet in this account.")
-}
-
-fn action_metadata_to_item(m: &accounts::Metadata) -> ListMetadataItem {
-    metadata_to_item(m, "n/a", "Any", "Any action received.")
-}
-
-fn group_metadata_to_item(m: &accounts::Metadata) -> ListMetadataItem {
-    metadata_to_item(m, "n/a", "Any", "Any group in this account.")
-}
-
-fn metadata_to_item(
-    m: &accounts::Metadata,
-    wildcard_id: &str,
-    wildcard_name: &str,
-    wildcard_description: &str,
-) -> ListMetadataItem {
-    if m.id == U256::zero() {
-        return ListMetadataItem {
-            id: wildcard_id.to_string(),
-            name: wildcard_name.to_string(),
-            description: wildcard_description.to_string(),
-        };
-    }
-
+fn metadata_to_item(m: &accounts::Metadata) -> ListMetadataItem {
     let mut bytes = [0; 32];
     m.id.to_big_endian(&mut bytes);
-
     ListMetadataItem {
-        id: bytes_to_0x_hex(bytes),
+        id: bytes_to_hex(bytes),
         name: m.name.clone(),
         description: m.description.clone(),
     }
@@ -372,11 +375,11 @@ fn metadata_to_item(
 
 #[allow(dead_code)]
 fn usage_api_key_to_api_key_item(
-    m: &accounts::contracts::account_config_contract::UsageApiKeyReturn,
+    m: &accounts::contracts::account_config_contract::UsageApiKey,
 ) -> ApiKeyItem {
     let mut bytes = [0; 32];
     m.metadata.id.to_big_endian(&mut bytes);
-    let id = bytes_to_0x_hex(bytes);
+    let id = bytes_to_hex(bytes);
 
     ApiKeyItem {
         id,
@@ -389,11 +392,11 @@ fn usage_api_key_to_api_key_item(
 
 pub async fn list_api_keys(
     api_key: &str,
-    page_number: u64,
-    page_size: u64,
+    page_number: &str,
+    page_size: &str,
 ) -> Result<Vec<ApiKeyItem>, ApiStatus> {
-    let pn = U256::from(page_number);
-    let ps = U256::from(page_size);
+    let pn = parse_u256(page_number)?;
+    let ps = parse_u256(page_size)?;
     let list = accounts::list_api_keys(api_key, pn, ps)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_api_keys failed"))?;
@@ -413,24 +416,24 @@ pub async fn list_api_keys(
 
 pub async fn list_groups(
     api_key: &str,
-    page_number: u64,
-    page_size: u64,
+    page_number: &str,
+    page_size: &str,
 ) -> Result<Vec<ListMetadataItem>, ApiStatus> {
-    let pn = U256::from(page_number);
-    let ps = U256::from(page_size);
+    let pn = parse_u256(page_number)?;
+    let ps = parse_u256(page_size)?;
     let list = accounts::list_groups(api_key, pn, ps)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_groups failed"))?;
-    Ok(list.iter().map(group_metadata_to_item).collect())
+    Ok(list.iter().map(metadata_to_item).collect())
 }
 
 pub async fn list_wallets(
     api_key: &str,
-    page_number: u64,
-    page_size: u64,
+    page_number: &str,
+    page_size: &str,
 ) -> Result<Vec<WalletItem>, ApiStatus> {
-    let pn = U256::from(page_number);
-    let ps = U256::from(page_size);
+    let pn = parse_u256(page_number)?;
+    let ps = parse_u256(page_size)?;
     let list = accounts::list_wallets(api_key, pn, ps)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_wallets failed"))?;
@@ -441,7 +444,7 @@ pub async fn list_wallets(
             id: m.id.to_string(),
             name: m.name.clone(),
             description: m.description.clone(),
-            wallet_address: bytes_to_0x_hex(m.pkp_id.as_bytes()),
+            wallet_address: bytes_to_hex(m.wallet_address.as_bytes()),
         })
         .collect();
     Ok(wallet_items)
@@ -450,12 +453,12 @@ pub async fn list_wallets(
 pub async fn list_wallets_in_group(
     api_key: &str,
     group_id: &str,
-    page_number: u64,
-    page_size: u64,
+    page_number: &str,
+    page_size: &str,
 ) -> Result<Vec<WalletItem>, ApiStatus> {
-    let gid = string_group_id_to_u256(group_id)?;
-    let pn = U256::from(page_number);
-    let ps = U256::from(page_size);
+    let gid = parse_u256(group_id)?;
+    let pn = parse_u256(page_number)?;
+    let ps = parse_u256(page_size)?;
     let list = accounts::list_wallets_in_group(api_key, gid, pn, ps)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_wallets_in_group failed"))?;
@@ -466,7 +469,7 @@ pub async fn list_wallets_in_group(
             id: m.id.to_string(),
             name: m.name.clone(),
             description: m.description.clone(),
-            wallet_address: bytes_to_0x_hex(m.pkp_id.as_bytes()),
+            wallet_address: bytes_to_hex(m.wallet_address.as_bytes()),
         })
         .collect();
     Ok(wallet_items)
@@ -475,18 +478,16 @@ pub async fn list_wallets_in_group(
 pub async fn list_actions(
     api_key: &str,
     group_id: &str,
-    page_number: u64,
-    page_size: u64,
+    page_number: &str,
+    page_size: &str,
 ) -> Result<Vec<ListMetadataItem>, ApiStatus> {
-    let gid = string_group_id_to_u256(group_id)?;
-    let pn = U256::from(page_number);
-    let ps = U256::from(page_size);
+    let gid = parse_u256(group_id)?;
+    let pn = parse_u256(page_number)?;
+    let ps = parse_u256(page_size)?;
     let list = accounts::list_actions(api_key, gid, pn, ps)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?;
-
-    let list = list.iter().map(action_metadata_to_item).collect();
-    Ok(list)
+    Ok(list.iter().map(metadata_to_item).collect())
 }
 
 pub async fn get_chain_info() -> Result<NodeChainConfigResponse, ApiStatus> {

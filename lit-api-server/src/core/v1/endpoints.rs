@@ -209,6 +209,7 @@ async fn sign_with_pkp(
 #[post("/lit_action", format = "json", data = "<lit_action_request>")]
 async fn lit_action(
     api_key: ApiKey,
+    correlation_id: crate::observability::CorrelationId,
     grpc_client_pool: &State<GrpcClientPool<tonic::transport::Channel>>,
     ipfs_cache: &State<Cache<String, String>>,
     http_client: &State<reqwest::Client>,
@@ -218,6 +219,7 @@ async fn lit_action(
         response: ApiResult(
             core_features::lit_action(
                 api_key.0.as_str(),
+                correlation_id.0.clone(),
                 grpc_client_pool.inner(),
                 ipfs_cache.inner(),
                 http_client.inner(),
@@ -433,12 +435,17 @@ async fn update_usage_api_key_metadata(
 #[get("/list_api_keys?<page_number>&<page_size>")]
 async fn list_api_keys(
     api_key: ApiKey,
-    page_number: u64,
-    page_size: u64,
+    page_number: String,
+    page_size: String,
 ) -> OpenApiResponse<Vec<ApiKeyItem>, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
-            account_management::list_api_keys(api_key.0.as_str(), page_number, page_size).await,
+            account_management::list_api_keys(
+                api_key.0.as_str(),
+                page_number.as_str(),
+                page_size.as_str(),
+            )
+            .await,
         )
         .into(),
     }
@@ -448,12 +455,17 @@ async fn list_api_keys(
 #[get("/list_groups?<page_number>&<page_size>")]
 async fn list_groups(
     api_key: ApiKey,
-    page_number: u64,
-    page_size: u64,
+    page_number: String,
+    page_size: String,
 ) -> OpenApiResponse<Vec<ListMetadataItem>, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
-            account_management::list_groups(api_key.0.as_str(), page_number, page_size).await,
+            account_management::list_groups(
+                api_key.0.as_str(),
+                page_number.as_str(),
+                page_size.as_str(),
+            )
+            .await,
         )
         .into(),
     }
@@ -463,12 +475,17 @@ async fn list_groups(
 #[get("/list_wallets?<page_number>&<page_size>")]
 async fn list_wallets(
     api_key: ApiKey,
-    page_number: u64,
-    page_size: u64,
+    page_number: String,
+    page_size: String,
 ) -> OpenApiResponse<Vec<WalletItem>, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
-            account_management::list_wallets(api_key.0.as_str(), page_number, page_size).await,
+            account_management::list_wallets(
+                api_key.0.as_str(),
+                page_number.as_str(),
+                page_size.as_str(),
+            )
+            .await,
         )
         .into(),
     }
@@ -479,16 +496,16 @@ async fn list_wallets(
 async fn list_wallets_in_group(
     api_key: ApiKey,
     group_id: String,
-    page_number: u64,
-    page_size: u64,
+    page_number: String,
+    page_size: String,
 ) -> OpenApiResponse<Vec<WalletItem>, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
             account_management::list_wallets_in_group(
                 api_key.0.as_str(),
                 group_id.as_str(),
-                page_number,
-                page_size,
+                page_number.as_str(),
+                page_size.as_str(),
             )
             .await,
         )
@@ -501,16 +518,16 @@ async fn list_wallets_in_group(
 async fn list_actions(
     api_key: ApiKey,
     group_id: String,
-    page_number: u64,
-    page_size: u64,
+    page_number: String,
+    page_size: String,
 ) -> OpenApiResponse<Vec<ListMetadataItem>, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
             account_management::list_actions(
                 api_key.0.as_str(),
                 group_id.as_str(),
-                page_number,
-                page_size,
+                page_number.as_str(),
+                page_size.as_str(),
             )
             .await,
         )

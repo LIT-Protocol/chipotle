@@ -6,6 +6,13 @@
 const ACCOUNT_CONFIG_VIEW_ABI = [
   {
     inputs: [],
+    name: 'owner',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
     name: 'pricingOperator',
     outputs: [{ internalType: 'address', name: '', type: 'address' }],
     stateMutability: 'view',
@@ -36,13 +43,6 @@ const ACCOUNT_CONFIG_VIEW_ABI = [
   {
     inputs: [],
     name: 'rebalanceAmount',
-    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
-    stateMutability: 'view',
-    type: 'function',
-  },
-  {
-    inputs: [],
-    name: 'pkpCount',
     outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
     stateMutability: 'view',
     type: 'function',
@@ -298,6 +298,8 @@ async function fetchContractValues() {
   }
 
   hideError();
+  setValue('val-owner', '…', false);
+  setValue('val-owner-balance', '', false);
   setValue('val-pricing-operator', '…', false);
   setValue('val-pricing-operator-balance', '', false);
   setValue('val-admin-api-payer', '…', false);
@@ -305,28 +307,27 @@ async function fetchContractValues() {
   setValue('val-payer-count', '…', false);
   setValue('val-requested-api-payer-count', '…', false);
   setValue('val-rebalance-amount', '…', false);
-  setValue('val-pkp-count', '…', false);
   if (results) results.style.display = 'block';
 
   try {
     const provider = new ethers.JsonRpcProvider(rpcUrl);
     const contract = new ethers.Contract(contractAddress, ACCOUNT_CONFIG_VIEW_ABI, provider);
 
-    const [pricingOperator, adminApiPayer, apiPayerCount, requestedApiPayerCount, rebalanceAmountWei, pkpCount] = await Promise.all([
+    const [owner, pricingOperator, adminApiPayer, apiPayerCount, requestedApiPayerCount, rebalanceAmountWei] = await Promise.all([
+      contract.owner(),
       contract.pricingOperator(),
       contract.adminApiPayerAccount(),
       contract.apiPayerCount(),
       contract.requestedApiPayerCount(),
       contract.rebalanceAmount(),
-      contract.pkpCount(),
     ]);
 
+    setValue('val-owner', owner ?? '—', !owner);
     setValue('val-pricing-operator', pricingOperator ?? '—', !pricingOperator);
     setValue('val-admin-api-payer', adminApiPayer ?? '—', !adminApiPayer);
     setValue('val-payer-count', String(apiPayerCount), false);
     setValue('val-requested-api-payer-count', String(requestedApiPayerCount), false);
     setValue('val-rebalance-amount', ethers.formatEther(rebalanceAmountWei) + ' ETH', false);
-    setValue('val-pkp-count', String(pkpCount), false);
     populateApiPayerCountDropdown(Number(requestedApiPayerCount));
 
     const rebalanceInput = el('rebalance-amount');
@@ -334,6 +335,7 @@ async function fetchContractValues() {
 
     // Fetch balances asynchronously so they don't block the main display.
     const balanceTargets = [
+      [owner,        'val-owner-balance'],
       [pricingOperator, 'val-pricing-operator-balance'],
       [adminApiPayer,   'val-admin-api-payer-balance'],
     ];

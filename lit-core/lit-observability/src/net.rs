@@ -10,8 +10,10 @@ pub(crate) fn init_tonic_exporter_builder(endpoint: &str) -> Result<TonicExporte
 
 pub mod grpc {
     pub use tonic_middleware;
+    use tonic::codegen::http::header::{HeaderName, HeaderValue};
     use tracing::Instrument;
     use tracing::info_span;
+    use uuid::Uuid;
     #[cfg(feature = "otlp")]
     use tracing_opentelemetry::OpenTelemetrySpanExt;
 
@@ -26,6 +28,9 @@ pub mod grpc {
 
     #[cfg(feature = "otlp")]
     use crate::tracing::propagation::HttpMetadataMap;
+
+    const HEADER_X_CORRELATION_ID: &str = "x-correlation-id";
+    const HEADER_X_REQUEST_ID: &str = "x-request-id";
 
     /// TracingMiddleware is a middleware that handles tracing context that is propagated across process boundaries.
     #[derive(Clone)]
@@ -48,29 +53,48 @@ pub mod grpc {
 
             let correlation_id = req
                 .headers()
-                .get("x-correlation-id")
-                .or_else(|| req.headers().get("x-request-id"))
+                .get(HEADER_X_CORRELATION_ID)
+                .or_else(|| req.headers().get(HEADER_X_REQUEST_ID))
                 .and_then(|h| h.to_str().ok())
-                .filter(|s| !s.is_empty());
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .unwrap_or_else(|| Uuid::new_v4().to_string());
+            let request_id = req
+                .headers()
+                .get(HEADER_X_REQUEST_ID)
+                .or_else(|| req.headers().get(HEADER_X_CORRELATION_ID))
+                .and_then(|h| h.to_str().ok())
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .unwrap_or_else(|| correlation_id.clone());
 
-            let info_span = match correlation_id {
-                Some(id) => info_span!(
-                    "handle_grpc_request",
-                    method = %req.method(),
-                    path = %req.uri().path(),
-                    correlation_id = %id,
-                ),
-                None => info_span!(
-                    "handle_grpc_request",
-                    method = %req.method(),
-                    path = %req.uri().path(),
-                ),
-            };
+            let info_span = info_span!(
+                "handle_grpc_request",
+                method = %req.method(),
+                path = %req.uri().path(),
+                correlation_id = %correlation_id,
+                request_id = %request_id,
+            );
 
             #[cfg(feature = "otlp")]
             info_span.set_parent(parent_cx);
 
-            service.call(req).instrument(info_span).await
+            let mut response = service.call(req).instrument(info_span).await?;
+
+            if let (Ok(name_correlation), Ok(value_correlation)) = (
+                HeaderName::try_from(HEADER_X_CORRELATION_ID),
+                HeaderValue::try_from(correlation_id.as_str()),
+            ) {
+                response.headers_mut().insert(name_correlation, value_correlation);
+            }
+            if let (Ok(name_request), Ok(value_request)) = (
+                HeaderName::try_from(HEADER_X_REQUEST_ID),
+                HeaderValue::try_from(request_id.as_str()),
+            ) {
+                response.headers_mut().insert(name_request, value_request);
+            }
+
+            Ok(response)
         }
     }
 }

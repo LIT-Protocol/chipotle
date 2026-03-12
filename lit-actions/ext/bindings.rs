@@ -87,6 +87,34 @@ async fn op_increment_fetch_count(state: Rc<RefCell<OpState>>) -> Result<u32, Js
 #[instrument(skip_all, ret)]
 #[op2(async, reentrant)]
 #[string]
+async fn op_sign(
+    state: Rc<RefCell<OpState>>,
+    #[buffer(copy)] to_sign: Vec<u8>,
+    #[string] pkp_id: String,
+    #[string] sig_name: String,
+    #[string] signing_scheme: String,
+    #[string] _key_set_id: String,
+) -> Result<String, JsErrorBox> {
+    ensure_not_empty!(to_sign, "toSign");
+    ensure_not_blank!(pkp_id, "pkpId");
+    ensure_not_blank!(sig_name, "sigName");
+    ensure_not_blank!(signing_scheme, "signingScheme");
+
+    remote_op_async!(op_sign,
+        state,
+        SignRequest {
+            to_sign,
+            pkp_id,
+            sig_name,
+            signing_scheme,
+        },
+        UnionRequest::Sign(resp) => Ok(resp.success)
+    )
+}
+
+#[instrument(skip_all, ret)]
+#[op2(async, reentrant)]
+#[string]
 async fn op_aes_encrypt(
     state: Rc<RefCell<OpState>>,
     #[string] pkp_id: String,
@@ -117,6 +145,44 @@ async fn op_aes_decrypt(
         state,
         AesDecryptRequest { pkp_id, ciphertext },
         UnionRequest::AesDecrypt(resp) => Ok(resp.plaintext)
+    )
+}
+
+#[instrument(skip_all, ret)]
+#[op2(async, reentrant)]
+#[string]
+async fn op_call_contract(
+    state: Rc<RefCell<OpState>>,
+    #[string] chain: String,
+    #[string] txn: String,
+) -> Result<String, JsErrorBox> {
+    ensure_not_blank!(chain); // ensure_one_of not feasible as there are too many supported blockchains
+    ensure_not_blank!(txn);
+
+    remote_op_async!(op_call_contract,
+        state,
+        CallContractRequest { chain, txn },
+        UnionRequest::CallContract(resp) => Ok(resp.result)
+    )
+}
+
+#[instrument(skip_all, ret)]
+#[op2(async, reentrant)]
+#[string]
+async fn op_call_child(
+    state: Rc<RefCell<OpState>>,
+    #[string] ipfs_id: String,
+    #[serde] params: Option<serde_json::Value>,
+) -> Result<String, JsErrorBox> {
+    ensure_not_blank!(ipfs_id, "ipfsId");
+
+    remote_op_async!(op_call_child,
+        state,
+        CallChildRequest {
+            ipfs_id,
+            params: params.as_ref().map(serde_json::to_vec).transpose().map_err(JsErrorBox::from_err)?,
+        },
+        UnionRequest::CallChild(resp) => Ok(resp.response)
     )
 }
 
@@ -154,8 +220,11 @@ extension!(
     ops = [
         op_aes_decrypt,
         op_aes_encrypt,
+        op_call_child,
+        op_call_contract,
         op_increment_fetch_count,
         op_set_response,
+        op_sign,
         op_update_resource_usage,
     ],
     esm_entry_point = "ext:lit_actions/99_patches.js",
@@ -164,6 +233,7 @@ extension!(
         "00_ethers.js",
         "00_viem.js",
         "02_litActionsSDK.js",
+        "06_litActionsSDK_viem.js",
         "99_patches.js",
     ],
     middleware = |op| match op.name {

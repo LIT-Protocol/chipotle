@@ -227,6 +227,11 @@
       <div class="results" id="results" style="display: none">
         <h2>Contract values</h2>
         <div class="result-row">
+          <span class="result-label">owner</span
+          ><span class="result-value" id="val-owner">—</span
+          ><span class="result-value" id="val-owner-balance" style="color:var(--muted);margin-left:auto"></span>
+        </div>
+        <div class="result-row">
           <span class="result-label">pricing</span
           ><span class="result-value" id="val-pricing-operator">—</span
           ><span class="result-value" id="val-pricing-operator-balance" style="color:var(--muted);margin-left:auto"></span>
@@ -247,10 +252,6 @@
         <div class="result-row">
           <span class="result-label">Rebalance</span
           ><span class="result-value" id="val-rebalance-amount">—</span>
-        </div>
-        <div class="result-row">
-          <span class="result-label">PKP count</span
-          ><span class="result-value" id="val-pkp-count">—</span>
         </div>
       </div>
       <div class="error" id="error" style="display: none"></div>

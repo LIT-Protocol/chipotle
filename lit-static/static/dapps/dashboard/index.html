@@ -215,9 +215,7 @@
               <div class="card-header">
                 <h3 class="card-title">Actions in group</h3>
                 <div class="card-header-actions">
-                  <select id="actions-group-id" class="input input-sm" style="width: 12rem;">
-                    <option value="" disabled selected>Loading groups…</option>
-                  </select>
+                  <input type="text" id="actions-group-id" class="input input-sm" placeholder="Group ID" style="width: 6rem;">
                   <button type="button" id="btn-load-actions" class="btn btn-sm btn-outline">Refresh</button>
                 </div>
               </div>
@@ -272,13 +270,7 @@
               </div>
               <div class="card-body">
                 <div class="form-group">
-                  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:0.35rem;">
-                    <label for="action-runner-code" style="margin-bottom:0;">Lit Action code</label>
-                    <div style="display:flex;align-items:center;gap:0.5rem;flex-shrink:0;">
-                      <label for="action-runner-usage-key" style="margin-bottom:0;white-space:nowrap;font-size:0.8125rem;">Usage API Key</label>
-                      <input type="text" id="action-runner-usage-key" class="input" style="width:25rem;font-family:'JetBrains Mono',monospace;font-size:0.8125rem;padding:0.35rem 0.6rem;" placeholder="optional — overrides account key" />
-                    </div>
-                  </div>
+                  <label for="action-runner-code">Lit Action code</label>
                   <textarea id="action-runner-code" class="input textarea-lg" rows="10" placeholder="Paste your Lit Action JavaScript code here (e.g. const go = async () => { Lit.Actions.setResponse({ response: JSON.stringify('hello') }); }; go();)" spellcheck="false"></textarea>
                 </div>
                 <div class="form-group">

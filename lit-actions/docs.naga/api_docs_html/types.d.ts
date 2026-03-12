@@ -150,6 +150,60 @@ export declare namespace Lit {
       keySetId: string;
     }): Promise<string>;
     /**
+     * Ask the Lit Node to sign any data using the ECDSA Algorithm with it's private key share.  The resulting signature share will be returned to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
+     * @name Lit.Actions.signEcdsa
+     * @function signEcdsa
+     * @param {Object} params
+     * @param {Uint8Array} params.toSign The data to sign.  Should be an array of 8-bit integers.
+     * @param {string} params.publicKey The public key of the PKP you wish to sign with
+     * @param {string} params.sigName You can put any string here.  This is used to identify the signature in the response by the Lit JS SDK.  This is useful if you are signing multiple messages at once.  When you get the final signature out, it will be in an object with this signature name as the key.
+     * @param {string} params.keySetId The key set id to use
+     * @returns {Promise<string>} This function will return the string "success" if it works.  The signature share is returned behind the scenes to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
+     */
+    function signEcdsa({
+      toSign,
+      publicKey,
+      sigName,
+      keySetId,
+    }: {
+      toSign: Uint8Array;
+      publicKey: string;
+      sigName: string;
+      keySetId: string;
+    }): Promise<string>;
+    /**
+     * @param {Uint8array} toSign the message to sign
+     * @param {string} publicKey the public key of the PKP
+     * @param {string} sigName the name of the signature
+     * @param {string} signingScheme the name of the signing scheme
+     *   one of the following
+     *   "EcdsaK256Sha256"
+     *   "EcdsaP256Sha256"
+     *   "EcdsaP384Sha384"
+     *   "SchnorrEd25519Sha512"
+     *   "SchnorrK256Sha256"
+     *   "SchnorrP256Sha256"
+     *   "SchnorrP384Sha384"
+     *   "SchnorrRistretto25519Sha512"
+     *   "SchnorrEd448Shake256"
+     *   "SchnorrRedJubjubBlake2b512"
+     *   "SchnorrK256Taproot"
+     *   "SchnorrRedDecaf377Blake2b512"
+     *   "SchnorrkelSubstrate"
+     *   "Bls12381G1ProofOfPossession"
+     * @param {string} params.keySetId The key set id to use
+     * @name Lit.Actions.sign
+     * @function sign
+     * @returns {Uint8array} The resulting signature share
+     */
+    function sign({
+      toSign,
+      publicKey,
+      sigName,
+      signingScheme,
+      keySetId,
+    }: Uint8array): Uint8array;
+    /**
      * Ask the Lit Node to sign a message using the eth_personalSign algorithm.  The resulting signature share will be returned to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
      * @name Lit.Actions.ethPersonalSignMessageEcdsa
      * @function ethPersonalSignMessageEcdsa
@@ -198,6 +252,38 @@ export declare namespace Lit {
      * @param {string} params.response The response to send to the client.  You can put any string here, like you could use JSON.stringify on a JS object and send it here.
      */
     function setResponse({ response }: { response: string }): any;
+    /**
+     * Call a child Lit Action
+     * @name Lit.Actions.call
+     * @function call
+     * @param {Object} params
+     * @param {string} params.ipfsId The IPFS ID of the Lit Action to call
+     * @param {Object=} params.params Optional parameters to pass to the child Lit Action
+     * @returns {Promise<string>} The response from the child Lit Action.  Note that any signatures performed by the child Lit Action will be automatically combined and returned with the parent Lit Action to the Lit JS SDK client.
+     */
+    function call({
+      ipfsId,
+      params,
+    }: {
+      ipfsId: string;
+      params?: any | undefined;
+    }): Promise<string>;
+    /**
+     * Call a smart contract
+     * @name Lit.Actions.callContract
+     * @function callContract
+     * @param {Object} params
+     * @param {string} params.chain The name of the chain to use.  Check out the lit docs "Supported Blockchains" page to find the name.  For example, "ethereum"
+     * @param {string} params.txn The RLP Encoded txn, as a hex string
+     * @returns {Promise<string>} The response from calling the contract
+     */
+    function callContract({
+      chain,
+      txn,
+    }: {
+      chain: string;
+      txn: string;
+    }): Promise<string>;
     /**
      * Convert a Uint8Array to a string.  This is a re-export of this function: https://www.npmjs.com/package/uint8arrays#tostringarray-encoding--utf8
      * @name Lit.Actions.uint8arrayToString

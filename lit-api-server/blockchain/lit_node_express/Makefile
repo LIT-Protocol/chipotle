@@ -1,4 +1,4 @@
-# Run from blockchain/lit_node_express/ (directory containing this Makefile).
+# Run from blockchain/swaps/ (directory containing this MakeFile).
 # Paths artifacts/contracts and ../../src/... are relative to this directory.
 
 RUST_PROJECT := ../rust_generator_and_deployer
@@ -10,32 +10,24 @@ ANVIL_SECRET := 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff
 
 # 1. Compile Solidity contracts with Hardhat
 compile:
-	npx hardhat clean
 	npx hardhat compile
-	
-facade:
-	node generate-diamond-abi.mjs
 
 # 2. Generate Rust bindings from artifacts. Args: input_folder, output_folder
-generate: compile facade
+generate: compile
 	cd $(RUST_PROJECT) && cargo build --bin contract_generator
 	$(GENERATOR_BIN) artifacts/contracts ../../src/accounts/contracts/
 
 # 3. Deploy contracts to Base mainnet. Args: network (3 = Base), abis_folder
-deploy_base: generate compile
+deploy_base: generate
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
-	$(DEPLOYER_BIN) deploy base artifacts/contracts $(BASE_DEPLOYER_SECRET)
+	$(DEPLOYER_BIN) 3 artifacts/contracts $(BASE_DEPLOYER_SECRET)
 
 # 4. Deploy contracts to Base Sepolia. Args: network (2 = Base Sepolia), abis_folder
-deploy_sepolia: generate compile
+deploy_sepolia: generate
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
-	$(DEPLOYER_BIN) deploy base-sepolia artifacts/contracts $(DEPLOYER_SECRET)
+	$(DEPLOYER_BIN) 2 artifacts/contracts $(DEPLOYER_SECRET)
 
 # 5. Deploy contracts to Anvil. Args: network (0 = Anvil), abis_folder
-deploy_anvil: generate compile
+deploy_anvil: generate
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
-	$(DEPLOYER_BIN) deploy anvil artifacts/contracts $(ANVIL_SECRET)
-
-update_sepolia: generate compile
-	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
-	$(DEPLOYER_BIN) update base-sepolia artifacts/contracts $(DEPLOYER_SECRET)
+	$(DEPLOYER_BIN) 0 artifacts/contracts $(ANVIL_SECRET)

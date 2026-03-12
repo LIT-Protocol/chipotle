@@ -30,6 +30,7 @@ tracing = { workspace = true, features = ["std"] }
 tracing-log = { version = "0.2", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry", "std"] }
 tracing-opentelemetry = { workspace = true, optional = true }
+uuid = { version = "1", features = ["v4"] }
 
 [dependencies.lit-core]
 path = "../lit-core"

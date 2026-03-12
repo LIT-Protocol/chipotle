@@ -5,7 +5,7 @@ pub mod config;
 pub mod core;
 pub mod dstack;
 pub mod error;
-pub mod utils;
+pub mod observability;
 
 use crate::abstractions::transfer::chain_info::Chain;
 use crate::accounts::signer_pool::start_signer_pool;
@@ -148,6 +148,7 @@ async fn main() -> Result<(), rocket::Error> {
     let (core_routes, openapi_spec) = core::v1::endpoints::routes_with_spec();
 
     let mut r = rocket::build()
+        .attach(observability::ObservabilityFairing::new())
         .attach(cors)
         .mount(
             "/",

@@ -1,12 +1,10 @@
 {
   "name": "contracts",
   "version": "1.0.0",
+  "type": "module",
   "devDependencies": {
     "@types/node": "^22.19.9",
-    "hardhat": "^2.26.0",
-    "hardhat-deploy": "^1.0.4",
-    "hardhat-diamond-abi": "^3.0.1",
-    "ts-node": "^10.9.2",
+    "hardhat": "^3.1.9",
     "typescript": "~5.8.0"
   },
   "dependencies": {

@@ -1,6 +1,55 @@
 export declare namespace Lit {
   export namespace Actions {
     /**
+     * Ask the Lit Node to sign any data using the ECDSA Algorithm with its private key. The resulting signature will be returned to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
+     * @name Lit.Actions.signEcdsa
+     * @function signEcdsa
+     * @param {Object} params
+     * @param {Uint8Array} params.toSign The message to sign
+     * @param {string} params.publicKey The public key of the PKP
+     * @param {string} params.sigName The name of the signature
+     * @returns {Promise<Uint8Array>} The resulting signature
+     */
+    function signEcdsa({
+      toSign,
+      publicKey,
+      sigName,
+    }: {
+      toSign: Uint8Array;
+      publicKey: string;
+      sigName: string;
+    }): Promise<Uint8Array>;
+    /**
+     * @param {Uint8array} toSign the message to sign
+     * @param {string} publicKey the public key of the PKP
+     * @param {string} sigName the name of the signature
+     * @param {string} signingScheme the name of the signing scheme
+     *   one of the following
+     *   "EcdsaK256Sha256"
+     *   "EcdsaP256Sha256"
+     *   "EcdsaP384Sha384"
+     *   "SchnorrEd25519Sha512"
+     *   "SchnorrK256Sha256"
+     *   "SchnorrP256Sha256"
+     *   "SchnorrP384Sha384"
+     *   "SchnorrRistretto25519Sha512"
+     *   "SchnorrEd448Shake256"
+     *   "SchnorrRedJubjubBlake2b512"
+     *   "SchnorrK256Taproot"
+     *   "SchnorrRedDecaf377Blake2b512"
+     *   "SchnorrkelSubstrate"
+     *   "Bls12381G1ProofOfPossession"
+     * @name Lit.Actions.sign
+     * @function sign
+     * @returns {Uint8Array} The resulting signature
+     */
+    function sign({
+      toSign,
+      publicKey,
+      sigName,
+      signingScheme,
+    }: Uint8array): Uint8Array;
+    /**
      * Set the response returned to the client
      * @name Lit.Actions.setResponse
      * @function setResponse
@@ -8,6 +57,38 @@ export declare namespace Lit {
      * @param {string} params.response The response to send to the client.  You can put any string here, like you could use JSON.stringify on a JS object and send it here.
      */
     function setResponse({ response }: { response: string }): any;
+    /**
+     * Call a child Lit Action
+     * @name Lit.Actions.call
+     * @function call
+     * @param {Object} params
+     * @param {string} params.ipfsId The IPFS ID of the Lit Action to call
+     * @param {Object=} params.params Optional parameters to pass to the child Lit Action
+     * @returns {Promise<string>} The response from the child Lit Action.  Note that any signatures performed by the child Lit Action will be automatically combined and returned with the parent Lit Action to the Lit JS SDK client.
+     */
+    function call({
+      ipfsId,
+      params,
+    }: {
+      ipfsId: string;
+      params?: any | undefined;
+    }): Promise<string>;
+    /**
+     * Call a smart contract
+     * @name Lit.Actions.callContract
+     * @function callContract
+     * @param {Object} params
+     * @param {string} params.chain The name of the chain to use.  Check out the lit docs "Supported Blockchains" page to find the name.  For example, "ethereum"
+     * @param {string} params.txn The RLP Encoded txn, as a hex string
+     * @returns {Promise<string>} The response from calling the contract
+     */
+    function callContract({
+      chain,
+      txn,
+    }: {
+      chain: string;
+      txn: string;
+    }): Promise<string>;
     /**
      * Convert a Uint8Array to a string.
      * @name Lit.Actions.uint8arrayToString

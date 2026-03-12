@@ -5,8 +5,7 @@ use rocket_okapi::{
     response::OpenApiResponderInner,
 };
 use rocket_responder::{
-    ApiResponse, bad_request, forbidden, internal_server_error, not_found, ok, payment_required,
-    unauthorized,
+    ApiResponse, bad_request, internal_server_error, not_found, ok, payment_required,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
@@ -109,8 +108,6 @@ impl<T: Serialize> From<ApiResult<T>> for ApiResponse<T, ErrMessage> {
                 500 => internal_server_error(ErrMessage(status.message)),
                 400 => bad_request(ErrMessage(status.message)),
                 404 => not_found(ErrMessage(status.message)),
-                401 => unauthorized(ErrMessage(status.message)),
-                403 => forbidden(ErrMessage(status.message)),
                 402 => payment_required(ErrMessage(status.message)),
                 _ => internal_server_error(ErrMessage(format!(
                     "Unhandled error code #{}: {}",
@@ -165,23 +162,6 @@ impl ApiStatus {
         }
     }
 
-    pub fn unauthorized(message: impl Into<String>) -> Self {
-        let message = message.into();
-        warn!("Unauthorized: {:?}", message);
-        Self {
-            status: Status::Unauthorized,
-            message,
-        }
-    }
-
-    pub fn forbidden(message: impl Into<String>) -> Self {
-        let message = message.into();
-        warn!("Forbidden: {:?}", message);
-        Self {
-            status: Status::Forbidden,
-            message,
-        }
-    }
     pub fn option_not_found(message: impl Into<String>) -> Self {
         let message = message.into();
         warn!("Option not found: {:?}", message);

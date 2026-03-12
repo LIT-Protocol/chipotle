@@ -198,8 +198,24 @@ jobs:
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
 
-  k6-correctness:
+  k6-integration:
     needs: [wait-for-api-available, k6-smoke]
-    uses: ./.github/workflows/correctness.yml
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/k6-integration.yml
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+
+  k6-new-account:
+    needs: [wait-for-api-available, k6-integration]
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/k6-new-account.yml
+    with:
+      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+
+  k6-lit-action-ecdsa-sign:
+    needs: [wait-for-api-available, k6-new-account]
+    if: ${{ !cancelled() }}
+    uses: ./.github/workflows/k6-lit-action-ecdsa-sign.yml
+    with:
+      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+
