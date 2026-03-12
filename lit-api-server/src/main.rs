@@ -23,7 +23,13 @@ use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 #[rocket::main]
 #[allow(clippy::result_large_err)]
 async fn main() -> Result<(), rocket::Error> {
-    let obs = config::read_observability_config();
+    let obs = match config::read_observability_config() {
+        Ok(obs) => obs,
+        Err(e) => {
+            eprintln!("Failed to read observability config: {e}. Exiting.");
+            std::process::exit(1);
+        }
+    };
 
     // Initialize the primary tracing subscriber (stdout + privacy filtering).
     // When built with --features otlp, also initializes OTLP providers and wires

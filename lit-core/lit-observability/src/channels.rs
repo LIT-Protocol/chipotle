@@ -1,6 +1,7 @@
 use std::{collections::HashMap, future::Future};
 
-use crate::{opentelemetry::global, tracing::propagation::HashMapMetadataMap};
+use crate::tracing::propagation::HashMapMetadataMap;
+use opentelemetry::global;
 use flume::{
     Receiver, RecvError, SendError, Sender,
     r#async::{RecvFut, SendFut},
