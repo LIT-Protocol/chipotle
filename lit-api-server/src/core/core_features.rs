@@ -33,10 +33,10 @@ pub async fn lit_action(
     http_client: &reqwest::Client,
     lit_action_request: Json<LitActionRequest>,
 ) -> Result<LitActionResponse, ApiStatus> {
-    let request_id = Some(request_span.request_id.clone());
+    let request_id = request_span.request_id.clone();
 
     let mut http_headers = BTreeMap::new();
-    http_headers.insert("x-request-id".to_string(), request_span.request_id.clone());
+    http_headers.insert("x-request-id".to_string(), request_id.clone());
     if let Some(ref cid) = request_span.correlation_id {
         http_headers.insert("x-correlation-id".to_string(), cid.clone());
     }
