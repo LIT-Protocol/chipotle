@@ -1,5 +1,6 @@
 # Deploy group — included by root justfile. Uses: image_base, image_lit_actions,
-# image_lit_api_server, image_lit_static, app_name, instance_type.
+# image_lit_api_server, image_lit_static, image_otel_collector, app_name,
+# instance_type, gcp_project_id, base_url.
 
 # Install Phala CLI (optional; run before first deploy)
 [group: 'deploy']
@@ -10,16 +11,17 @@ setup:
     npm install -g phala
     phala --version
 
-# Build all three Docker images (release mode, linux/amd64 for Phala CVM)
+# Build all Docker images (release mode, linux/amd64 for Phala CVM)
 [group: 'deploy']
 docker-build: _check_docker
     #!/usr/bin/env sh
     set -eu
-    docker build --platform linux/amd64 -f Dockerfile.lit-actions    -t {{image_lit_actions}}    .
-    docker build --platform linux/amd64 -f Dockerfile.lit-api-server -t {{image_lit_api_server}} .
-    docker build --platform linux/amd64 -f Dockerfile.lit-static     -t {{image_lit_static}}     .
+    docker build --platform linux/amd64 -f Dockerfile.lit-actions     -t {{image_lit_actions}}     .
+    docker build --platform linux/amd64 -f Dockerfile.lit-api-server  -t {{image_lit_api_server}}  .
+    docker build --platform linux/amd64 -f Dockerfile.lit-static      -t {{image_lit_static}}      --build-arg BASE_URL={{base_url}} .
+    docker build --platform linux/amd64 -f Dockerfile.otel-collector  -t {{image_otel_collector}}  .
 
-# Push all three images and capture each registry-assigned @sha256: digest.
+# Push all images and capture each registry-assigned @sha256: digest.
 # Digests are written to .digest-{service}.txt and read by `deploy` (DR-1.1, DR-1.2).
 # docker inspect .RepoDigests is populated by `docker push` with the registry-assigned
 # content hash; we strip the repo prefix to get sha256:...
@@ -32,10 +34,12 @@ docker-push: docker-build
     docker push {{image_lit_actions}}
     docker push {{image_lit_api_server}}
     docker push {{image_lit_static}}
-    docker inspect {{image_lit_actions}}    | jq -r '.[0].RepoDigests[0]' | sed 's/.*@//' > .digest-lit-actions.txt
-    docker inspect {{image_lit_api_server}} | jq -r '.[0].RepoDigests[0]' | sed 's/.*@//' > .digest-lit-api-server.txt
-    docker inspect {{image_lit_static}}     | jq -r '.[0].RepoDigests[0]' | sed 's/.*@//' > .digest-lit-static.txt
-    for f in .digest-lit-actions.txt .digest-lit-api-server.txt .digest-lit-static.txt; do
+    docker push {{image_otel_collector}}
+    docker inspect {{image_lit_actions}}     | jq -r '.[0].RepoDigests[0]' | sed 's/.*@//' > .digest-lit-actions.txt
+    docker inspect {{image_lit_api_server}}  | jq -r '.[0].RepoDigests[0]' | sed 's/.*@//' > .digest-lit-api-server.txt
+    docker inspect {{image_lit_static}}      | jq -r '.[0].RepoDigests[0]' | sed 's/.*@//' > .digest-lit-static.txt
+    docker inspect {{image_otel_collector}}  | jq -r '.[0].RepoDigests[0]' | sed 's/.*@//' > .digest-otel-collector.txt
+    for f in .digest-lit-actions.txt .digest-lit-api-server.txt .digest-lit-static.txt .digest-otel-collector.txt; do
         [ -s "$f" ] || { echo "error: digest capture failed for $f"; exit 1; }
         printf "captured %s: %s\n" "$f" "$(cat $f)"
     done
@@ -53,20 +57,24 @@ deploy name=(app_name): docker-push _check_phala
     DIGEST_LIT_ACTIONS=$(cat .digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
     DIGEST_LIT_API_SERVER=$(cat .digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
     DIGEST_LIT_STATIC=$(cat .digest-lit-static.txt | tr -d '\n' | sed 's/}[}]*$//')
+    DIGEST_OTEL_COLLECTOR=$(cat .digest-otel-collector.txt | tr -d '\n' | sed 's/}[}]*$//')
     [ -n "$DIGEST_LIT_ACTIONS" ]    || { echo "error: lit-actions digest missing; run: just docker-build"; exit 1; }
     [ -n "$DIGEST_LIT_API_SERVER" ] || { echo "error: lit-api-server digest missing; run: just docker-build"; exit 1; }
     [ -n "$DIGEST_LIT_STATIC" ]     || { echo "error: lit-static digest missing; run: just docker-build"; exit 1; }
+    [ -n "$DIGEST_OTEL_COLLECTOR" ] || { echo "error: otel-collector digest missing; run: just docker-build"; exit 1; }
     sed \
         -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|{{image_base}}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
         -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|{{image_base}}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
         -e "s|\${DOCKER_IMAGE_LIT_STATIC}|{{image_base}}-lit-static@${DIGEST_LIT_STATIC}|g" \
+        -e "s|\${DOCKER_IMAGE_OTEL_COLLECTOR}|{{image_base}}-otel-collector@${DIGEST_OTEL_COLLECTOR}|g" \
+        -e "s|\${GCP_PROJECT_ID}|{{gcp_project_id}}|g" \
         docker-compose.phala.yml > docker-compose.deploy.yml
     cat docker-compose.deploy.yml
     if [ -f .env ]; then set -a && . ./.env && set +a; fi
     [ -n "${PHALA_PRIVATE_KEY}" ] || { echo "error: PHALA_PRIVATE_KEY not set. Copy .env.example to .env and set your DstackApp key."; exit 1; }
     phala deploy -c docker-compose.deploy.yml --cvm-id {{app_name}} --private-key "${PHALA_PRIVATE_KEY}"
 
-# First-time deploy to a new Phala app with OS image 0.5.4.1.
+# First-time deploy to a new Phala app with OS image dstack-0.5.6.
 # Usage: just deploy-new [name]
 #   just deploy-new              # uses app name from branch (lit-api-server or chipotle-next)
 #   just deploy-new my-new-app   # creates app named my-new-app
@@ -80,20 +88,24 @@ deploy-new name=(app_name): docker-push _check_phala
     DIGEST_LIT_ACTIONS=$(cat .digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
     DIGEST_LIT_API_SERVER=$(cat .digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
     DIGEST_LIT_STATIC=$(cat .digest-lit-static.txt | tr -d '\n' | sed 's/}[}]*$//')
+    DIGEST_OTEL_COLLECTOR=$(cat .digest-otel-collector.txt | tr -d '\n' | sed 's/}[}]*$//')
     [ -n "$DIGEST_LIT_ACTIONS" ]    || { echo "error: lit-actions digest missing; run: just docker-build"; exit 1; }
     [ -n "$DIGEST_LIT_API_SERVER" ] || { echo "error: lit-api-server digest missing; run: just docker-build"; exit 1; }
     [ -n "$DIGEST_LIT_STATIC" ]     || { echo "error: lit-static digest missing; run: just docker-build"; exit 1; }
+    [ -n "$DIGEST_OTEL_COLLECTOR" ] || { echo "error: otel-collector digest missing; run: just docker-build"; exit 1; }
     sed \
         -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|{{image_base}}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
         -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|{{image_base}}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
         -e "s|\${DOCKER_IMAGE_LIT_STATIC}|{{image_base}}-lit-static@${DIGEST_LIT_STATIC}|g" \
+        -e "s|\${DOCKER_IMAGE_OTEL_COLLECTOR}|{{image_base}}-otel-collector@${DIGEST_OTEL_COLLECTOR}|g" \
+        -e "s|\${GCP_PROJECT_ID}|{{gcp_project_id}}|g" \
         docker-compose.phala.yml > docker-compose.deploy.yml
     cat docker-compose.deploy.yml
     if [ -f .env ]; then set -a && . ./.env && set +a; fi
     [ -n "${PHALA_PRIVATE_KEY}" ] || { echo "error: PHALA_PRIVATE_KEY not set. Copy .env.example to .env and set your DstackApp key."; exit 1; }
     phala deploy -c docker-compose.deploy.yml -n "$APP_NAME" --instance-type {{instance_type}} \
         --image dstack-0.5.6 \
-        --kms base --private-key "${PHALA_PRIVATE_KEY}"
+        --kms base --private-key "${PHALA_PRIVATE_KEY}" -e GCP_SERVICE_ACCOUNT_JSON=${GCP_SERVICE_ACCOUNT_JSON} -e BASE_CHAIN_RPC=${BASE_CHAIN_RPC}
 
 # Run locally with Docker Compose (no Phala Cloud)
 [group: 'deploy']
@@ -101,6 +113,8 @@ docker-run-local: docker-build
     DOCKER_IMAGE_LIT_ACTIONS={{image_lit_actions}} \
     DOCKER_IMAGE_LIT_API_SERVER={{image_lit_api_server}} \
     DOCKER_IMAGE_LIT_STATIC={{image_lit_static}} \
+    DOCKER_IMAGE_OTEL_COLLECTOR={{image_otel_collector}} \
+    GCP_PROJECT_ID={{gcp_project_id}} \
     docker compose -f docker-compose.phala.yml up -d
 
 [private]

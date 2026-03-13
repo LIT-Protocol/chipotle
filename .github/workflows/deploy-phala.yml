@@ -1,8 +1,8 @@
 # Deploy lit-api-server + lit-actions + lit-static + otel-collector to Phala CVM (tdx.large instance)
 #
 # Branch-based deployment:
-#   push to main  → lit-api-server,      base_url https://api.dev.litprotocol.com
-#   push to next  → lit-api-server-next, base_url https://...-8000.dstack-pha-prod5.phala.network
+#   push to main            → chipotle-dev
+#   push to next or others  → chipotle-next
 #
 # Image provenance (DR-1b): Each image is signed with Sigstore (cosign keyless) immediately
 # after push. Signatures are recorded in the public Rekor transparency log, binding the image
@@ -54,10 +54,10 @@ jobs:
         id: set
         run: |
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            echo "phala_app_name=lit-api-server" >> "$GITHUB_OUTPUT"
+            echo "phala_app_name=chipotle-dev" >> "$GITHUB_OUTPUT"
             echo "instance_type=tdx.large" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-dev" >> "$GITHUB_OUTPUT"
-            BASE_URL="https://api.dev.litprotocol.com"
+            BASE_URL="https://f8fce543471dc9f5f5643aa217422398c36e5edc-8000.dstack-base-prod5.phala.network"
           elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
             echo "phala_app_name=chipotle-next" >> "$GITHUB_OUTPUT"
             echo "instance_type=tdx.small" >> "$GITHUB_OUTPUT"
