@@ -63,8 +63,8 @@ async fn main() -> Result<(), rocket::Error> {
                 global::set_meter_provider(metrics_provider.clone());
 
                 let tracer = tracing_provider.tracer("lit-api-server");
-                let otel_trace_layer = lit_observability::tracing_opentelemetry::layer()
-                    .with_tracer(tracer);
+                let otel_trace_layer =
+                    lit_observability::tracing_opentelemetry::layer().with_tracer(tracer);
                 let otel_log_layer = ContextAwareOtelLogLayer::new(&logger_provider);
                 let subscriber = lit_observability::init_subscriber(&obs.log_level)
                     .expect("Failed to setup tracing")

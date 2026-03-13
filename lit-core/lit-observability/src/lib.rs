@@ -22,9 +22,9 @@ pub use opentelemetry;
 pub use opentelemetry_sdk;
 #[cfg(feature = "otlp")]
 pub use opentelemetry_semantic_conventions;
+pub use tonic_middleware;
 #[cfg(feature = "otlp")]
 pub use tracing_opentelemetry;
-pub use tonic_middleware;
 
 /// Initializes the primary tracing subscriber with fmt (stdout) and privacy filtering.
 /// `log_level` is the minimum log level (e.g. "info", "debug"). Overridden by `RUST_LOG`.
