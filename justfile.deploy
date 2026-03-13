@@ -17,7 +17,7 @@ docker-build: _check_docker
     #!/usr/bin/env sh
     set -eu
     docker build --platform linux/amd64 -f Dockerfile.lit-actions     -t {{image_lit_actions}}     .
-    docker build --platform linux/amd64 -f Dockerfile.lit-api-server  -t {{image_lit_api_server}}  .
+    docker build --platform linux/amd64 -f Dockerfile.lit-api-server  -t {{image_lit_api_server}}  --build-arg NODE_CONFIG={{node_config}} .
     docker build --platform linux/amd64 -f Dockerfile.lit-static      -t {{image_lit_static}}      --build-arg BASE_URL={{base_url}} .
     docker build --platform linux/amd64 -f Dockerfile.otel-collector  -t {{image_otel_collector}}  .
 

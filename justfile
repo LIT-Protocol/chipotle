@@ -14,6 +14,7 @@ app_name       := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main
 instance_type  := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo tdx.small || echo tdx.small'`
 gcp_project_id := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo chipotle-dev || echo chipotle-next'`
 base_url       := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo https://f8fce543471dc9f5f5643aa217422398c36e5edc-8000.dstack-base-prod5.phala.network || echo https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network'`
+node_config    := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo NodeConfig.main.toml || echo NodeConfig.next.toml'`
 
 import "justfile.deploy"
 import "justfile.sim"
