@@ -84,6 +84,11 @@ services:
       # Phala CVM secrets in the deployment manifest.
       GCP_SERVICE_ACCOUNT_JSON: ${GCP_SERVICE_ACCOUNT_JSON}
       GCP_PROJECT_ID: ${GCP_PROJECT_ID}
+    # Host filesystem + pid namespace for the hostmetrics receiver to report
+    # accurate CVM-level CPU, memory, disk, and network metrics.
+    pid: host
+    volumes:
+      - '/:/host:ro,rslave'
     restart: unless-stopped
 
   lit-static:
@@ -95,20 +100,6 @@ services:
     environment:
       ROCKET_ADDRESS: "0.0.0.0"
       ROCKET_PORT: "8001"
-    restart: unless-stopped
-
-  # Prometheus Node Exporter — exposes CVM host metrics (CPU, memory, disk, network)
-  # on port 9100 for the OTel Collector to scrape. The /host bind-mount + --path.rootfs
-  # gives accurate host-level readings from inside the container. pid:host is required
-  # for per-process and CPU metrics.
-  # See: https://docs.phala.com/phala-cloud/production-checklist
-  node-exporter:
-    image: quay.io/prometheus/node-exporter:v1.9.0
-    command:
-      - '--path.rootfs=/host'
-    pid: host
-    volumes:
-      - '/:/host:ro,rslave'
     restart: unless-stopped
 
 volumes:

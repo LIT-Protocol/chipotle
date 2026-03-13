@@ -22,15 +22,19 @@ receivers:
         # collector via the otel-collector hostname on the compose bridge network.
         endpoint: 0.0.0.0:4317
 
-  # Scrape CVM host metrics (CPU, memory, disk, network) from the node-exporter
-  # sidecar. These appear in GCP Cloud Monitoring under the prometheus/ prefix.
-  prometheus:
-    config:
-      scrape_configs:
-        - job_name: 'node-exporter'
-          scrape_interval: 30s
-          static_configs:
-            - targets: ['node-exporter:9100']
+  # CVM host metrics — CPU, memory, disk, network, and load averages.
+  # root_path tells the receiver to read /proc and /sys from the host
+  # bind-mount rather than the container's own filesystem.
+  hostmetrics:
+    root_path: /host
+    collection_interval: 30s
+    scrapers:
+      cpu:
+      memory:
+      disk:
+      filesystem:
+      network:
+      load:
 
 processors:
   memory_limiter:
@@ -80,7 +84,7 @@ service:
       exporters: [googlecloud]
 
     metrics:
-      receivers: [otlp, prometheus]
+      receivers: [otlp, hostmetrics]
       processors: [memory_limiter, resource, batch]
       exporters: [googlecloud]
 
