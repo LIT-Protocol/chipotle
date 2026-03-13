@@ -3,22 +3,24 @@ toc:
     description: |
       Welcome to the Lit Actions SDK Docs.  These functions can be used inside a Lit Action.  You should prefix each function with "Lit.Actions." so to call "isPermittedAction()" you should do "Lit.Actions.isPermittedAction()"  To understand how these functions fit together, please view the documentation for this SDK, located at https://developer.litprotocol.com/
 
-  - name: Signing
-  - signEcdsa
-  - sign
-
   - name: Encryption
     description: |
       Encryption and decryption functions.  These functions are used to encrypt and decrypt data.  The data is encrypted & decrypted using a symmetric key derived from the secret key of the PKP.
   - Encrypt
   - Decrypt
 
+  - name: PKP Keys
+    description: |
+      Key management functions for PKPs.  These functions are used to get keys for PKPs that can be used in javascript functions.
+  - getPrivateKey
+  - getLitActionPrivateKey
+  - getLitActionPublicKey
+  - getLitActionWalletAddress
+
   - name: Action Utilities
     description: |
       Helpers available inside actions as `Lit.Actions.*`.
   - setResponse
-  - call
-  - callContract
   
   - name: Runtime Globals
     description: |

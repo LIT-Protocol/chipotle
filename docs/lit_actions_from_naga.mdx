@@ -1,0 +1,390 @@
+# Lit Actions: Migration from Naga
+
+This document is a reference for developers migrating from the Naga Lit Actions SDK to the current SDK.
+It covers all actions available in both generations and explains how deprecated Naga actions map to current equivalents.
+
+## Overview
+
+The current Lit Actions SDK is a streamlined runtime focused on cryptographic key operations and action identity.
+Many capabilities that previously required runtime API calls — permission checking, access control, multi-party signing coordination — are now handled **on-chain** through the security model managed by the
+[Dashboard application](https://developer.litprotocol.com/) or accessed directly on-chain.
+
+> **Deprecated actions** generally have equivalent functionality derived through the combination of **new actions** and the **on-chain security settings** provided by the Dashboard application (or accessed directly on-chain).
+> Permissions, group membership, and access control are now encoded at account-creation time rather than checked dynamically at execution time.
+
+---
+
+## Current Actions
+
+These actions are available in the current SDK (`Lit.Actions.*`).
+
+### Encryption
+
+Encryption and decryption using a symmetric key derived from a PKP's secret key.
+
+#### `Lit.Actions.Encrypt`
+
+Encrypt a message using AES with a symmetric key derived from a PKP.
+
+**Parameters**
+
+*   `params` **Object**
+    *   `params.pkpId` **string** — The ID of the PKP
+    *   `params.message` **string** — The message to encrypt
+
+Returns **Promise\<string>** — The ciphertext
+
+---
+
+#### `Lit.Actions.Decrypt`
+
+Decrypt data using AES with a symmetric key derived from a PKP.
+
+**Parameters**
+
+*   `params` **Object**
+    *   `params.pkpId` **string** — The ID of the PKP
+    *   `params.ciphertext` **string** — The ciphertext to decrypt
+
+Returns **Promise\<string>** — The decrypted plaintext
+
+---
+
+### PKP Keys
+
+Functions for retrieving private and public keys associated with PKPs and Lit Actions.
+
+#### `Lit.Actions.getPrivateKey`
+
+Get the private key for a PKP wallet. The key can then be used directly with ethers.js or any standard cryptographic library to sign data, derive addresses, or perform other key operations.
+
+**Parameters**
+
+*   `params` **Object**
+    *   `params.pkpId` **string** — The ID of the PKP
+
+Returns **Promise\<string>** — The private key secret
+
+---
+
+#### `Lit.Actions.getLitActionPrivateKey`
+
+Get the private key for the currently executing Lit Action. The keypair is deterministically derived from the action's IPFS CID.
+
+Returns **Promise\<string>** — The private key secret
+
+---
+
+#### `Lit.Actions.getLitActionPublicKey`
+
+Get the public key for a Lit Action by IPFS ID.
+
+**Parameters**
+
+*   `params` **Object**
+    *   `params.ipfsId` **string** — The IPFS ID of the Lit Action
+
+Returns **Promise\<string>** — The public key
+
+---
+
+#### `Lit.Actions.getLitActionWalletAddress`
+
+Get the wallet address for a Lit Action by IPFS ID.
+
+**Parameters**
+
+*   `params` **Object**
+    *   `params.ipfsId` **string** — The IPFS ID of the Lit Action
+
+Returns **Promise\<string>** — The wallet address
+
+---
+
+### Action Utilities
+
+#### `Lit.Actions.setResponse`
+
+Set the response returned to the client.
+
+**Parameters**
+
+*   `params` **Object**
+    *   `params.response` **any** — The response to send to the client. If this is not a string, it will be JSON-encoded before being sent. A value of undefined is encoded as null.
+
+---
+
+### Runtime Globals
+
+| Global | Description |
+|---|---|
+| `LitActions` | Alias for `Lit.Actions`, injected into the execution environment |
+| `ethers` | ethers.js v5 — wallets, providers, contracts, and cryptographic helpers |
+
+---
+
+## Deprecated Actions (Naga)
+
+The following actions were available in the Naga SDK. They are no longer part of the current runtime.
+Each section notes how to achieve equivalent behavior using current actions and on-chain settings.
+
+### Signing
+
+Naga exposed high-level signing helpers that coordinated threshold signing across nodes.
+In the current SDK, retrieve a private key with `Lit.Actions.getPrivateKey` and use **ethers.js** directly to sign.
+Which PKPs a given action is permitted to access is governed by group membership and on-chain security settings configured via the Dashboard — no runtime permission check is required.
+
+#### ~~`Lit.Actions.ethPersonalSignMessageEcdsa`~~ *(deprecated)*
+
+Previously asked the Lit Node to sign a message using the `eth_personalSign` algorithm and automatically combine signature shares.
+
+**Replacement:** Use `Lit.Actions.getPrivateKey({ pkpId })` to retrieve the private key, then sign with `ethers.Wallet`:
+```js
+const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId }));
+const sig = await wallet.signMessage(message);
+Lit.Actions.setResponse({ response: sig });
+```
+
+---
+
+#### ~~`Lit.Actions.signAsAction`~~ *(deprecated)*
+
+Previously signed data using the Lit Action's own cryptographic identity derived from its IPFS CID, enabling autonomous agent behavior and action-to-action authentication.
+
+**Replacement:** Use `Lit.Actions.getLitActionPrivateKey()` to retrieve the current action's private key, then sign with ethers.js.
+
+---
+
+#### ~~`Lit.Actions.signAndCombineEcdsa`~~ *(deprecated)*
+
+Previously signed with ECDSA and automatically combined signature shares from all nodes into a complete signature.
+
+**Replacement:** Use `Lit.Actions.getPrivateKey({ pkpId })` and sign with ethers.js.
+
+---
+
+#### ~~`Lit.Actions.signAndCombine`~~ *(deprecated)*
+
+Previously signed with any signing scheme and automatically combined signature shares.
+
+**Replacement:** Use `Lit.Actions.getPrivateKey({ pkpId })` and sign with the appropriate library for the target scheme.
+
+---
+
+#### ~~`Lit.Actions.verifyActionSignature`~~ *(deprecated)*
+
+Previously verified that a signature was created by a specific Lit Action using `signAsAction`.
+
+**Replacement:** Retrieve the action's public key via `Lit.Actions.getLitActionPublicKey({ ipfsId })` and verify the signature using ethers.js or another standard cryptographic library.
+
+---
+
+### Checking Permissions
+
+These functions performed on-chain permission lookups at runtime. In the current model, permissions are enforced at the API gateway level based on on-chain group membership configured through the Dashboard. Actions do not need to query permissions themselves — if an action is executing, the required permissions have already been validated.
+
+#### ~~`Lit.Actions.isPermittedAction`~~ *(deprecated)*
+
+Previously checked whether a given IPFS ID was permitted to sign using a given PKP token ID.
+
+**Replacement:** Configure permitted actions for a PKP group using the Dashboard or directly via the `AccountConfig` smart contract. Permission is enforced on-chain before the action runs.
+
+---
+
+#### ~~`Lit.Actions.isPermittedAddress`~~ *(deprecated)*
+
+Previously checked whether a given wallet address was permitted to sign using a given PKP token ID.
+
+**Replacement:** Manage wallet/PKP access via Dashboard group settings or directly on-chain.
+
+---
+
+#### ~~`Lit.Actions.isPermittedAuthMethod`~~ *(deprecated)*
+
+Previously checked whether a given auth method was permitted to sign using a given PKP token ID.
+
+**Replacement:** Auth method restrictions are enforced through on-chain group configuration via the Dashboard.
+
+---
+
+#### ~~`Lit.Actions.getPermittedActions`~~ *(deprecated)*
+
+Previously returned the full list of actions permitted to sign using a given PKP token ID.
+
+**Replacement:** Query group membership directly from the `AccountConfig` smart contract on-chain, or manage via the Dashboard.
+
+---
+
+#### ~~`Lit.Actions.getPermittedAddresses`~~ *(deprecated)*
+
+Previously returned the full list of addresses permitted to sign using a given PKP token ID.
+
+**Replacement:** Query the `AccountConfig` contract on-chain or use the Dashboard.
+
+---
+
+#### ~~`Lit.Actions.getPermittedAuthMethods`~~ *(deprecated)*
+
+Previously returned the full list of auth methods permitted to sign using a given PKP token ID.
+
+**Replacement:** Query the `AccountConfig` contract on-chain or use the Dashboard.
+
+---
+
+#### ~~`Lit.Actions.getPermittedAuthMethodScopes`~~ *(deprecated)*
+
+Previously returned the permitted auth method scopes for a given PKP and auth method.
+
+**Replacement:** Query the `AccountConfig` contract on-chain or use the Dashboard.
+
+---
+
+### Key Management
+
+#### ~~`Lit.Actions.getActionPublicKey`~~ *(deprecated)*
+
+Previously retrieved the public key for a Lit Action's cryptographic identity given a signing scheme and IPFS CID.
+
+**Replacement:** Use `Lit.Actions.getLitActionPublicKey({ ipfsId })`.
+
+---
+
+#### ~~`Lit.Actions.getLatestNonce`~~ *(deprecated)*
+
+Previously returned the latest nonce for a given address on a supported chain.
+
+**Replacement:** Use ethers.js directly:
+```js
+const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+const nonce = await provider.getTransactionCount(address);
+```
+
+---
+
+#### ~~`Lit.Actions.claimKey`~~ *(deprecated)*
+
+Previously claimed a key through a key identifier and added the result to a claim registry.
+
+**Replacement:** PKP key management is now handled entirely through the Dashboard and on-chain `AccountConfig` contract.
+
+---
+
+#### ~~`Lit.Actions.pubkeyToTokenId`~~ *(deprecated)*
+
+Previously converted a PKP public key to a token ID by hashing with keccak256.
+
+**Replacement:** Compute the hash directly with ethers.js:
+```js
+const tokenId = ethers.utils.keccak256(publicKey);
+```
+
+---
+
+### Action Utilities
+
+#### ~~`Lit.Actions.checkConditions`~~ *(deprecated)*
+
+Previously evaluated access control conditions using the Lit condition-checking engine at runtime.
+
+**Replacement:** Access control is enforced on-chain through group and PKP settings managed via the Dashboard or `AccountConfig` contract. Design your system so that permission is established before an action executes rather than checked inside the action.
+
+---
+
+#### ~~`Lit.Actions.broadcastAndCollect`~~ *(deprecated)*
+
+Previously broadcast a message to all connected nodes and collected their responses.
+
+**Replacement:** No direct equivalent in the current runtime. Node coordination is now handled at the infrastructure level.
+
+---
+
+#### ~~`Lit.Actions.runOnce`~~ *(deprecated)*
+
+Previously ran a function only once across all nodes using leader election.
+
+**Replacement:** No direct equivalent. Design actions to be idempotent across node execution.
+
+---
+
+#### ~~`Lit.Actions.getRpcUrl`~~ *(deprecated)*
+
+Previously returned the RPC URL for a given blockchain.
+
+**Replacement:** Supply your own RPC URL and construct an ethers provider:
+```js
+const provider = new ethers.providers.JsonRpcProvider("https://your-rpc-url");
+```
+
+---
+
+#### ~~`Lit.Actions.encrypt`~~ *(deprecated)*
+
+Previously encrypted data using BLS encryption with access control conditions.
+
+**Replacement:** Use `Lit.Actions.Encrypt({ pkpId, message })`. Access control is enforced through on-chain group membership rather than runtime conditions.
+
+---
+
+#### ~~`Lit.Actions.decryptAndCombine`~~ *(deprecated)*
+
+Previously decrypted and combined ciphertext subject to access control conditions, combining shares from all nodes.
+
+**Replacement:** Use `Lit.Actions.Decrypt({ pkpId, ciphertext })`. Access is governed by Dashboard group settings.
+
+---
+
+#### ~~`Lit.Actions.decryptToSingleNode`~~ *(deprecated)*
+
+Previously decrypted data to a single node subject to access control conditions.
+
+**Replacement:** Use `Lit.Actions.Decrypt({ pkpId, ciphertext })`.
+
+---
+
+#### ~~`Lit.Actions.aesDecrypt`~~ *(deprecated)*
+
+Previously decrypted data using AES with an explicitly provided symmetric key.
+
+**Replacement:** Use `Lit.Actions.Decrypt({ pkpId, ciphertext })`. The symmetric key is derived automatically from the PKP.
+
+---
+
+### Data Helpers
+
+#### ~~`Lit.Actions.uint8arrayToString`~~ *(deprecated)*
+
+Previously converted a Uint8Array to a string.
+
+**Replacement:** Use ethers.js utilities or standard JavaScript:
+```js
+const str = ethers.utils.toUtf8String(uint8Array);
+// or
+const str = new TextDecoder().decode(uint8Array);
+```
+
+---
+
+#### ~~`Lit.Actions.uint8arrayFromString`~~ *(deprecated)*
+
+Previously converted a string to a Uint8Array.
+
+**Replacement:** Use ethers.js utilities or standard JavaScript:
+```js
+const bytes = ethers.utils.toUtf8Bytes(str);
+// or
+const bytes = new TextEncoder().encode(str);
+```
+
+---
+
+### Deprecated Runtime Globals
+
+| Global | Status | Notes |
+|---|---|---|
+| `LitAuth` | Deprecated | Auth context is no longer injected; authentication is enforced on-chain before execution |
+| `jwt` | Deprecated | Use a standard JWT library bundled with your action if needed |
+| `Lit.Auth.actionIpfsIdStack` | Deprecated | No longer injected |
+| `Lit.Auth.authSigAddress` | Deprecated | No longer injected |
+| `Lit.Auth.authMethodContexts` | Deprecated | No longer injected |
+| `Lit.Auth.resources` | Deprecated | No longer injected |
+| `Lit.Auth.customAuthResource` | Deprecated | No longer injected |

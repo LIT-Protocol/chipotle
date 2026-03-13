@@ -5,60 +5,81 @@ export declare namespace Lit {
      * @name Lit.Actions.setResponse
      * @function setResponse
      * @param {Object} params
-     * @param {string} params.response The response to send to the client.  You can put any string here, like you could use JSON.stringify on a JS object and send it here.
+     * @param {*} params.response The response to send to the client. If this is not a string, it will be JSON-encoded before being sent. A value of undefined is encoded as null.
      */
-    function setResponse({ response }: { response: string }): any;
-    /**
-     * Convert a Uint8Array to a string.
-     * @name Lit.Actions.uint8arrayToString
-     * @function uint8arrayToString
-     * @param {Uint8Array} array The Uint8Array to convert
-     * @param {string} [encoding='utf8'] The encoding to use (utf8 supported)
-     * @returns {string} The string representation of the Uint8Array
-     */
-    function uint8arrayToString(array: Uint8Array, encoding?: string): string;
-    /**
-     * Convert a string to a Uint8Array.
-     * @name Lit.Actions.uint8arrayFromString
-     * @function uint8arrayFromString
-     * @param {string} string The string to convert
-     * @param {string} [encoding='utf8'] The encoding to use (utf8 supported)
-     * @returns {Uint8Array} The Uint8Array representation of the string
-     */
-    function uint8arrayFromString(
-      string: string,
-      encoding?: string,
-    ): Uint8Array;
+    function setResponse({ response }: { response: any }): any;
     /**
      * Decrypt data using AES with a symmetric key
      * @name Lit.Actions.Decrypt
      * @function Decrypt
      * @param {Object} params
-     * @param {string} params.publicKey The public key of the PKP
+     * @param {string} params.pkpId The ID of the PKP
      * @param {string} params.ciphertext The ciphertext to decrypt
      * @returns {Promise<string>} The decrypted plaintext
      */
     function Decrypt({
-      publicKey,
+      pkpId,
       ciphertext,
     }: {
-      publicKey: string;
+      pkpId: string;
       ciphertext: string;
     }): Promise<string>;
     /**
      * @name Lit.Actions.Encrypt
      * @function Encrypt
      * @param {Object} params
-     * @param {string} params.publicKey The public key of the PKP
+     * @param {string} params.pkpId The ID of the PKP
      * @param {string} params.message The message to encrypt
      * @returns {Promise<string>} The ciphertext
      */
     function Encrypt({
-      publicKey,
+      pkpId,
       message,
     }: {
-      publicKey: string;
+      pkpId: string;
       message: string;
+    }): Promise<string>;
+    /**
+     * Get the private key for a PKP wallet
+     * @name Lit.Actions.getPrivateKey
+     * @function getPrivateKey
+     * @param {Object} params
+     * @param {string} params.pkpId The ID of the PKP
+     * @returns {Promise<string>} The private key secret
+     */
+    function getPrivateKey({ pkpId }: { pkpId: string }): Promise<string>;
+    /**
+     * Get the private key for the currently executing Lit Action
+     * @name Lit.Actions.getLitActionPrivateKey
+     * @function getLitActionPrivateKey
+     * @returns {Promise<string>} The private key secret
+     */
+    function getLitActionPrivateKey(): Promise<string>;
+    /**
+     * Get the public key for a Lit Action by IPFS ID
+     * @name Lit.Actions.getLitActionPublicKey
+     * @function getLitActionPublicKey
+     * @param {Object} params
+     * @param {string} params.ipfsId The IPFS ID of the Lit Action
+     * @returns {Promise<string>} The public key
+     */
+    function getLitActionPublicKey({
+      ipfsId,
+    }: {
+      ipfsId: string;
+    }): Promise<string>;
+    /**
+     * Get the wallet address for a Lit Action by IPFS ID
+     * @name Lit.Actions.getLitActionWalletAddress
+     * @function getLitActionWalletAddress
+     * @param {Object} params
+     * @param {string} params.ipfsId The IPFS ID of the Lit Action
+     * @returns {Promise<string>} The wallet address
+     */
+    function getLitActionWalletAddress({
+      ipfsId,
+    }: {
+      ipfsId: string;
     }): Promise<string>;
   }
 
