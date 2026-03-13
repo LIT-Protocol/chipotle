@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install:*)",
+      "Bash(make compile:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo check:*)"
+    ]
+  }
+}

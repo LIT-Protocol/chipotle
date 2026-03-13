@@ -813,9 +813,9 @@ mod tests {
         let err = sev_snp_err(err, Some("sev-snp".into()));
         let err = generic_err(err, Some("last".into()));
 
-        assert_eq!(err.is_kind(Kind::Generic, false), true);
-        assert_eq!(err.is_kind(Kind::SevSnp, false), false);
-        assert_eq!(err.is_kind(Kind::SevSnp, true), true);
+        assert!(err.is_kind(Kind::Generic, false));
+        assert!(!err.is_kind(Kind::SevSnp, false));
+        assert!(err.is_kind(Kind::SevSnp, true));
     }
 
     #[test]
@@ -824,8 +824,8 @@ mod tests {
         let err = err_code(err, EC::CoreFatal, Some("fatal-1".into()));
         let err = sev_snp_err(err, Some("sev-snp".into()));
 
-        assert_eq!(err.is_code(EC::CoreFatal, false), false);
-        assert_eq!(err.is_code(EC::CoreFatal, true), true);
+        assert!(!err.is_code(EC::CoreFatal, false));
+        assert!(err.is_code(EC::CoreFatal, true));
     }
 
     #[test]
@@ -833,11 +833,11 @@ mod tests {
         let err = generic_err("first", None);
         let err = generic_err(err, Some("second".into()));
 
-        assert_eq!(err.has_code(), false);
+        assert!(!err.has_code());
 
         let err = err_code(err, EC::CoreFatal, Some("fatal-1".into()));
         let err = sev_snp_err(err, Some("sev-snp".into()));
 
-        assert_eq!(err.has_code(), true);
+        assert!(err.has_code());
     }
 }

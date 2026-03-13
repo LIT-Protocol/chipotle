@@ -1,0 +1,237 @@
+# Sim group — included by root justfile. sim-verify depends on api-server from root.
+
+# Build the dstack simulator from source (cached in /tmp/dstack).
+# Skips the build if the binary already exists; re-run manually to update.
+[group: 'sim']
+sim-build:
+    #!/usr/bin/env sh
+    set -eu
+    DSTACK_DIR=/tmp/dstack
+    if [ ! -d "$DSTACK_DIR" ]; then
+        echo "Cloning Dstack-TEE/dstack..."
+        git clone --depth 1 https://github.com/Dstack-TEE/dstack.git "$DSTACK_DIR"
+    fi
+    echo "Building dstack-guest-agent (this takes a few minutes)..."
+    cd "$DSTACK_DIR/sdk/simulator" && bash build.sh
+
+# Build the dstack-verifier from source (cached in /tmp/dstack).
+[group: 'sim']
+verifier-build: sim-build
+    #!/usr/bin/env sh
+    set -eu
+    echo "Building dstack-verifier..."
+    cargo build \
+        --manifest-path=/tmp/dstack/verifier/Cargo.toml \
+        --bin dstack-verifier
+
+# Start the dstack simulator in a unique temp directory so multiple runner
+# instances on the same host can coexist without socket conflicts.
+# Records the temp dir and PID in /tmp/dstack-sim.state; run `just sim-stop` to clean up.
+[group: 'sim']
+sim-start: sim-build
+    #!/usr/bin/env sh
+    set -eu
+    SIM_SRC=/tmp/dstack/sdk/simulator
+    STATE=/tmp/dstack-sim.state
+
+    # Stop and clean up any previous instance recorded in the state file.
+    if [ -f "$STATE" ]; then
+        OLD_DIR=$(sed -n '1p' "$STATE")
+        OLD_PID=$(sed -n '2p' "$STATE")
+        kill "$OLD_PID" 2>/dev/null || true
+        rm -rf "$OLD_DIR"
+        rm -f "$STATE"
+    fi
+
+    # Create a fresh temp dir; the simulator creates sockets relative to its CWD,
+    # so running from a unique dir isolates sockets per instance.
+    SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
+    SIM_SOCK="$SIM_TMP/dstack.sock"
+
+    # Copy the simulator's data files (referenced by relative paths in dstack.toml).
+    cp "$SIM_SRC/appkeys.json" "$SIM_SRC/app-compose.json" \
+       "$SIM_SRC/sys-config.json" "$SIM_SRC/attestation.bin" \
+       "$SIM_SRC/dstack.toml" "$SIM_TMP/"
+
+    echo "Starting dstack simulator in $SIM_TMP..."
+    sh -c "cd '$SIM_TMP' && exec '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
+    SIM_PID=$!
+
+    for i in $(seq 1 15); do
+        [ -S "$SIM_SOCK" ] && break
+        printf "  waiting for dstack.sock (%d/15)...\n" "$i"
+        sleep 1
+    done
+    [ -S "$SIM_SOCK" ] || {
+        echo "error: dstack.sock never appeared"
+        cat "$SIM_TMP/dstack-simulator.log"
+        kill "$SIM_PID" 2>/dev/null || true
+        rm -rf "$SIM_TMP"
+        rm -f "$STATE"
+        exit 1
+    }
+    printf '%s\n%s\n' "$SIM_TMP" "$SIM_PID" > "$STATE"
+    echo "Simulator ready at $SIM_SOCK (log: $SIM_TMP/dstack-simulator.log). Run: just sim-stop"
+    printf '  DSTACK_SOCKET=%s\n' "$SIM_SOCK"
+
+# Stop the dstack simulator and remove its temp directory.
+[group: 'sim']
+sim-stop:
+    #!/usr/bin/env sh
+    STATE=/tmp/dstack-sim.state
+    if [ -f "$STATE" ]; then
+        OLD_DIR=$(sed -n '1p' "$STATE")
+        OLD_PID=$(sed -n '2p' "$STATE")
+        kill "$OLD_PID" 2>/dev/null || true
+        rm -rf "$OLD_DIR"
+        rm -f "$STATE"
+        echo "Simulator stopped and temp dir removed."
+    else
+        pkill -x dstack-simulator 2>/dev/null || true
+        echo "Simulator stopped (no state file; sent pkill)."
+    fi
+
+# Build the dstack simulator (if needed), run phala attestation tests, then tear down.
+# Each run gets its own temp dir so parallel invocations don't conflict.
+[group: 'sim']
+sim-test: sim-build
+    #!/usr/bin/env sh
+    set -eu
+    SIM_SRC=/tmp/dstack/sdk/simulator
+    SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
+    SIM_SOCK="$SIM_TMP/dstack.sock"
+    PROJECT_ROOT="$(pwd)"
+
+    # Copy simulator data files to the isolated temp dir.
+    cp "$SIM_SRC/appkeys.json" "$SIM_SRC/app-compose.json" \
+       "$SIM_SRC/sys-config.json" "$SIM_SRC/attestation.bin" \
+       "$SIM_SRC/dstack.toml" "$SIM_TMP/"
+
+    echo "Starting dstack simulator in $SIM_TMP..."
+    sh -c "cd '$SIM_TMP' && exec '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
+    SIM_PID=$!
+
+    for i in $(seq 1 15); do
+        [ -S "$SIM_SOCK" ] && break
+        printf "  waiting for dstack.sock (%d/15)...\n" "$i"
+        sleep 1
+    done
+    [ -S "$SIM_SOCK" ] || {
+        echo "error: dstack.sock never appeared"
+        cat "$SIM_TMP/dstack-simulator.log"
+        kill "$SIM_PID" 2>/dev/null || true
+        rm -rf "$SIM_TMP"
+        exit 1
+    }
+
+    DSTACK_SOCKET="$SIM_SOCK" \
+        cargo test --manifest-path="$PROJECT_ROOT/lit-api-server/Cargo.toml" \
+            --features phala \
+            -- dstack::v1::dstack::tests --nocapture
+    STATUS=$?
+
+    kill "$SIM_PID" 2>/dev/null || true
+    rm -rf "$SIM_TMP"
+    exit "$STATUS"
+
+# Start simulator, run lit-api-server (which fetches attestation from simulator), run
+# dstack-verifier against lit-api-server's /attestation endpoint, assert quote_verified=true.
+# Builds simulator, verifier, and lit-api-server if needed.
+# Note: is_valid will be false for the simulator — its attestation.bin uses a synthetic OS image
+# hash that is not published on download.dstack.org. This is expected; quote_verified=true is the
+# meaningful assertion (it confirms the full simulator → lit-api-server → verifier pipeline).
+[group: 'sim']
+sim-verify: sim-build verifier-build api-server
+    #!/usr/bin/env sh
+    set -eu
+    SIM_SRC=/tmp/dstack/sdk/simulator
+    SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
+    SIM_SOCK="$SIM_TMP/dstack.sock"
+    VERIFIER_BIN=/tmp/dstack/target/debug/dstack-verifier
+    VERIFIER_CFG=/tmp/dstack/verifier/dstack-verifier.toml
+    PROJECT_ROOT="$(pwd)"
+
+    # Copy simulator data files.
+    cp "$SIM_SRC/appkeys.json" "$SIM_SRC/app-compose.json" \
+       "$SIM_SRC/sys-config.json" "$SIM_SRC/attestation.bin" \
+       "$SIM_SRC/dstack.toml" "$SIM_TMP/"
+
+    # Start simulator.
+    echo "Starting dstack simulator in $SIM_TMP..."
+    sh -c "cd '$SIM_TMP' && exec '$SIM_SRC/dstack-simulator'" >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
+    SIM_PID=$!
+    for i in $(seq 1 15); do
+        [ -S "$SIM_SOCK" ] && break
+        printf "  waiting for dstack.sock (%d/15)...\n" "$i"
+        sleep 1
+    done
+    [ -S "$SIM_SOCK" ] || {
+        echo "error: dstack.sock never appeared"
+        cat "$SIM_TMP/dstack-simulator.log"
+        kill "$SIM_PID" 2>/dev/null || true
+        rm -rf "$SIM_TMP"
+        exit 1
+    }
+
+    # Copy branch-appropriate config (NodeConfig.toml is gitignored); main uses main.toml, others use next.toml.
+    BRANCH=$(git -C "$PROJECT_ROOT" branch --show-current)
+    if [ "$BRANCH" = "main" ]; then
+        cp "$PROJECT_ROOT/lit-api-server/NodeConfig.main.toml" "$PROJECT_ROOT/lit-api-server/NodeConfig.toml"
+    else
+        cp "$PROJECT_ROOT/lit-api-server/NodeConfig.next.toml" "$PROJECT_ROOT/lit-api-server/NodeConfig.toml"
+    fi
+    API_BIN="$PROJECT_ROOT/lit-api-server/target/debug/lit-api-server"
+    echo "Starting lit-api-server (demo config)..."
+    (cd "$PROJECT_ROOT/lit-api-server" && DSTACK_SOCKET="$SIM_SOCK" "$API_BIN") >> "$SIM_TMP/lit-api-server.log" 2>&1 &
+    API_PID=$!
+    if ! kill -0 "$API_PID" 2>/dev/null; then
+        echo "error: lit-api-server failed to start"
+        cat "$SIM_TMP/lit-api-server.log"
+        kill "$SIM_PID" 2>/dev/null || true
+        rm -rf "$SIM_TMP"
+        exit 1
+    fi
+
+    # Wait for /attestation to respond.
+    for i in $(seq 1 20); do
+        if curl -sf http://localhost:8000/attestation >/dev/null 2>&1; then
+            echo "lit-api-server /attestation ready."
+            break
+        fi
+        printf "  waiting for lit-api-server (%d/20)...\n" "$i"
+        sleep 1
+    done
+    if ! curl -sf http://localhost:8000/attestation >/dev/null 2>&1; then
+        echo "error: lit-api-server /attestation never responded"
+        cat "$SIM_TMP/lit-api-server.log"
+        kill "$SIM_PID" "$API_PID" 2>/dev/null || true
+        rm -rf "$SIM_TMP"
+        exit 1
+    fi
+
+    # Get attestation from lit-api-server (which got it from the simulator).
+    echo "Getting attestation from lit-api-server /attestation..."
+    QUOTE_RESP=$(curl -sf http://localhost:8000/attestation)
+
+    # Teardown simulator and lit-api-server.
+    kill "$SIM_PID" "$API_PID" 2>/dev/null || true
+
+    # Write the verifier request: strip 0x prefix from quote, set attestation=null.
+    VERIFY_FILE="$SIM_TMP/verify-request.json"
+    printf '%s' "$QUOTE_RESP" | python3 -c \
+        'import sys,json; d=json.load(sys.stdin); q=d["quote"]; q=q[2:] if q.startswith("0x") else q; print(json.dumps({"quote":q,"event_log":d["event_log"],"vm_config":d["vm_config"],"attestation":None}))' \
+        > "$VERIFY_FILE"
+
+    # Run verifier in oneshot mode. Exits 1 when is_valid=false, which is expected for the
+    # simulator — so we ignore the exit code and check quote_verified.
+    echo "Running dstack-verifier (oneshot)..."
+    "$VERIFIER_BIN" -c "$VERIFIER_CFG" --verify "$VERIFY_FILE" || true
+
+    RESULT_FILE="${VERIFY_FILE}.verification.json"
+    QUOTE_OK=$(python3 -c \
+        'import sys,json; v=json.load(open(sys.argv[1]))["details"]["quote_verified"]; print("true" if v else "false")' \
+        "$RESULT_FILE")
+    rm -rf "$SIM_TMP"
+
+    [ "$QUOTE_OK" = "true" ] || { echo "error: quote_verified=false — attestation pipeline is broken"; exit 1; }
+    echo "Attestation pipeline verified: quote_verified=true."

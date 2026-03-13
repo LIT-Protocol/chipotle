@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
 </head>
 <body>
   <div class="app">
@@ -76,13 +77,10 @@
             <span class="sidebar-link-icon">◇</span>
             <span class="sidebar-link-text">Wallets</span>
           </a>
+          <hr>
           <a href="#action-runner" class="sidebar-link" data-scroll="action-runner">
             <span class="sidebar-link-icon">◇</span>
             <span class="sidebar-link-text">Action Runner</span>
-          </a>
-          <a href="lit_actions.html" class="sidebar-link">
-            <span class="sidebar-link-icon">◇</span>
-            <span class="sidebar-link-text">Lit Actions Viem</span>
           </a>
         </nav>
       </aside>
@@ -215,7 +213,9 @@
               <div class="card-header">
                 <h3 class="card-title">Actions in group</h3>
                 <div class="card-header-actions">
-                  <input type="text" id="actions-group-id" class="input input-sm" placeholder="Group ID" style="width: 6rem;">
+                  <select id="actions-group-id" class="input input-sm" style="width: 12rem;">
+                    <option value="" disabled selected>Loading groups…</option>
+                  </select>
                   <button type="button" id="btn-load-actions" class="btn btn-sm btn-outline">Refresh</button>
                 </div>
               </div>
@@ -247,7 +247,7 @@
               <div class="card-body">
                 <div class="table-wrap">
                   <table class="data-table" id="wallets-table">
-                    <thead><tr><th>PkpId (Address)</th><th>Description</th></tr></thead>
+                    <thead><tr><th>Description</th><th>PkpId (Address)</th></tr></thead>
                     <tbody id="wallets-tbody"></tbody>
                   </table>
                   <p id="wallets-empty" class="empty-state" style="display: none;">No wallets.</p>
@@ -260,7 +260,7 @@
           </section>
 
           <!-- Action Runner -->
-          <section id="section-action-runner" class="dashboard-section">
+          <section id="section-action-runner" class="dashboard-section" style="display:none;">
             <h2 class="section-title">Action Runner</h2>
             <p class="section-desc">Paste Lit Action JavaScript code and optional JSON parameters, then execute.</p>
             <div id="action-runner-status" class="status" style="display: none;"></div>
@@ -270,12 +270,18 @@
               </div>
               <div class="card-body">
                 <div class="form-group">
-                  <label for="action-runner-code">Lit Action code</label>
-                  <textarea id="action-runner-code" class="input textarea-lg" rows="10" placeholder="Paste your Lit Action JavaScript code here (e.g. const go = async () => { Lit.Actions.setResponse({ response: JSON.stringify('hello') }); }; go();)" spellcheck="false"></textarea>
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:0.35rem;">
+                    <label for="action-runner-code" style="margin-bottom:0;">Lit Action code</label>
+                    <div style="display:flex;align-items:center;gap:0.5rem;flex-shrink:0;">
+                      <label for="action-runner-usage-key" style="margin-bottom:0;white-space:nowrap;font-size:0.8125rem;">Usage API Key</label>
+                      <input type="text" id="action-runner-usage-key" class="input" style="width:25rem;font-family:'JetBrains Mono',monospace;font-size:0.8125rem;padding:0.35rem 0.6rem;" placeholder="optional — overrides account key" />
+                    </div>
+                  </div>
+                  <div id="action-runner-code" class="codejar-editor language-javascript" spellcheck="false"></div>
                 </div>
                 <div class="form-group">
                   <label for="action-runner-params">Parameters (JSON, optional)</label>
-                  <textarea id="action-runner-params" class="input textarea-sm" rows="4" placeholder='Optional JSON object, e.g. {"key": "value"}' spellcheck="false"></textarea>
+                  <div id="action-runner-params" class="codejar-editor codejar-editor-sm language-json" spellcheck="false"></div>
                 </div>
                 <div class="action-runner-buttons">
                   <button type="button" id="btn-execute-lit-action" class="btn btn-primary">Execute Lit Action</button>
@@ -333,6 +339,9 @@
     </div>
   </div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

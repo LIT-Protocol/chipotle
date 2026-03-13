@@ -36,11 +36,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── 1. Build the dstack simulator and verifier (cached separately) ────
-      # Each artifact has its own cache keyed by the dstack HEAD SHA (obtained
-      # without cloning via git ls-remote). The verifier cache is shared with
-      # the verify-attestation workflow so a warm hit there avoids rebuilding
-      # here. On full cache hit the clone and all builds are skipped entirely.
+      # ── 1. Build the dstack simulator (cached by dstack HEAD SHA) ───────────
+      # The verifier is pulled as the dstacktee/dstack-verifier Docker image
+      # (same as verify-attestation.yml) — no source build or cache needed.
       - name: Get dstack HEAD SHA
         id: dstack-sha
         run: |
@@ -54,21 +52,14 @@ jobs:
           path: ${{ github.workspace }}/dstack-cache/simulator
           key: dstack-simulator-${{ steps.dstack-sha.outputs.sha }}-${{ runner.os }}
 
-      - name: Restore verifier cache
-        id: verifier-cache
-        uses: actions/cache@v4
-        with:
-          path: ${{ github.workspace }}/dstack-cache/verifier
-          key: dstack-verifier-${{ steps.dstack-sha.outputs.sha }}-${{ runner.os }}
-
       - name: Fix dstack cache permissions
-        if: steps.sim-cache.outputs.cache-hit == 'true' || steps.verifier-cache.outputs.cache-hit == 'true'
+        if: steps.sim-cache.outputs.cache-hit == 'true'
         run: |
           CACHE_DIR="${{ github.workspace }}/dstack-cache"
           [ -d "$CACHE_DIR" ] && chmod -R u+rwX "$CACHE_DIR" || true
 
       - name: Clone dstack repository
-        if: steps.sim-cache.outputs.cache-hit != 'true' || steps.verifier-cache.outputs.cache-hit != 'true'
+        if: steps.sim-cache.outputs.cache-hit != 'true'
         run: |
           DSTACK_BUILD=$(mktemp -d)
           echo "DSTACK_BUILD=$DSTACK_BUILD" >> "$GITHUB_ENV"
@@ -76,7 +67,7 @@ jobs:
 
       # Use stable Rust for the dstack build (it may require features newer than 1.91).
       - name: Install Rust (stable, for dstack)
-        if: steps.sim-cache.outputs.cache-hit != 'true' || steps.verifier-cache.outputs.cache-hit != 'true'
+        if: steps.sim-cache.outputs.cache-hit != 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Build dstack simulator
@@ -95,17 +86,8 @@ jobs:
              "$DSTACK_BUILD/sdk/simulator/dstack.toml" \
              "${{ github.workspace }}/dstack-cache/simulator/"
 
-      - name: Build dstack-verifier
-        if: steps.verifier-cache.outputs.cache-hit != 'true'
-        run: cargo build --manifest-path="$DSTACK_BUILD/verifier/Cargo.toml" --bin dstack-verifier
-
-      - name: Populate verifier cache
-        if: steps.verifier-cache.outputs.cache-hit != 'true'
-        run: |
-          mkdir -p "${{ github.workspace }}/dstack-cache/verifier"
-          cp "$DSTACK_BUILD/target/debug/dstack-verifier" \
-             "$DSTACK_BUILD/verifier/dstack-verifier.toml" \
-             "${{ github.workspace }}/dstack-cache/verifier/"
+      - name: Pull dstack-verifier image
+        run: docker pull --platform linux/amd64 dstacktee/dstack-verifier:latest
 
       - name: Remove dstack build directory
         if: always() && env.DSTACK_BUILD != ''
@@ -181,10 +163,7 @@ jobs:
       - name: Verify attestation pipeline with dstack-verifier
         run: |
           set -eu
-          CACHE_DIR="${{ github.workspace }}/dstack-cache"
-          SIM_SRC="$CACHE_DIR/simulator"
-          VERIFIER_BIN="$CACHE_DIR/verifier/dstack-verifier"
-          VERIFIER_CFG="$CACHE_DIR/verifier/dstack-verifier.toml"
+          SIM_SRC="${{ github.workspace }}/dstack-cache/simulator"
           API_BIN="$(pwd)/lit-api-server/target/debug/lit-api-server"
 
           SIM_TMP=$(mktemp -d /tmp/dstack-sim-XXXXXX)
@@ -210,8 +189,12 @@ jobs:
             exit 1
           }
 
-          # Copy demo config to checkout (NodeConfig.toml is gitignored); run from lit-api-server dir.
-          cp lit-api-server/NodeConfig.demo.toml lit-api-server/NodeConfig.toml
+          # Copy branch-appropriate config (NodeConfig.toml is gitignored); main uses main.toml, others use next.toml.
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            cp lit-api-server/NodeConfig.main.toml lit-api-server/NodeConfig.toml
+          else
+            cp lit-api-server/NodeConfig.next.toml lit-api-server/NodeConfig.toml
+          fi
           (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" "$API_BIN") >> "$SIM_TMP/lit-api-server.log" 2>&1 &
           API_PID=$!
           if ! kill -0 "$API_PID" 2>/dev/null; then
@@ -240,28 +223,31 @@ jobs:
           fi
 
           # Get attestation from lit-api-server (which got it from the simulator).
-          QUOTE_RESP=$(curl -sf http://localhost:8000/attestation)
+          curl -sf http://localhost:8000/attestation > "$SIM_TMP/attestation.json"
 
           # Teardown simulator and lit-api-server.
           kill "$SIM_PID" "$API_PID" 2>/dev/null || true
 
-          # Write the verifier request: strip 0x prefix, set attestation=null.
-          VERIFY_FILE="$SIM_TMP/verify-request.json"
-          printf '%s' "$QUOTE_RESP" | python3 -c \
-            'import sys,json; d=json.load(sys.stdin); q=d["quote"]; q=q[2:] if q.startswith("0x") else q; print(json.dumps({"quote":q,"event_log":d["event_log"],"vm_config":d["vm_config"],"attestation":None}))' \
-            > "$VERIFY_FILE"
+          # Fix empty digests and normalise format (same script used by verify-attestation.yml).
+          # Then inject spec_version=1 into vm_config if missing: the simulator omits it but
+          # the Docker verifier's serde parser requires it to be present in VmConfig.
+          # (The verifier will still report os_image_hash_verified=false and is_valid=false
+          # because the simulator's synthetic OS hash is not published — that is expected.)
+          python3 scripts/fix-attestation-event-log.py "$SIM_TMP/attestation.json" \
+            | python3 scripts/inject-spec-version.py \
+            > "$SIM_TMP/verify-request.json"
 
-          # Use workspace for verifier image cache (avoids /tmp permission denied on self-hosted).
-          VERIFIER_CFG_OVERRIDE="$SIM_TMP/verifier.toml"
-          sed "s|image_cache_dir = .*|image_cache_dir = \"${{ github.workspace }}/dstack-cache/verifier-image-cache\"|" "$VERIFIER_CFG" > "$VERIFIER_CFG_OVERRIDE"
-          mkdir -p "${{ github.workspace }}/dstack-cache/verifier-image-cache"
-
-          # Run verifier in oneshot mode. Exits 1 when is_valid=false (expected for
-          # the simulator) — ignore the exit code and check quote_verified directly.
-          "$VERIFIER_BIN" -c "$VERIFIER_CFG_OVERRIDE" --verify "$VERIFY_FILE" || true
+          # Run verifier via Docker (same image as verify-attestation.yml).
+          # Exits 1 when is_valid=false (expected for simulator) — ignore and check quote_verified.
+          docker run --rm \
+            -v "$SIM_TMP:/verify" \
+            -w /verify \
+            --platform linux/amd64 \
+            dstacktee/dstack-verifier:latest \
+            --verify /verify/verify-request.json || true
 
           # Assertion: quote_verified must be true.
-          RESULT_FILE="${VERIFY_FILE}.verification.json"
+          RESULT_FILE="$SIM_TMP/verify-request.json.verification.json"
           QUOTE_OK=$(python3 -c \
             'import sys,json; v=json.load(open(sys.argv[1]))["details"]["quote_verified"]; print("true" if v else "false")' \
             "$RESULT_FILE")

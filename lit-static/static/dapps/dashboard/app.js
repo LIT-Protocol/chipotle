@@ -49,12 +49,7 @@ async function preloadAllTables() {
     await loadWallets();
     await loadUsageKeys();
     const groupIdEl = document.getElementById('actions-group-id');
-    let groupId = (groupIdEl && groupIdEl.value.trim()) || '';
-    if (!groupId && groups && groups.length > 0) {
-      groupId = String(groups[0].id);
-      if (groupIdEl) groupIdEl.value = groupId;
-    }
-    if (!groupId) groupId = '0';
+    const groupId = (groupIdEl && groupIdEl.value.trim()) || (groups && groups.length > 0 ? String(groups[0].id) : '0');
     await loadActions(groupId);
   } catch (_) { /* ignore */ }
 }
@@ -420,8 +415,8 @@ function renderWalletsTable(items) {
     const description = item.description ?? '';
     const tr = document.createElement('tr');
     tr.innerHTML =
-      '<td class="mono cell-address"></td>' +
-      '<td class="mono">' + escapeHtml(description) + '</td>';
+      '<td class="mono">' + escapeHtml(description) + '</td>' +
+      '<td class="mono cell-address"></td>';
     const addressCell = tr.querySelector('.cell-address');
     const addressCopyBtn = document.createElement('button');
     addressCopyBtn.type = 'button';
@@ -527,6 +522,18 @@ async function loadUsageKeys() {
 }
 
 // ----- Load table data (used by preload and refresh buttons) -----
+function populateActionsGroupDropdown(groups) {
+  const sel = document.getElementById('actions-group-id');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = groups.length === 0
+    ? '<option value="" disabled selected>No groups</option>'
+    : groups.map(g => `<option value="${g.id}">${escapeHtml(g.name || String(g.id))}</option>`).join('');
+  // Restore previous selection if still valid, otherwise pick first.
+  if (current && [...sel.options].some(o => o.value === current)) sel.value = current;
+  else if (sel.options.length > 0) sel.selectedIndex = 0;
+}
+
 async function loadGroups() {
   const apiKey = getApiKey();
   if (!apiKey) return;
@@ -537,6 +544,7 @@ async function loadGroups() {
     const client = await getClient();
     const items = await client.listGroups({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
     renderGroupsTable(items);
+    populateActionsGroupDropdown(items);
     window._statGroups = items.length;
     updateStatCards();
     return items;
@@ -643,7 +651,7 @@ function openAddGroupModal() {
 }
 
 function openEditGroupModal(item) {
-  const id = String(item.id);
+  const id = String(Number(item.id));
   const body =
     '<div class="form-group"><label>Group ID</label><div class="mono">' + escapeHtml(id) + '</div></div>' +
     '<div class="form-group"><label for="modal-edit-group-name">Name</label><input type="text" id="modal-edit-group-name" class="input" value="' + escapeHtml(item.name || '') + '"></div>' +
@@ -685,8 +693,10 @@ function openEditGroupModal(item) {
 function openAddActionModal() {
   const groupIdEl = document.getElementById('actions-group-id');
   const groupId = (groupIdEl && groupIdEl.value.trim()) || '0';
+  const selectedOption = groupIdEl && groupIdEl.options[groupIdEl.selectedIndex];
+  const groupLabel = selectedOption ? selectedOption.textContent : groupId;
   const body =
-    '<div class="form-group"><label for="modal-action-group-id">Group ID</label><input type="text" id="modal-action-group-id" class="input" value="' + escapeHtml(groupId) + '" placeholder="0"></div>' +
+    '<div class="form-group"><label>Group</label><div class="input" style="background:var(--input-bg,#f3f4f6);color:var(--text-muted,#6b7280);cursor:default;" id="modal-action-group-id">' + escapeHtml(groupLabel) + '</div></div>' +
     '<div class="form-group"><label for="modal-action-cid">IPFS CID</label><input type="text" id="modal-action-cid" class="input" placeholder="Qm... or bafy..."></div>' +
     '<div class="form-group"><label for="modal-action-name">Name (optional)</label><input type="text" id="modal-action-name" class="input" placeholder="Action name"></div>' +
     '<div class="form-group"><label for="modal-action-desc">Description (optional)</label><input type="text" id="modal-action-desc" class="input" placeholder="Optional"></div>';
@@ -696,13 +706,13 @@ function openAddActionModal() {
   openModal('Add action', body, footer);
   document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
   document.getElementById('modal-add-btn').addEventListener('click', async () => {
-    const gid = document.getElementById('modal-action-group-id').value.trim();
+    const gid = groupId;
     const cid = document.getElementById('modal-action-cid').value.trim();
     const name = document.getElementById('modal-action-name').value.trim() || undefined;
     const desc = document.getElementById('modal-action-desc').value.trim() || undefined;
     const apiKey = getApiKey();
     if (!apiKey || !gid || !cid) {
-      showStatus('actions-status', 'Fill Group ID and IPFS CID.', 'error');
+      showStatus('actions-status', 'Fill in the IPFS CID.', 'error');
       return;
     }
     closeModal();
@@ -902,19 +912,42 @@ function initActions() {
   document.getElementById('btn-load-actions')?.addEventListener('click', () => {
     const groupId = document.getElementById('actions-group-id').value.trim();
     if (groupId) loadActions(groupId);
-    else showStatus('actions-status', 'Enter Group ID.', 'error');
+    else showStatus('actions-status', 'Select a group.', 'error');
+  });
+  document.getElementById('actions-group-id')?.addEventListener('change', () => {
+    const groupId = document.getElementById('actions-group-id').value.trim();
+    if (groupId) loadActions(groupId);
   });
   document.getElementById('btn-add-action')?.addEventListener('click', () => openAddActionModal());
 }
 
 // ----- Sidebar scroll -----
+const ACTION_RUNNER_ID = 'action-runner';
+const MAIN_SECTION_IDS = ['overview', 'usage-keys', 'groups', 'actions', 'wallets'];
+
+function setActionRunnerVisible(visible) {
+  const actionRunnerSection = document.getElementById('section-' + ACTION_RUNNER_ID);
+  if (actionRunnerSection) actionRunnerSection.style.display = visible ? '' : 'none';
+  MAIN_SECTION_IDS.forEach((id) => {
+    const el = document.getElementById('section-' + id);
+    if (el) el.style.display = visible ? 'none' : '';
+  });
+}
+
 function initSidebar() {
   document.querySelectorAll('.sidebar-link[data-scroll]').forEach((a) => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
       const id = a.getAttribute('data-scroll');
-      const el = document.getElementById('section-' + id);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (id === ACTION_RUNNER_ID) {
+        setActionRunnerVisible(true);
+        const el = document.getElementById('section-' + id);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else {
+        setActionRunnerVisible(false);
+        const el = document.getElementById('section-' + id);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     });
   });
 }
@@ -1000,7 +1033,10 @@ function initHeader() {
 }
 
 // ----- Action Runner -----
-function initActionRunner() {
+let _codeJarEditor = null;
+let _paramsJarEditor = null;
+
+async function initActionRunner() {
   const codeEl = document.getElementById('action-runner-code');
   const paramsEl = document.getElementById('action-runner-params');
   const btn = document.getElementById('btn-execute-lit-action');
@@ -1010,12 +1046,44 @@ function initActionRunner() {
 
   if (!btn || !outputEl) return;
 
-  btn.addEventListener('click', async () => {
-    const apiKey = getApiKey();
-    const code = codeEl?.value?.trim() ?? '';
-    const paramsRaw = paramsEl?.value?.trim() ?? '';
+  let getCode;
+  let getParams;
 
-    if (!apiKey) {
+  try {
+    const { CodeJar } = await import('https://cdn.jsdelivr.net/npm/codejar@4.2.0/+esm');
+    const highlight = (editor) => {
+      if (!window.Prism) return;
+      const lang = editor.classList.contains('language-json') ? 'json' : 'javascript';
+      const grammar = Prism.languages[lang];
+      if (grammar) editor.innerHTML = Prism.highlight(editor.textContent, grammar, lang);
+    };
+    _codeJarEditor = CodeJar(codeEl, highlight, { tab: '  ' });
+    _paramsJarEditor = CodeJar(paramsEl, highlight, { tab: '  ' });
+
+    getCode = () => _codeJarEditor ? _codeJarEditor.toString() : (codeEl?.textContent ?? '');
+    getParams = () => _paramsJarEditor ? _paramsJarEditor.toString() : (paramsEl?.textContent ?? '');
+  } catch (e) {
+    // Fallback: enable plain contenteditable editors if CodeJar fails to load
+    console.error('Failed to load CodeJar for Action Runner editor, falling back to plain editor.', e);
+    if (codeEl) {
+      codeEl.setAttribute('contenteditable', 'true');
+    }
+    if (paramsEl) {
+      paramsEl.setAttribute('contenteditable', 'true');
+    }
+    getCode = () => (codeEl?.textContent ?? '');
+    getParams = () => (paramsEl?.textContent ?? '');
+  }
+
+  btn.addEventListener('click', async () => {
+    const accountKey = getApiKey();
+    const usageKeyEl = document.getElementById('action-runner-usage-key');
+    const usageKey = usageKeyEl?.value?.trim() ?? '';
+    const apiKey = usageKey || accountKey;
+    const code = (getCode ? getCode() : (codeEl?.textContent ?? '')).trim();
+    const paramsRaw = (getParams ? getParams() : (paramsEl?.textContent ?? '')).trim();
+
+    if (!accountKey) {
       hideStatus('action-runner-status');
       outputEl.textContent = 'Log in first to execute Lit Actions.';
       outputEl.className = 'action-runner-output error';
@@ -1058,7 +1126,7 @@ function initActionRunner() {
   });
 
   btnGetCid?.addEventListener('click', async () => {
-    const code = codeEl?.value?.trim() ?? '';
+    const code = getCode().trim();
     if (!code) {
       outputEl.textContent = 'Enter Lit Action code to get its IPFS CID.';
       outputEl.className = 'action-runner-output error';
@@ -1100,7 +1168,7 @@ function init() {
   initWallets();
   initGroups();
   initActions();
-  initActionRunner();
+  initActionRunner(); // async; CodeJar loads lazily on first use
   initSidebar();
   initHeader();
 }

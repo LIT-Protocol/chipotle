@@ -1,4 +1,3 @@
-use crate::core::v1::models::response::SignWithPkpResponse;
 use rocket_okapi::okapi::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -42,13 +41,13 @@ pub struct AddActionToGroupRequest {
 pub struct AddPkpToGroupRequest {
     /// Group ID (decimal or hex string).
     pub group_id: String,
-    pub pkp_public_key: String,
+    pub pkp_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct RemovePkpFromGroupRequest {
     pub group_id: String,
-    pub pkp_public_key: String,
+    pub pkp_id: String,
 }
 
 /// Request for update_group (AccountConfig.updateGroup). API key via header.
@@ -93,8 +92,6 @@ pub struct UpdateUsageApiKeyMetadataRequest {
 /// Request for add_usage_api_key. expiration and balance as decimal strings (e.g. unix timestamp, wei). API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AddUsageApiKeyRequest {
-    pub expiration: String,
-    pub balance: String,
     pub name: String,
     pub description: String,
 }
@@ -103,14 +100,6 @@ pub struct AddUsageApiKeyRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct RemoveUsageApiKeyRequest {
     pub usage_api_key: String,
-}
-
-/// API key via header.
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct SignWithPKPRequest {
-    pub pkp_public_key: String,
-    pub message: String,
-    pub signing_scheme: String,
 }
 
 /// API key via header.
@@ -131,10 +120,4 @@ pub struct DecryptRequest {
     pub api_key: String,
     pub ciphertext: String,
     pub data_to_encrypt_hash: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
-pub struct CombineSignatureSharesRequest {
-    pub api_key: String,
-    pub share_date: SignWithPkpResponse,
 }

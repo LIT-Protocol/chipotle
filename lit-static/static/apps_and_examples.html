@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lit Node Express Node – Dashboard, SDKs, APIs &amp; Apps</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #050508;
+      --bg-secondary: #0f0f14;
+      --bg-card: #14141c;
+      --bg-card-hover: #1a1a24;
+      --border: rgba(255, 255, 255, 0.08);
+      --text-primary: #f4f4f6;
+      --text-secondary: #a1a1aa;
+      --text-muted: #71717a;
+      --accent: #8b5cf6;
+      --accent-hover: #a78bfa;
+      --accent-dim: rgba(139, 92, 246, 0.2);
+      --gradient-start: #6366f1;
+      --gradient-end: #8b5cf6;
+      --radius: 12px;
+      --radius-sm: 8px;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 15px;
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+    .app {
+      width: 100%;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem;
+      min-height: 100vh;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 2rem;
+      padding-bottom: 1rem;
+      border-bottom: 1px solid var(--border);
+    }
+    .header-brand {
+      text-decoration: none;
+      color: inherit;
+    }
+    .logo {
+      font-weight: 700;
+      font-size: 1.35rem;
+      letter-spacing: -0.02em;
+      background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .intro {
+      color: var(--text-secondary);
+      font-size: 1rem;
+      margin: 0 0 2.5rem;
+      line-height: 1.65;
+    }
+    .section-title {
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--text-muted);
+      margin: 0 0 1rem;
+    }
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 1rem;
+      transition: background 0.2s;
+    }
+    .card:hover {
+      background: var(--bg-card-hover);
+    }
+    .card-title {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin: 0 0 0.35rem;
+    }
+    .card-title a {
+      color: var(--text-primary);
+      text-decoration: none;
+    }
+    .card-title a:hover {
+      color: var(--accent-hover);
+    }
+    .card-desc {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      margin: 0 0 0.75rem;
+      line-height: 1.5;
+    }
+    .card-meta {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .card-meta a {
+      color: var(--accent-hover);
+      text-decoration: none;
+    }
+    .card-meta a:hover {
+      text-decoration: underline;
+    }
+    .link-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+    .link-list li {
+      margin-bottom: 0.5rem;
+    }
+    .link-list li:last-child {
+      margin-bottom: 0;
+    }
+    .link-list a {
+      color: var(--accent-hover);
+      text-decoration: none;
+      font-size: 0.95rem;
+    }
+    .link-list a:hover {
+      text-decoration: underline;
+    }
+    .footer {
+      margin-top: 3rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    .footer a {
+      color: var(--accent-hover);
+      text-decoration: none;
+    }
+    .footer a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="header">
+      <a href="https://developer.litprotocol.com/" target="_blank" rel="noopener noreferrer" class="header-brand">
+        <span class="logo">Lit Node Express Server</span>
+      </a>
+    </header>
+
+    <p class="intro">
+      This server exposes a REST API used by the <strong>Core</strong>, <strong>Transfer</strong>, and <strong>Swaps</strong> JavaScript SDKs.
+      The SDKs wrap the API endpoints so you can call them from the browser or Node. Demo apps include
+      <strong>Solver</strong> (for solvers: view swap requests, commit to quotes, process swaps), <strong>SWPS</strong> (for users: request swaps and manage flow), and the <strong>Lit Express Node dashboard</strong> (manage accounts, groups, wallets, and IPFS actions).
+    </p>
+
+    <h2 class="section-title">Lit Express Node dashboard</h2>
+
+    <div class="card">
+      <h3 class="card-title"><a href="dapps/dashboard/">Lit Express Node dashboard</a></h3>
+      <p class="card-desc">
+        Desktop app (light/dark mode) for Lit Express Node (AccountConfig contract): log in with an API key or create a new account; create wallets and add existing PKPs to groups; list and create groups; add IPFS CIDs (permitted actions) to groups. Uses the Core SDK and mirrors the contract’s accounts, groups, and actions.
+      </p>
+      <p class="card-meta">Open: <a href="dapps/dashboard/">dapps/dashboard/</a></p>
+    </div>
+
+     <h2 class="section-title">API reference</h2>
+
+    <div class="card">
+      <h3 class="card-title"><a href="open_api.html">Core V1 OpenAPI spec</a></h3>
+      <p class="card-desc">
+        Interactive OpenAPI (Swagger) documentation for <code>/core/v1/</code>: all endpoints, request and response schemas, and &quot;Try it out&quot; to call the API from the browser. Covers new account, create wallet, sign with PKP, lit action, add/remove group, PKP and usage API keys, and list groups, wallets, and actions.
+      </p>
+      <p class="card-meta">Open: <a href="/swagger-ui/">swagger-ui/</a></p>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title"><a href="solidity_contract.html">AccountConfig contract (Solidity)</a></h3>
+      <p class="card-desc">
+        Developer documentation for the <code>AccountConfig.sol</code> contract: errors, structs (Metadata, UsageApiKey, Group, Account), state variables, and all functions with NatSpec (accounts, groups, wallets, usage API keys, list/query, balance &amp; pricing).
+      </p>
+      <p class="card-meta">Open: <a href="solidity_contract.html">solidity_contract.html</a></p>
+    </div>
+    
+    <h2 class="section-title">JavaScript APIs</h2>
+
+    <div class="card">
+      <h3 class="card-title"><a href="docs/client/js-core-sdk.html">Core SDK</a> <span style="color: var(--text-muted); font-weight: 400;">(core_sdk.js)</span></h3>
+      <p class="card-desc">
+        Wraps the v1 core API: get API key, sign with PKP, run Lit actions, encrypt/decrypt. Routes are mounted at <code>/core/v1/</code>. Use this for PKP-based signing and Lit Actions.
+      </p>
+      <p class="card-meta">Docs: <a href="docs/client/js-core-sdk.html">docs/client/js-core-sdk.html</a></p>
+      <p class="card-meta">Code: <a href="core_sdk.js">core_sdk.js</a></p>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title"><a href="docs/client/js-transfer-sdk.html">Transfer SDK</a> <span style="color: var(--text-muted); font-weight: 400;">(transfer_sdk.js)</span></h3>
+      <p class="card-desc">
+        Wraps transfer endpoints: get balance, send transfer (PKP wallet to destination). Routes are mounted at <code>/transfer/v1/</code>. Use this to move assets from a PKP-controlled wallet.
+      </p>
+      <p class="card-meta">Docs: <a href="docs/client/js-transfer-sdk.html">docs/client/js-transfer-sdk.html</a></p>
+      <p class="card-meta">Code: <a href="transfer_sdk.js">transfer_sdk.js</a></p>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title"><a href="docs/client/js-swaps-sdk.html">Swaps SDK</a> <span style="color: var(--text-muted); font-weight: 400;">(swaps_sdk.js)</span></h3>
+      <p class="card-desc">
+        Wraps swap intents: token list, new quote request, fill quote, accept quote, swap status, open swap requests/quotes, quote balances, attempt swap. Routes are mounted at <code>/swaps/v1/</code>. Use this to build swap flows and solver UIs.
+      </p>
+      <p class="card-meta">Docs: <a href="docs/client/js-swaps-sdk.html">docs/client/js-swaps-sdk.html</a></p>
+      <p class="card-meta">Code: <a href="swaps_sdk.js">swaps_sdk.js</a></p>
+    </div>   
+
+    <h2 class="section-title">Sample test page</h2>
+
+    <div class="card">
+      <h3 class="card-title"><a href="simple_api_test.html">Simple API test</a></h3>
+      <p class="card-desc">
+        Interactive test page to try core and transfer endpoints: get API key, sign with PKP, get balance, send transfer. Configure base URL and use the forms to call the APIs.
+      </p>
+      <p class="card-meta">Open: <a href="simple_api_test.html">simple_api_test.html</a></p>
+    </div>
+
+    <h2 class="section-title">Demo apps</h2>
+
+    <div class="card">
+      <h3 class="card-title"><a href="dapps/solver/">Solver app</a></h3>
+      <p class="card-desc">
+        For solvers/liquidity providers. View open swap requests and open quotes in tables, commit to a quote via MetaMask (newQuote), check PKP balances for a quote, and process a swap (attempt_swap_request). Uses the Swaps SDK and ethers for wallet signing.
+      </p>
+      <p class="card-meta">Open: <a href="dapps/solver/">dapps/solver/</a></p>
+    </div>
+
+    <div class="card">
+      <h3 class="card-title"><a href="dapps/swps/">SWPS app</a></h3>
+      <p class="card-desc">
+        For end users requesting swaps. Request a swap (origin/destination token and chain), view token list, and follow the swap flow. Uses the Swaps SDK to create quote requests and interact with the swap API.
+      </p>
+      <p class="card-meta">Open: <a href="dapps/swps/">dapps/swps/</a></p>
+    </div>
+
+
+
+    <footer class="footer">
+      <a href="https://developer.litprotocol.com/" target="_blank" rel="noopener noreferrer">Lit Protocol</a> ·
+      API routes: <code>/core/v1/</code>, <code>/transfer/v1/</code>, <code>/swaps/v1/</code>
+    </footer>
+  </div>
+</body>
+</html>

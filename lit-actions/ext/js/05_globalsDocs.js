@@ -18,13 +18,4 @@ const LitActions = undefined;
  */
 const ethers = undefined;
 
-/**
- * The jsonwebtoken library exposed to Lit Actions for JWT encoding and verification.
- *
- * @global
- * @name jwt
- * @type {{decode: Function, verify: Function, sign: Function}}
- */
-const jwt = undefined;
-
 export {};
