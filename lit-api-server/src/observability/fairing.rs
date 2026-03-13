@@ -17,15 +17,17 @@ use uuid::Uuid;
 const HEADER_X_CORRELATION_ID: &str = "X-Correlation-Id";
 const HEADER_X_REQUEST_ID: &str = "X-Request-Id";
 
-/// Context stored per request for response header injection.
-/// Note: We store only IDs (Send + Sync) because EnteredSpan is !Send and cannot
-/// live in Rocket's local_cache. The request span covers on_request only.
+/// Context stored per request for response header injection and request-scoped tracing.
+/// The `Span` (Send + Sync) is stored here instead of an `EnteredSpan` (!Send) so it
+/// can live in Rocket's `local_cache`. The OTel layer records span duration from
+/// creation (on_request) to drop (after on_response), covering the full request lifecycle.
 struct RequestTracingContext {
-    /// User-provided X-Correlation-Id, if any. Only set when user explicitly sent the header.
-    /// Per requirements: X-Correlation-Id MUST NOT be on response if user did not provide it.
     user_provided_correlation_id: Option<String>,
-    /// Span/request ID. Always present. Propagated as X-Request-Id on response.
     request_id: String,
+    /// Span covering the full request lifecycle. Not entered — stored for lifetime only.
+    /// Never read directly; the span is kept alive by this field and closed on drop.
+    #[allow(dead_code)]
+    span: tracing::Span,
 }
 
 impl RequestTracingContext {
@@ -33,6 +35,7 @@ impl RequestTracingContext {
         Self {
             user_provided_correlation_id: None,
             request_id: String::new(),
+            span: tracing::Span::none(),
         }
     }
 }
@@ -116,27 +119,32 @@ impl Fairing for ObservabilityFairing {
         // Per requirements: if user sends X-Request-Id, it must be ignored.
         let request_id = Uuid::new_v4().to_string();
 
-        let _span = info_span!(
+        let span = info_span!(
             "http_request",
             method = %req.method(),
             uri = %req.uri(),
             correlation_id = field::Empty,
             request_id = %request_id,
-        )
-        .entered();
+        );
 
         if let Some(ref cid) = user_provided_correlation_id {
-            _span.record("correlation_id", cid.as_str());
+            span.record("correlation_id", cid.as_str());
         }
 
-        lit_observability::logging::set_request_context(
-            Some(request_id.clone()),
-            user_provided_correlation_id.clone(),
-        );
+        // Enter briefly so set_request_context (which uses Span::current()) attaches
+        // IDs to this span's extensions. The span itself stays alive in local_cache.
+        {
+            let _guard = span.enter();
+            lit_observability::logging::set_request_context(
+                Some(request_id.clone()),
+                user_provided_correlation_id.clone(),
+            );
+        }
 
         let ctx = RequestTracingContext {
             user_provided_correlation_id,
             request_id,
+            span,
         };
         let _ = req.local_cache(|| ctx);
     }
