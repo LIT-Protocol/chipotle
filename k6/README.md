@@ -11,9 +11,7 @@ Auto-generated from the OpenAPI spec using [@grafana/openapi-to-k6](https://gith
 
 ```bash
 npm install -g @grafana/openapi-to-k6
-openapi-to-k6 --include-sample-script \
-  https://36da669c852c9bd4fdea27dd331c07ff776bd125-8000.dstack-pha-prod5.phala.network/openapi.json \
-  ./k6
+openapi-to-k6 https://f8fce543471dc9f5f5643aa217422398c36e5edc-8000.dstack-base-prod5.phala.network/openapi.json \ ./k6
 
 # Note: The OpenAPI spec paths omit the /core/v1 prefix. Set BASE_URL with /core/v1
 # when running against the Phala deployment, e.g. BASE_URL=.../core/v1

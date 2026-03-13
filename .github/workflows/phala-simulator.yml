@@ -189,8 +189,12 @@ jobs:
             exit 1
           }
 
-          # Copy next config to checkout (NodeConfig.toml is gitignored); run from lit-api-server dir.
-          cp lit-api-server/NodeConfig.next.toml lit-api-server/NodeConfig.toml
+          # Copy branch-appropriate config (NodeConfig.toml is gitignored); main uses main.toml, others use next.toml.
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            cp lit-api-server/NodeConfig.main.toml lit-api-server/NodeConfig.toml
+          else
+            cp lit-api-server/NodeConfig.next.toml lit-api-server/NodeConfig.toml
+          fi
           (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" "$API_BIN") >> "$SIM_TMP/lit-api-server.log" 2>&1 &
           API_PID=$!
           if ! kill -0 "$API_PID" 2>/dev/null; then
