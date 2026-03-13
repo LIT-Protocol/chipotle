@@ -5,10 +5,10 @@
  * Use: k6 run k6/correctness/new-account.spec.ts
  *      BASE_URL=https://your-instance.phala.network/core/v1 k6 run k6/correctness/new-account.spec.ts
  */
-import type { Response } from "k6/http";
 import { sleep } from "k6";
-import { checkAndLog } from "../check.ts";
+import { checkAndLog } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
+import { assertOk } from "../helpers.ts";
 import { BASE_URL } from "../defaults.ts";
 
 export const options = {
@@ -44,37 +44,4 @@ export default function () {
     "newAccount returns wallet_address": () =>
       typeof data.wallet_address === "string" && data.wallet_address.length > 0,
   }, "newAccount");
-}
-
-function assertOk(
-  name: string,
-  endpoint: string,
-  res: { response: Response },
-): boolean {
-  const { response } = res;
-  const status = response?.status ?? 0;
-  const ok = status >= 200 && status < 300;
-  if (!ok) {
-    let msg = "";
-    if (status === 0) {
-      msg = "(no response / connection failed)";
-    } else {
-      try {
-        const body = JSON.parse(response.body as string);
-        msg =
-          body.message ??
-          body.error ??
-          body.detail ??
-          (typeof body === "string" ? body : JSON.stringify(body));
-      } catch {
-        msg = (response.body as string) || "(no body)";
-      }
-    }
-    console.error(`FAIL ${name} | ${endpoint} | ${status} | ${msg}`);
-  }
-  checkAndLog(response, {
-    [`${name} 2xx`]: (r) =>
-      (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, name);
-  return ok;
 }
