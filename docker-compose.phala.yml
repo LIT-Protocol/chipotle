@@ -84,11 +84,13 @@ services:
       # Phala CVM secrets in the deployment manifest.
       GCP_SERVICE_ACCOUNT_JSON: ${GCP_SERVICE_ACCOUNT_JSON}
       GCP_PROJECT_ID: ${GCP_PROJECT_ID}
-    # Host filesystem + pid namespace for the hostmetrics receiver to report
-    # accurate CVM-level CPU, memory, disk, and network metrics.
+    # Host pid namespace + /proc and /sys mounts for the hostmetrics receiver
+    # to report accurate CVM-level CPU, memory, disk, and network metrics.
+    # We avoid mounting the entire root filesystem to limit the read surface.
     pid: host
     volumes:
-      - '/:/host:ro,rslave'
+      - '/proc:/host/proc:ro'
+      - '/sys:/host/sys:ro'
     restart: unless-stopped
 
   lit-static:
