@@ -8,22 +8,11 @@
 
 // --- Request types (match core/v1/models/request.rs) ---
 
-/** Default signing scheme for signWithPkp (secp256k1 + SHA-256). */
-export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
-
 /**
  * @typedef {Object} NewAccountOptions
  * @property {string} accountName - Name for the account
  * @property {string} accountDescription - Description for the account
  * @property {string} [initialBalance] - Optional initial balance (decimal or hex; default 0)
- */
-
-/**
- * @typedef {Object} SignWithPkpOptions
- * @property {string} apiKey - Hex-encoded API key (from getApiKey)
- * @property {string} pkpId - PKP ID
- * @property {string} message - Message to sign
- * @property {string} [signingScheme='EcdsaK256Sha256'] - Signing scheme (use SIGNING_SCHEME_ECDSA_K256_SHA256)
  */
 
 /**
@@ -167,19 +156,6 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @property {string} contract_address - AccountConfig contract address
  */
 
-/** Share type enum (response.rs ShareType). */
-export const SHARE_TYPE_ECDSA = 'Ecdsa';
-export const SHARE_TYPE_FROST = 'Frost';
-export const SHARE_TYPE_BLS = 'Bls';
-
-/**
- * Single signature share (response.rs SignatureShare).
- * @typedef {Object} SignatureShare
- * @property {string} share_id
- * @property {string} peer_id
- * @property {string} signature_share
- */
-
 // --- Response types (match core/v1/models/response.rs) ---
 
 /**
@@ -194,22 +170,8 @@ export const SHARE_TYPE_BLS = 'Bls';
  */
 
 /**
- * Sign-with-PKP response (response.rs SignWithPkpResponse).
- * @typedef {Object} SignWithPkpResponse
- * @property {string} signing_scheme - Signing scheme (e.g. EcdsaK256Sha256)
- * @property {string} signed_digest - Signed digest (hex)
- * @property {string} pkp_id - PKP ID
- * @property {string} share_type - 'Ecdsa' | 'Frost' | 'Bls'
- * @property {string} [big_r] - ECDSA big R (optional)
- * @property {string} [compressed_public_key] - Compressed public key (optional)
- * @property {string} [verifying_share] - Verifying share (optional)
- * @property {string} [signing_commitments] - Signing commitments (optional)
- * @property {SignatureShare[]} shares - Signature shares (share_id, peer_id, signature_share)
- */
-
-/**
  * @typedef {Object} LitActionResponse - Lit action execution result (single response from /lit_action)
- * @property {SignWithPkpResponse[]} signatures - Signing results from the action
+ * @property {Object[]} signatures - Signing results from the action
  * @property {string} response - Action response payload
  * @property {string} logs - Action logs
  * @property {boolean} has_error - Whether the action reported an error
@@ -369,27 +331,6 @@ export class LitNodeSimpleApiClient {
       headers: headersWithApiKey(apiKey),
     });
     return parseResponse(res, 'create_wallet');
-  }
-
-  /**
-   * POST /core/v1/sign_with_pkp
-   * Signs a message with the given PKP using the provided API key.
-   * Uses EcdsaK256Sha256 signing scheme by default.
-   * @param {SignWithPkpOptions} options
-   * @returns {Promise<SignWithPkpResponse>} { signing_scheme, signed_digest, pkp_id, signature }
-   */
-  async signWithPkp({ apiKey, pkpId, message, signingScheme = SIGNING_SCHEME_ECDSA_K256_SHA256 }) {
-    const body = {
-      pkp_id: pkpId,
-      message,
-      signing_scheme: signingScheme,
-    };
-    const res = await fetch(`${this.baseUrl}/sign_with_pkp`, {
-      method: 'POST',
-      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
-      body: JSON.stringify(body),
-    });
-    return parseResponse(res, 'sign_with_pkp');
   }
 
   /**
@@ -726,6 +667,26 @@ export class LitNodeSimpleApiClient {
       if (rpcUrl) cfg.rpc_url = rpcUrl;
     }
     return cfg;
+  }
+
+  /**
+   * GET /core/v1/get_api_payers
+   * Returns all API payer addresses registered on the node.
+   * @returns {Promise<string[]>}
+   */
+  async getApiPayers() {
+    const res = await fetch(`${this.baseUrl}/get_api_payers`);
+    return parseResponse(res, 'get_api_payers');
+  }
+
+  /**
+   * GET /core/v1/get_admin_api_payer
+   * Returns the admin API payer address for the node.
+   * @returns {Promise<string>}
+   */
+  async getAdminApiPayer() {
+    const res = await fetch(`${this.baseUrl}/get_admin_api_payer`);
+    return parseResponse(res, 'get_admin_api_payer');
   }
 }
 

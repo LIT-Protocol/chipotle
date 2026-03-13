@@ -28,7 +28,7 @@ pub struct AddGroupRequest {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AddActionToGroupRequest {
-    pub group_id: String,
+    pub group_id: u64,
     /// IPFS CID for the action (will be keccak256-hashed on server).
     pub action_ipfs_cid: String,
     /// Optional name for the action (stored in contract metadata).
@@ -40,13 +40,13 @@ pub struct AddActionToGroupRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AddPkpToGroupRequest {
     /// Group ID (decimal or hex string).
-    pub group_id: String,
+    pub group_id: u64,
     pub pkp_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct RemovePkpFromGroupRequest {
-    pub group_id: String,
+    pub group_id: u64,
     pub pkp_id: String,
 }
 
@@ -54,7 +54,7 @@ pub struct RemovePkpFromGroupRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateGroupRequest {
     /// Group ID (decimal or hex string).
-    pub group_id: String,
+    pub group_id: u64,
     pub name: String,
     pub description: String,
     #[serde(default)]
@@ -66,7 +66,7 @@ pub struct UpdateGroupRequest {
 /// Request for remove_action_from_group. action_ipfs_cid is keccak256-hashed on server. API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct RemoveActionFromGroupRequest {
-    pub group_id: String,
+    pub group_id: u64,
     /// IPFS CID for the action (keccak256-hashed on server).
     pub action_ipfs_cid: String,
 }
@@ -74,7 +74,7 @@ pub struct RemoveActionFromGroupRequest {
 /// Request for update_action_metadata. action_ipfs_cid is keccak256-hashed on server. API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateActionMetadataRequest {
-    pub group_id: String,
+    pub group_id: u64,
     /// IPFS CID for the action (keccak256-hashed on server).
     pub action_ipfs_cid: String,
     pub name: String,
@@ -94,6 +94,17 @@ pub struct UpdateUsageApiKeyMetadataRequest {
 pub struct AddUsageApiKeyRequest {
     pub name: String,
     pub description: String,
+    pub can_create_groups: bool,
+    pub can_delete_groups: bool,
+    pub can_create_pkps: bool,
+    /// Group IDs, where 0 is the wildcard for all groups.
+    pub can_manage_ipfs_ids_in_groups: Vec<u64>,    
+    /// Group IDs, where 0 is the wildcard for all groups.
+    pub can_add_pkp_to_groups: Vec<u64>,
+    /// Group IDs, where 0 is the wildcard for all groups.
+    pub can_remove_pkp_from_groups: Vec<u64>,
+    /// Group IDs, where 0 is the wildcard for all groups.
+    pub can_execute_in_groups: Vec<u64>,
 }
 
 /// API key via header.

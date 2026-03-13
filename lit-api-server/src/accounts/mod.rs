@@ -11,6 +11,7 @@ use crate::accounts::signable_contract::{
     get_read_only_account_config_contract, get_signable_account_config_contract, send_transaction,
 };
 use crate::accounts::signer_pool::SignerPool;
+use crate::core::v1::models::request::AddUsageApiKeyRequest;
 use crate::utils::parse_with_hash::api_key_hash;
 use crate::utils::parse_with_hash::ipfs_cid_to_u256;
 use ethers::types::{Address, H160, U256};
@@ -229,8 +230,7 @@ pub async fn add_usage_api_key(
     usage_api_key: &str,
     expiration: U256,
     balance: U256,
-    name: &str,
-    description: &str,
+    req: AddUsageApiKeyRequest,
 ) -> Result<bool> {
     let (contract, signer_address) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
@@ -249,15 +249,15 @@ pub async fn add_usage_api_key(
         usage_api_key_hash,
         expiration,
         balance,
-        name.to_string(),
-        description.to_string(),
-        true,               // create_groups
-        true,               // delete_groups
-        true,               // create_pk_ps
-        vec![U256::zero()], // manage_ipfs_ids_in_groups
-        vec![U256::zero()], // add_pkp_to_groups
-        vec![U256::zero()], // remove_pkp_from_groups
-        vec![U256::zero()], // execute_in_groups
+        req.name.to_string(),
+        req.description.to_string(),
+        req.can_create_groups,
+        req.can_delete_groups,
+        req.can_create_pkps,
+        req.can_manage_ipfs_ids_in_groups.into_iter().map(|id| U256::from(id)).collect(),
+        req.can_add_pkp_to_groups.into_iter().map(|id| U256::from(id)).collect(),
+        req.can_remove_pkp_from_groups.into_iter().map(|id| U256::from(id)).collect(),
+        req.can_execute_in_groups.into_iter().map(|id| U256::from(id)).collect(),
     );
     send_transaction(function_call, signer_pool, signer_address).await
 }

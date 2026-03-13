@@ -467,6 +467,15 @@ function renderUsageKeysTable() {
       '<td class="mono">' + escapeHtml(balance) + '</td>' +
       '<td class="cell-actions"></td>';
     const actionsCell = tr.querySelector('.cell-actions');
+    const canEdit = !!(item.usage_api_key ?? item.api_key);
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'btn-icon';
+    editBtn.title = canEdit ? 'Edit' : 'Edit requires key (add key in this session to edit later)';
+    editBtn.innerHTML = ICON_PENCIL;
+    if (!canEdit) editBtn.disabled = true;
+    editBtn.addEventListener('click', () => canEdit && openEditUsageKeyModal(normalizeUsageKeyItem(item)));
+    actionsCell.appendChild(editBtn);
     const delBtn = document.createElement('button');
     delBtn.type = 'button';
     delBtn.className = 'btn-icon btn-icon-danger';
@@ -839,6 +848,39 @@ function openAddUsageKeyModal() {
         updateStatCards();
       }
       showStatus('overview-status-usage-keys', 'Usage API key added. Copy and store your key now (shown once): ' + usageKey, 'success');
+    } catch (e) {
+      showStatus('overview-status-usage-keys', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+    } finally {
+      closeActionProgress();
+    }
+  });
+}
+
+function openEditUsageKeyModal(item) {
+  const body =
+    '<div class="form-group"><label for="modal-edit-usage-name">Name</label><input type="text" id="modal-edit-usage-name" class="input" value="' + escapeHtml(item.name || '') + '"></div>' +
+    '<div class="form-group"><label for="modal-edit-usage-desc">Description</label><input type="text" id="modal-edit-usage-desc" class="input" value="' + escapeHtml(item.description || '') + '"></div>';
+  const footer =
+    '<button type="button" class="btn btn-outline" id="modal-cancel-btn">Cancel</button>' +
+    '<button type="button" class="btn btn-primary" id="modal-save-btn">Save</button>';
+  openModal('Edit usage API key', body, footer);
+  document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
+  document.getElementById('modal-save-btn').addEventListener('click', async () => {
+    const name = document.getElementById('modal-edit-usage-name').value.trim();
+    const description = document.getElementById('modal-edit-usage-desc').value.trim();
+    const apiKey = getApiKey();
+    if (!apiKey) return;
+    closeModal();
+    hideStatus('overview-status-usage-keys');
+    try {
+      showActionProgress('Updating usage API key', 'Updating usage API key metadata.');
+      const client = await getClient();
+      await client.updateUsageApiKeyMetadata({ apiKey, usageApiKey: item.usage_api_key, name, description });
+      const store = getUsageKeysStore();
+      const idx = store.findIndex((k) => k.usage_api_key === item.usage_api_key);
+      if (idx !== -1) { store[idx].name = name; store[idx].description = description; }
+      renderUsageKeysTable();
+      showStatus('overview-status-usage-keys', 'Usage API key updated.', 'success');
     } catch (e) {
       showStatus('overview-status-usage-keys', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
     } finally {
