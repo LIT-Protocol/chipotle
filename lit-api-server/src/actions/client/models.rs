@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 pub struct SignedData {
     pub signing_scheme: String,
     pub digest: String,
-    pub public_key: String,
+    pub pkp_id: String,
     pub signature: String,
 }
 

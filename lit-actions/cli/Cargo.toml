@@ -11,6 +11,13 @@ name = "lit_actions"
 test = false
 doctest = false
 
+[features]
+default = []
+# OTLP telemetry export via otel-collector. Enable at build time for production.
+otlp = ["lit-observability/otlp"]
+# Production builds always include OTLP so telemetry reaches the otel-collector sidecar.
+production = ["otlp"]
+
 [dependencies]
 anyhow = { workspace = true }
 clap = { version = "4", features = ["derive"] }

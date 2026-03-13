@@ -1,11 +1,16 @@
+#[cfg(feature = "otlp")]
 use lit_core::error::Result;
+#[cfg(feature = "otlp")]
 use opentelemetry_otlp::TonicExporterBuilder;
+#[cfg(feature = "otlp")]
 use opentelemetry_sdk::{runtime, trace};
 
 pub mod propagation;
 
+#[cfg(feature = "otlp")]
 use crate::error::unexpected_err;
 
+#[cfg(feature = "otlp")]
 pub(crate) fn init_tracing_provider(
     tonic_exporter_builder: TonicExporterBuilder, trace_config: trace::Config,
 ) -> Result<trace::TracerProvider> {

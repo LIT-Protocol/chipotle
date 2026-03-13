@@ -23,4 +23,9 @@ WORKDIR /app
 COPY --from=builder /build/lit-static/target/release/lit-static /usr/local/bin/
 COPY --from=builder /build/lit-static/static /app/static
 
+# Inject the API server root URL (e.g. https://api.dev.litprotocol.com) into
+# the dashboard app at build time. Defaults to localhost for local development.
+ARG BASE_URL=http://localhost:8000
+RUN sed -i "s|__LIT_API_BASE_URL__|${BASE_URL}|g" /app/static/dapps/dashboard/app.js
+
 CMD ["lit-static"]

@@ -37,7 +37,7 @@ impl Client {
     }
 
     #[allow(dead_code)]
-    fn ipfs_cache(&self) -> Result<Cache<String, String>> {
+    pub fn ipfs_cache(&self) -> Result<Cache<String, String>> {
         // if let Some(ipfs_cache) = self.js_env.ipfs_cache.clone() {
         //     return Ok(ipfs_cache);
         // }
@@ -46,7 +46,7 @@ impl Client {
     }
 
     #[allow(dead_code)]
-    fn http_cache(&self) -> Result<reqwest::Client> {
+    pub fn http_cache(&self) -> Result<reqwest::Client> {
         if let Some(http_cache) = self.js_env.http_client.clone() {
             return Ok(http_cache);
         }
@@ -55,17 +55,27 @@ impl Client {
 
     pub fn metadata(&self) -> Result<MetadataMap> {
         let mut md = MetadataMap::new();
-        // md.insert(
-        //     "x-host",
-        //     self.lit_config()
-        //         .external_addr()
-        //         .unwrap_or_default()
-        //         .parse()?,
-        // );
         md.insert("x-request-id", self.request_id().parse()?);
 
-        // Add trace context to the metadata for distributed tracing.
-        // inject_tracing_metadata(&mut md);
+        // TODO: x-correlation-id is also sent via ExecutionRequest.http_headers —
+        // this redundancy in gRPC metadata could be simplified later.
+        if let Some(cid) = self.http_headers.get("x-correlation-id") {
+            md.insert("x-correlation-id", cid.parse()?);
+        }
+
+        // Inject W3C TraceContext headers into gRPC metadata for distributed tracing.
+        // This allows TracingMiddleware on the lit-actions side to reconstruct the parent span.
+        #[cfg(feature = "otlp")]
+        {
+            use lit_observability::opentelemetry::propagation::TextMapPropagator;
+            use lit_observability::opentelemetry_sdk::propagation::TraceContextPropagator;
+            use lit_observability::tracing_opentelemetry::OpenTelemetrySpanExt;
+
+            let cx = tracing::Span::current().context();
+            let propagator = TraceContextPropagator::new();
+            let mut injector = lit_observability::tracing::propagation::TonicMetadataMap(&mut md);
+            propagator.inject_context(&cx, &mut injector);
+        }
 
         Ok(md)
     }

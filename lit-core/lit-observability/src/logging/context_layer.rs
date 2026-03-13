@@ -2,24 +2,40 @@
 //! Injects request_id/correlation_id into OTLP logs.
 //! Resolution order: span extensions, then task-local context keyed by tokio task ID.
 
+#[cfg(feature = "otlp")]
 use std::any::TypeId;
+#[cfg(feature = "otlp")]
 use std::borrow::Cow;
+#[cfg(feature = "otlp")]
 use std::marker::PhantomData;
 use std::sync::LazyLock;
 
 use dashmap::DashMap;
 
+#[cfg(feature = "otlp")]
 use opentelemetry::Key;
+#[cfg(feature = "otlp")]
 use opentelemetry::logs::{AnyValue, LogRecord as _, Logger, LoggerProvider as _, Severity};
+#[cfg(feature = "otlp")]
 use opentelemetry::trace::TraceContextExt;
+#[cfg(feature = "otlp")]
 use opentelemetry_sdk::logs::LoggerProvider;
-use tracing::span::{Attributes, Id, Record};
-use tracing::{Dispatch, Event, Span, Subscriber};
+use tracing::span::Id;
+#[cfg(feature = "otlp")]
+use tracing::span::{Attributes, Record};
+use tracing::{Dispatch, Span};
+#[cfg(feature = "otlp")]
+use tracing::{Event, Subscriber};
+#[cfg(feature = "otlp")]
 use tracing_opentelemetry::OpenTelemetrySpanExt;
+#[cfg(feature = "otlp")]
 use tracing_subscriber::Layer;
+#[cfg(feature = "otlp")]
 use tracing_subscriber::layer::Context;
+#[cfg(feature = "otlp")]
 use tracing_subscriber::registry::LookupSpan;
 
+#[cfg(feature = "otlp")]
 const INSTRUMENTATION_LIBRARY_NAME: &str = "lit-observability";
 
 // Task-local fallback keyed by tokio task ID; cleared at request boundaries.
@@ -54,6 +70,7 @@ impl WithRequestContext {
 }
 
 /// Tracing layer that converts events to OpenTelemetry LogRecords with request context injection.
+#[cfg(feature = "otlp")]
 pub struct ContextAwareOtelLogLayer<S> {
     logger: opentelemetry_sdk::logs::Logger,
     with_context: WithRequestContext,
@@ -61,6 +78,7 @@ pub struct ContextAwareOtelLogLayer<S> {
     _subscriber: PhantomData<fn(S)>,
 }
 
+#[cfg(feature = "otlp")]
 impl<S> ContextAwareOtelLogLayer<S>
 where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
@@ -120,6 +138,7 @@ where
     }
 }
 
+#[cfg(feature = "otlp")]
 impl<S> Layer<S> for ContextAwareOtelLogLayer<S>
 where
     S: Subscriber + for<'lookup> LookupSpan<'lookup>,
@@ -205,6 +224,7 @@ where
     }
 }
 
+#[cfg(feature = "otlp")]
 #[derive(Default)]
 struct RecordedContextFields {
     has_request_id: bool,
@@ -212,11 +232,13 @@ struct RecordedContextFields {
 }
 
 /// Extracts tracing event fields into a LogRecord, preserving native types.
+#[cfg(feature = "otlp")]
 struct EventVisitor<'a, LR: opentelemetry::logs::LogRecord> {
     log_record: &'a mut LR,
     context_fields: RecordedContextFields,
 }
 
+#[cfg(feature = "otlp")]
 impl<'a, LR: opentelemetry::logs::LogRecord> EventVisitor<'a, LR> {
     fn new(log_record: &'a mut LR) -> Self {
         Self { log_record, context_fields: RecordedContextFields::default() }
@@ -236,6 +258,7 @@ impl<'a, LR: opentelemetry::logs::LogRecord> EventVisitor<'a, LR> {
     }
 }
 
+#[cfg(feature = "otlp")]
 impl<LR: opentelemetry::logs::LogRecord> tracing::field::Visit for EventVisitor<'_, LR> {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
         self.track_context_field(field.name());
@@ -323,12 +346,15 @@ pub fn set_request_context(request_id: Option<String>, correlation_id: Option<St
 
     let span = Span::current();
 
-    // OTel span attributes for trace correlation
-    if let Some(ref req_id) = request_id {
-        span.set_attribute("request_id", req_id.clone());
-    }
-    if let Some(ref corr_id) = correlation_id {
-        span.set_attribute("correlation_id", corr_id.clone());
+    // OTel span attributes for trace correlation (only when OTLP is enabled)
+    #[cfg(feature = "otlp")]
+    {
+        if let Some(ref req_id) = request_id {
+            span.set_attribute("request_id", req_id.clone());
+        }
+        if let Some(ref corr_id) = correlation_id {
+            span.set_attribute("correlation_id", corr_id.clone());
+        }
     }
 
     // Span extensions for log injection
@@ -392,7 +418,7 @@ pub fn get_request_context() -> Option<RequestContext> {
     get_task_request_context()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "otlp"))]
 mod tests {
     use super::*;
     use opentelemetry_sdk::Resource;
@@ -428,7 +454,7 @@ mod tests {
             let _guard = span.enter();
 
             let initial = get_request_context();
-            assert!(initial.is_none() || !initial.as_ref().map_or(false, |c| c.has_context()));
+            assert!(initial.is_none() || !initial.as_ref().is_some_and(|c| c.has_context()));
 
             let expected_req_id = "test-req-id-12345".to_string();
             let expected_corr_id = "test-corr-id-67890".to_string();

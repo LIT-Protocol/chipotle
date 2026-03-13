@@ -1,0 +1,93 @@
+# Verify attestation from a deployed Phala CVM
+#
+# Fetches /attestation from the live API, runs the official
+# dstacktee/dstack-verifier Docker image, and asserts is_valid=true.
+# Unlike the simulator CI job (which can only check quote_verified),
+# a real TDX deployment must produce a fully valid attestation.
+#
+# Called from Deploy to Phala CVM after the API is available, or manually
+# via workflow_dispatch.
+
+name: Verify Remote Attestation
+
+on:
+  workflow_call:
+    inputs:
+      attestation_url:
+        description: "Base URL of the deployed CVM (e.g. https://host — /attestation is appended)"
+        required: true
+        type: string
+      runner:
+        description: 'Runner as JSON array (e.g. ["self-hosted"])'
+        required: false
+        type: string
+        default: '["self-hosted"]'
+  workflow_dispatch:
+    inputs:
+      attestation_url:
+        description: "Base URL of the deployed CVM (e.g. https://host)"
+        required: true
+        type: string
+      runner:
+        description: "Runner as JSON array"
+        required: false
+        type: string
+        default: '["self-hosted"]'
+
+jobs:
+  verify:
+    name: dstack-verifier (remote)
+    runs-on: ${{ fromJson(inputs.runner) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pull dstack-verifier image
+        run: docker pull --platform linux/amd64 dstacktee/dstack-verifier:latest
+
+      - name: Verify remote attestation
+        run: |
+          set -eu
+          ATTESTATION_URL="${{ inputs.attestation_url }}"
+          TMP_DIR=$(mktemp -d /tmp/verify-remote-XXXXXX)
+
+          echo "Fetching attestation from $ATTESTATION_URL/attestation..."
+          curl -sf "$ATTESTATION_URL/attestation" > "$TMP_DIR/attestation.json" || {
+            echo "::error::Failed to fetch $ATTESTATION_URL/attestation"
+            rm -rf "$TMP_DIR"
+            exit 1
+          }
+
+          # Fix empty digests in runtime events (dstack guest-agent strips them;
+          # the Docker verifier's parser rejects digest=""). See script docstring.
+          python3 scripts/fix-attestation-event-log.py "$TMP_DIR/attestation.json" \
+            > "$TMP_DIR/verify-request.json"
+
+          echo "Running dstack-verifier (oneshot) via Docker..."
+          docker run --rm \
+            -v "$TMP_DIR:/verify" \
+            -w /verify \
+            --platform linux/amd64 \
+            dstacktee/dstack-verifier:latest \
+            --verify /verify/verify-request.json || true
+
+          RESULT_FILE="$TMP_DIR/verify-request.json.verification.json"
+          if [ ! -f "$RESULT_FILE" ]; then
+            echo "::error::Verifier did not produce result file"
+            rm -rf "$TMP_DIR"
+            exit 1
+          fi
+
+          echo "--- Verifier output ---"
+          cat "$RESULT_FILE"
+          echo "--- end ---"
+
+          IS_VALID=$(python3 -c \
+            'import sys,json; v=json.load(open(sys.argv[1])); print("true" if v.get("is_valid") else "false")' \
+            "$RESULT_FILE")
+          rm -rf "$TMP_DIR"
+
+          if [ "$IS_VALID" != "true" ]; then
+            echo "::error::is_valid=false — remote attestation from $ATTESTATION_URL is not valid"
+            exit 1
+          fi
+          echo "Remote attestation verified: is_valid=true."

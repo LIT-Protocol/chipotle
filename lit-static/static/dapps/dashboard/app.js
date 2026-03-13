@@ -18,14 +18,12 @@ function setApiKey(v) {
 }
 
 function getBaseUrl() {
-
-  if (typeof location !== 'undefined' && location.origin && (location.origin.startsWith('http://') || location.origin.startsWith('https://')))
-    
-    if (location.origin.indexOf('localhost.:8080') !== -1)
-      return 'http://localhost:8000';
-    else
-      return 'https://36da669c852c9bd4fdea27dd331c07ff776bd125-8000.dstack-pha-prod5.phala.network';
-  return 'http://localhost:8000';
+  // Falls back to localhost for local development.
+  // For deployments, __LIT_API_BASE_URL__ is replaced at image build time
+  // via ARG BASE_URL in Dockerfile.lit-static.
+  if (typeof location !== 'undefined' && location.origin && location.origin.indexOf('localhost') !== -1)
+    return 'http://localhost:8000';
+  return '__LIT_API_BASE_URL__';
 }
 
 function updateAuthUI() {
@@ -51,12 +49,7 @@ async function preloadAllTables() {
     await loadWallets();
     await loadUsageKeys();
     const groupIdEl = document.getElementById('actions-group-id');
-    let groupId = (groupIdEl && groupIdEl.value.trim()) || '';
-    if (!groupId && groups && groups.length > 0) {
-      groupId = String(groups[0].id);
-      if (groupIdEl) groupIdEl.value = groupId;
-    }
-    if (!groupId) groupId = '0';
+    const groupId = (groupIdEl && groupIdEl.value.trim()) || (groups && groups.length > 0 ? String(groups[0].id) : '0');
     await loadActions(groupId);
   } catch (_) { /* ignore */ }
 }
@@ -163,7 +156,6 @@ function initLogin() {
   document.getElementById('btn-create-account').addEventListener('click', async () => {
     const name = document.getElementById('new-account-name').value.trim();
     const desc = document.getElementById('new-account-desc').value.trim();
-    const initialBalance = document.getElementById('new-account-initial-balance').value.trim() || undefined;
     hideStatus('login-status');
     if (!name) {
       showStatus('login-status', 'Enter an account name.', 'error');
@@ -172,15 +164,21 @@ function initLogin() {
     const btn = document.getElementById('btn-create-account');
     btn.disabled = true;
     try {
+      showActionProgress(
+        'Creating account',
+        'Creating a new Lit Express account and returning an API key.'
+      );
       const client = await getClient();
-      const res = await client.newAccount({ accountName: name, accountDescription: desc, initialBalance });
+      const res = await client.newAccount({ accountName: name, accountDescription: desc });
       setApiKey(res.api_key);
-      showStatus('login-status', 'Account created. You are now logged in.', 'success');
+      const walletMsg = res.wallet_address ? ' Wallet: ' + (res.wallet_address.slice(0, 10) + '…' + res.wallet_address.slice(-8)) : '';
+      showStatus('login-status', 'Account created. Copy and store your API key now (shown once): ' + res.api_key + walletMsg, 'success');
       document.getElementById('new-account-name').value = '';
       document.getElementById('new-account-desc').value = '';
     } catch (e) {
       showStatus('login-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
     } finally {
+      closeActionProgress();
       btn.disabled = false;
     }
   });
@@ -280,6 +278,34 @@ function initConfirmClose() {
   document.getElementById('confirm-overlay')?.addEventListener('click', (e) => {
     if (e.target.id === 'confirm-overlay') closeConfirm(false);
   });
+}
+
+// ----- Action progress modal (non-dismissible) -----
+let _actionProgressPreviousFocus = null;
+
+function showActionProgress(title, description) {
+  const overlay = document.getElementById('action-overlay');
+  const titleEl = document.getElementById('action-title');
+  const descEl = document.getElementById('action-desc');
+  if (!overlay || !titleEl || !descEl) return;
+  titleEl.textContent = title || 'Working…';
+  descEl.textContent = description || '';
+  _actionProgressPreviousFocus = document.activeElement;
+  overlay.classList.add('is-open');
+  overlay.setAttribute('aria-hidden', 'false');
+  const dialog = overlay.querySelector('[role="dialog"]');
+  if (dialog) dialog.focus();
+}
+
+function closeActionProgress() {
+  const overlay = document.getElementById('action-overlay');
+  if (!overlay) return;
+  overlay.classList.remove('is-open');
+  overlay.setAttribute('aria-hidden', 'true');
+  if (_actionProgressPreviousFocus && typeof _actionProgressPreviousFocus.focus === 'function') {
+    try { _actionProgressPreviousFocus.focus(); } catch (_) { /* element may have been removed */ }
+  }
+  _actionProgressPreviousFocus = null;
 }
 
 // ----- Shared list render (overview lists stay as list) -----
@@ -386,14 +412,11 @@ function renderWalletsTable(items) {
   if (empty) empty.style.display = 'none';
   items.forEach((item) => {
     const address = item.wallet_address ?? item.address ?? item.name ?? '';
-    const pubkey = item.public_key ?? '';
-    const pubkeyPreview = pubkey ? keyPreview(pubkey) : '—';
     const description = item.description ?? '';
     const tr = document.createElement('tr');
     tr.innerHTML =
-      '<td class="mono cell-address"></td>' +
-      '<td class="mono cell-pubkey"></td>' +
-      '<td class="mono">' + escapeHtml(description) + '</td>';
+      '<td class="mono">' + escapeHtml(description) + '</td>' +
+      '<td class="mono cell-address"></td>';
     const addressCell = tr.querySelector('.cell-address');
     const addressCopyBtn = document.createElement('button');
     addressCopyBtn.type = 'button';
@@ -412,28 +435,6 @@ function renderWalletsTable(items) {
       }
     });
     addressCell.appendChild(addressCopyBtn);
-    const pubkeyCell = tr.querySelector('.cell-pubkey');
-    if (pubkey) {
-      const pubkeyCopyBtn = document.createElement('button');
-      pubkeyCopyBtn.type = 'button';
-      pubkeyCopyBtn.className = 'btn-copy-key';
-      pubkeyCopyBtn.textContent = pubkeyPreview;
-      pubkeyCopyBtn.title = 'Copy full public key';
-      pubkeyCopyBtn.addEventListener('click', async () => {
-        try {
-          await navigator.clipboard.writeText(pubkey);
-          const orig = pubkeyCopyBtn.textContent;
-          pubkeyCopyBtn.textContent = 'Copied!';
-          pubkeyCopyBtn.title = 'Copied!';
-          setTimeout(() => { pubkeyCopyBtn.textContent = orig; pubkeyCopyBtn.title = 'Copy full public key'; }, 1500);
-        } catch (_) {
-          pubkeyCopyBtn.title = 'Copy failed';
-        }
-      });
-      pubkeyCell.appendChild(pubkeyCopyBtn);
-    } else {
-      pubkeyCell.textContent = '—';
-    }
     tbody.appendChild(tr);
   });
 }
@@ -456,43 +457,24 @@ function renderUsageKeysTable() {
   }
   if (empty) empty.style.display = 'none';
   items.forEach((item) => {
-    const key = item.usage_api_key ?? item.api_key ?? '';
-    const preview = keyPreview(key);
     const expiration = item.expiration != null ? String(item.expiration) : '—';
     const balance = item.balance != null ? String(item.balance) : '—';
     const tr = document.createElement('tr');
     tr.innerHTML =
-      '<td class="mono cell-key"></td>' +
       '<td>' + escapeHtml(item.name || '') + '</td>' +
       '<td class="mono">' + escapeHtml(item.description || '') + '</td>' +
       '<td class="mono">' + escapeHtml(expiration) + '</td>' +
       '<td class="mono">' + escapeHtml(balance) + '</td>' +
       '<td class="cell-actions"></td>';
-    const keyCell = tr.querySelector('.cell-key');
-    const copyBtn = document.createElement('button');
-    copyBtn.type = 'button';
-    copyBtn.className = 'btn-copy-key';
-    copyBtn.textContent = preview;
-    copyBtn.title = 'Copy full key';
-    copyBtn.addEventListener('click', async () => {
-      try {
-        await navigator.clipboard.writeText(key);
-        const orig = copyBtn.textContent;
-        copyBtn.textContent = 'Copied!';
-        copyBtn.title = 'Copied!';
-        setTimeout(() => { copyBtn.textContent = orig; copyBtn.title = 'Copy full key'; }, 1500);
-      } catch (_) {
-        copyBtn.title = 'Copy failed';
-      }
-    });
-    keyCell.appendChild(copyBtn);
     const actionsCell = tr.querySelector('.cell-actions');
     const delBtn = document.createElement('button');
     delBtn.type = 'button';
     delBtn.className = 'btn-icon btn-icon-danger';
-    delBtn.title = 'Delete';
+    delBtn.title = (item.usage_api_key ?? item.api_key) ? 'Delete' : 'Delete requires key (add key in this session to remove later)';
     delBtn.innerHTML = ICON_TRASH;
-    delBtn.addEventListener('click', () => confirmAndRemoveUsageKey(normalizeUsageKeyItem(item)));
+    const canRemove = !!(item.usage_api_key ?? item.api_key);
+    if (!canRemove) delBtn.disabled = true;
+    delBtn.addEventListener('click', () => canRemove && confirmAndRemoveUsageKey(normalizeUsageKeyItem(item)));
     actionsCell.appendChild(delBtn);
     tbody.appendChild(tr);
   });
@@ -500,6 +482,7 @@ function renderUsageKeysTable() {
 
 function normalizeUsageKeyItem(item) {
   return {
+    id: item.id,
     usage_api_key: item.usage_api_key ?? item.api_key,
     name: item.name,
     description: item.description,
@@ -518,6 +501,7 @@ async function loadUsageKeys() {
     const client = await getClient();
     const items = await client.listApiKeys({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
     window._usageKeys = items.map((it) => ({
+      id: it.id,
       api_key: it.api_key,
       usage_api_key: it.api_key,
       name: it.name ?? '',
@@ -538,6 +522,18 @@ async function loadUsageKeys() {
 }
 
 // ----- Load table data (used by preload and refresh buttons) -----
+function populateActionsGroupDropdown(groups) {
+  const sel = document.getElementById('actions-group-id');
+  if (!sel) return;
+  const current = sel.value;
+  sel.innerHTML = groups.length === 0
+    ? '<option value="" disabled selected>No groups</option>'
+    : groups.map(g => `<option value="${g.id}">${escapeHtml(g.name || String(g.id))}</option>`).join('');
+  // Restore previous selection if still valid, otherwise pick first.
+  if (current && [...sel.options].some(o => o.value === current)) sel.value = current;
+  else if (sel.options.length > 0) sel.selectedIndex = 0;
+}
+
 async function loadGroups() {
   const apiKey = getApiKey();
   if (!apiKey) return;
@@ -548,6 +544,7 @@ async function loadGroups() {
     const client = await getClient();
     const items = await client.listGroups({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
     renderGroupsTable(items);
+    populateActionsGroupDropdown(items);
     window._statGroups = items.length;
     updateStatCards();
     return items;
@@ -632,6 +629,7 @@ function openAddGroupModal() {
     closeModal();
     hideStatus('groups-status');
     try {
+      showActionProgress('Creating group', `Creating group “${name}”.`);
       const client = await getClient();
       await client.addGroup({
         apiKey,
@@ -646,12 +644,14 @@ function openAddGroupModal() {
       showStatus('groups-status', 'Group created.', 'success');
     } catch (e) {
       showStatus('groups-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+    } finally {
+      closeActionProgress();
     }
   });
 }
 
 function openEditGroupModal(item) {
-  const id = String(item.id);
+  const id = String(Number(item.id));
   const body =
     '<div class="form-group"><label>Group ID</label><div class="mono">' + escapeHtml(id) + '</div></div>' +
     '<div class="form-group"><label for="modal-edit-group-name">Name</label><input type="text" id="modal-edit-group-name" class="input" value="' + escapeHtml(item.name || '') + '"></div>' +
@@ -676,12 +676,15 @@ function openEditGroupModal(item) {
     closeModal();
     hideStatus('groups-status');
     try {
+      showActionProgress('Updating group', `Updating group “${name}”.`);
       const client = await getClient();
       await client.updateGroup({ apiKey, groupId: id, name, description: desc, allWalletsPermitted: allWallets, allActionsPermitted: allActions });
       await loadGroups();
       showStatus('groups-status', 'Group updated.', 'success');
     } catch (e) {
       showStatus('groups-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+    } finally {
+      closeActionProgress();
     }
   });
 }
@@ -690,8 +693,10 @@ function openEditGroupModal(item) {
 function openAddActionModal() {
   const groupIdEl = document.getElementById('actions-group-id');
   const groupId = (groupIdEl && groupIdEl.value.trim()) || '0';
+  const selectedOption = groupIdEl && groupIdEl.options[groupIdEl.selectedIndex];
+  const groupLabel = selectedOption ? selectedOption.textContent : groupId;
   const body =
-    '<div class="form-group"><label for="modal-action-group-id">Group ID</label><input type="text" id="modal-action-group-id" class="input" value="' + escapeHtml(groupId) + '" placeholder="0"></div>' +
+    '<div class="form-group"><label>Group</label><div class="input" style="background:var(--input-bg,#f3f4f6);color:var(--text-muted,#6b7280);cursor:default;" id="modal-action-group-id">' + escapeHtml(groupLabel) + '</div></div>' +
     '<div class="form-group"><label for="modal-action-cid">IPFS CID</label><input type="text" id="modal-action-cid" class="input" placeholder="Qm... or bafy..."></div>' +
     '<div class="form-group"><label for="modal-action-name">Name (optional)</label><input type="text" id="modal-action-name" class="input" placeholder="Action name"></div>' +
     '<div class="form-group"><label for="modal-action-desc">Description (optional)</label><input type="text" id="modal-action-desc" class="input" placeholder="Optional"></div>';
@@ -701,18 +706,19 @@ function openAddActionModal() {
   openModal('Add action', body, footer);
   document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
   document.getElementById('modal-add-btn').addEventListener('click', async () => {
-    const gid = document.getElementById('modal-action-group-id').value.trim();
+    const gid = groupId;
     const cid = document.getElementById('modal-action-cid').value.trim();
     const name = document.getElementById('modal-action-name').value.trim() || undefined;
     const desc = document.getElementById('modal-action-desc').value.trim() || undefined;
     const apiKey = getApiKey();
     if (!apiKey || !gid || !cid) {
-      showStatus('actions-status', 'Fill Group ID and IPFS CID.', 'error');
+      showStatus('actions-status', 'Fill in the IPFS CID.', 'error');
       return;
     }
     closeModal();
     hideStatus('actions-status');
     try {
+      showActionProgress('Adding action', `Adding action CID “${cid}” to group ${gid}.`);
       const client = await getClient();
       await client.addActionToGroup({ apiKey, groupId: gid, actionIpfsCid: cid, name, description: desc });
       if (groupIdEl) groupIdEl.value = gid;
@@ -720,6 +726,8 @@ function openAddActionModal() {
       showStatus('actions-status', 'Action added.', 'success');
     } catch (e) {
       showStatus('actions-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+    } finally {
+      closeActionProgress();
     }
   });
 }
@@ -747,12 +755,15 @@ function openEditActionModal(item, groupId) {
     closeModal();
     hideStatus('actions-status');
     try {
+      showActionProgress('Updating action', `Updating action metadata for CID “${cid}”.`);
       const client = await getClient();
       await client.updateActionMetadata({ apiKey, groupId, actionIpfsCid: cid, name, description: desc });
       await loadActions(groupId);
       showStatus('actions-status', 'Action updated.', 'success');
     } catch (e) {
       showStatus('actions-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+    } finally {
+      closeActionProgress();
     }
   });
 }
@@ -767,12 +778,15 @@ async function confirmAndRemoveAction(item, groupId) {
   if (!apiKey) return;
   hideStatus('actions-status');
   try {
+    showActionProgress('Removing action', `Removing action CID “${cid}” from group ${groupId}.`);
     const client = await getClient();
     await client.removeActionFromGroup({ apiKey, groupId, actionIpfsCid: cid });
     await loadActions(groupId);
     showStatus('actions-status', 'Action removed.', 'success');
   } catch (e) {
     showStatus('actions-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+  } finally {
+    closeActionProgress();
   }
 }
 
@@ -797,26 +811,45 @@ function openAddUsageKeyModal() {
     closeModal();
     hideStatus('overview-status-usage-keys');
     try {
+      showActionProgress('Adding usage API key', 'Creating a new usage API key for this account.');
       const client = await getClient();
       const expiration = '9999999999';
       const balance = '1000000000000000000';
-      const res = await client.addUsageApiKey({ apiKey, usageApiKey: '', expiration, balance });
-      const usageKey = res && res.usage_api_key ? res.usage_api_key : '';
-      if (usageKey && (name || description)) {
-        await client.updateUsageApiKeyMetadata({ apiKey, usageApiKey: usageKey, name, description });
-      }
+      const res = await client.addUsageApiKey({
+        apiKey,
+        usageApiKey: '',
+        expiration,
+        balance,
+        name,
+        description,
+      });
+      const usageKey = res && res.usage_api_key ? res.usage_api_key : '';     
       if (usageKey) {
-        await loadUsageKeys();
+        getUsageKeysStore().push({
+          id: usageKey.slice(0, 12),
+          api_key: usageKey,
+          usage_api_key: usageKey,
+          name: name || '',
+          description: description || '',
+          expiration: '9999999999',
+          balance: 1000000000000000000,
+        });
+        window._statUsageKeys = getUsageKeysStore().length;
+        renderUsageKeysTable();
+        updateStatCards();
       }
       showStatus('overview-status-usage-keys', 'Usage API key added. Copy and store your key now (shown once): ' + usageKey, 'success');
     } catch (e) {
       showStatus('overview-status-usage-keys', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+    } finally {
+      closeActionProgress();
     }
   });
 }
 
 async function confirmAndRemoveUsageKey(item) {
-  const masked = maskApiKey(item.usage_api_key || '');
+  const keyOrId = item.usage_api_key || item.api_key || item.id || '';
+  const masked = keyOrId ? (keyOrId.length > 12 ? maskApiKey(keyOrId) : keyOrId) : '—';
   const msg = 'Remove usage API key "' + escapeHtml(masked) + '" from this account? This cannot be undone.';
   const confirmed = await confirmDelete(msg);
   if (!confirmed) return;
@@ -824,6 +857,7 @@ async function confirmAndRemoveUsageKey(item) {
   if (!apiKey) return;
   hideStatus('overview-status-usage-keys');
   try {
+    showActionProgress('Removing usage API key', `Removing usage API key “${masked}”.`);
     const client = await getClient();
     await client.removeUsageApiKey({ apiKey, usageApiKey: item.usage_api_key });
     const store = getUsageKeysStore();
@@ -834,6 +868,8 @@ async function confirmAndRemoveUsageKey(item) {
     showStatus('overview-status-usage-keys', 'Usage API key removed.', 'success');
   } catch (e) {
     showStatus('overview-status-usage-keys', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+  } finally {
+    closeActionProgress();
   }
 }
 
@@ -852,12 +888,15 @@ function openAddWalletModal() {
     closeModal();
     hideStatus('wallets-status');
     try {
+      showActionProgress('Creating wallet', 'Creating and registering a new wallet for this account.');
       const client = await getClient();
       const res = await client.createWallet(apiKey);
       await loadWallets();
       showStatus('wallets-status', 'Wallet created: ' + (res.wallet_address || ''), 'success');
     } catch (e) {
       showStatus('wallets-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+    } finally {
+      closeActionProgress();
     }
   });
 }
@@ -873,7 +912,11 @@ function initActions() {
   document.getElementById('btn-load-actions')?.addEventListener('click', () => {
     const groupId = document.getElementById('actions-group-id').value.trim();
     if (groupId) loadActions(groupId);
-    else showStatus('actions-status', 'Enter Group ID.', 'error');
+    else showStatus('actions-status', 'Select a group.', 'error');
+  });
+  document.getElementById('actions-group-id')?.addEventListener('change', () => {
+    const groupId = document.getElementById('actions-group-id').value.trim();
+    if (groupId) loadActions(groupId);
   });
   document.getElementById('btn-add-action')?.addEventListener('click', () => openAddActionModal());
 }
@@ -982,11 +1025,14 @@ function initActionRunner() {
   if (!btn || !outputEl) return;
 
   btn.addEventListener('click', async () => {
-    const apiKey = getApiKey();
+    const accountKey = getApiKey();
+    const usageKeyEl = document.getElementById('action-runner-usage-key');
+    const usageKey = usageKeyEl?.value?.trim() ?? '';
+    const apiKey = usageKey || accountKey;
     const code = codeEl?.value?.trim() ?? '';
     const paramsRaw = paramsEl?.value?.trim() ?? '';
 
-    if (!apiKey) {
+    if (!accountKey) {
       hideStatus('action-runner-status');
       outputEl.textContent = 'Log in first to execute Lit Actions.';
       outputEl.className = 'action-runner-output error';
