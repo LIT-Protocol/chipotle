@@ -256,19 +256,19 @@ pub async fn add_usage_api_key(
         req.can_create_pkps,
         req.can_manage_ipfs_ids_in_groups
             .into_iter()
-            .map(|id| U256::from(id))
+            .map(U256::from)
             .collect(),
         req.can_add_pkp_to_groups
             .into_iter()
-            .map(|id| U256::from(id))
+            .map(U256::from)
             .collect(),
         req.can_remove_pkp_from_groups
             .into_iter()
-            .map(|id| U256::from(id))
+            .map(U256::from)
             .collect(),
         req.can_execute_in_groups
             .into_iter()
-            .map(|id| U256::from(id))
+            .map(U256::from)
             .collect(),
     );
     send_transaction(function_call, signer_pool, signer_address).await
