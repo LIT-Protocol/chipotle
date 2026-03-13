@@ -127,14 +127,8 @@ pub async fn add_group(
     api_key: &str,
     req: Json<AddGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let cid_hashes = match req.all_actions_permitted {
-        true => vec![U256::zero()],
-        false => hex_array_to_u256_array(&req.permitted_actions)?,
-    };
-    let pkp_ids = match req.all_wallets_permitted {
-        true => vec![H160::zero()],
-        false => hex_array_to_h160_array(&req.pkps)?,
-    };
+    let cid_hashes = hex_array_to_u256_array(&req.cid_hashes_permitted)?;
+    let pkp_ids = hex_array_to_h160_array(&req.pkp_ids_permitted)?;
 
     accounts::add_group(
         signer_pool,
@@ -154,7 +148,7 @@ pub async fn add_action_to_group(
     api_key: &str,
     req: Json<AddActionToGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let group_id = string_group_id_to_u256(&req.group_id)?;
+    let group_id = U256::from(req.group_id);
     let name = req.name.as_deref().unwrap_or("");
     let description = req.description.as_deref().unwrap_or("");
     accounts::add_action_to_group(
@@ -175,7 +169,7 @@ pub async fn add_pkp_to_group(
     api_key: &str,
     req: Json<AddPkpToGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let group_id = string_group_id_to_u256(&req.group_id)?;
+    let group_id = U256::from(req.group_id);
     let wallet_address_bytes = hex_to_bytes(&req.pkp_id)?;
     if wallet_address_bytes.len() != 20 {
         return Err(ApiStatus::bad_request(
@@ -195,7 +189,7 @@ pub async fn remove_pkp_from_group(
     api_key: &str,
     req: Json<RemovePkpFromGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let group_id = string_group_id_to_u256(&req.group_id)?;
+    let group_id = U256::from(req.group_id);
     let src = hex_to_bytes(&req.pkp_id)?;
     if src.len() != 20 {
         return Err(ApiStatus::bad_request(
@@ -250,8 +244,7 @@ pub async fn add_usage_api_key(
         &usage_api_key,
         expiration,
         balance,
-        &req.name,
-        &req.description,
+        req.into_inner(),
     )
     .await
     .map_err(|e| ApiStatus::internal_server_error(e, "add_usage_api_key failed"))?;
@@ -277,7 +270,7 @@ pub async fn update_group(
     api_key: &str,
     req: Json<UpdateGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let group_id = string_group_id_to_u256(&req.group_id)?;
+    let group_id = U256::from(req.group_id);
     accounts::update_group(signer_pool, api_key, group_id, &req.name, &req.description)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "update_group failed"))?;
@@ -289,7 +282,7 @@ pub async fn remove_action_from_group(
     api_key: &str,
     req: Json<RemoveActionFromGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let group_id = string_group_id_to_u256(&req.group_id)?;
+    let group_id = U256::from(req.group_id);
     accounts::remove_action_from_group_by_cid(signer_pool, api_key, group_id, &req.action_ipfs_cid)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "remove_action_from_group failed"))?;
@@ -301,7 +294,7 @@ pub async fn update_action_metadata(
     api_key: &str,
     req: Json<UpdateActionMetadataRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let group_id = string_group_id_to_u256(&req.group_id)?;
+    let group_id = U256::from(req.group_id);
     let action_hash = ipfs_cid_to_u256(&req.action_ipfs_cid)?;
     accounts::update_action_metadata(
         signer_pool,
@@ -449,11 +442,11 @@ pub async fn list_wallets(
 
 pub async fn list_wallets_in_group(
     api_key: &str,
-    group_id: &str,
+    group_id: u64,
     page_number: u64,
     page_size: u64,
 ) -> Result<Vec<WalletItem>, ApiStatus> {
-    let gid = string_group_id_to_u256(group_id)?;
+    let gid = U256::from(group_id);
     let pn = U256::from(page_number);
     let ps = U256::from(page_size);
     let list = accounts::list_wallets_in_group(api_key, gid, pn, ps)

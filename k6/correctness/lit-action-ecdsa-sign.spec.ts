@@ -100,7 +100,26 @@ export default function () {
       typeof walletAddress === "string" && walletAddress.length > 0,
   }, "createWallet");
 
-  // ── 3. Sign with signEcdsa ────────────────────────────────────────────────
+  // ── 3. Create usage API key for lit action calls ──────────────────────────
+  const addUsageKeyRes = client.addUsageApiKey(
+    {
+      name: "k6-ecdsa-usage-key",
+      description: "k6 ecdsa sign test usage key",
+      can_create_groups: false,
+      can_delete_groups: false,
+      can_create_pkps: false,
+      can_manage_ipfs_ids_in_groups: [],
+      can_add_pkp_to_groups: [],
+      can_remove_pkp_from_groups: [],
+      can_execute_in_groups: [0],
+    },
+    authHeaders,
+  );
+  if (!assertOk("addUsageApiKey", "POST /add_usage_api_key", addUsageKeyRes)) return;
+  const usageApiKey = (addUsageKeyRes.data as { usage_api_key: string }).usage_api_key;
+  const usageKeyHeaders = { "X-Api-Key": usageApiKey };
+
+  // ── 4. Sign with signEcdsa ────────────────────────────────────────────────
   // signEcdsa identifies the key by pkpId (wallet address) since migration in #67.
   console.log(`pkpId (walletAddress): ${walletAddress}`);
 
@@ -113,7 +132,7 @@ export default function () {
         sigName: "sig",
       },
     },
-    authHeaders,
+    usageKeyHeaders,
   );
 
   if (!assertOk("litAction/signEcdsa", "POST /lit_action", res)) return;

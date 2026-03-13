@@ -371,7 +371,7 @@ async fn list_wallets(
 #[get("/list_wallets_in_group?<group_id>&<page_number>&<page_size>")]
 async fn list_wallets_in_group(
     api_key: ApiKey,
-    group_id: String,
+    group_id: u64,
     page_number: u64,
     page_size: u64,
 ) -> OpenApiResponse<Vec<WalletItem>, ErrMessage> {
@@ -379,7 +379,7 @@ async fn list_wallets_in_group(
         response: ApiResult(
             account_management::list_wallets_in_group(
                 api_key.0.as_str(),
-                group_id.as_str(),
+                group_id,
                 page_number,
                 page_size,
             )

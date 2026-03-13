@@ -17,7 +17,7 @@ export const options = {
   vus: 1,
   iterations: 1,
   thresholds: {
-    http_reqs: ["count>=3"],
+    http_reqs: ["count>=4"],
     http_req_failed: ["rate<0.1"],
     checks: ["rate==1"],
   },
@@ -47,10 +47,29 @@ export default function () {
   const apiKey = (newAccountRes.data as { api_key: string }).api_key;
   const authHeaders = { "X-Api-Key": apiKey };
 
-  // 3. Run hello-world lit action
+  // 3. Create usage API key for lit action calls
+  const addUsageKeyRes = client.addUsageApiKey(
+    {
+      name: "k6-smoke-usage-key",
+      description: "k6 smoke test usage key",
+      can_create_groups: false,
+      can_delete_groups: false,
+      can_create_pkps: false,
+      can_manage_ipfs_ids_in_groups: [],
+      can_add_pkp_to_groups: [],
+      can_remove_pkp_from_groups: [],
+      can_execute_in_groups: [0],
+    },
+    authHeaders,
+  );
+  if (!assertOk("addUsageApiKey", "POST /add_usage_api_key", addUsageKeyRes)) return;
+  const usageApiKey = (addUsageKeyRes.data as { usage_api_key: string }).usage_api_key;
+  const usageKeyHeaders = { "X-Api-Key": usageApiKey };
+
+  // 4. Run hello-world lit action
   const litActionRes = client.litAction(
     { code: HELLO_WORLD_CODE, js_params: null },
-    authHeaders,
+    usageKeyHeaders,
   );
   if (!assertOk("litAction", "POST /lit_action", litActionRes)) return;
   checkAndLog(litActionRes.response, {
