@@ -1,5 +1,6 @@
 use ahash::{HashSet, HashSetExt};
-use lit_observability::{metrics::counter, opentelemetry::KeyValue};
+use lit_observability::metrics::counter;
+use opentelemetry::KeyValue;
 use opentelemetry_semantic_conventions::resource::{HTTP_METHOD, HTTP_STATUS_CODE, URL_PATH};
 use rocket::{Data, Request, Response, Route, fairing::Fairing};
 

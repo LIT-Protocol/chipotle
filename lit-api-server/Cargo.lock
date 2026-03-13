@@ -4511,6 +4511,7 @@ dependencies = [
  "lit-actions-grpc",
  "lit-core",
  "lit-core-derive",
+ "lit-observability",
  "moka",
  "rand 0.8.5",
  "rand_chacha 0.3.1",
@@ -4524,6 +4525,7 @@ dependencies = [
  "serde",
  "serde_bare",
  "serde_json",
+ "sha3 0.10.8",
  "sqlx",
  "tdx-quote",
  "tokio",
@@ -4532,6 +4534,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "uuid 1.21.0",
 ]
 
 [[package]]
@@ -4595,7 +4598,7 @@ version = "0.1.0"
 dependencies = [
  "dashmap",
  "derive_more 2.1.1",
- "hyper-util",
+ "flume",
  "lit-core",
  "lit-core-derive",
  "lit-logging",
@@ -4609,8 +4612,6 @@ dependencies = [
  "tonic-middleware",
  "tower 0.5.3",
  "tracing",
- "tracing-appender",
- "tracing-log",
  "tracing-opentelemetry",
  "tracing-subscriber",
 ]
@@ -8208,18 +8209,6 @@ dependencies = [
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
-]
-
-[[package]]
-name = "tracing-appender"
-version = "0.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "786d480bce6247ab75f005b14ae1624ad978d3029d9113f0a22fa1ac773faeaf"
-dependencies = [
- "crossbeam-channel",
- "thiserror 2.0.18",
- "time",
- "tracing-subscriber",
 ]
 
 [[package]]

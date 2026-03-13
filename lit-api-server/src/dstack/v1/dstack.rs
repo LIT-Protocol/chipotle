@@ -133,10 +133,11 @@ fn decode_quote(quote_str: &str) -> Vec<u8> {
     #[cfg(not(feature = "production"))]
     {
         let hex_str = s.strip_prefix("0x").unwrap_or(s);
-        if hex_str.len() > 200 && hex_str.chars().all(|c| c.is_ascii_hexdigit()) {
-            if let Ok(decoded) = hex::decode(hex_str) {
-                return decoded;
-            }
+        if hex_str.len() > 200
+            && hex_str.chars().all(|c| c.is_ascii_hexdigit())
+            && let Ok(decoded) = hex::decode(hex_str)
+        {
+            return decoded;
         }
     }
     base64_light::base64_decode(s)
