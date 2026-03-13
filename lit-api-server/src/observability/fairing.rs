@@ -157,10 +157,7 @@ impl Fairing for ObservabilityFairing {
 
         // X-Request-Id must NOT be provided by the user. Always generate a new random UUID.
         // Per requirements: if user sends X-Request-Id, it must be ignored.
-        let privacy_mode = req
-            .headers()
-            .get_one(HEADER_X_PRIVACY_MODE)
-            .is_some_and(|v| v == "true");
+        let privacy_mode = req.headers().get_one(HEADER_X_PRIVACY_MODE).is_some();
         let request_id = if privacy_mode {
             format!("{}_{}", Uuid::new_v4(), lit_observability::PRIVACY_MODE_TAG)
         } else {
