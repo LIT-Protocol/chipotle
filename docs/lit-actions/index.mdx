@@ -1,5 +1,5 @@
 ---
-title: "Lit Actions Overview"
+title: "Overview"
 description: "Lit Actions are immutable JavaScript programs stored on IPFS and executed by the Lit network. They can sign data, encrypt and decrypt secrets, and make arbitrary HTTP requests — all in a verifiable, trustless way."
 ---
 
@@ -87,7 +87,7 @@ const wallet = new ethers.Wallet(
 );
 const signature = await wallet.signMessage(`ETH price: ${price}`);
 
-Lit.Actions.setResponse({ response: JSON.stringify({ price, signature }) });
+Lit.Actions.setResponse({ response: { price, signature } });
 ```
 
 The caller receives both the price and a signature that can be verified against the PKP's public key — a cryptographic proof that this specific action fetched and attested to this specific price.

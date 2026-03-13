@@ -18,7 +18,7 @@ The simplest pattern: retrieve a PKP's private key and sign an arbitrary message
     await Lit.Actions.getPrivateKey({ pkpId })
   );
   const signature = await wallet.signMessage(message);
-  Lit.Actions.setResponse({ response: JSON.stringify({ message, signature }) });
+  Lit.Actions.setResponse({ response: { message, signature } });
 })();
 ```
 
@@ -34,7 +34,7 @@ Encrypt a sensitive string so that only the holder of the PKP can later decrypt 
 // js_params: { pkpId, secret }
 (async () => {
   const ciphertext = await Lit.Actions.Encrypt({ pkpId, message: secret });
-  Lit.Actions.setResponse({ response: JSON.stringify({ ciphertext }) });
+  Lit.Actions.setResponse({ response: { ciphertext } });
 })();
 ```
 
@@ -50,7 +50,7 @@ Decrypt a ciphertext that was previously produced by `Lit.Actions.Encrypt` using
 // js_params: { pkpId, ciphertext }
 (async () => {
   const plaintext = await Lit.Actions.Decrypt({ pkpId, ciphertext });
-  Lit.Actions.setResponse({ response: JSON.stringify({ plaintext }) });
+  Lit.Actions.setResponse({ response: { plaintext } });
 })();
 ```
 
@@ -70,7 +70,7 @@ Fetch the current price of ETH from a public API and sign the result. The caller
   const price = data?.ethereum?.usd;
 
   if (typeof price !== "number") {
-    Lit.Actions.setResponse({ response: JSON.stringify({ error: "Price fetch failed" }) });
+    Lit.Actions.setResponse({ response: { error: "Price fetch failed" } });
     return;
   }
 
@@ -80,9 +80,7 @@ Fetch the current price of ETH from a public API and sign the result. The caller
   );
   const signature = await wallet.signMessage(payload);
 
-  Lit.Actions.setResponse({
-    response: JSON.stringify({ price, payload, signature }),
-  });
+  Lit.Actions.setResponse({ response: { price, payload, signature } });
 })();
 ```
 
@@ -107,16 +105,13 @@ Only sign a message if the current temperature at a given location exceeds a thr
   const temp = data?.main?.temp;
 
   if (typeof temp !== "number") {
-    Lit.Actions.setResponse({ response: JSON.stringify({ error: "Weather fetch failed" }) });
+    Lit.Actions.setResponse({ response: { error: "Weather fetch failed" } });
     return;
   }
 
   if (temp < minTempCelsius) {
     Lit.Actions.setResponse({
-      response: JSON.stringify({
-        signed: false,
-        reason: `Temperature ${temp}°C is below threshold of ${minTempCelsius}°C`,
-      }),
+      response: { signed: false, reason: `Temperature ${temp}°C is below threshold of ${minTempCelsius}°C` },
     });
     return;
   }
@@ -126,9 +121,7 @@ Only sign a message if the current temperature at a given location exceeds a thr
   );
   const signature = await wallet.signMessage(message);
 
-  Lit.Actions.setResponse({
-    response: JSON.stringify({ signed: true, temp, message, signature }),
-  });
+  Lit.Actions.setResponse({ response: { signed: true, temp, message, signature } });
 })();
 ```
 
@@ -167,7 +160,7 @@ Call a view function on an EVM smart contract and return the result. Useful for 
   const signature = await wallet.signMessage(payload);
 
   Lit.Actions.setResponse({
-    response: JSON.stringify({ holder: holderAddress, balance: balanceFormatted, symbol, payload, signature }),
+    response: { holder: holderAddress, balance: balanceFormatted, symbol, payload, signature },
   });
 })();
 ```
@@ -197,13 +190,13 @@ Construct, sign, and broadcast an ETH transfer transaction from a PKP wallet. Th
   const receipt = await tx.wait();
 
   Lit.Actions.setResponse({
-    response: JSON.stringify({
+    response: {
       txHash: receipt.transactionHash,
       from: wallet.address,
       to: toAddress,
       amountEth,
       blockNumber: receipt.blockNumber,
-    }),
+    },
   });
 })();
 ```

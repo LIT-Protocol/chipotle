@@ -90,7 +90,7 @@ In the **Action Runner** section, paste some Lit Action JavaScript code and opti
 ```
     const message = "Hello from Lit Action";
     const sig = await LitActions.signEcdsa({ toSign: new TextEncoder().encode(message), publicKey, sigName });
-    LitActions.setResponse({ response: JSON.stringify({ message, sig }) });
+    LitActions.setResponse({ response: { message, sig } });
 ```
  Choose the API key (account or usage key) to use for the request, then click **Execute**. The node runs the action and returns signatures, response, and logs. The key you use must be allowed to run that action (via the group and IPFS CID configuration).
 
@@ -296,7 +296,7 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
       code: `
         const message = "Hello from Lit Action";
         const sig = await LitActions.signEcdsa({ toSign: new TextEncoder().encode(message), publicKey, sigName });
-        LitActions.setResponse({ response: JSON.stringify({ message, sig }) });
+        LitActions.setResponse({ response: { message, sig } });
       `,
       jsParams: { publicKey: '0x...', sigName: 'sig1' }
     });
