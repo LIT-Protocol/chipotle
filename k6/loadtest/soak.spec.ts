@@ -17,16 +17,21 @@
  *   k6 run k6/loadtest/soak.spec.ts
  *   SOAK_DURATION=30m k6 run k6/loadtest/soak.spec.ts
  *   BASE_URL=http://localhost:8000/core/v1 k6 run k6/loadtest/soak.spec.ts
+ *   SCENARIO=ramp k6 run k6/loadtest/soak.spec.ts    # run only ramp scenario
+ *
+ * Scenarios:
+ *   soak - Sustained low-intensity workload (default). Ramp up, steady state, ramp down.
+ *   ramp - Gradual load increase: +1 VU per minute for 8 min, then 1 min ramp-down.
  *
  * Environment:
  *   BASE_URL       - API base URL (default: api.dev.litprotocol.com/core/v1)
- *   SOAK_DURATION  - Total test duration (default: 1h)
- *   SOAK_VUS       - Virtual users (default: 3)
+ *   SCENARIO       - Run only this scenario: "soak" or "ramp" (default: both)
+ *   SOAK_DURATION  - Total test duration for soak scenario (default: 30m)
+ *   SOAK_VUS       - Virtual users for soak scenario (default: 3)
  */
-import { checkAndLog } from "../helpers.ts";
+import { checkAndLog, assertOk } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
 import { createAccountAndUsageKey } from "../setup.ts";
-import { assertOk } from "../helpers.ts";
 import { sleep } from "k6";
 import {
   ECDSA_SIGN_CODE,
@@ -43,13 +48,44 @@ const SOAK_VUS = parseInt(__ENV.SOAK_VUS || "3", 10);
 const RAMP_UP = "2m";
 const RAMP_DOWN = "2m";
 
+// Ramp scenario: +1 VU per minute for 8 min, then 1 min ramp-down (max 8 VUs)
+const RAMP_MAX_VUS = 8;
+
+const allScenarios = {
+  soak: {
+    executor: "ramping-vus",
+      startVUs: 0,
+    stages: [
+      { duration: RAMP_UP, target: SOAK_VUS },
+      { duration: SOAK_DURATION, target: SOAK_VUS },
+      { duration: RAMP_DOWN, target: 0 },
+    ],
+  },
+  ramp: {
+    executor: "ramping-vus",
+    startVUs: 0,
+    stages: [
+      { duration: "1m", target: 1 },
+      { duration: "1m", target: 2 },
+      { duration: "1m", target: 3 },
+      { duration: "1m", target: 4 },
+      { duration: "1m", target: 5 },
+      { duration: "1m", target: 6 },
+      { duration: "1m", target: 7 },
+      { duration: "1m", target: 8 },
+      { duration: "1m", target: 0 },
+    ],
+  },
+};
+
+const SCENARIO = __ENV.SCENARIO;
+const scenarios = SCENARIO && allScenarios[SCENARIO as keyof typeof allScenarios]
+  ? { [SCENARIO]: allScenarios[SCENARIO as keyof typeof allScenarios] }
+  : allScenarios;
+
 export const options = {
-  vus: SOAK_VUS,
-  stages: [
-    { duration: RAMP_UP, target: SOAK_VUS },
-    { duration: SOAK_DURATION, target: SOAK_VUS },
-    { duration: RAMP_DOWN, target: 0 },
-  ],
+  scenarios,
+  setupTimeout: "3m", // 8 accounts × 2 API calls each; ~6s/call → ~96s min; 3m allows for slow responses
   thresholds: {
     http_req_failed: ["rate<0.05"],
     http_req_duration: ["p(99)<15000"],
@@ -66,8 +102,8 @@ export type SoakSetupData = SoakAccountData[];
 
 export function setup(): SoakSetupData {
   const accounts: SoakAccountData[] = [];
-
-  for (let i = 0; i < SOAK_VUS; i++) {
+  const maxVus = Math.max(SOAK_VUS, RAMP_MAX_VUS);
+  for (let i = 0; i < maxVus; i++) {
     const { usageApiKey, walletAddress } = createAccountAndUsageKey({
       accountName: `k6-soak-test-vu-${i + 1}`,
       accountDescription: `k6 soak test account VU ${i + 1}`,
@@ -77,7 +113,6 @@ export function setup(): SoakSetupData {
     });
     accounts.push({ usageApiKey, pkpId: walletAddress });
   }
-
   return accounts;
 }
 
