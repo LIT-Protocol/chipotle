@@ -1033,7 +1033,10 @@ function initHeader() {
 }
 
 // ----- Action Runner -----
-function initActionRunner() {
+let _codeJarEditor = null;
+let _paramsJarEditor = null;
+
+async function initActionRunner() {
   const codeEl = document.getElementById('action-runner-code');
   const paramsEl = document.getElementById('action-runner-params');
   const btn = document.getElementById('btn-execute-lit-action');
@@ -1043,13 +1046,42 @@ function initActionRunner() {
 
   if (!btn || !outputEl) return;
 
+  let getCode;
+  let getParams;
+
+  try {
+    const { CodeJar } = await import('https://cdn.jsdelivr.net/npm/codejar@4.2.0/+esm');
+    const highlight = (editor) => {
+      if (!window.Prism) return;
+      const lang = editor.classList.contains('language-json') ? 'json' : 'javascript';
+      const grammar = Prism.languages[lang];
+      if (grammar) editor.innerHTML = Prism.highlight(editor.textContent, grammar, lang);
+    };
+    _codeJarEditor = CodeJar(codeEl, highlight, { tab: '  ' });
+    _paramsJarEditor = CodeJar(paramsEl, highlight, { tab: '  ' });
+
+    getCode = () => _codeJarEditor ? _codeJarEditor.toString() : (codeEl?.textContent ?? '');
+    getParams = () => _paramsJarEditor ? _paramsJarEditor.toString() : (paramsEl?.textContent ?? '');
+  } catch (e) {
+    // Fallback: enable plain contenteditable editors if CodeJar fails to load
+    console.error('Failed to load CodeJar for Action Runner editor, falling back to plain editor.', e);
+    if (codeEl) {
+      codeEl.setAttribute('contenteditable', 'true');
+    }
+    if (paramsEl) {
+      paramsEl.setAttribute('contenteditable', 'true');
+    }
+    getCode = () => (codeEl?.textContent ?? '');
+    getParams = () => (paramsEl?.textContent ?? '');
+  }
+
   btn.addEventListener('click', async () => {
     const accountKey = getApiKey();
     const usageKeyEl = document.getElementById('action-runner-usage-key');
     const usageKey = usageKeyEl?.value?.trim() ?? '';
     const apiKey = usageKey || accountKey;
-    const code = codeEl?.value?.trim() ?? '';
-    const paramsRaw = paramsEl?.value?.trim() ?? '';
+    const code = (getCode ? getCode() : (codeEl?.textContent ?? '')).trim();
+    const paramsRaw = (getParams ? getParams() : (paramsEl?.textContent ?? '')).trim();
 
     if (!accountKey) {
       hideStatus('action-runner-status');
@@ -1094,7 +1126,7 @@ function initActionRunner() {
   });
 
   btnGetCid?.addEventListener('click', async () => {
-    const code = codeEl?.value?.trim() ?? '';
+    const code = getCode().trim();
     if (!code) {
       outputEl.textContent = 'Enter Lit Action code to get its IPFS CID.';
       outputEl.className = 'action-runner-output error';
@@ -1136,7 +1168,7 @@ function init() {
   initWallets();
   initGroups();
   initActions();
-  initActionRunner();
+  initActionRunner(); // async; CodeJar loads lazily on first use
   initSidebar();
   initHeader();
 }

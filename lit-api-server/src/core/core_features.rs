@@ -84,7 +84,7 @@ pub async fn lit_action(
     };
 
     let response = match serde_json::from_str::<serde_json::Value>(&result.response) {
-        Ok(response) => json!(&response),
+        Ok(response) => response,
         Err(e) => {
             tracing::error!("failed to parse response: {:?}", e);
             json!(result.response)

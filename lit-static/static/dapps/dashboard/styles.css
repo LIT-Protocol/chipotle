@@ -1203,3 +1203,23 @@ textarea.input.textarea-sm {
 [data-theme="dark"] .status-badge-success {
   color: #4ade80;
 }
+
+/* ----- CodeJar editor ----- */
+.codejar-editor {
+  min-height: 440px;
+  border-radius: 6px;
+  font-family: 'JetBrains Mono', 'Fira Mono', monospace;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  padding: 0.75rem 1rem;
+  overflow: auto;
+  white-space: pre;
+  tab-size: 2;
+  outline: none;
+  background: #1d1f21;
+  color: #c5c8c6;
+}
+
+.codejar-editor-sm {
+  min-height: 90px;
+}
