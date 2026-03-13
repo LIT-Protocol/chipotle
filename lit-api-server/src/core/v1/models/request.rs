@@ -92,7 +92,7 @@ pub struct AddUsageApiKeyRequest {
     pub can_delete_groups: bool,
     pub can_create_pkps: bool,
     /// Group IDs, where 0 is the wildcard for all groups.
-    pub can_manage_ipfs_ids_in_groups: Vec<u64>,    
+    pub can_manage_ipfs_ids_in_groups: Vec<u64>,
     /// Group IDs, where 0 is the wildcard for all groups.
     pub can_add_pkp_to_groups: Vec<u64>,
     /// Group IDs, where 0 is the wildcard for all groups.

@@ -73,18 +73,15 @@ export interface AddGroupRequest {
   group_name: string;
   /** Description of the group (Group.metadata.description in AccountConfig.sol). */
   group_description: string;
-  /** Keccak256 hashes of action IPFS CIDs (hex strings). */
-  permitted_actions: string[];
-  /** Keccak256 hashes of PKP/wallet public keys (hex strings). */
-  pkps: string[];
-  /** If true, all wallets are permitted to use the group (AccountConfig.sol Group.all_wallets_permitted). */
-  all_wallets_permitted?: boolean;
-  /** If true, all actions are permitted (AccountConfig.sol Group.all_actions_permitted). */
-  all_actions_permitted?: boolean;
+  /** pkp ids permitted to use the group (AccountConfig.sol Group.pkpId). */
+  pkp_ids_permitted: string[];
+  /** Actions permitted to use the group (AccountConfig.sol Group.cidHash). */
+  cid_hashes_permitted: string[];
 }
 
 export interface AddActionToGroupRequest {
-  group_id: string;
+  /** @minimum 0 */
+  group_id: number;
   /** IPFS CID for the action (will be keccak256-hashed on server). */
   action_ipfs_cid: string;
   /**
@@ -100,13 +97,17 @@ export interface AddActionToGroupRequest {
 }
 
 export interface AddPkpToGroupRequest {
-  /** Group ID (decimal or hex string). */
-  group_id: string;
+  /**
+   * Group ID (decimal or hex string).
+   * @minimum 0
+   */
+  group_id: number;
   pkp_id: string;
 }
 
 export interface RemovePkpFromGroupRequest {
-  group_id: string;
+  /** @minimum 0 */
+  group_id: number;
   pkp_id: string;
 }
 
@@ -124,6 +125,17 @@ export interface AddUsageApiKeyResponse {
 export interface AddUsageApiKeyRequest {
   name: string;
   description: string;
+  can_create_groups: boolean;
+  can_delete_groups: boolean;
+  can_create_pkps: boolean;
+  /** Group IDs, where 0 is the wildcard for all groups. */
+  can_manage_ipfs_ids_in_groups: number[];
+  /** Group IDs, where 0 is the wildcard for all groups. */
+  can_add_pkp_to_groups: number[];
+  /** Group IDs, where 0 is the wildcard for all groups. */
+  can_remove_pkp_from_groups: number[];
+  /** Group IDs, where 0 is the wildcard for all groups. */
+  can_execute_in_groups: number[];
 }
 
 /**
@@ -137,19 +149,23 @@ export interface RemoveUsageApiKeyRequest {
  * Request for update_group (AccountConfig.updateGroup). API key via header.
  */
 export interface UpdateGroupRequest {
-  /** Group ID (decimal or hex string). */
-  group_id: string;
+  /**
+   * Group ID (decimal or hex string).
+   * @minimum 0
+   */
+  group_id: number;
   name: string;
   description: string;
-  all_wallets_permitted?: boolean;
-  all_actions_permitted?: boolean;
+  pkp_ids_permitted?: string[];
+  cid_hashes_permitted?: string[];
 }
 
 /**
  * Request for remove_action_from_group. action_ipfs_cid is keccak256-hashed on server. API key via header.
  */
 export interface RemoveActionFromGroupRequest {
-  group_id: string;
+  /** @minimum 0 */
+  group_id: number;
   /** IPFS CID for the action (keccak256-hashed on server). */
   action_ipfs_cid: string;
 }
@@ -158,7 +174,8 @@ export interface RemoveActionFromGroupRequest {
  * Request for update_action_metadata. action_ipfs_cid is keccak256-hashed on server. API key via header.
  */
 export interface UpdateActionMetadataRequest {
-  group_id: string;
+  /** @minimum 0 */
+  group_id: number;
   /** IPFS CID for the action (keccak256-hashed on server). */
   action_ipfs_cid: string;
   name: string;
@@ -385,7 +402,10 @@ export type ListWalletsHeaders = {
 export type ListWalletsDefault = WalletItem[] | ErrMessage;
 
 export type ListWalletsInGroupParams = {
-  group_id: string;
+  /**
+   * @minimum 0
+   */
+  group_id: number;
   /**
    * @minimum 0
    */
