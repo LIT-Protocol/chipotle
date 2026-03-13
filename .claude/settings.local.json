@@ -4,7 +4,9 @@
       "Bash(npm install:*)",
       "Bash(make compile:*)",
       "Bash(cargo build:*)",
-      "Bash(cargo check:*)"
+      "Bash(cargo check:*)",
+      "Bash(grep -n \"focus\\\\|blur\" /Users/brendonpaul/GitHub/lit-node-express/lit-static/static/dapps/dashboard/app.js | grep -v \"//\\\\|focus\\(\\)$\")",
+      "Bash(grep -n \"input,\\\\|, input\\\\|button,\\\\|, button\\\\|input {$\\\\|button {$\" /Users/brendonpaul/GitHub/lit-node-express/lit-static/static/dapps/dashboard/styles.css | head -20)"
     ]
   }
 }

@@ -127,14 +127,8 @@ pub async fn add_group(
     api_key: &str,
     req: Json<AddGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let cid_hashes = match req.all_actions_permitted {
-        true => vec![U256::zero()],
-        false => hex_array_to_u256_array(&req.permitted_actions)?,
-    };
-    let pkp_ids = match req.all_wallets_permitted {
-        true => vec![H160::zero()],
-        false => hex_array_to_h160_array(&req.pkps)?,
-    };
+    let cid_hashes = hex_array_to_u256_array(&req.cid_hashes_permitted)?;
+    let pkp_ids = hex_array_to_h160_array(&req.pkp_ids_permitted)?;
 
     accounts::add_group(
         signer_pool,

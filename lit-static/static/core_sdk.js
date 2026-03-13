@@ -12,7 +12,6 @@
  * @typedef {Object} NewAccountOptions
  * @property {string} accountName - Name for the account
  * @property {string} accountDescription - Description for the account
- * @property {string} [initialBalance] - Optional initial balance (decimal or hex; default 0)
  */
 
 /**
@@ -25,12 +24,10 @@
 /**
  * @typedef {Object} AddGroupOptions
  * @property {string} apiKey - Account API key
- * @property {string} groupName - Name of the group (Group.groupName in AccountConfig.sol)
- * @property {string} [groupDescription=''] - Description of the group (Group.groupDescription in AccountConfig.sol)
- * @property {string[]} permittedActions - Keccak256 hashes of action IPFS CIDs (hex strings, with or without 0x)
- * @property {string[]} pkps - Keccak256 hashes of PKP public keys (hex strings)
- * @property {boolean} [allWalletsPermitted=false] - If true, all wallets are permitted (AccountConfig.sol Group.all_wallets_permitted)
- * @property {boolean} [allActionsPermitted=false] - If true, all actions are permitted (AccountConfig.sol Group.all_actions_permitted)
+ * @property {string} groupName - Name of the group (Group.metadata.name in AccountConfig.sol)
+ * @property {string} [groupDescription=''] - Description of the group (Group.metadata.description in AccountConfig.sol)
+ * @property {string[]} [pkpIdsPermitted=[]] - PKP IDs permitted to use the group (AccountConfig.sol Group.pkpId)
+ * @property {string[]} [cidHashesPermitted=[]] - Keccak256 hashes of permitted action IPFS CIDs (AccountConfig.sol Group.cidHash)
  */
 
 /**
@@ -59,10 +56,15 @@
 /**
  * @typedef {Object} AddUsageApiKeyOptions
  * @property {string} apiKey - Account API key
- * @property {string} expiration - Expiration (e.g. unix timestamp as decimal string)
- * @property {string} balance - Balance (e.g. wei as decimal string)
  * @property {string} name - Name
  * @property {string} description - Description
+ * @property {boolean} [canCreateGroups=false] - Permission to create groups
+ * @property {boolean} [canDeleteGroups=false] - Permission to delete groups
+ * @property {boolean} [canCreatePkps=false] - Permission to create PKPs
+ * @property {number[]} [canManageIpfsIdsInGroups=[]] - Group IDs allowed to manage IPFS action CIDs (0 = all groups)
+ * @property {number[]} [canAddPkpToGroups=[]] - Group IDs allowed to add PKPs (0 = all groups)
+ * @property {number[]} [canRemovePkpFromGroups=[]] - Group IDs allowed to remove PKPs (0 = all groups)
+ * @property {number[]} [canExecuteInGroups=[]] - Group IDs allowed to execute actions (0 = all groups)
  */
 
 /**
@@ -77,8 +79,8 @@
  * @property {string} groupId - Group ID (decimal or hex string)
  * @property {string} name - Group name
  * @property {string} description - Group description
- * @property {boolean} [allWalletsPermitted=false] - All wallets permitted
- * @property {boolean} [allActionsPermitted=false] - All actions permitted
+ * @property {string[]} [pkpIdsPermitted=[]] - PKP IDs permitted to use the group
+ * @property {string[]} [cidHashesPermitted=[]] - Keccak256 hashes of permitted action IPFS CIDs
  */
 
 /**
@@ -171,8 +173,7 @@
 
 /**
  * @typedef {Object} LitActionResponse - Lit action execution result (single response from /lit_action)
- * @property {Object[]} signatures - Signing results from the action
- * @property {string} response - Action response payload
+ * @property {*} response - Action response payload
  * @property {string} logs - Action logs
  * @property {boolean} has_error - Whether the action reported an error
  */
@@ -291,11 +292,10 @@ export class LitNodeSimpleApiClient {
    * @param {NewAccountOptions} options
    * @returns {Promise<NewAccountResponse>}
    */
-  async newAccount({ accountName, accountDescription, initialBalance }) {
+  async newAccount({ accountName, accountDescription }) {
     const body = {
       account_name: accountName,
       account_description: accountDescription ?? '',
-      initial_balance: initialBalance ?? null,
     };
     const res = await fetch(`${this.baseUrl}/new_account`, {
       method: 'POST',
@@ -348,7 +348,7 @@ export class LitNodeSimpleApiClient {
    * POST /core/v1/lit_action
    * Executes a lit action with the given code and optional params.
    * @param {LitActionOptions} options
-   * @returns {Promise<LitActionResponse>} { signatures, response, logs, has_error }
+   * @returns {Promise<LitActionResponse>} { response, logs, has_error }
    */
   async litAction({ apiKey, code, jsParams }) {
     const body = {
@@ -369,14 +369,12 @@ export class LitNodeSimpleApiClient {
    * @param {AddGroupOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async addGroup({ apiKey, groupName, groupDescription = '', permittedActions, pkps, allWalletsPermitted = false, allActionsPermitted = false }) {
+  async addGroup({ apiKey, groupName, groupDescription = '', pkpIdsPermitted = [], cidHashesPermitted = [] }) {
     const body = {
       group_name: groupName ?? '',
       group_description: groupDescription ?? '',
-      permitted_actions: permittedActions ?? [],
-      pkps: pkps ?? [],
-      all_wallets_permitted: allWalletsPermitted,
-      all_actions_permitted: allActionsPermitted,
+      pkp_ids_permitted: pkpIdsPermitted,
+      cid_hashes_permitted: cidHashesPermitted,
     };
     const res = await fetch(`${this.baseUrl}/add_group`, {
       method: 'POST',
@@ -451,12 +449,28 @@ export class LitNodeSimpleApiClient {
    * @param {AddUsageApiKeyOptions} options
    * @returns {Promise<AddUsageApiKeyResponse>}
    */
-  async addUsageApiKey({ apiKey, expiration, balance, name, description }) {
+  async addUsageApiKey({
+    apiKey,
+    name,
+    description,
+    canCreateGroups = false,
+    canDeleteGroups = false,
+    canCreatePkps = false,
+    canManageIpfsIdsInGroups = [],
+    canAddPkpToGroups = [],
+    canRemovePkpFromGroups = [],
+    canExecuteInGroups = [],
+  }) {
     const body = {
-      expiration,
-      balance,
       name,
       description,
+      can_create_groups: canCreateGroups,
+      can_delete_groups: canDeleteGroups,
+      can_create_pkps: canCreatePkps,
+      can_manage_ipfs_ids_in_groups: canManageIpfsIdsInGroups,
+      can_add_pkp_to_groups: canAddPkpToGroups,
+      can_remove_pkp_from_groups: canRemovePkpFromGroups,
+      can_execute_in_groups: canExecuteInGroups,
     };
     const res = await fetch(`${this.baseUrl}/add_usage_api_key`, {
       method: 'POST',
@@ -490,13 +504,13 @@ export class LitNodeSimpleApiClient {
    * @param {UpdateGroupOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async updateGroup({ apiKey, groupId, name, description, allWalletsPermitted = false, allActionsPermitted = false }) {
+  async updateGroup({ apiKey, groupId, name, description, pkpIdsPermitted = [], cidHashesPermitted = [] }) {
     const body = {
       group_id: groupId,
       name: name ?? '',
       description: description ?? '',
-      all_wallets_permitted: allWalletsPermitted,
-      all_actions_permitted: allActionsPermitted,
+      pkp_ids_permitted: pkpIdsPermitted,
+      cid_hashes_permitted: cidHashesPermitted,
     };
     const res = await fetch(`${this.baseUrl}/update_group`, {
       method: 'POST',

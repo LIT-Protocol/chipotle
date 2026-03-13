@@ -14,16 +14,10 @@ pub struct AddGroupRequest {
     pub group_name: String,
     /// Description of the group (Group.metadata.description in AccountConfig.sol).
     pub group_description: String,
-    /// Keccak256 hashes of action IPFS CIDs (hex strings).
-    pub permitted_actions: Vec<String>,
-    /// Keccak256 hashes of PKP/wallet public keys (hex strings).
-    pub pkps: Vec<String>,
-    /// If true, all wallets are permitted to use the group (AccountConfig.sol Group.all_wallets_permitted).
-    #[serde(default)]
-    pub all_wallets_permitted: bool,
-    /// If true, all actions are permitted (AccountConfig.sol Group.all_actions_permitted).
-    #[serde(default)]
-    pub all_actions_permitted: bool,
+    /// pkp ids permitted to use the group (AccountConfig.sol Group.pkpId).
+    pub pkp_ids_permitted: Vec<String>,
+    /// Actions permitted to use the group (AccountConfig.sol Group.cidHash).
+    pub cid_hashes_permitted: Vec<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -58,9 +52,9 @@ pub struct UpdateGroupRequest {
     pub name: String,
     pub description: String,
     #[serde(default)]
-    pub all_wallets_permitted: bool,
+    pub pkp_ids_permitted: Vec<String>,
     #[serde(default)]
-    pub all_actions_permitted: bool,
+    pub cid_hashes_permitted: Vec<String>,
 }
 
 /// Request for remove_action_from_group. action_ipfs_cid is keccak256-hashed on server. API key via header.
