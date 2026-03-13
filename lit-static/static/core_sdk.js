@@ -392,7 +392,7 @@ export class LitNodeSimpleApiClient {
    */
   async addActionToGroup({ apiKey, groupId, actionIpfsCid, name, description }) {
     const body = {
-      group_id: groupId,
+      group_id: Number(groupId),
       action_ipfs_cid: actionIpfsCid,
       name: name ?? null,
       description: description ?? null,
@@ -413,7 +413,7 @@ export class LitNodeSimpleApiClient {
    */
   async addPkpToGroup({ apiKey, groupId, pkpId }) {
     const body = {
-      group_id: groupId,
+      group_id: Number(groupId),
       pkp_id: pkpId,
     };
     const res = await fetch(`${this.baseUrl}/add_pkp_to_group`, {
@@ -432,7 +432,7 @@ export class LitNodeSimpleApiClient {
    */
   async removePkpFromGroup({ apiKey, groupId, pkpId }) {
     const body = {
-      group_id: groupId,
+      group_id: Number(groupId),
       pkp_id: pkpId,
     };
     const res = await fetch(`${this.baseUrl}/remove_pkp_from_group`, {
@@ -506,7 +506,7 @@ export class LitNodeSimpleApiClient {
    */
   async updateGroup({ apiKey, groupId, name, description, pkpIdsPermitted = [], cidHashesPermitted = [] }) {
     const body = {
-      group_id: groupId,
+      group_id: Number(groupId),
       name: name ?? '',
       description: description ?? '',
       pkp_ids_permitted: pkpIdsPermitted,
@@ -528,7 +528,7 @@ export class LitNodeSimpleApiClient {
    */
   async removeActionFromGroup({ apiKey, groupId, actionIpfsCid }) {
     const body = {
-      group_id: groupId,
+      group_id: Number(groupId),
       action_ipfs_cid: actionIpfsCid,
     };
     const res = await fetch(`${this.baseUrl}/remove_action_from_group`, {
@@ -547,7 +547,7 @@ export class LitNodeSimpleApiClient {
    */
   async updateActionMetadata({ apiKey, groupId, actionIpfsCid, name, description }) {
     const body = {
-      group_id: groupId,
+      group_id: Number(groupId),
       action_ipfs_cid: actionIpfsCid,
       name: name ?? '',
       description: description ?? '',

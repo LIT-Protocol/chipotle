@@ -635,7 +635,8 @@ function initWallets() {
 function selectAllInMultiSelect(id) {
   const wrap = document.getElementById(id);
   if (!wrap) return;
-  wrap.querySelectorAll('input[type=”checkbox”]').forEach((cb) => { cb.checked = true; });
+  const allCb = wrap.querySelector('input[value="0"]');
+  wrap.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = cb === allCb; });
   updateMultiSelectSummary(id);
 }
 
@@ -652,15 +653,14 @@ function openGroupModal(item = null) {
 
   titleEl.textContent = isEdit ? 'Edit group' : 'Add group';
   modalBody.innerHTML =
-    (isEdit ? '<div class=”form-group”><label>Group ID</label><div class=”mono”>' + escapeHtml(String(Number(item.id))) + '</div></div>' : '') +
-    '<div class=”form-group”><label for=”' + nameId + '”>Name</label><input type=”text” id=”' + nameId + '” class=”input” placeholder=”My group” value=”' + escapeHtml(item?.name ?? '') + '”></div>' +
-    '<div class=”form-group”><label for=”' + descId + '”>Description</label><input type=”text” id=”' + descId + '” class=”input” placeholder=”Optional” value=”' + escapeHtml(item?.description ?? '') + '”></div>' +
-    '<div class=”form-group”><label>PKP IDs permitted</label>' + buildWalletMultiSelect('modal-group-pkp-ids', false) + '</div>' +
-    '<div class=”form-group”><label>CID hashes permitted</label>' + buildActionsMultiSelect('modal-group-cid-hashes', false) + '</div>';
+    '<div class="form-group"><label for="' + nameId + '">Name</label><input type="text" id="' + nameId + '" class="input" placeholder="My" value="' + escapeHtml(item?.name ?? '') + '"></div>' +
+    '<div class="form-group"><label for="' + descId + '">Description</label><input type="text" id="' + descId + '" class="input" placeholder="Optional" value="' + escapeHtml(item?.description ?? '') + '"></div>' +
+    '<div class="form-group"><label>PKP IDs permitted</label>' + buildWalletMultiSelect('modal-group-pkp-ids', false) + '</div>' +
+    '<div class="form-group"><label>CID hashes permitted</label>' + buildActionsMultiSelect('modal-group-cid-hashes', false) + '</div>';
   modalFooter.innerHTML =
-    '<button type=”button” class=”btn btn-outline” id=”modal-all-opts-btn” style=”margin-right:auto;”>All Options</button>' +
-    '<button type=”button” class=”btn btn-outline” id=”modal-cancel-btn”>Cancel</button>' +
-    '<button type=”button” class=”btn btn-primary” id=”modal-save-btn”>' + (isEdit ? 'Save' : 'Add') + '</button>';
+    '<button type="button" class="btn btn-outline" id="modal-all-opts-btn" style="margin-right:auto;">All Options</button>' +
+    '<button type="button" class="btn btn-outline" id="modal-cancel-btn">Cancel</button>' +
+    '<button type="button" class="btn btn-primary" id="modal-save-btn">' + (isEdit ? 'Save' : 'Add') + '</button>';
   overlay.classList.add('is-open');
   overlay.setAttribute('aria-hidden', 'false');
   const firstInput = modalBody.querySelector('input, select, textarea');
@@ -693,10 +693,10 @@ function openGroupModal(item = null) {
       const client = await getClient();
       if (isEdit) {
         const id = String(Number(item.id));
-        showActionProgress('Updating group', `Updating group “${name}”.`);
+        showActionProgress('Updating group', `Updating group "${name}".`);
         await client.updateGroup({ apiKey, groupId: id, name, description: desc, pkpIdsPermitted, cidHashesPermitted });
       } else {
-        showActionProgress('Creating group', `Creating group “${name}”.`);
+        showActionProgress('Creating group', `Creating group "${name}".`);
         await client.addGroup({ apiKey, groupName: name, groupDescription: desc, pkpIdsPermitted, cidHashesPermitted });
       }
       await loadGroups();
@@ -741,7 +741,7 @@ function openAddActionModal() {
     closeModal();
     hideStatus('actions-status');
     try {
-      showActionProgress('Adding action', `Adding action CID “${cid}” to group ${gid}.`);
+      showActionProgress('Adding action', `Adding action CID "${cid}" to group ${gid}.`);
       const client = await getClient();
       await client.addActionToGroup({ apiKey, groupId: gid, actionIpfsCid: cid, name, description: desc });
       if (groupIdEl) groupIdEl.value = gid;
@@ -757,8 +757,10 @@ function openAddActionModal() {
 
 function openEditActionModal(item, groupId) {
   const cid = item.ipfs_cid || item.cid || '';
+  const group = getGroupsStore().find((g) => String(g.id) === String(groupId));
+  const groupLabel = group ? (group.name || String(groupId)) : String(groupId);
   const body =
-    '<div class="form-group"><label>Group ID</label><div class="mono">' + escapeHtml(groupId) + '</div></div>' +
+    '<div class="form-group"><label>Group</label><div class="input" style="background:var(--input-bg,#f3f4f6);color:var(--text-muted,#6b7280);cursor:default;">' + escapeHtml(groupLabel) + '</div></div>' +
     '<div class="form-group"><label>IPFS CID</label><div class="mono">' + escapeHtml(cid) + '</div></div>' +
     '<div class="form-group"><label for="modal-edit-action-name">Name</label><input type="text" id="modal-edit-action-name" class="input" value="' + escapeHtml(item.name || '') + '"></div>' +
     '<div class="form-group"><label for="modal-edit-action-desc">Description</label><input type="text" id="modal-edit-action-desc" class="input" value="' + escapeHtml(item.description || '') + '"></div>';
@@ -778,7 +780,7 @@ function openEditActionModal(item, groupId) {
     closeModal();
     hideStatus('actions-status');
     try {
-      showActionProgress('Updating action', `Updating action metadata for CID “${cid}”.`);
+      showActionProgress('Updating action', `Updating action metadata for CID "${cid}".`);
       const client = await getClient();
       await client.updateActionMetadata({ apiKey, groupId, actionIpfsCid: cid, name, description: desc });
       await loadActions(groupId);
@@ -801,7 +803,7 @@ async function confirmAndRemoveAction(item, groupId) {
   if (!apiKey) return;
   hideStatus('actions-status');
   try {
-    showActionProgress('Removing action', `Removing action CID “${cid}” from group ${groupId}.`);
+    showActionProgress('Removing action', `Removing action CID "${cid}" from group ${groupId}.`);
     const client = await getClient();
     await client.removeActionFromGroup({ apiKey, groupId, actionIpfsCid: cid });
     await loadActions(groupId);
@@ -821,7 +823,7 @@ function buildMultiSelect(id, items, getValue, getLabel, placeholder, disabled) 
   ).join('');
   if (!opts) opts = '<div class="ms-option" style="opacity:0.6;cursor:default;">No items available</div>';
   return (
-    '<div class="ms-wrap" id="' + id + '">' +
+    '<div class="ms-wrap" id="' + id + '" data-placeholder="' + escapeHtml(placeholder) + '">' +
       '<button type="button" class="ms-trigger"' + (disabled ? ' disabled' : '') + '>' +
         '<span class="ms-summary">' + escapeHtml(placeholder) + '</span>' +
         '<span class="ms-arrow" aria-hidden="true"></span>' +
@@ -837,25 +839,23 @@ function buildGroupMultiSelect(id, disabled) {
 }
 
 function buildWalletMultiSelect(id, disabled) {
-  return buildMultiSelect(id, getWalletsStore(), (w) => w.wallet_address, (w) => w.name || w.wallet_address, 'Select PKPs\u2026', disabled);
+  const items = [{ wallet_address: '0', name: 'All' }, ...getWalletsStore()];
+  return buildMultiSelect(id, items, (w) => w.wallet_address, (w) => w.name || w.wallet_address, 'Select PKPs\u2026', disabled);
 }
 
 function buildActionsMultiSelect(id, disabled) {
-  return buildMultiSelect(id, getActionsStore(), (a) => a.id, (a) => a.name || a.id, 'Select actions\u2026', disabled);
+  const items = [{ id: '0', name: 'All' }, ...getActionsStore()];
+  return buildMultiSelect(id, items, (a) => a.id, (a) => a.name || a.id, 'Select actions\u2026', disabled);
 }
 
 function updateMultiSelectSummary(id) {
   const wrap = document.getElementById(id);
   if (!wrap) return;
-  const allCb = wrap.querySelector('input[value="0"]');
   const summaryEl = wrap.querySelector('.ms-summary');
-  if (allCb && allCb.checked) {
-    summaryEl.textContent = 'All Groups';
-    return;
-  }
   const checked = [...wrap.querySelectorAll('input[type="checkbox"]:checked')];
+  const placeholder = wrap.dataset.placeholder || 'Select\u2026';
   summaryEl.textContent = checked.length === 0
-    ? 'Select groups\u2026'
+    ? placeholder
     : checked.map((c) => c.nextElementSibling.textContent).join(', ');
 }
 
@@ -1007,7 +1007,7 @@ async function confirmAndRemoveUsageKey(item) {
   if (!apiKey) return;
   hideStatus('overview-status-usage-keys');
   try {
-    showActionProgress('Removing usage API key', `Removing usage API key “${masked}”.`);
+    showActionProgress('Removing usage API key', `Removing usage API key "${masked}".`);
     const client = await getClient();
     await client.removeUsageApiKey({ apiKey, usageApiKey: item.usage_api_key });
     const store = getUsageKeysStore();
