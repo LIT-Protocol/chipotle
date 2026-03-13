@@ -5,25 +5,41 @@ use crate::actions::grpc::GrpcClientPool;
 use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::LitActionRequest;
 use crate::core::v1::models::response::LitActionResponse;
+use crate::observability::RequestSpan;
 use crate::utils::parse_with_hash::ipfs_cid_to_u256;
 use ipfs_hasher::IpfsHasher;
 use moka::future::Cache;
 use rocket::serde::json::Json;
+use std::collections::BTreeMap;
 use tracing::instrument;
 
 #[instrument(
     level = "debug",
-    skip(api_key, grpc_client_pool, ipfs_cache, http_client, lit_action_request),
+    skip(
+        request_span,
+        api_key,
+        grpc_client_pool,
+        ipfs_cache,
+        http_client,
+        lit_action_request
+    ),
     err
 )]
 pub async fn lit_action(
+    request_span: &RequestSpan,
     api_key: &str,
     grpc_client_pool: &GrpcClientPool<tonic::transport::Channel>,
     ipfs_cache: &Cache<String, String>,
     http_client: &reqwest::Client,
     lit_action_request: Json<LitActionRequest>,
 ) -> Result<LitActionResponse, ApiStatus> {
-    let request_id = Some("test".to_string());
+    let request_id = Some(request_span.request_id.clone());
+
+    let mut http_headers = BTreeMap::new();
+    http_headers.insert("x-request-id".to_string(), request_span.request_id.clone());
+    if let Some(ref cid) = request_span.correlation_id {
+        http_headers.insert("x-correlation-id".to_string(), cid.clone());
+    }
 
     let code_to_run = lit_action_request.code.clone();
     let derived_ipfs_id = get_lit_action_ipfs_id(code_to_run.clone());
@@ -43,6 +59,7 @@ pub async fn lit_action(
     let mut client = match ClientBuilder::default()
         .js_env(deno_execution_env)
         .request_id(request_id.clone())
+        .http_headers(http_headers)
         .api_key(api_key.to_string())
         .ipfs_id(derived_ipfs_id.clone())
         .client_grpc_channels((*grpc_client_pool).clone())
