@@ -1,0 +1,21 @@
+ARG OTEL_COLLECTOR_VERSION=0.104.0
+
+# Copy the statically-linked collector binary out of the official distroless image.
+FROM otel/opentelemetry-collector-contrib:${OTEL_COLLECTOR_VERSION} AS collector
+
+# Alpine runtime — provides /bin/sh so the entrypoint script can run.
+FROM alpine:3.19
+
+RUN adduser -D -u 10001 otel
+
+COPY --from=collector /otelcol-contrib /otelcol-contrib
+
+COPY otel-collector/config.yaml /etc/otelcol-contrib/config.yaml
+COPY --chmod=755 otel-collector/entrypoint.sh /entrypoint.sh
+
+USER 10001
+
+HEALTHCHECK --interval=5s --timeout=3s --start-period=10s --retries=3 \
+  CMD ["wget", "--spider", "-q", "http://localhost:13133"]
+
+ENTRYPOINT ["/entrypoint.sh"]
