@@ -99,13 +99,32 @@ export default function () {
   };
   const authHeaders = { "X-Api-Key": api_key };
 
-  // ── 2. Encrypt challenge ──────────────────────────────────────────────────
+  // ── 2. Create usage API key for lit action calls ──────────────────────────
+  const addUsageKeyRes = client.addUsageApiKey(
+    {
+      name: "k6-encrypt-usage-key",
+      description: "k6 encrypt/decrypt test usage key",
+      can_create_groups: false,
+      can_delete_groups: false,
+      can_create_pkps: false,
+      can_manage_ipfs_ids_in_groups: [],
+      can_add_pkp_to_groups: [],
+      can_remove_pkp_from_groups: [],
+      can_execute_in_groups: [0],
+    },
+    authHeaders,
+  );
+  if (!assertOk("addUsageApiKey", "POST /add_usage_api_key", addUsageKeyRes)) return;
+  const usageApiKey = (addUsageKeyRes.data as { usage_api_key: string }).usage_api_key;
+  const usageKeyHeaders = { "X-Api-Key": usageApiKey };
+
+  // ── 3. Encrypt challenge ──────────────────────────────────────────────────
   const encryptRes = client.litAction(
     {
       code: ENCRYPT_CODE,
       js_params: { pkpId, challenge },
     },
-    authHeaders,
+    usageKeyHeaders,
   );
   if (!assertOk("litAction/encrypt", "POST /lit_action", encryptRes)) return;
 
@@ -122,13 +141,13 @@ export default function () {
   }
   const ciphertext: string = encryptBody.response;
 
-  // ── 3. Decrypt ciphertext ─────────────────────────────────────────────────
+  // ── 4. Decrypt ciphertext ─────────────────────────────────────────────────
   const decryptRes = client.litAction(
     {
       code: DECRYPT_CODE,
       js_params: { pkpId, ciphertext },
     },
-    authHeaders,
+    usageKeyHeaders,
   );
   if (!assertOk("litAction/decrypt", "POST /lit_action", decryptRes)) return;
 
