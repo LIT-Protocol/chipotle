@@ -33,8 +33,8 @@
             "group": "Architecture",
             "pages": [
               "architecture/index",
-              "architecture/diagram",
-              "architecture/authModel"
+              "architecture/authModel",
+              "architecture/diagram"
             ]
           },
           {
