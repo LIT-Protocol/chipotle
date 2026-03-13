@@ -42,10 +42,6 @@
               <label for="new-account-desc">Account description</label>
               <input type="text" id="new-account-desc" class="input" placeholder="Optional">
             </div>
-            <div class="form-group">
-              <label for="new-account-initial-balance">Initial balance (optional)</label>
-              <input type="text" id="new-account-initial-balance" class="input" placeholder="0 ( or some balance to 10000000)">
-            </div>
             <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account</button>
           </div>
         </div>
@@ -83,6 +79,10 @@
           <a href="#action-runner" class="sidebar-link" data-scroll="action-runner">
             <span class="sidebar-link-icon">◇</span>
             <span class="sidebar-link-text">Action Runner</span>
+          </a>
+          <a href="lit_actions.html" class="sidebar-link">
+            <span class="sidebar-link-icon">◇</span>
+            <span class="sidebar-link-text">Lit Actions Viem</span>
           </a>
         </nav>
       </aside>
@@ -169,7 +169,7 @@
               <div class="card-body">
                 <div class="table-wrap">
                   <table class="data-table" id="usage-keys-table">
-                    <thead><tr><th>Key</th><th>Name</th><th>Description</th><th>Expiration</th><th>Balance</th><th class="th-actions"></th></tr></thead>
+                    <thead><tr><th>Name</th><th>Description</th><th>Expiration</th><th>Balance</th><th class="th-actions"></th></tr></thead>
                     <tbody id="usage-keys-tbody"></tbody>
                   </table>
                   <p id="usage-keys-empty" class="empty-state" style="display: none;">No usage API keys.</p>
@@ -215,7 +215,9 @@
               <div class="card-header">
                 <h3 class="card-title">Actions in group</h3>
                 <div class="card-header-actions">
-                  <input type="text" id="actions-group-id" class="input input-sm" placeholder="Group ID" style="width: 6rem;">
+                  <select id="actions-group-id" class="input input-sm" style="width: 12rem;">
+                    <option value="" disabled selected>Loading groups…</option>
+                  </select>
                   <button type="button" id="btn-load-actions" class="btn btn-sm btn-outline">Refresh</button>
                 </div>
               </div>
@@ -247,7 +249,7 @@
               <div class="card-body">
                 <div class="table-wrap">
                   <table class="data-table" id="wallets-table">
-                    <thead><tr><th>Address</th><th>Public key</th><th>Description</th></tr></thead>
+                    <thead><tr><th>Description</th><th>PkpId (Address)</th></tr></thead>
                     <tbody id="wallets-tbody"></tbody>
                   </table>
                   <p id="wallets-empty" class="empty-state" style="display: none;">No wallets.</p>
@@ -270,7 +272,13 @@
               </div>
               <div class="card-body">
                 <div class="form-group">
-                  <label for="action-runner-code">Lit Action code</label>
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:0.35rem;">
+                    <label for="action-runner-code" style="margin-bottom:0;">Lit Action code</label>
+                    <div style="display:flex;align-items:center;gap:0.5rem;flex-shrink:0;">
+                      <label for="action-runner-usage-key" style="margin-bottom:0;white-space:nowrap;font-size:0.8125rem;">Usage API Key</label>
+                      <input type="text" id="action-runner-usage-key" class="input" style="width:25rem;font-family:'JetBrains Mono',monospace;font-size:0.8125rem;padding:0.35rem 0.6rem;" placeholder="optional — overrides account key" />
+                    </div>
+                  </div>
                   <textarea id="action-runner-code" class="input textarea-lg" rows="10" placeholder="Paste your Lit Action JavaScript code here (e.g. const go = async () => { Lit.Actions.setResponse({ response: JSON.stringify('hello') }); }; go();)" spellcheck="false"></textarea>
                 </div>
                 <div class="form-group">
@@ -313,6 +321,22 @@
       <div class="modal-footer">
         <button type="button" class="btn btn-outline" id="confirm-cancel-btn">Cancel</button>
         <button type="button" class="btn btn-danger" id="confirm-delete-btn">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Action progress (non-dismissible) -->
+  <div id="action-overlay" class="modal-overlay" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-sm" role="dialog" aria-modal="true" aria-labelledby="action-title" tabindex="-1">
+      <div class="modal-header">
+        <h3 class="modal-title" id="action-title">Working…</h3>
+      </div>
+      <div class="modal-body">
+        <p id="action-desc" class="modal-action-desc"></p>
+      </div>
+      <div class="modal-footer modal-footer-progress">
+        <span class="action-spinner" aria-hidden="true"></span>
+        <span class="modal-progress-text">This may take a moment…</span>
       </div>
     </div>
   </div>

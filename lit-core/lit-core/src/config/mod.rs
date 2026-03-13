@@ -659,9 +659,9 @@ mod tests {
         .expect("failed to load config");
 
         assert_eq!(cfg.env().clone(), LitEnv::Dev);
-        assert_eq!(cfg.is_dev(), true);
+        assert!(cfg.is_dev());
         assert_eq!(cfg.config().get_string("simple.dummy").unwrap(), "default".to_string());
-        assert_eq!(cfg.config().get_bool("simple.other").unwrap(), true);
+        assert!(cfg.config().get_bool("simple.other").unwrap());
         #[cfg(feature = "ipfs")]
         assert_eq!(cfg.ipfs_api(), DEFAULT_IPFS_API.to_string());
         #[cfg(feature = "ipfs")]
@@ -685,9 +685,9 @@ mod tests {
         .expect("failed to load config");
 
         assert_eq!(cfg.env().clone(), LitEnv::Dev);
-        assert_eq!(cfg.is_dev(), true);
+        assert!(cfg.is_dev());
         assert_eq!(cfg.config().get_string("simple.dummy").unwrap(), "keyed".to_string());
-        assert_eq!(cfg.config().get_bool("simple.other").unwrap(), true);
+        assert!(cfg.config().get_bool("simple.other").unwrap());
         #[cfg(feature = "ipfs")]
         assert_eq!(cfg.ipfs_api(), "http://litos-host-other:2199".to_string());
         #[cfg(feature = "ipfs")]
@@ -713,9 +713,9 @@ mod tests {
         .expect("failed to load config");
 
         assert_eq!(cfg.env().clone(), LitEnv::Dev);
-        assert_eq!(cfg.is_dev(), true);
+        assert!(cfg.is_dev());
         assert_eq!(cfg.config().get_string("simple.dummy").unwrap(), "home".to_string());
-        assert_eq!(cfg.config().get_bool("simple.other").unwrap(), true);
+        assert!(cfg.config().get_bool("simple.other").unwrap());
         #[cfg(feature = "ipfs")]
         assert_eq!(cfg.ipfs_api(), "http://litos-host-home:2199".to_string());
         #[cfg(feature = "ipfs")]
@@ -742,9 +742,9 @@ mod tests {
         .expect("failed to load config");
 
         assert_eq!(cfg.env().clone(), LitEnv::Dev);
-        assert_eq!(cfg.is_dev(), true);
+        assert!(cfg.is_dev());
         assert_eq!(cfg.config().get_string("simple.dummy").unwrap(), "system".to_string());
-        assert_eq!(cfg.config().get_bool("simple.other").unwrap(), false);
+        assert!(!cfg.config().get_bool("simple.other").unwrap());
         assert_eq!(cfg.config().get_string("top.one").unwrap(), "1".to_string());
         assert_eq!(cfg.config().get_string("top.two").unwrap(), "2".to_string());
         assert_eq!(cfg.config().get_string("top.three").unwrap(), "3".to_string());

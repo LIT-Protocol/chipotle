@@ -17,8 +17,8 @@ yarn add @lit-protocol/naga-la-types
 ```ts
 import type { Lit } from '@lit-protocol/naga-la-types';
 
-async function sign(params: Parameters<typeof Lit.Actions.signEcdsa>[0]) {
-  return await Lit.Actions.signEcdsa(params);
+async function encryptMessage(params: Parameters<typeof Lit.Actions.Encrypt>[0]) {
+  return await Lit.Actions.Encrypt(params);
 }
 ```
 

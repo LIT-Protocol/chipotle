@@ -14,7 +14,7 @@ COPY lit-core ./lit-core/
 COPY lit-actions ./lit-actions/
 COPY lit-api-server ./lit-api-server/
 
-RUN cd lit-api-server && cargo build --profile production --bin lit-api-server
+RUN cd lit-api-server && cargo build --release --features production --bin lit-api-server
 
 FROM debian:bookworm-slim AS runtime
 
@@ -25,11 +25,11 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-COPY --from=builder /build/lit-api-server/target/production/lit-api-server /usr/local/bin/
+COPY --from=builder /build/lit-api-server/target/release/lit-api-server /usr/local/bin/
 COPY --from=builder /build/lit-api-server/Rocket.toml /app/
 COPY --from=builder /build/lit-api-server/rpc-config.yaml /app/
 COPY --from=builder /build/lit-api-server/log_levels.toml /app/
 # NodeConfig.toml required at startup; use demo as default (override via volume mount for production)
-COPY --from=builder /build/lit-api-server/NodeConfig.demo.toml /app/NodeConfig.toml
+COPY --from=builder /build/lit-api-server/NodeConfig.next.toml /app/NodeConfig.toml
 
 CMD ["lit-api-server"]

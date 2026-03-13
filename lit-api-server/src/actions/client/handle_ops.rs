@@ -50,13 +50,16 @@ impl Client {
                 }
                 .into()
             }
-            UnionResponse::AesEncrypt(AesEncryptRequest {
-                public_key,
-                message,
-            }) => {
+            UnionResponse::AesEncrypt(AesEncryptRequest { pkp_id, message }) => {
+                if !op_code_helpers::can_use_wallet_in_action(&self.api_key, &self.ipfs_id, &pkp_id)
+                    .await?
+                {
+                    bail!("API key cannot use selected wallet in selected action");
+                }
+
                 let encrypted = op_code_helpers::encryption::aes_encrypt_with_pkp(
                     &self.api_key,
-                    &public_key,
+                    &pkp_id,
                     &message,
                 )
                 .await?;
@@ -65,13 +68,16 @@ impl Client {
                 }
                 .into()
             }
-            UnionResponse::AesDecrypt(AesDecryptRequest {
-                public_key,
-                ciphertext,
-            }) => {
+            UnionResponse::AesDecrypt(AesDecryptRequest { pkp_id, ciphertext }) => {
+                if !op_code_helpers::can_use_wallet_in_action(&self.api_key, &self.ipfs_id, &pkp_id)
+                    .await?
+                {
+                    bail!("API key cannot use selected wallet in selected action");
+                }
+
                 let decrypted = op_code_helpers::encryption::aes_decrypt_with_pkp(
                     &self.api_key,
-                    &public_key,
+                    &pkp_id,
                     &ciphertext,
                 )
                 .await?;
@@ -80,101 +86,38 @@ impl Client {
                 }
                 .into()
             }
-            UnionResponse::GetLatestNonce(GetLatestNonceRequest { .. }) => {
-                bail!("GetLatestNonce is not implemented");
-            }
-            UnionResponse::Sign(SignRequest {
-                to_sign,
-                public_key,
-                sig_name,
-                signing_scheme,
-            }) => {
-                let (sig_name, signed_data) = match op_code_helpers::signing::sign_with_pkp(
-                    &self.api_key,
-                    &public_key,
-                    &to_sign,
-                    &sig_name,
-                    &signing_scheme,
-                )
-                .await
+            UnionResponse::GetPrivateKey(GetPrivateKeyRequest { pkp_id }) => {
+                if !op_code_helpers::can_use_wallet_in_action(&self.api_key, &self.ipfs_id, &pkp_id)
+                    .await?
                 {
-                    Ok((sig_name, signed_data)) => (sig_name, signed_data),
-                    Err(e) => bail!("Error signing: {:?}", e),
-                };
-
-                let hex_signature = signed_data.signature.clone();
-
-                self.state.sign_count += 1;
-                self.state.signed_data.insert(sig_name, signed_data);
-
-                SignResponse {
-                    success: hex_signature,
+                    bail!("API key cannot use selected wallet in selected action");
                 }
-                .into()
+                let secret = op_code_helpers::private_keys::get_private_key(&self.api_key, &pkp_id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                GetPrivateKeyResponse { secret }.into()
             }
-            UnionResponse::CallChild(CallChildRequest {
-                ipfs_id: _,
-                params: _,
+            UnionResponse::GetLitActionPrivateKey(GetLitActionPrivateKeyRequest {}) => {
+                let secret =
+                    op_code_helpers::private_keys::get_lit_action_private_key(&self.ipfs_id)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                GetLitActionPrivateKeyResponse { secret }.into()
+            }
+            UnionResponse::GetLitActionPublicKey(GetLitActionPublicKeyRequest { ipfs_id }) => {
+                let public_key = op_code_helpers::private_keys::get_lit_action_public_key(&ipfs_id)
+                    .await
+                    .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                GetLitActionPublicKeyResponse { public_key }.into()
+            }
+            UnionResponse::GetLitActionWalletAddress(GetLitActionWalletAddressRequest {
+                ipfs_id,
             }) => {
-                // self.pay(LitActionPriceComponent::CallDepth, 1).await?;
-
-                // info!(
-                //     "Calling child action: {:?}, self keyset id: {:?}",
-                //     ipfs_id, self.key_set_id
-                // );
-                // call_depth += 1;
-                // if call_depth > self.max_call_depth {
-                //     bail!(
-                //         "The recursion limit of a child action is {} and you have attempted to exceed that limit.",
-                //         self.max_call_depth
-                //     );
-                // }
-
-                // // Pull down the lit action code from IPFS
-                // let code = crate::utils::web::get_ipfs_file(
-                //     &ipfs_id,
-                //     self.lit_config(),
-                //     self.ipfs_cache()?,
-                //     self.http_cache()?,
-                // )
-                // .await?;
-
-                // let globals = params
-                //     .map(|params| serde_json::from_slice::<serde_json::Value>(&params))
-                //     .transpose()?;
-
-                // let auth_context = {
-                //     let mut ctx = auth_context.clone();
-                //     ctx.action_ipfs_id_stack.push(ipfs_id.clone());
-                //     ctx
-                // };
-
-                // // NB: Using execute_js_inner instead of execute_js to avoid resetting state
-                // let res = Box::pin(self.execute_js_inner(code, globals, &auth_context, call_depth))
-                //     .await?;
-
-                // CallChildResponse {
-                //     response: res.response,
-                // }
-                // .into()
-                bail!("CallChild is not implemented");
-            }
-            UnionResponse::CallContract(CallContractRequest { .. }) => {
-                bail!("CallContract is not implemented");
-            }
-            UnionResponse::GetRpcUrl(GetRpcUrlRequest { .. }) => {
-                bail!("GetRpcUrl is not implemented");
-            }
-            UnionResponse::EncryptBls(EncryptBlsRequest {
-                access_control_conditions: _,
-                to_encrypt: _,
-            }) => {
-                // use lit_rust_crypto::blsful::Bls12381G1;
-
-                bail!("EncryptBls is not implemented");
-            }
-            UnionResponse::DecryptBls(DecryptBlsRequest { .. }) => {
-                bail!("DecryptBls is not implemented");
+                let wallet_address =
+                    op_code_helpers::private_keys::get_lit_action_wallet_address(&ipfs_id)
+                        .await
+                        .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+                GetLitActionWalletAddressResponse { wallet_address }.into()
             }
             UnionResponse::UpdateResourceUsage(UpdateResourceUsageRequest {
                 tick: _,
@@ -187,27 +130,6 @@ impl Client {
                 // let cancel_action = r.is_err();
                 let cancel_action = false;
                 UpdateResourceUsageResponse { cancel_action }.into()
-            }
-            UnionResponse::SignAsAction(SignAsActionRequest {
-                to_sign: _,
-                sig_name: _,
-                signing_scheme: _,
-            }) => {
-                bail!("SignAsAction is not implemented");
-            }
-            UnionResponse::GetActionPublicKey(GetActionPublicKeyRequest {
-                signing_scheme: _,
-                action_ipfs_cid: _,
-            }) => {
-                bail!("GetActionPublicKey is not implemented");
-            }
-            UnionResponse::VerifyActionSignature(VerifyActionSignatureRequest {
-                signing_scheme: _,
-                action_ipfs_cid: _,
-                to_sign: _,
-                sign_output: _,
-            }) => {
-                bail!("VerifyActionSignature is not implemented");
             }
             UnionResponse::Result(_) => unreachable!(), // handled in main loop
         })

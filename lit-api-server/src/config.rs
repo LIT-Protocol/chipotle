@@ -1,13 +1,38 @@
-use crate::abstractions::transfer::chain_info::Chain;
+use crate::utils::chain_info::Chain;
 use anyhow::Result;
 use std::path::Path;
 use std::{env, fs};
 use toml_edit::DocumentMut;
 
+pub struct ObservabilityConfig {
+    pub log_level: String,
+    #[cfg(feature = "otlp")]
+    pub telemetry_endpoint: String,
+}
+
+/// Reads observability settings from environment variables.
+///
+/// - `log_level`: `RUST_LOG` env var, defaults to `"trace"`.
+/// - `telemetry_endpoint` (otlp builds only): `LIT_TELEMETRY_ENDPOINT` env var, required.
+///
+/// Returns an error if a required value is absent.
+pub fn read_observability_config() -> Result<ObservabilityConfig> {
+    let log_level = env::var("RUST_LOG").unwrap_or_else(|_| "trace".to_string());
+
+    #[cfg(feature = "otlp")]
+    let telemetry_endpoint = env::var("LIT_TELEMETRY_ENDPOINT")
+        .map_err(|_| anyhow::anyhow!("LIT_TELEMETRY_ENDPOINT is not set"))?;
+
+    Ok(ObservabilityConfig {
+        log_level,
+        #[cfg(feature = "otlp")]
+        telemetry_endpoint,
+    })
+}
+
 #[derive(Debug, Clone)]
 pub struct NodeConfig {
     pub chain: Chain,
-    pub secret: String,
     pub contract_address: String,
 }
 
@@ -42,10 +67,6 @@ pub fn init_config() -> Result<(), anyhow::Error> {
         .to_string()
         .trim()
         .replace("\"", "");
-    let secret: String = toml_document["chain"]["secret"]
-        .to_string()
-        .trim()
-        .replace("\"", "");
     let contract_address: String = toml_document["chain"]["contract_address"]
         .to_string()
         .trim()
@@ -67,15 +88,8 @@ pub fn init_config() -> Result<(), anyhow::Error> {
         ));
     }
 
-    if secret.is_empty() {
-        return Err(anyhow::anyhow!(
-            "Secret is empty or not found in NodeConfig.toml"
-        ));
-    }
-
     let node_config = NodeConfig {
         chain,
-        secret,
         contract_address,
     };
 

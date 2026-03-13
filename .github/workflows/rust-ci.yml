@@ -1,11 +1,9 @@
 # Runs cargo fmt --check, cargo clippy, and cargo build --all-features
-# on every push to every branch and on every pull request.
+# on every pull request.
 
 name: Rust CI
 
 on:
-  push:
-    branches: [main, next]
   pull_request:
 
 # Cancel any in-progress run on the same branch/PR when a new commit is pushed.

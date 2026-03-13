@@ -1,20 +1,48 @@
-# Phala CVM deployment: lit-api-server + lit-actions + lit-static
+# Phala CVM deployment: lit-api-server + lit-actions + lit-static + otel-collector
 # lit-actions and lit-api-server share gRPC Unix socket at /tmp/lit_actions.sock.
 # lit-static serves SDKs, docs, dapps on port 8001.
+# otel-collector runs on the compose bridge network, receives OTLP on 0.0.0.0:4317,
+# and forwards telemetry to GCP. lit-actions reaches it via LIT_TELEMETRY_ENDPOINT;
+# lit-api-server reads the endpoint from NodeConfig.toml ([observability] telemetry_endpoint).
 # Uses tdx.large instance type via phala deploy --instance-type tdx.large
 #
 # Image placeholders (DOCKER_IMAGE_*) are substituted with @sha256: digests by
 # the deploy workflow (DR-1.1, DR-1.2) to ensure verifiable, immutable image
 # references for CVM verification. Mutable tags (:latest, :sha) are never used
 # in the deployed compose file.
+#
+# Required secrets (set as encrypted Phala CVM environment variables):
+#   GCP_SERVICE_ACCOUNT_JSON  - GCP service account key (raw JSON or base64-encoded)
+#   GCP_PROJECT_ID            - GCP project ID (e.g. "my-gcp-project")
+
+# RUST_LOG filter shared by lit-actions and lit-api-server.
+# App code stays at trace; per-module overrides suppress low-value internals:
+#   h2=info          – HTTP/2 frame/stream state machine chatter
+#   hyper=info       – per-request connection lifecycle events
+#   hyper_util=info  – timer and pool bookkeeping
+#   tonic=info       – gRPC codec and transport plumbing
+#   tower=info       – service middleware polling
+#   reqwest=info     – redirect/cookie-jar internals
+#   rustls=info      – TLS handshake and session-ticket noise
+#   tokio_util=info  – codec/framed-read buffer ops
+x-rust-log: &rust-log "trace,h2=info,hyper=info,hyper_util=info,tonic=info,tower=info,reqwest=info,rustls=info,tokio_util=info"
 
 services:
   lit-actions:
     image: ${DOCKER_IMAGE_LIT_ACTIONS}
-    command: ["lit_actions", "--socket", "/tmp/lit_actions.sock"]
+    command:
+      - lit_actions
+      - --socket
+      - /tmp/lit_actions.sock
+    environment:
+      RUST_LOG: *rust-log
+      LIT_TELEMETRY_ENDPOINT: http://otel-collector:4317
     volumes:
       - lit-socket:/tmp
-      - /var/run/dstack.sock:/var/run/dstack.sock
+    depends_on:
+      otel-collector:
+        condition: service_healthy
+        required: false
     restart: unless-stopped
 
   lit-api-server:
@@ -24,15 +52,38 @@ services:
     ports:
       - "8000:8000"
     environment:
+      RUST_LOG: *rust-log
+      LIT_TELEMETRY_ENDPOINT: http://otel-collector:4317
       ROCKET_ADDRESS: "0.0.0.0"
       ROCKET_PORT: "8000"
+      # BASE_CHAIN_RPC is populated via an encrypted secret passed in through the Phala CLI/UI
+      BASE_CHAIN_RPC: ${BASE_CHAIN_RPC}
     volumes:
       - lit-socket:/tmp
       - /var/run/dstack.sock:/var/run/dstack.sock
-      # Uncomment to override NodeConfig.toml with production config (chain, contract_address, secret):
+      # Optional overide for NodeConfig.toml (chain, contract_address).
       # - ./NodeConfig.toml:/app/NodeConfig.toml:ro
     depends_on:
-      - lit-actions
+      lit-actions:
+        condition: service_started
+      otel-collector:
+        condition: service_healthy
+        required: false
+    restart: unless-stopped
+
+  # OTel Collector — receives OTLP (gRPC/HTTP) on 0.0.0.0:4317/4318 from all
+  # services on the compose bridge, then exports to GCP Cloud Monitoring,
+  # Cloud Trace, and Cloud Logging.
+  #
+  # NOTE: both lit-api-server and lit-actions must be built with --features otlp
+  # for OTLP emission. Without that feature they fall back to stdout logging.
+  otel-collector:
+    image: ${DOCKER_IMAGE_OTEL_COLLECTOR}
+    environment:
+      # GCP_SERVICE_ACCOUNT_JSON and GCP_PROJECT_ID must be set as encrypted
+      # Phala CVM secrets in the deployment manifest.
+      GCP_SERVICE_ACCOUNT_JSON: ${GCP_SERVICE_ACCOUNT_JSON}
+      GCP_PROJECT_ID: ${GCP_PROJECT_ID}
     restart: unless-stopped
 
   lit-static:

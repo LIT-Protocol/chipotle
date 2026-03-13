@@ -1,0 +1,116 @@
+# Deploy group — included by root justfile. Uses: image_base, image_lit_actions,
+# image_lit_api_server, image_lit_static, app_name, instance_type.
+
+# Install Phala CLI (optional; run before first deploy)
+[group: 'deploy']
+setup:
+    #!/usr/bin/env sh
+    set -eu
+    command -v npm >/dev/null 2>&1 || { echo "error: npm not found. Install Node.js from https://nodejs.org/"; exit 1; }
+    npm install -g phala
+    phala --version
+
+# Build all three Docker images (release mode, linux/amd64 for Phala CVM)
+[group: 'deploy']
+docker-build: _check_docker
+    #!/usr/bin/env sh
+    set -eu
+    docker build --platform linux/amd64 -f Dockerfile.lit-actions    -t {{image_lit_actions}}    .
+    docker build --platform linux/amd64 -f Dockerfile.lit-api-server -t {{image_lit_api_server}} .
+    docker build --platform linux/amd64 -f Dockerfile.lit-static     -t {{image_lit_static}}     .
+
+# Push all three images and capture each registry-assigned @sha256: digest.
+# Digests are written to .digest-{service}.txt and read by `deploy` (DR-1.1, DR-1.2).
+# docker inspect .RepoDigests is populated by `docker push` with the registry-assigned
+# content hash; we strip the repo prefix to get sha256:...
+# Use jq (no justfile {{}} escaping) to avoid stray }} in output.
+[group: 'deploy']
+docker-push: docker-build
+    #!/usr/bin/env sh
+    set -eu
+    command -v jq >/dev/null 2>&1 || { echo "error: jq not found. Install from https://stedolan.github.io/jq/"; exit 1; }
+    docker push {{image_lit_actions}}
+    docker push {{image_lit_api_server}}
+    docker push {{image_lit_static}}
+    docker inspect {{image_lit_actions}}    | jq -r '.[0].RepoDigests[0]' | sed 's/.*@//' > .digest-lit-actions.txt
+    docker inspect {{image_lit_api_server}} | jq -r '.[0].RepoDigests[0]' | sed 's/.*@//' > .digest-lit-api-server.txt
+    docker inspect {{image_lit_static}}     | jq -r '.[0].RepoDigests[0]' | sed 's/.*@//' > .digest-lit-static.txt
+    for f in .digest-lit-actions.txt .digest-lit-api-server.txt .digest-lit-static.txt; do
+        [ -s "$f" ] || { echo "error: digest capture failed for $f"; exit 1; }
+        printf "captured %s: %s\n" "$f" "$(cat $f)"
+    done
+
+
+# Deploy to Phala Cloud (requires: docker login, phala login).
+# Builds, pushes, captures @sha256: digests, then substitutes them into the
+# compose file (DR-1.1, DR-1.2). Override DOCKER_IMAGE (repo path) or
+# DOCKER_TAG (to skip the build and reuse a prior push; digest files must exist).
+# Use deploy to upgrade existing CVM; use deploy-new for first-time provisioning.
+[group: 'deploy']
+deploy name=(app_name): docker-push _check_phala
+    #!/usr/bin/env sh
+    set -eu
+    DIGEST_LIT_ACTIONS=$(cat .digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
+    DIGEST_LIT_API_SERVER=$(cat .digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
+    DIGEST_LIT_STATIC=$(cat .digest-lit-static.txt | tr -d '\n' | sed 's/}[}]*$//')
+    [ -n "$DIGEST_LIT_ACTIONS" ]    || { echo "error: lit-actions digest missing; run: just docker-build"; exit 1; }
+    [ -n "$DIGEST_LIT_API_SERVER" ] || { echo "error: lit-api-server digest missing; run: just docker-build"; exit 1; }
+    [ -n "$DIGEST_LIT_STATIC" ]     || { echo "error: lit-static digest missing; run: just docker-build"; exit 1; }
+    sed \
+        -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|{{image_base}}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
+        -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|{{image_base}}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
+        -e "s|\${DOCKER_IMAGE_LIT_STATIC}|{{image_base}}-lit-static@${DIGEST_LIT_STATIC}|g" \
+        docker-compose.phala.yml > docker-compose.deploy.yml
+    cat docker-compose.deploy.yml
+    if [ -f .env ]; then set -a && . ./.env && set +a; fi
+    [ -n "${PHALA_PRIVATE_KEY}" ] || { echo "error: PHALA_PRIVATE_KEY not set. Copy .env.example to .env and set your DstackApp key."; exit 1; }
+    phala deploy -c docker-compose.deploy.yml --cvm-id {{app_name}} --private-key "${PHALA_PRIVATE_KEY}"
+
+# First-time deploy to a new Phala app with OS image 0.5.4.1.
+# Usage: just deploy-new [name]
+#   just deploy-new              # uses app name from branch (lit-api-server or chipotle-next)
+#   just deploy-new my-new-app   # creates app named my-new-app
+[group: 'deploy']
+deploy-new name=(app_name): docker-push _check_phala
+    #!/usr/bin/env sh
+    set -eu
+    APP_NAME="{{name}}"
+    [ -n "$APP_NAME" ] || { echo "error: app name is empty"; exit 1; }
+    echo "Deploying app: $APP_NAME"
+    DIGEST_LIT_ACTIONS=$(cat .digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
+    DIGEST_LIT_API_SERVER=$(cat .digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
+    DIGEST_LIT_STATIC=$(cat .digest-lit-static.txt | tr -d '\n' | sed 's/}[}]*$//')
+    [ -n "$DIGEST_LIT_ACTIONS" ]    || { echo "error: lit-actions digest missing; run: just docker-build"; exit 1; }
+    [ -n "$DIGEST_LIT_API_SERVER" ] || { echo "error: lit-api-server digest missing; run: just docker-build"; exit 1; }
+    [ -n "$DIGEST_LIT_STATIC" ]     || { echo "error: lit-static digest missing; run: just docker-build"; exit 1; }
+    sed \
+        -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|{{image_base}}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
+        -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|{{image_base}}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
+        -e "s|\${DOCKER_IMAGE_LIT_STATIC}|{{image_base}}-lit-static@${DIGEST_LIT_STATIC}|g" \
+        docker-compose.phala.yml > docker-compose.deploy.yml
+    cat docker-compose.deploy.yml
+    if [ -f .env ]; then set -a && . ./.env && set +a; fi
+    [ -n "${PHALA_PRIVATE_KEY}" ] || { echo "error: PHALA_PRIVATE_KEY not set. Copy .env.example to .env and set your DstackApp key."; exit 1; }
+    phala deploy -c docker-compose.deploy.yml -n "$APP_NAME" --instance-type {{instance_type}} \
+        --image dstack-0.5.6 \
+        --kms base --private-key "${PHALA_PRIVATE_KEY}"
+
+# Run locally with Docker Compose (no Phala Cloud)
+[group: 'deploy']
+docker-run-local: docker-build
+    DOCKER_IMAGE_LIT_ACTIONS={{image_lit_actions}} \
+    DOCKER_IMAGE_LIT_API_SERVER={{image_lit_api_server}} \
+    DOCKER_IMAGE_LIT_STATIC={{image_lit_static}} \
+    docker compose -f docker-compose.phala.yml up -d
+
+[private]
+_check_docker:
+    #!/usr/bin/env sh
+    set -eu
+    command -v docker >/dev/null 2>&1 || { echo "error: docker not found. Install from https://docs.docker.com/get-docker/"; exit 1; }
+
+[private]
+_check_phala:
+    #!/usr/bin/env sh
+    set -eu
+    command -v phala >/dev/null 2>&1 || { echo "error: phala not found. Run: just setup"; exit 1; }

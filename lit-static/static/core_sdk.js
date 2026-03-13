@@ -21,7 +21,7 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
 /**
  * @typedef {Object} SignWithPkpOptions
  * @property {string} apiKey - Hex-encoded API key (from getApiKey)
- * @property {string} pkpPublicKey - PKP public key
+ * @property {string} pkpId - PKP ID
  * @property {string} message - Message to sign
  * @property {string} [signingScheme='EcdsaK256Sha256'] - Signing scheme (use SIGNING_SCHEME_ECDSA_K256_SHA256)
  */
@@ -57,22 +57,23 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @typedef {Object} AddPkpToGroupOptions
  * @property {string} apiKey - Account API key
  * @property {string} groupId - Group ID (decimal or hex string)
- * @property {string} pkpPublicKey - PKP public key (will be hashed on server)
+ * @property {string} pkpId - PKP ID
  */
 
 /**
  * @typedef {Object} RemovePkpFromGroupOptions
  * @property {string} apiKey - Account API key
  * @property {string} groupId - Group ID (decimal or hex string)
- * @property {string} pkpPublicKey - PKP public key (must match value used when adding)
+ * @property {string} pkpId - PKP ID (must match value used when adding)
  */
 
 /**
  * @typedef {Object} AddUsageApiKeyOptions
  * @property {string} apiKey - Account API key
- * @property {string} usageApiKey - Usage API key to add
  * @property {string} expiration - Expiration (e.g. unix timestamp as decimal string)
  * @property {string} balance - Balance (e.g. wei as decimal string)
+ * @property {string} name - Name
+ * @property {string} description - Description
  */
 
 /**
@@ -142,8 +143,7 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @property {string} id - ID (hash as stored on chain)
  * @property {string} name - Name
  * @property {string} description - Description
- * @property {string} wallet_address - Wallet address (or IPFS CID / public key as stored)
- * @property {string} public_key - Public key (or CID / address as stored)
+ * @property {string} wallet_address - Wallet address (hex)
  */
 
 /**
@@ -151,9 +151,9 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @property {string} id - ID (hash as stored on chain)
  * @property {string} name - Name
  * @property {string} description - Description
- * @property {string} api_key - Usage API key
  * @property {string} expiration - Expiration (e.g. unix timestamp string)
  * @property {number} balance - Balance (u64)
+ * @property {string} [api_key] - Usage API key (only present when returned by server, e.g. from lookup; not in standard list response)
  */
 
 /**
@@ -163,7 +163,7 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @property {boolean} is_evm - Whether the chain is EVM
  * @property {boolean} testnet - Whether the chain is a testnet
  * @property {string} token - Native token symbol
- * @property {string} rpc_url - RPC URL
+ * @property {string} [rpc_url] - RPC URL (resolved from chainlist when not in API response)
  * @property {string} contract_address - AccountConfig contract address
  */
 
@@ -198,7 +198,7 @@ export const SHARE_TYPE_BLS = 'Bls';
  * @typedef {Object} SignWithPkpResponse
  * @property {string} signing_scheme - Signing scheme (e.g. EcdsaK256Sha256)
  * @property {string} signed_digest - Signed digest (hex)
- * @property {string} public_key - Public key (hex)
+ * @property {string} pkp_id - PKP ID
  * @property {string} share_type - 'Ecdsa' | 'Frost' | 'Bls'
  * @property {string} [big_r] - ECDSA big R (optional)
  * @property {string} [compressed_public_key] - Compressed public key (optional)
@@ -218,6 +218,12 @@ export const SHARE_TYPE_BLS = 'Bls';
 /**
  * @typedef {Object} AccountOpResponse - Response for account config operations (add_group, add_pkp_to_group, etc.)
  * @property {boolean} success
+ */
+
+/**
+ * @typedef {Object} AddUsageApiKeyResponse - Response for add_usage_api_key (response.rs AddUsageApiKeyResponse)
+ * @property {boolean} success
+ * @property {string} usage_api_key - The newly created usage API key (returned only once)
  */
 
 /**
@@ -275,6 +281,35 @@ async function parseResponse(res, context) {
     return text ? JSON.parse(text) : null;
   } catch (_) {
     throw new Error(`${context}: invalid JSON response`);
+  }
+}
+
+const CHAINLIST_API = 'https://chainlistapi.com';
+const CORS_PROXY = 'https://whateverorigin.org/get?url=';
+
+/**
+ * Resolve a public RPC URL for the given chain ID from chainlistapi.com.
+ * Uses Whatever Origin CORS proxy (free, no domain whitelist) to avoid cross-origin restrictions.
+ * @param {number} chainId - EVM chain ID
+ * @returns {Promise<string|null>} First HTTP RPC URL, or null if not found
+ */
+export async function resolveRpcUrlFromChainlist(chainId) {
+  if (chainId == null || chainId === '') return null;
+  try {
+    const url = `${CORS_PROXY}${encodeURIComponent(`${CHAINLIST_API}/chains/${chainId}`)}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const wrapper = await res.json();
+    const data = typeof wrapper?.contents === 'string' ? JSON.parse(wrapper.contents) : wrapper;
+    const rpcs = data?.rpc;
+    if (!Array.isArray(rpcs)) return null;
+    const entry = rpcs.find((r) => {
+      const u = typeof r === 'string' ? r : r?.url;
+      return typeof u === 'string' && u.startsWith('https://');
+    });
+    return entry ? (typeof entry === 'string' ? entry : entry.url) : null;
+  } catch (_) {
+    return null;
   }
 }
 
@@ -341,11 +376,11 @@ export class LitNodeSimpleApiClient {
    * Signs a message with the given PKP using the provided API key.
    * Uses EcdsaK256Sha256 signing scheme by default.
    * @param {SignWithPkpOptions} options
-   * @returns {Promise<SignWithPkpResponse>} { signing_scheme, signed_digest, public_key, share_type, shares, ... }
+   * @returns {Promise<SignWithPkpResponse>} { signing_scheme, signed_digest, pkp_id, signature }
    */
-  async signWithPkp({ apiKey, pkpPublicKey, message, signingScheme = SIGNING_SCHEME_ECDSA_K256_SHA256 }) {
+  async signWithPkp({ apiKey, pkpId, message, signingScheme = SIGNING_SCHEME_ECDSA_K256_SHA256 }) {
     const body = {
-      pkp_public_key: pkpPublicKey,
+      pkp_id: pkpId,
       message,
       signing_scheme: signingScheme,
     };
@@ -355,6 +390,17 @@ export class LitNodeSimpleApiClient {
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'sign_with_pkp');
+  }
+
+  /**
+   * GET /core/v1/get_lit_action_ipfs_id/<code>
+   * Returns the IPFS CID (hash) for the given lit action code.
+   * @param {string} code - Lit action JavaScript code
+   * @returns {Promise<string>} IPFS CID (e.g. derived hash of code)
+   */
+  async getLitActionIpfsId(code) {
+    const res = await fetch(`${this.baseUrl}/get_lit_action_ipfs_id/${encodeURIComponent(code)}`);
+    return parseResponse(res, 'get_lit_action_ipfs_id');
   }
 
   /**
@@ -426,10 +472,10 @@ export class LitNodeSimpleApiClient {
    * @param {AddPkpToGroupOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async addPkpToGroup({ apiKey, groupId, pkpPublicKey }) {
+  async addPkpToGroup({ apiKey, groupId, pkpId }) {
     const body = {
       group_id: groupId,
-      pkp_public_key: pkpPublicKey,
+      pkp_id: pkpId,
     };
     const res = await fetch(`${this.baseUrl}/add_pkp_to_group`, {
       method: 'POST',
@@ -445,10 +491,10 @@ export class LitNodeSimpleApiClient {
    * @param {RemovePkpFromGroupOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async removePkpFromGroup({ apiKey, groupId, pkpPublicKey }) {
+  async removePkpFromGroup({ apiKey, groupId, pkpId }) {
     const body = {
       group_id: groupId,
-      pkp_public_key: pkpPublicKey,
+      pkp_id: pkpId,
     };
     const res = await fetch(`${this.baseUrl}/remove_pkp_from_group`, {
       method: 'POST',
@@ -460,14 +506,16 @@ export class LitNodeSimpleApiClient {
 
   /**
    * POST /core/v1/add_usage_api_key
-   * Add a usage API key to an account.
+   * Add a usage API key to an account. Server creates and returns the new key.
    * @param {AddUsageApiKeyOptions} options
-   * @returns {Promise<AccountOpResponse>}
+   * @returns {Promise<AddUsageApiKeyResponse>}
    */
-  async addUsageApiKey({ apiKey, expiration, balance }) {
+  async addUsageApiKey({ apiKey, expiration, balance, name, description }) {
     const body = {
       expiration,
       balance,
+      name,
+      description,
     };
     const res = await fetch(`${this.baseUrl}/add_usage_api_key`, {
       method: 'POST',
@@ -667,11 +715,17 @@ export class LitNodeSimpleApiClient {
   /**
    * GET /core/v1/get_node_chain_config
    * Returns the node's chain configuration (chain name, id, RPC URL, contract address, etc.).
+   * When the API does not include rpc_url, it is resolved from chainlistapi.com using chain_id.
    * @returns {Promise<NodeChainConfigResponse>}
    */
   async getNodeChainConfig() {
     const res = await fetch(`${this.baseUrl}/get_node_chain_config`);
-    return parseResponse(res, 'get_node_chain_config');
+    const cfg = await parseResponse(res, 'get_node_chain_config');
+    if (!cfg.rpc_url && cfg.chain_id != null && cfg.is_evm) {
+      const rpcUrl = await resolveRpcUrlFromChainlist(cfg.chain_id);
+      if (rpcUrl) cfg.rpc_url = rpcUrl;
+    }
+    return cfg;
   }
 }
 

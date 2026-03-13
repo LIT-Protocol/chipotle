@@ -42,7 +42,6 @@ export default function () {
   const newAccountRes = client.newAccount({
     account_name: "k6-smoke-test",
     account_description: "k6 smoke test account",
-    initial_balance: "10000",
   });
   if (!assertOk("newAccount", "POST /new_account", newAccountRes)) return;
   const apiKey = (newAccountRes.data as { api_key: string }).api_key;

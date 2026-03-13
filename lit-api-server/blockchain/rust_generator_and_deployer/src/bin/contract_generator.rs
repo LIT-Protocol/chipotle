@@ -1,28 +1,50 @@
 use ethers::prelude::*;
+use lit_contracts_minimal_generator::args::parse_named_args;
 use std::env;
 use std::fs::{copy, create_dir_all, read_dir, write};
 use std::path::Path;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    if args.len() < 3 {
+    let named = parse_named_args(&args);
+
+    let bin = args
+        .first()
+        .map(|s| s.as_str())
+        .unwrap_or("generate_contracts");
+    let usage = || {
         eprintln!(
-            "Usage: {} <input_folder> <output_folder>",
-            args.first().unwrap_or(&"generate_contracts".into())
+            "Usage: {} --abifolder=<abifolder> --outputfolder=<outputfolder>",
+            bin
         );
-        eprintln!("  input_folder  - folder containing ABI files (e.g. ../lit-blockchain/abis/)");
+        eprintln!("  --abifolder    folder containing ABI files (e.g. ../lit-blockchain/abis/)");
         eprintln!(
-            "  output_folder - folder to write generated .rs files (e.g. ../lit-blockchain/src/contracts/)"
+            "  --outputfolder folder to write generated .rs files (e.g. ../lit-blockchain/src/contracts/)"
         );
         std::process::exit(1);
-    }
-    let input_folder = args[1].trim_end_matches('/');
-    let output_folder = args[2].trim_end_matches('/');
+    };
 
-    if !Path::new(output_folder).exists() {
-        create_dir_all(output_folder).expect("Could not create output folder.");
+    let input_folder = match named.get("abifolder") {
+        Some(f) => f.trim_end_matches('/').to_string(),
+        None => {
+            eprintln!("Missing required arg: --abifolder");
+            usage();
+            unreachable!()
+        }
+    };
+    let output_folder = match named.get("outputfolder") {
+        Some(f) => f.trim_end_matches('/').to_string(),
+        None => {
+            eprintln!("Missing required arg: --outputfolder");
+            usage();
+            unreachable!()
+        }
+    };
+
+    if !Path::new(&output_folder).exists() {
+        create_dir_all(&output_folder).expect("Could not create output folder.");
     }
-    process_folder(input_folder, output_folder);
+    process_folder(&input_folder, &output_folder);
 }
 
 fn process_folder(input_folder: &str, output_folder: &str) {
@@ -35,8 +57,14 @@ fn process_folder(input_folder: &str, output_folder: &str) {
 
     let files = result.unwrap();
     for file in files.flatten() {
+        if file.path().to_str().unwrap().contains("DiamondPattern") {
+            continue;
+        }
         println!("Processing file: {:?}", file.path());
         if file.file_type().unwrap().is_dir() {
+            if file.path().to_str().unwrap().ends_with("Facets") {
+                continue;
+            }
             process_folder(file.path().to_str().unwrap(), output_folder);
             continue;
         }
