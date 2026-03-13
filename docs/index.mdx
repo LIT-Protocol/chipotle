@@ -147,7 +147,7 @@ Create a new account (returns API key and wallet address). Or verify an existing
   <Tab title="cURL">
     ```bash
     # New account
-    curl -s -X POST "http://localhost:8000/core/v1/new_account" \
+    curl -s -X POST "https://api.dev.litprotocol.com/core/v1/new_account" \
       -H "Content-Type: application/json" \
       -d '{"account_name":"My App","account_description":"Optional","initial_balance":"0"}'
     
