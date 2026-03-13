@@ -122,20 +122,21 @@ impl Action for Server {
                         let request_id = req
                             .http_headers
                             .get(&HEADER_KEY_X_REQUEST_ID.to_ascii_lowercase())
-                            .cloned()
-                            .map(|id| {
-                                if privacy_mode {
-                                    format!("{id}_{PRIVACY_MODE_TAG}")
-                                } else {
-                                    id
-                                }
-                            });
+                            .cloned();
                         let correlation_id = req
                             .http_headers
                             .get(&HEADER_KEY_X_CORRELATION_ID.to_ascii_lowercase())
                             .cloned();
 
-                        if request_id.is_some() || correlation_id.is_some() {
+                        if privacy_mode {
+                            // Always set context in privacy mode, tagging the request_id
+                            // even if no request_id was provided.
+                            let tagged_id = match request_id {
+                                Some(id) => format!("{id}_{PRIVACY_MODE_TAG}"),
+                                None => PRIVACY_MODE_TAG.to_string(),
+                            };
+                            set_request_context(Some(tagged_id), correlation_id);
+                        } else if request_id.is_some() || correlation_id.is_some() {
                             set_request_context(request_id, correlation_id);
                         }
 
