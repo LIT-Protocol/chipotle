@@ -9,12 +9,8 @@
 import type { Response } from "k6/http";
 import { checkAndLog } from "../check.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
-
-const BASE_URL =
-  __ENV.BASE_URL ||
-  "https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network/core/v1";
-
-const HELLO_WORLD_CODE = 'Lit.Actions.setResponse({response: "Hello World!"})';
+import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
+import { BASE_URL } from "../defaults.ts";
 
 export const options = {
   vus: 1,

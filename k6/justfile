@@ -1,0 +1,24 @@
+# k6 load tests — run from project root: just -f k6/justfile <recipe>
+# Or cd k6 && just <recipe>
+#
+# Usage:
+#   just soak
+#   just soak-local
+#   just spike
+#   just spike-local
+#   just soak BASE_URL=http://localhost:8000/core/v1
+#   just spike BASE_URL='https://other.example.com/core/v1'
+
+_default_base_url := 'https://api.dev.litprotocol.com/core/v1'
+
+soak BASE_URL=_default_base_url:
+    BASE_URL={{BASE_URL}} k6 cloud run --local-execution loadtest/soak.spec.ts
+
+soak-local BASE_URL=_default_base_url:
+    BASE_URL={{BASE_URL}} k6 run loadtest/soak.spec.ts
+
+spike BASE_URL=_default_base_url:
+    BASE_URL={{BASE_URL}} k6 cloud run --local-execution loadtest/spike.spec.ts
+
+spike-local BASE_URL=_default_base_url:
+    BASE_URL={{BASE_URL}} k6 run loadtest/spike.spec.ts

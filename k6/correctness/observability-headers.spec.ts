@@ -16,13 +16,10 @@ import http from "k6/http";
 import type { Response } from "k6/http";
 import { checkAndLog } from "../check.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
-
-const BASE_URL =
-  __ENV.BASE_URL ||
-  "https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network/core/v1";
+import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
+import { BASE_URL } from "../defaults.ts";
 
 const SIMPLE_ENDPOINT = `${BASE_URL}/get_node_chain_config`;
-const HELLO_WORLD_CODE = 'Lit.Actions.setResponse({response: "Hello World!"})';
 
 // UUID v4 pattern: 8-4-4-4-12 hex digits, version nibble = 4, variant bits = 8/9/a/b
 const UUID_V4_RE =
