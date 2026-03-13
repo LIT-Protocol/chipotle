@@ -10,6 +10,7 @@ use crate::utils::parse_with_hash::ipfs_cid_to_u256;
 use ipfs_hasher::IpfsHasher;
 use moka::future::Cache;
 use rocket::serde::json::Json;
+use serde_json::json;
 use std::collections::BTreeMap;
 use tracing::instrument;
 
@@ -82,8 +83,16 @@ pub async fn lit_action(
         Err(e) => return Err(anyhow::anyhow!("Actions failed with : {:?}", e).into()),
     };
 
+    let response = match serde_json::from_str::<serde_json::Value>(&result.response) {
+        Ok(response) => json!(&response),
+        Err(e) => {
+            tracing::error!("failed to parse response: {:?}", e);
+            json!(result.response)
+        }
+    };
+
     let lit_action_response = LitActionResponse {
-        response: result.response,
+        response,
         logs: result.logs,
         has_error: false,
     };
