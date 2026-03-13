@@ -23,9 +23,10 @@
  *   SOAK_DURATION  - Total test duration (default: 1h)
  *   SOAK_VUS       - Virtual users (default: 3)
  */
-import type { Response } from "k6/http";
-import { checkAndLog } from "../check.ts";
+import { checkAndLog } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
+import { createAccountAndUsageKey } from "../setup.ts";
+import { assertOk } from "../helpers.ts";
 import { sleep } from "k6";
 import {
   ECDSA_SIGN_CODE,
@@ -64,42 +65,17 @@ export interface SoakAccountData {
 export type SoakSetupData = SoakAccountData[];
 
 export function setup(): SoakSetupData {
-  const client = new LitApiServerClient({ baseUrl: BASE_URL });
   const accounts: SoakAccountData[] = [];
 
   for (let i = 0; i < SOAK_VUS; i++) {
-    const newAccountRes = client.newAccount({
-      account_name: `k6-soak-test-vu-${i + 1}`,
-      account_description: `k6 soak test account VU ${i + 1}`,
+    const { usageApiKey, walletAddress } = createAccountAndUsageKey({
+      accountName: `k6-soak-test-vu-${i + 1}`,
+      accountDescription: `k6 soak test account VU ${i + 1}`,
+      usageKeyName: `k6-soak-usage-key-vu-${i + 1}`,
+      usageKeyDescription: `k6 soak test usage key VU ${i + 1}`,
+      setupContext: `soak VU ${i + 1}`,
     });
-    if (!assertOk(`setup newAccount VU ${i + 1}`, "POST /new_account", newAccountRes)) {
-      throw new Error(`Soak test setup failed: could not create account for VU ${i + 1}`);
-    }
-    const { api_key, wallet_address: pkpId } = newAccountRes.data as {
-      api_key: string;
-      wallet_address: string;
-    };
-    const authHeaders = { "X-Api-Key": api_key };
-
-    const addUsageKeyRes = client.addUsageApiKey(
-      {
-        name: `k6-soak-usage-key-vu-${i + 1}`,
-        description: `k6 soak test usage key VU ${i + 1}`,
-        can_create_groups: false,
-        can_delete_groups: false,
-        can_create_pkps: false,
-        can_manage_ipfs_ids_in_groups: [],
-        can_add_pkp_to_groups: [],
-        can_remove_pkp_from_groups: [],
-        can_execute_in_groups: [0],
-      },
-      authHeaders,
-    );
-    if (!assertOk(`setup addUsageApiKey VU ${i + 1}`, "POST /add_usage_api_key", addUsageKeyRes)) {
-      throw new Error(`Soak test setup failed: could not create usage key for VU ${i + 1}`);
-    }
-    const usageApiKey = (addUsageKeyRes.data as { usage_api_key: string }).usage_api_key;
-    accounts.push({ usageApiKey, pkpId });
+    accounts.push({ usageApiKey, pkpId: walletAddress });
   }
 
   return accounts;
@@ -188,37 +164,4 @@ export default function (setupData: SoakSetupData) {
 
   // Low intensity: 2–4 seconds between requests per VU
   sleep(2 + Math.random() * 2);
-}
-
-function assertOk(
-  name: string,
-  endpoint: string,
-  res: { response: Response },
-): boolean {
-  const { response } = res;
-  const status = response?.status ?? 0;
-  const ok = status >= 200 && status < 300;
-  if (!ok) {
-    let msg = "";
-    if (status === 0) {
-      msg = "(no response / connection failed)";
-    } else {
-      try {
-        const body = JSON.parse(response.body as string);
-        msg =
-          body.message ??
-          body.error ??
-          body.detail ??
-          (typeof body === "string" ? body : JSON.stringify(body));
-      } catch {
-        msg = (response.body as string) || "(no body)";
-      }
-    }
-    console.error(`FAIL ${name} | ${endpoint} | ${status} | ${msg}`);
-  }
-  checkAndLog(response, {
-    [`${name} 2xx`]: (r) =>
-      (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, name);
-  return ok;
 }

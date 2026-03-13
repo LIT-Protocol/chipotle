@@ -13,9 +13,10 @@
  *   BASE_URL=https://your-instance/core/v1 k6 run k6/correctness/observability-headers.spec.ts
  */
 import http from "k6/http";
-import type { Response } from "k6/http";
-import { checkAndLog } from "../check.ts";
+import { checkAndLog } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
+import { createAccountAndUsageKey } from "../setup.ts";
+import { assertOk } from "../helpers.ts";
 import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
 import { BASE_URL } from "../defaults.ts";
 
@@ -36,48 +37,24 @@ export const options = {
   },
 };
 
-function assertOk(
-  name: string,
-  endpoint: string,
-  res: { response: Response },
-): boolean {
-  const { response } = res;
-  const status = response?.status ?? 0;
-  const ok = status >= 200 && status < 300;
-  if (!ok) {
-    let msg = "";
-    if (status === 0) {
-      msg = "(no response / connection failed)";
-    } else {
-      try {
-        const body = JSON.parse(response.body as string);
-        msg =
-          body.message ??
-          body.error ??
-          body.detail ??
-          (typeof body === "string" ? body : JSON.stringify(body));
-      } catch {
-        msg = (response.body as string) || "(no body)";
-      }
-    }
-    console.error(`FAIL ${name} | ${endpoint} | ${status} | ${msg}`);
-  }
-  checkAndLog(response, {
-    [`${name} 2xx`]: (r) =>
-      (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, name);
-  return ok;
+export interface ObservabilitySetupData {
+  usageApiKey: string;
 }
 
-export default function () {
-  // ── Setup: create account for authenticated endpoints ───────────────────
-  const client = new LitApiServerClient({ baseUrl: BASE_URL });
-  const newAccountRes = client.newAccount({
-    account_name: "k6-observability-headers",
-    account_description: "Observability header correctness test",
+export function setup(): ObservabilitySetupData {
+  const { usageApiKey } = createAccountAndUsageKey({
+    accountName: "k6-observability-headers",
+    accountDescription: "Observability header correctness test",
+    usageKeyName: "k6-observability-usage-key",
+    usageKeyDescription: "Observability header test usage key",
+    setupContext: "observability-headers",
   });
-  if (!assertOk("newAccount", "POST /new_account", newAccountRes)) return;
-  const apiKey = (newAccountRes.data as { api_key: string }).api_key;
+  return { usageApiKey };
+}
+
+export default function (data: ObservabilitySetupData) {
+  const { usageApiKey } = data;
+  const client = new LitApiServerClient({ baseUrl: BASE_URL });
 
   // ── 1. Simple endpoint: X-Request-Id is present and UUID v4 ────────────
   {
@@ -159,7 +136,7 @@ export default function () {
     const userCorrelationId = "e2e-lit-action-corr-456";
     const laRes = client.litAction(
       { code: HELLO_WORLD_CODE, js_params: null },
-      { "X-Api-Key": apiKey } as any,
+      { "X-Api-Key": usageApiKey } as any,
       { headers: { "X-Correlation-Id": userCorrelationId } },
     );
     if (!assertOk("lit_action+corr", "POST /lit_action", laRes)) return;
@@ -185,7 +162,7 @@ export default function () {
   {
     const laRes = client.litAction(
       { code: HELLO_WORLD_CODE, js_params: null },
-      { "X-Api-Key": apiKey } as any,
+      { "X-Api-Key": usageApiKey } as any,
     );
     if (!assertOk("lit_action no-corr", "POST /lit_action", laRes)) return;
     checkAndLog(laRes.response, {
@@ -202,7 +179,7 @@ export default function () {
     const userRequestId = "550e8400-e29b-41d4-a716-446655440000";
     const laRes = client.litAction(
       { code: HELLO_WORLD_CODE, js_params: null },
-      { "X-Api-Key": apiKey } as any,
+      { "X-Api-Key": usageApiKey } as any,
       { headers: { "X-Request-Id": userRequestId } },
     );
     if (!assertOk("lit_action ignore-rid", "POST /lit_action", laRes)) return;

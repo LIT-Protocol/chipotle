@@ -4,20 +4,37 @@
  * round-trip produces the original plaintext.
  *
  * Flow:
- *   1. Create a fresh account (wallet_address from newAccount is the PKP id)
- *   2. Run a Lit Action that encrypts a random challenge with the PKP's AES key
- *   3. Run a second Lit Action that decrypts the ciphertext and returns plaintext
- *   4. Assert decrypted plaintext === original challenge
+ *   Setup: create account and usage key (wallet_address is the PKP id)
+ *   1. Run a Lit Action that encrypts a random challenge with the PKP's AES key
+ *   2. Run a second Lit Action that decrypts the ciphertext and returns plaintext
+ *   3. Assert decrypted plaintext === original challenge
  *
  * Usage:
- *   k6 run k6/lit-action-encrypt-decrypt.spec.ts
- *   BASE_URL=https://your-instance/core/v1 k6 run k6/lit-action-encrypt-decrypt.spec.ts
+ *   k6 run k6/correctness/lit-action-encrypt-decrypt.spec.ts
+ *   BASE_URL=https://your-instance/core/v1 k6 run k6/correctness/lit-action-encrypt-decrypt.spec.ts
  */
-import type { Response } from "k6/http";
-import { checkAndLog } from "../check.ts";
+import { checkAndLog } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
+import { createAccountAndUsageKey } from "../setup.ts";
+import { assertOk } from "../helpers.ts";
 import { ENCRYPT_CODE, DECRYPT_CODE } from "../LitActionCode/index.ts";
 import { BASE_URL } from "../defaults.ts";
+
+export interface EncryptDecryptSetupData {
+  usageApiKey: string;
+  pkpId: string;
+}
+
+export function setup(): EncryptDecryptSetupData {
+  const { usageApiKey, walletAddress } = createAccountAndUsageKey({
+    accountName: "k6-encrypt-decrypt",
+    accountDescription: "k6 encrypt/decrypt test account",
+    usageKeyName: "k6-encrypt-usage-key",
+    usageKeyDescription: "k6 encrypt/decrypt test usage key",
+    setupContext: "encrypt-decrypt",
+  });
+  return { usageApiKey, pkpId: walletAddress };
+}
 
 export const options = {
   vus: 1,
@@ -30,81 +47,17 @@ export const options = {
   },
 };
 
-function assertOk(
-  name: string,
-  endpoint: string,
-  res: { response: Response },
-): boolean {
-  const { response } = res;
-  const status = response?.status ?? 0;
-  const ok = status >= 200 && status < 300;
-  if (!ok) {
-    let msg = "";
-    if (status === 0) {
-      msg = "(no response / connection failed)";
-    } else {
-      try {
-        const body = JSON.parse(response.body as string);
-        msg =
-          body.message ??
-          body.error ??
-          body.detail ??
-          (typeof body === "string" ? body : JSON.stringify(body));
-      } catch {
-        msg = (response.body as string) || "(no body)";
-      }
-    }
-    console.error(`FAIL ${name} | ${endpoint} | ${status} | ${msg}`);
-  }
-  checkAndLog(response, {
-    [`${name} 2xx`]: (r) =>
-      (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, name);
-  return ok;
-}
-
-export default function () {
+export default function (data: EncryptDecryptSetupData) {
   const client = new LitApiServerClient({ baseUrl: BASE_URL });
+  const { usageApiKey, pkpId } = data;
+  const usageKeyHeaders = { "X-Api-Key": usageApiKey };
 
   // Random challenge — two Math.random() halves give ~22 chars of alphanumeric entropy.
   const challenge =
     Math.random().toString(36).slice(2) +
     Math.random().toString(36).slice(2);
 
-  // ── 1. Create account ─────────────────────────────────────────────────────
-  // newAccount returns the account master wallet address, which is already
-  // registered on-chain and usable as a PKP id for encrypt/decrypt.
-  const newAccountRes = client.newAccount({
-    account_name: "k6-encrypt-decrypt",
-    account_description: "k6 encrypt/decrypt test account",
-  });
-  if (!assertOk("newAccount", "POST /new_account", newAccountRes)) return;
-  const { api_key, wallet_address: pkpId } = newAccountRes.data as {
-    api_key: string;
-    wallet_address: string;
-  };
-  const authHeaders = { "X-Api-Key": api_key };
-
-  // ── 2. Create usage API key for lit action calls ──────────────────────────
-  const addUsageKeyRes = client.addUsageApiKey(
-    {
-      name: "k6-encrypt-usage-key",
-      description: "k6 encrypt/decrypt test usage key",
-      can_create_groups: false,
-      can_delete_groups: false,
-      can_create_pkps: false,
-      can_manage_ipfs_ids_in_groups: [],
-      can_add_pkp_to_groups: [],
-      can_remove_pkp_from_groups: [],
-      can_execute_in_groups: [0],
-    },
-    authHeaders,
-  );
-  if (!assertOk("addUsageApiKey", "POST /add_usage_api_key", addUsageKeyRes)) return;
-  const usageApiKey = (addUsageKeyRes.data as { usage_api_key: string }).usage_api_key;
-  const usageKeyHeaders = { "X-Api-Key": usageApiKey };
-
-  // ── 3. Encrypt challenge ──────────────────────────────────────────────────
+  // ── 1. Encrypt challenge ──────────────────────────────────────────────────
   const encryptRes = client.litAction(
     {
       code: ENCRYPT_CODE,
@@ -127,7 +80,7 @@ export default function () {
   }
   const ciphertext: string = encryptBody.response;
 
-  // ── 4. Decrypt ciphertext ─────────────────────────────────────────────────
+  // ── 2. Decrypt ciphertext ─────────────────────────────────────────────────
   const decryptRes = client.litAction(
     {
       code: DECRYPT_CODE,
