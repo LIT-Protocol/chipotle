@@ -1,3 +1,3 @@
 pub mod fairing;
 
-pub use fairing::{CorrelationId, ObservabilityFairing};
+pub use fairing::{CorrelationId, ObservabilityFairing, RequestSpan};

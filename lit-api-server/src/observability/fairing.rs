@@ -15,17 +15,24 @@ use tracing::{field, info_span};
 use uuid::Uuid;
 
 const HEADER_X_CORRELATION_ID: &str = "X-Correlation-Id";
+const HEADER_X_PRIVACY_MODE: &str = "X-Privacy-Mode";
 const HEADER_X_REQUEST_ID: &str = "X-Request-Id";
 
-/// Context stored per request for response header injection.
-/// Note: We store only IDs (Send + Sync) because EnteredSpan is !Send and cannot
-/// live in Rocket's local_cache. The request span covers on_request only.
+/// Context stored per request for response header injection and span propagation.
+/// The root span is stored as a non-entered `tracing::Span` (which is Send + Sync)
+/// because `EnteredSpan` is !Send and cannot live in Rocket's `local_cache`.
+/// The span stays alive for the full request lifecycle because `local_cache` is
+/// dropped only after the response is sent.
 struct RequestTracingContext {
     /// User-provided X-Correlation-Id, if any. Only set when user explicitly sent the header.
     /// Per requirements: X-Correlation-Id MUST NOT be on response if user did not provide it.
     user_provided_correlation_id: Option<String>,
     /// Span/request ID. Always present. Propagated as X-Request-Id on response.
     request_id: String,
+    /// Root span covering the full request lifecycle. Closed when local_cache is dropped
+    /// (after response is sent), satisfying the requirement that the root span covers
+    /// both success and failure responses.
+    span: tracing::Span,
 }
 
 impl RequestTracingContext {
@@ -33,6 +40,7 @@ impl RequestTracingContext {
         Self {
             user_provided_correlation_id: None,
             request_id: String::new(),
+            span: tracing::Span::none(),
         }
     }
 }
@@ -96,6 +104,41 @@ impl<'r> OpenApiFromRequest<'r> for CorrelationId {
     }
 }
 
+/// Request guard providing the root span and request/correlation IDs.
+/// Handlers that take this guard can use `.instrument(span)` or `#[instrument(parent = span)]`
+/// to make their work appear as child spans of the root HTTP request span.
+#[derive(Clone, Debug)]
+pub struct RequestSpan {
+    pub span: tracing::Span,
+    pub request_id: String,
+    pub correlation_id: Option<String>,
+}
+
+#[rocket::async_trait]
+impl<'r> rocket::request::FromRequest<'r> for RequestSpan {
+    type Error = std::convert::Infallible;
+
+    async fn from_request(req: &'r Request<'_>) -> rocket::request::Outcome<Self, Self::Error> {
+        let ctx = req.local_cache(RequestTracingContext::dummy);
+        rocket::request::Outcome::Success(RequestSpan {
+            span: ctx.span.clone(),
+            request_id: ctx.request_id.clone(),
+            correlation_id: ctx.user_provided_correlation_id.clone(),
+        })
+    }
+}
+
+impl<'r> OpenApiFromRequest<'r> for RequestSpan {
+    fn from_request_input(
+        _generator: &mut OpenApiGenerator,
+        _name: String,
+        _required: bool,
+    ) -> RocketOkapiResult<RequestHeaderInput> {
+        // Internal guard — no user-visible header input.
+        Ok(RequestHeaderInput::None)
+    }
+}
+
 #[rocket::async_trait]
 impl Fairing for ObservabilityFairing {
     fn info(&self) -> Info {
@@ -114,35 +157,48 @@ impl Fairing for ObservabilityFairing {
 
         // X-Request-Id must NOT be provided by the user. Always generate a new random UUID.
         // Per requirements: if user sends X-Request-Id, it must be ignored.
-        let request_id = Uuid::new_v4().to_string();
+        let privacy_mode = req.headers().get_one(HEADER_X_PRIVACY_MODE).is_some();
+        let request_id = if privacy_mode {
+            format!("{}_{}", Uuid::new_v4(), lit_observability::PRIVACY_MODE_TAG)
+        } else {
+            Uuid::new_v4().to_string()
+        };
 
-        let _span = info_span!(
+        let span = info_span!(
             "http_request",
             method = %req.method(),
             uri = %req.uri(),
             correlation_id = field::Empty,
             request_id = %request_id,
-        )
-        .entered();
+            http.status_code = field::Empty,
+        );
 
         if let Some(ref cid) = user_provided_correlation_id {
-            _span.record("correlation_id", cid.as_str());
+            span.record("correlation_id", cid.as_str());
         }
 
-        lit_observability::logging::set_request_context(
-            Some(request_id.clone()),
-            user_provided_correlation_id.clone(),
-        );
+        // Enter the span briefly to set task-local request context for log correlation.
+        span.in_scope(|| {
+            lit_observability::logging::set_request_context(
+                Some(request_id.clone()),
+                user_provided_correlation_id.clone(),
+            );
+        });
 
         let ctx = RequestTracingContext {
             user_provided_correlation_id,
             request_id,
+            span,
         };
         let _ = req.local_cache(|| ctx);
     }
 
     async fn on_response<'r>(&self, req: &'r Request<'_>, res: &mut Response<'r>) {
         let ctx = req.local_cache(RequestTracingContext::dummy);
+
+        // Record the response status on the root span so traces include the outcome.
+        ctx.span.record("http.status_code", res.status().code);
+
         if let Some(ref id) = ctx.user_provided_correlation_id {
             res.set_header(Header::new(HEADER_X_CORRELATION_ID, id.clone()));
         }
@@ -150,7 +206,9 @@ impl Fairing for ObservabilityFairing {
             res.set_header(Header::new(HEADER_X_REQUEST_ID, ctx.request_id.clone()));
         }
         // Clear task-local context to prevent stale entries if tokio reuses this task ID.
-        lit_observability::logging::clear_task_request_context();
+        ctx.span.in_scope(|| {
+            lit_observability::logging::clear_task_request_context();
+        });
     }
 }
 

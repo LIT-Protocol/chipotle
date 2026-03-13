@@ -19,6 +19,7 @@ use crate::core::v1::models::response::{
     AccountOpResponse, AddUsageApiKeyResponse, CreateWalletResponse, ListMetadataItem,
     LitActionResponse, NewAccountResponse, NodeChainConfigResponse,
 };
+use crate::observability::RequestSpan;
 use moka::future::Cache;
 use rocket::Route;
 use rocket::State;
@@ -96,7 +97,9 @@ async fn create_wallet(
 
 #[openapi(tag = "Actions")]
 #[post("/lit_action", format = "json", data = "<lit_action_request>")]
+#[tracing::instrument(name = "endpoint::lit_action", skip_all, parent = &request_span.span)]
 async fn lit_action(
+    request_span: RequestSpan,
     api_key: ApiKey,
     grpc_client_pool: &State<GrpcClientPool<tonic::transport::Channel>>,
     ipfs_cache: &State<Cache<String, String>>,
@@ -106,6 +109,7 @@ async fn lit_action(
     OpenApiResponse {
         response: ApiResult(
             core_features::lit_action(
+                &request_span,
                 api_key.0.as_str(),
                 grpc_client_pool.inner(),
                 ipfs_cache.inner(),
