@@ -9,10 +9,7 @@ import type { Response } from "k6/http";
 import { sleep } from "k6";
 import { checkAndLog } from "../check.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
-
-const baseUrl =
-  __ENV.BASE_URL ||
-  "https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network/core/v1";
+import { BASE_URL } from "../defaults.ts";
 
 export const options = {
   vus: 2,
@@ -28,7 +25,7 @@ export default function () {
   // Stagger start to reduce simultaneous blockchain tx submissions (avoids nonce conflicts)
   sleep(Math.random() * 2);
 
-  const client = new LitApiServerClient({ baseUrl });
+  const client = new LitApiServerClient({ baseUrl: BASE_URL });
 
   // Unique account name per VU/iteration to avoid conflicts under concurrency
   const accountName = `k6-new-account-vu${__VU}-i${__ITER}-${Date.now()}`;

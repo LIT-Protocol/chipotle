@@ -19,7 +19,7 @@
  *   BASE_URL=http://localhost:8000/core/v1 k6 run k6/loadtest/soak.spec.ts
  *
  * Environment:
- *   BASE_URL       - API base URL (default: Phala prod)
+ *   BASE_URL       - API base URL (default: api.dev.litprotocol.com/core/v1)
  *   SOAK_DURATION  - Total test duration (default: 1h)
  *   SOAK_VUS       - Virtual users (default: 3)
  */
@@ -32,10 +32,7 @@ import {
   ENCRYPT_CODE,
   DECRYPT_CODE,
 } from "../LitActionCode/index.ts";
-
-const BASE_URL =
-  __ENV.BASE_URL ||
-  "https://api.dev.litprotocol.com/core/v1";
+import { BASE_URL } from "../defaults.ts";
 
 // Parse duration: "1h", "30m", "10m" etc.
 const SOAK_DURATION = __ENV.SOAK_DURATION || "30m";

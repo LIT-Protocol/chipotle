@@ -21,7 +21,7 @@ BASE_URL=http://localhost:8000/core/v1 k6 run k6/loadtest/spike.spec.ts
 
 | Variable       | Default | Description              |
 |----------------|---------|--------------------------|
-| `BASE_URL`     | Phala prod | API base URL          |
+| `BASE_URL`     | api.dev.litprotocol.com | API base URL          |
 | `SPIK_VUS`     | `20`    | Peak virtual users       |
 | `SPIK_DURATION`| `2m`    | Sustain duration at peak  |
 
@@ -51,7 +51,7 @@ SOAK_VUS=4 k6 run k6/loadtest/soak.spec.ts
 
 | Variable        | Default | Description                    |
 |----------------|---------|--------------------------------|
-| `BASE_URL`     | Phala prod | API base URL (include `/core/v1`) |
+| `BASE_URL`     | api.dev.litprotocol.com | API base URL (include `/core/v1`) |
 | `SOAK_DURATION`| `30m`    | Steady-state duration          |
 | `SOAK_VUS`     | `3`     | Virtual users                  |
 

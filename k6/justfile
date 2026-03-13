@@ -9,7 +9,7 @@
 #   just soak BASE_URL=http://localhost:8000/core/v1
 #   just spike BASE_URL='https://other.example.com/core/v1'
 
-_default_base_url := 'https://f8fce543471dc9f5f5643aa217422398c36e5edc-8000.dstack-base-prod5.phala.network/core/v1'
+_default_base_url := 'https://api.dev.litprotocol.com/core/v1'
 
 soak BASE_URL=_default_base_url:
     BASE_URL={{BASE_URL}} k6 cloud run --local-execution loadtest/soak.spec.ts
