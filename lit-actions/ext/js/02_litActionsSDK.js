@@ -4,10 +4,14 @@ import * as ops from 'ext:core/ops';
  * @name Lit.Actions.setResponse
  * @function setResponse
  * @param {Object} params
- * @param {string} params.response The response to send to the client.  You can put any string here, like you could use JSON.stringify on a JS object and send it here.
+ * @param {*} params.response The response to send to the client. If this is not a string, it will be JSON-encoded before being sent. A value of undefined is encoded as null.
  */
 function setResponse({ response }) {
-  return ops.op_set_response(response);
+  const stringifiedResponse =
+    typeof response === 'string'
+      ? response
+      : JSON.stringify(response === undefined ? null : response);
+  return ops.op_set_response(stringifiedResponse);
 }
 
 /**

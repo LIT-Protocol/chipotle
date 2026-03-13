@@ -205,7 +205,7 @@ function initOverview() {
   renderUsageKeysTable();
   updateStatCards();
   document.getElementById('btn-load-usage-keys')?.addEventListener('click', () => loadUsageKeys());
-  document.getElementById('btn-add-usage-key')?.addEventListener('click', () => openAddUsageKeyModal());
+  document.getElementById('btn-add-usage-key')?.addEventListener('click', () => openUsageKeyModal());
 }
 
 // ----- Icons (pencil, trash) -----
@@ -445,6 +445,21 @@ function getUsageKeysStore() {
   return window._usageKeys;
 }
 
+function getGroupsStore() {
+  if (!window._groups) window._groups = [];
+  return window._groups;
+}
+
+function getWalletsStore() {
+  if (!window._wallets) window._wallets = [];
+  return window._wallets;
+}
+
+function getActionsStore() {
+  if (!window._actions) window._actions = [];
+  return window._actions;
+}
+
 function renderUsageKeysTable() {
   const items = getUsageKeysStore();
   const tbody = document.getElementById('usage-keys-tbody');
@@ -467,6 +482,15 @@ function renderUsageKeysTable() {
       '<td class="mono">' + escapeHtml(balance) + '</td>' +
       '<td class="cell-actions"></td>';
     const actionsCell = tr.querySelector('.cell-actions');
+    const canEdit = !!(item.usage_api_key ?? item.api_key);
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'btn-icon';
+    editBtn.title = canEdit ? 'Edit' : 'Edit requires key (add key in this session to edit later)';
+    editBtn.innerHTML = ICON_PENCIL;
+    if (!canEdit) editBtn.disabled = true;
+    editBtn.addEventListener('click', () => canEdit && openUsageKeyModal(normalizeUsageKeyItem(item)));
+    actionsCell.appendChild(editBtn);
     const delBtn = document.createElement('button');
     delBtn.type = 'button';
     delBtn.className = 'btn-icon btn-icon-danger';
@@ -543,6 +567,7 @@ async function loadGroups() {
   try {
     const client = await getClient();
     const items = await client.listGroups({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
+    window._groups = items;
     renderGroupsTable(items);
     populateActionsGroupDropdown(items);
     window._statGroups = items.length;
@@ -565,6 +590,7 @@ async function loadWallets() {
   try {
     const client = await getClient();
     const items = await client.listWallets({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
+    window._wallets = items;
     renderWalletsTable(items);
     window._statWallets = items.length;
     updateStatCards();
@@ -586,6 +612,7 @@ async function loadActions(groupId) {
   try {
     const client = await getClient();
     const items = await client.listActions({ apiKey, groupId, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
+    window._actions = items;
     renderActionsTable(items, groupId);
     window._statActions = items.length;
     updateStatCards();
@@ -605,22 +632,56 @@ function initWallets() {
 }
 
 // ----- Group modals -----
-function openAddGroupModal() {
-  const body =
-    '<div class="form-group"><label for="modal-group-name">Name</label><input type="text" id="modal-group-name" class="input" placeholder="My group"></div>' +
-    '<div class="form-group"><label for="modal-group-desc">Description</label><input type="text" id="modal-group-desc" class="input" placeholder="Optional"></div>' +
-    '<label class="checkbox-label"><input type="checkbox" id="modal-group-all-wallets"> All wallets permitted</label>' +
-    '<label class="checkbox-label"><input type="checkbox" id="modal-group-all-actions"> All actions permitted</label>';
-  const footer =
+function selectAllInMultiSelect(id) {
+  const wrap = document.getElementById(id);
+  if (!wrap) return;
+  const allCb = wrap.querySelector('input[value="0"]');
+  wrap.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = cb === allCb; });
+  updateMultiSelectSummary(id);
+}
+
+function openGroupModal(item = null) {
+  const isEdit = item != null;
+  const nameId = isEdit ? 'modal-edit-group-name' : 'modal-group-name';
+  const descId = isEdit ? 'modal-edit-group-desc' : 'modal-group-desc';
+
+  const overlay = document.getElementById('modal-overlay');
+  const titleEl = document.getElementById('modal-title');
+  const modalBody = document.getElementById('modal-body');
+  const modalFooter = document.getElementById('modal-footer');
+  if (!overlay || !titleEl || !modalBody || !modalFooter) return;
+
+  titleEl.textContent = isEdit ? 'Edit group' : 'Add group';
+  modalBody.innerHTML =
+    '<div class="form-group"><label for="' + nameId + '">Name</label><input type="text" id="' + nameId + '" class="input" placeholder="My" value="' + escapeHtml(item?.name ?? '') + '"></div>' +
+    '<div class="form-group"><label for="' + descId + '">Description</label><input type="text" id="' + descId + '" class="input" placeholder="Optional" value="' + escapeHtml(item?.description ?? '') + '"></div>' +
+    '<div class="form-group"><label>PKP IDs permitted</label>' + buildWalletMultiSelect('modal-group-pkp-ids', false) + '</div>' +
+    '<div class="form-group"><label>CID hashes permitted</label>' + buildActionsMultiSelect('modal-group-cid-hashes', false) + '</div>';
+  modalFooter.innerHTML =
+    '<button type="button" class="btn btn-outline" id="modal-all-opts-btn" style="margin-right:auto;">All Options</button>' +
     '<button type="button" class="btn btn-outline" id="modal-cancel-btn">Cancel</button>' +
-    '<button type="button" class="btn btn-primary" id="modal-add-btn">Add</button>';
-  openModal('Add group', body, footer);
-  document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
-  document.getElementById('modal-add-btn').addEventListener('click', async () => {
-    const name = document.getElementById('modal-group-name').value.trim();
-    const desc = document.getElementById('modal-group-desc').value.trim();
-    const allWallets = document.getElementById('modal-group-all-wallets').checked;
-    const allActions = document.getElementById('modal-group-all-actions').checked;
+    '<button type="button" class="btn btn-primary" id="modal-save-btn">' + (isEdit ? 'Save' : 'Add') + '</button>';
+  overlay.classList.add('is-open');
+  overlay.setAttribute('aria-hidden', 'false');
+  const firstInput = modalBody.querySelector('input, select, textarea');
+  if (firstInput) firstInput.focus();
+
+  const allOptsBtn = modalFooter.querySelector('#modal-all-opts-btn');
+  const cancelBtn = modalFooter.querySelector('#modal-cancel-btn');
+  const saveBtn = modalFooter.querySelector('#modal-save-btn');
+
+  attachGroupMultiSelectLogic('modal-group-pkp-ids');
+  attachGroupMultiSelectLogic('modal-group-cid-hashes');
+  if (allOptsBtn) allOptsBtn.addEventListener('click', () => {
+    selectAllInMultiSelect('modal-group-pkp-ids');
+    selectAllInMultiSelect('modal-group-cid-hashes');
+  });
+  if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+  if (saveBtn) saveBtn.addEventListener('click', async () => {
+    const name = document.getElementById(nameId).value.trim();
+    const desc = document.getElementById(descId).value.trim();
+    const pkpIdsPermitted = getSelectedGroupIds('modal-group-pkp-ids').map(String);
+    const cidHashesPermitted = getSelectedGroupIds('modal-group-cid-hashes').map(String);
     const apiKey = getApiKey();
     if (!apiKey || !name) {
       showStatus('groups-status', 'Enter a group name.', 'error');
@@ -629,19 +690,17 @@ function openAddGroupModal() {
     closeModal();
     hideStatus('groups-status');
     try {
-      showActionProgress('Creating group', `Creating group “${name}”.`);
       const client = await getClient();
-      await client.addGroup({
-        apiKey,
-        groupName: name,
-        groupDescription: desc,
-        permittedActions: [],
-        pkps: [],
-        allWalletsPermitted: allWallets,
-        allActionsPermitted: allActions,
-      });
+      if (isEdit) {
+        const id = String(Number(item.id));
+        showActionProgress('Updating group', `Updating group "${name}".`);
+        await client.updateGroup({ apiKey, groupId: id, name, description: desc, pkpIdsPermitted, cidHashesPermitted });
+      } else {
+        showActionProgress('Creating group', `Creating group "${name}".`);
+        await client.addGroup({ apiKey, groupName: name, groupDescription: desc, pkpIdsPermitted, cidHashesPermitted });
+      }
       await loadGroups();
-      showStatus('groups-status', 'Group created.', 'success');
+      showStatus('groups-status', isEdit ? 'Group updated.' : 'Group created.', 'success');
     } catch (e) {
       showStatus('groups-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
     } finally {
@@ -650,44 +709,8 @@ function openAddGroupModal() {
   });
 }
 
-function openEditGroupModal(item) {
-  const id = String(Number(item.id));
-  const body =
-    '<div class="form-group"><label>Group ID</label><div class="mono">' + escapeHtml(id) + '</div></div>' +
-    '<div class="form-group"><label for="modal-edit-group-name">Name</label><input type="text" id="modal-edit-group-name" class="input" value="' + escapeHtml(item.name || '') + '"></div>' +
-    '<div class="form-group"><label for="modal-edit-group-desc">Description</label><input type="text" id="modal-edit-group-desc" class="input" value="' + escapeHtml(item.description || '') + '"></div>' +
-    '<label class="checkbox-label"><input type="checkbox" id="modal-edit-group-all-wallets"' + (item.all_wallets_permitted ? ' checked' : '') + '> All wallets permitted</label>' +
-    '<label class="checkbox-label"><input type="checkbox" id="modal-edit-group-all-actions"' + (item.all_actions_permitted ? ' checked' : '') + '> All actions permitted</label>';
-  const footer =
-    '<button type="button" class="btn btn-outline" id="modal-cancel-btn">Cancel</button>' +
-    '<button type="button" class="btn btn-primary" id="modal-save-btn">Save</button>';
-  openModal('Edit group', body, footer);
-  document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
-  document.getElementById('modal-save-btn').addEventListener('click', async () => {
-    const name = document.getElementById('modal-edit-group-name').value.trim();
-    const desc = document.getElementById('modal-edit-group-desc').value.trim();
-    const allWallets = document.getElementById('modal-edit-group-all-wallets').checked;
-    const allActions = document.getElementById('modal-edit-group-all-actions').checked;
-    const apiKey = getApiKey();
-    if (!apiKey || !name) {
-      showStatus('groups-status', 'Enter a group name.', 'error');
-      return;
-    }
-    closeModal();
-    hideStatus('groups-status');
-    try {
-      showActionProgress('Updating group', `Updating group “${name}”.`);
-      const client = await getClient();
-      await client.updateGroup({ apiKey, groupId: id, name, description: desc, allWalletsPermitted: allWallets, allActionsPermitted: allActions });
-      await loadGroups();
-      showStatus('groups-status', 'Group updated.', 'success');
-    } catch (e) {
-      showStatus('groups-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
-    } finally {
-      closeActionProgress();
-    }
-  });
-}
+function openAddGroupModal() { openGroupModal(); }
+function openEditGroupModal(item) { openGroupModal(item); }
 
 // ----- Action modals -----
 function openAddActionModal() {
@@ -718,7 +741,7 @@ function openAddActionModal() {
     closeModal();
     hideStatus('actions-status');
     try {
-      showActionProgress('Adding action', `Adding action CID “${cid}” to group ${gid}.`);
+      showActionProgress('Adding action', `Adding action CID "${cid}" to group ${gid}.`);
       const client = await getClient();
       await client.addActionToGroup({ apiKey, groupId: gid, actionIpfsCid: cid, name, description: desc });
       if (groupIdEl) groupIdEl.value = gid;
@@ -734,8 +757,10 @@ function openAddActionModal() {
 
 function openEditActionModal(item, groupId) {
   const cid = item.ipfs_cid || item.cid || '';
+  const group = getGroupsStore().find((g) => String(g.id) === String(groupId));
+  const groupLabel = group ? (group.name || String(groupId)) : String(groupId);
   const body =
-    '<div class="form-group"><label>Group ID</label><div class="mono">' + escapeHtml(groupId) + '</div></div>' +
+    '<div class="form-group"><label>Group</label><div class="input" style="background:var(--input-bg,#f3f4f6);color:var(--text-muted,#6b7280);cursor:default;">' + escapeHtml(groupLabel) + '</div></div>' +
     '<div class="form-group"><label>IPFS CID</label><div class="mono">' + escapeHtml(cid) + '</div></div>' +
     '<div class="form-group"><label for="modal-edit-action-name">Name</label><input type="text" id="modal-edit-action-name" class="input" value="' + escapeHtml(item.name || '') + '"></div>' +
     '<div class="form-group"><label for="modal-edit-action-desc">Description</label><input type="text" id="modal-edit-action-desc" class="input" value="' + escapeHtml(item.description || '') + '"></div>';
@@ -755,7 +780,7 @@ function openEditActionModal(item, groupId) {
     closeModal();
     hideStatus('actions-status');
     try {
-      showActionProgress('Updating action', `Updating action metadata for CID “${cid}”.`);
+      showActionProgress('Updating action', `Updating action metadata for CID "${cid}".`);
       const client = await getClient();
       await client.updateActionMetadata({ apiKey, groupId, actionIpfsCid: cid, name, description: desc });
       await loadActions(groupId);
@@ -778,7 +803,7 @@ async function confirmAndRemoveAction(item, groupId) {
   if (!apiKey) return;
   hideStatus('actions-status');
   try {
-    showActionProgress('Removing action', `Removing action CID “${cid}” from group ${groupId}.`);
+    showActionProgress('Removing action', `Removing action CID "${cid}" from group ${groupId}.`);
     const client = await getClient();
     await client.removeActionFromGroup({ apiKey, groupId, actionIpfsCid: cid });
     await loadActions(groupId);
@@ -791,16 +816,122 @@ async function confirmAndRemoveAction(item, groupId) {
 }
 
 // ----- Usage API key Add modal and delete -----
-function openAddUsageKeyModal() {
+function buildMultiSelect(id, items, getValue, getLabel, placeholder, disabled) {
+  const d = disabled ? ' disabled' : '';
+  let opts = items.map((item) =>
+    '<label class="ms-option"><input type="checkbox" value="' + escapeHtml(String(getValue(item))) + '"' + d + '><span>' + escapeHtml(getLabel(item)) + '</span></label>'
+  ).join('');
+  if (!opts) opts = '<div class="ms-option" style="opacity:0.6;cursor:default;">No items available</div>';
+  return (
+    '<div class="ms-wrap" id="' + id + '" data-placeholder="' + escapeHtml(placeholder) + '">' +
+      '<button type="button" class="ms-trigger"' + (disabled ? ' disabled' : '') + '>' +
+        '<span class="ms-summary">' + escapeHtml(placeholder) + '</span>' +
+        '<span class="ms-arrow" aria-hidden="true"></span>' +
+      '</button>' +
+      '<div class="ms-dropdown">' + opts + '</div>' +
+    '</div>'
+  );
+}
+
+function buildGroupMultiSelect(id, disabled) {
+  const items = [{ id: '0', name: 'All Groups' }, ...getGroupsStore()];
+  return buildMultiSelect(id, items, (g) => g.id, (g) => g.name || String(g.id), 'Select groups\u2026', disabled);
+}
+
+function buildWalletMultiSelect(id, disabled) {
+  const items = [{ wallet_address: '0', name: 'All' }, ...getWalletsStore()];
+  return buildMultiSelect(id, items, (w) => w.wallet_address, (w) => w.name || w.wallet_address, 'Select PKPs\u2026', disabled);
+}
+
+function buildActionsMultiSelect(id, disabled) {
+  const items = [{ id: '0', name: 'All' }, ...getActionsStore()];
+  return buildMultiSelect(id, items, (a) => a.id, (a) => a.name || a.id, 'Select actions\u2026', disabled);
+}
+
+function updateMultiSelectSummary(id) {
+  const wrap = document.getElementById(id);
+  if (!wrap) return;
+  const summaryEl = wrap.querySelector('.ms-summary');
+  const checked = [...wrap.querySelectorAll('input[type="checkbox"]:checked')];
+  const placeholder = wrap.dataset.placeholder || 'Select\u2026';
+  summaryEl.textContent = checked.length === 0
+    ? placeholder
+    : checked.map((c) => c.nextElementSibling.textContent).join(', ');
+}
+
+function attachGroupMultiSelectLogic(id) {
+  const wrap = document.getElementById(id);
+  if (!wrap) return;
+  const trigger = wrap.querySelector('.ms-trigger');
+  const allCb = wrap.querySelector('input[value="0"]');
+
+  trigger.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.ms-wrap.is-open').forEach((w) => { if (w !== wrap) w.classList.remove('is-open'); });
+    wrap.classList.toggle('is-open');
+  });
+
+  document.addEventListener('click', function msOutside(e) {
+    if (!wrap.isConnected) { document.removeEventListener('click', msOutside); return; }
+    if (!wrap.contains(e.target)) wrap.classList.remove('is-open');
+  });
+
+  wrap.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+    cb.addEventListener('change', () => {
+      if (cb === allCb && allCb.checked) {
+        wrap.querySelectorAll('input[type="checkbox"]').forEach((c) => { if (c !== allCb) c.checked = false; });
+      } else if (cb !== allCb && cb.checked && allCb && allCb.checked) {
+        allCb.checked = false;
+      }
+      updateMultiSelectSummary(id);
+    });
+  });
+}
+
+function getSelectedGroupIds(id) {
+  const wrap = document.getElementById(id);
+  if (!wrap) return [];
+  return [...wrap.querySelectorAll('input[type="checkbox"]:checked')].map((c) => Number(c.value));
+}
+
+function openUsageKeyModal(item = null) {
+  const isEdit = item != null;
   const body =
-    '<div class="form-group"><label for="modal-usage-name">Name (optional)</label><input type="text" id="modal-usage-name" class="input" placeholder="Optional"></div>' +
-    '<div class="form-group"><label for="modal-usage-desc">Description (optional)</label><input type="text" id="modal-usage-desc" class="input" placeholder="Optional"></div>';
+    '<div class="form-group"><label for="modal-usage-name">Name (optional)</label><input type="text" id="modal-usage-name" class="input" placeholder="Optional" value="' + escapeHtml(item?.name ?? '') + '"></div>' +
+    '<div class="form-group"><label for="modal-usage-desc">Description (optional)</label><input type="text" id="modal-usage-desc" class="input" placeholder="Optional" value="' + escapeHtml(item?.description ?? '') + '"></div>' +
+    '<div class="form-group">' +
+      '<label class="checkbox-label"><input type="checkbox" id="modal-usage-can-create-groups"' + (isEdit ? ' disabled' : '') + '> Can create groups</label>' +
+      '<label class="checkbox-label"><input type="checkbox" id="modal-usage-can-delete-groups"' + (isEdit ? ' disabled' : '') + '> Can delete groups</label>' +
+      '<label class="checkbox-label"><input type="checkbox" id="modal-usage-can-create-pkps"' + (isEdit ? ' disabled' : '') + '> Can create PKPs</label>' +
+    '</div>' +
+    '<div class="form-group"><label>Can execute in groups</label>' + buildGroupMultiSelect('modal-usage-execute-groups', isEdit) + '</div>' +
+    '<div class="form-group"><label>Can manage IPFS actions in groups</label>' + buildGroupMultiSelect('modal-usage-manage-ipfs-groups', isEdit) + '</div>' +
+    '<div class="form-group"><label>Can add PKP to groups</label>' + buildGroupMultiSelect('modal-usage-add-pkp-groups', isEdit) + '</div>' +
+    '<div class="form-group"><label>Can remove PKP from groups</label>' + buildGroupMultiSelect('modal-usage-remove-pkp-groups', isEdit) + '</div>';
   const footer =
+    (!isEdit ? '<button type="button" class="btn btn-outline" id="modal-all-options-btn" style="margin-right:auto;">All Options</button>' : '') +
     '<button type="button" class="btn btn-outline" id="modal-cancel-btn">Cancel</button>' +
-    '<button type="button" class="btn btn-primary" id="modal-add-btn">Add</button>';
-  openModal('Add usage API key', body, footer);
+    '<button type="button" class="btn btn-primary" id="modal-save-btn">' + (isEdit ? 'Save' : 'Add') + '</button>';
+  openModal(isEdit ? 'Edit usage API key' : 'Add usage API key', body, footer);
+  if (!isEdit) {
+    attachGroupMultiSelectLogic('modal-usage-execute-groups');
+    attachGroupMultiSelectLogic('modal-usage-manage-ipfs-groups');
+    attachGroupMultiSelectLogic('modal-usage-add-pkp-groups');
+    attachGroupMultiSelectLogic('modal-usage-remove-pkp-groups');
+    document.getElementById('modal-all-options-btn').addEventListener('click', () => {
+      document.getElementById('modal-usage-can-create-groups').checked = true;
+      document.getElementById('modal-usage-can-delete-groups').checked = true;
+      document.getElementById('modal-usage-can-create-pkps').checked = true;
+      ['modal-usage-execute-groups', 'modal-usage-manage-ipfs-groups', 'modal-usage-add-pkp-groups', 'modal-usage-remove-pkp-groups'].forEach((id) => {
+        const wrap = document.getElementById(id);
+        if (!wrap) return;
+        wrap.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = cb.value === '0'; });
+        updateMultiSelectSummary(id);
+      });
+    });
+  }
   document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
-  document.getElementById('modal-add-btn').addEventListener('click', async () => {
+  document.getElementById('modal-save-btn').addEventListener('click', async () => {
     const name = document.getElementById('modal-usage-name').value.trim() || '';
     const description = document.getElementById('modal-usage-desc').value.trim() || '';
     const apiKey = getApiKey();
@@ -810,39 +941,58 @@ function openAddUsageKeyModal() {
     }
     closeModal();
     hideStatus('overview-status-usage-keys');
-    try {
-      showActionProgress('Adding usage API key', 'Creating a new usage API key for this account.');
-      const client = await getClient();
-      const expiration = '9999999999';
-      const balance = '1000000000000000000';
-      const res = await client.addUsageApiKey({
-        apiKey,
-        usageApiKey: '',
-        expiration,
-        balance,
-        name,
-        description,
-      });
-      const usageKey = res && res.usage_api_key ? res.usage_api_key : '';     
-      if (usageKey) {
-        getUsageKeysStore().push({
-          id: usageKey.slice(0, 12),
-          api_key: usageKey,
-          usage_api_key: usageKey,
-          name: name || '',
-          description: description || '',
-          expiration: '9999999999',
-          balance: 1000000000000000000,
-        });
-        window._statUsageKeys = getUsageKeysStore().length;
+    if (isEdit) {
+      try {
+        showActionProgress('Updating usage API key', 'Updating usage API key metadata.');
+        const client = await getClient();
+        await client.updateUsageApiKeyMetadata({ apiKey, usageApiKey: item.usage_api_key, name, description });
+        const store = getUsageKeysStore();
+        const idx = store.findIndex((k) => k.usage_api_key === item.usage_api_key);
+        if (idx !== -1) { store[idx].name = name; store[idx].description = description; }
         renderUsageKeysTable();
-        updateStatCards();
+        showStatus('overview-status-usage-keys', 'Usage API key updated.', 'success');
+      } catch (e) {
+        showStatus('overview-status-usage-keys', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+      } finally {
+        closeActionProgress();
       }
-      showStatus('overview-status-usage-keys', 'Usage API key added. Copy and store your key now (shown once): ' + usageKey, 'success');
-    } catch (e) {
-      showStatus('overview-status-usage-keys', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
-    } finally {
-      closeActionProgress();
+    } else {
+      const canCreateGroups = document.getElementById('modal-usage-can-create-groups').checked;
+      const canDeleteGroups = document.getElementById('modal-usage-can-delete-groups').checked;
+      const canCreatePkps = document.getElementById('modal-usage-can-create-pkps').checked;
+      const canExecuteInGroups = getSelectedGroupIds('modal-usage-execute-groups');
+      const canManageIpfsIdsInGroups = getSelectedGroupIds('modal-usage-manage-ipfs-groups');
+      const canAddPkpToGroups = getSelectedGroupIds('modal-usage-add-pkp-groups');
+      const canRemovePkpFromGroups = getSelectedGroupIds('modal-usage-remove-pkp-groups');
+      try {
+        showActionProgress('Adding usage API key', 'Creating a new usage API key for this account.');
+        const client = await getClient();
+        const res = await client.addUsageApiKey({
+          apiKey, name, description,
+          canCreateGroups, canDeleteGroups, canCreatePkps,
+          canManageIpfsIdsInGroups, canAddPkpToGroups, canRemovePkpFromGroups, canExecuteInGroups,
+        });
+        const usageKey = res && res.usage_api_key ? res.usage_api_key : '';
+        if (usageKey) {
+          getUsageKeysStore().push({
+            id: usageKey.slice(0, 12),
+            api_key: usageKey,
+            usage_api_key: usageKey,
+            name: name || '',
+            description: description || '',
+            expiration: '',
+            balance: 0,
+          });
+          window._statUsageKeys = getUsageKeysStore().length;
+          renderUsageKeysTable();
+          updateStatCards();
+        }
+        showStatus('overview-status-usage-keys', 'Usage API key added. Copy and store your key now (shown once): ' + usageKey, 'success');
+      } catch (e) {
+        showStatus('overview-status-usage-keys', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+      } finally {
+        closeActionProgress();
+      }
     }
   });
 }
@@ -857,7 +1007,7 @@ async function confirmAndRemoveUsageKey(item) {
   if (!apiKey) return;
   hideStatus('overview-status-usage-keys');
   try {
-    showActionProgress('Removing usage API key', `Removing usage API key “${masked}”.`);
+    showActionProgress('Removing usage API key', `Removing usage API key "${masked}".`);
     const client = await getClient();
     await client.removeUsageApiKey({ apiKey, usageApiKey: item.usage_api_key });
     const store = getUsageKeysStore();
@@ -922,13 +1072,32 @@ function initActions() {
 }
 
 // ----- Sidebar scroll -----
+const ACTION_RUNNER_ID = 'action-runner';
+const MAIN_SECTION_IDS = ['overview', 'usage-keys', 'groups', 'actions', 'wallets'];
+
+function setActionRunnerVisible(visible) {
+  const actionRunnerSection = document.getElementById('section-' + ACTION_RUNNER_ID);
+  if (actionRunnerSection) actionRunnerSection.style.display = visible ? '' : 'none';
+  MAIN_SECTION_IDS.forEach((id) => {
+    const el = document.getElementById('section-' + id);
+    if (el) el.style.display = visible ? 'none' : '';
+  });
+}
+
 function initSidebar() {
   document.querySelectorAll('.sidebar-link[data-scroll]').forEach((a) => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
       const id = a.getAttribute('data-scroll');
-      const el = document.getElementById('section-' + id);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      if (id === ACTION_RUNNER_ID) {
+        setActionRunnerVisible(true);
+        const el = document.getElementById('section-' + id);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else {
+        setActionRunnerVisible(false);
+        const el = document.getElementById('section-' + id);
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     });
   });
 }
@@ -1014,7 +1183,10 @@ function initHeader() {
 }
 
 // ----- Action Runner -----
-function initActionRunner() {
+let _codeJarEditor = null;
+let _paramsJarEditor = null;
+
+async function initActionRunner() {
   const codeEl = document.getElementById('action-runner-code');
   const paramsEl = document.getElementById('action-runner-params');
   const btn = document.getElementById('btn-execute-lit-action');
@@ -1024,13 +1196,42 @@ function initActionRunner() {
 
   if (!btn || !outputEl) return;
 
+  let getCode;
+  let getParams;
+
+  try {
+    const { CodeJar } = await import('https://cdn.jsdelivr.net/npm/codejar@4.2.0/+esm');
+    const highlight = (editor) => {
+      if (!window.Prism) return;
+      const lang = editor.classList.contains('language-json') ? 'json' : 'javascript';
+      const grammar = Prism.languages[lang];
+      if (grammar) editor.innerHTML = Prism.highlight(editor.textContent, grammar, lang);
+    };
+    _codeJarEditor = CodeJar(codeEl, highlight, { tab: '  ' });
+    _paramsJarEditor = CodeJar(paramsEl, highlight, { tab: '  ' });
+
+    getCode = () => _codeJarEditor ? _codeJarEditor.toString() : (codeEl?.textContent ?? '');
+    getParams = () => _paramsJarEditor ? _paramsJarEditor.toString() : (paramsEl?.textContent ?? '');
+  } catch (e) {
+    // Fallback: enable plain contenteditable editors if CodeJar fails to load
+    console.error('Failed to load CodeJar for Action Runner editor, falling back to plain editor.', e);
+    if (codeEl) {
+      codeEl.setAttribute('contenteditable', 'true');
+    }
+    if (paramsEl) {
+      paramsEl.setAttribute('contenteditable', 'true');
+    }
+    getCode = () => (codeEl?.textContent ?? '');
+    getParams = () => (paramsEl?.textContent ?? '');
+  }
+
   btn.addEventListener('click', async () => {
     const accountKey = getApiKey();
     const usageKeyEl = document.getElementById('action-runner-usage-key');
     const usageKey = usageKeyEl?.value?.trim() ?? '';
     const apiKey = usageKey || accountKey;
-    const code = codeEl?.value?.trim() ?? '';
-    const paramsRaw = paramsEl?.value?.trim() ?? '';
+    const code = (getCode ? getCode() : (codeEl?.textContent ?? '')).trim();
+    const paramsRaw = (getParams ? getParams() : (paramsEl?.textContent ?? '')).trim();
 
     if (!accountKey) {
       hideStatus('action-runner-status');
@@ -1075,7 +1276,7 @@ function initActionRunner() {
   });
 
   btnGetCid?.addEventListener('click', async () => {
-    const code = codeEl?.value?.trim() ?? '';
+    const code = getCode().trim();
     if (!code) {
       outputEl.textContent = 'Enter Lit Action code to get its IPFS CID.';
       outputEl.className = 'action-runner-output error';
@@ -1117,7 +1318,7 @@ function init() {
   initWallets();
   initGroups();
   initActions();
-  initActionRunner();
+  initActionRunner(); // async; CodeJar loads lazily on first use
   initSidebar();
   initHeader();
 }
