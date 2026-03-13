@@ -39,7 +39,7 @@ export interface CreateWalletResponse {
 }
 
 export interface LitActionResponse {
-  response: string;
+  response: unknown;
   logs: string;
   has_error: boolean;
 }

@@ -8,6 +8,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
 </head>
 <body>
   <div class="app">
@@ -276,11 +277,11 @@
                       <input type="text" id="action-runner-usage-key" class="input" style="width:25rem;font-family:'JetBrains Mono',monospace;font-size:0.8125rem;padding:0.35rem 0.6rem;" placeholder="optional — overrides account key" />
                     </div>
                   </div>
-                  <textarea id="action-runner-code" class="input textarea-lg" rows="10" placeholder="Paste your Lit Action JavaScript code here (e.g. const go = async () => { Lit.Actions.setResponse({ response: 'hello lit action world!' }); }; go();)" spellcheck="false"></textarea>
+                  <div id="action-runner-code" class="codejar-editor language-javascript" spellcheck="false"></div>
                 </div>
                 <div class="form-group">
                   <label for="action-runner-params">Parameters (JSON, optional)</label>
-                  <textarea id="action-runner-params" class="input textarea-sm" rows="4" placeholder='Optional JSON object, e.g. {"key": "value"}' spellcheck="false"></textarea>
+                  <div id="action-runner-params" class="codejar-editor codejar-editor-sm language-json" spellcheck="false"></div>
                 </div>
                 <div class="action-runner-buttons">
                   <button type="button" id="btn-execute-lit-action" class="btn btn-primary">Execute Lit Action</button>
@@ -338,6 +339,8 @@
     </div>
   </div>
 
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>

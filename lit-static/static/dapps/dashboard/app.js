@@ -1033,7 +1033,10 @@ function initHeader() {
 }
 
 // ----- Action Runner -----
-function initActionRunner() {
+let _codeJarEditor = null;
+let _paramsJarEditor = null;
+
+async function initActionRunner() {
   const codeEl = document.getElementById('action-runner-code');
   const paramsEl = document.getElementById('action-runner-params');
   const btn = document.getElementById('btn-execute-lit-action');
@@ -1043,13 +1046,24 @@ function initActionRunner() {
 
   if (!btn || !outputEl) return;
 
+  const { CodeJar } = await import('https://cdn.jsdelivr.net/npm/codejar@4.2.0/+esm');
+  const highlight = (editor) => {
+    editor.textContent = editor.textContent;
+    if (window.Prism) Prism.highlightElement(editor);
+  };
+  _codeJarEditor = CodeJar(codeEl, highlight, { tab: '  ' });
+  _paramsJarEditor = CodeJar(paramsEl, highlight, { tab: '  ' });
+
+  const getCode = () => _codeJarEditor ? _codeJarEditor.toString() : (codeEl?.textContent ?? '');
+  const getParams = () => _paramsJarEditor ? _paramsJarEditor.toString() : (paramsEl?.textContent ?? '');
+
   btn.addEventListener('click', async () => {
     const accountKey = getApiKey();
     const usageKeyEl = document.getElementById('action-runner-usage-key');
     const usageKey = usageKeyEl?.value?.trim() ?? '';
     const apiKey = usageKey || accountKey;
-    const code = codeEl?.value?.trim() ?? '';
-    const paramsRaw = paramsEl?.value?.trim() ?? '';
+    const code = getCode().trim();
+    const paramsRaw = getParams().trim();
 
     if (!accountKey) {
       hideStatus('action-runner-status');
@@ -1094,7 +1108,7 @@ function initActionRunner() {
   });
 
   btnGetCid?.addEventListener('click', async () => {
-    const code = codeEl?.value?.trim() ?? '';
+    const code = getCode().trim();
     if (!code) {
       outputEl.textContent = 'Enter Lit Action code to get its IPFS CID.';
       outputEl.className = 'action-runner-output error';
@@ -1136,7 +1150,7 @@ function init() {
   initWallets();
   initGroups();
   initActions();
-  initActionRunner();
+  initActionRunner(); // async; CodeJar loads lazily on first use
   initSidebar();
   initHeader();
 }
