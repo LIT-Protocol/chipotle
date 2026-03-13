@@ -7,9 +7,7 @@ use deno_core::futures::TryFutureExt as _;
 use deno_lib::util::result::any_and_jserrorbox_downcast_ref;
 use deno_runtime::tokio_util::create_and_run_current_thread;
 use lit_actions_grpc::{proto::*, unix};
-use lit_api_core::context::{
-    HEADER_KEY_X_CORRELATION_ID, HEADER_KEY_X_PRIVACY_MODE, HEADER_KEY_X_REQUEST_ID,
-};
+use lit_api_core::context::{HEADER_KEY_X_CORRELATION_ID, HEADER_KEY_X_REQUEST_ID};
 use lit_observability::{
     PRIVACY_MODE_TAG,
     channels::{ChannelMsg, new_traced_bounded_channel},
@@ -100,13 +98,14 @@ impl Action for Server {
             #[allow(clippy::single_match)]
             match req.union {
                 Some(UnionRequest::Execute(req)) => {
-                    // we're outside of the spawned thread, so we can't use the request context
-                    if req
+                    // Privacy mode is indicated by the PRIVACY_MODE_TAG suffix
+                    // on the request_id, tagged at the origin (lit-api-server fairing).
+                    let privacy_mode = req
                         .http_headers
-                        .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
-                        .unwrap_or(&"false".to_string())
-                        == "true"
-                    {
+                        .get(&HEADER_KEY_X_REQUEST_ID.to_ascii_lowercase())
+                        .is_some_and(|id| id.ends_with(PRIVACY_MODE_TAG));
+
+                    if privacy_mode {
                         debug!("ExecuteJsRequest: **PRIVACY MODE**");
                     } else {
                         debug!("{:?}", DebugExecutionRequest::from(&req));
@@ -114,11 +113,8 @@ impl Action for Server {
 
                     std::thread::spawn(move || {
                         // Extract IDs from http_headers for log injection context.
-                        let privacy_mode = req
-                            .http_headers
-                            .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
-                            .map(|v| v.as_str() == "true")
-                            .unwrap_or(false);
+                        // The request_id arrives pre-tagged with PRIVACY_MODE_TAG
+                        // from lit-api-server if privacy mode was requested.
                         let request_id = req
                             .http_headers
                             .get(&HEADER_KEY_X_REQUEST_ID.to_ascii_lowercase())
@@ -128,15 +124,7 @@ impl Action for Server {
                             .get(&HEADER_KEY_X_CORRELATION_ID.to_ascii_lowercase())
                             .cloned();
 
-                        if privacy_mode {
-                            // Always set context in privacy mode, tagging the request_id
-                            // even if no request_id was provided.
-                            let tagged_id = match request_id {
-                                Some(id) => format!("{id}_{PRIVACY_MODE_TAG}"),
-                                None => PRIVACY_MODE_TAG.to_string(),
-                            };
-                            set_request_context(Some(tagged_id), correlation_id);
-                        } else if request_id.is_some() || correlation_id.is_some() {
+                        if request_id.is_some() || correlation_id.is_some() {
                             set_request_context(request_id, correlation_id);
                         }
 
