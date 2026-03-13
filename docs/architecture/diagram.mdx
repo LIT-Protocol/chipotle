@@ -1,0 +1,165 @@
+---
+title: "Programmable KMS — Auth Model"
+description: "Entity relationships, on-chain vs TEE boundaries, and how self-sovereign vs SaaS emerges from configuration — not modes."
+---
+
+<Note>
+  **Core Insight:** There are no "modes." Self-sovereign vs SaaS is an **emergent property** of how you configure the same system. The only things that vary are **who is the Account Owner** (TEE-derived wallet vs SAFE vs EOA) and **what scopes the API keys have**. The contracts don't know or care.
+</Note>
+
+---
+
+## Entity Boundaries
+
+The system spans four distinct trust boundaries. Understanding what lives where is essential to reasoning about security.
+
+### User / External
+
+| Entity | Description |
+|---|---|
+| **Account Owner** | Top-level identity. An address on Base that can do everything. Can be an EOA, TEE-derived wallet (Stytch auth), or SAFE/governance contract. **Ultimate authority.** |
+| **API Key (Private Key)** | User holds the private key locally. Sent to TEE over HTTPS per-request. TEE derives the address and checks scopes on-chain. |
+| **SAFE / Governance** | Optional. Multisig, timelocks, voting. Submits txs directly to chain for structural changes — TEE not involved. |
+
+### TEE Enclave (Phala / dstack)
+
+| Entity | Description |
+|---|---|
+| **Root Key** | Master secret managed by Phala's KMS. Only approved TEE build images can derive from it. Never leaves the enclave. |
+| **Key Derivation** | Signing key + symmetric encryption key derived transiently from root key using derivation path ID. Never persisted. |
+| **Auth Verification** | Derives address from API key → reads on-chain scopes → checks group membership of action CID + PKP → allows or rejects. |
+| **Sandbox Execution** | Fetches Lit Action from IPFS, runs in sandboxed JS environment with access to derived key material. Returns result to caller. |
+| **TX Relay** | Convenience relay for management operations. TEE checks scopes, then signs and submits tx to Base on user's behalf. |
+
+### On-Chain (Base)
+
+| Entity | Description |
+|---|---|
+| **Account Contract** | Registers the owner address. All permissions flow from this. Requires `msg.sender == owner`. |
+| **API Key Registry** | On-chain mapping of key addresses → scopes. Includes per-group scope bindings. Owner-managed. |
+| **PKP Registry** | List of PKP derivation path IDs owned by the account. PKPs are created here, then referenced by Groups. |
+| **Groups** | Permission policies binding `{PKP IDs, Action CIDs}`. "Who can execute" is on the API key, not the group. |
+
+### IPFS (Content-addressed)
+
+| Entity | Description |
+|---|---|
+| **Lit Actions** | Immutable JS on IPFS, referenced by CID. Not owned by anyone — public, reusable, content-addressed. Like npm packages. |
+
+---
+
+## Entity Relationships
+
+```
+USER / EXTERNAL                ON-CHAIN (BASE)             TEE ENCLAVE
+─────────────────────────────  ──────────────────────────  ──────────────────────────────
+Account Owner                  Account Contract             Root Key
+ EOA / SAFE / TEE-derived   ──▶  owner address registered    master secret, never exported
+      │ owns                                                      │ derives
+      │                        API Key Registry             Auth + Key Derivation
+API Key (private key)       ──▶  address → scopes mapping ◀──    verify scopes, derive keys
+ Held by user, sent/request                                       │ provides keys
+      │ sent over HTTPS            │ reads                        │
+      └──────────────────────────▶ TEE                    Sandbox Execution
+                                   │                        runs Lit Actions w/ key material
+                                  PKP Registry                    │ fetched from IPFS
+                                   derivation path IDs            ▼
+                                      │ referenced         Lit Actions (IPFS)
+                                  Groups               ◀──   Immutable JS, public CIDs
+                                   {PKP refs, ACIDs}
+                                      │ CID ref
+                                  TX Relay
+                                   signs + submits mgmt txs
+```
+
+---
+
+## Execution Flow (Inside the TEE)
+
+| Step | Action | Who |
+|---|---|---|
+| **1** | User sends API key (private key) + `"run action QmABC with pkp_001"` over HTTPS | `user → tee` |
+| **2** | TEE derives the public address from the provided private key | `inside tee` |
+| **3** | TEE reads the API Key Registry on Base — does this address have `execute` scope? On which groups? | `tee → chain read` |
+| **4** | TEE checks: is there a group this key can execute on where **QmABC is a listed action** AND **pkp_001 is a listed PKP**? | `tee → chain read` |
+| **5** | If authorized → derive pkp_001 key material from root key → fetch QmABC from IPFS → execute in sandbox with key material access → return result | `inside tee + ipfs fetch` |
+| **✕ Reject** | If any check fails → reject the request. No key material is derived. | — |
+
+---
+
+## Management Paths
+
+There are two paths for making structural changes (creating groups, adding PKPs, updating scopes):
+
+### Path A: Via TEE Relay *(convenience)*
+
+TEE checks scopes and submits the transaction on the user's behalf.
+
+```
+User + API Key  →  TEE (verify scopes)  →  Permissions Contract
+```
+
+### Path B: Direct to Chain *(self-sovereign)*
+
+Owner submits transactions directly — TEE is not involved.
+
+```
+SAFE / EOA  →  Permissions Contract
+```
+
+---
+
+## API Key Scopes
+
+| Scope | Allows | Type |
+|---|---|---|
+| `execute` | Invoke Lit Actions with PKPs | per-group |
+| `pkp:create` | Create new PKPs in the account's registry | account-wide |
+| `group:create` | Create new groups | account-wide |
+| `group:delete` | Delete groups | account-wide |
+| `group:manageActions` | Add / remove action CIDs in a group | per-group |
+| `group:addPkp` | Add PKP references to a group | per-group |
+| `group:removePkp` | Remove PKP references from a group | per-group |
+
+---
+
+## Permission Matrix
+
+| Operation | Owner | API Key | Scope Required |
+|---|:---:|:---:|---|
+| Invoke action + PKP | ✓ | ✓ | `execute(group_id)` |
+| Create PKP | ✓ | ✓ | `pkp:create` |
+| Create group | ✓ | ✓ | `group:create` |
+| Delete group | ✓ | ✓ | `group:delete` |
+| Add/remove actions | ✓ | ✓ | `group:manageActions(group_id)` |
+| Add PKPs to group | ✓ | ✓ | `group:addPkp(group_id)` |
+| Remove PKPs from group | ✓ | ✓ | `group:removePkp(group_id)` |
+| Add / revoke API key | ✓ | ✕ | owner only |
+| Update API key scopes | ✓ | ✕ | owner only |
+| Transfer ownership | ✓ | ✕ | owner only |
+
+---
+
+## Configuration Comparison
+
+The same system, two very different security postures — determined entirely by who the owner is and what scopes the keys carry.
+
+### SaaS Mode
+
+*Fast iteration, broad scopes, Stytch recovery*
+
+| | |
+|---|---|
+| **Owner** | TEE-derived wallet from Stytch auth (email / passkey / OAuth) |
+| **API Key** | `dev_key` with all scopes: `execute(*)`, `pkp:create`, `group:create`, `group:delete`, `group:manageActions(*)`, `group:addPkp(*)`, `group:removePkp(*)` |
+| **Effect** | Developer does everything via HTTP. Only API key management and ownership transfer require Stytch-authenticated dashboard. Recovery = Stytch re-auth. |
+
+### Self-Sovereign Mode
+
+*Auditable governance, restricted scopes, SAFE multisig*
+
+| | |
+|---|---|
+| **Owner** | 3-of-5 SAFE multisig on Base |
+| **API Keys** | `server_key` → `execute(group_1)` only. `onboard_key` → `pkp:create` + `group:addPkp(group_1)` only. No structural scopes granted. |
+| **Effect** | Day-to-day ops via purpose-built keys. All structural changes (groups, actions, PKP removal) require SAFE vote. Leaked key blast radius is minimal. |

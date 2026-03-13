@@ -1,0 +1,34 @@
+---
+title: "Architecture"
+description: "How Lit Chipotle's three composable layers — TEE enclave, on-chain permissions, and IPFS — work together to provide programmable key management."
+---
+
+Lit Chipotle is built on three composable layers that each handle a distinct concern. Understanding the separation makes it easier to reason about security, auditability, and where your own code fits in.
+
+## The Three Layers
+
+**TEE Enclave (Phala / dstack)**
+The enclave holds the root key and performs all sensitive operations: key derivation, authorization checking, and sandboxed Lit Action execution. Nothing that touches key material ever leaves the enclave. The TEE also acts as a convenience relay — it can sign and submit on-chain management transactions on your behalf after verifying your API key scopes.
+
+**On-Chain Permissions (Base)**
+All authorization state lives on-chain in a set of smart contracts: an Account contract that registers the owner address, an API Key Registry mapping key addresses to scopes, a PKP Registry of wallet derivation path IDs, and Groups that bind PKPs to permitted action CIDs. The TEE reads these contracts to decide whether to execute a request. You can update them either through the TEE relay or by submitting transactions directly from an EOA or multisig.
+
+**Lit Actions (IPFS)**
+Lit Actions are immutable JavaScript programs stored on IPFS and referenced by content ID (CID). They are not owned by anyone — they are public, reusable, and content-addressed, similar to npm packages. The TEE fetches the action by CID at execution time and runs it inside a sandboxed JS environment that has access to the derived key material.
+
+## Self-Sovereign vs SaaS
+
+There are no modes. Whether you operate in a self-sovereign or SaaS posture is an emergent property of who owns the Account contract and what scopes your API keys carry.
+
+| | SaaS | Self-Sovereign |
+|---|---|---|
+| **Account Owner** | TEE-derived wallet (Stytch auth) | 3-of-5 SAFE multisig on Base |
+| **API Key Scopes** | All scopes — full access via HTTP | Purpose-built keys with minimal scopes |
+| **Structural Changes** | Via TEE relay (Stytch-authenticated) | SAFE vote → direct on-chain tx |
+| **Key Recovery** | Stytch re-authentication | SAFE signers |
+| **Leaked Key Blast Radius** | High | Minimal — scoped to specific groups |
+
+## Further Reading
+
+- [Auth Model & Permission Matrix](/architecture/authModel) — detailed entity boundaries, execution flow, and the full permission matrix
+- [System Diagram](/architecture/diagram) — entity relationships, on-chain vs TEE boundaries, and management paths

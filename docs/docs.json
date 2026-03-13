@@ -13,6 +13,8 @@
         "tab": "Building on Lit Chipotle",
         "pages": [
           "index",
+          "dashboard",
+          "api_direct",
           {
             "group": "Lit Actions",
             "pages": [
@@ -25,6 +27,14 @@
                   "lit-actions/migration/patterns"
                 ]
               }
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/index",
+              "architecture/diagram",
+              "architecture/authModel"
             ]
           },
           {
