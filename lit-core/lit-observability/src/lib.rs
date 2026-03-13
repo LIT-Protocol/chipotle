@@ -22,6 +22,8 @@ pub use opentelemetry;
 pub use opentelemetry_sdk;
 #[cfg(feature = "otlp")]
 pub use opentelemetry_semantic_conventions;
+#[cfg(feature = "otlp")]
+pub use tracing_opentelemetry;
 pub use tonic_middleware;
 
 /// Initializes the primary tracing subscriber with fmt (stdout) and privacy filtering.

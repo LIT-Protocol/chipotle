@@ -116,22 +116,18 @@ impl Fairing for ObservabilityFairing {
         // Per requirements: if user sends X-Request-Id, it must be ignored.
         let request_id = Uuid::new_v4().to_string();
 
-        let correlation_id_for_logging = user_provided_correlation_id
-            .as_deref()
-            .unwrap_or(&request_id);
-
         let _span = info_span!(
             "http_request",
             method = %req.method(),
             uri = %req.uri(),
-            correlation_id = %correlation_id_for_logging,
+            correlation_id = user_provided_correlation_id.as_deref().unwrap_or(""),
             request_id = %request_id,
         )
         .entered();
 
         lit_observability::logging::set_request_context(
             Some(request_id.clone()),
-            Some(correlation_id_for_logging.to_string()),
+            user_provided_correlation_id.clone(),
         );
 
         let ctx = RequestTracingContext {
