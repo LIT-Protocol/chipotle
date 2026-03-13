@@ -68,7 +68,7 @@ The core authorization primitive. A Group is a **permission policy** that binds 
 - A set of **PKP references** (derivation path IDs from the account's PKP registry)
 - A set of **Action CIDs** (any valid IPFS CID — no registration required)
 
-That's it. A group is just {PKPs, Actions}. "Who can execute" is not a property of the group — it's a property of API key scopes. The owner decides which API keys get `execute` on which groups when they configure the keys.
+That's it. A group is just `{PKPs, Actions}`. "Who can execute" is not a property of the group — it's a property of API key scopes. The owner decides which API keys get `execute` on which groups when they configure the keys.
 
 A Group answers the question: "Can this action use this key?" The API key scope answers: "Can this caller use this group?"
 
