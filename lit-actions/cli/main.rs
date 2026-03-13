@@ -70,7 +70,7 @@ async fn init_observability() -> ObservabilityProviders {
     {
         use lit_observability::{
             logging::ContextAwareOtelLogLayer,
-            opentelemetry::{KeyValue, global},
+            opentelemetry::{KeyValue, global, trace::TracerProvider},
             opentelemetry_sdk::{Resource, propagation::TraceContextPropagator, trace as sdktrace},
             opentelemetry_semantic_conventions::resource::SERVICE_NAME,
         };
@@ -106,9 +106,13 @@ async fn init_observability() -> ObservabilityProviders {
         global::set_tracer_provider(tracing_provider.clone());
         global::set_meter_provider(metrics_provider.clone());
 
+        let tracer = tracing_provider.tracer("lit-actions");
+        let otel_trace_layer =
+            lit_observability::tracing_opentelemetry::layer().with_tracer(tracer);
         let otel_log_layer = ContextAwareOtelLogLayer::new(&logger_provider);
         lit_observability::init_subscriber(&log_level)
             .expect("Failed to init tracing subscriber (invalid RUST_LOG or filter config)")
+            .with(otel_trace_layer)
             .with(otel_log_layer)
             .init();
 
