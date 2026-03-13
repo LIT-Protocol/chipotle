@@ -1,10 +1,11 @@
 use std::{collections::HashMap, future::Future};
 
-use crate::{opentelemetry::global, tracing::propagation::HashMapMetadataMap};
+use crate::tracing::propagation::HashMapMetadataMap;
 use flume::{
     Receiver, RecvError, SendError, Sender,
     r#async::{RecvFut, SendFut},
 };
+use opentelemetry::global;
 use tracing::{Instrument, debug_span, instrument};
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 
