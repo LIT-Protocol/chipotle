@@ -39,7 +39,7 @@ export interface CreateWalletResponse {
 }
 
 export interface LitActionResponse {
-  response: string;
+  response: unknown;
   logs: string;
   has_error: boolean;
 }
@@ -459,8 +459,8 @@ export class LitApiServerClient {
   } {
     const k6url = new URL(
       this.cleanBaseUrl +
-        `/list_api_keys` +
-        `?${new URLSearchParams(params).toString()}`,
+      `/list_api_keys` +
+      `?${new URLSearchParams(params).toString()}`,
     );
     const mergedRequestParameters = this._mergeRequestParameters(
       requestParameters || {},
@@ -1175,8 +1175,8 @@ export class LitApiServerClient {
   } {
     const k6url = new URL(
       this.cleanBaseUrl +
-        `/list_groups` +
-        `?${new URLSearchParams(params).toString()}`,
+      `/list_groups` +
+      `?${new URLSearchParams(params).toString()}`,
     );
     const mergedRequestParameters = this._mergeRequestParameters(
       requestParameters || {},
@@ -1220,8 +1220,8 @@ export class LitApiServerClient {
   } {
     const k6url = new URL(
       this.cleanBaseUrl +
-        `/list_wallets` +
-        `?${new URLSearchParams(params).toString()}`,
+      `/list_wallets` +
+      `?${new URLSearchParams(params).toString()}`,
     );
     const mergedRequestParameters = this._mergeRequestParameters(
       requestParameters || {},
@@ -1265,8 +1265,8 @@ export class LitApiServerClient {
   } {
     const k6url = new URL(
       this.cleanBaseUrl +
-        `/list_wallets_in_group` +
-        `?${new URLSearchParams(params).toString()}`,
+      `/list_wallets_in_group` +
+      `?${new URLSearchParams(params).toString()}`,
     );
     const mergedRequestParameters = this._mergeRequestParameters(
       requestParameters || {},
@@ -1310,8 +1310,8 @@ export class LitApiServerClient {
   } {
     const k6url = new URL(
       this.cleanBaseUrl +
-        `/list_actions` +
-        `?${new URLSearchParams(params).toString()}`,
+      `/list_actions` +
+      `?${new URLSearchParams(params).toString()}`,
     );
     const mergedRequestParameters = this._mergeRequestParameters(
       requestParameters || {},
