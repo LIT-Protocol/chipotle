@@ -1046,24 +1046,40 @@ async function initActionRunner() {
 
   if (!btn || !outputEl) return;
 
-  const { CodeJar } = await import('https://cdn.jsdelivr.net/npm/codejar@4.2.0/+esm');
-  const highlight = (editor) => {
-    editor.textContent = editor.textContent;
-    if (window.Prism) Prism.highlightElement(editor);
-  };
-  _codeJarEditor = CodeJar(codeEl, highlight, { tab: '  ' });
-  _paramsJarEditor = CodeJar(paramsEl, highlight, { tab: '  ' });
+  let getCode;
+  let getParams;
 
-  const getCode = () => _codeJarEditor ? _codeJarEditor.toString() : (codeEl?.textContent ?? '');
-  const getParams = () => _paramsJarEditor ? _paramsJarEditor.toString() : (paramsEl?.textContent ?? '');
+  try {
+    const { CodeJar } = await import('https://cdn.jsdelivr.net/npm/codejar@4.2.0/+esm');
+    const highlight = (editor) => {
+      editor.textContent = editor.textContent;
+      if (window.Prism) Prism.highlightElement(editor);
+    };
+    _codeJarEditor = CodeJar(codeEl, highlight, { tab: '  ' });
+    _paramsJarEditor = CodeJar(paramsEl, highlight, { tab: '  ' });
+
+    getCode = () => _codeJarEditor ? _codeJarEditor.toString() : (codeEl?.textContent ?? '');
+    getParams = () => _paramsJarEditor ? _paramsJarEditor.toString() : (paramsEl?.textContent ?? '');
+  } catch (e) {
+    // Fallback: enable plain contenteditable editors if CodeJar fails to load
+    console.error('Failed to load CodeJar for Action Runner editor, falling back to plain editor.', e);
+    if (codeEl) {
+      codeEl.setAttribute('contenteditable', 'true');
+    }
+    if (paramsEl) {
+      paramsEl.setAttribute('contenteditable', 'true');
+    }
+    getCode = () => (codeEl?.textContent ?? '');
+    getParams = () => (paramsEl?.textContent ?? '');
+  }
 
   btn.addEventListener('click', async () => {
     const accountKey = getApiKey();
     const usageKeyEl = document.getElementById('action-runner-usage-key');
     const usageKey = usageKeyEl?.value?.trim() ?? '';
     const apiKey = usageKey || accountKey;
-    const code = getCode().trim();
-    const paramsRaw = getParams().trim();
+    const code = (getCode ? getCode() : (codeEl?.textContent ?? '')).trim();
+    const paramsRaw = (getParams ? getParams() : (paramsEl?.textContent ?? '')).trim();
 
     if (!accountKey) {
       hideStatus('action-runner-status');
