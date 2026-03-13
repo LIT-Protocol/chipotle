@@ -7,7 +7,9 @@ use deno_core::futures::TryFutureExt as _;
 use deno_lib::util::result::any_and_jserrorbox_downcast_ref;
 use deno_runtime::tokio_util::create_and_run_current_thread;
 use lit_actions_grpc::{proto::*, unix};
-use lit_api_core::context::{HEADER_KEY_X_PRIVACY_MODE, HEADER_KEY_X_REQUEST_ID};
+use lit_api_core::context::{
+    HEADER_KEY_X_CORRELATION_ID, HEADER_KEY_X_PRIVACY_MODE, HEADER_KEY_X_REQUEST_ID,
+};
 use lit_observability::{
     PRIVACY_MODE_TAG,
     channels::{ChannelMsg, new_traced_bounded_channel},
@@ -111,24 +113,30 @@ impl Action for Server {
                     }
 
                     std::thread::spawn(move || {
-                        // Set request context for log injection; no fallback IDs.
-                        let none = &"none".to_string();
+                        // Extract IDs from http_headers for log injection context.
                         let privacy_mode = req
                             .http_headers
                             .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
-                            .unwrap_or(none);
+                            .map(|v| v.as_str() == "true")
+                            .unwrap_or(false);
                         let request_id = req
                             .http_headers
                             .get(&HEADER_KEY_X_REQUEST_ID.to_ascii_lowercase())
-                            .unwrap_or(none);
-                        let request_id = if privacy_mode == "true" {
-                            format!("{request_id}_{PRIVACY_MODE_TAG}")
-                        } else {
-                            request_id.to_string()
-                        };
+                            .cloned()
+                            .map(|id| {
+                                if privacy_mode {
+                                    format!("{id}_{PRIVACY_MODE_TAG}")
+                                } else {
+                                    id
+                                }
+                            });
+                        let correlation_id = req
+                            .http_headers
+                            .get(&HEADER_KEY_X_CORRELATION_ID.to_ascii_lowercase())
+                            .cloned();
 
-                        if request_id != "none" {
-                            set_request_context(Some(request_id), None);
+                        if request_id.is_some() || correlation_id.is_some() {
+                            set_request_context(request_id, correlation_id);
                         }
 
                         create_and_run_current_thread(
