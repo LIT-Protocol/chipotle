@@ -11,7 +11,7 @@ use rocket_okapi::Result as RocketOkapiResult;
 use rocket_okapi::r#gen::OpenApiGenerator;
 use rocket_okapi::okapi::openapi3::{Object, Parameter, ParameterValue};
 use rocket_okapi::request::{OpenApiFromRequest, RequestHeaderInput};
-use tracing::info_span;
+use tracing::{field, info_span};
 use uuid::Uuid;
 
 const HEADER_X_CORRELATION_ID: &str = "X-Correlation-Id";
@@ -120,10 +120,14 @@ impl Fairing for ObservabilityFairing {
             "http_request",
             method = %req.method(),
             uri = %req.uri(),
-            correlation_id = user_provided_correlation_id.as_deref().unwrap_or(""),
+            correlation_id = field::Empty,
             request_id = %request_id,
         )
         .entered();
+
+        if let Some(ref cid) = user_provided_correlation_id {
+            _span.record("correlation_id", cid.as_str());
+        }
 
         lit_observability::logging::set_request_context(
             Some(request_id.clone()),
