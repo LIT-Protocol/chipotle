@@ -1052,8 +1052,10 @@ async function initActionRunner() {
   try {
     const { CodeJar } = await import('https://cdn.jsdelivr.net/npm/codejar@4.2.0/+esm');
     const highlight = (editor) => {
-      editor.textContent = editor.textContent;
-      if (window.Prism) Prism.highlightElement(editor);
+      if (!window.Prism) return;
+      const lang = editor.classList.contains('language-json') ? 'json' : 'javascript';
+      const grammar = Prism.languages[lang];
+      if (grammar) editor.innerHTML = Prism.highlight(editor.textContent, grammar, lang);
     };
     _codeJarEditor = CodeJar(codeEl, highlight, { tab: '  ' });
     _paramsJarEditor = CodeJar(paramsEl, highlight, { tab: '  ' });
