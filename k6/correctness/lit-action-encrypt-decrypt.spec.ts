@@ -16,22 +16,11 @@
 import type { Response } from "k6/http";
 import { checkAndLog } from "../check.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
+import { ENCRYPT_CODE, DECRYPT_CODE } from "../LitActionCode/index.ts";
 
 const BASE_URL =
   __ENV.BASE_URL ||
   "https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network/core/v1";
-
-// pkpId and challenge are injected via js_params and become top-level globals.
-const ENCRYPT_CODE = `(async () => {
-  const ciphertext = await Lit.Actions.Encrypt({ pkpId, message: challenge });
-  Lit.Actions.setResponse({ response: ciphertext });
-})();`;
-
-// pkpId and ciphertext are injected via js_params and become top-level globals.
-const DECRYPT_CODE = `(async () => {
-  const plaintext = await Lit.Actions.Decrypt({ pkpId, ciphertext });
-  Lit.Actions.setResponse({ response: plaintext });
-})();`;
 
 export const options = {
   vus: 1,

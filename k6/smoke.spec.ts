@@ -5,13 +5,12 @@
 import type { Response } from "k6/http";
 import { checkAndLog } from "./check.ts";
 import { LitApiServerClient } from "./litApiServer.ts";
+import { HELLO_WORLD_CODE } from "./LitActionCode/index.ts";
 
 const baseUrl =
   __ENV.BASE_URL ||
   "https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network/core/v1";
 const client = new LitApiServerClient({ baseUrl });
-
-const HELLO_WORLD_CODE = 'Lit.Actions.setResponse({response: "Hello World!"})';
 
 export const options = {
   vus: 1,
