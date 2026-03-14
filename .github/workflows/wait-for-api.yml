@@ -93,6 +93,35 @@ jobs:
         run: |
           BASE_URL="${{ steps.resolve-url.outputs.api_root_url }}"
           TIMEOUT="${{ inputs.timeout }}"
+
+          # Step-function: if the API is currently up (stale instance still
+          # serving), wait for it to go down before polling for the new
+          # instance.  This avoids the race where we'd pass against the old
+          # deployment.
+          if curl -sf "$BASE_URL/openapi.json" > /dev/null 2>&1; then
+            echo "API is currently available — waiting for it to go down (deployment restart)..."
+            DOWN_DEADLINE=$(( $(date +%s) + 300 ))  # 5 min
+            WENT_DOWN=false
+            while curl -sf "$BASE_URL/openapi.json" > /dev/null 2>&1; do
+              if [ "$(date +%s)" -ge "$DOWN_DEADLINE" ]; then
+                echo "API never went down after 300s — proceeding to poll anyway"
+                break
+              fi
+              echo "Still up, rechecking in 5s..."
+              sleep 5
+            done
+            if ! curl -sf "$BASE_URL/openapi.json" > /dev/null 2>&1; then
+              WENT_DOWN=true
+            fi
+            if [ "$WENT_DOWN" = true ]; then
+              echo "API is down — waiting 15s for clean restart..."
+              sleep 15
+            fi
+          else
+            echo "API is not currently available — polling for availability"
+          fi
+
+          # Poll for the API to come (back) up.
           echo "Polling $BASE_URL/openapi.json (timeout: ${TIMEOUT}s)..."
           deadline=$(( $(date +%s) + TIMEOUT ))
           until curl -sf "$BASE_URL/openapi.json" > /dev/null; do
