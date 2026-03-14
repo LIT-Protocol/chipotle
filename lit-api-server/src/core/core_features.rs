@@ -26,6 +26,7 @@ use tracing::instrument;
     ),
     err
 )]
+#[instrument(name = "core_features::lit_action", level = "debug", skip_all, err)]
 pub async fn lit_action(
     request_span: &RequestSpan,
     api_key: &str,
