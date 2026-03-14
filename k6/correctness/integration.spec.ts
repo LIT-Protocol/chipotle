@@ -59,8 +59,8 @@ export default function (data: IntegrationSetupData) {
   }, "getNodeChainConfig");
 
   // ── 2. getLitActionIpfsId ─────────────────────────────────────────────────
-  const ipfsRes = client.getLitActionIpfsId(encodeURIComponent(HELLO_WORLD_CODE));
-  if (!assertOk("getLitActionIpfsId", "GET /get_lit_action_ipfs_id/{code}", ipfsRes)) return;
+  const ipfsRes = client.getLitActionIpfsId(HELLO_WORLD_CODE);
+  if (!assertOk("getLitActionIpfsId", "POST /get_lit_action_ipfs_id", ipfsRes)) return;
   const ipfsId = (ipfsRes.response.body as string).replace(/^"|"$/g, "").trim();
   checkAndLog(ipfsRes.response, {
     "ipfs id is non-empty string": () => ipfsId.length > 0,

@@ -1334,3 +1334,54 @@ textarea.input.textarea-sm {
 .codejar-editor-sm {
   min-height: 90px;
 }
+
+/* ----- New account API key banner ----- */
+.new-account-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  background: var(--warning-bg, rgba(234, 179, 8, 0.12));
+  border: 1px solid var(--warning-border, rgba(234, 179, 8, 0.4));
+  border-radius: 8px;
+  padding: 0.875rem 1rem;
+  margin-bottom: 1.25rem;
+  color: var(--text);
+}
+
+.new-account-banner-body {
+  flex: 1;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.new-account-key-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.new-account-key {
+  font-size: 0.82rem;
+  word-break: break-all;
+  background: var(--input-bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.25rem 0.5rem;
+}
+
+.new-account-dismiss {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0.1rem 0.25rem;
+  flex-shrink: 0;
+}
+
+.new-account-dismiss:hover {
+  color: var(--text);
+}

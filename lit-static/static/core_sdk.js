@@ -142,8 +142,15 @@
  * @property {string} id - ID (hash as stored on chain)
  * @property {string} name - Name
  * @property {string} description - Description
- * @property {string} expiration - Expiration (e.g. unix timestamp string)
+ * @property {string} expiration - Expiration (unix timestamp string)
  * @property {number} balance - Balance (u64)
+ * @property {boolean} can_create_groups - Permission to create groups
+ * @property {boolean} can_delete_groups - Permission to delete groups
+ * @property {boolean} can_create_pkps - Permission to create PKPs
+ * @property {number[]} can_manage_ipfs_ids_in_groups - Group IDs allowed to manage IPFS action CIDs (0 = all groups)
+ * @property {number[]} can_add_pkp_to_groups - Group IDs allowed to add PKPs (0 = all groups)
+ * @property {number[]} can_remove_pkp_from_groups - Group IDs allowed to remove PKPs (0 = all groups)
+ * @property {number[]} can_execute_in_groups - Group IDs allowed to execute actions (0 = all groups)
  * @property {string} [api_key] - Usage API key (only present when returned by server, e.g. from lookup; not in standard list response)
  */
 
@@ -334,13 +341,17 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
-   * GET /core/v1/get_lit_action_ipfs_id/<code>
+   * POST /core/v1/get_lit_action_ipfs_id
    * Returns the IPFS CID (hash) for the given lit action code.
    * @param {string} code - Lit action JavaScript code
    * @returns {Promise<string>} IPFS CID (e.g. derived hash of code)
    */
   async getLitActionIpfsId(code) {
-    const res = await fetch(`${this.baseUrl}/get_lit_action_ipfs_id/${encodeURIComponent(code)}`);
+    const res = await fetch(`${this.baseUrl}/get_lit_action_ipfs_id`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(code),
+    });
     return parseResponse(res, 'get_lit_action_ipfs_id');
   }
 
