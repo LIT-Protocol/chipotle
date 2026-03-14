@@ -123,10 +123,11 @@ async fn lit_action(
 }
 
 #[openapi(tag = "Account Management")]
-#[get("/get_lit_action_ipfs_id/<code>")]
-async fn get_lit_action_ipfs_id(code: String) -> OpenApiResponse<String, ErrMessage> {
+#[post("/get_lit_action_ipfs_id", format = "json", data = "<code>")]
+async fn get_lit_action_ipfs_id(code: Json<String>) -> OpenApiResponse<String, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::get_lit_action_ipfs_id(code).await).into(),
+        response: ApiResult(account_management::get_lit_action_ipfs_id(code.into_inner()).await)
+            .into(),
     }
 }
 
