@@ -32,7 +32,7 @@ pub async fn get_admin_api_payer_key() -> Result<[u8; 32], String> {
     get_key(path.as_str(), purpose).await
 }
 
-#[instrument(name = "dstack::v1::get_key", level = "debug", err)]
+#[instrument(name = "dstack::v1::get_key", level = "debug", err, skip_all)]
 async fn get_key(path: &str, purpose: &str) -> Result<[u8; 32], String> {
     let key_response = dstack::get_key(path, purpose)
         .await
