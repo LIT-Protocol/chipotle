@@ -14,18 +14,6 @@ use serde_json::json;
 use std::collections::BTreeMap;
 use tracing::instrument;
 
-#[instrument(
-    level = "debug",
-    skip(
-        request_span,
-        api_key,
-        grpc_client_pool,
-        ipfs_cache,
-        http_client,
-        lit_action_request
-    ),
-    err
-)]
 #[instrument(name = "core_features::lit_action", level = "debug", skip_all, err)]
 pub async fn lit_action(
     request_span: &RequestSpan,
