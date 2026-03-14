@@ -101,22 +101,16 @@ jobs:
           if curl -sf "$BASE_URL/openapi.json" > /dev/null 2>&1; then
             echo "API is currently available — waiting for it to go down (deployment restart)..."
             DOWN_DEADLINE=$(( $(date +%s) + 300 ))  # 5 min
-            WENT_DOWN=false
             while curl -sf "$BASE_URL/openapi.json" > /dev/null 2>&1; do
               if [ "$(date +%s)" -ge "$DOWN_DEADLINE" ]; then
-                echo "API never went down after 300s — proceeding to poll anyway"
-                break
+                echo "::error::API never went down after 300s — deploy may have failed"
+                exit 1
               fi
               echo "Still up, rechecking in 5s..."
               sleep 5
             done
-            if ! curl -sf "$BASE_URL/openapi.json" > /dev/null 2>&1; then
-              WENT_DOWN=true
-            fi
-            if [ "$WENT_DOWN" = true ]; then
-              echo "API is down — waiting 15s for clean restart..."
-              sleep 15
-            fi
+            echo "API is down — waiting 15s for clean restart..."
+            sleep 15
           else
             echo "API is not currently available — polling for availability"
           fi
