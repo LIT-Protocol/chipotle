@@ -1,5 +1,5 @@
 # Run all k6/correctness specs sequentially.
-# Called from Deploy to Phala CVM after wait-for-api, or manually via workflow_dispatch.
+# Called from Deploy to Phala CVM after wait-for-api-restart, or manually via workflow_dispatch.
 
 name: k6 Correctness
 

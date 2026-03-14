@@ -1,7 +1,7 @@
-# Reusable workflow: wait for an API endpoint to become available
+# Reusable workflow: wait for an API restart to complete
 #
 # Call with api_root_url (direct) or phala_app_name (get from Phala CLI):
-#   uses: ./.github/workflows/wait-for-api.yml
+#   uses: ./.github/workflows/wait-for-api-restart.yml
 #   with:
 #     api_root_url: "https://example.com/core/v1"   # OR phala_app_name
 #     # phala_app_name: "lit-api-server"        # CVM name; requires PHALA_CLOUD_API_KEY secret
@@ -10,7 +10,7 @@
 #   secrets:
 #     PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}  # when using phala_app_name
 
-name: Wait for API
+name: Wait for API restart
 
 on:
   workflow_call:
