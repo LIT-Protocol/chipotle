@@ -1,0 +1,206 @@
+---
+title: "Examples"
+description: "Seven common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, and sending ETH — including examples gated on live external data."
+---
+
+Each example below is a self-contained Lit Action. Pass the code string to the `/core/v1/lit_action` endpoint with any required `js_params`. The `pkpId` parameter is the wallet address of the PKP you want to use, passed in via `js_params`.
+
+---
+
+## 1. Sign a Message
+
+The simplest pattern: retrieve a PKP's private key and sign an arbitrary message with it. The signature proves the message was attested by a specific, on-chain-registered key.
+
+```javascript
+// js_params: { pkpId, message }
+(async () => {
+  const wallet = new ethers.Wallet(
+    await Lit.Actions.getPrivateKey({ pkpId })
+  );
+  const signature = await wallet.signMessage(message);
+  Lit.Actions.setResponse({ response: { message, signature } });
+})();
+```
+
+The caller can verify the signature against the PKP's public key (or wallet address) to confirm the message originated from this action.
+
+---
+
+## 2. Encrypt a Secret
+
+Encrypt a sensitive string so that only the holder of the PKP can later decrypt it. Useful for storing API keys, passwords, or personal data on-chain or in IPFS without exposing the plaintext.
+
+```javascript
+// js_params: { pkpId, secret }
+(async () => {
+  const ciphertext = await Lit.Actions.Encrypt({ pkpId, message: secret });
+  Lit.Actions.setResponse({ response: { ciphertext } });
+})();
+```
+
+Store the returned `ciphertext` anywhere — IPFS, a smart contract, a database — and retrieve the plaintext only when needed using the Decrypt action below.
+
+---
+
+## 3. Decrypt a Secret
+
+Decrypt a ciphertext that was previously produced by `Lit.Actions.Encrypt` using the same PKP. Only an action that is permitted to use the PKP (enforced on-chain) can decrypt it.
+
+```javascript
+// js_params: { pkpId, ciphertext }
+(async () => {
+  const plaintext = await Lit.Actions.Decrypt({ pkpId, ciphertext });
+  Lit.Actions.setResponse({ response: { plaintext } });
+})();
+```
+
+---
+
+## 4. Fetch a Crypto Price and Sign It
+
+Fetch the current price of ETH from a public API and sign the result. The caller receives both the price and a signature — a **verifiable price proof** that can be submitted to a smart contract as a trusted oracle update.
+
+```javascript
+// js_params: { pkpId }
+(async () => {
+  const res = await fetch(
+    "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
+  );
+  const data = await res.json();
+  const price = data?.ethereum?.usd;
+
+  if (typeof price !== "number") {
+    Lit.Actions.setResponse({ response: { error: "Price fetch failed" } });
+    return;
+  }
+
+  const payload = `ETH/USD: ${price}`;
+  const wallet = new ethers.Wallet(
+    await Lit.Actions.getPrivateKey({ pkpId })
+  );
+  const signature = await wallet.signMessage(payload);
+
+  Lit.Actions.setResponse({ response: { price, payload, signature } });
+})();
+```
+
+A smart contract can call `ecrecover` on the signature to confirm the price was signed by a specific, known PKP address — without trusting any off-chain intermediary.
+
+---
+
+## 5. Weather-Gated Signing
+
+Only sign a message if the current temperature at a given location exceeds a threshold. This demonstrates **condition-gated signing** using a live external data source.
+
+```javascript
+// js_params: { pkpId, city, minTempCelsius, message }
+// Example: { pkpId: "0x...", city: "London", minTempCelsius: 20, message: "Approved" }
+(async () => {
+  const apiKey = await Lit.Actions.Decrypt({ pkpId, ciphertext: encryptedWeatherApiKey });
+
+  const res = await fetch(
+    `https://api.openweathermap.org/data/2.5/weather?q=${city}&units=metric&appid=${apiKey}`
+  );
+  const data = await res.json();
+  const temp = data?.main?.temp;
+
+  if (typeof temp !== "number") {
+    Lit.Actions.setResponse({ response: { error: "Weather fetch failed" } });
+    return;
+  }
+
+  if (temp < minTempCelsius) {
+    Lit.Actions.setResponse({
+      response: { signed: false, reason: `Temperature ${temp}°C is below threshold of ${minTempCelsius}°C` },
+    });
+    return;
+  }
+
+  const wallet = new ethers.Wallet(
+    await Lit.Actions.getPrivateKey({ pkpId })
+  );
+  const signature = await wallet.signMessage(message);
+
+  Lit.Actions.setResponse({ response: { signed: true, temp, message, signature } });
+})();
+```
+
+Note the use of `Lit.Actions.Decrypt` to retrieve the weather API key securely at runtime — the key is stored as ciphertext and never exposed in the action code or `js_params`. Pass `encryptedWeatherApiKey` as a `js_params` value (produced by Example 2).
+
+---
+
+## 6. Read from a Smart Contract
+
+Call a view function on an EVM smart contract and return the result. Useful for reading on-chain state (balances, governance votes, NFT ownership) inside an action, or for gating downstream logic on chain data.
+
+```javascript
+// js_params: { pkpId, contractAddress, holderAddress }
+// Checks the ERC-20 balance of holderAddress and signs the result.
+(async () => {
+  const rpcUrl = "https://mainnet.base.org";
+  const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+
+  const erc20Abi = [
+    "function balanceOf(address owner) view returns (uint256)",
+    "function symbol() view returns (string)",
+  ];
+  const contract = new ethers.Contract(contractAddress, erc20Abi, provider);
+
+  const [balance, symbol] = await Promise.all([
+    contract.balanceOf(holderAddress),
+    contract.symbol(),
+  ]);
+
+  const balanceFormatted = ethers.utils.formatUnits(balance, 18);
+  const payload = `${holderAddress} holds ${balanceFormatted} ${symbol}`;
+
+  const wallet = new ethers.Wallet(
+    await Lit.Actions.getPrivateKey({ pkpId })
+  );
+  const signature = await wallet.signMessage(payload);
+
+  Lit.Actions.setResponse({
+    response: { holder: holderAddress, balance: balanceFormatted, symbol, payload, signature },
+  });
+})();
+```
+
+---
+
+## 7. Send ETH to an Address
+
+Construct, sign, and broadcast an ETH transfer transaction from a PKP wallet. The PKP pays the gas and the transfer amount, so ensure the PKP wallet holds sufficient ETH on the target chain before running this action.
+
+```javascript
+// js_params: { pkpId, toAddress, amountEth, chainId, rpcUrl }
+// Example: { pkpId: "0x...", toAddress: "0x...", amountEth: "0.001", chainId: 8453, rpcUrl: "https://mainnet.base.org" }
+(async () => {
+  const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+  const wallet = new ethers.Wallet(
+    await Lit.Actions.getPrivateKey({ pkpId }),
+    provider
+  );
+
+  const tx = await wallet.sendTransaction({
+    to: toAddress,
+    value: ethers.utils.parseEther(amountEth),
+    chainId,
+  });
+
+  const receipt = await tx.wait();
+
+  Lit.Actions.setResponse({
+    response: {
+      txHash: receipt.transactionHash,
+      from: wallet.address,
+      to: toAddress,
+      amountEth,
+      blockNumber: receipt.blockNumber,
+    },
+  });
+})();
+```
+
+<Warning>
+  The PKP wallet at `pkpId` must hold enough ETH on the target chain to cover both the transfer amount and the gas fee. Use `createWallet` to get a PKP address, fund it on-chain, then use that address as `pkpId`.
+</Warning>
