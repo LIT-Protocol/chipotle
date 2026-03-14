@@ -20,6 +20,13 @@ export interface ApiKeyItem {
   expiration: string;
   /** @minimum 0 */
   balance: number;
+  can_create_groups: boolean;
+  can_delete_groups: boolean;
+  can_create_pkps: boolean;
+  can_manage_ipfs_ids_in_groups: number[];
+  can_add_pkp_to_groups: number[];
+  can_remove_pkp_from_groups: number[];
+  can_execute_in_groups: number[];
 }
 
 export type ErrMessage = string;
@@ -680,16 +687,14 @@ export class LitApiServerClient {
   }
 
   getLitActionIpfsId(
-    code: string,
+    getLitActionIpfsIdBody: string,
     requestParameters?: Params,
   ): {
     response: Response;
     data: GetLitActionIpfsIdDefault;
     operationId: string;
   } {
-    const k6url = new URL(
-      this.cleanBaseUrl + `/get_lit_action_ipfs_id`,
-    );
+    const k6url = new URL(this.cleanBaseUrl + `/get_lit_action_ipfs_id`);
     const mergedRequestParameters = this._mergeRequestParameters(
       requestParameters || {},
       this.commonRequestParameters,
@@ -697,8 +702,14 @@ export class LitApiServerClient {
     const response = http.request(
       "POST",
       k6url.toString(),
-      JSON.stringify(code),
-      { ...mergedRequestParameters, headers: { ...mergedRequestParameters?.headers, "Content-Type": "application/json" } },
+      JSON.stringify(getLitActionIpfsIdBody),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+        },
+      },
     );
     let data;
 
