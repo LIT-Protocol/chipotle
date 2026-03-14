@@ -24,7 +24,8 @@
                 "group": "Migration",
                 "pages": [
                   "lit-actions/migration/changes",
-                  "lit-actions/migration/patterns"
+                  "lit-actions/migration/patterns",
+                  "lit-actions/migration/encryption"
                 ]
               }
             ]

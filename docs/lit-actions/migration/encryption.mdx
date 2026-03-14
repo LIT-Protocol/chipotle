@@ -1,0 +1,64 @@
+---
+title: "Encryption & Decryption"
+description: "How encryption and decryption work in Chipotle compared to the official Lit SDK's access-control-conditions approach."
+---
+
+## The Official SDK Approach
+
+The [official Lit documentation](https://developer.litprotocol.com/sdk/auth-context-consumption/encrypt-and-decrypt) shows a full encrypt/decrypt flow using the `@lit-protocol/access-control-conditions` package. The steps are:
+
+1. **Install the package** — `npm install @lit-protocol/access-control-conditions`
+2. **Define access control conditions** — Build an `accs` object that describes *who* can decrypt (e.g. a specific wallet address, a token balance check, an NFT ownership check). These are evaluated at decrypt time across the Lit node network.
+3. **Encrypt (no auth required)** — Call `litClient.encrypt({ dataToEncrypt, unifiedAccessControlConditions, chain })`. Anyone can encrypt; the conditions only gate decryption.
+4. **Authenticate the decryptor** — The decryptor (e.g. Bob) must produce an `authContext` by signing a SIWE message via `authManager.createEoaAuthContext(...)`. This proves wallet ownership to the nodes.
+5. **Decrypt** — Call `litClient.decrypt({ data, unifiedAccessControlConditions, authContext, chain })`. The nodes verify the auth context against the conditions, combine decryption shares, and return the plaintext.
+
+**Key characteristics of this approach:**
+- Access control is defined as a *dynamic condition* evaluated at decrypt time
+- The decryptor must authenticate with a wallet signature on every decrypt call
+- Conditions can reference on-chain state (balances, NFTs, DAO membership) evaluated at the moment of decryption
+- Encryption happens client-side using BLS; decryption shares are combined by the node network
+- Requires the `@lit-protocol/access-control-conditions` SDK package
+
+---
+
+## The Chipotle Approach
+
+In Chipotle, encryption and decryption happen **inside a Lit Action** using `Lit.Actions.Encrypt` and `Lit.Actions.Decrypt`. The symmetric key is derived from a PKP — access control is not a runtime condition but a static on-chain configuration.
+
+### Encrypt
+
+```js
+const ciphertext = await Lit.Actions.Encrypt({ pkpId, message });
+Lit.Actions.setResponse({ response: { ciphertext } });
+```
+
+### Decrypt
+
+```js
+const plaintext = await Lit.Actions.Decrypt({ pkpId, ciphertext });
+Lit.Actions.setResponse({ response: { plaintext } });
+```
+
+**Key characteristics of this approach:**
+- Access control is defined **at account setup time** — which API keys can run which actions against which PKPs is enforced by the Dashboard's group and scope configuration before the action ever executes
+- No wallet signature or auth context is required inside the action; if the action is running, the caller has already been authorised
+- The symmetric key is derived deterministically from the PKP's secret key — the same PKP always produces the same encryption key, so ciphertext encrypted with a given PKP can always be decrypted by the same PKP
+- Encryption and decryption are symmetric operations: both use the same PKP-derived key
+- No additional SDK packages needed beyond the Lit Action runtime
+
+---
+
+## Side-by-Side Comparison
+
+| | Official SDK (Naga) | Chipotle |
+|---|---|---|
+| **Where encryption runs** | Client-side (caller's machine) | Inside a Lit Action (TEE) |
+| **Access control type** | Dynamic conditions evaluated at decrypt time | Static on-chain group/scope config, enforced before execution |
+| **Auth required to decrypt** | Yes — wallet signature (SIWE) per decrypt call | No — API key scope checked at request time |
+| **Key material** | BLS threshold key shares combined across nodes | Symmetric key derived from PKP secret inside TEE |
+| **Conditions can reference on-chain state** | Yes — balance, NFTs, DAO membership at time of decrypt | No — access is based on group membership set at config time |
+| **SDK dependency** | `@lit-protocol/access-control-conditions` | None — `Lit.Actions.*` is injected at runtime |
+| **Encrypted data portability** | Ciphertext is portable; decryptable by anyone meeting conditions at any future time | Ciphertext is portable; decryptable by any action with access to the same PKP |
+| **Changing access** | Update the conditions (new encrypt required if conditions change) | Update group/scope settings in the Dashboard or on-chain |
+
