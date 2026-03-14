@@ -10,42 +10,72 @@ The [official Lit documentation](https://developer.litprotocol.com/sdk/auth-cont
 1. **Install the package** — `npm install @lit-protocol/access-control-conditions`
 2. **Define access control conditions** — Build an `accs` object that describes *who* can decrypt (e.g. a specific wallet address, a token balance check, an NFT ownership check). These are evaluated at decrypt time across the Lit node network.
 3. **Encrypt (no auth required)** — Call `litClient.encrypt({ dataToEncrypt, unifiedAccessControlConditions, chain })`. Anyone can encrypt; the conditions only gate decryption.
-4. **Authenticate the decryptor** — The decryptor (e.g. Bob) must produce an `authContext` by signing a SIWE message via `authManager.createEoaAuthContext(...)`. This proves wallet ownership to the nodes.
+4. **Authenticate the decryptor** — The decryptor must produce an `authContext` by signing a SIWE message via `authManager.createEoaAuthContext(...)`. This proves wallet ownership to the nodes.
 5. **Decrypt** — Call `litClient.decrypt({ data, unifiedAccessControlConditions, authContext, chain })`. The nodes verify the auth context against the conditions, combine decryption shares, and return the plaintext.
 
 **Key characteristics of this approach:**
-- Access control is defined as a *dynamic condition* evaluated at decrypt time
+- Access control conditions are immutable — they are baked into the ciphertext at encryption time and cannot be changed without re-encrypting
 - The decryptor must authenticate with a wallet signature on every decrypt call
 - Conditions can reference on-chain state (balances, NFTs, DAO membership) evaluated at the moment of decryption
 - Encryption happens client-side using BLS; decryption shares are combined by the node network
-- Requires the `@lit-protocol/access-control-conditions` SDK package
+- Requires the `@lit-protocol/access-control-conditions` SDK package and a running Lit node connection
 
 ---
 
 ## The Chipotle Approach
 
-In Chipotle, encryption and decryption happen **inside a Lit Action** using `Lit.Actions.Encrypt` and `Lit.Actions.Decrypt`. The symmetric key is derived from a PKP — access control is not a runtime condition but a static on-chain configuration.
+In Chipotle, encryption and decryption happen **inside a Lit Action** running in a TEE using `Lit.Actions.Encrypt` and `Lit.Actions.Decrypt`. The symmetric key is derived from a PKP. What makes this model flexible is that the Lit Action itself is plain JavaScript — so you can implement any gating logic you need (API calls, on-chain checks, parameter validation) before deciding whether to encrypt or decrypt.
 
-### Encrypt
+**Access control in Chipotle has two layers:**
+
+1. **Structural (on-chain)** — The Dashboard's group and scope configuration determines which API keys can call which actions against which PKPs. This is enforced before the action runs. These settings can be **locked** (by revoking management scopes from all API keys, requiring a SAFE multisig to change) or left **updatable** (by retaining `group:manageActions` scope on a key).
+
+2. **In-action (programmatic)** — The Lit Action itself can implement arbitrary gating conditions before calling `Encrypt` or `Decrypt`: check an API key passed as a parameter, fetch an external API, verify a signature, read a smart contract state. This gives you full flexibility without touching on-chain config.
+
+Encryption can be tied to a **user account** (a PKP belonging to a specific user), a **group** (a PKP shared by a set of users), or any other logical boundary you model with PKPs. Decryption can similarly be gated on authentication (check a token or signature in `jsParams`) or any external condition your action can verify.
+
+Because the action is just an HTTP call, no SDK is required — you can call the node from any environment that can make HTTP requests: a browser, a server, a mobile app, a cron job, a Rust binary, or a shell script.
+
+### Encrypt (with optional gating)
 
 ```js
+// jsParams: { pkpId, message, optional-userToken }
+
+// Optional gate: verify caller before encrypting
+const authRes = await some-gated-check
+if (!authRes.ok) {
+  Lit.Actions.setResponse({ response: { error: 'Unauthorized' } });
+  return;
+}
+
 const ciphertext = await Lit.Actions.Encrypt({ pkpId, message });
 Lit.Actions.setResponse({ response: { ciphertext } });
 ```
 
-### Decrypt
+### Decrypt (with optional gating)
 
 ```js
+// jsParams: { pkpId, ciphertext, optional-userToken }
+
+// Optional gate: check condition before decrypting
+const authRes = await some-gated-check
+if (!authRes.ok) {
+  Lit.Actions.setResponse({ response: { error: 'Unauthorized' } });
+  return;
+}
+
 const plaintext = await Lit.Actions.Decrypt({ pkpId, ciphertext });
 Lit.Actions.setResponse({ response: { plaintext } });
 ```
 
-**Key characteristics of this approach:**
-- Access control is defined **at account setup time** — which API keys can run which actions against which PKPs is enforced by the Dashboard's group and scope configuration before the action ever executes
-- No wallet signature or auth context is required inside the action; if the action is running, the caller has already been authorised
-- The symmetric key is derived deterministically from the PKP's secret key — the same PKP always produces the same encryption key, so ciphertext encrypted with a given PKP can always be decrypted by the same PKP
-- Encryption and decryption are symmetric operations: both use the same PKP-derived key
-- No additional SDK packages needed beyond the Lit Action runtime
+The gate can be anything — an auth token check, a smart contract read, a price feed, a weather API, or simply a value in `jsParams`. The encrypt/decrypt calls only happen if your logic allows it.
+
+**Key characteristics of the Chipotle approach:**
+- Access conditions can be **locked** (revoke management scopes via Dashboard) or **changed later** (update group/scope settings without re-encrypting)
+- Encryption can be tied to a user account PKP, a shared group PKP, or any PKP-level boundary you define
+- Decryption can be gated on authentication (a token, a signature, a session) or any programmatic condition inside the action
+- No SDK required — works from any HTTP client in any language or environment
+- The symmetric key is derived deterministically from the PKP — the same PKP always produces the same encryption key
 
 ---
 
@@ -54,11 +84,30 @@ Lit.Actions.setResponse({ response: { plaintext } });
 | | Official SDK (Naga) | Chipotle |
 |---|---|---|
 | **Where encryption runs** | Client-side (caller's machine) | Inside a Lit Action (TEE) |
-| **Access control type** | Dynamic conditions evaluated at decrypt time | Static on-chain group/scope config, enforced before execution |
-| **Auth required to decrypt** | Yes — wallet signature (SIWE) per decrypt call | No — API key scope checked at request time |
+| **Access control** | Immutable conditions baked into ciphertext at encrypt time | Two layers: on-chain structural config + in-action programmatic gating |
+| **Can access rules change later?** | No — re-encrypt required | Yes — update group/scope settings in Dashboard or on-chain (no re-encrypt needed for structural changes) |
+| **Auth required to decrypt** | Yes — wallet signature (SIWE) on every call | Optional — gate however you like inside the action |
+| **Encryption scope** | Tied to conditions (wallet address, token balance, etc.) | Tied to a PKP — user account, group, or any logical boundary |
 | **Key material** | BLS threshold key shares combined across nodes | Symmetric key derived from PKP secret inside TEE |
-| **Conditions can reference on-chain state** | Yes — balance, NFTs, DAO membership at time of decrypt | No — access is based on group membership set at config time |
-| **SDK dependency** | `@lit-protocol/access-control-conditions` | None — `Lit.Actions.*` is injected at runtime |
-| **Encrypted data portability** | Ciphertext is portable; decryptable by anyone meeting conditions at any future time | Ciphertext is portable; decryptable by any action with access to the same PKP |
-| **Changing access** | Update the conditions (new encrypt required if conditions change) | Update group/scope settings in the Dashboard or on-chain |
+| **SDK required** | Yes — `@lit-protocol/access-control-conditions` | No — plain HTTP from any environment |
+| **Languages / environments** | JavaScript/TypeScript (Node.js or browser) | Any — browser, server, mobile, shell, Rust, Python, etc. |
+| **Encrypted data portability** | Ciphertext is portable; decryptable by anyone meeting conditions | Ciphertext is portable; decryptable by any action with access to the same PKP |
 
+---
+
+## When to Use Each Approach
+
+**Use the official SDK conditions approach** when:
+- You need wallet-authenticated, dynamic access control checked against on-chain state at decrypt time
+- Decryptors are external wallets interacting directly with the Lit network
+- Conditions must be permanently immutable (baked into the ciphertext)
+
+**Use the Chipotle approach** when:
+- Encryption and decryption happen inside a Lit Action (server-side secrets, encrypted storage, API key vaulting)
+- You want to gate access with arbitrary logic — external APIs, signatures, parameters — without on-chain condition overhead
+- You need to call from environments without JavaScript SDK support
+- You want the flexibility to update access rules later without re-encrypting all existing data
+
+<Note>
+The Chipotle `Encrypt`/`Decrypt` functions are not a drop-in replacement for the full access-control-conditions system when you need dynamic, wallet-authenticated decryption tied to immutable on-chain conditions. They are a more flexible primitive suited for server-side secrets management within the Lit Action execution environment.
+</Note>
