@@ -1,5 +1,5 @@
 # Run openapi-to-k6 against deployed OpenAPI spec and fail if litApiServer.ts has drifted.
-# Called from Deploy to Phala CVM after wait-for-api, or manually via workflow_dispatch.
+# Called from Deploy to Phala CVM after wait-for-api-restart, or manually via workflow_dispatch.
 
 name: OpenAPI Spec Check
 
