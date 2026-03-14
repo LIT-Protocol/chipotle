@@ -688,17 +688,17 @@ export class LitApiServerClient {
     operationId: string;
   } {
     const k6url = new URL(
-      this.cleanBaseUrl + `/get_lit_action_ipfs_id/${code}`,
+      this.cleanBaseUrl + `/get_lit_action_ipfs_id`,
     );
     const mergedRequestParameters = this._mergeRequestParameters(
       requestParameters || {},
       this.commonRequestParameters,
     );
     const response = http.request(
-      "GET",
+      "POST",
       k6url.toString(),
-      undefined,
-      mergedRequestParameters,
+      JSON.stringify(code),
+      { ...mergedRequestParameters, headers: { ...mergedRequestParameters?.headers, "Content-Type": "application/json" } },
     );
     let data;
 
