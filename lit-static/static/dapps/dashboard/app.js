@@ -29,10 +29,6 @@ function getBaseUrl() {
 function updateAuthUI() {
   const hasKey = !!getApiKey();
   document.body.classList.toggle('has-api-key', hasKey);
-  const apiKeyTextEl = document.getElementById('account-api-key-text');
-  if (apiKeyTextEl) {
-    apiKeyTextEl.textContent = hasKey ? maskApiKey(getApiKey()) : '—';
-  }
   if (hasKey) {
     refreshOverviewAccount();
     updateStatCards();
@@ -171,8 +167,7 @@ function initLogin() {
       const client = await getClient();
       const res = await client.newAccount({ accountName: name, accountDescription: desc });
       setApiKey(res.api_key);
-      const walletMsg = res.wallet_address ? ' Wallet: ' + (res.wallet_address.slice(0, 10) + '…' + res.wallet_address.slice(-8)) : '';
-      showStatus('login-status', 'Account created. Copy and store your API key now (shown once): ' + res.api_key + walletMsg, 'success');
+      showNewAccountBanner(res.api_key);
       document.getElementById('new-account-name').value = '';
       document.getElementById('new-account-desc').value = '';
     } catch (e) {
@@ -198,6 +193,33 @@ function keyPreview(key) {
 
 function refreshOverviewAccount() {
   // Overview no longer displays API key or status; kept for any future use.
+}
+
+function showNewAccountBanner(apiKey) {
+  const banner = document.getElementById('new-account-banner');
+  const keyEl = document.getElementById('new-account-key-text');
+  const copyBtn = document.getElementById('new-account-copy-btn');
+  const dismissBtn = document.getElementById('new-account-dismiss-btn');
+  if (!banner || !keyEl || !copyBtn || !dismissBtn) return;
+  keyEl.textContent = apiKey;
+  banner.style.display = '';
+  copyBtn.textContent = 'Copy';
+  copyBtn.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(apiKey);
+    } catch (_) {
+      const ta = document.createElement('textarea');
+      ta.value = apiKey;
+      ta.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    copyBtn.textContent = 'Copied!';
+    setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+  };
+  dismissBtn.onclick = () => { banner.style.display = 'none'; };
 }
 
 function initOverview() {
@@ -472,12 +494,17 @@ function renderUsageKeysTable() {
   }
   if (empty) empty.style.display = 'none';
   items.forEach((item) => {
-    const expiration = item.expiration != null ? String(item.expiration) : '—';
+    const expiration = (() => {
+      const ts = Number(item.expiration);
+      if (!ts) return '—';
+      return new Date(ts * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+    })();
     const balance = item.balance != null ? String(item.balance) : '—';
     const tr = document.createElement('tr');
     tr.innerHTML =
       '<td>' + escapeHtml(item.name || '') + '</td>' +
       '<td class="mono">' + escapeHtml(item.description || '') + '</td>' +
+      '<td class="mono" style="font-size:0.82em;">' + escapeHtml(renderPermissionSummary(item)) + '</td>' +
       '<td class="mono">' + escapeHtml(expiration) + '</td>' +
       '<td class="mono">' + escapeHtml(balance) + '</td>' +
       '<td class="cell-actions"></td>';
@@ -512,7 +539,31 @@ function normalizeUsageKeyItem(item) {
     description: item.description,
     expiration: item.expiration,
     balance: item.balance,
+    can_create_groups: item.can_create_groups ?? false,
+    can_delete_groups: item.can_delete_groups ?? false,
+    can_create_pkps: item.can_create_pkps ?? false,
+    can_manage_ipfs_ids_in_groups: item.can_manage_ipfs_ids_in_groups ?? [],
+    can_add_pkp_to_groups: item.can_add_pkp_to_groups ?? [],
+    can_remove_pkp_from_groups: item.can_remove_pkp_from_groups ?? [],
+    can_execute_in_groups: item.can_execute_in_groups ?? [],
   };
+}
+
+function renderPermissionSummary(item) {
+  const parts = [];
+  if (item.can_create_groups) parts.push('create groups');
+  if (item.can_delete_groups) parts.push('delete groups');
+  if (item.can_create_pkps) parts.push('create PKPs');
+  const fmtGroups = (ids) => (ids && ids.length > 0) ? (ids.includes(0) ? 'all' : ids.join(', ')) : null;
+  const exec = fmtGroups(item.can_execute_in_groups);
+  if (exec) parts.push('execute: ' + exec);
+  const manage = fmtGroups(item.can_manage_ipfs_ids_in_groups);
+  if (manage) parts.push('manage actions: ' + manage);
+  const addPkp = fmtGroups(item.can_add_pkp_to_groups);
+  if (addPkp) parts.push('add PKP: ' + addPkp);
+  const removePkp = fmtGroups(item.can_remove_pkp_from_groups);
+  if (removePkp) parts.push('remove PKP: ' + removePkp);
+  return parts.length > 0 ? parts.join('; ') : 'none';
 }
 
 async function loadUsageKeys() {
@@ -532,6 +583,13 @@ async function loadUsageKeys() {
       description: it.description ?? '',
       expiration: it.expiration,
       balance: it.balance,
+      can_create_groups: it.can_create_groups ?? false,
+      can_delete_groups: it.can_delete_groups ?? false,
+      can_create_pkps: it.can_create_pkps ?? false,
+      can_manage_ipfs_ids_in_groups: it.can_manage_ipfs_ids_in_groups ?? [],
+      can_add_pkp_to_groups: it.can_add_pkp_to_groups ?? [],
+      can_remove_pkp_from_groups: it.can_remove_pkp_from_groups ?? [],
+      can_execute_in_groups: it.can_execute_in_groups ?? [],
     }));
     window._statUsageKeys = window._usageKeys.length;
     renderUsageKeysTable();
@@ -680,8 +738,8 @@ function openGroupModal(item = null) {
   if (saveBtn) saveBtn.addEventListener('click', async () => {
     const name = document.getElementById(nameId).value.trim();
     const desc = document.getElementById(descId).value.trim();
-    const pkpIdsPermitted = getSelectedGroupIds('modal-group-pkp-ids').map(String);
-    const cidHashesPermitted = getSelectedGroupIds('modal-group-cid-hashes').map(String);
+    const pkpIdsPermitted = getSelectedStringValues('modal-group-pkp-ids');
+    const cidHashesPermitted = getSelectedStringValues('modal-group-cid-hashes');
     const apiKey = getApiKey();
     if (!apiKey || !name) {
       showStatus('groups-status', 'Enter a group name.', 'error');
@@ -894,6 +952,12 @@ function getSelectedGroupIds(id) {
   return [...wrap.querySelectorAll('input[type="checkbox"]:checked')].map((c) => Number(c.value));
 }
 
+function getSelectedStringValues(id) {
+  const wrap = document.getElementById(id);
+  if (!wrap) return [];
+  return [...wrap.querySelectorAll('input[type="checkbox"]:checked')].map((c) => c.value);
+}
+
 function openUsageKeyModal(item = null) {
   const isEdit = item != null;
   const body =
@@ -913,6 +977,23 @@ function openUsageKeyModal(item = null) {
     '<button type="button" class="btn btn-outline" id="modal-cancel-btn">Cancel</button>' +
     '<button type="button" class="btn btn-primary" id="modal-save-btn">' + (isEdit ? 'Save' : 'Add') + '</button>';
   openModal(isEdit ? 'Edit usage API key' : 'Add usage API key', body, footer);
+  if (isEdit && item) {
+    const setCb = (id, val) => { const el = document.getElementById(id); if (el) el.checked = !!val; };
+    setCb('modal-usage-can-create-groups', item.can_create_groups);
+    setCb('modal-usage-can-delete-groups', item.can_delete_groups);
+    setCb('modal-usage-can-create-pkps', item.can_create_pkps);
+    const preSelect = (msId, ids) => {
+      const wrap = document.getElementById(msId);
+      if (!wrap || !ids) return;
+      const idSet = new Set(ids.map(String));
+      wrap.querySelectorAll('input[type="checkbox"]').forEach((cb) => { if (idSet.has(cb.value)) cb.checked = true; });
+      updateMultiSelectSummary(msId);
+    };
+    preSelect('modal-usage-execute-groups', item.can_execute_in_groups);
+    preSelect('modal-usage-manage-ipfs-groups', item.can_manage_ipfs_ids_in_groups);
+    preSelect('modal-usage-add-pkp-groups', item.can_add_pkp_to_groups);
+    preSelect('modal-usage-remove-pkp-groups', item.can_remove_pkp_from_groups);
+  }
   if (!isEdit) {
     attachGroupMultiSelectLogic('modal-usage-execute-groups');
     attachGroupMultiSelectLogic('modal-usage-manage-ipfs-groups');
@@ -1139,39 +1220,6 @@ function initHeader() {
     if (dropdown && !dropdown.contains(e.target)) closeAccountDropdown();
   });
 
-  const copyBtn = document.getElementById('account-copy-btn');
-  if (copyBtn) {
-    copyBtn.addEventListener('click', async (e) => {
-      e.stopPropagation();
-      const key = getApiKey();
-      if (!key) return;
-      try {
-        await navigator.clipboard.writeText(key);
-        const orig = copyBtn.textContent;
-        copyBtn.textContent = 'Copied!';
-        copyBtn.setAttribute('title', 'Copied');
-        setTimeout(() => {
-          copyBtn.textContent = orig;
-          copyBtn.setAttribute('title', 'Copy full API key');
-        }, 1500);
-      } catch (_) {
-        try {
-          const ta = document.createElement('textarea');
-          ta.value = key;
-          ta.setAttribute('readonly', '');
-          ta.style.position = 'fixed';
-          ta.style.opacity = '0';
-          document.body.appendChild(ta);
-          ta.select();
-          document.execCommand('copy');
-          document.body.removeChild(ta);
-          copyBtn.textContent = 'Copied!';
-          setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
-        } catch (__) {}
-      }
-    });
-  }
-
   const signoutBtn = document.getElementById('account-signout-btn');
   if (signoutBtn) {
     signoutBtn.addEventListener('click', (e) => {
@@ -1287,8 +1335,12 @@ async function initActionRunner() {
     btnGetCid.disabled = true;
     try {
       const baseUrl = getBaseUrl().replace(/\/$/, '');
-      const url = baseUrl + '/core/v1/get_lit_action_ipfs_id/' + encodeURIComponent(code);
-      const res = await fetch(url);
+      const url = baseUrl + '/core/v1/get_lit_action_ipfs_id';
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(code),
+      });
       const text = await res.text();
       if (!res.ok) throw new Error(text || res.status + ' ' + res.statusText);
       let cid = text;

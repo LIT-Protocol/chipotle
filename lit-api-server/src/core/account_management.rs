@@ -122,6 +122,7 @@ pub async fn get_lit_action_ipfs_id(code: String) -> Result<String, ApiStatus> {
     Ok(derived_ipfs_id)
 }
 
+#[tracing::instrument(name = "account_management::add_group", skip(signer_pool, api_key))]
 pub async fn add_group(
     signer_pool: Arc<SignerPool>,
     api_key: &str,
@@ -377,6 +378,21 @@ fn usage_api_key_to_api_key_item(
         description: m.metadata.description.clone(),
         expiration: m.expiration.to_string(),
         balance: m.balance.as_u64(),
+        can_create_groups: m.create_groups,
+        can_delete_groups: m.delete_groups,
+        can_create_pkps: m.create_pk_ps,
+        can_manage_ipfs_ids_in_groups: m
+            .manage_ipfs_ids_in_groups
+            .iter()
+            .map(|id| id.as_u64())
+            .collect(),
+        can_add_pkp_to_groups: m.add_pkp_to_groups.iter().map(|id| id.as_u64()).collect(),
+        can_remove_pkp_from_groups: m
+            .remove_pkp_from_groups
+            .iter()
+            .map(|id| id.as_u64())
+            .collect(),
+        can_execute_in_groups: m.execute_in_groups.iter().map(|id| id.as_u64()).collect(),
     }
 }
 
@@ -391,16 +407,7 @@ pub async fn list_api_keys(
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "list_api_keys failed"))?;
 
-    let api_key_items = list
-        .iter()
-        .map(|m| ApiKeyItem {
-            id: m.api_key_hash.to_string(),
-            name: m.metadata.name.clone(),
-            description: m.metadata.description.clone(),
-            expiration: m.expiration.to_string(),
-            balance: m.balance.as_u64(),
-        })
-        .collect();
+    let api_key_items = list.iter().map(usage_api_key_to_api_key_item).collect();
     Ok(api_key_items)
 }
 
