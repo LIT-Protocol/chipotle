@@ -300,6 +300,33 @@
       <div id="rebalance-amount-status" style="display: none; font-size: 0.85rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
     </div>
 
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.25rem">
+        <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Usage Details</h2>
+        <button type="button" id="btn-refresh-usage" style="margin-top:0;padding:0.3rem 0.75rem;font-size:0.8rem;">Refresh</button>
+      </div>
+      <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+        Direct contract reads: <code>pkpCount</code>, <code>accountCount</code>, <code>indexToAccountHashAt</code>
+      </p>
+      <div id="usage-results" style="display: none;">
+        <div class="result-row">
+          <span class="result-label">PKP count</span>
+          <span class="result-value" id="usage-pkp-count">—</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">Account count</span>
+          <span class="result-value" id="usage-account-count">—</span>
+        </div>
+        <div id="usage-accounts-table"></div>
+        <div id="usage-pagination" style="display:none;align-items:center;gap:0.75rem;margin-top:0.75rem;">
+          <button type="button" id="btn-usage-prev" style="margin-top:0;padding:0.3rem 0.75rem;font-size:0.8rem;" disabled>&#8592; Prev</button>
+          <span id="usage-page-info" style="color:var(--muted);font-size:0.85rem;font-family:'JetBrains Mono',monospace;">Page 1</span>
+          <button type="button" id="btn-usage-next" style="margin-top:0;padding:0.3rem 0.75rem;font-size:0.8rem;" disabled>Next &#8594;</button>
+        </div>
+      </div>
+      <div id="usage-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.umd.min.js"></script>
     <script src="app.js"></script>
   </body>

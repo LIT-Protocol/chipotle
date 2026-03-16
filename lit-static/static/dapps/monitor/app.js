@@ -47,6 +47,20 @@ const ACCOUNT_CONFIG_VIEW_ABI = [
     stateMutability: 'view',
     type: 'function',
   },
+  {
+    inputs: [],
+    name: 'accountCount',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [{ internalType: 'uint256', name: 'index', type: 'uint256' }],
+    name: 'indexToAccountHashAt',
+    outputs: [{ internalType: 'uint256', name: '', type: 'uint256' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
 ];
 
 const SET_REBALANCE_AMOUNT_ABI = [
@@ -251,12 +265,14 @@ async function loadNetwork() {
   await getNodeChainConfig(serverUrl); // Must run first to populate RPC URL
   await getApiPayers(serverUrl);
   await fetchContractValues();
+  await fetchUsageStats();
 }
 
 async function refreshBalances() {
   const serverUrl = getServerUrl();
   await getApiPayers(serverUrl);
   await fetchContractValues();
+  await fetchUsageStats();
 }
 
 (function () {
@@ -475,6 +491,108 @@ el('btn-set-rebalance-amount')?.addEventListener('click', async () => {
   } finally {
     btn.disabled = false;
   }
+});
+
+// ── Usage Details ─────────────────────────────────────────────────────────────
+
+let _usagePage = 0;
+let _usageAccountCount = 0;
+const USAGE_PAGE_SIZE = 10;
+
+async function fetchUsageStats() {
+  const rpcUrl = (el('cc-rpc-url')?.value || '').trim();
+  const contractAddress = (el('contract-address')?.value || '').trim();
+  const resultsEl = el('usage-results');
+  const errEl = el('usage-error');
+
+  if (!rpcUrl || !contractAddress) return;
+  if (errEl) errEl.style.display = 'none';
+  if (resultsEl) resultsEl.style.display = 'block';
+  setValue('usage-pkp-count', '…', false);
+  setValue('usage-account-count', '…', false);
+
+  try {
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const contract = new ethers.Contract(contractAddress, ACCOUNT_CONFIG_VIEW_ABI, provider);
+    const [pkpCount, accountCount] = await Promise.all([
+      contract.pkpCount(),
+      contract.accountCount(),
+    ]);
+    setValue('usage-pkp-count', String(pkpCount), false);
+    setValue('usage-account-count', String(accountCount), false);
+    _usageAccountCount = Number(accountCount);
+    _usagePage = 0;
+    await loadUsageAccountPage(0);
+  } catch (e) {
+    if (resultsEl) resultsEl.style.display = 'none';
+    if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
+  }
+}
+
+async function loadUsageAccountPage(page) {
+  const rpcUrl = (el('cc-rpc-url')?.value || '').trim();
+  const contractAddress = (el('contract-address')?.value || '').trim();
+  const tableEl = el('usage-accounts-table');
+  const paginationEl = el('usage-pagination');
+  const pageInfoEl = el('usage-page-info');
+  const prevBtn = el('btn-usage-prev');
+  const nextBtn = el('btn-usage-next');
+  if (!tableEl) return;
+
+  const total = _usageAccountCount;
+  const totalPages = Math.max(1, Math.ceil(total / USAGE_PAGE_SIZE));
+
+  if (total === 0) {
+    tableEl.innerHTML = '<p style="color:var(--muted);font-size:0.85rem;margin:0.75rem 0 0">No accounts registered.</p>';
+    if (paginationEl) paginationEl.style.display = 'none';
+    return;
+  }
+
+  if (paginationEl) paginationEl.style.display = 'flex';
+  if (pageInfoEl) pageInfoEl.textContent = `Page ${page + 1} of ${totalPages}`;
+  if (prevBtn) prevBtn.disabled = page === 0;
+  if (nextBtn) nextBtn.disabled = page >= totalPages - 1;
+
+  const start = page * USAGE_PAGE_SIZE;
+  const end = Math.min(start + USAGE_PAGE_SIZE, total);
+  tableEl.innerHTML = '<p style="color:var(--muted);font-size:0.85rem;margin:0.5rem 0 0">Loading…</p>';
+
+  try {
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const contract = new ethers.Contract(contractAddress, ACCOUNT_CONFIG_VIEW_ABI, provider);
+    const indices = Array.from({ length: end - start }, (_, i) => start + i);
+    const hashes = await Promise.all(indices.map(i => contract.indexToAccountHashAt(i)));
+
+    tableEl.innerHTML =
+      `<table style="margin-top:0.75rem">` +
+        `<thead><tr><th>#</th><th>Account Hash</th></tr></thead>` +
+        `<tbody>` +
+          hashes.map((hash, i) => {
+            const hex = '0x' + BigInt(hash).toString(16).padStart(64, '0');
+            return `<tr><td style="color:var(--muted);padding-right:1rem;white-space:nowrap">${start + i}</td><td>${hex}</td></tr>`;
+          }).join('') +
+        `</tbody>` +
+      `</table>`;
+  } catch (e) {
+    tableEl.innerHTML = `<p style="color:#f87171;font-size:0.85rem;margin:0.5rem 0 0">Error: ${e?.message || String(e)}</p>`;
+  }
+}
+
+el('btn-usage-prev')?.addEventListener('click', async () => {
+  if (_usagePage > 0) { _usagePage--; await loadUsageAccountPage(_usagePage); }
+});
+
+el('btn-usage-next')?.addEventListener('click', async () => {
+  if (_usagePage < Math.ceil(_usageAccountCount / USAGE_PAGE_SIZE) - 1) {
+    _usagePage++;
+    await loadUsageAccountPage(_usagePage);
+  }
+});
+
+el('btn-refresh-usage')?.addEventListener('click', async () => {
+  const btn = el('btn-refresh-usage');
+  btn.disabled = true;
+  try { await fetchUsageStats(); } finally { btn.disabled = false; }
 });
 
 el('cc-rpc-url')?.addEventListener('change', () => refreshBalances());
