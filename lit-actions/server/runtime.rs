@@ -259,14 +259,10 @@ pub(crate) async fn execute_js(
     let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
     let memory_limit_mb = memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB);
 
-    let mut worker = build_main_worker_and_inject_sdk(
-        &js_params,
-        &auth_context,
-        http_headers,
-        Some(memory_limit_mb),
-    )
-    .context("Error building main worker")
-    .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
+    let mut worker =
+        build_main_worker_and_inject_sdk(&None, &auth_context, http_headers, Some(memory_limit_mb))
+            .context("Error building main worker")
+            .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
 
     let op_state = worker.js_runtime.op_state();
     {
@@ -305,6 +301,26 @@ pub(crate) async fn execute_js(
         is_test_server,
     )
     .await?;
+
+    let js_params = js_params.as_ref().unwrap_or_default();
+    let js_func_params = match js_params.as_object().ok_or("".to_string()) {
+        Ok(obj) => obj
+            .iter()
+            .map(|(key, value)| format!(" {} : {} ", key, value))
+            .collect::<Vec<String>>()
+            .join(", "),
+        Err(_) => "".to_string(),
+    };
+
+    let code = format!(
+        "
+      {code}
+    
+        (async () => {{
+        const data = await main( {{ {js_func_params} }} );
+        LitActions.setResponse( {{ response: data }} );
+    }})();"
+    );
 
     if let Err(e) = worker
         .js_runtime
