@@ -18,7 +18,7 @@ import { LitApiServerClient } from "../litApiServer.ts";
 import { createAccountAndUsageKey } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
 import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
-import { BASE_URL } from "../defaults.ts";
+import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
 
 const SIMPLE_ENDPOINT = `${BASE_URL}/get_node_chain_config`;
 
@@ -54,7 +54,7 @@ export function setup(): ObservabilitySetupData {
 
 export default function (data: ObservabilitySetupData) {
   const { usageApiKey } = data;
-  const client = new LitApiServerClient({ baseUrl: BASE_URL });
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
 
   // ── 1. Simple endpoint: X-Request-Id is present and UUID v4 ────────────
   {
