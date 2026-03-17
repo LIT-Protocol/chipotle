@@ -8,6 +8,8 @@ use ethers::signers::{LocalWallet, Signer};
 use ethers::types::{H160, U256};
 use ethers_providers::Middleware;
 
+use lit_observability::metrics::{LitMetric, gauge};
+
 use crate::accounts::signable_contract::{
     SigningClient, get_admin_api_payer_contract, get_admin_api_signer,
     get_read_only_account_config_contract,
@@ -18,6 +20,37 @@ use crate::dstack::v1::get_lit_payer_key;
 
 const STALE_LEASE_SECS: u64 = 10;
 const CLEANUP_INTERVAL_SECS: u64 = 5;
+
+enum SignerPoolMetrics {
+    IdleSigners,
+}
+
+impl LitMetric for SignerPoolMetrics {
+    fn get_meter(&self) -> &str {
+        "lit.signer_pool"
+    }
+    fn get_namespace(&self) -> &str {
+        "signer_pool"
+    }
+    fn get_name(&self) -> &str {
+        match self {
+            Self::IdleSigners => "idle_signers",
+        }
+    }
+    fn get_description(&self) -> &str {
+        match self {
+            Self::IdleSigners => "Number of currently idle signers in the pool.",
+        }
+    }
+    fn get_unit(&self) -> &str {
+        ""
+    }
+}
+
+fn record_idle_signers(entries: &[SigningPoolEntry]) {
+    let idle = entries.iter().filter(|e| !e.in_use).count();
+    gauge::record(SignerPoolMetrics::IdleSigners, idle as u64, &[]);
+}
 
 #[derive(Clone)]
 pub struct SigningPoolEntry {
@@ -129,6 +162,7 @@ pub async fn get_signer_entries(
 async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<SigningPoolMessage>) {
     let mut payer_count = entries.len();
     tracing::info!("signer_pool: signer count: {payer_count}");
+    record_idle_signers(&entries);
     let mut interval = tokio::time::interval(Duration::from_secs(CLEANUP_INTERVAL_SECS));
     interval.tick().await; // discard the immediate first tick
 
@@ -170,6 +204,7 @@ async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<Signin
                                 });
                             }
                         }
+                        record_idle_signers(&entries);
                     }
                     Ok(SigningPoolMessage::Release { address }) => {
                         if let Some(entry) =
@@ -184,6 +219,7 @@ async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<Signin
                                 address
                             );
                         }
+                        record_idle_signers(&entries);
                     }
                     Err(_) => {
                         tracing::info!("signer_pool: channel closed, shutting down");
@@ -194,6 +230,7 @@ async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<Signin
             _ = interval.tick() => {
                 check_for_new_api_payer_count(&mut entries, &mut payer_count).await;
                 release_stale_leases(&mut entries).await;
+                record_idle_signers(&entries);
             }
         }
     }

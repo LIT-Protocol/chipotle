@@ -70,3 +70,26 @@ pub mod counter {
         counter.add(value, attributes);
     }
 }
+
+pub mod gauge {
+    use opentelemetry::{KeyValue, global};
+
+    pub fn record(metric: impl super::LitMetric, value: u64, attributes: &[KeyValue]) {
+        let meter = global::meter(metric.get_meter().to_string());
+        let name = metric.get_full_name().to_string();
+        let description = metric.get_description().to_string();
+        let unit = metric.get_unit().to_owned();
+
+        let mut gauge = meter.u64_gauge(name);
+
+        if !description.is_empty() {
+            gauge = gauge.with_description(description);
+        }
+        if !unit.is_empty() {
+            gauge = gauge.with_unit(unit);
+        }
+
+        let gauge = gauge.init();
+        gauge.record(value, attributes);
+    }
+}
