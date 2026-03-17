@@ -12,6 +12,7 @@ export const BASE_URL =
  * every request from a single run can be correlated in server-side logs.
  */
 export const K6_RUN_ID = `k6-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+console.log(`k6 run correlation id: ${K6_RUN_ID}`);
 
 /**
  * Common request parameters applied to every LitApiServerClient instance.
