@@ -44,29 +44,39 @@ pub trait LitMetric {
 }
 
 pub mod counter {
+    use std::sync::OnceLock;
+
+    use dashmap::DashMap;
+    use opentelemetry::metrics::Counter;
     use opentelemetry::{KeyValue, global};
+
+    static COUNTERS: OnceLock<DashMap<String, Counter<u64>>> = OnceLock::new();
 
     pub fn add_one(metric: impl super::LitMetric, attributes: &[KeyValue]) {
         add_value(metric, 1, attributes)
     }
 
     pub fn add_value(metric: impl super::LitMetric, value: u64, attributes: &[KeyValue]) {
-        // shallow wrapper - this could probably all be cached?  What's the best practice?
-        let meter = global::meter(metric.get_meter().to_string());
-        let name = metric.get_full_name().to_string();
-        let description = metric.get_description().to_string();
-        let unit = metric.get_unit().to_owned();
+        let counters = COUNTERS.get_or_init(DashMap::new);
+        let name = metric.get_full_name();
 
-        let mut counter = meter.u64_counter(name);
+        let counter = counters.entry(name.clone()).or_insert_with(|| {
+            let meter = global::meter(metric.get_meter().to_string());
+            let description = metric.get_description().to_string();
+            let unit = metric.get_unit().to_owned();
 
-        if !description.is_empty() {
-            counter = counter.with_description(description);
-        }
-        if !unit.is_empty() {
-            counter = counter.with_unit(unit);
-        }
+            let mut builder = meter.u64_counter(name);
 
-        let counter = counter.init();
+            if !description.is_empty() {
+                builder = builder.with_description(description);
+            }
+            if !unit.is_empty() {
+                builder = builder.with_unit(unit);
+            }
+
+            builder.init()
+        });
+
         counter.add(value, attributes);
     }
 }
