@@ -1,0 +1,8 @@
+# Our OTel metrics recorder bridge does not support Counter::absolute()
+# because OpenTelemetry counters are additive-only — there is no way to
+# set a counter to an absolute value.  Calling absolute() silently drops
+# the value and emits a warning at runtime.  Catching it at lint time is
+# strictly better.
+disallowed-methods = [
+    { path = "metrics::Counter::absolute", reason = "not supported by the OTel recorder bridge in lit-observability — use increment() instead" },
+]
