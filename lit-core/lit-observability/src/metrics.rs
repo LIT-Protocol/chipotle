@@ -64,8 +64,11 @@ impl CounterFn for OtelCounter {
         self.inner.add(value, &self.attributes);
     }
 
-    fn absolute(&self, _value: u64) {
-        // OTel counters are additive-only; absolute set is not supported.
+    fn absolute(&self, value: u64) {
+        tracing::warn!(
+            value,
+            "metrics::Counter::absolute() is not supported by the OTel bridge; use increment() instead"
+        );
     }
 }
 
