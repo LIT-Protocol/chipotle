@@ -4,7 +4,7 @@
  */
 import { LitApiServerClient } from "./litApiServer.ts";
 import { assertOk } from "./helpers.ts";
-import { BASE_URL } from "./defaults.ts";
+import { BASE_URL, COMMON_PARAMS } from "./defaults.ts";
 
 export interface AccountAndUsageKey {
   apiKey: string;
@@ -26,6 +26,7 @@ export function createAccountAndUsageKey(options: {
 }): AccountAndUsageKey {
   const client = new LitApiServerClient({
     baseUrl: options.baseUrl ?? BASE_URL,
+    commonRequestParameters: COMMON_PARAMS,
   });
   const prefix = options.setupContext ? `${options.setupContext}/` : "setup/";
 

@@ -11,7 +11,7 @@ import { LitApiServerClient } from "../litApiServer.ts";
 import { createAccountAndUsageKey } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
 import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
-import { BASE_URL } from "../defaults.ts";
+import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
 
 export interface IntegrationSetupData {
   apiKey: string;
@@ -42,7 +42,7 @@ export const options = {
 };
 
 export default function (data: IntegrationSetupData) {
-  const client = new LitApiServerClient({ baseUrl: BASE_URL });
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
   const authHeaders = { "X-Api-Key": data.apiKey };
 
   // ── 1. getNodeChainConfig ─────────────────────────────────────────────────
