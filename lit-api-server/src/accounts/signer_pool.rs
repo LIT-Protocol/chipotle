@@ -8,8 +8,6 @@ use ethers::signers::{LocalWallet, Signer};
 use ethers::types::{H160, U256};
 use ethers_providers::Middleware;
 
-use lit_observability::metrics::{LitMetric, gauge};
-
 use crate::accounts::signable_contract::{
     SigningClient, get_admin_api_payer_contract, get_admin_api_signer,
     get_read_only_account_config_contract,
@@ -21,35 +19,9 @@ use crate::dstack::v1::get_lit_payer_key;
 const STALE_LEASE_SECS: u64 = 10;
 const CLEANUP_INTERVAL_SECS: u64 = 5;
 
-enum SignerPoolMetrics {
-    IdleSigners,
-}
-
-impl LitMetric for SignerPoolMetrics {
-    fn get_meter(&self) -> &str {
-        "lit.signer_pool"
-    }
-    fn get_namespace(&self) -> &str {
-        "signer_pool"
-    }
-    fn get_name(&self) -> &str {
-        match self {
-            Self::IdleSigners => "idle_signers",
-        }
-    }
-    fn get_description(&self) -> &str {
-        match self {
-            Self::IdleSigners => "Number of currently idle signers in the pool.",
-        }
-    }
-    fn get_unit(&self) -> &str {
-        ""
-    }
-}
-
 fn record_idle_signers(entries: &[SigningPoolEntry]) {
     let idle = entries.iter().filter(|e| !e.in_use).count();
-    gauge::record(SignerPoolMetrics::IdleSigners, idle as u64, &[]);
+    metrics::gauge!("signer_pool.idle_signers").set(idle as f64);
 }
 
 #[derive(Clone)]
