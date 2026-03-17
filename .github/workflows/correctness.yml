@@ -29,28 +29,33 @@ jobs:
       - name: observability-headers.spec.ts
         env:
           BASE_URL: ${{ inputs.api_root_url }}
+          K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-observability-headers
         run: k6 run k6/correctness/observability-headers.spec.ts
 
       - name: integration.spec.ts
         if: ${{ !cancelled() }}
         env:
           BASE_URL: ${{ inputs.api_root_url }}
+          K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-integration
         run: k6 run k6/correctness/integration.spec.ts
 
       - name: new-account.spec.ts
         if: ${{ !cancelled() }}
         env:
           BASE_URL: ${{ inputs.api_root_url }}
+          K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-new-account
         run: k6 run k6/correctness/new-account.spec.ts
 
       - name: lit-action-ecdsa-sign.spec.ts
         if: ${{ !cancelled() }}
         env:
           BASE_URL: ${{ inputs.api_root_url }}
+          K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-ecdsa-sign
         run: k6 run k6/correctness/lit-action-ecdsa-sign.spec.ts
 
       - name: lit-action-encrypt-decrypt.spec.ts
         if: ${{ !cancelled() }}
         env:
           BASE_URL: ${{ inputs.api_root_url }}
+          K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-encrypt-decrypt
         run: k6 run k6/correctness/lit-action-encrypt-decrypt.spec.ts

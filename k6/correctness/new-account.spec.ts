@@ -9,7 +9,7 @@ import { sleep } from "k6";
 import { checkAndLog } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
 import { assertOk } from "../helpers.ts";
-import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
+import { BASE_URL, COMMON_PARAMS, K6_RUN_ID } from "../defaults.ts";
 
 export const options = {
   vus: 2,
@@ -20,6 +20,10 @@ export const options = {
     checks: ["rate==1"],
   },
 };
+
+export function setup() {
+  console.log(`k6 run correlation id: ${K6_RUN_ID}`);
+}
 
 export default function () {
   // Stagger start to reduce simultaneous blockchain tx submissions (avoids nonce conflicts)

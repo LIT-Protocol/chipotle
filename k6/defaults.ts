@@ -10,9 +10,14 @@ export const BASE_URL =
 /**
  * A unique ID for this k6 run, used as the X-Correlation-Id header so that
  * every request from a single run can be correlated in server-side logs.
+ *
+ * Pass K6_CORRELATION_ID as an env var to ensure the same ID is used across
+ * all k6 phases (init, setup, VU, teardown). The justfile recipes do this
+ * automatically. Without it, each phase generates its own ID.
  */
-export const K6_RUN_ID = `k6-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-console.log(`k6 run correlation id: ${K6_RUN_ID}`);
+export const K6_RUN_ID =
+  __ENV.K6_CORRELATION_ID ||
+  `k6-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
 /**
  * Common request parameters applied to every LitApiServerClient instance.
