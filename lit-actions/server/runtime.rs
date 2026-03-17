@@ -320,7 +320,9 @@ pub(crate) async fn execute_js(
     
         (async () => {{
         const data = await main( {{ {js_func_params} }} );
-        LitActions.setResponse( {{ response: data }} );
+        if (typeof data !== \"undefined\") {{
+          LitActions.setResponse( {{ response: data }} );
+        }}
     }})();"
     );
 
