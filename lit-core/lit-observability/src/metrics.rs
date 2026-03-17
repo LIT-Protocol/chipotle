@@ -72,24 +72,35 @@ pub mod counter {
 }
 
 pub mod gauge {
+    use std::sync::OnceLock;
+
+    use dashmap::DashMap;
+    use opentelemetry::metrics::Gauge;
     use opentelemetry::{KeyValue, global};
 
+    static GAUGES: OnceLock<DashMap<String, Gauge<u64>>> = OnceLock::new();
+
     pub fn record(metric: impl super::LitMetric, value: u64, attributes: &[KeyValue]) {
-        let meter = global::meter(metric.get_meter().to_string());
-        let name = metric.get_full_name().to_string();
-        let description = metric.get_description().to_string();
-        let unit = metric.get_unit().to_owned();
+        let gauges = GAUGES.get_or_init(DashMap::new);
+        let name = metric.get_full_name();
 
-        let mut gauge = meter.u64_gauge(name);
+        let gauge = gauges.entry(name.clone()).or_insert_with(|| {
+            let meter = global::meter(metric.get_meter().to_string());
+            let description = metric.get_description().to_string();
+            let unit = metric.get_unit().to_owned();
 
-        if !description.is_empty() {
-            gauge = gauge.with_description(description);
-        }
-        if !unit.is_empty() {
-            gauge = gauge.with_unit(unit);
-        }
+            let mut builder = meter.u64_gauge(name);
 
-        let gauge = gauge.init();
+            if !description.is_empty() {
+                builder = builder.with_description(description);
+            }
+            if !unit.is_empty() {
+                builder = builder.with_unit(unit);
+            }
+
+            builder.init()
+        });
+
         gauge.record(value, attributes);
     }
 }
