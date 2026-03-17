@@ -302,16 +302,8 @@ pub(crate) async fn execute_js(
     )
     .await?;
 
-    // Convert js_params to a string of key:value pairs
     let js_params = js_params.as_ref().unwrap_or_default();
-    let js_func_params = match js_params.as_object().ok_or("".to_string()) {
-        Ok(obj) => obj
-            .iter()
-            .map(|(key, value)| format!(" {} : {} ", key, value))
-            .collect::<Vec<String>>()
-            .join(", "),
-        Err(_) => "".to_string(),
-    };
+    let js_func_params = js_params.to_string();
 
     // Add a wrapper function so that we can catch "return" statements and set the response
     let code = format!(
@@ -319,7 +311,8 @@ pub(crate) async fn execute_js(
       {code}
     
         (async () => {{
-        const data = await main( {{ {js_func_params} }} );
+        const params = {js_func_params} ;
+         const data = await main(params);
         if (typeof data !== \"undefined\") {{
           LitActions.setResponse( {{ response: data }} );
         }}
