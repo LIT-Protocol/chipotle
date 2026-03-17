@@ -49,9 +49,7 @@ use opentelemetry::{KeyValue, global};
 const METER_NAME: &str = "lit";
 
 fn key_to_attributes(key: &Key) -> Vec<KeyValue> {
-    key.labels()
-        .map(|l| KeyValue::new(l.key().to_string(), l.value().to_string()))
-        .collect()
+    key.labels().map(|l| KeyValue::new(l.key().to_string(), l.value().to_string())).collect()
 }
 
 // --- Counter bridge ---
