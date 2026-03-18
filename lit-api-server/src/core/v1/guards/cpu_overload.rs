@@ -48,7 +48,7 @@ impl CpuOverloadMonitor {
         tokio::spawn(async move {
             let mut was_overloaded = false;
             loop {
-                if let Some(load_avg) = read_1m_load_avg() {
+                if let Some(load_avg) = read_1m_load_avg().await {
                     let is_overloaded = load_avg > threshold;
                     flag.store(is_overloaded, Ordering::Relaxed);
 
@@ -80,8 +80,9 @@ impl CpuOverloadMonitor {
 }
 
 /// Reads the 1-minute load average from `/proc/loadavg`.
-fn read_1m_load_avg() -> Option<f64> {
-    std::fs::read_to_string("/proc/loadavg")
+async fn read_1m_load_avg() -> Option<f64> {
+    tokio::fs::read_to_string("/proc/loadavg")
+        .await
         .ok()?
         .split_whitespace()
         .next()?
@@ -172,10 +173,10 @@ mod tests {
         assert_eq!(response.status(), Status::TooManyRequests);
     }
 
-    #[test]
-    fn read_load_avg_returns_some_on_linux() {
+    #[tokio::test]
+    async fn read_load_avg_returns_some_on_linux() {
         // /proc/loadavg should always be readable on Linux.
-        let load = read_1m_load_avg();
+        let load = read_1m_load_avg().await;
         assert!(load.is_some(), "/proc/loadavg should be readable");
         assert!(load.unwrap() >= 0.0);
     }
