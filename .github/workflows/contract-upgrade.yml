@@ -1,0 +1,95 @@
+# Upgrade (or deploy) Diamond contracts on Base Sepolia or Base Mainnet.
+#
+# This workflow compiles the Solidity contracts, builds the Rust
+# contract_deployer binary, and runs it with the chosen action/network.
+#
+# Required secrets:
+#   CONTRACT_DEPLOYER_SECRET       - deployer wallet private key (Base Sepolia)
+#   CONTRACT_DEPLOYER_SECRET_BASE  - deployer wallet private key (Base Mainnet)
+
+name: Contract Upgrade
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "deploy (new diamond) or update (existing diamond)"
+        required: true
+        type: choice
+        options:
+          - update
+          - deploy
+        default: update
+      network:
+        description: "Target network"
+        required: true
+        type: choice
+        options:
+          - base-sepolia
+          - base
+        default: base-sepolia
+      address:
+        description: "Diamond contract address (required for update)"
+        required: false
+        type: string
+
+concurrency:
+  group: contract-upgrade-${{ github.event.inputs.network }}
+  cancel-in-progress: false
+
+jobs:
+  contract-upgrade:
+    name: ${{ inputs.action }} on ${{ inputs.network }}
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate inputs
+        run: |
+          if [ "${{ inputs.action }}" = "update" ] && [ -z "${{ inputs.address }}" ]; then
+            echo "::error::Diamond contract address is required for the update action."
+            exit 1
+          fi
+
+      - uses: dtolnay/rust-toolchain@1.91
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install contract dependencies
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npm ci
+
+      - name: Compile contracts
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: |
+          npx hardhat clean
+          npx hardhat compile
+          node generate-diamond-abi.mjs
+
+      - name: Build contract deployer
+        working-directory: lit-api-server/blockchain/rust_generator_and_deployer
+        run: cargo build --bin contract_deployer
+
+      - name: Select deployer secret
+        id: secret
+        run: |
+          if [ "${{ inputs.network }}" = "base" ]; then
+            echo "key=${{ secrets.CONTRACT_DEPLOYER_SECRET_BASE }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "key=${{ secrets.CONTRACT_DEPLOYER_SECRET }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run contract deployer
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: |
+          DEPLOYER=../rust_generator_and_deployer/target/debug/contract_deployer
+
+          ARGS="--action=${{ inputs.action }} --network=${{ inputs.network }} --abifolder=artifacts/contracts --secret=${{ steps.secret.outputs.key }}"
+
+          if [ "${{ inputs.action }}" = "update" ]; then
+            ARGS="$ARGS --address=${{ inputs.address }}"
+          fi
+
+          $DEPLOYER $ARGS
