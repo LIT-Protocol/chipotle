@@ -665,30 +665,6 @@
           "internalType": "uint256",
           "name": "cidHash",
           "type": "uint256"
-        }
-      ],
-      "name": "canExecuteActionFast",
-      "outputs": [
-        {
-          "internalType": "bool",
-          "name": "",
-          "type": "bool"
-        }
-      ],
-      "stateMutability": "view",
-      "type": "function"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "uint256",
-          "name": "apiKeyHash",
-          "type": "uint256"
-        },
-        {
-          "internalType": "uint256",
-          "name": "cidHash",
-          "type": "uint256"
         },
         {
           "internalType": "address",
@@ -706,6 +682,30 @@
         {
           "internalType": "bool",
           "name": "canUseWallet",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "cidHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "canExecuteActionFast",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
           "type": "bool"
         }
       ],
