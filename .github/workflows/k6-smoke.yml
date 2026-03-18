@@ -29,4 +29,5 @@ jobs:
       - name: smoke.spec.ts
         env:
           BASE_URL: ${{ inputs.api_root_url }}
+          K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-smoke
         run: k6 run k6/smoke.spec.ts

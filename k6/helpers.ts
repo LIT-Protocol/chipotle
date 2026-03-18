@@ -39,6 +39,19 @@ export function checkAndLog<T>(
 }
 
 /**
+ * Extract X-Correlation-Id and X-Request-Id from a response for diagnostics.
+ */
+function responseTraceIds(response: Response | undefined): string {
+  if (!response?.headers) return "";
+  const correlationId = response.headers["X-Correlation-Id"] ?? "";
+  const requestId = response.headers["X-Request-Id"] ?? "";
+  const parts: string[] = [];
+  if (correlationId) parts.push(`correlation_id=${correlationId}`);
+  if (requestId) parts.push(`request_id=${requestId}`);
+  return parts.length > 0 ? ` | ${parts.join(" ")}` : "";
+}
+
+/**
  * Assert HTTP response is 2xx. Logs failure and runs checkAndLog for k6 metrics.
  * Returns true if ok, false otherwise.
  */
@@ -66,7 +79,7 @@ export function assertOk(
         msg = (response.body as string) || "(no body)";
       }
     }
-    console.error(`FAIL ${name} | ${endpoint} | ${status} | ${msg}`);
+    console.error(`FAIL ${name} | ${endpoint} | ${status} | ${msg}${responseTraceIds(response)}`);
   }
   checkAndLog(response, {
     [`${name} 2xx`]: (r) =>

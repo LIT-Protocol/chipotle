@@ -18,7 +18,7 @@ import { LitApiServerClient } from "../litApiServer.ts";
 import { createAccountAndUsageKey } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
 import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
-import { BASE_URL } from "../defaults.ts";
+import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
 
 const SIMPLE_ENDPOINT = `${BASE_URL}/get_node_chain_config`;
 
@@ -54,7 +54,7 @@ export function setup(): ObservabilitySetupData {
 
 export default function (data: ObservabilitySetupData) {
   const { usageApiKey } = data;
-  const client = new LitApiServerClient({ baseUrl: BASE_URL });
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
 
   // ── 1. Simple endpoint: X-Request-Id is present and UUID v4 ────────────
   {
@@ -160,7 +160,9 @@ export default function (data: ObservabilitySetupData) {
 
   // ── 8. lit_action: no correlation header when not sent ─────────────────
   {
-    const laRes = client.litAction(
+    // Use a client without COMMON_PARAMS so X-Correlation-Id is truly absent.
+    const bareClient = new LitApiServerClient({ baseUrl: BASE_URL });
+    const laRes = bareClient.litAction(
       { code: HELLO_WORLD_CODE, js_params: null },
       { "X-Api-Key": usageApiKey } as any,
     );

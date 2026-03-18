@@ -13,13 +13,13 @@ The simplest pattern: retrieve a PKP's private key and sign an arbitrary message
 
 ```javascript
 // js_params: { pkpId, message }
-(async () => {
+async function main() {
   const wallet = new ethers.Wallet(
     await Lit.Actions.getPrivateKey({ pkpId })
   );
   const signature = await wallet.signMessage(message);
-  Lit.Actions.setResponse({ response: { message, signature } });
-})();
+  return { message, signature };
+}
 ```
 
 The caller can verify the signature against the PKP's public key (or wallet address) to confirm the message originated from this action.
@@ -32,10 +32,10 @@ Encrypt a sensitive string so that only the holder of the PKP can later decrypt 
 
 ```javascript
 // js_params: { pkpId, secret }
-(async () => {
+async function main() {
   const ciphertext = await Lit.Actions.Encrypt({ pkpId, message: secret });
-  Lit.Actions.setResponse({ response: { ciphertext } });
-})();
+  return { ciphertext };
+}
 ```
 
 Store the returned `ciphertext` anywhere — IPFS, a smart contract, a database — and retrieve the plaintext only when needed using the Decrypt action below.
@@ -48,10 +48,10 @@ Decrypt a ciphertext that was previously produced by `Lit.Actions.Encrypt` using
 
 ```javascript
 // js_params: { pkpId, ciphertext }
-(async () => {
+async function main() {
   const plaintext = await Lit.Actions.Decrypt({ pkpId, ciphertext });
-  Lit.Actions.setResponse({ response: { plaintext } });
-})();
+  return { plaintext };
+}
 ```
 
 ---
@@ -62,7 +62,7 @@ Fetch the current price of ETH from a public API and sign the result. The caller
 
 ```javascript
 // js_params: { pkpId }
-(async () => {
+async function main() {
   const res = await fetch(
     "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
   );
@@ -70,8 +70,7 @@ Fetch the current price of ETH from a public API and sign the result. The caller
   const price = data?.ethereum?.usd;
 
   if (typeof price !== "number") {
-    Lit.Actions.setResponse({ response: { error: "Price fetch failed" } });
-    return;
+    return { error: "Price fetch failed" };
   }
 
   const payload = `ETH/USD: ${price}`;
@@ -80,8 +79,8 @@ Fetch the current price of ETH from a public API and sign the result. The caller
   );
   const signature = await wallet.signMessage(payload);
 
-  Lit.Actions.setResponse({ response: { price, payload, signature } });
-})();
+  return { price, payload, signature };
+}
 ```
 
 A smart contract can call `ecrecover` on the signature to confirm the price was signed by a specific, known PKP address — without trusting any off-chain intermediary.
@@ -95,7 +94,7 @@ Only sign a message if the current temperature at a given location exceeds a thr
 ```javascript
 // js_params: { pkpId, city, minTempCelsius, message }
 // Example: { pkpId: "0x...", city: "London", minTempCelsius: 20, message: "Approved" }
-(async () => {
+async function main() {
   const apiKey = await Lit.Actions.Decrypt({ pkpId, ciphertext: encryptedWeatherApiKey });
 
   const res = await fetch(
@@ -105,15 +104,11 @@ Only sign a message if the current temperature at a given location exceeds a thr
   const temp = data?.main?.temp;
 
   if (typeof temp !== "number") {
-    Lit.Actions.setResponse({ response: { error: "Weather fetch failed" } });
-    return;
+    return { error: "Weather fetch failed" };
   }
 
   if (temp < minTempCelsius) {
-    Lit.Actions.setResponse({
-      response: { signed: false, reason: `Temperature ${temp}°C is below threshold of ${minTempCelsius}°C` },
-    });
-    return;
+    return { signed: false, reason: `Temperature ${temp}°C is below threshold of ${minTempCelsius}°C` };
   }
 
   const wallet = new ethers.Wallet(
@@ -121,8 +116,8 @@ Only sign a message if the current temperature at a given location exceeds a thr
   );
   const signature = await wallet.signMessage(message);
 
-  Lit.Actions.setResponse({ response: { signed: true, temp, message, signature } });
-})();
+  return { signed: true, temp, message, signature };
+}
 ```
 
 Note the use of `Lit.Actions.Decrypt` to retrieve the weather API key securely at runtime — the key is stored as ciphertext and never exposed in the action code or `js_params`. Pass `encryptedWeatherApiKey` as a `js_params` value (produced by Example 2).
@@ -136,7 +131,7 @@ Call a view function on an EVM smart contract and return the result. Useful for 
 ```javascript
 // js_params: { pkpId, contractAddress, holderAddress }
 // Checks the ERC-20 balance of holderAddress and signs the result.
-(async () => {
+async function main() {
   const rpcUrl = "https://mainnet.base.org";
   const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
 
@@ -159,10 +154,8 @@ Call a view function on an EVM smart contract and return the result. Useful for 
   );
   const signature = await wallet.signMessage(payload);
 
-  Lit.Actions.setResponse({
-    response: { holder: holderAddress, balance: balanceFormatted, symbol, payload, signature },
-  });
-})();
+  return { holder: holderAddress, balance: balanceFormatted, symbol, payload, signature };
+}
 ```
 
 ---
@@ -174,7 +167,7 @@ Construct, sign, and broadcast an ETH transfer transaction from a PKP wallet. Th
 ```javascript
 // js_params: { pkpId, toAddress, amountEth, chainId, rpcUrl }
 // Example: { pkpId: "0x...", toAddress: "0x...", amountEth: "0.001", chainId: 8453, rpcUrl: "https://mainnet.base.org" }
-(async () => {
+async function main() {
   const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
   const wallet = new ethers.Wallet(
     await Lit.Actions.getPrivateKey({ pkpId }),
@@ -189,16 +182,14 @@ Construct, sign, and broadcast an ETH transfer transaction from a PKP wallet. Th
 
   const receipt = await tx.wait();
 
-  Lit.Actions.setResponse({
-    response: {
-      txHash: receipt.transactionHash,
-      from: wallet.address,
-      to: toAddress,
-      amountEth,
-      blockNumber: receipt.blockNumber,
-    },
-  });
-})();
+  return {
+    txHash: receipt.transactionHash,
+    from: wallet.address,
+    to: toAddress,
+    amountEth,
+    blockNumber: receipt.blockNumber,
+  };
+}
 ```
 
 <Warning>

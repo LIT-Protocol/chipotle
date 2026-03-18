@@ -81,11 +81,12 @@ test *names='smoke':
     set -eu
     command -v k6 >/dev/null 2>&1 || { echo "error: k6 not found. Install from https://grafana.com/docs/k6/latest/set-up/install-k6/"; exit 1; }
     for t in {{names}}; do
+        corr_id="k6-$(date +%s)-$(head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"
         case "$t" in
-            smoke)       k6 run k6/smoke.spec.ts ;;
-            integration) k6 run k6/integration.spec.ts ;;
-            ecdsa-sign)  k6 run k6/lit-action-ecdsa-sign.spec.ts ;;
-            sample)      k6 run k6/k6-script.sample.ts ;;
+            smoke)       K6_CORRELATION_ID="$corr_id" k6 run k6/smoke.spec.ts ;;
+            integration) K6_CORRELATION_ID="$corr_id" k6 run k6/integration.spec.ts ;;
+            ecdsa-sign)  K6_CORRELATION_ID="$corr_id" k6 run k6/lit-action-ecdsa-sign.spec.ts ;;
+            sample)      K6_CORRELATION_ID="$corr_id" k6 run k6/k6-script.sample.ts ;;
             *) echo "error: unknown test '$t'. Available: smoke, integration, ecdsa-sign, sample"; exit 1 ;;
         esac
     done

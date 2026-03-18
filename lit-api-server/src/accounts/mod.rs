@@ -15,6 +15,7 @@ use crate::core::v1::models::request::AddUsageApiKeyRequest;
 use crate::utils::parse_with_hash::api_key_hash;
 use crate::utils::parse_with_hash::ipfs_cid_to_u256;
 use ethers::types::{Address, H160, U256};
+use tracing::instrument;
 
 /// Create a new account. `initial_balance` is stored on the account's apiKey (AccountConfig.accountApiKey.balance).
 pub async fn new_account(
@@ -315,6 +316,12 @@ pub async fn register_wallet_derivation(
 
 /// Get the derivation path for a wallet address under an account (read-only).
 /// `wallet_address` is the hex address (with or without 0x). Returns the U256 derivation path, or errors if not set.
+#[instrument(
+    name = "accounts::get_wallet_derivation",
+    level = "debug",
+    skip_all,
+    err
+)]
 pub async fn get_wallet_derivation(api_key: &str, wallet_address: H160) -> Result<U256> {
     let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
@@ -453,6 +460,7 @@ pub async fn get_rebalance_amount() -> Result<U256> {
     Ok(rebalance_amount)
 }
 
+#[instrument(name = "accounts::can_execute_action", level = "debug", skip_all, err)]
 pub async fn can_execute_action(api_key: &str, cid_hash: U256) -> Result<bool> {
     let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
@@ -463,6 +471,12 @@ pub async fn can_execute_action(api_key: &str, cid_hash: U256) -> Result<bool> {
     Ok(can_execute)
 }
 
+#[instrument(
+    name = "accounts::can_use_wallet_in_action",
+    level = "debug",
+    skip_all,
+    err
+)]
 pub async fn can_use_wallet_in_action(
     api_key: &str,
     cid_hash: U256,

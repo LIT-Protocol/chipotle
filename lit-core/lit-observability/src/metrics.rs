@@ -32,41 +32,215 @@ pub(crate) fn init_metrics_provider(
         })
 }
 
-pub trait LitMetric {
-    fn get_meter(&self) -> &str;
-    fn get_namespace(&self) -> &str;
-    fn get_name(&self) -> &str;
-    fn get_full_name(&self) -> String {
-        format!("{}.{}", self.get_namespace(), self.get_name())
-    }
-    fn get_description(&self) -> &str;
-    fn get_unit(&self) -> &str;
-}
+// ---------------------------------------------------------------------------
+// OTel-backed `metrics` facade recorder (only available with the otlp feature)
+// ---------------------------------------------------------------------------
 
-pub mod counter {
+#[cfg(feature = "otlp")]
+mod recorder {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use dashmap::DashMap;
+    use metrics::{
+        Counter, CounterFn, Gauge, GaugeFn, Histogram, HistogramFn, Key, KeyName, Metadata,
+        Recorder, SharedString, Unit,
+    };
     use opentelemetry::{KeyValue, global};
 
-    pub fn add_one(metric: impl super::LitMetric, attributes: &[KeyValue]) {
-        add_value(metric, 1, attributes)
+    const METER_NAME: &str = "lit";
+
+    fn key_to_attributes(key: &Key) -> Vec<KeyValue> {
+        key.labels().map(|l| KeyValue::new(l.key().to_string(), l.value().to_string())).collect()
     }
 
-    pub fn add_value(metric: impl super::LitMetric, value: u64, attributes: &[KeyValue]) {
-        // shallow wrapper - this could probably all be cached?  What's the best practice?
-        let meter = global::meter(metric.get_meter().to_string());
-        let name = metric.get_full_name().to_string();
-        let description = metric.get_description().to_string();
-        let unit = metric.get_unit().to_owned();
+    // --- Counter bridge ---
 
-        let mut counter = meter.u64_counter(name);
-
-        if !description.is_empty() {
-            counter = counter.with_description(description);
-        }
-        if !unit.is_empty() {
-            counter = counter.with_unit(unit);
-        }
-
-        let counter = counter.init();
-        counter.add(value, attributes);
+    struct OtelCounter {
+        inner: opentelemetry::metrics::Counter<u64>,
+        attributes: Vec<KeyValue>,
     }
+
+    impl CounterFn for OtelCounter {
+        fn increment(&self, value: u64) {
+            self.inner.add(value, &self.attributes);
+        }
+
+        fn absolute(&self, value: u64) {
+            tracing::warn!(
+                value,
+                "metrics::Counter::absolute() is not supported by the OTel bridge; use increment() instead"
+            );
+        }
+    }
+
+    // --- Gauge bridge ---
+
+    struct OtelGauge {
+        inner: opentelemetry::metrics::Gauge<f64>,
+        attributes: Vec<KeyValue>,
+        current: AtomicU64, // stores f64 bits
+    }
+
+    impl GaugeFn for OtelGauge {
+        fn increment(&self, value: f64) {
+            loop {
+                let bits = self.current.load(Ordering::Relaxed);
+                let new = f64::from_bits(bits) + value;
+                if self
+                    .current
+                    .compare_exchange_weak(
+                        bits,
+                        new.to_bits(),
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    )
+                    .is_ok()
+                {
+                    self.inner.record(new, &self.attributes);
+                    break;
+                }
+            }
+        }
+
+        fn decrement(&self, value: f64) {
+            self.increment(-value);
+        }
+
+        fn set(&self, value: f64) {
+            self.current.store(value.to_bits(), Ordering::Relaxed);
+            self.inner.record(value, &self.attributes);
+        }
+    }
+
+    // --- Histogram bridge ---
+
+    struct OtelHistogram {
+        inner: opentelemetry::metrics::Histogram<f64>,
+        attributes: Vec<KeyValue>,
+    }
+
+    impl HistogramFn for OtelHistogram {
+        fn record(&self, value: f64) {
+            self.inner.record(value, &self.attributes);
+        }
+    }
+
+    // --- Recorder ---
+
+    struct OtelRecorder {
+        otel_counters: DashMap<String, opentelemetry::metrics::Counter<u64>>,
+        otel_gauges: DashMap<String, opentelemetry::metrics::Gauge<f64>>,
+        otel_histograms: DashMap<String, opentelemetry::metrics::Histogram<f64>>,
+        descriptions: DashMap<String, String>,
+    }
+
+    impl OtelRecorder {
+        fn new() -> Self {
+            Self {
+                otel_counters: DashMap::new(),
+                otel_gauges: DashMap::new(),
+                otel_histograms: DashMap::new(),
+                descriptions: DashMap::new(),
+            }
+        }
+
+        fn get_description(&self, name: &str) -> Option<String> {
+            self.descriptions.get(name).map(|d| d.value().clone())
+        }
+    }
+
+    impl Recorder for OtelRecorder {
+        fn describe_counter(&self, key: KeyName, _unit: Option<Unit>, description: SharedString) {
+            self.descriptions.insert(key.as_str().to_string(), description.to_string());
+        }
+
+        fn describe_gauge(&self, key: KeyName, _unit: Option<Unit>, description: SharedString) {
+            self.descriptions.insert(key.as_str().to_string(), description.to_string());
+        }
+
+        fn describe_histogram(&self, key: KeyName, _unit: Option<Unit>, description: SharedString) {
+            self.descriptions.insert(key.as_str().to_string(), description.to_string());
+        }
+
+        fn register_counter(&self, key: &Key, _metadata: &Metadata<'_>) -> Counter {
+            let name = key.name().to_string();
+            let attributes = key_to_attributes(key);
+
+            let otel_counter = self
+                .otel_counters
+                .entry(name.clone())
+                .or_insert_with(|| {
+                    let meter = global::meter(METER_NAME);
+                    let mut builder = meter.u64_counter(name.clone());
+                    if let Some(desc) = self.get_description(&name) {
+                        builder = builder.with_description(desc);
+                    }
+                    builder.init()
+                })
+                .clone();
+
+            Counter::from_arc(Arc::new(OtelCounter { inner: otel_counter, attributes }))
+        }
+
+        fn register_gauge(&self, key: &Key, _metadata: &Metadata<'_>) -> Gauge {
+            let name = key.name().to_string();
+            let attributes = key_to_attributes(key);
+
+            let otel_gauge = self
+                .otel_gauges
+                .entry(name.clone())
+                .or_insert_with(|| {
+                    let meter = global::meter(METER_NAME);
+                    let mut builder = meter.f64_gauge(name.clone());
+                    if let Some(desc) = self.get_description(&name) {
+                        builder = builder.with_description(desc);
+                    }
+                    builder.init()
+                })
+                .clone();
+
+            Gauge::from_arc(Arc::new(OtelGauge {
+                inner: otel_gauge,
+                attributes,
+                current: AtomicU64::new(0f64.to_bits()),
+            }))
+        }
+
+        fn register_histogram(&self, key: &Key, _metadata: &Metadata<'_>) -> Histogram {
+            let name = key.name().to_string();
+            let attributes = key_to_attributes(key);
+
+            let otel_histogram = self
+                .otel_histograms
+                .entry(name.clone())
+                .or_insert_with(|| {
+                    let meter = global::meter(METER_NAME);
+                    let mut builder = meter.f64_histogram(name.clone());
+                    if let Some(desc) = self.get_description(&name) {
+                        builder = builder.with_description(desc);
+                    }
+                    builder.init()
+                })
+                .clone();
+
+            Histogram::from_arc(Arc::new(OtelHistogram { inner: otel_histogram, attributes }))
+        }
+    }
+
+    /// Install the OTel-backed metrics recorder as the global `metrics` facade
+    /// backend. Call this after the OTel `MeterProvider` has been set globally.
+    pub fn install() {
+        if let Err(e) = metrics::set_global_recorder(OtelRecorder::new()) {
+            tracing::warn!("metrics recorder already installed: {e}");
+        }
+    }
+}
+
+/// Install the OTel-backed metrics recorder. Without the `otlp` feature this
+/// is a no-op — call sites can still use `metrics::counter!` / `metrics::gauge!`
+/// freely; the values simply won't be exported.
+pub fn install_recorder() {
+    #[cfg(feature = "otlp")]
+    recorder::install();
 }

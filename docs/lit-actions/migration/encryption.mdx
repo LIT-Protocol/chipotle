@@ -40,32 +40,32 @@ Because the action is just an HTTP call, no SDK is required — you can call the
 
 ```js
 // jsParams: { pkpId, message, optional-userToken }
+async function main() {
+  // Optional gate: verify caller before encrypting
+  const authRes = await some-gated-check;
+  if (!authRes.ok) {
+    return { error: 'Unauthorized' };
+  }
 
-// Optional gate: verify caller before encrypting
-const authRes = await some-gated-check
-if (!authRes.ok) {
-  Lit.Actions.setResponse({ response: { error: 'Unauthorized' } });
-  return;
+  const ciphertext = await Lit.Actions.Encrypt({ pkpId, message });
+  return { ciphertext };
 }
-
-const ciphertext = await Lit.Actions.Encrypt({ pkpId, message });
-Lit.Actions.setResponse({ response: { ciphertext } });
 ```
 
 ### Decrypt (with optional gating)
 
 ```js
 // jsParams: { pkpId, ciphertext, optional-userToken }
+async function main() {
+  // Optional gate: check condition before decrypting
+  const authRes = await some-gated-check;
+  if (!authRes.ok) {
+    return { error: 'Unauthorized' };
+  }
 
-// Optional gate: check condition before decrypting
-const authRes = await some-gated-check
-if (!authRes.ok) {
-  Lit.Actions.setResponse({ response: { error: 'Unauthorized' } });
-  return;
+  const plaintext = await Lit.Actions.Decrypt({ pkpId, ciphertext });
+  return { plaintext };
 }
-
-const plaintext = await Lit.Actions.Decrypt({ pkpId, ciphertext });
-Lit.Actions.setResponse({ response: { plaintext } });
 ```
 
 The gate can be anything — an auth token check, a smart contract read, a price feed, a weather API, or simply a value in `jsParams`. The encrypt/decrypt calls only happen if your logic allows it.

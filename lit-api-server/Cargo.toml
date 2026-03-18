@@ -30,6 +30,7 @@ ethers = { version = "2.0.8", features = ["abigen", "legacy"] }
 ethers-providers = "2"
 
 flume = "0.11.0"
+metrics = "0.23"
 futures = "0.3.31"
 hex = "0.4"
 sha3 = "0.10"
