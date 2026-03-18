@@ -20,13 +20,17 @@ fn hash_file(path: &Path) -> Option<String> {
     Some(hasher.finalize().to_hex().to_string())
 }
 
-fn hash_paths(paths: Vec<PathBuf>) -> String {
+fn hash_paths(base_dir: &Path, paths: Vec<PathBuf>) -> String {
     let mut hasher = Hasher::new();
     let mut sorted = paths;
     sorted.sort();
     for path in sorted {
         if let Some(h) = hash_file(&path) {
-            hasher.update(path.as_os_str().as_encoded_bytes());
+            // Hash a stable, relative, normalized path so src_hash is
+            // independent of the absolute checkout location and OS.
+            let rel = path.strip_prefix(base_dir).unwrap_or(&path);
+            let rel_str = rel.to_string_lossy().replace('\\', "/");
+            hasher.update(rel_str.as_bytes());
             hasher.update(h.as_bytes());
         }
     }
@@ -35,7 +39,8 @@ fn hash_paths(paths: Vec<PathBuf>) -> String {
 
 fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let src_path = Path::new(&manifest_dir).join("src");
+    let manifest_dir_path = Path::new(&manifest_dir);
+    let src_path = manifest_dir_path.join("src");
     let version_path = src_path.join("version.rs");
 
     let mut files: Vec<PathBuf> = WalkDir::new(&src_path)
@@ -46,10 +51,10 @@ fn main() {
         .filter(|p| p != &version_path)
         .collect();
 
-    files.push(Path::new(&manifest_dir).join("Cargo.toml"));
-    files.push(Path::new(&manifest_dir).join("Cargo.lock"));
+    files.push(manifest_dir_path.join("Cargo.toml"));
+    files.push(manifest_dir_path.join("Cargo.lock"));
 
-    let hash = hash_paths(files);
+    let hash = hash_paths(manifest_dir_path, files);
 
     let (old_hash, old_git_commit) = if version_path.exists() {
         let content = fs::read_to_string(&version_path).unwrap_or_default();
