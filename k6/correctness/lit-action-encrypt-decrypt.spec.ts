@@ -18,7 +18,7 @@ import { LitApiServerClient } from "../litApiServer.ts";
 import { createAccountAndUsageKey } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
 import { ENCRYPT_CODE, DECRYPT_CODE } from "../LitActionCode/index.ts";
-import { BASE_URL } from "../defaults.ts";
+import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
 
 export interface EncryptDecryptSetupData {
   usageApiKey: string;
@@ -48,7 +48,7 @@ export const options = {
 };
 
 export default function (data: EncryptDecryptSetupData) {
-  const client = new LitApiServerClient({ baseUrl: BASE_URL });
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
   const { usageApiKey, pkpId } = data;
   const usageKeyHeaders = { "X-Api-Key": usageApiKey };
 

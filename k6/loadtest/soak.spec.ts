@@ -38,7 +38,7 @@ import {
   ENCRYPT_CODE,
   DECRYPT_CODE,
 } from "../LitActionCode/index.ts";
-import { BASE_URL } from "../defaults.ts";
+import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
 
 // Parse duration: "1h", "30m", "10m" etc.
 const SOAK_DURATION = __ENV.SOAK_DURATION || "30m";
@@ -117,7 +117,7 @@ export function setup(): SoakSetupData {
 }
 
 export default function (setupData: SoakSetupData) {
-  const client = new LitApiServerClient({ baseUrl: BASE_URL });
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
   const account = setupData[__VU - 1];
   const usageKeyHeaders = { "X-Api-Key": account.usageApiKey };
 

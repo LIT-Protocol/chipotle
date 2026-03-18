@@ -61,6 +61,7 @@ async fn main() -> Result<(), rocket::Error> {
                 global::set_text_map_propagator(TraceContextPropagator::new());
                 global::set_tracer_provider(tracing_provider.clone());
                 global::set_meter_provider(metrics_provider.clone());
+                lit_observability::metrics::install_recorder();
 
                 let tracer = tracing_provider.tracer("lit-api-server");
                 let otel_trace_layer =

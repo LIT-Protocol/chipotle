@@ -1,0 +1,253 @@
+---
+title: "Programmable KMS — Auth Model"
+description: "How accounts, API keys, PKPs, groups, and the TEE root key compose into a programmable KMS — and how self-sovereign vs SaaS emerges from configuration."
+---
+
+## Core Insight
+
+There are no "modes." Self-sovereign vs SaaS is not a toggle — it's an emergent property of how you configure the same system. The only things that vary are:
+
+1. **Who is the Account Owner** (TEE-derived wallet from Stytch auth vs SAFE vs raw EOA)
+2. **What scopes the API keys have** (everything vs execute-only vs somewhere in between)
+
+A "self-sovereign" setup is just: owner = SAFE, API keys = execute-only. A "SaaS" setup is just: owner = TEE-derived wallet, API keys = broad scopes. The contracts don't know or care.
+
+---
+
+## Entities
+
+### Account
+
+The top-level identity. Just an address on Base. This address is the **owner** — it can do everything, and it's the only thing that can do certain structural and destructive operations.
+
+The owner address can be:
+
+- An EOA (simple, but no recovery)
+- A TEE-derived wallet (SaaS happy path — user authenticates via Stytch with email/passkey/OAuth, TEE verifies the Stytch auth token and derives a deterministic wallet from the authenticated user ID)
+- A SAFE or any governance contract (self-sovereign — multisig, voting, timelocks, whatever)
+
+The contracts don't distinguish between these. `msg.sender == owner` is `msg.sender == owner`.
+
+### API Key
+
+A wallet keypair registered on-chain under an Account. The user holds the private key and sends it to the TEE over HTTPS. The TEE derives the address and looks up what scopes it has.
+
+**API keys have scopes.** A scope is a permission granted by the Account Owner when the key is registered (or updated). There are seven scopes:
+
+| Scope                 | What it allows                                | Scoped to    |
+| --------------------- | --------------------------------------------- | ------------ |
+| `execute`             | Invoke Lit Actions with PKPs                  | Per-group    |
+| `pkp:create`          | Create new PKPs in the account's PKP registry | Account-wide |
+| `group:create`        | Create new groups                             | Account-wide |
+| `group:delete`        | Delete groups                                 | Account-wide |
+| `group:manageActions` | Add and remove action CIDs in a group         | Per-group    |
+| `group:addPkp`        | Add PKP references to a group                 | Per-group    |
+| `group:removePkp`     | Remove PKP references from a group            | Per-group    |
+
+A key can have any combination of scopes. The owner grants scopes at registration time and can update them later.
+
+**Four of the seven scopes are per-group.** When you grant an API key `execute`, `group:manageActions`, `group:addPkp`, or `group:removePkp`, you specify _which groups_ it applies to. This is the key security property — a leaked onboarding key that has `group:addPkp(group_1)` can only add PKPs to group_1, not to some new insecure group that someone just created. And because it only has `group:addPkp` (not `group:removePkp`), it can't pull existing PKPs out of the group either.
+
+**Three scopes are account-wide.** `pkp:create` is account-wide because PKPs are created in the account's registry before being assigned to any group. Creating a PKP doesn't grant access to anything by itself — the PKP still has to be added to a group (which requires `group:addPkp` on that specific group) and someone has to have `execute` on that group to actually use it. `group:create` and `group:delete` are account-wide because groups aren't scoped to other groups. In SaaS mode, developers need these to build their app through the API. In self-sovereign mode, you simply don't grant these scopes to any API key, and then only the SAFE can create or delete groups.
+
+**Everything else is owner-only:** adding/revoking API keys, updating scopes, transferring ownership. These are structural operations that affect the trust boundary itself.
+
+### PKP Registry (Account-level)
+
+An on-chain list of PKP derivation path IDs owned by the Account. PKPs are created here, then referenced by Groups.
+
+The actual key material (signing key + symmetric encryption key) only exists transiently inside the TEE, derived on-demand from the root key using the derivation path ID. It's never persisted, never leaves the TEE boundary.
+
+### Lit Action
+
+Immutable JS code pinned to IPFS, identified by its CID. Actions are **not owned by anyone** — they're public, content-addressed code. Any account can reference any CID in its groups. There is no action registry.
+
+This is intentional. Actions are meant to be reusable across companies and users. An ecosystem of audited, well-known action CIDs that people drop into their groups is more valuable than everyone registering private copies. Think of them like npm packages — you reference them, you don't own them.
+
+### Group
+
+The core authorization primitive. A Group is a **permission policy** that binds together:
+
+- A set of **PKP references** (derivation path IDs from the account's PKP registry)
+- A set of **Action CIDs** (any valid IPFS CID — no registration required)
+
+That's it. A group is just `{PKPs, Actions}`. "Who can execute" is not a property of the group — it's a property of API key scopes. The owner decides which API keys get `execute` on which groups when they configure the keys.
+
+A Group answers the question: "Can this action use this key?" The API key scope answers: "Can this caller use this group?"
+
+Groups are owned by the Account. Only the owner can create or delete them. PKPs can be referenced by multiple groups. The same action CID can appear in groups across completely unrelated accounts.
+
+### Root Key
+
+The master secret managed by Phala's KMS. Access is governed by on-chain governance at the infrastructure level — only approved TEE build images can derive from it. This is the Phala/dstack layer, separate from the per-account auth model described here.
+
+---
+
+## How the Pieces Fit Together
+
+```
+Account (owner address)
+│
+├── API Keys (each with scopes)
+│     ├── key_dev:     [execute(*), pkp:create, group:create,             ← SaaS: broad scopes
+│     │                 group:delete, group:manage*(*)]
+│     ├── key_server:  [execute(group_1)]                                 ← self-sovereign: execution only
+│     └── key_onboard: [pkp:create, group:addPkp(group_1)]               ← self-sovereign: onboarding
+│
+├── PKP Registry
+│     ├── pkp_001 (derivation path)
+│     ├── pkp_002
+│     └── pkp_003
+│
+└── Groups
+      ├── group_1
+      │     ├── PKPs: [pkp_001, pkp_002]        ← must be in your PKP registry
+      │     └── Actions: [QmABC..., QmDEF...]    ← any IPFS CID
+      │
+      └── group_2
+            ├── PKPs: [pkp_002, pkp_003]
+            └── Actions: [QmGHI...]              ← could be the same CID another company uses
+```
+
+Note: there is no "authorized callers" list on the group. Which keys can execute against a group is determined entirely by the `execute` scope on the API keys, managed by the owner.
+
+---
+
+## Execution Flow (inside the TEE)
+
+1. User sends HTTP request: API key (private key) + "run action QmABC with pkp_001"
+2. TEE derives address from private key
+3. TEE reads on-chain: does this address have an API key with `execute` scope? On which groups?
+4. TEE checks: is there a group this key can execute on where QmABC is a listed action AND pkp_001 is a listed PKP?
+5. If yes → derive pkp_001 key material from root key → fetch QmABC from IPFS → execute in sandbox with access to key material → return result
+6. If no → reject
+
+---
+
+## Management Flow (two paths to the same contracts)
+
+### Path A: Via TEE (convenience relay)
+
+User sends HTTP + API key to the TEE. TEE checks the key's scopes (including which groups the scope applies to), then signs and submits a transaction to the permissions contracts on Base on the user's behalf.
+
+```
+User → HTTP + API key → TEE → tx → Permissions Contract (Base)
+```
+
+The user never interacts with the chain directly. This is the default for most users.
+
+### Path B: Direct to chain
+
+The Account Owner (SAFE, EOA, whatever) submits transactions directly to the permissions contracts. The TEE is not involved in the mutation at all.
+
+```
+SAFE/EOA → tx → Permissions Contract (Base)
+```
+
+This is how self-sovereign users handle governance operations. It's transparent and auditable — the SAFE proposal is visible on-chain before execution.
+
+**Both paths write to the same contracts.** The contract authorization check is:
+
+```
+require(
+  msg.sender == accountOwner ||
+  isAPIKeyWithScope(msg.sender, requiredScope, groupId)
+)
+```
+
+---
+
+## Permission Matrix
+
+| Operation                       | Owner | API Key | Scope required                  |
+| ------------------------------- | ----- | ------- | ------------------------------- |
+| Invoke action + PKP             | ✓     | ✓       | `execute(group_id)`             |
+| Create PKP                      | ✓     | ✓       | `pkp:create`                    |
+| Create group                    | ✓     | ✓       | `group:create`                  |
+| Delete group                    | ✓     | ✓       | `group:delete`                  |
+| Add/remove action CIDs in group | ✓     | ✓       | `group:manageActions(group_id)` |
+| Add PKPs to group               | ✓     | ✓       | `group:addPkp(group_id)`        |
+| Remove PKPs from group          | ✓     | ✓       | `group:removePkp(group_id)`     |
+| Add API key                     | ✓     | ✗       | — (owner only)                  |
+| Revoke API key                  | ✓     | ✗       | — (owner only)                  |
+| Update API key scopes           | ✓     | ✗       | — (owner only)                  |
+| Transfer ownership              | ✓     | ✗       | — (owner only)                  |
+
+---
+
+## Why Self-Sovereign Emerges from Configuration
+
+Consider two setups:
+
+### Setup A: "SaaS mode"
+
+- **Owner:** TEE-derived wallet (user authenticates via Stytch, TEE derives wallet from authenticated user ID)
+- **API key `dev_key`:** scopes = `[execute(*), pkp:create, group:create, group:delete, group:manageActions(*), group:addPkp(*), group:removePkp(*)]`
+- **Effect:** The developer can do everything via HTTP calls except manage API keys and transfer ownership (those are owner-only, done through the Stytch-authenticated dashboard). This is the full development experience — create groups, add actions, create PKPs, execute, iterate. Fast iteration, no multisig overhead. Recovery is via Stytch re-authentication — the TEE will derive the same wallet from the same user ID. When the app is production-ready, the developer can revoke the broad-scoped `dev_key` and replace it with purpose-built keys that have narrower scopes.
+
+### Setup B: "Self-sovereign mode"
+
+- **Owner:** A 3-of-5 SAFE
+- **API key `server_key`:** scopes = `[execute(group_1)]` — can only run actions on group_1
+- **API key `onboard_key`:** scopes = `[pkp:create, group:addPkp(group_1)]` — can create PKPs and add them to group_1 only
+- **No API keys with `group:create`, `group:delete`, `group:manageActions`, or `group:removePkp` scopes**
+- **Effect:** Day-to-day operations flow through purpose-built API keys. The server can execute actions. The onboarding server can set up new customers without a SAFE vote. But everything structural — creating or deleting groups, adding or swapping action CIDs, removing PKPs — always requires a SAFE multisig vote, because that's the whole point: transparent, auditable governance over what code your PKPs can run and how your groups are organized. If `onboard_key` leaks, the attacker can create PKPs and add them to group_1 (which is annoying but not catastrophic — they're just creating new key material that uses the same already-audited actions). They can't remove existing PKPs from the group, can't add PKPs to any other group, can't change actions, can't create or delete groups, can't execute anything. An evil admin with `server_key` can invoke existing actions but cannot change the rules.
+
+---
+
+## Upgrade Flow Example: Swapping Actions in a Group
+
+### In SaaS mode (Setup A)
+
+1. Pin new Lit Action JS to IPFS → get `QmNEW`
+2. `POST /groups/:id/actions` with `{add: ["QmNEW"], remove: ["QmOLD"]}` → TEE submits tx to update group
+3. Done. Next execution request uses new permissions. `dev_key` has `group:manageActions(*)`, so this is allowed on any group.
+
+### In self-sovereign mode (Setup B)
+
+1. Pin new Lit Action JS to IPFS → get `QmNEW`
+2. Propose a SAFE transaction batch:
+   - `group.addAction(groupId, "QmNEW")`
+   - `group.removeAction(groupId, "QmOLD")`
+3. SAFE signers review the new code (CID is deterministic — they can fetch and audit it from IPFS)
+4. 3-of-5 signers approve → SAFE executes batch tx directly on the permissions contracts
+5. Done. Next execution request reads updated on-chain state. TEE was not involved in the upgrade at all.
+
+This is intentional. No API key has `group:manageActions` in Setup B, so the only path to change actions is the owner going direct to chain. Every action upgrade is a visible, auditable SAFE proposal.
+
+---
+
+## Onboarding Flow Example (Setup B)
+
+1. `POST /pkps/create` using `onboard_key` → TEE submits tx, new PKP registered in account's PKP registry
+2. `POST /groups/group_1/pkps` with `{add: ["pkp_new"]}` using `onboard_key` → TEE submits tx
+3. Done. New customer has a PKP in group_1. The existing `server_key` (which has `execute(group_1)`) can now execute actions with this PKP on the customer's behalf.
+
+This is the key reason `onboard_key` exists in Setup B — you don't want to hit the SAFE every time you onboard a new user. Creating PKPs and adding them to a pre-configured group is a high-volume, low-risk operation. The API keys are per-purpose, not per-customer: one `server_key` executes for all customers, one `onboard_key` handles all onboarding. The SAFE only needs to be involved for structural changes: which actions are trusted, which groups exist, and who gets API keys.
+
+---
+
+## Account Lifecycle
+
+### Onboarding (SaaS)
+
+1. User signs up via Stytch (email, passkey, Google OAuth, etc.)
+2. TEE verifies the Stytch auth token and derives a deterministic wallet from the authenticated user ID → this becomes the Account Owner address
+3. System registers this on-chain as a new Account
+4. Owner creates a first group and a first API key with broad scopes
+5. User uses this API key for all HTTP interactions
+
+### Graduating to self-sovereign
+
+1. User deploys a SAFE on Base with their desired signer set
+2. User calls `transferOwnership(safeAddress)` — authenticated via Stytch (current owner) through the TEE relay
+3. Account Owner is now the SAFE
+4. SAFE creates new API keys with restricted scopes, locked to specific groups (e.g. `server_key`, `onboard_key`)
+5. SAFE revokes the old broad-scoped API key
+6. Stytch is fully out of the loop — the SAFE is sovereign
+
+### Key rotation
+
+Owner registers a new API key address with the desired scopes, then revokes the old one. In SaaS mode, this is an HTTP call (TEE derives the owner wallet from Stytch auth and signs the tx). In self-sovereign mode, this requires a SAFE vote.
+
+---

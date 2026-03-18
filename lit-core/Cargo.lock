@@ -2077,6 +2077,7 @@ dependencies = [
  "lit-core",
  "lit-core-derive",
  "lit-observability",
+ "metrics",
  "num_cpus",
  "once_cell",
  "openssl",
@@ -2175,6 +2176,7 @@ dependencies = [
  "lit-core",
  "lit-core-derive",
  "lit-logging",
+ "metrics",
  "nu-ansi-term",
  "opentelemetry",
  "opentelemetry-otlp",
@@ -2251,6 +2253,16 @@ name = "memchr"
 version = "2.7.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a282da65faaf38286cf3be983213fcf1d2e2a58700e808f83f4ea9a4804bc0"
+
+[[package]]
+name = "metrics"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3045b4193fbdc5b5681f32f11070da9be3609f189a79f3390706d42587f46bb5"
+dependencies = [
+ "ahash",
+ "portable-atomic",
+]
 
 [[package]]
 name = "mime"
@@ -2808,6 +2820,12 @@ dependencies = [
  "rustix",
  "windows-sys 0.60.2",
 ]
+
+[[package]]
+name = "portable-atomic"
+version = "1.13.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
 
 [[package]]
 name = "potential_utf"

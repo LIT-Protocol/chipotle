@@ -14,7 +14,7 @@ import { LitApiServerClient } from "../litApiServer.ts";
 import { createAccountAndUsageKey } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
 import { ECDSA_SIGN_CODE } from "../LitActionCode/index.ts";
-import { BASE_URL } from "../defaults.ts";
+import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
 
 export const options = {
   vus: 1,
@@ -39,7 +39,7 @@ export function setup() {
 }
 
 export default function (data: { usageKeyHeaders: { "X-Api-Key": string } }) {
-  const client = new LitApiServerClient({ baseUrl: BASE_URL });
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
 
   const litActionRes = client.litAction(
     {

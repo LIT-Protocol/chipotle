@@ -4,7 +4,7 @@
  */
 import { LitApiServerClient } from "./litApiServer.ts";
 import { assertOk } from "./helpers.ts";
-import { BASE_URL } from "./defaults.ts";
+import { BASE_URL, COMMON_PARAMS, K6_RUN_ID } from "./defaults.ts";
 
 export interface AccountAndUsageKey {
   apiKey: string;
@@ -24,8 +24,10 @@ export function createAccountAndUsageKey(options: {
   usageKeyDescription: string;
   setupContext?: string;
 }): AccountAndUsageKey {
+  console.log(`k6 run correlation id: ${K6_RUN_ID}`);
   const client = new LitApiServerClient({
     baseUrl: options.baseUrl ?? BASE_URL,
+    commonRequestParameters: COMMON_PARAMS,
   });
   const prefix = options.setupContext ? `${options.setupContext}/` : "setup/";
 
