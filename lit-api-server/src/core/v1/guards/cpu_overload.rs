@@ -14,8 +14,8 @@ use rocket::request::{FromRequest, Outcome, Request};
 use rocket_okapi::Result as RocketOkapiResult;
 use rocket_okapi::r#gen::OpenApiGenerator;
 use rocket_okapi::request::{OpenApiFromRequest, RequestHeaderInput};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 /// Monitors system load average and exposes an overload flag.
