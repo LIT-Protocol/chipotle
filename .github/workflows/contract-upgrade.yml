@@ -1,32 +1,30 @@
 # Upgrade existing Diamond contract facets.
 #
-# Network and contract address are read from the NodeConfig file that
-# matches the branch the workflow runs on:
-#   main  → lit-api-server/NodeConfig.main.toml
-#   next  → lit-api-server/NodeConfig.next.toml
-#
-# Both values can be overridden via the optional workflow inputs.
+# Network and contract address are always read from the NodeConfig file
+# for the selected branch:
+#   main → lit-api-server/NodeConfig.main.toml
+#   next → lit-api-server/NodeConfig.next.toml
 #
 # Required secrets:
 #   CONTRACT_DEPLOYER_SECRET_SEPOLIA - deployer wallet private key (Base Sepolia)
-#   CONTRACT_DEPLOYER_SECRET_BASE  - deployer wallet private key (Base Mainnet)
+#   CONTRACT_DEPLOYER_SECRET_BASE    - deployer wallet private key (Base Mainnet)
 
 name: Contract Upgrade
 
 on:
   workflow_dispatch:
     inputs:
-      network:
-        description: "Target network (leave empty to read from NodeConfig)"
-        required: false
-        type: string
-      address:
-        description: "Diamond contract address (leave empty to read from NodeConfig)"
-        required: false
-        type: string
+      branch:
+        description: "Branch whose NodeConfig to use"
+        required: true
+        type: choice
+        options:
+          - next
+          - main
+        default: next
 
 concurrency:
-  group: contract-upgrade-${{ github.ref_name }}
+  group: contract-upgrade-${{ inputs.branch }}
   cancel-in-progress: false
 
 jobs:
@@ -34,52 +32,25 @@ jobs:
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
 
       - name: Read config from NodeConfig
         id: config
         run: |
-          BRANCH="${{ github.ref_name }}"
+          CONFIG="lit-api-server/NodeConfig.${{ inputs.branch }}.toml"
 
-          if [ "$BRANCH" = "main" ]; then
-            CONFIG="lit-api-server/NodeConfig.main.toml"
-          elif [ "$BRANCH" = "next" ]; then
-            CONFIG="lit-api-server/NodeConfig.next.toml"
-          else
-            echo "::warning::Branch '$BRANCH' has no NodeConfig file — inputs are required."
-            CONFIG=""
-          fi
-
-          if [ -n "$CONFIG" ] && [ -f "$CONFIG" ]; then
-            CHAIN_NAME=$(grep '^name' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
-            CONTRACT_ADDR=$(grep '^contract_address' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
-            echo "config_network=$CHAIN_NAME" >> "$GITHUB_OUTPUT"
-            echo "config_address=$CONTRACT_ADDR" >> "$GITHUB_OUTPUT"
-            echo "Resolved from $CONFIG: network=$CHAIN_NAME address=$CONTRACT_ADDR"
-          fi
-
-      - name: Resolve network and address
-        id: resolve
-        run: |
-          # Prefer explicit inputs; fall back to NodeConfig values.
-          NETWORK="${{ inputs.network }}"
-          ADDRESS="${{ inputs.address }}"
-
-          [ -z "$NETWORK" ] && NETWORK="${{ steps.config.outputs.config_network }}"
-          [ -z "$ADDRESS" ] && ADDRESS="${{ steps.config.outputs.config_address }}"
-
-          if [ -z "$NETWORK" ]; then
-            echo "::error::Could not determine network — set it via input or ensure a NodeConfig exists for this branch."
+          if [ ! -f "$CONFIG" ]; then
+            echo "::error::$CONFIG not found."
             exit 1
           fi
 
-          if [ -z "$ADDRESS" ]; then
-            echo "::error::Could not determine contract address — set it via input or ensure a NodeConfig exists for this branch."
-            exit 1
-          fi
+          NETWORK=$(grep '^name' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          ADDRESS=$(grep '^contract_address' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
 
           echo "network=$NETWORK" >> "$GITHUB_OUTPUT"
           echo "address=$ADDRESS" >> "$GITHUB_OUTPUT"
-          echo "Resolved: network=$NETWORK address=$ADDRESS"
+          echo "Resolved from $CONFIG: network=$NETWORK address=$ADDRESS"
 
       - uses: dtolnay/rust-toolchain@1.91
 
@@ -105,7 +76,7 @@ jobs:
       - name: Select deployer secret
         id: secret
         run: |
-          if [ "${{ steps.resolve.outputs.network }}" = "base" ]; then
+          if [ "${{ steps.config.outputs.network }}" = "base" ]; then
             echo "key=${{ secrets.CONTRACT_DEPLOYER_SECRET_BASE }}" >> "$GITHUB_OUTPUT"
           else
             echo "key=${{ secrets.CONTRACT_DEPLOYER_SECRET_SEPOLIA }}" >> "$GITHUB_OUTPUT"
@@ -116,7 +87,7 @@ jobs:
         run: |
           ../rust_generator_and_deployer/target/debug/contract_deployer \
             --action=update \
-            --network=${{ steps.resolve.outputs.network }} \
+            --network=${{ steps.config.outputs.network }} \
             --abifolder=artifacts/contracts \
             --secret=${{ steps.secret.outputs.key }} \
-            --address=${{ steps.resolve.outputs.address }}
+            --address=${{ steps.config.outputs.address }}
