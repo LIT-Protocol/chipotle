@@ -6,4 +6,3 @@ pub mod dstack;
 pub mod error;
 pub mod observability;
 pub mod utils;
-pub mod version;

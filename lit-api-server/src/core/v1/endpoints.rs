@@ -17,7 +17,7 @@ use crate::core::v1::models::response::ApiKeyItem;
 use crate::core::v1::models::response::WalletItem;
 use crate::core::v1::models::response::{
     AccountOpResponse, AddUsageApiKeyResponse, CreateWalletResponse, ListMetadataItem,
-    LitActionResponse, NewAccountResponse, NodeChainConfigResponse, VersionResponse,
+    LitActionResponse, NewAccountResponse, NodeChainConfigResponse,
 };
 use crate::observability::RequestSpan;
 use moka::future::Cache;
@@ -55,7 +55,6 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         get_node_chain_config,
         get_api_payers,
         get_admin_api_payer,
-        get_version,
     ]
 }
 
@@ -434,18 +433,5 @@ async fn get_api_payers() -> OpenApiResponse<Vec<String>, ErrMessage> {
 async fn get_admin_api_payer() -> OpenApiResponse<String, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(account_management::get_admin_api_payer().await).into(),
-    }
-}
-
-#[openapi(tag = "Info")]
-#[get("/version")]
-async fn get_version() -> OpenApiResponse<VersionResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(Ok(VersionResponse {
-            version: crate::version::VERSION,
-            src_hash: crate::version::SRC_HASH,
-            git_commit: crate::version::GIT_COMMIT,
-        }))
-        .into(),
     }
 }
