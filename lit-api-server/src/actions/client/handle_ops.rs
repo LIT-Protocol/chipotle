@@ -1,7 +1,7 @@
 use super::op_code_helpers;
 use anyhow::{Result, bail};
 use lit_actions_grpc::proto::*;
-use tracing::{instrument, trace};
+use tracing::instrument;
 
 use super::Client;
 
@@ -12,7 +12,8 @@ impl Client {
         op: UnionResponse,
         call_depth: u32,
     ) -> Result<ExecuteJsRequest> {
-        trace!("handle_op: {:?}", op);
+        // NOTE: Do not log `op` here — response variants (GetPrivateKeyResponse,
+        // GetLitActionPrivateKeyResponse, AesDecryptResponse) carry secret material.
         self.state.ops_count += 1;
 
         Ok(match op {
