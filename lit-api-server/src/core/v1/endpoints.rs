@@ -5,6 +5,7 @@ use crate::actions::grpc::GrpcClientPool;
 use crate::core::account_management;
 use crate::core::core_features;
 use crate::core::v1::guards::apikey::ApiKey;
+use crate::core::v1::guards::cpu_overload::CpuAvailable;
 use crate::core::v1::helpers::api_status::{ApiResult, ErrMessage};
 use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{
@@ -61,6 +62,7 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
 #[openapi(tag = "Account Management")]
 #[post("/new_account", format = "json", data = "<new_account_request>")]
 async fn new_account(
+    _cpu: CpuAvailable,
     signer_pool: &State<Arc<SignerPool>>,
     new_account_request: Json<NewAccountRequest>,
 ) -> OpenApiResponse<NewAccountResponse, ErrMessage> {
@@ -74,7 +76,7 @@ async fn new_account(
 
 #[openapi(tag = "Account Management")]
 #[get("/account_exists")]
-async fn account_exists(api_key: ApiKey) -> OpenApiResponse<bool, ErrMessage> {
+async fn account_exists(_cpu: CpuAvailable, api_key: ApiKey) -> OpenApiResponse<bool, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(account_management::account_exists(api_key.0.as_str()).await).into(),
     }
@@ -83,6 +85,7 @@ async fn account_exists(api_key: ApiKey) -> OpenApiResponse<bool, ErrMessage> {
 #[openapi(tag = "Account Management")]
 #[get("/create_wallet")]
 async fn create_wallet(
+    _cpu: CpuAvailable,
     signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
 ) -> OpenApiResponse<CreateWalletResponse, ErrMessage> {
@@ -99,6 +102,7 @@ async fn create_wallet(
 #[post("/lit_action", format = "json", data = "<lit_action_request>")]
 #[tracing::instrument(name = "endpoint::lit_action", skip_all, parent = &request_span.span)]
 async fn lit_action(
+    _cpu: CpuAvailable,
     request_span: RequestSpan,
     api_key: ApiKey,
     grpc_client_pool: &State<GrpcClientPool<tonic::transport::Channel>>,
@@ -124,7 +128,7 @@ async fn lit_action(
 
 #[openapi(tag = "Account Management")]
 #[post("/get_lit_action_ipfs_id", format = "json", data = "<code>")]
-async fn get_lit_action_ipfs_id(code: Json<String>) -> OpenApiResponse<String, ErrMessage> {
+async fn get_lit_action_ipfs_id(_cpu: CpuAvailable, code: Json<String>) -> OpenApiResponse<String, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(account_management::get_lit_action_ipfs_id(code.into_inner()).await)
             .into(),
@@ -134,6 +138,7 @@ async fn get_lit_action_ipfs_id(code: Json<String>) -> OpenApiResponse<String, E
 #[openapi(tag = "Account Management")]
 #[post("/add_group", format = "json", data = "<req>")]
 async fn add_group(
+    _cpu: CpuAvailable,
     signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<AddGroupRequest>,
@@ -150,6 +155,7 @@ async fn add_group(
 #[openapi(tag = "Account Management")]
 #[post("/add_action_to_group", format = "json", data = "<req>")]
 async fn add_action_to_group(
+    _cpu: CpuAvailable,
     signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<AddActionToGroupRequest>,
@@ -170,6 +176,7 @@ async fn add_action_to_group(
 #[openapi(tag = "Account Management")]
 #[post("/add_pkp_to_group", format = "json", data = "<req>")]
 async fn add_pkp_to_group(
+    _cpu: CpuAvailable,
     signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<AddPkpToGroupRequest>,
@@ -190,6 +197,7 @@ async fn add_pkp_to_group(
 #[openapi(tag = "Account Management")]
 #[post("/remove_pkp_from_group", format = "json", data = "<req>")]
 async fn remove_pkp_from_group(
+    _cpu: CpuAvailable,
     signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<RemovePkpFromGroupRequest>,
@@ -210,6 +218,7 @@ async fn remove_pkp_from_group(
 #[openapi(tag = "Account Management")]
 #[post("/add_usage_api_key", format = "json", data = "<req>")]
 async fn add_usage_api_key(
+    _cpu: CpuAvailable,
     signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<AddUsageApiKeyRequest>,
@@ -230,6 +239,7 @@ async fn add_usage_api_key(
 #[openapi(tag = "Account Management")]
 #[post("/remove_usage_api_key", format = "json", data = "<req>")]
 async fn remove_usage_api_key(
+    _cpu: CpuAvailable,
     signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<RemoveUsageApiKeyRequest>,
@@ -250,6 +260,7 @@ async fn remove_usage_api_key(
 #[openapi(tag = "Account Management")]
 #[post("/update_group", format = "json", data = "<req>")]
 async fn update_group(
+    _cpu: CpuAvailable,
     signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<UpdateGroupRequest>,
@@ -266,6 +277,7 @@ async fn update_group(
 #[openapi(tag = "Account Management")]
 #[post("/remove_action_from_group", format = "json", data = "<req>")]
 async fn remove_action_from_group(
+    _cpu: CpuAvailable,
     signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<RemoveActionFromGroupRequest>,
@@ -286,6 +298,7 @@ async fn remove_action_from_group(
 #[openapi(tag = "Account Management")]
 #[post("/update_action_metadata", format = "json", data = "<req>")]
 async fn update_action_metadata(
+    _cpu: CpuAvailable,
     signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<UpdateActionMetadataRequest>,
@@ -306,6 +319,7 @@ async fn update_action_metadata(
 #[openapi(tag = "Account Management")]
 #[post("/update_usage_api_key_metadata", format = "json", data = "<req>")]
 async fn update_usage_api_key_metadata(
+    _cpu: CpuAvailable,
     signer_pool: &State<Arc<SignerPool>>,
     api_key: ApiKey,
     req: Json<UpdateUsageApiKeyMetadataRequest>,
@@ -326,6 +340,7 @@ async fn update_usage_api_key_metadata(
 #[openapi(tag = "Account Management")]
 #[get("/list_api_keys?<page_number>&<page_size>")]
 async fn list_api_keys(
+    _cpu: CpuAvailable,
     api_key: ApiKey,
     page_number: u64,
     page_size: u64,
@@ -341,6 +356,7 @@ async fn list_api_keys(
 #[openapi(tag = "Account Management")]
 #[get("/list_groups?<page_number>&<page_size>")]
 async fn list_groups(
+    _cpu: CpuAvailable,
     api_key: ApiKey,
     page_number: u64,
     page_size: u64,
@@ -356,6 +372,7 @@ async fn list_groups(
 #[openapi(tag = "Account Management")]
 #[get("/list_wallets?<page_number>&<page_size>")]
 async fn list_wallets(
+    _cpu: CpuAvailable,
     api_key: ApiKey,
     page_number: u64,
     page_size: u64,
@@ -371,6 +388,7 @@ async fn list_wallets(
 #[openapi(tag = "Account Management")]
 #[get("/list_wallets_in_group?<group_id>&<page_number>&<page_size>")]
 async fn list_wallets_in_group(
+    _cpu: CpuAvailable,
     api_key: ApiKey,
     group_id: u64,
     page_number: u64,
@@ -393,6 +411,7 @@ async fn list_wallets_in_group(
 #[openapi(tag = "Account Management")]
 #[get("/list_actions?<group_id>&<page_number>&<page_size>")]
 async fn list_actions(
+    _cpu: CpuAvailable,
     api_key: ApiKey,
     group_id: String,
     page_number: u64,
@@ -414,7 +433,9 @@ async fn list_actions(
 
 #[openapi(tag = "Account Management")]
 #[get("/get_node_chain_config")]
-async fn get_node_chain_config() -> OpenApiResponse<NodeChainConfigResponse, ErrMessage> {
+async fn get_node_chain_config(
+    _cpu: CpuAvailable,
+) -> OpenApiResponse<NodeChainConfigResponse, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(account_management::get_chain_info().await).into(),
     }
@@ -422,7 +443,7 @@ async fn get_node_chain_config() -> OpenApiResponse<NodeChainConfigResponse, Err
 
 #[openapi(tag = "Account Management")]
 #[get("/get_api_payers")]
-async fn get_api_payers() -> OpenApiResponse<Vec<String>, ErrMessage> {
+async fn get_api_payers(_cpu: CpuAvailable) -> OpenApiResponse<Vec<String>, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(account_management::get_api_payers().await).into(),
     }
@@ -430,7 +451,7 @@ async fn get_api_payers() -> OpenApiResponse<Vec<String>, ErrMessage> {
 
 #[openapi(tag = "Account Management")]
 #[get("/get_admin_api_payer")]
-async fn get_admin_api_payer() -> OpenApiResponse<String, ErrMessage> {
+async fn get_admin_api_payer(_cpu: CpuAvailable) -> OpenApiResponse<String, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(account_management::get_admin_api_payer().await).into(),
     }
