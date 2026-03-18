@@ -102,3 +102,10 @@ pub struct NodeChainConfigResponse {
     pub rpc_url: String,
     pub contract_address: String,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct VersionResponse {
+    pub version: &'static str,
+    pub src_hash: &'static str,
+    pub git_commit: &'static str,
+}
