@@ -87,14 +87,10 @@ A smart contract can call `ecrecover` on the signature to confirm the price was 
 
 ---
 
-## 5. Weather-Gated Signing
 
-Only sign a message if the current temperature at a given location exceeds a threshold. This demonstrates **condition-gated signing** using a live external data source.
-
-```javascript
-// js_params: { pkpId, city, minTempCelsius, message }
+// js_params: { pkpId, city, minTempCelsius, message, encryptedWeatherApiKey }
 // Example: { pkpId: "0x...", city: "London", minTempCelsius: 20, message: "Approved" }
-async function main({ pkpId, city, minTempCelsius, message }) {
+(async () => {
   const apiKey = await Lit.Actions.Decrypt({ pkpId, ciphertext: encryptedWeatherApiKey });
 
   const res = await fetch(
@@ -104,11 +100,15 @@ async function main({ pkpId, city, minTempCelsius, message }) {
   const temp = data?.main?.temp;
 
   if (typeof temp !== "number") {
-    return { error: "Weather fetch failed" };
+    Lit.Actions.setResponse({ response: { error: "Weather fetch failed" } });
+    return;
   }
 
   if (temp < minTempCelsius) {
-    return { signed: false, reason: `Temperature ${temp}°C is below threshold of ${minTempCelsius}°C` };
+    Lit.Actions.setResponse({
+      response: { signed: false, reason: `Temperature ${temp}°C is below threshold of ${minTempCelsius}°C` },
+    });
+    return;
   }
 
   const wallet = new ethers.Wallet(
@@ -116,11 +116,9 @@ async function main({ pkpId, city, minTempCelsius, message }) {
   );
   const signature = await wallet.signMessage(message);
 
-  return { signed: true, temp, message, signature };
-}
-```
+  Lit.Actions.setResponse({ response: { signed: true, temp, message, signature } });
+})();
 
-Note the use of `Lit.Actions.Decrypt` to retrieve the weather API key securely at runtime — the key is stored as ciphertext and never exposed in the action code or `js_params`. Pass `encryptedWeatherApiKey` as a `js_params` value (produced by Example 2).
 
 ---
 
