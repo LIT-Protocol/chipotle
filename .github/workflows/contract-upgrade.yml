@@ -8,7 +8,7 @@
 # Both values can be overridden via the optional workflow inputs.
 #
 # Required secrets:
-#   CONTRACT_DEPLOYER_SECRET       - deployer wallet private key (Base Sepolia)
+#   CONTRACT_DEPLOYER_SECRET_SEPOLIA - deployer wallet private key (Base Sepolia)
 #   CONTRACT_DEPLOYER_SECRET_BASE  - deployer wallet private key (Base Mainnet)
 
 name: Contract Upgrade
@@ -108,7 +108,7 @@ jobs:
           if [ "${{ steps.resolve.outputs.network }}" = "base" ]; then
             echo "key=${{ secrets.CONTRACT_DEPLOYER_SECRET_BASE }}" >> "$GITHUB_OUTPUT"
           else
-            echo "key=${{ secrets.CONTRACT_DEPLOYER_SECRET }}" >> "$GITHUB_OUTPUT"
+            echo "key=${{ secrets.CONTRACT_DEPLOYER_SECRET_SEPOLIA }}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Upgrade diamond facets
