@@ -266,7 +266,7 @@ pub(crate) async fn execute_js(
         Some(memory_limit_mb),
     )
     .context("Error building main worker")
-    .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
+    .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context 
 
     let op_state = worker.js_runtime.op_state();
     {

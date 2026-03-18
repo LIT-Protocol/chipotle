@@ -490,3 +490,17 @@ pub async fn can_use_wallet_in_action(
         .await?;
     Ok(can_use)
 }
+
+pub async fn can_execute_action_and_use_wallet(
+    api_key: &str,
+    cid_hash: U256,
+    wallet_address: H160,
+) -> Result<(bool, bool)> {
+    let contract = get_read_only_account_config_contract().await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let result = contract
+        .can_execute_action_and_use_wallet(account_api_key_hash, cid_hash, wallet_address)
+        .call()
+        .await?;
+    Ok(result)
+}
