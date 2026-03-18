@@ -7,7 +7,7 @@ import { LitApiServerClient } from "./litApiServer.ts";
 import { createAccountAndUsageKey } from "./setup.ts";
 import { assertOk } from "./helpers.ts";
 import { HELLO_WORLD_CODE } from "./LitActionCode/index.ts";
-import { BASE_URL } from "./defaults.ts";
+import { BASE_URL, COMMON_PARAMS } from "./defaults.ts";
 
 export const options = {
   vus: 1,
@@ -35,7 +35,7 @@ export function setup(): SmokeSetupData {
 }
 
 export default function (data: SmokeSetupData) {
-  const client = new LitApiServerClient({ baseUrl: BASE_URL });
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
   const usageKeyHeaders = { "X-Api-Key": data.usageApiKey };
 
   // 1. Public endpoint (no auth)

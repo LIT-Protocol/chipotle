@@ -9,7 +9,7 @@ import { sleep } from "k6";
 import { checkAndLog } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
 import { assertOk } from "../helpers.ts";
-import { BASE_URL } from "../defaults.ts";
+import { BASE_URL, COMMON_PARAMS, K6_RUN_ID } from "../defaults.ts";
 
 export const options = {
   vus: 2,
@@ -21,11 +21,15 @@ export const options = {
   },
 };
 
+export function setup() {
+  console.log(`k6 run correlation id: ${K6_RUN_ID}`);
+}
+
 export default function () {
   // Stagger start to reduce simultaneous blockchain tx submissions (avoids nonce conflicts)
   sleep(Math.random() * 2);
 
-  const client = new LitApiServerClient({ baseUrl: BASE_URL });
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
 
   // Unique account name per VU/iteration to avoid conflicts under concurrency
   const accountName = `k6-new-account-vu${__VU}-i${__ITER}-${Date.now()}`;
