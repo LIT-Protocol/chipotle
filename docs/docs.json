@@ -20,11 +20,11 @@
             "pages": [
               "lit-actions/index",
               "lit-actions/examples",
+              "lit-actions/patterns",
               {
                 "group": "Migration",
                 "pages": [
                   "lit-actions/migration/changes",
-                  "lit-actions/migration/patterns",
                   "lit-actions/migration/encryption"
                 ]
               }
