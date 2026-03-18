@@ -267,8 +267,7 @@ pub(crate) async fn execute_js(
     )
     .context("Error building main worker")
     .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context 
-  
-  
+
     let op_state = worker.js_runtime.op_state();
     {
         // scope the borrow
