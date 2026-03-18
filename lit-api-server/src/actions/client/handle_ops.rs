@@ -6,7 +6,7 @@ use tracing::instrument;
 use super::Client;
 
 impl Client {
-    #[instrument(level = "debug", skip(self), err)]
+    #[instrument(level = "debug", skip(self, op), err)]
     pub async fn handle_op(
         &mut self,
         op: UnionResponse,
