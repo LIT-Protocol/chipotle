@@ -1,1 +1,3 @@
-Lit.Actions.setResponse({response: "Hello World!"})
+const main = async () => {
+  return "Hello World!";
+};
