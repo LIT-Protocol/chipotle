@@ -1,4 +1,4 @@
-# Upgrade (or deploy) Diamond contracts.
+# Upgrade existing Diamond contract facets.
 #
 # Network and contract address are read from the NodeConfig file that
 # matches the branch the workflow runs on:
@@ -16,14 +16,6 @@ name: Contract Upgrade
 on:
   workflow_dispatch:
     inputs:
-      action:
-        description: "deploy (new diamond) or update (existing diamond)"
-        required: true
-        type: choice
-        options:
-          - update
-          - deploy
-        default: update
       network:
         description: "Target network (leave empty to read from NodeConfig)"
         required: false
@@ -80,14 +72,14 @@ jobs:
             exit 1
           fi
 
-          if [ "${{ inputs.action }}" = "update" ] && [ -z "$ADDRESS" ]; then
-            echo "::error::Could not determine contract address for update — set it via input or ensure a NodeConfig exists for this branch."
+          if [ -z "$ADDRESS" ]; then
+            echo "::error::Could not determine contract address — set it via input or ensure a NodeConfig exists for this branch."
             exit 1
           fi
 
           echo "network=$NETWORK" >> "$GITHUB_OUTPUT"
           echo "address=$ADDRESS" >> "$GITHUB_OUTPUT"
-          echo "Resolved: action=${{ inputs.action }} network=$NETWORK address=$ADDRESS"
+          echo "Resolved: network=$NETWORK address=$ADDRESS"
 
       - uses: dtolnay/rust-toolchain@1.91
 
@@ -119,15 +111,12 @@ jobs:
             echo "key=${{ secrets.CONTRACT_DEPLOYER_SECRET }}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Run contract deployer
+      - name: Upgrade diamond facets
         working-directory: lit-api-server/blockchain/lit_node_express
         run: |
-          DEPLOYER=../rust_generator_and_deployer/target/debug/contract_deployer
-
-          ARGS="--action=${{ inputs.action }} --network=${{ steps.resolve.outputs.network }} --abifolder=artifacts/contracts --secret=${{ steps.secret.outputs.key }}"
-
-          if [ "${{ inputs.action }}" = "update" ]; then
-            ARGS="$ARGS --address=${{ steps.resolve.outputs.address }}"
-          fi
-
-          $DEPLOYER $ARGS
+          ../rust_generator_and_deployer/target/debug/contract_deployer \
+            --action=update \
+            --network=${{ steps.resolve.outputs.network }} \
+            --abifolder=artifacts/contracts \
+            --secret=${{ steps.secret.outputs.key }} \
+            --address=${{ steps.resolve.outputs.address }}
