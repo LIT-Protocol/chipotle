@@ -35,7 +35,9 @@ impl Client {
             .await
     }
 
-    #[instrument(level = "debug", skip_all, ret)]
+    // NOTE: `ret` intentionally omitted — ExecutionState contains `response` and `logs`
+    // which are set by user JS code and may include secret material.
+    #[instrument(level = "debug", skip_all, err)]
     pub async fn execute_js(
         &mut self,
         opts: impl Into<ExecutionOptions>,
