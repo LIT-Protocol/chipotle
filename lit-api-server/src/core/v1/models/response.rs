@@ -91,6 +91,13 @@ pub struct ApiKeyItem {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct VersionResponse {
+    pub version: &'static str,
+    pub src_hash: &'static str,
+    pub git_commit: &'static str,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct NodeChainConfigResponse {
     pub chain_name: String,
     pub chain_id: u64,
