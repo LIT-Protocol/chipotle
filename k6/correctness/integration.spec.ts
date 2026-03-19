@@ -361,7 +361,34 @@ export default function (data: IntegrationSetupData) {
     },
   }, "updateUsageApiKeyMetadata");
 
-  // ── 18. removeUsageApiKey ─────────────────────────────────────────────────
+  // ── 18. updateUsageApiKey ─────────────────────────────────────────────────
+  const updateUsageKeyPermsRes = client.updateUsageApiKey(
+    {
+      usage_api_key: usageApiKey,
+      name: "k6-usage-key-updated",
+      description: "Updated integration test usage key",
+      can_create_groups: false,
+      can_delete_groups: false,
+      can_create_pkps: false,
+      manage_ipfs_ids_in_groups: [],
+      add_pkp_to_groups: [],
+      remove_pkp_from_groups: [],
+      execute_in_groups: [0],
+    },
+    authHeaders,
+  );
+  if (!assertOk("updateUsageApiKey", "POST /update_usage_api_key", updateUsageKeyPermsRes)) return;
+  checkAndLog(updateUsageKeyPermsRes.response, {
+    "updateUsageApiKey success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+  }, "updateUsageApiKey");
+
+  // ── 19. removeUsageApiKey ─────────────────────────────────────────────────
   const removeUsageKeyRes = client.removeUsageApiKey(
     { usage_api_key: usageApiKey },
     authHeaders,
@@ -377,7 +404,7 @@ export default function (data: IntegrationSetupData) {
     },
   }, "removeUsageApiKey");
 
-  // ── 19. removePkpFromGroup ────────────────────────────────────────────────
+  // ── 20. removePkpFromGroup ────────────────────────────────────────────────
   const removePkpRes = client.removePkpFromGroup(
     { group_id: parseInt(groupId), pkp_id: walletAddress },
     authHeaders,
@@ -393,7 +420,7 @@ export default function (data: IntegrationSetupData) {
     },
   }, "removePkpFromGroup");
 
-  // ── 20. removeActionFromGroup ─────────────────────────────────────────────
+  // ── 21. removeActionFromGroup ─────────────────────────────────────────────
   const removeActionRes = client.removeActionFromGroup(
     { group_id: parseInt(groupId) , action_ipfs_cid: ipfsId },
     authHeaders,
@@ -408,4 +435,20 @@ export default function (data: IntegrationSetupData) {
       }
     },
   }, "removeActionFromGroup");
+
+  // ── 22. removeGroup ───────────────────────────────────────────────────────
+  const removeGroupRes = client.removeGroup(
+    { group_id: groupId },
+    authHeaders,
+  );
+  if (!assertOk("removeGroup", "POST /remove_group", removeGroupRes)) return;
+  checkAndLog(removeGroupRes.response, {
+    "removeGroup success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+  }, "removeGroup");
 }
