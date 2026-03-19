@@ -14,6 +14,53 @@ Many capabilities that previously required runtime API calls — permission chec
 
 ---
 
+## Breaking Change: Action Entry Point and Response
+
+**Lit Actions must now be written as a `async function main()` that returns a value directly.**
+
+```js
+// New pattern
+async function main() {
+  const result = await doSomething();
+  return result;
+}
+```
+
+The old patterns — IIFE (`(async () => { ... })()`) and `Lit.Actions.setResponse({ response })` — are no longer the recommended way to write actions. Use `return` from `main` to send a response to the caller.
+
+**Before:**
+```js
+(async () => {
+  const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId }));
+  const sig = await wallet.signMessage(message);
+  Lit.Actions.setResponse({ response: { sig } });
+})();
+```
+
+**After:**
+```js
+async function main() {
+  const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId }));
+  const sig = await wallet.signMessage(message);
+  return { sig };
+}
+```
+
+Early exits that previously called `setResponse` and then `return` now just `return` the value directly:
+
+```js
+async function main() {
+  if (!condition) {
+    return { error: "condition not met" };
+  }
+  // ...
+}
+```
+
+---
+
+---
+
 ## Current Actions
 
 These actions are available in the current SDK (`Lit.Actions.*`).
@@ -140,9 +187,11 @@ Previously asked the Lit Node to sign a message using the `eth_personalSign` alg
 
 **Replacement:** Use `Lit.Actions.getPrivateKey({ pkpId })` to retrieve the private key, then sign with `ethers.Wallet`:
 ```js
-const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId }));
-const sig = await wallet.signMessage(message);
-Lit.Actions.setResponse({ response: sig });
+async function main() {
+  const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId }));
+  const sig = await wallet.signMessage(message);
+  return sig;
+}
 ```
 
 ---
