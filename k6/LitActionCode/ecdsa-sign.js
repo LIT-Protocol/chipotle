@@ -1,4 +1,4 @@
-const main = async () => {
+async function main() {
   const privateKey = await Lit.Actions.getLitActionPrivateKey();
 
   const wallet = new ethers.Wallet(privateKey);

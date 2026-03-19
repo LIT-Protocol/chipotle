@@ -1,3 +1,3 @@
-const main = async () => {
+async function main() {
   return "Hello World!";
 };
