@@ -1,4 +1,4 @@
-const main = async () => {
-  const plaintext = await Lit.Actions.Decrypt({ pkpId, ciphertext });
-  return plaintext;
-};
+async function main({ pkpId, ciphertext }) {
+  const result = await Lit.Actions.Decrypt({ pkpId, ciphertext });
+  return result;
+}
