@@ -11,9 +11,11 @@ use crate::accounts::signable_contract::{
     get_read_only_account_config_contract, get_signable_account_config_contract, send_transaction,
 };
 use crate::accounts::signer_pool::SignerPool;
-use crate::core::v1::models::request::{AddActionRequest, AddUsageApiKeyRequest, UpdateUsageApiKeyRequest};
-use crate::utils::parse_with_hash::{api_key_hash, usage_api_key_to_hash};
+use crate::core::v1::models::request::{
+    AddActionRequest, AddUsageApiKeyRequest, UpdateUsageApiKeyRequest,
+};
 use crate::utils::parse_with_hash::ipfs_cid_to_u256;
+use crate::utils::parse_with_hash::{api_key_hash, usage_api_key_to_hash};
 use ethers::types::{Address, H160, U256};
 use tracing::instrument;
 
@@ -91,8 +93,7 @@ pub async fn add_action(
     let (contract, signer_address) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
-    let function_call =
-        contract.add_action(account_api_key_hash, req.name, req.description);
+    let function_call = contract.add_action(account_api_key_hash, req.name, req.description);
     send_transaction(function_call, signer_pool, signer_address).await
 }
 
@@ -108,8 +109,7 @@ pub async fn add_action_to_group(
     let account_api_key_hash = api_key_hash(api_key);
     let action_hash = ipfs_cid_to_u256(action_ipfs_cid)
         .map_err(|e| anyhow::anyhow!("Unable to parse action IPFS CID: {}", e))?;
-    let function_call =
-        contract.add_action_to_group(account_api_key_hash, group_id, action_hash);
+    let function_call = contract.add_action_to_group(account_api_key_hash, group_id, action_hash);
     send_transaction(function_call, signer_pool, signer_address).await
 }
 
@@ -270,18 +270,12 @@ pub async fn add_usage_api_key(
             .into_iter()
             .map(U256::from)
             .collect(),
-        req.add_pkp_to_groups
-            .into_iter()
-            .map(U256::from)
-            .collect(),
+        req.add_pkp_to_groups.into_iter().map(U256::from).collect(),
         req.remove_pkp_from_groups
             .into_iter()
             .map(U256::from)
             .collect(),
-        req.execute_in_groups
-            .into_iter()
-            .map(U256::from)
-            .collect(),
+        req.execute_in_groups.into_iter().map(U256::from).collect(),
     );
     send_transaction(function_call, signer_pool, signer_address).await
 }
@@ -314,18 +308,12 @@ pub async fn update_usage_api_key(
             .into_iter()
             .map(U256::from)
             .collect(),
-        req.add_pkp_to_groups
-            .into_iter()
-            .map(U256::from)
-            .collect(),
+        req.add_pkp_to_groups.into_iter().map(U256::from).collect(),
         req.remove_pkp_from_groups
             .into_iter()
             .map(U256::from)
             .collect(),
-        req.execute_in_groups
-            .into_iter()
-            .map(U256::from)
-            .collect(),
+        req.execute_in_groups.into_iter().map(U256::from).collect(),
     );
     send_transaction(function_call, signer_pool, signer_address).await
 }

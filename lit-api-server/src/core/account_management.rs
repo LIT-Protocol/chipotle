@@ -5,10 +5,9 @@ use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
-    AddUsageApiKeyRequest, NewAccountRequest, RemoveActionFromGroupRequest,
-    RemoveGroupRequest, RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest,
-    UpdateActionMetadataRequest, UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest,
-    UpdateUsageApiKeyRequest,
+    AddUsageApiKeyRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemoveGroupRequest,
+    RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest, UpdateActionMetadataRequest,
+    UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
     AccountOpResponse, AddUsageApiKeyResponse, ApiKeyItem, CreateWalletResponse, ListMetadataItem,
@@ -208,7 +207,10 @@ pub async fn remove_pkp_from_group(
     Ok(AccountOpResponse { success: true })
 }
 
-#[tracing::instrument(name = "account_management::add_usage_api_key", skip(signer_pool, api_key),)]
+#[tracing::instrument(
+    name = "account_management::add_usage_api_key",
+    skip(signer_pool, api_key)
+)]
 pub async fn add_usage_api_key(
     signer_pool: Arc<SignerPool>,
     api_key: &str,
@@ -300,9 +302,16 @@ pub async fn update_usage_api_key(
     let expiration = U256::from(ten_years_from_now);
     let balance = U256::from(10000000u64);
     let usage_api_key = req.usage_api_key.clone();
-    accounts::update_usage_api_key(signer_pool, api_key, &usage_api_key, expiration, balance, req.into_inner())
-        .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "update_usage_api_key failed"))?;
+    accounts::update_usage_api_key(
+        signer_pool,
+        api_key,
+        &usage_api_key,
+        expiration,
+        balance,
+        req.into_inner(),
+    )
+    .await
+    .map_err(|e| ApiStatus::internal_server_error(e, "update_usage_api_key failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
@@ -314,9 +323,17 @@ pub async fn update_group(
     let group_id = U256::from(req.group_id);
     let cid_hashes = hex_array_to_u256_array(&req.cid_hashes_permitted)?;
     let pkp_ids = hex_array_to_h160_array(&req.pkp_ids_permitted)?;
-    accounts::update_group(signer_pool, api_key, group_id, &req.name, &req.description, cid_hashes, pkp_ids)
-        .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "update_group failed"))?;
+    accounts::update_group(
+        signer_pool,
+        api_key,
+        group_id,
+        &req.name,
+        &req.description,
+        cid_hashes,
+        pkp_ids,
+    )
+    .await
+    .map_err(|e| ApiStatus::internal_server_error(e, "update_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
