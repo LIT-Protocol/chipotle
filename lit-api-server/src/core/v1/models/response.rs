@@ -76,7 +76,8 @@ pub struct WalletItem {
 /// One item from list_api_keys (AccountConfig.sol UsageApiKey).
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ApiKeyItem {
-    pub id: String, // hash of the item, as stored on chain.
+    pub id: String,           // auto-increment metadata id, as stored on chain.
+    pub api_key_hash: String, // keccak256 hash of the usage API key string (0x-prefixed hex).
     pub name: String,
     pub description: String,
     pub expiration: String,

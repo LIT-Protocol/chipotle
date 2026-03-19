@@ -381,8 +381,38 @@ function renderGroupsTable(items) {
     editBtn.innerHTML = ICON_PENCIL;
     editBtn.addEventListener('click', () => openEditGroupModal(item));
     actionsCell.appendChild(editBtn);
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn-icon btn-icon-danger';
+    delBtn.title = 'Delete';
+    delBtn.innerHTML = ICON_TRASH;
+    delBtn.addEventListener('click', () => confirmAndRemoveGroup(item));
+    actionsCell.appendChild(delBtn);
     tbody.appendChild(tr);
   });
+}
+
+async function confirmAndRemoveGroup(item) {
+  const label = item.name || item.id || '—';
+  const msg = 'Delete group "' + label + '"? This cannot be undone.';
+  const confirmed = await confirmDelete(msg);
+  if (!confirmed) return;
+  const apiKey = getApiKey();
+  if (!apiKey) return;
+  hideStatus('groups-status');
+  try {
+    showActionProgress('Deleting group', `Deleting group "${escapeHtml(label)}".`);
+    const client = await getClient();
+    await client.removeGroup({ apiKey, groupId: item.id });
+    window._groups = (window._groups || []).filter((g) => g.id !== item.id);
+    renderGroupsTable(window._groups);
+    updateStatCards();
+    showStatus('groups-status', 'Group deleted.', 'success');
+  } catch (e) {
+    showStatus('groups-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+  } finally {
+    closeActionProgress();
+  }
 }
 
 function renderActionsTable(items, groupId) {
@@ -577,8 +607,8 @@ async function loadUsageKeys() {
     const items = await client.listApiKeys({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
     window._usageKeys = items.map((it) => ({
       id: it.id,
-      api_key: it.api_key,
-      usage_api_key: it.api_key,
+      api_key_hash: it.api_key_hash,
+      usage_api_key: it.api_key_hash,
       name: it.name ?? '',
       description: it.description ?? '',
       expiration: it.expiration,
@@ -693,7 +723,7 @@ function initWallets() {
 function selectAllInMultiSelect(id) {
   const wrap = document.getElementById(id);
   if (!wrap) return;
-  const allCb = wrap.querySelector('input[value="0"]');
+  const allCb = wrap.querySelector('input[value="0"]') || wrap.querySelector('input[value="0x0000000000000000000000000000000000000000"]');
   wrap.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = cb === allCb; });
   updateMultiSelectSummary(id);
 }
@@ -801,7 +831,10 @@ function openAddActionModal() {
     try {
       showActionProgress('Adding action', `Adding action CID "${cid}" to group ${gid}.`);
       const client = await getClient();
-      await client.addActionToGroup({ apiKey, groupId: gid, actionIpfsCid: cid, name, description: desc });
+      if (name || desc) {
+        await client.addAction({ apiKey, name: name || '', description: desc || '' });
+      }
+      await client.addActionToGroup({ apiKey, groupId: gid, actionIpfsCid: cid });
       if (groupIdEl) groupIdEl.value = gid;
       await loadActions(gid);
       showStatus('actions-status', 'Action added.', 'success');
@@ -897,7 +930,7 @@ function buildGroupMultiSelect(id, disabled) {
 }
 
 function buildWalletMultiSelect(id, disabled) {
-  const items = [{ wallet_address: '0', name: 'All' }, ...getWalletsStore()];
+  const items = [{ wallet_address: '0x0000000000000000000000000000000000000000', name: 'All' }, ...getWalletsStore()];
   return buildMultiSelect(id, items, (w) => w.wallet_address, (w) => w.name || w.wallet_address, 'Select PKPs\u2026', disabled);
 }
 
@@ -968,10 +1001,10 @@ function openUsageKeyModal(item = null) {
       '<label class="checkbox-label"><input type="checkbox" id="modal-usage-can-delete-groups"' + (isEdit ? ' disabled' : '') + '> Can delete groups</label>' +
       '<label class="checkbox-label"><input type="checkbox" id="modal-usage-can-create-pkps"' + (isEdit ? ' disabled' : '') + '> Can create PKPs</label>' +
     '</div>' +
-    '<div class="form-group"><label>Can execute in groups</label>' + buildGroupMultiSelect('modal-usage-execute-groups', isEdit) + '</div>' +
-    '<div class="form-group"><label>Can manage IPFS actions in groups</label>' + buildGroupMultiSelect('modal-usage-manage-ipfs-groups', isEdit) + '</div>' +
-    '<div class="form-group"><label>Can add PKP to groups</label>' + buildGroupMultiSelect('modal-usage-add-pkp-groups', isEdit) + '</div>' +
-    '<div class="form-group"><label>Can remove PKP from groups</label>' + buildGroupMultiSelect('modal-usage-remove-pkp-groups', isEdit) + '</div>';
+    '<div class="form-group"><label>Can execute in groups</label>' + buildGroupMultiSelect('modal-usage-execute-groups', false) + '</div>' +
+    '<div class="form-group"><label>Can manage IPFS actions in groups</label>' + buildGroupMultiSelect('modal-usage-manage-ipfs-groups', false) + '</div>' +
+    '<div class="form-group"><label>Can add PKP to groups</label>' + buildGroupMultiSelect('modal-usage-add-pkp-groups', false) + '</div>' +
+    '<div class="form-group"><label>Can remove PKP from groups</label>' + buildGroupMultiSelect('modal-usage-remove-pkp-groups', false) + '</div>';
   const footer =
     (!isEdit ? '<button type="button" class="btn btn-outline" id="modal-all-options-btn" style="margin-right:auto;">All Options</button>' : '') +
     '<button type="button" class="btn btn-outline" id="modal-cancel-btn">Cancel</button>' +
@@ -994,11 +1027,11 @@ function openUsageKeyModal(item = null) {
     preSelect('modal-usage-add-pkp-groups', item.can_add_pkp_to_groups);
     preSelect('modal-usage-remove-pkp-groups', item.can_remove_pkp_from_groups);
   }
+  attachGroupMultiSelectLogic('modal-usage-execute-groups');
+  attachGroupMultiSelectLogic('modal-usage-manage-ipfs-groups');
+  attachGroupMultiSelectLogic('modal-usage-add-pkp-groups');
+  attachGroupMultiSelectLogic('modal-usage-remove-pkp-groups');
   if (!isEdit) {
-    attachGroupMultiSelectLogic('modal-usage-execute-groups');
-    attachGroupMultiSelectLogic('modal-usage-manage-ipfs-groups');
-    attachGroupMultiSelectLogic('modal-usage-add-pkp-groups');
-    attachGroupMultiSelectLogic('modal-usage-remove-pkp-groups');
     document.getElementById('modal-all-options-btn').addEventListener('click', () => {
       document.getElementById('modal-usage-can-create-groups').checked = true;
       document.getElementById('modal-usage-can-delete-groups').checked = true;
@@ -1023,13 +1056,36 @@ function openUsageKeyModal(item = null) {
     closeModal();
     hideStatus('overview-status-usage-keys');
     if (isEdit) {
+      const executeInGroups = getSelectedGroupIds('modal-usage-execute-groups');
+      const manageIpfsIdsInGroups = getSelectedGroupIds('modal-usage-manage-ipfs-groups');
+      const addPkpToGroups = getSelectedGroupIds('modal-usage-add-pkp-groups');
+      const removePkpFromGroups = getSelectedGroupIds('modal-usage-remove-pkp-groups');
       try {
-        showActionProgress('Updating usage API key', 'Updating usage API key metadata.');
+        showActionProgress('Updating usage API key', 'Saving changes to usage API key.');
         const client = await getClient();
-        await client.updateUsageApiKeyMetadata({ apiKey, usageApiKey: item.usage_api_key, name, description });
+        await client.updateUsageApiKey({
+          apiKey,
+          usageApiKey: item.usage_api_key,
+          name,
+          description,
+          canCreateGroups: item.can_create_groups,
+          canDeleteGroups: item.can_delete_groups,
+          canCreatePkps: item.can_create_pkps,
+          manageIpfsIdsInGroups,
+          addPkpToGroups,
+          removePkpFromGroups,
+          executeInGroups,
+        });
         const store = getUsageKeysStore();
         const idx = store.findIndex((k) => k.usage_api_key === item.usage_api_key);
-        if (idx !== -1) { store[idx].name = name; store[idx].description = description; }
+        if (idx !== -1) {
+          store[idx].name = name;
+          store[idx].description = description;
+          store[idx].can_manage_ipfs_ids_in_groups = manageIpfsIdsInGroups;
+          store[idx].can_add_pkp_to_groups = addPkpToGroups;
+          store[idx].can_remove_pkp_from_groups = removePkpFromGroups;
+          store[idx].can_execute_in_groups = executeInGroups;
+        }
         renderUsageKeysTable();
         showStatus('overview-status-usage-keys', 'Usage API key updated.', 'success');
       } catch (e) {
@@ -1041,17 +1097,20 @@ function openUsageKeyModal(item = null) {
       const canCreateGroups = document.getElementById('modal-usage-can-create-groups').checked;
       const canDeleteGroups = document.getElementById('modal-usage-can-delete-groups').checked;
       const canCreatePkps = document.getElementById('modal-usage-can-create-pkps').checked;
-      const canExecuteInGroups = getSelectedGroupIds('modal-usage-execute-groups');
-      const canManageIpfsIdsInGroups = getSelectedGroupIds('modal-usage-manage-ipfs-groups');
-      const canAddPkpToGroups = getSelectedGroupIds('modal-usage-add-pkp-groups');
-      const canRemovePkpFromGroups = getSelectedGroupIds('modal-usage-remove-pkp-groups');
+      const executeInGroups = getSelectedGroupIds('modal-usage-execute-groups');
+      const manageIpfsIdsInGroups = getSelectedGroupIds('modal-usage-manage-ipfs-groups');
+      const addPkpToGroups = getSelectedGroupIds('modal-usage-add-pkp-groups');
+      const removePkpFromGroups = getSelectedGroupIds('modal-usage-remove-pkp-groups');
       try {
         showActionProgress('Adding usage API key', 'Creating a new usage API key for this account.');
         const client = await getClient();
         const res = await client.addUsageApiKey({
           apiKey, name, description,
           canCreateGroups, canDeleteGroups, canCreatePkps,
-          canManageIpfsIdsInGroups, canAddPkpToGroups, canRemovePkpFromGroups, canExecuteInGroups,
+          manageIpfsIdsInGroups,
+          addPkpToGroups,
+          removePkpFromGroups,
+          executeInGroups,
         });
         const usageKey = res && res.usage_api_key ? res.usage_api_key : '';
         if (usageKey) {
