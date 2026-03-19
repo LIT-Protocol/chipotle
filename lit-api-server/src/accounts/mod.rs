@@ -11,8 +11,8 @@ use crate::accounts::signable_contract::{
     get_read_only_account_config_contract, get_signable_account_config_contract, send_transaction,
 };
 use crate::accounts::signer_pool::SignerPool;
-use crate::core::v1::models::request::AddUsageApiKeyRequest;
-use crate::utils::parse_with_hash::api_key_hash;
+use crate::core::v1::models::request::{AddActionRequest, AddUsageApiKeyRequest, UpdateUsageApiKeyRequest};
+use crate::utils::parse_with_hash::{api_key_hash, usage_api_key_to_hash};
 use crate::utils::parse_with_hash::ipfs_cid_to_u256;
 use ethers::types::{Address, H160, U256};
 use tracing::instrument;
@@ -82,27 +82,34 @@ pub async fn add_group(
     send_transaction(function_call, signer_pool, signer_address).await
 }
 
-/// Add an action (IPFS CID) to a group with optional metadata. `action_ipfs_cid` is hashed with keccak256; pass the raw CID string.
+/// Create a new action entry with name and description in the account's actionMetadata mapping.
+pub async fn add_action(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    req: AddActionRequest,
+) -> Result<bool> {
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let function_call =
+        contract.add_action(account_api_key_hash, req.name, req.description);
+    send_transaction(function_call, signer_pool, signer_address).await
+}
+
+/// Add an action to a group by its IPFS CID. Metadata must be set separately via add_action / update_action_metadata.
 pub async fn add_action_to_group(
     signer_pool: Arc<SignerPool>,
     api_key: &str,
     group_id: U256,
     action_ipfs_cid: &str,
-    name: &str,
-    description: &str,
 ) -> Result<bool> {
     let (contract, signer_address) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let action_hash = ipfs_cid_to_u256(action_ipfs_cid)
         .map_err(|e| anyhow::anyhow!("Unable to parse action IPFS CID: {}", e))?;
-    let function_call = contract.add_action_to_group(
-        account_api_key_hash,
-        group_id,
-        action_hash,
-        name.to_string(),
-        description.to_string(),
-    );
+    let function_call =
+        contract.add_action_to_group(account_api_key_hash, group_id, action_hash);
     send_transaction(function_call, signer_pool, signer_address).await
 }
 
@@ -127,6 +134,8 @@ pub async fn update_group(
     group_id: U256,
     name: &str,
     description: &str,
+    cid_hashes: Vec<U256>,
+    pkp_ids: Vec<Address>,
 ) -> Result<bool> {
     let (contract, signer_address) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
@@ -136,6 +145,8 @@ pub async fn update_group(
         group_id,
         name.to_string(),
         description.to_string(),
+        cid_hashes,
+        pkp_ids,
     );
     send_transaction(function_call, signer_pool, signer_address).await
 }
@@ -200,7 +211,7 @@ pub async fn update_usage_api_key_metadata(
     let (contract, signer_address) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
-    let usage_api_key_hash = api_key_hash(usage_api_key);
+    let usage_api_key_hash = usage_api_key_to_hash(usage_api_key);
     let function_call = contract.update_usage_api_key_metadata(
         account_api_key_hash,
         usage_api_key_hash,
@@ -255,19 +266,63 @@ pub async fn add_usage_api_key(
         req.can_create_groups,
         req.can_delete_groups,
         req.can_create_pkps,
-        req.can_manage_ipfs_ids_in_groups
+        req.manage_ipfs_ids_in_groups
             .into_iter()
             .map(U256::from)
             .collect(),
-        req.can_add_pkp_to_groups
+        req.add_pkp_to_groups
             .into_iter()
             .map(U256::from)
             .collect(),
-        req.can_remove_pkp_from_groups
+        req.remove_pkp_from_groups
             .into_iter()
             .map(U256::from)
             .collect(),
-        req.can_execute_in_groups
+        req.execute_in_groups
+            .into_iter()
+            .map(U256::from)
+            .collect(),
+    );
+    send_transaction(function_call, signer_pool, signer_address).await
+}
+
+/// Update all metadata and permissions on an existing usage API key (AccountConfig.setUsageApiKey).
+/// Re-uses the existing key hash — does not create a new wallet or key.
+pub async fn update_usage_api_key(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    usage_api_key: &str,
+    expiration: U256,
+    balance: U256,
+    req: UpdateUsageApiKeyRequest,
+) -> Result<bool> {
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let usage_api_key_hash = usage_api_key_to_hash(usage_api_key);
+    let function_call = contract.set_usage_api_key(
+        account_api_key_hash,
+        usage_api_key_hash,
+        expiration,
+        balance,
+        req.name,
+        req.description,
+        req.can_create_groups,
+        req.can_delete_groups,
+        req.can_create_pkps,
+        req.manage_ipfs_ids_in_groups
+            .into_iter()
+            .map(U256::from)
+            .collect(),
+        req.add_pkp_to_groups
+            .into_iter()
+            .map(U256::from)
+            .collect(),
+        req.remove_pkp_from_groups
+            .into_iter()
+            .map(U256::from)
+            .collect(),
+        req.execute_in_groups
             .into_iter()
             .map(U256::from)
             .collect(),
@@ -284,9 +339,22 @@ pub async fn remove_usage_api_key(
     let (contract, signer_address) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
-    let usage_api_key_hash = api_key_hash(usage_api_key);
+    let usage_api_key_hash = usage_api_key_to_hash(usage_api_key);
 
     let function_call = contract.remove_usage_api_key(account_api_key_hash, usage_api_key_hash);
+    send_transaction(function_call, signer_pool, signer_address).await
+}
+
+/// Remove a group from an account (AccountConfig.removeGroup).
+pub async fn remove_group(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    group_id: U256,
+) -> Result<bool> {
+    let (contract, signer_address) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let function_call = contract.remove_group(account_api_key_hash, group_id);
     send_transaction(function_call, signer_pool, signer_address).await
 }
 

@@ -9,6 +9,21 @@ pub fn api_key_hash(api_key_base_64: &str) -> U256 {
     U256::from_big_endian(&keccak256(api_key_base_64.as_bytes()))
 }
 
+/// Hash a usage API key string, OR pass through a pre-computed keccak256 hash.
+/// If `s` is a 0x-prefixed 66-character hex string (32 bytes), it is treated as
+/// an already-computed hash and parsed directly. Otherwise it is keccak256-hashed.
+pub fn usage_api_key_to_hash(s: &str) -> U256 {
+    let trimmed = s.trim();
+    if (trimmed.starts_with("0x") || trimmed.starts_with("0X")) && trimmed.len() == 66 {
+        if let Ok(bytes) = hex_to_bytes(trimmed) {
+            if bytes.len() == 32 {
+                return U256::from_big_endian(&bytes);
+            }
+        }
+    }
+    api_key_hash(trimmed)
+}
+
 pub fn hex_array_to_u256_array(hex_array: &[String]) -> Result<Vec<U256>, ApiStatus> {
     parse_u256_hex_list(hex_array)
 }

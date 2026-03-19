@@ -289,7 +289,7 @@ contract ViewsFacet {
         uint256 apiKeyHash
     ) internal view returns (AppStorage.Account storage) {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[apiKeyHash];
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashesToMaster[apiKeyHash];
         if (masterAccountApiKeyHash == 0) {
             revert AppStorage.AccountDoesNotExist(apiKeyHash);
         }
@@ -400,7 +400,9 @@ contract ViewsFacet {
         uint256 cidHash
     ) public view returns (bool) {
         AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
-        AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[apiKeyHash];
+        AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[
+            apiKeyHash
+        ];
 
         if (usageApiKey.executeInGroups.contains(0)) {
             return true; // wildcard: can execute in any group
@@ -411,7 +413,8 @@ contract ViewsFacet {
             uint256 groupId = account.groupList.at(i);
             AppStorage.Group storage group = account.groups[groupId];
             if (
-                (group.cidHash.contains(cidHash) || group.cidHash.contains(0)) &&
+                (group.cidHash.contains(cidHash) ||
+                    group.cidHash.contains(0)) &&
                 usageApiKey.executeInGroups.contains(groupId)
             ) {
                 return true;
@@ -427,7 +430,9 @@ contract ViewsFacet {
         address walletAddress
     ) public view returns (bool) {
         AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
-        AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[apiKeyHash];
+        AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[
+            apiKeyHash
+        ];
 
         if (usageApiKey.executeInGroups.contains(0)) {
             return true; // wildcard
@@ -438,8 +443,10 @@ contract ViewsFacet {
             uint256 groupId = account.groupList.at(i);
             AppStorage.Group storage group = account.groups[groupId];
             if (
-                (group.cidHash.contains(cidHash) || group.cidHash.contains(0)) &&
-                (group.pkpId.contains(walletAddress) || group.pkpId.contains(address(0))) &&
+                (group.cidHash.contains(cidHash) ||
+                    group.cidHash.contains(0)) &&
+                (group.pkpId.contains(walletAddress) ||
+                    group.pkpId.contains(address(0))) &&
                 usageApiKey.executeInGroups.contains(groupId)
             ) {
                 return true;
@@ -457,7 +464,9 @@ contract ViewsFacet {
         address walletAddress
     ) public view returns (bool canExecute, bool canUseWallet) {
         AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
-        AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[apiKeyHash];
+        AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[
+            apiKeyHash
+        ];
 
         if (usageApiKey.executeInGroups.contains(0)) {
             return (true, true); // wildcard: both trivially true
@@ -470,7 +479,8 @@ contract ViewsFacet {
             uint256 groupId = account.groupList.at(i);
             AppStorage.Group storage group = account.groups[groupId];
 
-            bool cidMatch = group.cidHash.contains(cidHash) || group.cidHash.contains(0);
+            bool cidMatch = group.cidHash.contains(cidHash) ||
+                group.cidHash.contains(0);
             if (!cidMatch) continue;
 
             bool groupPermitted = usageApiKey.executeInGroups.contains(groupId);
@@ -479,7 +489,10 @@ contract ViewsFacet {
             canExecute = true;
 
             if (!canUseWallet) {
-                if (group.pkpId.contains(walletAddress) || group.pkpId.contains(address(0))) {
+                if (
+                    group.pkpId.contains(walletAddress) ||
+                    group.pkpId.contains(address(0))
+                ) {
                     canUseWallet = true;
                 }
             }

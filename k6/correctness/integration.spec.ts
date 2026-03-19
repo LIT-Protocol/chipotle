@@ -148,14 +148,24 @@ export default function (data: IntegrationSetupData) {
   }
   const groupId = groups[groups.length - 1].id; // use the most recently created group
 
-  // ── 8. addActionToGroup ───────────────────────────────────────────────────
-  const addActionRes = client.addActionToGroup(
-    {
-      group_id: parseInt(groupId),
-      action_ipfs_cid: ipfsId,
-      name: "hello-world",
-      description: "Hello World lit action",
+  // ── 8. addAction + addActionToGroup ──────────────────────────────────────
+  const addActionMetaRes = client.addAction(
+    { name: "hello-world", description: "Hello World lit action" },
+    authHeaders,
+  );
+  if (!assertOk("addAction", "POST /add_action", addActionMetaRes)) return;
+  checkAndLog(addActionMetaRes.response, {
+    "addAction success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
     },
+  }, "addAction");
+
+  const addActionRes = client.addActionToGroup(
+    { group_id: parseInt(groupId), action_ipfs_cid: ipfsId },
     authHeaders,
   );
   if (!assertOk("addActionToGroup", "POST /add_action_to_group", addActionRes)) return;
@@ -225,10 +235,10 @@ export default function (data: IntegrationSetupData) {
       can_create_groups: false,
       can_delete_groups: false,
       can_create_pkps: false,
-      can_manage_ipfs_ids_in_groups: [],
-      can_add_pkp_to_groups: [],
-      can_remove_pkp_from_groups: [],
-      can_execute_in_groups: [0],
+      manage_ipfs_ids_in_groups: [],
+      add_pkp_to_groups: [],
+      remove_pkp_from_groups: [],
+      execute_in_groups: [0],
     },
     authHeaders,
   );
