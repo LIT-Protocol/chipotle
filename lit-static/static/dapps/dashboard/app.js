@@ -394,7 +394,7 @@ function renderGroupsTable(items) {
 
 async function confirmAndRemoveGroup(item) {
   const label = item.name || item.id || '—';
-  const msg = 'Delete group "' + escapeHtml(label) + '"? This cannot be undone.';
+  const msg = 'Delete group "' + label + '"? This cannot be undone.';
   const confirmed = await confirmDelete(msg);
   if (!confirmed) return;
   const apiKey = getApiKey();
