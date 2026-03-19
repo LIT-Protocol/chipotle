@@ -7,7 +7,7 @@
 #
 # Required secrets:
 #   CONTRACT_DEPLOYER_SECRET_SEPOLIA - deployer wallet private key (Base Sepolia)
-#   CONTRACT_DEPLOYER_SECRET_BASE    - deployer wallet private key (Base Mainnet)
+#   PHALA_DSTACKAPP_PRIVATE_KEY    - deployer wallet private key (Base Mainnet)
 
 name: Contract Upgrade
 
@@ -77,7 +77,7 @@ jobs:
         id: secret
         run: |
           if [ "${{ steps.config.outputs.network }}" = "base" ]; then
-            echo "key=${{ secrets.CONTRACT_DEPLOYER_SECRET_BASE }}" >> "$GITHUB_OUTPUT"
+            echo "key=${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}" >> "$GITHUB_OUTPUT"
           else
             echo "key=${{ secrets.CONTRACT_DEPLOYER_SECRET_SEPOLIA }}" >> "$GITHUB_OUTPUT"
           fi
