@@ -48,7 +48,7 @@ jobs:
           NETWORK=$(grep '^name' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
           ADDRESS=$(grep '^contract_address' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
 
-          echo "network=${{ secrets.BASE_CHAIN_RPC }}" >> "$GITHUB_OUTPUT"
+          echo "network=$NETWORK" >> "$GITHUB_OUTPUT"
           echo "address=$ADDRESS" >> "$GITHUB_OUTPUT"
           echo "Resolved from $CONFIG: network=$NETWORK address=$ADDRESS"
 
@@ -90,4 +90,5 @@ jobs:
             --network=${{ steps.config.outputs.network }} \
             --abifolder=artifacts/contracts \
             --secret=${{ steps.secret.outputs.key }} \
-            --address=${{ steps.config.outputs.address }}
+            --address=${{ steps.config.outputs.address }} \
+            --rpc-url=${{ secrets.BASE_CHAIN_RPC }}
