@@ -1,4 +1,4 @@
-(async () => {
-  const ciphertext = await Lit.Actions.Encrypt({ pkpId, message: challenge });
-  Lit.Actions.setResponse({ response: ciphertext });
-})();
+async function main({ pkpId, challenge }) {
+  const result = await Lit.Actions.Encrypt({ pkpId, message: challenge });
+  return result;
+}

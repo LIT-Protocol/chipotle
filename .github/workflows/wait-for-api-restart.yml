@@ -94,14 +94,19 @@ jobs:
           BASE_URL="${{ steps.resolve-url.outputs.api_root_url }}"
           TIMEOUT="${{ inputs.timeout }}"
 
+          # Derive the health URL from the API root URL.
+          # api_root_url is e.g. https://example.com/core/v1 — strip the
+          # /core/v1 suffix to get the base, then append /health.
+          HEALTH_URL="${BASE_URL%/core/v1}/health"
+
           # Step-function: if the API is currently up (stale instance still
           # serving), wait for it to go down before polling for the new
           # instance.  This avoids the race where we'd pass against the old
           # deployment.
-          if curl -sf "$BASE_URL/openapi.json" > /dev/null 2>&1; then
+          if curl -sf "$HEALTH_URL" > /dev/null 2>&1; then
             echo "API is currently available — waiting for it to go down (deployment restart)..."
             DOWN_DEADLINE=$(( $(date +%s) + 300 ))  # 5 min
-            while curl -sf "$BASE_URL/openapi.json" > /dev/null 2>&1; do
+            while curl -sf "$HEALTH_URL" > /dev/null 2>&1; do
               if [ "$(date +%s)" -ge "$DOWN_DEADLINE" ]; then
                 echo "::error::API never went down after 300s — deploy may have failed"
                 exit 1
@@ -115,10 +120,10 @@ jobs:
             echo "API is not currently available — polling for availability"
           fi
 
-          # Poll for the API to come (back) up.
-          echo "Polling $BASE_URL/openapi.json (timeout: ${TIMEOUT}s)..."
+          # Poll for the API to come (back) up via the /health endpoint.
+          echo "Polling $HEALTH_URL (timeout: ${TIMEOUT}s)..."
           deadline=$(( $(date +%s) + TIMEOUT ))
-          until curl -sf "$BASE_URL/openapi.json" > /dev/null; do
+          until curl -sf "$HEALTH_URL" > /dev/null; do
             if [ "$(date +%s)" -ge "$deadline" ]; then
               echo "Timed out after ${TIMEOUT}s waiting for API"
               exit 1

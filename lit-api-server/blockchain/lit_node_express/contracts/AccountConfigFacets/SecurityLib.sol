@@ -17,7 +17,7 @@ library SecurityLib {
     // ----- internal view helpers (revert helpers call view from Views facet conceptually; we duplicate for simplicity) -----
     function revertIfNotMasterAccount(uint256 accountApiKeyHash) internal view {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        if (s.allApiKeyHashes[accountApiKeyHash] != accountApiKeyHash) {
+        if (s.allApiKeyHashesToMaster[accountApiKeyHash] != accountApiKeyHash) {
             revert AppStorage.NotMasterAccount(accountApiKeyHash);
         }
     }
@@ -138,6 +138,90 @@ library SecurityLib {
             caller != s.adminApiPayerAccount
         ) {
             revert AppStorage.OnlyApiPayerOrOwner(caller);
+        }
+    }
+
+    function canAccountAddPkpToGroup(
+        uint256 usageApiKeyHash,
+        uint256 groupId
+    ) internal view {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        uint256 accountApiKeyHash = s.allApiKeyHashesToMaster[usageApiKeyHash];
+        AppStorage.UsageApiKey storage usageApiKey = s
+            .accounts[accountApiKeyHash]
+            .usageApiKeys[usageApiKeyHash];
+        if (!usageApiKey.addPkpToGroups.contains(groupId)) {
+            revert AppStorage.NotAllowedToAddPkpToGroup(
+                usageApiKeyHash,
+                groupId
+            );
+        }
+    }
+
+    function canAccountRemovePkpFromGroup(
+        uint256 usageApiKeyHash,
+        uint256 groupId
+    ) internal view {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        uint256 accountApiKeyHash = s.allApiKeyHashesToMaster[usageApiKeyHash];
+        AppStorage.UsageApiKey storage usageApiKey = s
+            .accounts[accountApiKeyHash]
+            .usageApiKeys[usageApiKeyHash];
+        if (!usageApiKey.removePkpFromGroups.contains(groupId)) {
+            revert AppStorage.NotAllowedToRemovePkpFromGroup(
+                usageApiKeyHash,
+                groupId
+            );
+        }
+    }
+
+    function canAccountManageIPFSIdsInGroup(
+        uint256 usageApiKeyHash,
+        uint256 groupId
+    ) internal view {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        uint256 accountApiKeyHash = s.allApiKeyHashesToMaster[usageApiKeyHash];
+        AppStorage.UsageApiKey storage usageApiKey = s
+            .accounts[accountApiKeyHash]
+            .usageApiKeys[usageApiKeyHash];
+        if (!usageApiKey.manageIPFSIdsInGroups.contains(groupId)) {
+            revert AppStorage.NotAllowedToManageIPFSIdsInGroup(
+                usageApiKeyHash,
+                groupId
+            );
+        }
+    }
+
+    function canCreateGroup(uint256 usageApiKeyHash) internal view {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        uint256 accountApiKeyHash = s.allApiKeyHashesToMaster[usageApiKeyHash];
+        AppStorage.UsageApiKey storage usageApiKey = s
+            .accounts[accountApiKeyHash]
+            .usageApiKeys[accountApiKeyHash];
+        if (!usageApiKey.createGroups) {
+            revert AppStorage.NotAllowedToCreateGroup(usageApiKeyHash);
+        }
+    }
+
+    function canDeleteGroup(uint256 usageApiKeyHash) internal view {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        uint256 accountApiKeyHash = s.allApiKeyHashesToMaster[usageApiKeyHash];
+        AppStorage.UsageApiKey storage usageApiKey = s
+            .accounts[accountApiKeyHash]
+            .usageApiKeys[usageApiKeyHash];
+        if (!usageApiKey.deleteGroups) {
+            revert AppStorage.NotAllowedToDeleteGroup(usageApiKeyHash);
+        }
+    }
+
+    function canCreatePkp(uint256 usageApiKeyHash) internal view {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        uint256 accountApiKeyHash = s.allApiKeyHashesToMaster[usageApiKeyHash];
+        AppStorage.UsageApiKey storage usageApiKey = s
+            .accounts[accountApiKeyHash]
+            .usageApiKeys[usageApiKeyHash];
+        if (!usageApiKey.createPKPs) {
+            revert AppStorage.NotAllowedToCreatePkp(usageApiKeyHash);
         }
     }
 }

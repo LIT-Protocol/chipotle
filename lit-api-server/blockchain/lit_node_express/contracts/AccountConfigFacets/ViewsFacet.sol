@@ -289,7 +289,7 @@ contract ViewsFacet {
         uint256 apiKeyHash
     ) internal view returns (AppStorage.Account storage) {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[apiKeyHash];
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashesToMaster[apiKeyHash];
         if (masterAccountApiKeyHash == 0) {
             revert AppStorage.AccountDoesNotExist(apiKeyHash);
         }
@@ -392,5 +392,110 @@ contract ViewsFacet {
             returnGroups[i] = groupIds[i];
         }
         return returnGroups;
+    }
+
+    /// @notice Optimized single-pass canExecuteAction with early exit. No intermediate array.
+    function canExecuteActionFast(
+        uint256 apiKeyHash,
+        uint256 cidHash
+    ) public view returns (bool) {
+        AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
+        AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[
+            apiKeyHash
+        ];
+
+        if (usageApiKey.executeInGroups.contains(0)) {
+            return true; // wildcard: can execute in any group
+        }
+
+        uint256 len = account.groupList.length();
+        for (uint256 i = 0; i < len; i++) {
+            uint256 groupId = account.groupList.at(i);
+            AppStorage.Group storage group = account.groups[groupId];
+            if (
+                (group.cidHash.contains(cidHash) ||
+                    group.cidHash.contains(0)) &&
+                usageApiKey.executeInGroups.contains(groupId)
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// @notice Optimized single-pass canUseWalletInAction with early exit. No intermediate array.
+    function canUseWalletInActionFast(
+        uint256 apiKeyHash,
+        uint256 cidHash,
+        address walletAddress
+    ) public view returns (bool) {
+        AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
+        AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[
+            apiKeyHash
+        ];
+
+        if (usageApiKey.executeInGroups.contains(0)) {
+            return true; // wildcard
+        }
+
+        uint256 len = account.groupList.length();
+        for (uint256 i = 0; i < len; i++) {
+            uint256 groupId = account.groupList.at(i);
+            AppStorage.Group storage group = account.groups[groupId];
+            if (
+                (group.cidHash.contains(cidHash) ||
+                    group.cidHash.contains(0)) &&
+                (group.pkpId.contains(walletAddress) ||
+                    group.pkpId.contains(address(0))) &&
+                usageApiKey.executeInGroups.contains(groupId)
+            ) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// @notice Combined check: returns (canExecute, canUseWallet) in a single pass.
+    ///         Use this from Rust to replace 2 sequential RPC calls with 1.
+    ///         Note: canUseWallet implies canExecute in this model.
+    function canExecuteActionAndUseWallet(
+        uint256 apiKeyHash,
+        uint256 cidHash,
+        address walletAddress
+    ) public view returns (bool canExecute, bool canUseWallet) {
+        AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
+        AppStorage.UsageApiKey storage usageApiKey = account.usageApiKeys[
+            apiKeyHash
+        ];
+
+        if (usageApiKey.executeInGroups.contains(0)) {
+            return (true, true); // wildcard: both trivially true
+        }
+
+        uint256 len = account.groupList.length();
+        for (uint256 i = 0; i < len; i++) {
+            if (canExecute && canUseWallet) break; // early exit once both resolved
+
+            uint256 groupId = account.groupList.at(i);
+            AppStorage.Group storage group = account.groups[groupId];
+
+            bool cidMatch = group.cidHash.contains(cidHash) ||
+                group.cidHash.contains(0);
+            if (!cidMatch) continue;
+
+            bool groupPermitted = usageApiKey.executeInGroups.contains(groupId);
+            if (!groupPermitted) continue;
+
+            canExecute = true;
+
+            if (!canUseWallet) {
+                if (
+                    group.pkpId.contains(walletAddress) ||
+                    group.pkpId.contains(address(0))
+                ) {
+                    canUseWallet = true;
+                }
+            }
+        }
     }
 }

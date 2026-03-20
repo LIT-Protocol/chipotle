@@ -29,10 +29,15 @@ function getBaseUrl() {
 function updateAuthUI() {
   const hasKey = !!getApiKey();
   document.body.classList.toggle('has-api-key', hasKey);
+  const balanceEl = document.getElementById('billing-balance-display');
+  const addFundsBtn = document.getElementById('btn-add-funds');
+  if (balanceEl) balanceEl.style.display = hasKey ? '' : 'none';
+  if (addFundsBtn) addFundsBtn.style.display = hasKey ? '' : 'none';
   if (hasKey) {
     refreshOverviewAccount();
     updateStatCards();
     preloadAllTables();
+    loadBillingBalance();
   }
 }
 
@@ -152,6 +157,7 @@ function initLogin() {
   document.getElementById('btn-create-account').addEventListener('click', async () => {
     const name = document.getElementById('new-account-name').value.trim();
     const desc = document.getElementById('new-account-desc').value.trim();
+    const email = document.getElementById('new-account-email').value.trim();
     hideStatus('login-status');
     if (!name) {
       showStatus('login-status', 'Enter an account name.', 'error');
@@ -165,7 +171,7 @@ function initLogin() {
         'Creating a new Lit Express account and returning an API key.'
       );
       const client = await getClient();
-      const res = await client.newAccount({ accountName: name, accountDescription: desc });
+      const res = await client.newAccount({ accountName: name, accountDescription: desc, email: email || undefined });
       setApiKey(res.api_key);
       showNewAccountBanner(res.api_key);
       document.getElementById('new-account-name').value = '';
@@ -193,6 +199,120 @@ function keyPreview(key) {
 
 function refreshOverviewAccount() {
   // Overview no longer displays API key or status; kept for any future use.
+}
+
+// ----- Billing -----
+async function loadBillingBalance() {
+  const apiKey = getApiKey();
+  if (!apiKey) return;
+  const el = document.getElementById('billing-balance-display');
+  if (!el) return;
+  try {
+    const client = await getClient();
+    const data = await client.getBillingBalance(apiKey);
+    el.textContent = data.balance_display || '';
+  } catch (_) {
+    el.textContent = '';
+  }
+}
+
+// Stripe card element singleton
+let _stripe = null;
+let _stripeCard = null;
+
+async function openAddFundsModal() {
+  const overlay = document.getElementById('billing-modal-overlay');
+  if (!overlay) return;
+  overlay.classList.add('is-open');
+  overlay.setAttribute('aria-hidden', 'false');
+
+  const statusEl = document.getElementById('billing-modal-status');
+  if (statusEl) { statusEl.style.display = 'none'; }
+
+  // Reset pay button to enabled state each time the modal is opened so that
+  // a previous Stripe init failure does not permanently disable it.
+  const payBtn = document.getElementById('billing-pay-btn');
+  if (payBtn) payBtn.disabled = true; // disabled until Stripe is ready
+
+  // Initialise Stripe.js if not already done
+  if (!_stripe) {
+    try {
+      const client = await getClient();
+      const cfg = await client.getStripeConfig();
+      _stripe = Stripe(cfg.publishable_key); // eslint-disable-line no-undef
+      const elements = _stripe.elements();
+      _stripeCard = elements.create('card');
+      _stripeCard.mount('#stripe-card-element');
+    } catch (e) {
+      if (statusEl) {
+        statusEl.textContent = 'Billing not available: ' + (e && e.message ? e.message : String(e));
+        statusEl.className = 'status error';
+        statusEl.style.display = 'block';
+      }
+      // payBtn stays disabled (already set above)
+      return;
+    }
+  }
+
+  // Stripe is ready – allow the user to pay
+  if (payBtn) payBtn.disabled = false;
+}
+
+function closeBillingModal() {
+  const overlay = document.getElementById('billing-modal-overlay');
+  if (overlay) {
+    overlay.classList.remove('is-open');
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function initBilling() {
+  const addFundsBtn = document.getElementById('btn-add-funds');
+  const closeBtn = document.getElementById('billing-modal-close-btn');
+  const cancelBtn = document.getElementById('billing-cancel-btn');
+  const payBtn = document.getElementById('billing-pay-btn');
+
+  if (addFundsBtn) addFundsBtn.addEventListener('click', openAddFundsModal);
+  if (closeBtn) closeBtn.addEventListener('click', closeBillingModal);
+  if (cancelBtn) cancelBtn.addEventListener('click', closeBillingModal);
+
+  if (payBtn) {
+    payBtn.addEventListener('click', async () => {
+      const apiKey = getApiKey();
+      if (!apiKey || !_stripe || !_stripeCard) return;
+
+      const amountCents = parseInt(document.getElementById('billing-amount').value, 10);
+      const statusEl = document.getElementById('billing-modal-status');
+
+      payBtn.disabled = true;
+      if (statusEl) { statusEl.style.display = 'none'; }
+
+      try {
+        const client = await getClient();
+        const intent = await client.createPaymentIntent(apiKey, amountCents);
+
+        const result = await _stripe.confirmCardPayment(intent.client_secret, {
+          payment_method: { card: _stripeCard },
+        });
+
+        if (result.error) {
+          throw new Error(result.error.message);
+        }
+
+        await client.confirmPayment(apiKey, intent.payment_intent_id);
+        closeBillingModal();
+        await loadBillingBalance();
+      } catch (e) {
+        if (statusEl) {
+          statusEl.textContent = 'Payment failed: ' + (e && e.message ? e.message : String(e));
+          statusEl.className = 'status error';
+          statusEl.style.display = 'block';
+        }
+      } finally {
+        payBtn.disabled = false;
+      }
+    });
+  }
 }
 
 function showNewAccountBanner(apiKey) {
@@ -230,9 +350,10 @@ function initOverview() {
   document.getElementById('btn-add-usage-key')?.addEventListener('click', () => openUsageKeyModal());
 }
 
-// ----- Icons (pencil, trash) -----
+// ----- Icons (pencil, trash, copy) -----
 const ICON_PENCIL = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
 const ICON_TRASH = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+const ICON_COPY = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>';
 
 // ----- Modal (Add / Edit) -----
 function openModal(title, bodyHTML, footerHTML) {
@@ -381,8 +502,38 @@ function renderGroupsTable(items) {
     editBtn.innerHTML = ICON_PENCIL;
     editBtn.addEventListener('click', () => openEditGroupModal(item));
     actionsCell.appendChild(editBtn);
+    const delBtn = document.createElement('button');
+    delBtn.type = 'button';
+    delBtn.className = 'btn-icon btn-icon-danger';
+    delBtn.title = 'Delete';
+    delBtn.innerHTML = ICON_TRASH;
+    delBtn.addEventListener('click', () => confirmAndRemoveGroup(item));
+    actionsCell.appendChild(delBtn);
     tbody.appendChild(tr);
   });
+}
+
+async function confirmAndRemoveGroup(item) {
+  const label = item.name || item.id || '—';
+  const msg = 'Delete group "' + label + '"? This cannot be undone.';
+  const confirmed = await confirmDelete(msg);
+  if (!confirmed) return;
+  const apiKey = getApiKey();
+  if (!apiKey) return;
+  hideStatus('groups-status');
+  try {
+    showActionProgress('Deleting group', `Deleting group "${escapeHtml(label)}".`);
+    const client = await getClient();
+    await client.removeGroup({ apiKey, groupId: item.id });
+    window._groups = (window._groups || []).filter((g) => g.id !== item.id);
+    renderGroupsTable(window._groups);
+    updateStatCards();
+    showStatus('groups-status', 'Group deleted.', 'success');
+  } catch (e) {
+    showStatus('groups-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
+  } finally {
+    closeActionProgress();
+  }
 }
 
 function renderActionsTable(items, groupId) {
@@ -509,6 +660,31 @@ function renderUsageKeysTable() {
       '<td class="mono">' + escapeHtml(balance) + '</td>' +
       '<td class="cell-actions"></td>';
     const actionsCell = tr.querySelector('.cell-actions');
+    const fullKey = item.api_key || (!item.api_key_hash ? item.usage_api_key : null);
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'btn-icon';
+    copyBtn.title = fullKey ? 'Copy usage API key' : 'Key only available when first created';
+    copyBtn.innerHTML = ICON_COPY;
+    if (!fullKey) copyBtn.disabled = true;
+    copyBtn.addEventListener('click', async () => {
+      if (!fullKey) return;
+      try {
+        await navigator.clipboard.writeText(fullKey);
+      } catch (_) {
+        const ta = document.createElement('textarea');
+        ta.value = fullKey;
+        ta.style.cssText = 'position:fixed;opacity:0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      const origTitle = copyBtn.title;
+      copyBtn.title = 'Copied!';
+      setTimeout(() => { copyBtn.title = origTitle; }, 1500);
+    });
+    actionsCell.appendChild(copyBtn);
     const canEdit = !!(item.usage_api_key ?? item.api_key);
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
@@ -577,8 +753,8 @@ async function loadUsageKeys() {
     const items = await client.listApiKeys({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
     window._usageKeys = items.map((it) => ({
       id: it.id,
-      api_key: it.api_key,
-      usage_api_key: it.api_key,
+      api_key_hash: it.api_key_hash,
+      usage_api_key: it.api_key_hash,
       name: it.name ?? '',
       description: it.description ?? '',
       expiration: it.expiration,
@@ -693,7 +869,7 @@ function initWallets() {
 function selectAllInMultiSelect(id) {
   const wrap = document.getElementById(id);
   if (!wrap) return;
-  const allCb = wrap.querySelector('input[value="0"]');
+  const allCb = wrap.querySelector('input[value="0"]') || wrap.querySelector('input[value="0x0000000000000000000000000000000000000000"]');
   wrap.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = cb === allCb; });
   updateMultiSelectSummary(id);
 }
@@ -801,7 +977,10 @@ function openAddActionModal() {
     try {
       showActionProgress('Adding action', `Adding action CID "${cid}" to group ${gid}.`);
       const client = await getClient();
-      await client.addActionToGroup({ apiKey, groupId: gid, actionIpfsCid: cid, name, description: desc });
+      if (name || desc) {
+        await client.addAction({ apiKey, name: name || '', description: desc || '' });
+      }
+      await client.addActionToGroup({ apiKey, groupId: gid, actionIpfsCid: cid });
       if (groupIdEl) groupIdEl.value = gid;
       await loadActions(gid);
       showStatus('actions-status', 'Action added.', 'success');
@@ -897,7 +1076,7 @@ function buildGroupMultiSelect(id, disabled) {
 }
 
 function buildWalletMultiSelect(id, disabled) {
-  const items = [{ wallet_address: '0', name: 'All' }, ...getWalletsStore()];
+  const items = [{ wallet_address: '0x0000000000000000000000000000000000000000', name: 'All' }, ...getWalletsStore()];
   return buildMultiSelect(id, items, (w) => w.wallet_address, (w) => w.name || w.wallet_address, 'Select PKPs\u2026', disabled);
 }
 
@@ -968,10 +1147,10 @@ function openUsageKeyModal(item = null) {
       '<label class="checkbox-label"><input type="checkbox" id="modal-usage-can-delete-groups"' + (isEdit ? ' disabled' : '') + '> Can delete groups</label>' +
       '<label class="checkbox-label"><input type="checkbox" id="modal-usage-can-create-pkps"' + (isEdit ? ' disabled' : '') + '> Can create PKPs</label>' +
     '</div>' +
-    '<div class="form-group"><label>Can execute in groups</label>' + buildGroupMultiSelect('modal-usage-execute-groups', isEdit) + '</div>' +
-    '<div class="form-group"><label>Can manage IPFS actions in groups</label>' + buildGroupMultiSelect('modal-usage-manage-ipfs-groups', isEdit) + '</div>' +
-    '<div class="form-group"><label>Can add PKP to groups</label>' + buildGroupMultiSelect('modal-usage-add-pkp-groups', isEdit) + '</div>' +
-    '<div class="form-group"><label>Can remove PKP from groups</label>' + buildGroupMultiSelect('modal-usage-remove-pkp-groups', isEdit) + '</div>';
+    '<div class="form-group"><label>Can execute in groups</label>' + buildGroupMultiSelect('modal-usage-execute-groups', false) + '</div>' +
+    '<div class="form-group"><label>Can manage IPFS actions in groups</label>' + buildGroupMultiSelect('modal-usage-manage-ipfs-groups', false) + '</div>' +
+    '<div class="form-group"><label>Can add PKP to groups</label>' + buildGroupMultiSelect('modal-usage-add-pkp-groups', false) + '</div>' +
+    '<div class="form-group"><label>Can remove PKP from groups</label>' + buildGroupMultiSelect('modal-usage-remove-pkp-groups', false) + '</div>';
   const footer =
     (!isEdit ? '<button type="button" class="btn btn-outline" id="modal-all-options-btn" style="margin-right:auto;">All Options</button>' : '') +
     '<button type="button" class="btn btn-outline" id="modal-cancel-btn">Cancel</button>' +
@@ -994,11 +1173,11 @@ function openUsageKeyModal(item = null) {
     preSelect('modal-usage-add-pkp-groups', item.can_add_pkp_to_groups);
     preSelect('modal-usage-remove-pkp-groups', item.can_remove_pkp_from_groups);
   }
+  attachGroupMultiSelectLogic('modal-usage-execute-groups');
+  attachGroupMultiSelectLogic('modal-usage-manage-ipfs-groups');
+  attachGroupMultiSelectLogic('modal-usage-add-pkp-groups');
+  attachGroupMultiSelectLogic('modal-usage-remove-pkp-groups');
   if (!isEdit) {
-    attachGroupMultiSelectLogic('modal-usage-execute-groups');
-    attachGroupMultiSelectLogic('modal-usage-manage-ipfs-groups');
-    attachGroupMultiSelectLogic('modal-usage-add-pkp-groups');
-    attachGroupMultiSelectLogic('modal-usage-remove-pkp-groups');
     document.getElementById('modal-all-options-btn').addEventListener('click', () => {
       document.getElementById('modal-usage-can-create-groups').checked = true;
       document.getElementById('modal-usage-can-delete-groups').checked = true;
@@ -1023,13 +1202,36 @@ function openUsageKeyModal(item = null) {
     closeModal();
     hideStatus('overview-status-usage-keys');
     if (isEdit) {
+      const executeInGroups = getSelectedGroupIds('modal-usage-execute-groups');
+      const manageIpfsIdsInGroups = getSelectedGroupIds('modal-usage-manage-ipfs-groups');
+      const addPkpToGroups = getSelectedGroupIds('modal-usage-add-pkp-groups');
+      const removePkpFromGroups = getSelectedGroupIds('modal-usage-remove-pkp-groups');
       try {
-        showActionProgress('Updating usage API key', 'Updating usage API key metadata.');
+        showActionProgress('Updating usage API key', 'Saving changes to usage API key.');
         const client = await getClient();
-        await client.updateUsageApiKeyMetadata({ apiKey, usageApiKey: item.usage_api_key, name, description });
+        await client.updateUsageApiKey({
+          apiKey,
+          usageApiKey: item.usage_api_key,
+          name,
+          description,
+          canCreateGroups: item.can_create_groups,
+          canDeleteGroups: item.can_delete_groups,
+          canCreatePkps: item.can_create_pkps,
+          manageIpfsIdsInGroups,
+          addPkpToGroups,
+          removePkpFromGroups,
+          executeInGroups,
+        });
         const store = getUsageKeysStore();
         const idx = store.findIndex((k) => k.usage_api_key === item.usage_api_key);
-        if (idx !== -1) { store[idx].name = name; store[idx].description = description; }
+        if (idx !== -1) {
+          store[idx].name = name;
+          store[idx].description = description;
+          store[idx].can_manage_ipfs_ids_in_groups = manageIpfsIdsInGroups;
+          store[idx].can_add_pkp_to_groups = addPkpToGroups;
+          store[idx].can_remove_pkp_from_groups = removePkpFromGroups;
+          store[idx].can_execute_in_groups = executeInGroups;
+        }
         renderUsageKeysTable();
         showStatus('overview-status-usage-keys', 'Usage API key updated.', 'success');
       } catch (e) {
@@ -1041,17 +1243,20 @@ function openUsageKeyModal(item = null) {
       const canCreateGroups = document.getElementById('modal-usage-can-create-groups').checked;
       const canDeleteGroups = document.getElementById('modal-usage-can-delete-groups').checked;
       const canCreatePkps = document.getElementById('modal-usage-can-create-pkps').checked;
-      const canExecuteInGroups = getSelectedGroupIds('modal-usage-execute-groups');
-      const canManageIpfsIdsInGroups = getSelectedGroupIds('modal-usage-manage-ipfs-groups');
-      const canAddPkpToGroups = getSelectedGroupIds('modal-usage-add-pkp-groups');
-      const canRemovePkpFromGroups = getSelectedGroupIds('modal-usage-remove-pkp-groups');
+      const executeInGroups = getSelectedGroupIds('modal-usage-execute-groups');
+      const manageIpfsIdsInGroups = getSelectedGroupIds('modal-usage-manage-ipfs-groups');
+      const addPkpToGroups = getSelectedGroupIds('modal-usage-add-pkp-groups');
+      const removePkpFromGroups = getSelectedGroupIds('modal-usage-remove-pkp-groups');
       try {
         showActionProgress('Adding usage API key', 'Creating a new usage API key for this account.');
         const client = await getClient();
         const res = await client.addUsageApiKey({
           apiKey, name, description,
           canCreateGroups, canDeleteGroups, canCreatePkps,
-          canManageIpfsIdsInGroups, canAddPkpToGroups, canRemovePkpFromGroups, canExecuteInGroups,
+          manageIpfsIdsInGroups,
+          addPkpToGroups,
+          removePkpFromGroups,
+          executeInGroups,
         });
         const usageKey = res && res.usage_api_key ? res.usage_api_key : '';
         if (usageKey) {
@@ -1373,6 +1578,7 @@ function init() {
   initActionRunner(); // async; CodeJar loads lazily on first use
   initSidebar();
   initHeader();
+  initBilling();
 }
 
 init();

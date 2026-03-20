@@ -1,0 +1,94 @@
+# Upgrade existing Diamond contract facets.
+#
+# Network and contract address are always read from the NodeConfig file
+# for the selected branch:
+#   main → lit-api-server/NodeConfig.main.toml
+#   next → lit-api-server/NodeConfig.next.toml
+#
+# Required secrets:
+#   CONTRACT_DEPLOYER_SECRET_SEPOLIA - deployer wallet private key (Base Sepolia)
+#   PHALA_DSTACKAPP_PRIVATE_KEY    - deployer wallet private key (Base Mainnet)
+
+name: Contract Upgrade
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch whose NodeConfig to use"
+        required: true
+        type: choice
+        options:
+          - next
+          - main
+        default: next
+
+concurrency:
+  group: contract-upgrade-${{ inputs.branch }}
+  cancel-in-progress: false
+
+jobs:
+  contract-upgrade:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+
+      - name: Read config from NodeConfig
+        id: config
+        run: |
+          CONFIG="lit-api-server/NodeConfig.${{ inputs.branch }}.toml"
+
+          if [ ! -f "$CONFIG" ]; then
+            echo "::error::$CONFIG not found."
+            exit 1
+          fi
+
+          NETWORK=$(grep '^name' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          ADDRESS=$(grep '^contract_address' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+
+          echo "network=$NETWORK" >> "$GITHUB_OUTPUT"
+          echo "address=$ADDRESS" >> "$GITHUB_OUTPUT"
+          echo "Resolved from $CONFIG: network=$NETWORK address=$ADDRESS"
+
+      - uses: dtolnay/rust-toolchain@1.91
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install contract dependencies
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npm ci
+
+      - name: Compile contracts
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: |
+          npx hardhat clean
+          npx hardhat compile
+          node generate-diamond-abi.mjs
+
+      - name: Build contract deployer
+        working-directory: lit-api-server/blockchain/rust_generator_and_deployer
+        run: cargo build --bin contract_deployer
+
+      - name: Select deployer secret
+        id: secret
+        run: |
+          if [ "${{ steps.config.outputs.network }}" = "base" ]; then
+            echo "key=${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "key=${{ secrets.CONTRACT_DEPLOYER_SECRET_SEPOLIA }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upgrade diamond facets
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: |
+          ../rust_generator_and_deployer/target/debug/contract_deployer \
+            --action=update \
+            --network=${{ steps.config.outputs.network }} \
+            --abifolder=artifacts/contracts \
+            --secret=${{ steps.secret.outputs.key }} \
+            --address=${{ steps.config.outputs.address }} \
+            --rpc-url=${{ secrets.BASE_CHAIN_RPC }}

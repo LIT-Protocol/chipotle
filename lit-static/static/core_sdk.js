@@ -12,6 +12,7 @@
  * @typedef {Object} NewAccountOptions
  * @property {string} accountName - Name for the account
  * @property {string} accountDescription - Description for the account
+ * @property {string} [email] - Optional email address for Stripe billing
  */
 
 /**
@@ -31,12 +32,17 @@
  */
 
 /**
+ * @typedef {Object} AddActionOptions
+ * @property {string} apiKey - Account API key
+ * @property {string} name - Name for the action (stored in contract actionMetadata)
+ * @property {string} description - Description for the action
+ */
+
+/**
  * @typedef {Object} AddActionToGroupOptions
  * @property {string} apiKey - Account API key
  * @property {string} groupId - Group ID (decimal or hex string)
  * @property {string} actionIpfsCid - IPFS CID for the action (keccak256-hashed on server)
- * @property {string} [name] - Optional name for the action (stored in contract metadata)
- * @property {string} [description] - Optional description for the action (stored in contract metadata)
  */
 
 /**
@@ -61,10 +67,25 @@
  * @property {boolean} [canCreateGroups=false] - Permission to create groups
  * @property {boolean} [canDeleteGroups=false] - Permission to delete groups
  * @property {boolean} [canCreatePkps=false] - Permission to create PKPs
- * @property {number[]} [canManageIpfsIdsInGroups=[]] - Group IDs allowed to manage IPFS action CIDs (0 = all groups)
- * @property {number[]} [canAddPkpToGroups=[]] - Group IDs allowed to add PKPs (0 = all groups)
- * @property {number[]} [canRemovePkpFromGroups=[]] - Group IDs allowed to remove PKPs (0 = all groups)
- * @property {number[]} [canExecuteInGroups=[]] - Group IDs allowed to execute actions (0 = all groups)
+ * @property {number[]} [manageIpfsIdsInGroups=[]] - Group IDs to grant manage-IPFS-IDs permission (0 = all groups)
+ * @property {number[]} [addPkpToGroups=[]] - Group IDs to grant add-PKP permission (0 = all groups)
+ * @property {number[]} [removePkpFromGroups=[]] - Group IDs to grant remove-PKP permission (0 = all groups)
+ * @property {number[]} [executeInGroups=[]] - Group IDs to grant execute permission (0 = all groups)
+ */
+
+/**
+ * @typedef {Object} UpdateUsageApiKeyOptions
+ * @property {string} apiKey - Account API key
+ * @property {string} usageApiKey - The existing usage API key to update
+ * @property {string} name - Name
+ * @property {string} description - Description
+ * @property {boolean} [canCreateGroups=false]
+ * @property {boolean} [canDeleteGroups=false]
+ * @property {boolean} [canCreatePkps=false]
+ * @property {number[]} [manageIpfsIdsInGroups=[]]
+ * @property {number[]} [addPkpToGroups=[]]
+ * @property {number[]} [removePkpFromGroups=[]]
+ * @property {number[]} [executeInGroups=[]]
  */
 
 /**
@@ -139,7 +160,8 @@
 
 /**
  * @typedef {Object} ApiKeyItem - One item from list_api_keys (response.rs ApiKeyItem)
- * @property {string} id - ID (hash as stored on chain)
+ * @property {string} id - Auto-increment metadata ID (0x-prefixed hex)
+ * @property {string} api_key_hash - keccak256 hash of the usage API key string (0x-prefixed hex, 66 chars)
  * @property {string} name - Name
  * @property {string} description - Description
  * @property {string} expiration - Expiration (unix timestamp string)
@@ -151,7 +173,6 @@
  * @property {number[]} can_add_pkp_to_groups - Group IDs allowed to add PKPs (0 = all groups)
  * @property {number[]} can_remove_pkp_from_groups - Group IDs allowed to remove PKPs (0 = all groups)
  * @property {number[]} can_execute_in_groups - Group IDs allowed to execute actions (0 = all groups)
- * @property {string} [api_key] - Usage API key (only present when returned by server, e.g. from lookup; not in standard list response)
  */
 
 /**
@@ -299,11 +320,12 @@ export class LitNodeSimpleApiClient {
    * @param {NewAccountOptions} options
    * @returns {Promise<NewAccountResponse>}
    */
-  async newAccount({ accountName, accountDescription }) {
+  async newAccount({ accountName, accountDescription, email }) {
     const body = {
       account_name: accountName,
       account_description: accountDescription ?? '',
     };
+    if (email) body.email = email;
     const res = await fetch(`${this.baseUrl}/new_account`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -396,17 +418,31 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
+   * POST /core/v1/add_action
+   * Create a new action entry with name and description in the account's actionMetadata.
+   * @param {AddActionOptions} options
+   * @returns {Promise<AccountOpResponse>}
+   */
+  async addAction({ apiKey, name, description }) {
+    const body = { name: name ?? '', description: description ?? '' };
+    const res = await fetch(`${this.baseUrl}/add_action`, {
+      method: 'POST',
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'add_action');
+  }
+
+  /**
    * POST /core/v1/add_action_to_group
-   * Add an action (IPFS CID) to a group with optional name and description.
+   * Add an action (IPFS CID) to a group. Use addAction separately to set name/description metadata.
    * @param {AddActionToGroupOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async addActionToGroup({ apiKey, groupId, actionIpfsCid, name, description }) {
+  async addActionToGroup({ apiKey, groupId, actionIpfsCid }) {
     const body = {
       group_id: Number(groupId),
       action_ipfs_cid: actionIpfsCid,
-      name: name ?? null,
-      description: description ?? null,
     };
     const res = await fetch(`${this.baseUrl}/add_action_to_group`, {
       method: 'POST',
@@ -467,10 +503,10 @@ export class LitNodeSimpleApiClient {
     canCreateGroups = false,
     canDeleteGroups = false,
     canCreatePkps = false,
-    canManageIpfsIdsInGroups = [],
-    canAddPkpToGroups = [],
-    canRemovePkpFromGroups = [],
-    canExecuteInGroups = [],
+    manageIpfsIdsInGroups = [],
+    addPkpToGroups = [],
+    removePkpFromGroups = [],
+    executeInGroups = [],
   }) {
     const body = {
       name,
@@ -478,10 +514,10 @@ export class LitNodeSimpleApiClient {
       can_create_groups: canCreateGroups,
       can_delete_groups: canDeleteGroups,
       can_create_pkps: canCreatePkps,
-      can_manage_ipfs_ids_in_groups: canManageIpfsIdsInGroups,
-      can_add_pkp_to_groups: canAddPkpToGroups,
-      can_remove_pkp_from_groups: canRemovePkpFromGroups,
-      can_execute_in_groups: canExecuteInGroups,
+      manage_ipfs_ids_in_groups: manageIpfsIdsInGroups,
+      add_pkp_to_groups: addPkpToGroups,
+      remove_pkp_from_groups: removePkpFromGroups,
+      execute_in_groups: executeInGroups,
     };
     const res = await fetch(`${this.baseUrl}/add_usage_api_key`, {
       method: 'POST',
@@ -489,6 +525,45 @@ export class LitNodeSimpleApiClient {
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'add_usage_api_key');
+  }
+
+  /**
+   * POST /core/v1/update_usage_api_key
+   * Update metadata and permissions on an existing usage API key.
+   * @param {UpdateUsageApiKeyOptions} options
+   * @returns {Promise<AccountOpResponse>}
+   */
+  async updateUsageApiKey({
+    apiKey,
+    usageApiKey,
+    name,
+    description,
+    canCreateGroups = false,
+    canDeleteGroups = false,
+    canCreatePkps = false,
+    manageIpfsIdsInGroups = [],
+    addPkpToGroups = [],
+    removePkpFromGroups = [],
+    executeInGroups = [],
+  }) {
+    const body = {
+      usage_api_key: usageApiKey,
+      name,
+      description,
+      can_create_groups: canCreateGroups,
+      can_delete_groups: canDeleteGroups,
+      can_create_pkps: canCreatePkps,
+      manage_ipfs_ids_in_groups: manageIpfsIdsInGroups,
+      add_pkp_to_groups: addPkpToGroups,
+      remove_pkp_from_groups: removePkpFromGroups,
+      execute_in_groups: executeInGroups,
+    };
+    const res = await fetch(`${this.baseUrl}/update_usage_api_key`, {
+      method: 'POST',
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'update_usage_api_key');
   }
 
   /**
@@ -507,6 +582,16 @@ export class LitNodeSimpleApiClient {
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'remove_usage_api_key');
+  }
+
+  async removeGroup({ apiKey, groupId }) {
+    const body = { group_id: String(groupId) };
+    const res = await fetch(`${this.baseUrl}/remove_group`, {
+      method: 'POST',
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'remove_group');
   }
 
   /**
@@ -712,6 +797,63 @@ export class LitNodeSimpleApiClient {
   async getAdminApiPayer() {
     const res = await fetch(`${this.baseUrl}/get_admin_api_payer`);
     return parseResponse(res, 'get_admin_api_payer');
+  }
+
+  // ─── Billing ─────────────────────────────────────────────────────────────
+
+  /**
+   * GET /core/v1/billing/stripe_config
+   * Returns the Stripe publishable key for Stripe.js initialisation.
+   * @returns {Promise<{publishable_key: string}>}
+   */
+  async getStripeConfig() {
+    const res = await fetch(`${this.baseUrl}/billing/stripe_config`);
+    return parseResponse(res, 'billing/stripe_config');
+  }
+
+  /**
+   * GET /core/v1/billing/balance
+   * Returns the current credit balance for the authenticated API key.
+   * @param {string} apiKey
+   * @returns {Promise<{balance_cents: number, balance_display: string}>}
+   */
+  async getBillingBalance(apiKey) {
+    const res = await fetch(`${this.baseUrl}/billing/balance`, {
+      headers: headersWithApiKey(apiKey),
+    });
+    return parseResponse(res, 'billing/balance');
+  }
+
+  /**
+   * POST /core/v1/billing/create_payment_intent
+   * Creates a Stripe PaymentIntent; returns client_secret and payment_intent_id.
+   * @param {string} apiKey
+   * @param {number} amountCents - Amount in US cents (minimum 500)
+   * @returns {Promise<{client_secret: string, payment_intent_id: string}>}
+   */
+  async createPaymentIntent(apiKey, amountCents) {
+    const res = await fetch(`${this.baseUrl}/billing/create_payment_intent`, {
+      method: 'POST',
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ amount_cents: amountCents }),
+    });
+    return parseResponse(res, 'billing/create_payment_intent');
+  }
+
+  /**
+   * POST /core/v1/billing/confirm_payment
+   * Verifies a succeeded PaymentIntent and credits the account.
+   * @param {string} apiKey
+   * @param {string} paymentIntentId
+   * @returns {Promise<void>}
+   */
+  async confirmPayment(apiKey, paymentIntentId) {
+    const res = await fetch(`${this.baseUrl}/billing/confirm_payment`, {
+      method: 'POST',
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ payment_intent_id: paymentIntentId }),
+    });
+    return parseResponse(res, 'billing/confirm_payment');
   }
 }
 

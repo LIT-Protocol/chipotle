@@ -1,1 +1,3 @@
-Lit.Actions.setResponse({response: "Hello World!"})
+async function main() {
+  return "Hello World!";
+}
