@@ -25,7 +25,6 @@ pub struct HealthResponse {
     pub healthy: bool,
     pub lit_actions_reachable: bool,
     pub cpu_overloaded: bool,
-    pub load_avg_1m: f64,
 }
 
 pub fn routes() -> Vec<Route> {
@@ -56,7 +55,6 @@ async fn health(
     };
 
     let cpu_overloaded = cpu_monitor.is_overloaded();
-    let load_avg_1m = cpu_monitor.load_avg_1m();
 
     let healthy = lit_actions_reachable && !cpu_overloaded;
 
@@ -72,7 +70,6 @@ async fn health(
             healthy,
             lit_actions_reachable,
             cpu_overloaded,
-            load_avg_1m,
         }),
     )
 }
