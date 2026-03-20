@@ -568,10 +568,9 @@ async fn billing_balance_impl(
     let customer_id = stripe::get_customer_by_wallet(&wallet, stripe)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "Stripe error"))?;
-    let balance = 
-        stripe::get_credit_balance(&customer_id, stripe)
-            .await
-            .map_err(|e| ApiStatus::internal_server_error(e, "Stripe error"))?;
+    let balance = stripe::get_credit_balance(&customer_id, stripe)
+        .await
+        .map_err(|e| ApiStatus::internal_server_error(e, "Stripe error"))?;
     let credits = -balance; // positive = available credit cents
     let display = if credits <= 0 {
         "No credits".to_string()
