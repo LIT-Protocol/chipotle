@@ -29,7 +29,8 @@ COPY --from=builder /build/lit-api-server/target/release/lit-api-server /usr/loc
 COPY --from=builder /build/lit-api-server/Rocket.toml /app/
 COPY --from=builder /build/lit-api-server/rpc-config.yaml /app/
 COPY --from=builder /build/lit-api-server/log_levels.toml /app/
-# NodeConfig.toml required at startup; use demo as default (override via volume mount for production)
-COPY --from=builder /build/lit-api-server/NodeConfig.demo.toml /app/NodeConfig.toml
+# NodeConfig.toml required at startup (main branch uses NodeConfig.main.toml; default: next)
+ARG NODE_CONFIG=NodeConfig.next.toml
+COPY --from=builder /build/lit-api-server/${NODE_CONFIG} /app/NodeConfig.toml
 
 CMD ["lit-api-server"]

@@ -8,22 +8,10 @@
 
 // --- Request types (match core/v1/models/request.rs) ---
 
-/** Default signing scheme for signWithPkp (secp256k1 + SHA-256). */
-export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
-
 /**
  * @typedef {Object} NewAccountOptions
  * @property {string} accountName - Name for the account
  * @property {string} accountDescription - Description for the account
- * @property {string} [initialBalance] - Optional initial balance (decimal or hex; default 0)
- */
-
-/**
- * @typedef {Object} SignWithPkpOptions
- * @property {string} apiKey - Hex-encoded API key (from getApiKey)
- * @property {string} pkpPublicKey - PKP public key
- * @property {string} message - Message to sign
- * @property {string} [signingScheme='EcdsaK256Sha256'] - Signing scheme (use SIGNING_SCHEME_ECDSA_K256_SHA256)
  */
 
 /**
@@ -36,12 +24,10 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
 /**
  * @typedef {Object} AddGroupOptions
  * @property {string} apiKey - Account API key
- * @property {string} groupName - Name of the group (Group.groupName in AccountConfig.sol)
- * @property {string} [groupDescription=''] - Description of the group (Group.groupDescription in AccountConfig.sol)
- * @property {string[]} permittedActions - Keccak256 hashes of action IPFS CIDs (hex strings, with or without 0x)
- * @property {string[]} pkps - Keccak256 hashes of PKP public keys (hex strings)
- * @property {boolean} [allWalletsPermitted=false] - If true, all wallets are permitted (AccountConfig.sol Group.all_wallets_permitted)
- * @property {boolean} [allActionsPermitted=false] - If true, all actions are permitted (AccountConfig.sol Group.all_actions_permitted)
+ * @property {string} groupName - Name of the group (Group.metadata.name in AccountConfig.sol)
+ * @property {string} [groupDescription=''] - Description of the group (Group.metadata.description in AccountConfig.sol)
+ * @property {string[]} [pkpIdsPermitted=[]] - PKP IDs permitted to use the group (AccountConfig.sol Group.pkpId)
+ * @property {string[]} [cidHashesPermitted=[]] - Keccak256 hashes of permitted action IPFS CIDs (AccountConfig.sol Group.cidHash)
  */
 
 /**
@@ -57,22 +43,28 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @typedef {Object} AddPkpToGroupOptions
  * @property {string} apiKey - Account API key
  * @property {string} groupId - Group ID (decimal or hex string)
- * @property {string} pkpPublicKey - PKP public key (will be hashed on server)
+ * @property {string} pkpId - PKP ID
  */
 
 /**
  * @typedef {Object} RemovePkpFromGroupOptions
  * @property {string} apiKey - Account API key
  * @property {string} groupId - Group ID (decimal or hex string)
- * @property {string} pkpPublicKey - PKP public key (must match value used when adding)
+ * @property {string} pkpId - PKP ID (must match value used when adding)
  */
 
 /**
  * @typedef {Object} AddUsageApiKeyOptions
  * @property {string} apiKey - Account API key
- * @property {string} usageApiKey - Usage API key to add
- * @property {string} expiration - Expiration (e.g. unix timestamp as decimal string)
- * @property {string} balance - Balance (e.g. wei as decimal string)
+ * @property {string} name - Name
+ * @property {string} description - Description
+ * @property {boolean} [canCreateGroups=false] - Permission to create groups
+ * @property {boolean} [canDeleteGroups=false] - Permission to delete groups
+ * @property {boolean} [canCreatePkps=false] - Permission to create PKPs
+ * @property {number[]} [canManageIpfsIdsInGroups=[]] - Group IDs allowed to manage IPFS action CIDs (0 = all groups)
+ * @property {number[]} [canAddPkpToGroups=[]] - Group IDs allowed to add PKPs (0 = all groups)
+ * @property {number[]} [canRemovePkpFromGroups=[]] - Group IDs allowed to remove PKPs (0 = all groups)
+ * @property {number[]} [canExecuteInGroups=[]] - Group IDs allowed to execute actions (0 = all groups)
  */
 
 /**
@@ -87,8 +79,8 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @property {string} groupId - Group ID (decimal or hex string)
  * @property {string} name - Group name
  * @property {string} description - Group description
- * @property {boolean} [allWalletsPermitted=false] - All wallets permitted
- * @property {boolean} [allActionsPermitted=false] - All actions permitted
+ * @property {string[]} [pkpIdsPermitted=[]] - PKP IDs permitted to use the group
+ * @property {string[]} [cidHashesPermitted=[]] - Keccak256 hashes of permitted action IPFS CIDs
  */
 
 /**
@@ -142,8 +134,7 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @property {string} id - ID (hash as stored on chain)
  * @property {string} name - Name
  * @property {string} description - Description
- * @property {string} wallet_address - Wallet address (or IPFS CID / public key as stored)
- * @property {string} public_key - Public key (or CID / address as stored)
+ * @property {string} wallet_address - Wallet address (hex)
  */
 
 /**
@@ -151,9 +142,16 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @property {string} id - ID (hash as stored on chain)
  * @property {string} name - Name
  * @property {string} description - Description
- * @property {string} api_key - Usage API key
- * @property {string} expiration - Expiration (e.g. unix timestamp string)
+ * @property {string} expiration - Expiration (unix timestamp string)
  * @property {number} balance - Balance (u64)
+ * @property {boolean} can_create_groups - Permission to create groups
+ * @property {boolean} can_delete_groups - Permission to delete groups
+ * @property {boolean} can_create_pkps - Permission to create PKPs
+ * @property {number[]} can_manage_ipfs_ids_in_groups - Group IDs allowed to manage IPFS action CIDs (0 = all groups)
+ * @property {number[]} can_add_pkp_to_groups - Group IDs allowed to add PKPs (0 = all groups)
+ * @property {number[]} can_remove_pkp_from_groups - Group IDs allowed to remove PKPs (0 = all groups)
+ * @property {number[]} can_execute_in_groups - Group IDs allowed to execute actions (0 = all groups)
+ * @property {string} [api_key] - Usage API key (only present when returned by server, e.g. from lookup; not in standard list response)
  */
 
 /**
@@ -163,21 +161,8 @@ export const SIGNING_SCHEME_ECDSA_K256_SHA256 = 'EcdsaK256Sha256';
  * @property {boolean} is_evm - Whether the chain is EVM
  * @property {boolean} testnet - Whether the chain is a testnet
  * @property {string} token - Native token symbol
- * @property {string} rpc_url - RPC URL
+ * @property {string} [rpc_url] - RPC URL (resolved from chainlist when not in API response)
  * @property {string} contract_address - AccountConfig contract address
- */
-
-/** Share type enum (response.rs ShareType). */
-export const SHARE_TYPE_ECDSA = 'Ecdsa';
-export const SHARE_TYPE_FROST = 'Frost';
-export const SHARE_TYPE_BLS = 'Bls';
-
-/**
- * Single signature share (response.rs SignatureShare).
- * @typedef {Object} SignatureShare
- * @property {string} share_id
- * @property {string} peer_id
- * @property {string} signature_share
  */
 
 // --- Response types (match core/v1/models/response.rs) ---
@@ -194,23 +179,8 @@ export const SHARE_TYPE_BLS = 'Bls';
  */
 
 /**
- * Sign-with-PKP response (response.rs SignWithPkpResponse).
- * @typedef {Object} SignWithPkpResponse
- * @property {string} signing_scheme - Signing scheme (e.g. EcdsaK256Sha256)
- * @property {string} signed_digest - Signed digest (hex)
- * @property {string} public_key - Public key (hex)
- * @property {string} share_type - 'Ecdsa' | 'Frost' | 'Bls'
- * @property {string} [big_r] - ECDSA big R (optional)
- * @property {string} [compressed_public_key] - Compressed public key (optional)
- * @property {string} [verifying_share] - Verifying share (optional)
- * @property {string} [signing_commitments] - Signing commitments (optional)
- * @property {SignatureShare[]} shares - Signature shares (share_id, peer_id, signature_share)
- */
-
-/**
  * @typedef {Object} LitActionResponse - Lit action execution result (single response from /lit_action)
- * @property {SignWithPkpResponse[]} signatures - Signing results from the action
- * @property {string} response - Action response payload
+ * @property {*} response - Action response payload
  * @property {string} logs - Action logs
  * @property {boolean} has_error - Whether the action reported an error
  */
@@ -218,6 +188,12 @@ export const SHARE_TYPE_BLS = 'Bls';
 /**
  * @typedef {Object} AccountOpResponse - Response for account config operations (add_group, add_pkp_to_group, etc.)
  * @property {boolean} success
+ */
+
+/**
+ * @typedef {Object} AddUsageApiKeyResponse - Response for add_usage_api_key (response.rs AddUsageApiKeyResponse)
+ * @property {boolean} success
+ * @property {string} usage_api_key - The newly created usage API key (returned only once)
  */
 
 /**
@@ -275,6 +251,35 @@ async function parseResponse(res, context) {
     return text ? JSON.parse(text) : null;
   } catch (_) {
     throw new Error(`${context}: invalid JSON response`);
+  }
+}
+
+const CHAINLIST_API = 'https://chainlistapi.com';
+const CORS_PROXY = 'https://whateverorigin.org/get?url=';
+
+/**
+ * Resolve a public RPC URL for the given chain ID from chainlistapi.com.
+ * Uses Whatever Origin CORS proxy (free, no domain whitelist) to avoid cross-origin restrictions.
+ * @param {number} chainId - EVM chain ID
+ * @returns {Promise<string|null>} First HTTP RPC URL, or null if not found
+ */
+export async function resolveRpcUrlFromChainlist(chainId) {
+  if (chainId == null || chainId === '') return null;
+  try {
+    const url = `${CORS_PROXY}${encodeURIComponent(`${CHAINLIST_API}/chains/${chainId}`)}`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const wrapper = await res.json();
+    const data = typeof wrapper?.contents === 'string' ? JSON.parse(wrapper.contents) : wrapper;
+    const rpcs = data?.rpc;
+    if (!Array.isArray(rpcs)) return null;
+    const entry = rpcs.find((r) => {
+      const u = typeof r === 'string' ? r : r?.url;
+      return typeof u === 'string' && u.startsWith('https://');
+    });
+    return entry ? (typeof entry === 'string' ? entry : entry.url) : null;
+  } catch (_) {
+    return null;
   }
 }
 
@@ -351,31 +356,25 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
-   * POST /core/v1/sign_with_pkp
-   * Signs a message with the given PKP using the provided API key.
-   * Uses EcdsaK256Sha256 signing scheme by default.
-   * @param {SignWithPkpOptions} options
-   * @returns {Promise<SignWithPkpResponse>} { signing_scheme, signed_digest, public_key, share_type, shares, ... }
+   * POST /core/v1/get_lit_action_ipfs_id
+   * Returns the IPFS CID (hash) for the given lit action code.
+   * @param {string} code - Lit action JavaScript code
+   * @returns {Promise<string>} IPFS CID (e.g. derived hash of code)
    */
-  async signWithPkp({ apiKey, pkpPublicKey, message, signingScheme = SIGNING_SCHEME_ECDSA_K256_SHA256 }) {
-    const body = {
-      pkp_public_key: pkpPublicKey,
-      message,
-      signing_scheme: signingScheme,
-    };
-    const res = await fetch(`${this.baseUrl}/sign_with_pkp`, {
+  async getLitActionIpfsId(code) {
+    const res = await fetch(`${this.baseUrl}/get_lit_action_ipfs_id`, {
       method: 'POST',
-      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
-      body: JSON.stringify(body),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(code),
     });
-    return parseResponse(res, 'sign_with_pkp');
+    return parseResponse(res, 'get_lit_action_ipfs_id');
   }
 
   /**
    * POST /core/v1/lit_action
    * Executes a lit action with the given code and optional params.
    * @param {LitActionOptions} options
-   * @returns {Promise<LitActionResponse>} { signatures, response, logs, has_error }
+   * @returns {Promise<LitActionResponse>} { response, logs, has_error }
    */
   async litAction({ apiKey, code, jsParams }) {
     const body = {
@@ -396,14 +395,12 @@ export class LitNodeSimpleApiClient {
    * @param {AddGroupOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async addGroup({ apiKey, groupName, groupDescription = '', permittedActions, pkps, allWalletsPermitted = false, allActionsPermitted = false }) {
+  async addGroup({ apiKey, groupName, groupDescription = '', pkpIdsPermitted = [], cidHashesPermitted = [] }) {
     const body = {
       group_name: groupName ?? '',
       group_description: groupDescription ?? '',
-      permitted_actions: permittedActions ?? [],
-      pkps: pkps ?? [],
-      all_wallets_permitted: allWalletsPermitted,
-      all_actions_permitted: allActionsPermitted,
+      pkp_ids_permitted: pkpIdsPermitted,
+      cid_hashes_permitted: cidHashesPermitted,
     };
     const res = await fetch(`${this.baseUrl}/add_group`, {
       method: 'POST',
@@ -421,7 +418,7 @@ export class LitNodeSimpleApiClient {
    */
   async addActionToGroup({ apiKey, groupId, actionIpfsCid, name, description }) {
     const body = {
-      group_id: groupId,
+      group_id: Number(groupId),
       action_ipfs_cid: actionIpfsCid,
       name: name ?? null,
       description: description ?? null,
@@ -440,10 +437,10 @@ export class LitNodeSimpleApiClient {
    * @param {AddPkpToGroupOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async addPkpToGroup({ apiKey, groupId, pkpPublicKey }) {
+  async addPkpToGroup({ apiKey, groupId, pkpId }) {
     const body = {
-      group_id: groupId,
-      pkp_public_key: pkpPublicKey,
+      group_id: Number(groupId),
+      pkp_id: pkpId,
     };
     const res = await fetch(`${this.baseUrl}/add_pkp_to_group`, {
       method: 'POST',
@@ -459,10 +456,10 @@ export class LitNodeSimpleApiClient {
    * @param {RemovePkpFromGroupOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async removePkpFromGroup({ apiKey, groupId, pkpPublicKey }) {
+  async removePkpFromGroup({ apiKey, groupId, pkpId }) {
     const body = {
-      group_id: groupId,
-      pkp_public_key: pkpPublicKey,
+      group_id: Number(groupId),
+      pkp_id: pkpId,
     };
     const res = await fetch(`${this.baseUrl}/remove_pkp_from_group`, {
       method: 'POST',
@@ -474,14 +471,32 @@ export class LitNodeSimpleApiClient {
 
   /**
    * POST /core/v1/add_usage_api_key
-   * Add a usage API key to an account.
+   * Add a usage API key to an account. Server creates and returns the new key.
    * @param {AddUsageApiKeyOptions} options
-   * @returns {Promise<AccountOpResponse>}
+   * @returns {Promise<AddUsageApiKeyResponse>}
    */
-  async addUsageApiKey({ apiKey, expiration, balance }) {
+  async addUsageApiKey({
+    apiKey,
+    name,
+    description,
+    canCreateGroups = false,
+    canDeleteGroups = false,
+    canCreatePkps = false,
+    canManageIpfsIdsInGroups = [],
+    canAddPkpToGroups = [],
+    canRemovePkpFromGroups = [],
+    canExecuteInGroups = [],
+  }) {
     const body = {
-      expiration,
-      balance,
+      name,
+      description,
+      can_create_groups: canCreateGroups,
+      can_delete_groups: canDeleteGroups,
+      can_create_pkps: canCreatePkps,
+      can_manage_ipfs_ids_in_groups: canManageIpfsIdsInGroups,
+      can_add_pkp_to_groups: canAddPkpToGroups,
+      can_remove_pkp_from_groups: canRemovePkpFromGroups,
+      can_execute_in_groups: canExecuteInGroups,
     };
     const res = await fetch(`${this.baseUrl}/add_usage_api_key`, {
       method: 'POST',
@@ -515,13 +530,13 @@ export class LitNodeSimpleApiClient {
    * @param {UpdateGroupOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async updateGroup({ apiKey, groupId, name, description, allWalletsPermitted = false, allActionsPermitted = false }) {
+  async updateGroup({ apiKey, groupId, name, description, pkpIdsPermitted = [], cidHashesPermitted = [] }) {
     const body = {
-      group_id: groupId,
+      group_id: Number(groupId),
       name: name ?? '',
       description: description ?? '',
-      all_wallets_permitted: allWalletsPermitted,
-      all_actions_permitted: allActionsPermitted,
+      pkp_ids_permitted: pkpIdsPermitted,
+      cid_hashes_permitted: cidHashesPermitted,
     };
     const res = await fetch(`${this.baseUrl}/update_group`, {
       method: 'POST',
@@ -539,7 +554,7 @@ export class LitNodeSimpleApiClient {
    */
   async removeActionFromGroup({ apiKey, groupId, actionIpfsCid }) {
     const body = {
-      group_id: groupId,
+      group_id: Number(groupId),
       action_ipfs_cid: actionIpfsCid,
     };
     const res = await fetch(`${this.baseUrl}/remove_action_from_group`, {
@@ -558,7 +573,7 @@ export class LitNodeSimpleApiClient {
    */
   async updateActionMetadata({ apiKey, groupId, actionIpfsCid, name, description }) {
     const body = {
-      group_id: groupId,
+      group_id: Number(groupId),
       action_ipfs_cid: actionIpfsCid,
       name: name ?? '',
       description: description ?? '',
@@ -681,11 +696,37 @@ export class LitNodeSimpleApiClient {
   /**
    * GET /core/v1/get_node_chain_config
    * Returns the node's chain configuration (chain name, id, RPC URL, contract address, etc.).
+   * When the API does not include rpc_url, it is resolved from chainlistapi.com using chain_id.
    * @returns {Promise<NodeChainConfigResponse>}
    */
   async getNodeChainConfig() {
     const res = await fetch(`${this.baseUrl}/get_node_chain_config`);
-    return parseResponse(res, 'get_node_chain_config');
+    const cfg = await parseResponse(res, 'get_node_chain_config');
+    if (!cfg.rpc_url && cfg.chain_id != null && cfg.is_evm) {
+      const rpcUrl = await resolveRpcUrlFromChainlist(cfg.chain_id);
+      if (rpcUrl) cfg.rpc_url = rpcUrl;
+    }
+    return cfg;
+  }
+
+  /**
+   * GET /core/v1/get_api_payers
+   * Returns all API payer addresses registered on the node.
+   * @returns {Promise<string[]>}
+   */
+  async getApiPayers() {
+    const res = await fetch(`${this.baseUrl}/get_api_payers`);
+    return parseResponse(res, 'get_api_payers');
+  }
+
+  /**
+   * GET /core/v1/get_admin_api_payer
+   * Returns the admin API payer address for the node.
+   * @returns {Promise<string>}
+   */
+  async getAdminApiPayer() {
+    const res = await fetch(`${this.baseUrl}/get_admin_api_payer`);
+    return parseResponse(res, 'get_admin_api_payer');
   }
 }
 

@@ -3,415 +3,107 @@
 ### Table of Contents
 
 *   [Welcome][1]
-*   [Signing][2]
-*   [signEcdsa][3]
+*   [Encryption][2]
+*   [Encrypt][3]
     *   [Parameters][4]
-*   [ethPersonalSignMessageEcdsa][5]
+*   [Decrypt][5]
     *   [Parameters][6]
-*   [sign][7]
-    *   [Parameters][8]
-*   [signAsAction][9]
-    *   [Parameters][10]
-*   [signAndCombineEcdsa][11]
+*   [PKP Keys][7]
+*   [getPrivateKey][8]
+    *   [Parameters][9]
+*   [getLitActionPrivateKey][10]
+*   [getLitActionPublicKey][11]
     *   [Parameters][12]
-*   [signAndCombine][13]
+*   [getLitActionWalletAddress][13]
     *   [Parameters][14]
-*   [verifyActionSignature][15]
-    *   [Parameters][16]
-*   [Checking Permissions][17]
-*   [isPermittedAction][18]
-    *   [Parameters][19]
-*   [isPermittedAddress][20]
-    *   [Parameters][21]
-*   [isPermittedAuthMethod][22]
-    *   [Parameters][23]
-*   [getPermittedActions][24]
-    *   [Parameters][25]
-*   [getPermittedAddresses][26]
-    *   [Parameters][27]
-*   [getPermittedAuthMethods][28]
-    *   [Parameters][29]
-*   [getPermittedAuthMethodScopes][30]
-    *   [Parameters][31]
-*   [Key Management][32]
-*   [getActionPublicKey][33]
-    *   [Parameters][34]
-*   [getLatestNonce][35]
-    *   [Parameters][36]
-*   [claimKey][37]
-    *   [Parameters][38]
-*   [pubkeyToTokenId][39]
-    *   [Parameters][40]
-*   [Action Utilities][41]
-*   [checkConditions][42]
-    *   [Parameters][43]
-*   [setResponse][44]
-    *   [Parameters][45]
-*   [call][46]
-    *   [Parameters][47]
-*   [callContract][48]
-    *   [Parameters][49]
-*   [broadcastAndCollect][50]
-    *   [Parameters][51]
-*   [runOnce][52]
-    *   [Parameters][53]
-*   [getRpcUrl][54]
-    *   [Parameters][55]
-*   [encrypt][56]
-    *   [Parameters][57]
-*   [decryptAndCombine][58]
-    *   [Parameters][59]
-*   [decryptToSingleNode][60]
-    *   [Parameters][61]
-*   [aesDecrypt][62]
-    *   [Parameters][63]
-*   [Data Helpers][64]
-*   [uint8arrayToString][65]
-    *   [Parameters][66]
-*   [uint8arrayFromString][67]
-    *   [Parameters][68]
-*   [Auth Utilities][69]
-*   [Runtime Globals][70]
-*   [LitActions][71]
-*   [LitAuth][72]
-*   [ethers][73]
-*   [jwt][74]
-*   [Lit.Auth][75]
-*   [Lit.Auth.actionIpfsIdStack][76]
-*   [Lit.Auth.authSigAddress][77]
-*   [Lit.Auth.authMethodContexts][78]
-*   [Lit.Auth.resources][79]
-*   [Lit.Auth.customAuthResource][80]
+*   [Action Utilities][15]
+*   [setResponse][16]
+    *   [Parameters][17]
+*   [Runtime Globals][18]
+*   [LitActions][19]
+*   [ethers][20]
 
 ## Welcome
 
-Welcome to the Lit Actions SDK Docs.  These functions can be used inside a Lit Action.  You should prefix each function with "Lit.Actions." so to call "isPermittedAction()" you should do "Lit.Actions.isPermittedAction()"  To understand how these functions fit together, please view the documentation for this SDK, located at [https://developer.litprotocol.com/][81]
+Welcome to the Lit Actions SDK Docs.  These functions can be used inside a Lit Action.  You should prefix each function with "Lit.Actions." so to call "isPermittedAction()" you should do "Lit.Actions.isPermittedAction()"  To understand how these functions fit together, please view the documentation for this SDK, located at [https://developer.litprotocol.com/][21]
 
-## Signing
+## Encryption
 
+Encryption and decryption functions.  These functions are used to encrypt and decrypt data.  The data is encrypted & decrypted using a symmetric key derived from the secret key of the PKP.
 
-
-## Lit.Actions.signEcdsa
-
-Ask the Lit Node to sign any data using the ECDSA Algorithm with it's private key share.  The resulting signature share will be returned to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
+## Lit.Actions.Encrypt
 
 ### Parameters
 
-*   `params` **[Object][82]**&#x20;
+*   `params` **[Object][22]**&#x20;
 
-    *   `params.toSign` **[Uint8Array][83]** The data to sign.  Should be an array of 8-bit integers.
-    *   `params.publicKey` **[string][84]** The public key of the PKP you wish to sign with
-    *   `params.sigName` **[string][84]** You can put any string here.  This is used to identify the signature in the response by the Lit JS SDK.  This is useful if you are signing multiple messages at once.  When you get the final signature out, it will be in an object with this signature name as the key.
-    *   `params.keySetId` **[string][84]** The key set id to use
+    *   `params.pkpId` **[string][23]** The ID of the PKP
+    *   `params.message` **[string][23]** The message to encrypt
 
-Returns **[Promise][85]<[string][84]>** This function will return the string "success" if it works.  The signature share is returned behind the scenes to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
+Returns **[Promise][24]<[string][23]>** The ciphertext
 
-## Lit.Actions.ethPersonalSignMessageEcdsa
+## Lit.Actions.Decrypt
 
-Ask the Lit Node to sign a message using the eth\_personalSign algorithm.  The resulting signature share will be returned to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
+Decrypt data using AES with a symmetric key
 
 ### Parameters
 
-*   `params` **[Object][82]**&#x20;
+*   `params` **[Object][22]**&#x20;
 
-    *   `params.message` **[string][84]** The message to sign.  Should be a string.
-    *   `params.publicKey` **[string][84]** The public key of the PKP you wish to sign with
-    *   `params.sigName` **[string][84]** You can put any string here.  This is used to identify the signature in the response by the Lit JS SDK.  This is useful if you are signing multiple messages at once.  When you get the final signature out, it will be in an object with this signature name as the key.
-    *   `params.keySetId` **[string][84]** The key set id to use
+    *   `params.pkpId` **[string][23]** The ID of the PKP
+    *   `params.ciphertext` **[string][23]** The ciphertext to decrypt
 
-Returns **[Promise][85]<[string][84]>** This function will return the string "success" if it works.  The signature share is returned behind the scenes to the Lit JS SDK which will automatically combine the shares and give you the full signature to use.
+Returns **[Promise][24]<[string][23]>** The decrypted plaintext
 
-## Lit.Actions.sign
+## PKP Keys
 
-### Parameters
+Key management functions for PKPs.  These functions are used to get keys for PKPs that can be used in javascript functions.
 
-*   `toSign` **[Uint8array][83]** the message to sign
-*   `publicKey` **[string][84]** the public key of the PKP
-*   `sigName` **[string][84]** the name of the signature
-*   `signingScheme` **[string][84]** the name of the signing scheme
-    one of the following
-    "EcdsaK256Sha256"
-    "EcdsaP256Sha256"
-    "EcdsaP384Sha384"
-    "SchnorrEd25519Sha512"
-    "SchnorrK256Sha256"
-    "SchnorrP256Sha256"
-    "SchnorrP384Sha384"
-    "SchnorrRistretto25519Sha512"
-    "SchnorrEd448Shake256"
-    "SchnorrRedJubjubBlake2b512"
-    "SchnorrK256Taproot"
-    "SchnorrRedDecaf377Blake2b512"
-    "SchnorrkelSubstrate"
-    "Bls12381G1ProofOfPossession"
+## Lit.Actions.getPrivateKey
 
-Returns **[Uint8array][83]** The resulting signature share
-
-## Lit.Actions.signAsAction
-
-Sign data using the Lit Action's own cryptographic identity derived from its IPFS CID.
-This allows actions to sign as themselves (not as a PKP), enabling autonomous agent behavior,
-action-to-action authentication, and verifiable computation results.
-
-The action's keypair is deterministically derived from: keccak256("lit\_action\_" + actionIpfsCid)
-The same action IPFS CID always generates the same keypair across all nodes.
+Get the private key for a PKP wallet
 
 ### Parameters
 
-*   `params` **[Object][82]**&#x20;
+*   `params` **[Object][22]**&#x20;
 
-    *   `params.toSign` **[Uint8Array][83]** The message to sign as an array of 8-bit integers
-    *   `params.sigName` **[string][84]** The name to identify this signature in the response
-    *   `params.signingScheme` **[string][84]** The signing algorithm to use. Must be one of:
-        "EcdsaK256Sha256", "EcdsaP256Sha256", "EcdsaP384Sha384",
-        "SchnorrEd25519Sha512", "SchnorrK256Sha256", "SchnorrP256Sha256", "SchnorrP384Sha384",
-        "SchnorrRistretto25519Sha512", "SchnorrEd448Shake256", "SchnorrRedJubjubBlake2b512",
-        "SchnorrK256Taproot", "SchnorrRedDecaf377Blake2b512", "SchnorrkelSubstrate",
-        "Bls12381G1ProofOfPossession"
+    *   `params.pkpId` **[string][23]** The ID of the PKP
 
-Returns **[Promise][85]<[Uint8Array][83]>** The resulting signature that can be verified using verifyActionSignature
+Returns **[Promise][24]<[string][23]>** The private key secret
 
-## Lit.Actions.signAndCombineEcdsa
+## Lit.Actions.getLitActionPrivateKey
 
-Sign with ECDSA and automatically combine signature shares from all nodes into a complete signature
+Get the private key for the currently executing Lit Action
 
-### Parameters
+Returns **[Promise][24]<[string][23]>** The private key secret
 
-*   `params` **[Object][82]**&#x20;
+## Lit.Actions.getLitActionPublicKey
 
-    *   `params.toSign` **[Uint8Array][83]** The message to sign
-    *   `params.publicKey` **[string][84]** The public key of the PKP
-    *   `params.sigName` **[string][84]** The name of the signature
-    *   `params.keySetId` **[string][84]** The key set id to use
-
-Returns **[Promise][85]<[Uint8Array][83]>** The resulting combined signature
-
-## Lit.Actions.signAndCombine
-
-Sign with any signing scheme and automatically combine signature shares from all nodes into a complete signature
+Get the public key for a Lit Action by IPFS ID
 
 ### Parameters
 
-*   `params` **[Object][82]**&#x20;
+*   `params` **[Object][22]**&#x20;
 
-    *   `params.toSign` **[Uint8Array][83]** The message to sign
-    *   `params.publicKey` **[string][84]** The public key of the PKP
-    *   `params.sigName` **[string][84]** The name of the signature
-    *   `params.signingScheme` **[string][84]** The signing scheme. Must be one of:
-    *   `params.keySetId` **[string][84]** The key set id to use
-        "EcdsaK256Sha256", "EcdsaP256Sha256", "EcdsaP384Sha384",
-        "SchnorrEd25519Sha512", "SchnorrK256Sha256", "SchnorrP256Sha256", "SchnorrP384Sha384",
-        "SchnorrRistretto25519Sha512", "SchnorrEd448Shake256", "SchnorrRedJubjubBlake2b512",
-        "SchnorrK256Taproot", "SchnorrRedDecaf377Blake2b512", "SchnorrkelSubstrate",
-        "Bls12381G1ProofOfPossession"
+    *   `params.ipfsId` **[string][23]** The IPFS ID of the Lit Action
 
-Returns **[Promise][85]<[Uint8Array][83]>** The resulting combined signature
+Returns **[Promise][24]<[string][23]>** The public key
 
-## Lit.Actions.verifyActionSignature
+## Lit.Actions.getLitActionWalletAddress
 
-Verify that a signature was created by a specific Lit Action using signAsAction.
-This enables action-to-action authentication, verifiable computation, and building trust chains
-between actions without requiring PKP ownership.
+Get the wallet address for a Lit Action by IPFS ID
 
 ### Parameters
 
-*   `params` **[Object][82]**&#x20;
+*   `params` **[Object][22]**&#x20;
 
-    *   `params.signingScheme` **[string][84]** The signing algorithm. Must be one of:
-        "EcdsaK256Sha256", "EcdsaP256Sha256", "EcdsaP384Sha384",
-        "SchnorrEd25519Sha512", "SchnorrK256Sha256", "SchnorrP256Sha256", "SchnorrP384Sha384",
-        "SchnorrRistretto25519Sha512", "SchnorrEd448Shake256", "SchnorrRedJubjubBlake2b512",
-        "SchnorrK256Taproot", "SchnorrRedDecaf377Blake2b512", "SchnorrkelSubstrate",
-        "Bls12381G1ProofOfPossession"
-    *   `params.actionIpfsCid` **[string][84]** The IPFS CID of the Lit Action that should have created the signature
-    *   `params.toSign` **[Uint8Array][83]** The message that was signed
-    *   `params.signOutput` **[string][84]** The signature output from signAsAction (as a string)
+    *   `params.ipfsId` **[string][23]** The IPFS ID of the Lit Action
 
-Returns **[Promise][85]<[boolean][86]>** true if the signature was created by the specified action, false otherwise
-
-## Checking Permissions
-
-
-
-## Lit.Actions.isPermittedAction
-
-Check if a given IPFS ID is permitted to sign using a given PKP tokenId
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.tokenId` **[string][84]** The tokenId to check
-    *   `params.ipfsId` **[string][84]** The IPFS ID of some JS code (a lit action)
-    *   `params.keySetId` **[string][84]** The key set id to use
-
-Returns **[Promise][85]<[boolean][86]>** A boolean indicating whether the IPFS ID is permitted to sign using the PKP tokenId
-
-## Lit.Actions.isPermittedAddress
-
-Check if a given wallet address is permitted to sign using a given PKP tokenId
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.tokenId` **[string][84]** The tokenId to check
-    *   `params.address` **[string][84]** The wallet address to check
-    *   `params.keySetId` **[string][84]** The key set id to use
-
-Returns **[Promise][85]<[boolean][86]>** A boolean indicating whether the wallet address is permitted to sign using the PKP tokenId
-
-## Lit.Actions.isPermittedAuthMethod
-
-Check if a given auth method is permitted to sign using a given PKP tokenId
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.tokenId` **[string][84]** The tokenId to check
-    *   `params.authMethodType` **[number][87]** The auth method type.  This is an integer.  This mapping shows the initial set but this set may be expanded over time without updating this contract: [https://github.com/LIT-Protocol/LitNodeContracts/blob/main/contracts/PKPPermissions.sol#L25][88]
-    *   `params.userId` **[Uint8Array][83]** The id of the auth method to check expressed as an array of unsigned 8-bit integers (a Uint8Array)
-    *   `params.keySetId` **[string][84]** The key set id to use
-
-Returns **[Promise][85]<[boolean][86]>** A boolean indicating whether the auth method is permitted to sign using the PKP tokenId
-
-## Lit.Actions.getPermittedActions
-
-Get the full list of actions that are permitted to sign using a given PKP tokenId
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.tokenId` **[string][84]** The tokenId to check
-    *   `params.keySetId` **[string][84]** The key set id to use
-
-Returns **[Promise][85]<[Array][89]<[string][84]>>** An array of IPFS IDs of lit actions that are permitted to sign using the PKP tokenId
-
-## Lit.Actions.getPermittedAddresses
-
-Get the full list of addresses that are permitted to sign using a given PKP tokenId
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.tokenId` **[string][84]** The tokenId to check
-    *   `params.keySetId` **[string][84]** The key set id to use
-
-Returns **[Promise][85]<[Array][89]<[string][84]>>** An array of addresses that are permitted to sign using the PKP tokenId
-
-## Lit.Actions.getPermittedAuthMethods
-
-Get the full list of auth methods that are permitted to sign using a given PKP tokenId
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.tokenId` **[string][84]** The tokenId to check
-    *   `params.keySetId` **[string][84]** The key set id to use
-
-Returns **[Promise][85]<[Array][89]<[Object][82]>>** An array of auth methods that are permitted to sign using the PKP tokenId.  Each auth method is an object with the following properties: auth\_method\_type, id, and user\_pubkey (used for web authn, this is the pubkey of the user's authentication keypair)
-
-## Lit.Actions.getPermittedAuthMethodScopes
-
-Get the permitted auth method scopes for a given PKP tokenId and auth method type + id
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.tokenId` **[string][84]** The tokenId to check
-    *   `params.authMethodType` **[string][84]** The auth method type to look up
-    *   `params.userId` **[Uint8Array][83]** The id of the auth method to check expressed as an array of unsigned 8-bit integers (a Uint8Array)
-    *   `params.maxScopeId` **[number][87]** The maximum scope id to check.  This is an integer.
-    *   `params.keySetId` **[string][84]** The key set id to use
-
-Returns **[Promise][85]<[Array][89]<[boolean][86]>>** An array of booleans that define if a given scope id is turned on.  The index of the array is the scope id.  For example, if the array is \[true, false, true], then scope ids 0 and 2 are turned on, but scope id 1 is turned off.
-
-## Key Management
-
-Accessed via `Lit.Actions.*`.
-
-## Lit.Actions.getActionPublicKey
-
-Get the public key for a Lit Action's cryptographic identity.
-This can be used to verify signatures created by signAsAction, or to get the public key
-of any action (including actions you didn't create) for verification purposes.
-
-The public key is deterministically derived from: keccak256("lit\_action\_" + actionIpfsCid)
-and will always be the same for a given action IPFS CID and signing scheme.
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.signingScheme` **[string][84]** The signing algorithm. Must be one of:
-        "EcdsaK256Sha256", "EcdsaP256Sha256", "EcdsaP384Sha384",
-        "SchnorrEd25519Sha512", "SchnorrK256Sha256", "SchnorrP256Sha256", "SchnorrP384Sha384",
-        "SchnorrRistretto25519Sha512", "SchnorrEd448Shake256", "SchnorrRedJubjubBlake2b512",
-        "SchnorrK256Taproot", "SchnorrRedDecaf377Blake2b512", "SchnorrkelSubstrate",
-        "Bls12381G1ProofOfPossession"
-    *   `params.actionIpfsCid` **[string][84]** The IPFS CID of the Lit Action
-
-Returns **[Promise][85]<[Uint8Array][83]>** The public key for the action
-
-## Lit.Actions.getLatestNonce
-
-Gets latest nonce for the given address on a supported chain
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.address` **[string][84]** The wallet address for getting the nonce
-    *   `params.chain` **[string][84]** The chain of which the nonce is fetched
-
-Returns **[Promise][85]<[string][84]>** The token ID as a string
-
-## Lit.Actions.claimKey
-
-Claim a key through a key identifier, the result of the claim will be added to `claim_id`
-under the `keyId` given.
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.keyId` **[string][84]** user id of the claim
-
-## Lit.Actions.pubkeyToTokenId
-
-Converts a PKP public key to a PKP token ID by hashing it with keccak256
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.publicKey` **[string][84]** The public key to convert
-    *   `params.keySetId` **[string][84]** The key set id to use
-
-Returns **[Promise][85]<[string][84]>** The token ID as a string
+Returns **[Promise][24]<[string][23]>** The wallet address
 
 ## Action Utilities
 
 Helpers available inside actions as `Lit.Actions.*`.
-
-## Lit.Actions.checkConditions
-
-Checks a condition using the Lit condition checking engine.  This is the same engine that powers our Access Control product.  You can use this to check any condition that you can express in our condition language.  This is a powerful tool that allows you to build complex conditions that can be checked in a decentralized way.  Visit [https://developer.litprotocol.com][90] and click on the "Access Control" section to learn more.
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.conditions` **[Array][89]<[Object][82]>** An array of access control condition objects
-    *   `params.authSig` **[Object][82]** The AuthSig to use for the condition check.  For example, if you were checking for NFT ownership, this AuthSig would be the signature from the NFT owner's wallet.
-    *   `params.chain` **[string][84]** The chain this AuthSig comes from
-
-Returns **[Promise][85]<[boolean][86]>** A boolean indicating whether the condition check passed or failed
 
 ## Lit.Actions.setResponse
 
@@ -419,172 +111,9 @@ Set the response returned to the client
 
 ### Parameters
 
-*   `params` **[Object][82]**&#x20;
+*   `params` **[Object][22]**&#x20;
 
-    *   `params.response` **[string][84]** The response to send to the client.  You can put any string here, like you could use JSON.stringify on a JS object and send it here.
-
-## Lit.Actions.call
-
-Call a child Lit Action
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.ipfsId` **[string][84]** The IPFS ID of the Lit Action to call
-    *   `params.params` **[Object][82]?** Optional parameters to pass to the child Lit Action
-
-Returns **[Promise][85]<[string][84]>** The response from the child Lit Action.  Note that any signatures performed by the child Lit Action will be automatically combined and returned with the parent Lit Action to the Lit JS SDK client.
-
-## Lit.Actions.callContract
-
-Call a smart contract
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.chain` **[string][84]** The name of the chain to use.  Check out the lit docs "Supported Blockchains" page to find the name.  For example, "ethereum"
-    *   `params.txn` **[string][84]** The RLP Encoded txn, as a hex string
-
-Returns **[Promise][85]<[string][84]>** The response from calling the contract
-
-## Lit.Actions.broadcastAndCollect
-
-Broadcast a message to all connected clients and collect their responses
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.name` **[string][84]** The name of the broadcast
-    *   `params.value` **[string][84]** The value to broadcast
-
-Returns **[Promise][85]<[string][84]>** The collected responses as a json array
-
-## Lit.Actions.runOnce
-
-Run a function only once across all nodes using leader election
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.waitForResponse` **[boolean][86]** Whether to wait for a response or not - if false, the function will return immediately
-    *   `params.name` **[string][84]** Optional name for this runOnce invocation
-*   `async_fn` **[Function][91]** The async function to run on the leader node
-
-Returns **[Promise][85]<[string][84]>** The response from the function if waitForResponse is true
-
-## Lit.Actions.getRpcUrl
-
-Get the RPC URL for a given blockchain
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.chain` **[string][84]** The chain to get the RPC URL for
-
-Returns **[Promise][85]<[string][84]>** The RPC URL for the chain
-
-## Lit.Actions.encrypt
-
-Encrypt data using BLS encryption with access control conditions
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.accessControlConditions` **[Array][89]<[Object][82]>** The access control conditions that must be met to decrypt
-    *   `params.to_encrypt` **[string][84]** The message to encrypt
-    *   `params.keySetId` **[string][84]** The key set id to use
-
-Returns **[Promise][85]<{ciphertext: [string][84], dataToEncryptHash: [string][84]}>** An object containing the ciphertext and the hash of the data that was encrypted
-
-## Lit.Actions.decryptAndCombine
-
-Decrypt and combine the provided ciphertext
-
-Important Considerations:
-
-*   Only unified access control conditions are supported. Standard/legacy ACC formats are not accepted.
-    When specifying EVM contract conditions, use the unified format with `conditionType: "evmContract"`.
-*   Timeouts are commonly caused by nondeterminism in Lit Actions. Ensure your action code is deterministic
-    (avoid unseeded randomness, time-based logic, race conditions, or non-deterministic external calls).
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.accessControlConditions` **[Array][89]<[Object][82]>** The access control conditions
-    *   `params.ciphertext` **[string][84]** The ciphertext to decrypt
-    *   `params.dataToEncryptHash` **[string][84]** The hash of the data to encrypt
-    *   `params.authSig` **[Object][82]** The auth signature
-    *   `params.chain` **[string][84]** The chain
-    *   `params.keySetId` **[string][84]** The key set id to use
-
-Returns **[Promise][85]<[string][84]>** The decrypted and combined data
-
-## Lit.Actions.decryptToSingleNode
-
-Decrypt to a single node
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.accessControlConditions` **[Array][89]<[Object][82]>** The access control conditions
-    *   `params.ciphertext` **[string][84]** The ciphertext to decrypt
-    *   `params.dataToEncryptHash` **[string][84]** The hash of the data to encrypt
-    *   `params.authSig` **[Object][82]** The auth signature
-    *   `params.chain` **[string][84]** The chain
-    *   `params.keySetId` **[string][84]** The key set id to use
-
-Returns **[Promise][85]<[string][84]>** The decrypted data
-
-## Lit.Actions.aesDecrypt
-
-Decrypt data using AES with a symmetric key
-
-### Parameters
-
-*   `params` **[Object][82]**&#x20;
-
-    *   `params.symmetricKey` **[Uint8Array][83]** The AES symmetric key
-    *   `params.ciphertext` **[Uint8Array][83]** The ciphertext to decrypt
-
-Returns **[Promise][85]<[string][84]>** The decrypted plaintext
-
-## Data Helpers
-
-Utility conversions exposed on `Lit.Actions.*`.
-
-## Lit.Actions.uint8arrayToString
-
-Convert a Uint8Array to a string.  This is a re-export of this function: [https://www.npmjs.com/package/uint8arrays#tostringarray-encoding--utf8][92]
-
-### Parameters
-
-*   `array` **[Uint8Array][83]** The Uint8Array to convert
-*   `encoding` **[string][84]** The encoding to use.  Defaults to "utf8"
-
-Returns **[string][84]** The string representation of the Uint8Array
-
-## Lit.Actions.uint8arrayFromString
-
-Convert a string to a Uint8Array.  This is a re-export of this function: [https://www.npmjs.com/package/uint8arrays#fromstringstring-encoding--utf8][93]
-
-### Parameters
-
-*   `string` **[string][84]** The string to convert
-*   `encoding` **[string][84]** The encoding to use.  Defaults to "utf8"
-
-Returns **[Uint8Array][83]** The Uint8Array representation of the string
-
-## Auth Utilities
-
-Authentication context injected as `Lit.Auth.*` during execution.
+    *   `params.response` **any** The response to send to the client. If this is not a string, it will be JSON-encoded before being sent. A value of undefined is encoded as null.
 
 ## Runtime Globals
 
@@ -595,242 +124,55 @@ Globals automatically available inside the Lit Action runtime.
 Global reference to the Lit Actions namespace for convenience.
 This alias is injected in the Lit Action execution environment and mirrors `Lit.Actions`.
 
-## LitAuth
-
-Global reference to the Lit Auth namespace for convenience.
-This alias is injected in the Lit Action execution environment and mirrors `Lit.Auth`.
-
 ## ethers
 
 The ethers.js v5 API exposed to Lit Actions for interacting with EVM chains.
 Includes wallets, providers, contracts, and cryptographic helpers.
 
-## jwt
-
-The jsonwebtoken library exposed to Lit Actions for JWT encoding and verification.
-
-Type: {decode: [Function][91], verify: [Function][91], sign: [Function][91]}
-
-## Lit.Auth
-
-Authentication Context available inside a Lit Action via `Lit.Auth`.
-
-This namespace is injected at runtime and is read-only. It contains
-contextual information about the current execution and authentication.
-
-## Lit.Auth.actionIpfsIdStack
-
-Stack of action IPFS IDs tracking the parent/child call hierarchy.
-When a parent action calls a child action, the child's IPFS ID is pushed onto this stack.
-
-Type: [Array][89]<[string][84]>
-
-## Lit.Auth.authSigAddress
-
-The address derived from the authentication signature, if present; otherwise null.
-
-Type: ([string][84] | null)
-
-## Lit.Auth.authMethodContexts
-
-Array of authentication method contexts used for this execution.
-
-Type: [Array][89]<{userId: [string][84], appId: [string][84], authMethodType: [number][87], lastRetrievedAt: [string][84], expiration: [number][87], usedForSignSessionKeyRequest: [boolean][86]}>
-
-## Lit.Auth.resources
-
-Array of resources (URIs) from SIWE/session signatures associated with this execution.
-
-Type: [Array][89]<[string][84]>
-
-## Lit.Auth.customAuthResource
-
-Custom authentication resource string.
-
-Type: [string][84]
-
 [1]: #welcome
 
-[2]: #signing
+[2]: #encryption
 
-[3]: #signecdsa
+[3]: #encrypt
 
 [4]: #parameters
 
-[5]: #ethpersonalsignmessageecdsa
+[5]: #decrypt
 
 [6]: #parameters-1
 
-[7]: #sign
+[7]: #pkp-keys
 
-[8]: #parameters-2
+[8]: #getprivatekey
 
-[9]: #signasaction
+[9]: #parameters-2
 
-[10]: #parameters-3
+[10]: #getlitactionprivatekey
 
-[11]: #signandcombineecdsa
+[11]: #getlitactionpublickey
 
-[12]: #parameters-4
+[12]: #parameters-3
 
-[13]: #signandcombine
+[13]: #getlitactionwalletaddress
 
-[14]: #parameters-5
+[14]: #parameters-4
 
-[15]: #verifyactionsignature
+[15]: #action-utilities
 
-[16]: #parameters-6
+[16]: #setresponse
 
-[17]: #checking-permissions
+[17]: #parameters-5
 
-[18]: #ispermittedaction
+[18]: #runtime-globals
 
-[19]: #parameters-7
+[19]: #litactions
 
-[20]: #ispermittedaddress
+[20]: #ethers
 
-[21]: #parameters-8
+[21]: https://developer.litprotocol.com/
 
-[22]: #ispermittedauthmethod
+[22]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object
 
-[23]: #parameters-9
+[23]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String
 
-[24]: #getpermittedactions
-
-[25]: #parameters-10
-
-[26]: #getpermittedaddresses
-
-[27]: #parameters-11
-
-[28]: #getpermittedauthmethods
-
-[29]: #parameters-12
-
-[30]: #getpermittedauthmethodscopes
-
-[31]: #parameters-13
-
-[32]: #key-management
-
-[33]: #getactionpublickey
-
-[34]: #parameters-14
-
-[35]: #getlatestnonce
-
-[36]: #parameters-15
-
-[37]: #claimkey
-
-[38]: #parameters-16
-
-[39]: #pubkeytotokenid
-
-[40]: #parameters-17
-
-[41]: #action-utilities
-
-[42]: #checkconditions
-
-[43]: #parameters-18
-
-[44]: #setresponse
-
-[45]: #parameters-19
-
-[46]: #call
-
-[47]: #parameters-20
-
-[48]: #callcontract
-
-[49]: #parameters-21
-
-[50]: #broadcastandcollect
-
-[51]: #parameters-22
-
-[52]: #runonce
-
-[53]: #parameters-23
-
-[54]: #getrpcurl
-
-[55]: #parameters-24
-
-[56]: #encrypt
-
-[57]: #parameters-25
-
-[58]: #decryptandcombine
-
-[59]: #parameters-26
-
-[60]: #decrypttosinglenode
-
-[61]: #parameters-27
-
-[62]: #aesdecrypt
-
-[63]: #parameters-28
-
-[64]: #data-helpers
-
-[65]: #uint8arraytostring
-
-[66]: #parameters-29
-
-[67]: #uint8arrayfromstring
-
-[68]: #parameters-30
-
-[69]: #auth-utilities
-
-[70]: #runtime-globals
-
-[71]: #litactions
-
-[72]: #litauth
-
-[73]: #ethers
-
-[74]: #jwt
-
-[75]: #litauth-1
-
-[76]: #litauthactionipfsidstack
-
-[77]: #litauthauthsigaddress
-
-[78]: #litauthauthmethodcontexts
-
-[79]: #litauthresources
-
-[80]: #litauthcustomauthresource
-
-[81]: https://developer.litprotocol.com/
-
-[82]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object
-
-[83]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Uint8Array
-
-[84]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String
-
-[85]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Promise
-
-[86]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Boolean
-
-[87]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Number
-
-[88]: https://github.com/LIT-Protocol/LitNodeContracts/blob/main/contracts/PKPPermissions.sol#L25
-
-[89]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Array
-
-[90]: https://developer.litprotocol.com
-
-[91]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Statements/function
-
-[92]: https://www.npmjs.com/package/uint8arrays#tostringarray-encoding--utf8
-
-[93]: https://www.npmjs.com/package/uint8arrays#fromstringstring-encoding--utf8
+[24]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Promise

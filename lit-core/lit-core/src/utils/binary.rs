@@ -28,6 +28,13 @@ where
     vec.as_ref().iter().map(|b| format!("{b:02x}")).collect::<String>()
 }
 
+pub fn bytes_to_0x_hex<B>(vec: B) -> String
+where
+    B: AsRef<[u8]>,
+{
+    format!("0x{}", bytes_to_hex(vec))
+}
+
 pub fn bytes_to_decimal<B>(vec: B) -> String
 where
     B: AsRef<[u8]>,

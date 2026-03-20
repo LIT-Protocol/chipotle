@@ -1,9 +1,6 @@
-import { checkAndLog } from "./check.ts";
 import { LitApiServerClient } from "./litApiServer.ts";
 
-const baseUrl =
-  __ENV.BASE_URL ||
-  "https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network/core/v1";
+const baseUrl = "<BASE_URL>";
 const litApiServerClient = new LitApiServerClient({ baseUrl });
 
 export default function () {
@@ -27,240 +24,202 @@ export default function () {
    *
    */
   params = {
-    page_number: "oh",
-    page_size: "kit",
+    page_number: "saturate",
+    page_size: "reporter",
   };
   headers = {
-    "X-Api-Key": "even",
+    "X-Api-Key": "than",
   };
 
   const listApiKeysResponseData = litApiServerClient.listApiKeys(
     params,
     headers,
   );
-  checkAndLog(listApiKeysResponseData.response, {
-    "listApiKeys 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "listApiKeys");
 
   /**
    *
    */
   newAccountRequest = {
-    account_name: "arrange",
-    account_description: "fat",
-    initial_balance: "1000000",
+    account_name: "bolster",
+    account_description: "ick",
   };
 
   const newAccountResponseData =
     litApiServerClient.newAccount(newAccountRequest);
-  checkAndLog(newAccountResponseData.response, {
-    "newAccount 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "newAccount");
 
   /**
    *
    */
   headers = {
-    "X-Api-Key": "provided",
+    "X-Api-Key": "yippee",
   };
 
   const accountExistsResponseData = litApiServerClient.accountExists(headers);
-  checkAndLog(accountExistsResponseData.response, {
-    "accountExists 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "accountExists");
 
   /**
    *
    */
   headers = {
-    "X-Api-Key": "thread",
+    "X-Api-Key": "materialise",
   };
 
   const createWalletResponseData = litApiServerClient.createWallet(headers);
-  checkAndLog(createWalletResponseData.response, {
-    "createWallet 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "createWallet");
 
   /**
    *
    */
   litActionRequest = {
-    code: "grizzled",
+    code: "into",
     js_params: undefined,
   };
   headers = {
-    "X-Api-Key": "for",
+    "X-Api-Key": "than",
   };
 
   const litActionResponseData = litApiServerClient.litAction(
     litActionRequest,
     headers,
   );
-  checkAndLog(litActionResponseData.response, {
-    "litAction 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "litAction");
 
   /**
    *
    */
-  code = "off";
+  code = "careless";
 
   const getLitActionIpfsIdResponseData =
     litApiServerClient.getLitActionIpfsId(code);
-  checkAndLog(getLitActionIpfsIdResponseData.response, {
-    "getLitActionIpfsId 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "getLitActionIpfsId");
 
   /**
    *
    */
   addGroupRequest = {
-    group_name: "any",
-    group_description: "absent",
+    group_name: "after",
+    group_description: "almost",
     permitted_actions: [],
     pkps: [],
     all_wallets_permitted: false,
-    all_actions_permitted: true,
+    all_actions_permitted: false,
   };
   headers = {
-    "X-Api-Key": "however",
+    "X-Api-Key": "duh",
   };
 
   const addGroupResponseData = litApiServerClient.addGroup(
     addGroupRequest,
     headers,
   );
-  checkAndLog(addGroupResponseData.response, {
-    "addGroup 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "addGroup");
 
   /**
    *
    */
   addActionToGroupRequest = {
-    group_id: "recovery",
-    action_ipfs_cid: "beautifully",
-    name: "stealthily",
-    description: "hm",
+    group_id: "furthermore",
+    action_ipfs_cid: "although",
+    name: "mmm",
+    description: "jacket",
   };
   headers = {
-    "X-Api-Key": "memorise",
+    "X-Api-Key": "whether",
   };
 
   const addActionToGroupResponseData = litApiServerClient.addActionToGroup(
     addActionToGroupRequest,
     headers,
   );
-  checkAndLog(addActionToGroupResponseData.response, {
-    "addActionToGroup 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "addActionToGroup");
 
   /**
    *
    */
   addPkpToGroupRequest = {
-    group_id: "dissemble",
-    pkp_public_key: "greedy",
+    group_id: "all",
+    pkp_id: "beyond",
   };
   headers = {
-    "X-Api-Key": "pastel",
+    "X-Api-Key": "psst",
   };
 
   const addPkpToGroupResponseData = litApiServerClient.addPkpToGroup(
     addPkpToGroupRequest,
     headers,
   );
-  checkAndLog(addPkpToGroupResponseData.response, {
-    "addPkpToGroup 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "addPkpToGroup");
 
   /**
    *
    */
   removePkpFromGroupRequest = {
-    group_id: "grouper",
-    pkp_public_key: "yowza",
+    group_id: "usually",
+    pkp_id: "atop",
   };
   headers = {
-    "X-Api-Key": "abaft",
+    "X-Api-Key": "who",
   };
 
   const removePkpFromGroupResponseData = litApiServerClient.removePkpFromGroup(
     removePkpFromGroupRequest,
     headers,
   );
-  checkAndLog(removePkpFromGroupResponseData.response, {
-    "removePkpFromGroup 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "removePkpFromGroup");
 
   /**
    *
    */
   addUsageApiKeyRequest = {
-    expiration: "boo",
-    balance: "decide",
+    expiration: "whopping",
+    balance: "likely",
+    name: "wetly",
+    description: "aha",
   };
   headers = {
-    "X-Api-Key": "pace",
+    "X-Api-Key": "whimsical",
   };
 
   const addUsageApiKeyResponseData = litApiServerClient.addUsageApiKey(
     addUsageApiKeyRequest,
     headers,
   );
-  checkAndLog(addUsageApiKeyResponseData.response, {
-    "addUsageApiKey 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "addUsageApiKey");
 
   /**
    *
    */
   removeUsageApiKeyRequest = {
-    usage_api_key: "creamy",
+    usage_api_key: "whoever",
   };
   headers = {
-    "X-Api-Key": "yet",
+    "X-Api-Key": "minister",
   };
 
   const removeUsageApiKeyResponseData = litApiServerClient.removeUsageApiKey(
     removeUsageApiKeyRequest,
     headers,
   );
-  checkAndLog(removeUsageApiKeyResponseData.response, {
-    "removeUsageApiKey 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "removeUsageApiKey");
 
   /**
    *
    */
   updateGroupRequest = {
-    group_id: "yet",
-    name: "where",
-    description: "unimpressively",
-    all_wallets_permitted: true,
+    group_id: "ick",
+    name: "good-natured",
+    description: "phew",
+    all_wallets_permitted: false,
     all_actions_permitted: true,
   };
   headers = {
-    "X-Api-Key": "abaft",
+    "X-Api-Key": "than",
   };
 
   const updateGroupResponseData = litApiServerClient.updateGroup(
     updateGroupRequest,
     headers,
   );
-  checkAndLog(updateGroupResponseData.response, {
-    "updateGroup 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "updateGroup");
 
   /**
    *
    */
   removeActionFromGroupRequest = {
-    group_id: "hmph",
-    action_ipfs_cid: "treasure",
+    group_id: "jaywalk",
+    action_ipfs_cid: "vice",
   };
   headers = {
-    "X-Api-Key": "aha",
+    "X-Api-Key": "after",
   };
 
   const removeActionFromGroupResponseData =
@@ -268,21 +227,18 @@ export default function () {
       removeActionFromGroupRequest,
       headers,
     );
-  checkAndLog(removeActionFromGroupResponseData.response, {
-    "removeActionFromGroup 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "removeActionFromGroup");
 
   /**
    *
    */
   updateActionMetadataRequest = {
-    group_id: "following",
-    action_ipfs_cid: "sizzling",
-    name: "unpleasant",
-    description: "decryption",
+    group_id: "outside",
+    action_ipfs_cid: "along",
+    name: "consequently",
+    description: "moor",
   };
   headers = {
-    "X-Api-Key": "truthfully",
+    "X-Api-Key": "apropos",
   };
 
   const updateActionMetadataResponseData =
@@ -290,20 +246,17 @@ export default function () {
       updateActionMetadataRequest,
       headers,
     );
-  checkAndLog(updateActionMetadataResponseData.response, {
-    "updateActionMetadata 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "updateActionMetadata");
 
   /**
    *
    */
   updateUsageApiKeyMetadataRequest = {
-    usage_api_key: "frizz",
-    name: "sheathe",
-    description: "around",
+    usage_api_key: "other",
+    name: "broken",
+    description: "capitalize",
   };
   headers = {
-    "X-Api-Key": "deeply",
+    "X-Api-Key": "scram",
   };
 
   const updateUsageApiKeyMetadataResponseData =
@@ -311,91 +264,86 @@ export default function () {
       updateUsageApiKeyMetadataRequest,
       headers,
     );
-  checkAndLog(updateUsageApiKeyMetadataResponseData.response, {
-    "updateUsageApiKeyMetadata 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "updateUsageApiKeyMetadata");
 
   /**
    *
    */
   params = {
-    page_number: "furiously",
-    page_size: "absentmindedly",
+    page_number: "whenever",
+    page_size: "pillbox",
   };
   headers = {
-    "X-Api-Key": "linseed",
+    "X-Api-Key": "pro",
   };
 
   const listGroupsResponseData = litApiServerClient.listGroups(params, headers);
-  checkAndLog(listGroupsResponseData.response, {
-    "listGroups 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "listGroups");
 
   /**
    *
    */
   params = {
-    page_number: "hence",
-    page_size: "sell",
+    page_number: "marvelous",
+    page_size: "roger",
   };
   headers = {
-    "X-Api-Key": "what",
+    "X-Api-Key": "strictly",
   };
 
   const listWalletsResponseData = litApiServerClient.listWallets(
     params,
     headers,
   );
-  checkAndLog(listWalletsResponseData.response, {
-    "listWallets 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "listWallets");
 
   /**
    *
    */
   params = {
-    group_id: "dependency",
+    group_id: "elver",
     page_number: "even",
-    page_size: "onto",
+    page_size: "carpool",
   };
   headers = {
-    "X-Api-Key": "naughty",
+    "X-Api-Key": "flashy",
   };
 
   const listWalletsInGroupResponseData = litApiServerClient.listWalletsInGroup(
     params,
     headers,
   );
-  checkAndLog(listWalletsInGroupResponseData.response, {
-    "listWalletsInGroup 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "listWalletsInGroup");
 
   /**
    *
    */
   params = {
-    group_id: "but",
-    page_number: "er",
-    page_size: "blowgun",
+    group_id: "phew",
+    page_number: "amidst",
+    page_size: "severe",
   };
   headers = {
-    "X-Api-Key": "yet",
+    "X-Api-Key": "over",
   };
 
   const listActionsResponseData = litApiServerClient.listActions(
     params,
     headers,
   );
-  checkAndLog(listActionsResponseData.response, {
-    "listActions 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "listActions");
 
   /**
    *
    */
+
   const getNodeChainConfigResponseData =
     litApiServerClient.getNodeChainConfig();
-  checkAndLog(getNodeChainConfigResponseData.response, {
-    "getNodeChainConfig 2xx": (r) => (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, "getNodeChainConfig");
+
+  /**
+   *
+   */
+
+  const getApiPayersResponseData = litApiServerClient.getApiPayers();
+
+  /**
+   *
+   */
+
+  const getAdminApiPayerResponseData = litApiServerClient.getAdminApiPayer();
 }

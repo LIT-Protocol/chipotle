@@ -1,19 +1,32 @@
-# Deploy lit-api-server + lit-actions + lit-static to Phala CVM (tdx.large instance)
+# Deploy lit-api-server + lit-actions + lit-static + otel-collector to Phala CVM (tdx.large instance)
 #
 # Branch-based deployment:
-#   push to main  → lit-api-server,      base_url https://api.dev.litprotocol.com
-#   push to next  → lit-api-server-next, base_url https://...-8000.dstack-pha-prod5.phala.network
+#   push to main            → chipotle-dev
+#   push to next or others  → chipotle-next
+#
+# Image provenance (DR-1b): Each image is signed with Sigstore (cosign keyless) immediately
+# after push. Signatures are recorded in the public Rekor transparency log, binding the image
+# digest to the GitHub Actions OIDC identity that built it. This allows anyone to verify that
+# a given image digest was built from a specific commit in this repository.
+#
+# To verify an image:
+#   cosign verify \
+#     --certificate-identity-regexp "https://github.com/LIT-Protocol/lit-node-express/.*" \
+#     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+#     <image>@<digest>
 #
 # Required secrets:
 #   DOCKERHUB_TOKEN - Docker Hub PAT (Account Settings > Security > Access Tokens)
 #   PHALA_CLOUD_API_KEY - From Phala Cloud Dashboard > API Tokens
+#   PHALA_DSTACKAPP_PRIVATE_KEY - Private key for DstackApp (Onchain KMS on Base)
 #
 # Required vars:
 #   DOCKER_IMAGE - Base image path, e.g. docker.io/username/lit-node-express
-#                  Three images are pushed:
+#                  Four images are pushed:
 #                    ${DOCKER_IMAGE}-lit-actions
 #                    ${DOCKER_IMAGE}-lit-api-server
 #                    ${DOCKER_IMAGE}-lit-static
+#                    ${DOCKER_IMAGE}-otel-collector
 #   DOCKERHUB_USERNAME - Docker Hub username
 
 name: Deploy to Phala CVM
@@ -29,21 +42,30 @@ on:
 
 jobs:
   determine-target:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     outputs:
       phala_app_name: ${{ steps.set.outputs.phala_app_name }}
       base_url: ${{ steps.set.outputs.base_url }}
       api_root_url: ${{ steps.set.outputs.api_root_url }}
+      instance_type: ${{ steps.set.outputs.instance_type }}
+      gcp_project_id: ${{ steps.set.outputs.gcp_project_id }}
+      node_config: ${{ steps.set.outputs.node_config }}
     steps:
       - name: Set deployment target
         id: set
         run: |
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            echo "phala_app_name=lit-api-server" >> "$GITHUB_OUTPUT"
-            BASE_URL="https://api.dev.litprotocol.com"
+            echo "phala_app_name=chipotle-dev" >> "$GITHUB_OUTPUT"
+            echo "instance_type=tdx.large" >> "$GITHUB_OUTPUT"
+            echo "gcp_project_id=chipotle-dev" >> "$GITHUB_OUTPUT"
+            echo "node_config=NodeConfig.main.toml" >> "$GITHUB_OUTPUT"
+            BASE_URL="https://f8fce543471dc9f5f5643aa217422398c36e5edc-8000.dstack-base-prod5.phala.network"
           elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
-            echo "phala_app_name=lit-api-server-next" >> "$GITHUB_OUTPUT"
-            BASE_URL="https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network"
+            echo "phala_app_name=chipotle-next" >> "$GITHUB_OUTPUT"
+            echo "instance_type=tdx.small" >> "$GITHUB_OUTPUT"
+            echo "gcp_project_id=chipotle-next" >> "$GITHUB_OUTPUT"
+            echo "node_config=NodeConfig.next.toml" >> "$GITHUB_OUTPUT"
+            BASE_URL="https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network"
           else
             echo "Unsupported branch for deployment"
             exit 1
@@ -51,23 +73,12 @@ jobs:
           echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
           echo "api_root_url=${BASE_URL}/core/v1" >> "$GITHUB_OUTPUT"
 
-  determine-runner:
-    runs-on: ubuntu-latest
-    outputs:
-      runner: ${{ steps.set-runner.outputs.use-runner }}
-    steps:
-      - name: Determine runner (self-hosted or fallback)
-        id: set-runner
-        uses: mikehardy/runner-fallback-action@v1
-        with:
-          primary-runner: self-hosted
-          fallback-runner: ubuntu-latest
-          github-token: ${{ secrets.GH_RUNNER_CHECK_TOKEN }}
-          fallback-on-error: true
-
   build:
-    needs: [determine-runner, determine-target]
-    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    needs: [determine-target]
+    runs-on: self-hosted
+    permissions:
+      id-token: write  # required for Sigstore keyless signing (OIDC token)
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -78,8 +89,13 @@ jobs:
             dockerfile: Dockerfile.lit-api-server
           - service: lit-static
             dockerfile: Dockerfile.lit-static
+          - service: otel-collector
+            dockerfile: Dockerfile.otel-collector
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
 
       - name: Log in to Docker Registry
         uses: docker/login-action@v3
@@ -96,7 +112,14 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ vars.DOCKER_IMAGE }}-${{ matrix.service }}:${{ github.sha }}
-          build-args: ${{ matrix.service == 'lit-static' && format('BASE_URL={0}', needs.determine-target.outputs.base_url) || '' }}
+          build-args: |
+            ${{ matrix.service == 'lit-static' && format('BASE_URL={0}', needs.determine-target.outputs.base_url) || '' }}
+            ${{ matrix.service == 'lit-api-server' && format('NODE_CONFIG={0}', needs.determine-target.outputs.node_config) || '' }}
+
+      - name: Sign image with Sigstore (keyless)
+        run: |
+          cosign sign --yes \
+            "${{ vars.DOCKER_IMAGE }}-${{ matrix.service }}@${{ steps.push.outputs.digest }}"
 
       - name: Save image digest
         run: echo "${{ steps.push.outputs.digest }}" > digest-${{ matrix.service }}.txt
@@ -108,8 +131,8 @@ jobs:
           path: digest-${{ matrix.service }}.txt
 
   deploy:
-    needs: [determine-runner, determine-target, build]
-    runs-on: ${{ fromJson(needs.determine-runner.outputs.runner) }}
+    needs: [determine-target, build]
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
@@ -121,13 +144,16 @@ jobs:
 
       - name: Prepare docker-compose for deployment (digest-pinned)
         run: |
-          DIGEST_LIT_ACTIONS=$(cat digest-lit-actions.txt)
-          DIGEST_LIT_API_SERVER=$(cat digest-lit-api-server.txt)
-          DIGEST_LIT_STATIC=$(cat digest-lit-static.txt)
+          DIGEST_LIT_ACTIONS=$(cat digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DIGEST_LIT_API_SERVER=$(cat digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DIGEST_LIT_STATIC=$(cat digest-lit-static.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DIGEST_OTEL_COLLECTOR=$(cat digest-otel-collector.txt | tr -d '\n' | sed 's/}[}]*$//')
           sed \
             -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|${{ vars.DOCKER_IMAGE }}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
             -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|${{ vars.DOCKER_IMAGE }}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
             -e "s|\${DOCKER_IMAGE_LIT_STATIC}|${{ vars.DOCKER_IMAGE }}-lit-static@${DIGEST_LIT_STATIC}|g" \
+            -e "s|\${DOCKER_IMAGE_OTEL_COLLECTOR}|${{ vars.DOCKER_IMAGE }}-otel-collector@${DIGEST_OTEL_COLLECTOR}|g" \
+            -e "s|\${GCP_PROJECT_ID}|${{ needs.determine-target.outputs.gcp_project_id }}|g" \
             docker-compose.phala.yml > docker-compose.deploy.yml
           cat docker-compose.deploy.yml
 
@@ -139,45 +165,36 @@ jobs:
       - name: Install Phala CLI
         run: npm install -g phala
 
-      - name: Deploy to Phala Cloud (tdx.large CVM)
+      - name: Deploy to Phala Cloud
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          PHALA_PRIVATE_KEY: ${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}
         run: |
           phala deploy \
             -c docker-compose.deploy.yml \
             --cvm-id ${{ needs.determine-target.outputs.phala_app_name }} \
-            --instance-type tdx.large
-
-  # Give the Phala CLI time to trigger the CVM restart and begin rebooting.
-  # Without this, the old instance may still be serving the API when wait-for-api-available
-  # starts polling, so we'd pass before the new deployment is actually live.
-  wait-after-deploy:
-    needs: [deploy]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Wait after Phala deploy
-        run: sleep 30
+            --private-key "$PHALA_PRIVATE_KEY"
 
   wait-for-api-available:
-    needs: [wait-after-deploy, determine-runner, determine-target]
-    uses: ./.github/workflows/wait-for-api.yml
+    needs: [deploy, determine-target]
+    uses: ./.github/workflows/wait-for-api-restart.yml
     with:
       api_root_url: ${{ needs.determine-target.outputs.api_root_url }}
-      runner: ${{ needs.determine-runner.outputs.runner }}
+      runner: '["self-hosted"]'
 
   verify-attestation:
-    needs: [wait-for-api-available, determine-runner, determine-target]
+    needs: [wait-for-api-available, determine-target]
     uses: ./.github/workflows/verify-attestation.yml
     with:
       attestation_url: ${{ needs.determine-target.outputs.base_url }}
-      runner: ${{ needs.determine-runner.outputs.runner }}
+      runner: '["self-hosted"]'
 
   openapi-spec-check:
-    needs: [wait-for-api-available, determine-runner]
+    needs: [wait-for-api-available]
     uses: ./.github/workflows/openapi-spec-check.yml
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
-      runner: ${{ needs.determine-runner.outputs.runner }}
+      runner: '["self-hosted"]'
 
   k6-smoke:
     needs: [wait-for-api-available, openapi-spec-check]
@@ -185,33 +202,8 @@ jobs:
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
 
-  k6-integration:
+  k6-correctness:
     needs: [wait-for-api-available, k6-smoke]
-    if: ${{ !cancelled() }}
-    uses: ./.github/workflows/k6-integration.yml
-    with:
-      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
-
-  k6-new-account:
-    needs: [wait-for-api-available, k6-integration]
-    if: ${{ !cancelled() }}
-    uses: ./.github/workflows/k6-new-account.yml
-    with:
-      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
-
-  k6-lit-action-ecdsa-sign:
-    needs: [wait-for-api-available, k6-new-account]
-    if: ${{ !cancelled() }}
-    uses: ./.github/workflows/k6-lit-action-ecdsa-sign.yml
-    with:
-      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
-
-  # signAsAction is deprecated. The workflow inverts the k6 exit code so it
-  # succeeds when k6 fails (expected) and fails when k6 passes (unexpected).
-  # See: https://litprotocol.slack.com/archives/C0AG62JLYKS/p1772285399551879?thread_ts=1772254651.978569&cid=C0AG62JLYKS
-  k6-lit-action-sign-as-action:
-    needs: [wait-for-api-available, k6-new-account]
-    if: ${{ !cancelled() }}
-    uses: ./.github/workflows/k6-lit-action-sign-as-action.yml
+    uses: ./.github/workflows/correctness.yml
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}

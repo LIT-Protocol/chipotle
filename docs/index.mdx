@@ -1,13 +1,22 @@
 ---
 title: "Quick Start"
-description: "Get started with Lit Node Express using the Lit Express Dashboard or the REST API (Core SDK and cURL), the fastest and easiest method to get started with Lit Actions."
+description: "Get started with Lit Chipotle using the Lit Chipotle Dashboard or the REST API (Core SDK and cURL), the fastest and easiest method to get started with Lit Actions."
 ---
 
-This guide introduces the \*\*Lit Express API \*\* and it's web interface, the **Lit Express** **Dashboard** which allows both web3 and non-web3 developers to quickly set up their Lit environment and start using Lit Actions.
+This guide introduces the [**Lit Chipotle API**](https://api.dev.litprotocol.com/) and its web interface, the [**Lit Chipotle Dashboard**](https://dashboard.dev.litprotocol.com/dapps/dashboard/) which allows both web3 and non-web3 developers to quickly set up their Lit environment and start using Lit Actions.
+
+## Zero to LitAction
+
+1. [Create an account via the Dashboard](#1-request-a-new-account-or-log-in), note down your API key
+2. Add a usage API key - set it's permissions by clicking "All Options"
+3. Run a LitAction
+   1. [From the Dashboard](#6-run-lit-actions)
+   2. [Programmatically via cURL/JavaScript](#6-run-lit-action)
+   3. or build your own SDK from the [OpenAPI spec](#open-api-specification)
 
 ## Overview
 
-The **Lit Express Dashboard** is front end to the **Lit Express API** server designed to quickly and efficiently execute Lit Actions, but also  manages your user accounts, usage parameters, client wallet creation (PKPs), and IPFS based actions, through a simple set of groups. \
+The [**Lit Chipotle Dashboard**](https://dashboard.dev.litprotocol.com/dapps/dashboard/) is the front end to the [**Lit Chipotle API**](https://api.dev.litprotocol.com) server, designed to quickly and efficiently execute Lit Actions and to manage your user accounts, usage parameters, client wallet creation (PKPs), and IPFS based actions, through a simple set of groups. \
 \
 Specifically it lets you:
 
@@ -18,13 +27,13 @@ Specifically it lets you:
 - Organize all your resources into **groups** that combine PKPs, IPFS actions, and usage API keys in any combination.
 - Send **lit-actions** to the node for execution, authorized by a usage or account API key.
 
-All of this can be done via the **Dashboard** (web GUI) or directly via the **REST API**, using a light-weight JS SDK, or even directly through CURL-ing commands.    Data is secure and onchain - all configuration within the Dashboard can be achieved by talking directly to our contracts located on **BASE**.
+All of this can be done via the [**Dashboard**](https://dashboard.dev.litprotocol.com/dapps/dashboard/) (web GUI) or directly via the [**REST API**](https://api.dev.litprotocol.com), using a light-weight JS SDK, or even directly through CURL-ing commands. Data is secure and on-chain—all configuration within the Dashboard can be achieved by talking directly to our contracts located on **BASE**.
 
 ## Using the Dashboard
 
-The Dashboard is a web management GUI for Lit Node Express. Open it from your browser at
+The [Dashboard](https://dashboard.dev.litprotocol.com/dapps/dashboard/) is a web management GUI for Lit's Chipotle offering. Open it from your browser at
 
-`dashboard.dev.litprotocol.com`
+`https://dashboard.dev.litprotocol.com/dapps/dashboard/`
 
 It supports light/dark theme for your convenience and provides simple management tools.
 
@@ -34,70 +43,85 @@ It supports light/dark theme for your convenience and provides simple management
 2. [Request usage API keys](#2-request-usage-api-keys)
 3. [Request new PKPs (wallets)](#3-request-new-pkps-wallets)
 4. [Register IPFS CIDs (actions)](#4-register-ipfs-cids-actions)
-5. [Grouping your resources](#5-create-groups)
+5. [Create groups](#5-create-groups)
 6. [Run lit-actions](#6-run-lit-actions)
 
-<Steps>
-  <Step title="Request a new account (or log in)">
-    On the login page you have two tabs:
+### 1. Request a new account (or log in)
 
-    - **Existing User** — Paste your account API key and click **Log in**. The server checks that the account exists and is mutable.
-    - **New User** — Enter an account name and optional description (and optional initial balance), then click **Create account**. The server creates the account and returns a new API key and wallet address. **Store the API key securely**; you'll need it to manage the account.
+On the login page you have two tabs:
 
-    After login, the dashboard shows Overview, Usage API Keys, Groups, IPFS Actions, Wallets, and Action Runner.\
-    You'll notice a single wallet in your account - it represents your master account API key, and can be used like a standard EVM wallet, or you can safely skip it's web3 properties and use the APIs directly.
-  </Step>
-  <Step title="Request usage API keys">
-    Usage API keys are scoped keys you can give to clients or dApps to run specific lit-actions or to deploy. They can be rotated or removed without changing the main account.
+- **Existing User** — Paste your account API key and click **Log in**. The server checks that the account exists and is mutable.
+- **New User** — Enter an account name and an optional description, then click **Create account**. The server creates the account and displays your new API key and wallet address in a one-time success message. **Copy and store the API key immediately**; it is shown only once and you'll need it to manage the account.
 
-    In the **Usage API Keys** section, click **Add**. Set _expiration_ and _initial balance_, then hit _confirm_. The server returns a new usage key **once** — copy and store it. You can optionally set a name and description after creation. \
-    \
-    Use this key in the `X-Api-Key` (or `Authorization: Bearer`) header when calling the node so that usage is attributed to this key.
-  </Step>
-  <Step title="Request new PKPs (wallets)">
-    PKPs (Programmable Key Pairs) are wallets the lit-nodes can use for signing. In the **Wallets** section, click **Add** to create a new wallet to assign to one of your users, or for use in running a lit-action. The server generates a new PKP and returns its address and public key.
+After login, the dashboard shows Overview, Usage API Keys, Groups, IPFS Actions, Wallets, and Action Runner.\
+You'll notice a single wallet in your account - it represents your master account API key, and can be used like a standard EVM wallet, or you can safely skip its web3 properties and use the APIs directly.
 
-    You can add existing PKPs to groups (see step 5) via **Add PKP to group** in the Groups section.
-  </Step>
-  <Step title="Register IPFS CIDs (actions)">
-    To scope which usage API keys can run which code, you register **IPFS CIDs** as permitted actions. In the **IPFS Actions** section, pick a group from the dropdown, then **Add** an action: enter the IPFS CID of the lit-action and optional name/description. The server hashes the CID and stores it in the group. Only keys that are allowed to use that group can run that action.
-  </Step>
-  <Step title="Grouping your resources">
-    Groups logically combine PKPs, IPFS actions, and (indirectly) usage API keys. You can use any combination: e.g. a group with only permitted actions, or only permitted wallets, or both.
+### 2. Request usage API keys
 
-    In the **Groups** section, click **Add** to create a group (name, description, optional permitted actions and PKPs, and flags for "all wallets permitted" / "all actions permitted"). Then:
+Usage API keys are scoped keys you can give to clients or dApps to run specific lit-actions or to deploy. They can be rotated or removed without changing the main account.
 
-    - Use **IPFS Actions** to add CIDs to the group.
-    - Use **Add PKP to group** / **Remove PKP from group** to allow which wallets can be used in that group.
+In the **Usage API Keys** section, click **Add**. Set an optional name and description, then click _Confirm_. The server generates a new usage key and displays it in a one-time success message — **copy and store it immediately**, as it will not be shown again. \
+\
+Use this key in the `X-Api-Key` (or `Authorization: Bearer`) header when calling the node so that usage is attributed to this key.
 
-    Usage API keys (and the account key) are validated against the account's groups and permitted actions/wallets when you run a lit-action.
-  </Step>
-  <Step title="Run lit-actions">
-    In the **Action Runner** section, paste some Lit Action JavaScript code and optional JSON parameters. Choose the API key (account or usage key) to use for the request, then click **Execute**. The node runs the action and returns signatures, response, and logs. The key you use must be allowed to run that action (via the group and IPFS CID configuration).
-  </Step>
-</Steps>
+### 3. Request new PKPs (wallets)
+
+PKPs (Programmable Key Pairs) are wallets the lit-nodes can use for signing. In the **Wallets** section, click **Add** to create a new wallet to assign to one of your users, or for use in running a lit-action. The server generates a new PKP and returns its address and public key.
+
+You can add existing PKPs to groups (see step 5) via **Add PKP to group** in the Groups section.
+
+### 4. Register IPFS CIDs (actions)
+
+To scope which usage API keys can run which code, you register **IPFS CIDs** as permitted actions. In the **IPFS Actions** section, pick a group from the dropdown, then **Add** an action: enter the IPFS CID of the lit-action and optional name/description. The server hashes the CID and stores it in the group. Only keys that are allowed to use that group can run that action.
+
+### 5. Create groups
+
+Groups logically combine PKPs, IPFS actions, and (indirectly) usage API keys. You can use any combination: e.g., a group with only permitted actions, or only permitted wallets, or both.
+
+In the **Groups** section, click **Add** to create a group (name, description, optional permitted actions and PKPs, and flags for "all wallets permitted" / "all actions permitted"). Then:
+
+- Use **IPFS Actions** to add CIDs to the group.
+- Use **Add PKP to group** / **Remove PKP from group** to allow which wallets can be used in that group.
+
+Usage API keys (and the account key) are validated against the account's groups and permitted actions/wallets when you run a lit-action.
+
+### 6. Run lit-actions
+
+In the **Action Runner** section, paste some Lit Action JavaScript code and optional JSON parameters. For example
+```
+    const message = "Hello from Lit Action";
+    const sig = await LitActions.signEcdsa({ toSign: new TextEncoder().encode(message), publicKey, sigName });
+    LitActions.setResponse({ response: { message, sig } });
+```
+ Choose the API key (account or usage key) to use for the request, then click **Execute**. The node runs the action and returns signatures, response, and logs. The key you use must be allowed to run that action (via the group and IPFS CID configuration).
+
+## Daily Usage
+
+The dashboard is just your human-friendly configuration tool. Once your account and keys are set up to your liking, you can simply call the lit-action endpoint with your usage key each time you, your dApp or cron job needs to execute a lit action. So the only daily use step is
+
+1. Call the API with your usage key, action-code ( or IPFS CID ) and any parameters that you need
 
 ## Using the API directly
 
 The same workflows can be done via the REST API. The API itself is under `/core/v1/`. All endpoints _that require authentication_ expect the API key in a header:
 
-- `X-Api-Key: <your-api-key>`
-- or `Authorization: Bearer <your-api-key>`
+- `X-Api-Key: your-api-key`
+- or `Authorization: Bearer your-api-key`
 
-Examples below use `BASE=api.dev.litprotocol.com` and `KEY=your_account_or_usage_api_key`. The JavaScript examples use the Core SDK (`LitNodeSimpleApiClient`) from `core_sdk.js`.
+Examples below assume `KEY=your_account_or_usage_api_key`. cURL snippets use `BASE=http://localhost:8000` (local dev node) and JavaScript snippets use `BASE=https://api.dev.litprotocol.com` (hosted dev API); change the `BASE` value if you want to target the other environment. The JavaScript examples use the Core SDK (`LitNodeSimpleApiClient`) from `core_sdk.js`.
 
 **API workflow:**
 
 1. [New account or verify account (login)](#1-new-account-or-verify-account-login)
 2. [Add usage API key](#2-add-usage-api-key)
-3. [Create wallet (PKP)](#3-create-wallet-pkp)
+3. [Create wallet (PKP)](#3-create-a-wallet-pkp)
 4. [Add group and register IPFS action](#4-add-group-and-register-ipfs-action)
 5. [Add PKP to group (optional)](#5-add-pkp-to-group-optional)
 6. [Run lit-action](#6-run-lit-action)
 
 ### 1. New account or verify account (login)
 
-Create a new account (returns API key and wallet address). Or verify an existing key with the`account_exists`function.
+Create a new account (returns API key and wallet address). Or verify an existing key with the `account_exists` function.
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
@@ -124,14 +148,12 @@ Create a new account (returns API key and wallet address). Or verify an existing
   <Tab title="cURL">
     ```bash
     # New account
-
     curl -s -X POST "https://api.dev.litprotocol.com/core/v1/new_account" \
       -H "Content-Type: application/json" \
       -d '{"account_name":"My App","account_description":"Optional","initial_balance":"0"}'
     
     # Verify account (replace KEY with your API key)
-    curl -s "https://api.dev.litprotocol.com/core/v1/account_exists" \
-
+    curl -s "http://localhost:8000/core/v1/account_exists" \
       -H "X-Api-Key: KEY"
     ```
   </Tab>
@@ -144,7 +166,7 @@ Create a usage API key with expiration and balance. The response includes the ne
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
     ```javascript
-    // Expiration: e.g. 1 year from now (Unix timestamp). Balance: e.g. "1000000"
+    // Expiration: e.g., 1 year from now (Unix timestamp). Balance: e.g., "1000000"
     const expiration = String(Math.floor(Date.now() / 1000) + 365 * 24 * 3600);
     const balance = '1000000';
     
@@ -158,7 +180,7 @@ Create a usage API key with expiration and balance. The response includes the ne
   </Tab>
   <Tab title="cURL">
     ```bash
-    # Replace KEY with account API key; set expiration (e.g. Unix ts) and balance
+    # Replace KEY with account API key; set expiration (e.g., Unix ts) and balance
     curl -s -X POST "http://localhost:8000/core/v1/add_usage_api_key" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
@@ -204,7 +226,7 @@ Create a group (with optional permitted actions and PKPs). Then add an action (I
       allActionsPermitted: false
     });
     
-    // List groups to get the new group id
+    // List groups to get the new group ID
     const groups = await client.listGroups({ apiKey: accountApiKey, pageNumber: '0', pageSize: '10' });
     const groupId = groups[groups.length - 1].id;
     
@@ -265,7 +287,7 @@ Restrict which wallets (PKPs) can be used in the group by adding their public ke
 
 ### 6. Run lit-action
 
-Execute a lit-action by sending JavaScript code and optional params. Use the account API key or a usage API key in the header.
+Execute a lit-action by sending JavaScript code and optional params. Use a usage API key in the header.
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
@@ -275,7 +297,7 @@ Execute a lit-action by sending JavaScript code and optional params. Use the acc
       code: `
         const message = "Hello from Lit Action";
         const sig = await LitActions.signEcdsa({ toSign: new TextEncoder().encode(message), publicKey, sigName });
-        LitActions.setResponse({ response: JSON.stringify({ message, sig }) });
+        LitActions.setResponse({ response: { message, sig } });
       `,
       jsParams: { publicKey: '0x...', sigName: 'sig1' }
     });
@@ -284,7 +306,7 @@ Execute a lit-action by sending JavaScript code and optional params. Use the acc
   </Tab>
   <Tab title="cURL">
     ```bash
-    # Replace KEY with account or usage API key. Code and js_params in body.
+    # Replace KEY with account or usage API key. Include the code and js_params in the request body.
     curl -s -X POST "http://localhost:8000/core/v1/lit_action" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
@@ -304,12 +326,15 @@ Execute a lit-action by sending JavaScript code and optional params. Use the acc
 - **remove_action_from_group** / **remove_pkp_from_group** — Remove action or PKP from a group.
 - **get_node_chain_config** — Get node chain config - a quick way to find the location of contracts within the system.
 
-Both request/response shapes and OpenAPI spec are available directly in the dev system.  For a Swagger-UI implementation of the OpenAPI spec, please browser to;\
+Both request/response shapes and OpenAPI spec are available directly in the dev system. For a Swagger UI implementation of the OpenAPI spec, please browse to:\
 \
 https://api.dev.litprotocol.com/swagger-ui/
 
+
+### Open API Specification
+
 The OpenAPI spec itself can be found at:\
 \
-https://api.dev.litprotocol.com/openapi.json
+[https://api.dev.litprotocol.com/core/v1/openapi.json](https://api.dev.litprotocol.com/core/v1/openapi.json)
 
-Note that these specs are subject to mild changes and will always be available with the dev server endpoints.
+Note that these specs are subject to minor changes and will always be available with the dev server endpoints.

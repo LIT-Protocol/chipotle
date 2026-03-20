@@ -2,28 +2,42 @@
  * Smoke test - hits get_node_chain_config, creates an account, and runs a hello-world lit action.
  * Use: k6 run smoke.spec.ts
  */
-import type { Response } from "k6/http";
-import { checkAndLog } from "./check.ts";
+import { checkAndLog } from "./helpers.ts";
 import { LitApiServerClient } from "./litApiServer.ts";
-
-const baseUrl =
-  __ENV.BASE_URL ||
-  "https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network/core/v1";
-const client = new LitApiServerClient({ baseUrl });
-
-const HELLO_WORLD_CODE = 'Lit.Actions.setResponse({response: "Hello World!"})';
+import { createAccountAndUsageKey } from "./setup.ts";
+import { assertOk } from "./helpers.ts";
+import { HELLO_WORLD_CODE } from "./LitActionCode/index.ts";
+import { BASE_URL, COMMON_PARAMS } from "./defaults.ts";
 
 export const options = {
   vus: 1,
   iterations: 1,
   thresholds: {
-    http_reqs: ["count>=3"],
+    http_reqs: ["count>=4"],
     http_req_failed: ["rate<0.1"],
     checks: ["rate==1"],
   },
 };
 
-export default function () {
+export interface SmokeSetupData {
+  usageApiKey: string;
+}
+
+export function setup(): SmokeSetupData {
+  const { usageApiKey } = createAccountAndUsageKey({
+    accountName: "k6-smoke-test",
+    accountDescription: "k6 smoke test account",
+    usageKeyName: "k6-smoke-usage-key",
+    usageKeyDescription: "k6 smoke test usage key",
+    setupContext: "smoke",
+  });
+  return { usageApiKey };
+}
+
+export default function (data: SmokeSetupData) {
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
+  const usageKeyHeaders = { "X-Api-Key": data.usageApiKey };
+
   // 1. Public endpoint (no auth)
   const chainConfigRes = client.getNodeChainConfig();
   if (!assertOk("getNodeChainConfig", "GET /get_node_chain_config", chainConfigRes)) return;
@@ -38,20 +52,10 @@ export default function () {
     },
   }, "getNodeChainConfig");
 
-  // 2. Create account
-  const newAccountRes = client.newAccount({
-    account_name: "k6-smoke-test",
-    account_description: "k6 smoke test account",
-    initial_balance: "10000",
-  });
-  if (!assertOk("newAccount", "POST /new_account", newAccountRes)) return;
-  const apiKey = (newAccountRes.data as { api_key: string }).api_key;
-  const authHeaders = { "X-Api-Key": apiKey };
-
-  // 3. Run hello-world lit action
+  // 2. Run hello-world lit action
   const litActionRes = client.litAction(
     { code: HELLO_WORLD_CODE, js_params: null },
-    authHeaders,
+    usageKeyHeaders,
   );
   if (!assertOk("litAction", "POST /lit_action", litActionRes)) return;
   checkAndLog(litActionRes.response, {
@@ -70,37 +74,4 @@ export default function () {
       }
     },
   }, "litAction");
-}
-
-function assertOk(
-  name: string,
-  endpoint: string,
-  res: { response: Response },
-): boolean {
-  const { response } = res;
-  const status = response?.status ?? 0;
-  const ok = status >= 200 && status < 300;
-  if (!ok) {
-    let msg = "";
-    if (status === 0) {
-      msg = "(no response / connection failed)";
-    } else {
-      try {
-        const body = JSON.parse(response.body as string);
-        msg =
-          body.message ??
-          body.error ??
-          body.detail ??
-          (typeof body === "string" ? body : JSON.stringify(body));
-      } catch {
-        msg = (response.body as string) || "(no body)";
-      }
-    }
-    console.error(`FAIL ${name} | ${endpoint} | ${status} | ${msg}`);
-  }
-  checkAndLog(response, {
-    [`${name} 2xx`]: (r) =>
-      (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, name);
-  return ok;
 }

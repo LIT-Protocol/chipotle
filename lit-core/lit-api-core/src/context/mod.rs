@@ -4,7 +4,6 @@ use std::future::Future;
 
 use lit_observability::PRIVACY_MODE_TAG;
 use lit_observability::logging::set_request_context;
-use lit_observability::metrics::counter;
 use opentelemetry::propagation::Injector;
 use rocket::Request;
 use rocket::request::{FromRequest, Outcome};
@@ -15,7 +14,6 @@ use tokio::task::futures::TaskLocalFuture;
 use tokio::task_local;
 
 use crate::error::{EC, Error, Result, conversion_err_code, validation_err_code};
-use crate::observability::http::HttpMetrics;
 
 pub const HEADER_KEY_X_CORRELATION_ID: &str = "X-Correlation-Id";
 pub const HEADER_KEY_X_REQUEST_ID: &str = "X-Request-Id";
@@ -213,7 +211,7 @@ pub(crate) fn extract_request_and_correlation_ids(
     let mut correlation_id = x_correlation_id.or(x_request_id);
 
     if x_privacy_mode.is_some() {
-        counter::add_one(HttpMetrics::PrivacyModeRequest, &[]);
+        metrics::counter!("service.request.privacy_mode").increment(1);
 
         let privacy_suffix = format!("_{}", PRIVACY_MODE_TAG);
         if let Some(ref id) = request_id
