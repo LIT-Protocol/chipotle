@@ -71,7 +71,8 @@ impl CpuOverloadMonitor {
                     .map(|avg| avg > load_threshold)
                     .unwrap_or(false);
 
-                let psi_overloaded = match (read_psi_cpu_total().await, prev_psi_total) {
+                let current_psi = read_psi_cpu_total().await;
+                let psi_overloaded = match (current_psi, prev_psi_total) {
                     (Some(current), Some(prev)) => {
                         // Delta is microseconds of CPU stall time in the last
                         // ~1 second.  Convert to a percentage of wall-clock
@@ -82,11 +83,7 @@ impl CpuOverloadMonitor {
                     }
                     _ => false, // Need two readings to compute a rate.
                 };
-
-                // Update prev_psi_total for next iteration.
-                if let Some(t) = read_psi_cpu_total().await {
-                    prev_psi_total = Some(t);
-                }
+                prev_psi_total = current_psi;
 
                 let is_overloaded = load_overloaded || psi_overloaded;
                 flag.store(is_overloaded, Ordering::Relaxed);
