@@ -114,6 +114,7 @@ pub fn api_key_to_wallet_address(api_key: &str) -> Result<String> {
     Ok(format!("{:?}", wallet.address()))
 }
 
+
 /// Find the Stripe customer for this wallet address, creating one if none exists.
 pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -> Result<String> {
     // Search by metadata.
@@ -132,9 +133,20 @@ pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -
         return Ok(id.to_string());
     };
 
-    // Not found
-    Err(anyhow::anyhow!("Stripe customer not found"))
+    // Not found, create a new customer
+    let resp = stripe_post(
+        state,
+        "customers",
+        &[("metadata[wallet_address]", wallet_address)],
+    )
+    .await?;
+    let id = resp
+        .get("id")
+        .and_then(|i| i.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Stripe: missing customer id"))?;
+    Ok(id.to_string())
 }
+
 
 /// Return the current credit balance in cents (≤ 0 means credits available; the Stripe
 /// balance field is negative when the customer has a credit).
