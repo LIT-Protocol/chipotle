@@ -229,6 +229,11 @@ async function openAddFundsModal() {
   const statusEl = document.getElementById('billing-modal-status');
   if (statusEl) { statusEl.style.display = 'none'; }
 
+  // Reset pay button to enabled state each time the modal is opened so that
+  // a previous Stripe init failure does not permanently disable it.
+  const payBtn = document.getElementById('billing-pay-btn');
+  if (payBtn) payBtn.disabled = true; // disabled until Stripe is ready
+
   // Initialise Stripe.js if not already done
   if (!_stripe) {
     try {
@@ -244,10 +249,13 @@ async function openAddFundsModal() {
         statusEl.className = 'status error';
         statusEl.style.display = 'block';
       }
-      const payBtn = document.getElementById('billing-pay-btn');
-      if (payBtn) payBtn.disabled = true;
+      // payBtn stays disabled (already set above)
+      return;
     }
   }
+
+  // Stripe is ready – allow the user to pay
+  if (payBtn) payBtn.disabled = false;
 }
 
 function closeBillingModal() {
