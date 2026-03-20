@@ -64,7 +64,8 @@ Inside a Lit Action, the `Lit.Actions` namespace exposes the current SDK. Key fu
 
 | Function | Description |
 |---|---|
-| `Lit.Actions.setResponse({ response })` | Return a value to the caller |
+| `return value` (from `main`) | Return a value to the caller — the preferred response method |
+| `Lit.Actions.setResponse({ response })` | Legacy: set the response returned to the caller |
 | `Lit.Actions.getPrivateKey({ pkpId })` | Retrieve a PKP private key for signing |
 | `Lit.Actions.getLitActionPrivateKey()` | Retrieve this action's own identity key |
 | `Lit.Actions.Encrypt({ pkpId, message })` | Encrypt a string with a PKP-derived AES key |
@@ -78,16 +79,18 @@ For the full API reference, see [Lit Actions SDK](/lit_actions).
 
 ```javascript
 // Fetch ETH price from an API and sign it with a PKP.
-// pkpId and sigName are injected via js_params.
-const res = await fetch("https://api.example.com/eth-price");
-const { price } = await res.json();
+// pkpId is injected via js_params.
+async function main() {
+  const res = await fetch("https://api.example.com/eth-price");
+  const { price } = await res.json();
 
-const wallet = new ethers.Wallet(
-  await Lit.Actions.getPrivateKey({ pkpId })
-);
-const signature = await wallet.signMessage(`ETH price: ${price}`);
+  const wallet = new ethers.Wallet(
+    await Lit.Actions.getPrivateKey({ pkpId })
+  );
+  const signature = await wallet.signMessage(`ETH price: ${price}`);
 
-Lit.Actions.setResponse({ response: { price, signature } });
+  return { price, signature };
+}
 ```
 
 The caller receives both the price and a signature that can be verified against the PKP's public key — a cryptographic proof that this specific action fetched and attested to this specific price.

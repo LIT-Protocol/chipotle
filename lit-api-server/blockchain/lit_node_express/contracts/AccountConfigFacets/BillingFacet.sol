@@ -25,7 +25,7 @@ contract BillingFacet {
         SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
         SecurityLib.revertIfNotMasterAccount(apiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[apiKeyHash];
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashesToMaster[apiKeyHash];
         AppStorage.Account storage account = s.accounts[
             masterAccountApiKeyHash
         ];
@@ -45,7 +45,7 @@ contract BillingFacet {
         SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
         SecurityLib.revertIfNotMasterAccount(apiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[apiKeyHash];
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashesToMaster[apiKeyHash];
         AppStorage.Account storage account = s.accounts[
             masterAccountApiKeyHash
         ];

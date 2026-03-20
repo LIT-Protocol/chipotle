@@ -1,18 +1,19 @@
 use super::op_code_helpers;
 use anyhow::{Result, bail};
 use lit_actions_grpc::proto::*;
-use tracing::{instrument, trace};
+use tracing::instrument;
 
 use super::Client;
 
 impl Client {
-    #[instrument(level = "debug", skip(self), err)]
+    #[instrument(level = "debug", skip(self, op), err)]
     pub async fn handle_op(
         &mut self,
         op: UnionResponse,
         call_depth: u32,
     ) -> Result<ExecuteJsRequest> {
-        trace!("handle_op: {:?}", op);
+        // NOTE: Do not log `op` here — response variants (GetPrivateKeyResponse,
+        // GetLitActionPrivateKeyResponse, AesDecryptResponse) carry secret material.
         self.state.ops_count += 1;
 
         Ok(match op {
@@ -51,8 +52,13 @@ impl Client {
                 .into()
             }
             UnionResponse::AesEncrypt(AesEncryptRequest { pkp_id, message }) => {
-                if !op_code_helpers::can_use_wallet_in_action(&self.api_key, &self.ipfs_id, &pkp_id)
-                    .await?
+                if !op_code_helpers::can_use_wallet_in_action_cached(
+                    &mut self.state,
+                    &self.api_key,
+                    &self.ipfs_id,
+                    &pkp_id,
+                )
+                .await?
                 {
                     bail!("API key cannot use selected wallet in selected action");
                 }
@@ -69,8 +75,13 @@ impl Client {
                 .into()
             }
             UnionResponse::AesDecrypt(AesDecryptRequest { pkp_id, ciphertext }) => {
-                if !op_code_helpers::can_use_wallet_in_action(&self.api_key, &self.ipfs_id, &pkp_id)
-                    .await?
+                if !op_code_helpers::can_use_wallet_in_action_cached(
+                    &mut self.state,
+                    &self.api_key,
+                    &self.ipfs_id,
+                    &pkp_id,
+                )
+                .await?
                 {
                     bail!("API key cannot use selected wallet in selected action");
                 }
@@ -87,8 +98,13 @@ impl Client {
                 .into()
             }
             UnionResponse::GetPrivateKey(GetPrivateKeyRequest { pkp_id }) => {
-                if !op_code_helpers::can_use_wallet_in_action(&self.api_key, &self.ipfs_id, &pkp_id)
-                    .await?
+                if !op_code_helpers::can_use_wallet_in_action_cached(
+                    &mut self.state,
+                    &self.api_key,
+                    &self.ipfs_id,
+                    &pkp_id,
+                )
+                .await?
                 {
                     bail!("API key cannot use selected wallet in selected action");
                 }

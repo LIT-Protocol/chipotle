@@ -160,7 +160,9 @@ export default function (data: ObservabilitySetupData) {
 
   // ── 8. lit_action: no correlation header when not sent ─────────────────
   {
-    const laRes = client.litAction(
+    // Use a client without COMMON_PARAMS so X-Correlation-Id is truly absent.
+    const bareClient = new LitApiServerClient({ baseUrl: BASE_URL });
+    const laRes = bareClient.litAction(
       { code: HELLO_WORLD_CODE, js_params: null },
       { "X-Api-Key": usageApiKey } as any,
     );

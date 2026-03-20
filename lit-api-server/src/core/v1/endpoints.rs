@@ -9,10 +9,11 @@ use crate::core::v1::guards::cpu_overload::CpuAvailable;
 use crate::core::v1::helpers::api_status::{ApiResult, ErrMessage};
 use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{
-    AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest, AddUsageApiKeyRequest,
-    LitActionRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
-    RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
-    UpdateUsageApiKeyMetadataRequest,
+    AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
+    AddUsageApiKeyRequest, LitActionRequest, NewAccountRequest, RemoveActionFromGroupRequest,
+    RemoveGroupRequest, RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest,
+    UpdateActionMetadataRequest, UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest,
+    UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::ApiKeyItem;
 use crate::core::v1::models::response::WalletItem;
@@ -40,10 +41,13 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         lit_action,
         get_lit_action_ipfs_id,
         add_group,
+        remove_group,
+        add_action,
         add_action_to_group,
         add_pkp_to_group,
         remove_pkp_from_group,
         add_usage_api_key,
+        update_usage_api_key,
         remove_usage_api_key,
         update_group,
         remove_action_from_group,
@@ -150,6 +154,38 @@ async fn add_group(
 }
 
 #[openapi(tag = "Account Management")]
+#[post("/remove_group", format = "json", data = "<req>")]
+async fn remove_group(
+    signer_pool: &State<Arc<SignerPool>>,
+    api_key: ApiKey,
+    req: Json<RemoveGroupRequest>,
+) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(
+            account_management::remove_group(signer_pool.inner().clone(), api_key.0.as_str(), req)
+                .await,
+        )
+        .into(),
+    }
+}
+
+#[openapi(tag = "Account Management")]
+#[post("/add_action", format = "json", data = "<req>")]
+async fn add_action(
+    signer_pool: &State<Arc<SignerPool>>,
+    api_key: ApiKey,
+    req: Json<AddActionRequest>,
+) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(
+            account_management::add_action(signer_pool.inner().clone(), api_key.0.as_str(), req)
+                .await,
+        )
+        .into(),
+    }
+}
+
+#[openapi(tag = "Account Management")]
 #[post("/add_action_to_group", format = "json", data = "<req>")]
 async fn add_action_to_group(
     signer_pool: &State<Arc<SignerPool>>,
@@ -239,6 +275,26 @@ async fn remove_usage_api_key(
     OpenApiResponse {
         response: ApiResult(
             account_management::remove_usage_api_key(
+                signer_pool.inner().clone(),
+                api_key.0.as_str(),
+                req,
+            )
+            .await,
+        )
+        .into(),
+    }
+}
+
+#[openapi(tag = "Account Management")]
+#[post("/update_usage_api_key", format = "json", data = "<req>")]
+async fn update_usage_api_key(
+    signer_pool: &State<Arc<SignerPool>>,
+    api_key: ApiKey,
+    req: Json<UpdateUsageApiKeyRequest>,
+) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(
+            account_management::update_usage_api_key(
                 signer_pool.inner().clone(),
                 api_key.0.as_str(),
                 req,
