@@ -1,15 +1,15 @@
 //! GET /health endpoint for NLB health checks.
 //!
-//! Returns 200 with a JSON body when the server is healthy, or 503 when any
-//! subsystem check fails.  No authentication is required — this is intended
-//! for infrastructure probes (AWS NLB, k8s liveness, etc.).
+//! Returns 200 when healthy, 503 when unhealthy.  No authentication required —
+//! intended for infrastructure probes (AWS NLB, k8s liveness, etc.).
 //!
-//! Healthy is defined as:
-//! - Configuration initialized (NodeConfig loaded, chain accessible)
-//! - Connected to a lit-actions gRPC service (Unix socket reachable)
+//! Only checks things that can fail *after* a successful startup.  Config,
+//! chain clients, and signer pool are validated on boot and the process exits
+//! if any of those fail, so they're guaranteed present when this endpoint is
+//! reachable.  The lit-actions gRPC service, however, runs in a separate
+//! container and can go down independently.
 
 use crate::actions::grpc::GrpcClientPool;
-use crate::config::GLOBAL_NODE_CONFIG;
 use rocket::http::Status;
 use rocket::serde::json::Json;
 use rocket::{Route, State, get, routes};
@@ -21,7 +21,6 @@ const LIT_ACTIONS_SOCKET: &str = "/tmp/lit_actions.sock";
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HealthResponse {
     pub healthy: bool,
-    pub config_initialized: bool,
     pub lit_actions_reachable: bool,
 }
 
@@ -34,21 +33,16 @@ pub fn routes() -> Vec<Route> {
 async fn health(
     grpc_pool: &State<GrpcClientPool<tonic::transport::Channel>>,
 ) -> (Status, Json<HealthResponse>) {
-    let config_initialized = GLOBAL_NODE_CONFIG.get().is_some();
-
-    // Check if we already have a connection to lit-actions in the pool, or if
-    // the socket file at least exists (avoids creating a new connection on
-    // every health probe).
+    // Check if we already have a pooled gRPC connection to lit-actions, or if
+    // the socket file at least exists.  Avoids opening a new connection on
+    // every NLB probe; the first real request will populate the pool.
     let lit_actions_reachable = if grpc_pool.get_connection(LIT_ACTIONS_SOCKET).await.is_some() {
         true
     } else {
-        // No pooled connection yet — fall back to checking the socket file
-        // exists.  A full gRPC connect on every NLB probe would be wasteful;
-        // the first real request will populate the pool.
         Path::new(LIT_ACTIONS_SOCKET).exists()
     };
 
-    let healthy = config_initialized && lit_actions_reachable;
+    let healthy = lit_actions_reachable;
 
     let status = if healthy {
         Status::Ok
@@ -60,7 +54,6 @@ async fn health(
         status,
         Json(HealthResponse {
             healthy,
-            config_initialized,
             lit_actions_reachable,
         }),
     )
@@ -82,11 +75,7 @@ mod tests {
         let client = Client::tracked(build_rocket()).await.expect("valid rocket");
         let response = client.get("/health").dispatch().await;
         let body: HealthResponse = response.into_json().await.expect("valid json");
-        // healthy is only true when ALL checks pass.
-        assert_eq!(
-            body.healthy,
-            body.config_initialized && body.lit_actions_reachable
-        );
+        assert_eq!(body.healthy, body.lit_actions_reachable);
     }
 
     #[tokio::test]
@@ -95,7 +84,9 @@ mod tests {
         // pooled gRPC connection, so lit_actions_reachable should be false.
         let client = Client::tracked(build_rocket()).await.expect("valid rocket");
         let response = client.get("/health").dispatch().await;
+        assert_eq!(response.status(), Status::ServiceUnavailable);
         let body: HealthResponse = response.into_json().await.expect("valid json");
         assert!(!body.lit_actions_reachable);
+        assert!(!body.healthy);
     }
 }
