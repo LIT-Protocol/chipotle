@@ -11,11 +11,12 @@
 
 use crate::actions::grpc::GrpcClientPool;
 use crate::core::v1::guards::cpu_overload::CpuOverloadMonitor;
+use lit_actions_grpc::unix;
 use rocket::http::Status;
 use rocket::serde::json::Json;
 use rocket::{Route, State, get, routes};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::PathBuf;
 
 const LIT_ACTIONS_SOCKET: &str = "/tmp/lit_actions.sock";
 
@@ -36,13 +37,21 @@ async fn health(
     grpc_pool: &State<GrpcClientPool<tonic::transport::Channel>>,
     cpu_monitor: &State<CpuOverloadMonitor>,
 ) -> (Status, Json<HealthResponse>) {
-    // Check if we already have a pooled gRPC connection to lit-actions, or if
-    // the socket file at least exists.  Avoids opening a new connection on
-    // every NLB probe; the first real request will populate the pool.
+    // Check if we have a pooled gRPC connection to lit-actions.  If not, try
+    // to connect (1s timeout via connect_to_socket).  This avoids the deadlock
+    // where NLB marks the node unhealthy → no traffic → lazy connection never
+    // established → stays unhealthy.  A successful connect also populates the
+    // pool so subsequent probes are a cheap HashMap lookup.
     let lit_actions_reachable = if grpc_pool.get_connection(LIT_ACTIONS_SOCKET).await.is_some() {
         true
     } else {
-        Path::new(LIT_ACTIONS_SOCKET).exists()
+        match unix::connect_to_socket(PathBuf::from(LIT_ACTIONS_SOCKET)).await {
+            Ok(channel) => {
+                grpc_pool.add_connection(LIT_ACTIONS_SOCKET, channel).await;
+                true
+            }
+            Err(_) => false,
+        }
     };
 
     let cpu_overloaded = cpu_monitor.is_overloaded();
