@@ -15,7 +15,7 @@ use ethers::signers::{LocalWallet, Signer};
 
 /// Cost constants in US cents.
 pub const COST_MANAGEMENT_CENTS: i64 = 1; // $0.01
-pub const COST_LIT_ACTION_CENTS: i64 = 1; // $0.05
+pub const COST_LIT_ACTION_CENTS: i64 = 1; // $0.01
 /// Minimum top-up (500 cents = $5.00).
 pub const MIN_TOPUP_CENTS: i64 = 500;
 
