@@ -22,7 +22,7 @@ use rocket_okapi::Result as RocketOkapiResult;
 use rocket_okapi::r#gen::OpenApiGenerator;
 use rocket_okapi::request::{OpenApiFromRequest, RequestHeaderInput};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 /// Monitors system load average + CPU pressure and exposes an overload flag.
@@ -30,6 +30,8 @@ use std::time::Duration;
 /// Register as Rocket managed state via `.manage(CpuOverloadMonitor::start())`.
 pub struct CpuOverloadMonitor {
     overloaded: Arc<AtomicBool>,
+    /// 1-minute load average × 100, stored as integer for atomic access.
+    load_avg_100: Arc<AtomicU64>,
 }
 
 impl CpuOverloadMonitor {
@@ -51,6 +53,7 @@ impl CpuOverloadMonitor {
             .unwrap_or(50.0);
 
         let overloaded = Arc::new(AtomicBool::new(false));
+        let load_avg_100 = Arc::new(AtomicU64::new(0));
 
         tracing::info!(
             num_cpus = num_cpus as usize,
@@ -61,15 +64,17 @@ impl CpuOverloadMonitor {
         );
 
         let flag = overloaded.clone();
+        let load_flag = load_avg_100.clone();
         tokio::spawn(async move {
             let mut was_overloaded = false;
             let mut prev_psi_total: Option<u64> = None;
 
             loop {
-                let load_overloaded = read_1m_load_avg()
-                    .await
-                    .map(|avg| avg > load_threshold)
-                    .unwrap_or(false);
+                let load_avg = read_1m_load_avg().await;
+                if let Some(avg) = load_avg {
+                    load_flag.store((avg * 100.0) as u64, Ordering::Relaxed);
+                }
+                let load_overloaded = load_avg.map(|avg| avg > load_threshold).unwrap_or(false);
 
                 let current_psi = read_psi_cpu_total().await;
                 let psi_overloaded = match (current_psi, prev_psi_total) {
@@ -107,17 +112,28 @@ impl CpuOverloadMonitor {
             }
         });
 
-        Self { overloaded }
+        Self {
+            overloaded,
+            load_avg_100,
+        }
     }
 
     /// Creates a monitor with a pre-set flag (for testing from other modules).
     #[cfg(test)]
     pub fn new_with_flag(overloaded: Arc<AtomicBool>) -> Self {
-        Self { overloaded }
+        Self {
+            overloaded,
+            load_avg_100: Arc::new(AtomicU64::new(0)),
+        }
     }
 
     pub fn is_overloaded(&self) -> bool {
         self.overloaded.load(Ordering::Relaxed)
+    }
+
+    /// Returns the most recent 1-minute load average sampled by the background task.
+    pub fn load_avg_1m(&self) -> f64 {
+        self.load_avg_100.load(Ordering::Relaxed) as f64 / 100.0
     }
 }
 
