@@ -39,11 +39,7 @@ async fn health(
     // Check if we already have a connection to lit-actions in the pool, or if
     // the socket file at least exists (avoids creating a new connection on
     // every health probe).
-    let lit_actions_reachable = if grpc_pool
-        .get_connection(LIT_ACTIONS_SOCKET)
-        .await
-        .is_some()
-    {
+    let lit_actions_reachable = if grpc_pool.get_connection(LIT_ACTIONS_SOCKET).await.is_some() {
         true
     } else {
         // No pooled connection yet — fall back to checking the socket file
@@ -87,7 +83,10 @@ mod tests {
         let response = client.get("/health").dispatch().await;
         let body: HealthResponse = response.into_json().await.expect("valid json");
         // healthy is only true when ALL checks pass.
-        assert_eq!(body.healthy, body.config_initialized && body.lit_actions_reachable);
+        assert_eq!(
+            body.healthy,
+            body.config_initialized && body.lit_actions_reachable
+        );
     }
 
     #[tokio::test]
