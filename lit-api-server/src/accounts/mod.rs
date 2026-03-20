@@ -90,11 +90,11 @@ pub async fn add_action(
     api_key: &str,
     req: AddActionRequest,
 ) -> Result<bool> {
-    let (contract, signer_address) =
+    let (contract, signer_address, client) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.add_action(account_api_key_hash, req.name, req.description);
-    send_transaction(function_call, signer_pool, signer_address).await
+    send_transaction(function_call, signer_pool, signer_address, client).await
 }
 
 /// Add an action to a group by its IPFS CID. Metadata must be set separately via add_action / update_action_metadata.
@@ -110,7 +110,7 @@ pub async fn add_action_to_group(
     let action_hash = ipfs_cid_to_u256(action_ipfs_cid)
         .map_err(|e| anyhow::anyhow!("Unable to parse action IPFS CID: {}", e))?;
     let function_call = contract.add_action_to_group(account_api_key_hash, group_id, action_hash);
-    send_transaction(function_call, signer_pool, signer_address).await
+    send_transaction(function_call, signer_pool, signer_address, client).await
 }
 
 /// Add a PKP to a group by its address (AccountConfig.addPkpToGroup).
@@ -277,7 +277,7 @@ pub async fn add_usage_api_key(
             .collect(),
         req.execute_in_groups.into_iter().map(U256::from).collect(),
     );
-    send_transaction(function_call, signer_pool, signer_address).await
+    send_transaction(function_call, signer_pool, signer_address, client).await
 }
 
 /// Update all metadata and permissions on an existing usage API key (AccountConfig.setUsageApiKey).
@@ -290,7 +290,7 @@ pub async fn update_usage_api_key(
     balance: U256,
     req: UpdateUsageApiKeyRequest,
 ) -> Result<bool> {
-    let (contract, signer_address) =
+    let (contract, signer_address, client) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let usage_api_key_hash = usage_api_key_to_hash(usage_api_key);
@@ -315,7 +315,7 @@ pub async fn update_usage_api_key(
             .collect(),
         req.execute_in_groups.into_iter().map(U256::from).collect(),
     );
-    send_transaction(function_call, signer_pool, signer_address, client).await
+    send_transaction(function_call, signer_pool, signer_address, client.clone()).await
 }
 
 /// Remove a usage API key from an account.
@@ -339,11 +339,11 @@ pub async fn remove_group(
     api_key: &str,
     group_id: U256,
 ) -> Result<bool> {
-    let (contract, signer_address) =
+    let (contract, signer_address, client) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.remove_group(account_api_key_hash, group_id);
-    send_transaction(function_call, signer_pool, signer_address).await
+    send_transaction(function_call, signer_pool, signer_address, client).await
 }
 
 /// Register the derivation path for a wallet address under an account (AccountConfig.wallet_derivation).
