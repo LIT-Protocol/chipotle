@@ -74,6 +74,12 @@ impl CpuOverloadMonitor {
         Self { overloaded }
     }
 
+    /// Creates a monitor with a pre-set flag (for testing from other modules).
+    #[cfg(test)]
+    pub fn new_with_flag(overloaded: Arc<AtomicBool>) -> Self {
+        Self { overloaded }
+    }
+
     pub fn is_overloaded(&self) -> bool {
         self.overloaded.load(Ordering::Relaxed)
     }

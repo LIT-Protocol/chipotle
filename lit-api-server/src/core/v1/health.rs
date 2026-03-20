@@ -7,9 +7,10 @@
 //! chain clients, and signer pool are validated on boot and the process exits
 //! if any of those fail, so they're guaranteed present when this endpoint is
 //! reachable.  The lit-actions gRPC service, however, runs in a separate
-//! container and can go down independently.
+//! container and can go down independently, and CPU load can spike at runtime.
 
 use crate::actions::grpc::GrpcClientPool;
+use crate::core::v1::guards::cpu_overload::CpuOverloadMonitor;
 use rocket::http::Status;
 use rocket::serde::json::Json;
 use rocket::{Route, State, get, routes};
@@ -22,6 +23,7 @@ const LIT_ACTIONS_SOCKET: &str = "/tmp/lit_actions.sock";
 pub struct HealthResponse {
     pub healthy: bool,
     pub lit_actions_reachable: bool,
+    pub cpu_overloaded: bool,
 }
 
 pub fn routes() -> Vec<Route> {
@@ -32,6 +34,7 @@ pub fn routes() -> Vec<Route> {
 #[get("/health")]
 async fn health(
     grpc_pool: &State<GrpcClientPool<tonic::transport::Channel>>,
+    cpu_monitor: &State<CpuOverloadMonitor>,
 ) -> (Status, Json<HealthResponse>) {
     // Check if we already have a pooled gRPC connection to lit-actions, or if
     // the socket file at least exists.  Avoids opening a new connection on
@@ -42,7 +45,9 @@ async fn health(
         Path::new(LIT_ACTIONS_SOCKET).exists()
     };
 
-    let healthy = lit_actions_reachable;
+    let cpu_overloaded = cpu_monitor.is_overloaded();
+
+    let healthy = lit_actions_reachable && !cpu_overloaded;
 
     let status = if healthy {
         Status::Ok
@@ -55,6 +60,7 @@ async fn health(
         Json(HealthResponse {
             healthy,
             lit_actions_reachable,
+            cpu_overloaded,
         }),
     )
 }
@@ -63,30 +69,54 @@ async fn health(
 mod tests {
     use super::*;
     use crate::actions::grpc::GrpcClientPool;
+    use crate::core::v1::guards::cpu_overload::CpuOverloadMonitor;
     use rocket::local::asynchronous::Client;
+    use std::sync::Arc;
+    use std::sync::atomic::AtomicBool;
 
-    fn build_rocket() -> rocket::Rocket<rocket::Build> {
+    fn build_rocket(overloaded: bool) -> rocket::Rocket<rocket::Build> {
         let pool = GrpcClientPool::<tonic::transport::Channel>::new();
-        rocket::build().manage(pool).mount("/", routes![health])
+        let monitor = CpuOverloadMonitor::new_with_flag(Arc::new(AtomicBool::new(overloaded)));
+        rocket::build()
+            .manage(pool)
+            .manage(monitor)
+            .mount("/", routes![health])
     }
 
     #[tokio::test]
     async fn health_returns_json_with_expected_shape() {
-        let client = Client::tracked(build_rocket()).await.expect("valid rocket");
+        let client = Client::tracked(build_rocket(false))
+            .await
+            .expect("valid rocket");
         let response = client.get("/health").dispatch().await;
         let body: HealthResponse = response.into_json().await.expect("valid json");
-        assert_eq!(body.healthy, body.lit_actions_reachable);
+        assert_eq!(
+            body.healthy,
+            body.lit_actions_reachable && !body.cpu_overloaded
+        );
     }
 
     #[tokio::test]
     async fn health_reports_lit_actions_unreachable_when_no_socket() {
-        // In the test environment there is no /tmp/lit_actions.sock and no
-        // pooled gRPC connection, so lit_actions_reachable should be false.
-        let client = Client::tracked(build_rocket()).await.expect("valid rocket");
+        let client = Client::tracked(build_rocket(false))
+            .await
+            .expect("valid rocket");
         let response = client.get("/health").dispatch().await;
         assert_eq!(response.status(), Status::ServiceUnavailable);
         let body: HealthResponse = response.into_json().await.expect("valid json");
         assert!(!body.lit_actions_reachable);
+        assert!(!body.healthy);
+    }
+
+    #[tokio::test]
+    async fn health_returns_503_when_cpu_overloaded() {
+        let client = Client::tracked(build_rocket(true))
+            .await
+            .expect("valid rocket");
+        let response = client.get("/health").dispatch().await;
+        assert_eq!(response.status(), Status::ServiceUnavailable);
+        let body: HealthResponse = response.into_json().await.expect("valid json");
+        assert!(body.cpu_overloaded);
         assert!(!body.healthy);
     }
 }
