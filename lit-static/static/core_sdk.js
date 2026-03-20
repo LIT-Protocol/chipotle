@@ -12,6 +12,7 @@
  * @typedef {Object} NewAccountOptions
  * @property {string} accountName - Name for the account
  * @property {string} accountDescription - Description for the account
+ * @property {string} [email] - Optional email address for Stripe billing
  */
 
 /**
