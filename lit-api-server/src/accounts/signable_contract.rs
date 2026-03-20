@@ -7,9 +7,12 @@ use ethers::contract::builders::ContractCall;
 use ethers::middleware::NonceManagerMiddleware;
 pub use ethers::middleware::SignerMiddleware;
 pub use ethers::providers::Http;
+pub use ethers::providers::Middleware;
 pub use ethers::providers::Provider;
 pub use ethers::signers::LocalWallet;
 use ethers::signers::Signer;
+pub use ethers::types::BlockId;
+pub use ethers::types::BlockNumber;
 pub use ethers::types::H160;
 pub use lit_core::utils::binary::hex_to_bytes;
 pub use std::sync::Arc;
@@ -42,15 +45,15 @@ pub async fn init_chain_clients() -> Result<()> {
 
 pub(crate) async fn get_signable_account_config_contract(
     signer_pool: Arc<SignerPool>,
-) -> Result<(AccountConfig<SigningClient>, H160), anyhow::Error> {
+) -> Result<(AccountConfig<SigningClient>, H160, Arc<SigningClient>), anyhow::Error> {
     let signer_handle = signer_pool.request().await?;
     let client = signer_handle
         .client
         .ok_or(anyhow::anyhow!("No signer available"))?;
     let signer_address = signer_handle.address;
-    let contract = get_account_config_contract::<SigningClient>(client).await?;
+    let contract = get_account_config_contract::<SigningClient>(client.clone()).await?;
 
-    Ok((contract, signer_address))
+    Ok((contract, signer_address, client))
 }
 
 pub async fn get_account_config_contract<M>(client: Arc<M>) -> Result<AccountConfig<M>>
@@ -106,15 +109,98 @@ pub(crate) async fn get_read_only_account_config_contract()
 }
 
 pub async fn send_transaction(
-    function_call: ContractCall<SigningClient, ()>,
+    mut function_call: ContractCall<SigningClient, ()>,
     signer_pool: Arc<SignerPool>,
     signer_address: H160,
+    client: Arc<SigningClient>,
 ) -> Result<bool> {
+    // First attempt.  The Ok arm returns early so the PendingTransaction's borrow of
+    // `function_call` is fully consumed before we ever reach the nonce-resync path below;
+    // this lets the borrow checker accept the later mutable borrow of `function_call.tx`.
+    let first_err = match function_call.send().await {
+        Ok(tx) => {
+            let result = match tx.await {
+                Ok(_) => Ok(true),
+                Err(e) => Err(anyhow::Error::from(e)),
+            };
+            signer_pool.release(signer_address).await?;
+            return result;
+        }
+        Err(e) => e,
+    };
+
+    // Only nonce-too-low is worth retrying; anything else is a hard failure.
+    // Walk the error chain and look for known nonce-related messages in a centralized way.
+    let is_nonce_too_low = |err: &dyn std::error::Error| -> bool {
+        let mut current = err;
+        loop {
+            let msg = current.to_string();
+            if msg.contains("nonce too low")
+                || msg.contains("transaction nonce is too low")
+                || msg.contains("replacement transaction underpriced")
+            {
+                return true;
+            }
+            if let Some(source) = current.source() {
+                current = source;
+            } else {
+                break;
+            }
+        }
+        false
+    };
+
+    if !is_nonce_too_low(&first_err) {
+        signer_pool.release(signer_address).await?;
+        return Err(anyhow::anyhow!("Failed to send transaction: {first_err}"));
+    }
+
+    // Fetch the current pending nonce from the chain and pin it on the transaction.
+    //
+    // Why not `initialize_nonce`:
+    //   `NonceManagerMiddleware::initialize_nonce` is a one-time init guard — once
+    //   `initialized = true` it returns the stale in-memory counter immediately, so it
+    //   cannot be used to re-sync after the first call.
+    //
+    // Why not updating the middleware counter directly:
+    //   ethers 2.x `NonceManagerMiddleware` has no public `set_nonce` method.  The
+    //   internal counter (`AtomicU64`) and `initialized` flag (`AtomicBool`) are private
+    //   fields with no external setter.
+    //
+    // How the middleware counter re-syncs after this:
+    //   `NonceManagerMiddleware::send_transaction` (ethers source lines ~151-164) has its
+    //   own error-recovery path: on any send failure it calls `get_transaction_count` from
+    //   the chain and, if the result differs from `self.nonce.load()`, stores the fresh
+    //   value and retries.  So the *next* transaction after this recovery will fail with
+    //   nonce-too-low (counter M+1 vs on-chain N+1), the middleware catches it, resets its
+    //   counter to N+1, and retries transparently — one extra round-trip, no data loss.
+    //
+    // Why pinning the nonce bypasses the middleware counter here:
+    //   `NonceManagerMiddleware::fill_transaction` only calls `get_transaction_count_with_manager`
+    //   (which increments the counter) when `tx.nonce().is_none()`.  An explicit nonce is
+    //   left untouched, so the retry uses exactly the value fetched from the chain.
+    match client
+        .get_transaction_count(signer_address, Some(BlockId::Number(BlockNumber::Pending)))
+        .await
+    {
+        Ok(fresh_nonce) => {
+            function_call.tx.set_nonce(fresh_nonce);
+        }
+        Err(nonce_err) => {
+            tracing::warn!("nonce resync failed: {nonce_err}");
+            signer_pool.release(signer_address).await?;
+            return Err(anyhow::anyhow!(
+                "Failed to send transaction (nonce resync failed): original error: {first_err}, nonce fetch error: {nonce_err}"
+            ));
+        }
+    }
+
+    // Retry with the pinned nonce.
     let tx = match function_call.send().await {
         Ok(tx) => tx,
-        Err(e) => {
+        Err(retry_err) => {
             signer_pool.release(signer_address).await?;
-            return Err(anyhow::anyhow!("Failed to send transaction: {e}"));
+            return Err(anyhow::anyhow!("Failed to send transaction: {retry_err}"));
         }
     };
 
