@@ -12,6 +12,7 @@
  * @typedef {Object} NewAccountOptions
  * @property {string} accountName - Name for the account
  * @property {string} accountDescription - Description for the account
+ * @property {string} [email] - Optional email address for Stripe billing
  */
 
 /**
@@ -319,11 +320,12 @@ export class LitNodeSimpleApiClient {
    * @param {NewAccountOptions} options
    * @returns {Promise<NewAccountResponse>}
    */
-  async newAccount({ accountName, accountDescription }) {
+  async newAccount({ accountName, accountDescription, email }) {
     const body = {
       account_name: accountName,
       account_description: accountDescription ?? '',
     };
+    if (email) body.email = email;
     const res = await fetch(`${this.baseUrl}/new_account`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -795,6 +797,63 @@ export class LitNodeSimpleApiClient {
   async getAdminApiPayer() {
     const res = await fetch(`${this.baseUrl}/get_admin_api_payer`);
     return parseResponse(res, 'get_admin_api_payer');
+  }
+
+  // ─── Billing ─────────────────────────────────────────────────────────────
+
+  /**
+   * GET /core/v1/billing/stripe_config
+   * Returns the Stripe publishable key for Stripe.js initialisation.
+   * @returns {Promise<{publishable_key: string}>}
+   */
+  async getStripeConfig() {
+    const res = await fetch(`${this.baseUrl}/billing/stripe_config`);
+    return parseResponse(res, 'billing/stripe_config');
+  }
+
+  /**
+   * GET /core/v1/billing/balance
+   * Returns the current credit balance for the authenticated API key.
+   * @param {string} apiKey
+   * @returns {Promise<{balance_cents: number, balance_display: string}>}
+   */
+  async getBillingBalance(apiKey) {
+    const res = await fetch(`${this.baseUrl}/billing/balance`, {
+      headers: headersWithApiKey(apiKey),
+    });
+    return parseResponse(res, 'billing/balance');
+  }
+
+  /**
+   * POST /core/v1/billing/create_payment_intent
+   * Creates a Stripe PaymentIntent; returns client_secret and payment_intent_id.
+   * @param {string} apiKey
+   * @param {number} amountCents - Amount in US cents (minimum 500)
+   * @returns {Promise<{client_secret: string, payment_intent_id: string}>}
+   */
+  async createPaymentIntent(apiKey, amountCents) {
+    const res = await fetch(`${this.baseUrl}/billing/create_payment_intent`, {
+      method: 'POST',
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ amount_cents: amountCents }),
+    });
+    return parseResponse(res, 'billing/create_payment_intent');
+  }
+
+  /**
+   * POST /core/v1/billing/confirm_payment
+   * Verifies a succeeded PaymentIntent and credits the account.
+   * @param {string} apiKey
+   * @param {string} paymentIntentId
+   * @returns {Promise<void>}
+   */
+  async confirmPayment(apiKey, paymentIntentId) {
+    const res = await fetch(`${this.baseUrl}/billing/confirm_payment`, {
+      method: 'POST',
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ payment_intent_id: paymentIntentId }),
+    });
+    return parseResponse(res, 'billing/confirm_payment');
   }
 }
 

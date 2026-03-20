@@ -29,10 +29,15 @@ function getBaseUrl() {
 function updateAuthUI() {
   const hasKey = !!getApiKey();
   document.body.classList.toggle('has-api-key', hasKey);
+  const balanceEl = document.getElementById('billing-balance-display');
+  const addFundsBtn = document.getElementById('btn-add-funds');
+  if (balanceEl) balanceEl.style.display = hasKey ? '' : 'none';
+  if (addFundsBtn) addFundsBtn.style.display = hasKey ? '' : 'none';
   if (hasKey) {
     refreshOverviewAccount();
     updateStatCards();
     preloadAllTables();
+    loadBillingBalance();
   }
 }
 
@@ -152,6 +157,7 @@ function initLogin() {
   document.getElementById('btn-create-account').addEventListener('click', async () => {
     const name = document.getElementById('new-account-name').value.trim();
     const desc = document.getElementById('new-account-desc').value.trim();
+    const email = document.getElementById('new-account-email').value.trim();
     hideStatus('login-status');
     if (!name) {
       showStatus('login-status', 'Enter an account name.', 'error');
@@ -165,7 +171,7 @@ function initLogin() {
         'Creating a new Lit Express account and returning an API key.'
       );
       const client = await getClient();
-      const res = await client.newAccount({ accountName: name, accountDescription: desc });
+      const res = await client.newAccount({ accountName: name, accountDescription: desc, email: email || undefined });
       setApiKey(res.api_key);
       showNewAccountBanner(res.api_key);
       document.getElementById('new-account-name').value = '';
@@ -193,6 +199,120 @@ function keyPreview(key) {
 
 function refreshOverviewAccount() {
   // Overview no longer displays API key or status; kept for any future use.
+}
+
+// ----- Billing -----
+async function loadBillingBalance() {
+  const apiKey = getApiKey();
+  if (!apiKey) return;
+  const el = document.getElementById('billing-balance-display');
+  if (!el) return;
+  try {
+    const client = await getClient();
+    const data = await client.getBillingBalance(apiKey);
+    el.textContent = data.balance_display || '';
+  } catch (_) {
+    el.textContent = '';
+  }
+}
+
+// Stripe card element singleton
+let _stripe = null;
+let _stripeCard = null;
+
+async function openAddFundsModal() {
+  const overlay = document.getElementById('billing-modal-overlay');
+  if (!overlay) return;
+  overlay.classList.add('is-open');
+  overlay.setAttribute('aria-hidden', 'false');
+
+  const statusEl = document.getElementById('billing-modal-status');
+  if (statusEl) { statusEl.style.display = 'none'; }
+
+  // Reset pay button to enabled state each time the modal is opened so that
+  // a previous Stripe init failure does not permanently disable it.
+  const payBtn = document.getElementById('billing-pay-btn');
+  if (payBtn) payBtn.disabled = true; // disabled until Stripe is ready
+
+  // Initialise Stripe.js if not already done
+  if (!_stripe) {
+    try {
+      const client = await getClient();
+      const cfg = await client.getStripeConfig();
+      _stripe = Stripe(cfg.publishable_key); // eslint-disable-line no-undef
+      const elements = _stripe.elements();
+      _stripeCard = elements.create('card');
+      _stripeCard.mount('#stripe-card-element');
+    } catch (e) {
+      if (statusEl) {
+        statusEl.textContent = 'Billing not available: ' + (e && e.message ? e.message : String(e));
+        statusEl.className = 'status error';
+        statusEl.style.display = 'block';
+      }
+      // payBtn stays disabled (already set above)
+      return;
+    }
+  }
+
+  // Stripe is ready – allow the user to pay
+  if (payBtn) payBtn.disabled = false;
+}
+
+function closeBillingModal() {
+  const overlay = document.getElementById('billing-modal-overlay');
+  if (overlay) {
+    overlay.classList.remove('is-open');
+    overlay.setAttribute('aria-hidden', 'true');
+  }
+}
+
+function initBilling() {
+  const addFundsBtn = document.getElementById('btn-add-funds');
+  const closeBtn = document.getElementById('billing-modal-close-btn');
+  const cancelBtn = document.getElementById('billing-cancel-btn');
+  const payBtn = document.getElementById('billing-pay-btn');
+
+  if (addFundsBtn) addFundsBtn.addEventListener('click', openAddFundsModal);
+  if (closeBtn) closeBtn.addEventListener('click', closeBillingModal);
+  if (cancelBtn) cancelBtn.addEventListener('click', closeBillingModal);
+
+  if (payBtn) {
+    payBtn.addEventListener('click', async () => {
+      const apiKey = getApiKey();
+      if (!apiKey || !_stripe || !_stripeCard) return;
+
+      const amountCents = parseInt(document.getElementById('billing-amount').value, 10);
+      const statusEl = document.getElementById('billing-modal-status');
+
+      payBtn.disabled = true;
+      if (statusEl) { statusEl.style.display = 'none'; }
+
+      try {
+        const client = await getClient();
+        const intent = await client.createPaymentIntent(apiKey, amountCents);
+
+        const result = await _stripe.confirmCardPayment(intent.client_secret, {
+          payment_method: { card: _stripeCard },
+        });
+
+        if (result.error) {
+          throw new Error(result.error.message);
+        }
+
+        await client.confirmPayment(apiKey, intent.payment_intent_id);
+        closeBillingModal();
+        await loadBillingBalance();
+      } catch (e) {
+        if (statusEl) {
+          statusEl.textContent = 'Payment failed: ' + (e && e.message ? e.message : String(e));
+          statusEl.className = 'status error';
+          statusEl.style.display = 'block';
+        }
+      } finally {
+        payBtn.disabled = false;
+      }
+    });
+  }
 }
 
 function showNewAccountBanner(apiKey) {
@@ -230,9 +350,10 @@ function initOverview() {
   document.getElementById('btn-add-usage-key')?.addEventListener('click', () => openUsageKeyModal());
 }
 
-// ----- Icons (pencil, trash) -----
+// ----- Icons (pencil, trash, copy) -----
 const ICON_PENCIL = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
 const ICON_TRASH = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg>';
+const ICON_COPY = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>';
 
 // ----- Modal (Add / Edit) -----
 function openModal(title, bodyHTML, footerHTML) {
@@ -539,6 +660,31 @@ function renderUsageKeysTable() {
       '<td class="mono">' + escapeHtml(balance) + '</td>' +
       '<td class="cell-actions"></td>';
     const actionsCell = tr.querySelector('.cell-actions');
+    const fullKey = item.api_key || (!item.api_key_hash ? item.usage_api_key : null);
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'btn-icon';
+    copyBtn.title = fullKey ? 'Copy usage API key' : 'Key only available when first created';
+    copyBtn.innerHTML = ICON_COPY;
+    if (!fullKey) copyBtn.disabled = true;
+    copyBtn.addEventListener('click', async () => {
+      if (!fullKey) return;
+      try {
+        await navigator.clipboard.writeText(fullKey);
+      } catch (_) {
+        const ta = document.createElement('textarea');
+        ta.value = fullKey;
+        ta.style.cssText = 'position:fixed;opacity:0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      const origTitle = copyBtn.title;
+      copyBtn.title = 'Copied!';
+      setTimeout(() => { copyBtn.title = origTitle; }, 1500);
+    });
+    actionsCell.appendChild(copyBtn);
     const canEdit = !!(item.usage_api_key ?? item.api_key);
     const editBtn = document.createElement('button');
     editBtn.type = 'button';
@@ -1432,6 +1578,7 @@ function init() {
   initActionRunner(); // async; CodeJar loads lazily on first use
   initSidebar();
   initHeader();
+  initBilling();
 }
 
 init();

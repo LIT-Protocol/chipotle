@@ -6,6 +6,7 @@ use lit_api_server::core;
 use lit_api_server::core::v1::guards::cpu_overload::CpuOverloadMonitor;
 use lit_api_server::dstack;
 use lit_api_server::observability;
+use lit_api_server::stripe;
 use lit_api_server::utils::chain_info::Chain;
 use moka::future::Cache;
 use rocket::response::Redirect;
@@ -147,6 +148,8 @@ async fn main() -> Result<(), rocket::Error> {
         .max_capacity(1024 * 1024 * 1024)
         .build();
 
+    let stripe_state = stripe::init();
+
     let (core_routes, openapi_spec) = core::v1::endpoints::routes_with_spec();
 
     let mut r = rocket::build()
@@ -171,7 +174,8 @@ async fn main() -> Result<(), rocket::Error> {
         // .manage(action_store)
         .manage(GrpcClientPool::<tonic::transport::Channel>::new())
         .manage(signer_pool)
-        .manage(CpuOverloadMonitor::start());
+        .manage(CpuOverloadMonitor::start())
+        .manage(stripe_state);
 
     {
         // /attestation at root — per Phala Get Attestation

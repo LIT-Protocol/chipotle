@@ -285,6 +285,14 @@ body.has-api-key .dashboard-wrap {
   margin-left: auto;
 }
 
+/* Billing balance chip */
+.billing-balance {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
 /* Account dropdown */
 .account-dropdown {
   position: relative;
