@@ -196,10 +196,12 @@ pub async fn charge_management(api_key: &str, state: &StripeState) -> Result<()>
     charge(api_key, COST_MANAGEMENT_CENTS, state).await
 }
 
-/// Charge $0.05 for a Lit Action execution.
+
+/// Charge $0.01 for a Lit Action execution.
 pub async fn charge_lit_action(api_key: &str, state: &StripeState) -> Result<()> {
     charge(api_key, COST_LIT_ACTION_CENTS, state).await
 }
+
 
 /// Create a PaymentIntent for `amount_cents`.  Returns `(client_secret, payment_intent_id)`.
 pub async fn create_payment_intent(
