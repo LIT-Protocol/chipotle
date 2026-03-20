@@ -1,0 +1,218 @@
+---
+title: "Patterns"
+description: "Common design patterns for Lit Actions: writing gating logic in plain JavaScript, using action-identity signing to produce immutable proofs, and structuring encrypt/decrypt flows around PKP wallets."
+---
+
+## Gating Logic — AKA Access Control Conditions
+
+The older Datil / Naga Lit SDK offered a fluent builder for declaring access control conditions (ACCs): structured objects that describe *who* may decrypt ciphertext or call an action. A typical condition using the SDK looks like this:
+
+```ts
+import { createAccBuilder } from '@lit-protocol/access-control-conditions';
+
+const conditions = createAccBuilder()
+  .on('ethereum')
+  .requireEthBalance('1000000000000000000')  // 1 ETH in wei
+  .and()
+  .on('ethereum')
+  .requireNftOwnership('0xContractAddress')
+  .build();
+```
+
+This produces a serialized conditions array that is passed to encrypt and decrypt calls, evaluated by the Lit node network at runtime.
+
+**In Chipotle, you skip the builder entirely.** Your Lit Action is JavaScript — so you write the gate as code. The result is simpler, easier to read, and far more flexible: you can call external APIs, read any chain, verify signatures, or apply any conditional logic that JavaScript supports.
+
+The equivalent of the ETH-balance check above, written directly in a Lit Action:
+
+```javascript
+// js_params: { pkpId, minBalanceWei, message }
+// pkpId doubles as the wallet address to check — it is an Ethereum address.
+async function main({ pkpId, minBalanceWei, message }) {
+  const provider = new ethers.providers.JsonRpcProvider("https://mainnet.base.org");
+  const balance = await provider.getBalance(pkpId);
+
+  if (balance.lt(ethers.BigNumber.from(minBalanceWei))) {
+    return {
+      error: `Balance ${ethers.utils.formatEther(balance)} ETH is below the required minimum`,
+    };
+  }
+
+  // Gate passed — sign the message with the PKP.
+  const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId }));
+  const signature = await wallet.signMessage(message);
+
+  return { message, signature, balanceEth: ethers.utils.formatEther(balance) };
+}
+```
+
+The same pattern extends to any condition you can express in JavaScript:
+
+```javascript
+// js_params: { pkpId, contractAddress, requiredAmount, message }
+// Gate on ERC-20 token balance instead of ETH.
+async function main({ pkpId, contractAddress, requiredAmount, message }) {
+  const provider = new ethers.providers.JsonRpcProvider("https://mainnet.base.org");
+  const erc20 = new ethers.Contract(
+    contractAddress,
+    ["function balanceOf(address) view returns (uint256)"],
+    provider
+  );
+  const balance = await erc20.balanceOf(pkpId);
+
+  if (balance.lt(ethers.BigNumber.from(requiredAmount))) {
+    return { error: "Insufficient token balance" };
+  }
+
+  const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId }));
+  const signature = await wallet.signMessage(message);
+  return { message, signature };
+}
+```
+
+Because gating is just code, you can combine conditions arbitrarily — NFT ownership AND minimum ETH balance AND a timestamp check — without learning a builder API or worrying about condition serialization.
+
+---
+
+## Action-Identity Signing — Immutable Proofs
+
+Every Lit Action has a cryptographic identity derived from its IPFS CID. `Lit.Actions.getLitActionPrivateKey()` retrieves a private key that is **deterministically derived from the content hash of the action code**. There is no way to produce that key outside of that exact code running inside the Lit network.
+
+This means any signature produced with this key carries a guarantee: **the data was produced by that specific, immutable action**. If the action code changes by a single byte, it gets a new IPFS CID, a new key, and a new identity. There is no way to forge the signature without controlling both the Lit network and the exact source code.
+
+This is useful any time you want to produce a **verifiable proof** — a signed output that a smart contract, API, or third party can verify came from a specific computation, not an arbitrary off-chain script.
+
+### Example: Signing a Price Feed
+
+```javascript
+// js_params: {}  — no caller-supplied parameters needed
+async function main() {
+  const res = await fetch(
+    "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
+  );
+  const data = await res.json();
+  const price = data?.ethereum?.usd;
+
+  if (typeof price !== "number") {
+    return { error: "Price fetch failed" };
+  }
+
+  // Sign with the action's own key — not a PKP.
+  // The private key is derived from this action's IPFS CID.
+  const actionWallet = new ethers.Wallet(
+    await Lit.Actions.getLitActionPrivateKey()
+  );
+
+  const payload = `ETH/USD: ${price} at ${Date.now()}`;
+  const signature = await actionWallet.signMessage(payload);
+
+  return {
+    price,
+    payload,
+    signature,
+    signerAddress: actionWallet.address,
+  };
+}
+```
+
+To verify the output, any caller can:
+
+1. Retrieve the action's public key or wallet address via `Lit.Actions.getLitActionPublicKey({ ipfsId })` (callable from inside another action) or by fetching it once and caching it.
+2. Call `ethers.utils.verifyMessage(payload, signature)` and compare the recovered address to the known action address.
+
+If the addresses match, the caller has a cryptographic proof that this specific, immutable action code produced this specific output — without trusting any intermediary.
+
+<Note>
+Use `getLitActionPrivateKey` when the proof must be tied to the action code itself. Use `getPrivateKey({ pkpId })` when the proof must be tied to a specific PKP wallet (e.g. an account or a user's identity). Both patterns produce verifiable signatures; they differ in what identity the signature is bound to.
+</Note>
+
+---
+
+## Encrypt / Decrypt — PKP Wallets as Data Vaults
+
+### One PKP per logical data boundary
+
+The best practice for encrypting a set of related data is to **create a dedicated PKP wallet for that data boundary**. The PKP's derived symmetric key is then used to encrypt everything in that boundary — user records, API keys, configuration, documents, whatever belongs together.
+
+```
+Account
+ └── Group
+      ├── PKP: "user-alice-data-vault"    ← one vault per user
+      ├── PKP: "user-bob-data-vault"
+      └── PKP: "app-secrets"              ← one vault per concern
+```
+
+Encrypt each item with its vault's PKP:
+
+```javascript
+// js_params: { pkpId, plaintext }
+// Run once to seal a piece of data into the vault.
+async function main({ pkpId, plaintext }) {
+  const ciphertext = await Lit.Actions.Encrypt({ pkpId, message: plaintext });
+  return { ciphertext };
+}
+```
+
+Store the returned `ciphertext` anywhere — IPFS, a database, a smart contract — without risk. Without the PKP's derived key (which never leaves the TEE), the ciphertext is opaque.
+
+### Giving dApp users access through gating conditions
+
+To let a dApp user read encrypted data, you give them access to a **decrypt action** that enforces your gating conditions before calling `Lit.Actions.Decrypt`. The user calls the action with a reference to the vault PKP; if their condition is met, they receive the plaintext. If not, they receive an error.
+
+**The symmetric key is never shared.** It is derived inside the TEE, used to decrypt, and discarded. The user only ever sees the plaintext result — and only if the action's gating logic allows it.
+
+```javascript
+// js_params: { pkpId, ciphertext, userToken }
+// userToken is a signed JWT or session token the caller supplies to prove identity.
+async function main({ pkpId, ciphertext, userToken }) {
+  // Verify the caller's token against your auth service.
+  const authRes = await fetch("https://auth.your-app.com/verify", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token: userToken }),
+  });
+  const auth = await authRes.json();
+
+  if (!auth.valid) {
+    return { error: "Unauthorized" };
+  }
+
+  // Gate passed — decrypt and return the plaintext.
+  const plaintext = await Lit.Actions.Decrypt({ pkpId, ciphertext });
+  return { plaintext };
+}
+```
+
+You can substitute any condition for the token check — an on-chain balance, NFT ownership, a subscription status API, a time window, or a combination:
+
+```javascript
+// js_params: { pkpId, ciphertext, holderAddress, nftContractAddress }
+// Only NFT holders may decrypt.
+async function main({ pkpId, ciphertext, holderAddress, nftContractAddress }) {
+  const provider = new ethers.providers.JsonRpcProvider("https://mainnet.base.org");
+  const nft = new ethers.Contract(
+    nftContractAddress,
+    ["function balanceOf(address) view returns (uint256)"],
+    provider
+  );
+  const balance = await nft.balanceOf(holderAddress);
+
+  if (balance.eq(0)) {
+    return { error: "NFT not held — access denied" };
+  }
+
+  const plaintext = await Lit.Actions.Decrypt({ pkpId, ciphertext });
+  return { plaintext };
+}
+```
+
+### Why this is safe to expose
+
+Sharing a PKP ID (the wallet address) with users is safe because:
+
+- The **private key** is only accessible inside a Lit Action running in a TEE — it is never returned to callers and never leaves the node.
+- The **symmetric key** used for encryption is derived from the private key inside the TEE. It is also never returned.
+- The **ciphertext** is meaningless without the derived key.
+- The only way to get plaintext is to run an action that holds the right PKP and chooses to call `Decrypt` — so your gating logic is the sole enforcement point.
+
+Users can hold the `pkpId` and the `ciphertext` indefinitely. They gain access to the plaintext only if and when the gating logic inside the action is satisfied.
