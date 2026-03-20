@@ -23,7 +23,7 @@ const LIT_ACTIONS_SOCKET: &str = "/tmp/lit_actions.sock";
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HealthResponse {
     pub lit_actions_reachable: bool,
-    pub cpu_overloaded: bool,
+    pub cpu_available: bool,
 }
 
 pub fn routes() -> Vec<Route> {
@@ -53,9 +53,9 @@ async fn health(
         }
     };
 
-    let cpu_overloaded = cpu_monitor.is_overloaded();
+    let cpu_available = !cpu_monitor.is_overloaded();
 
-    let healthy = lit_actions_reachable && !cpu_overloaded;
+    let healthy = lit_actions_reachable && cpu_available;
 
     let status = if healthy {
         Status::Ok
@@ -67,7 +67,7 @@ async fn health(
         status,
         Json(HealthResponse {
             lit_actions_reachable,
-            cpu_overloaded,
+            cpu_available,
         }),
     )
 }
@@ -98,7 +98,7 @@ mod tests {
         let response = client.get("/health").dispatch().await;
         let body: HealthResponse = response.into_json().await.expect("valid json");
         // Status code conveys healthy/unhealthy; body has diagnostics.
-        assert!(!body.cpu_overloaded);
+        assert!(body.cpu_available);
     }
 
     #[tokio::test]
@@ -120,6 +120,6 @@ mod tests {
         let response = client.get("/health").dispatch().await;
         assert_eq!(response.status(), Status::ServiceUnavailable);
         let body: HealthResponse = response.into_json().await.expect("valid json");
-        assert!(body.cpu_overloaded);
+        assert!(!body.cpu_available);
     }
 }
