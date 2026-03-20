@@ -125,12 +125,11 @@ pub async fn get_or_create_customer(wallet_address: &str, state: &StripeState) -
     )
     .await?;
 
-    if let Some(data) = resp.get("data").and_then(|d| d.as_array()) {
-        if let Some(first) = data.first() {
-            if let Some(id) = first.get("id").and_then(|i| i.as_str()) {
-                return Ok(id.to_string());
-            }
-        }
+    if let Some(data) = resp.get("data").and_then(|d| d.as_array())
+        && let Some(first) = data.first()
+        && let Some(id) = first.get("id").and_then(|i| i.as_str())
+    {
+        return Ok(id.to_string());
     }
 
     // Not found — create.
@@ -139,7 +138,10 @@ pub async fn get_or_create_customer(wallet_address: &str, state: &StripeState) -
         "customers",
         &[
             ("metadata[wallet_address]", wallet_address),
-            ("description", &format!("Lit Express Node — {wallet_address}")),
+            (
+                "description",
+                &format!("Lit Express Node — {wallet_address}"),
+            ),
         ],
     )
     .await?;
@@ -154,10 +156,7 @@ pub async fn get_or_create_customer(wallet_address: &str, state: &StripeState) -
 /// balance field is negative when the customer has a credit).
 pub async fn get_credit_balance(customer_id: &str, state: &StripeState) -> Result<i64> {
     let resp = stripe_get(state, &format!("customers/{customer_id}"), &[]).await?;
-    let balance = resp
-        .get("balance")
-        .and_then(|b| b.as_i64())
-        .unwrap_or(0);
+    let balance = resp.get("balance").and_then(|b| b.as_i64()).unwrap_or(0);
     Ok(balance)
 }
 
@@ -268,9 +267,7 @@ pub async fn confirm_payment_and_credit(
         .unwrap_or("unknown");
 
     if status != "succeeded" {
-        anyhow::bail!(
-            "PaymentIntent {payment_intent_id} has status '{status}', not 'succeeded'"
-        );
+        anyhow::bail!("PaymentIntent {payment_intent_id} has status '{status}', not 'succeeded'");
     }
 
     // Replay guard: reject if this intent was already credited.
@@ -285,10 +282,7 @@ pub async fn confirm_payment_and_credit(
     }
 
     // Ownership check: the PaymentIntent's customer must match the caller's customer.
-    let pi_customer = resp
-        .get("customer")
-        .and_then(|c| c.as_str())
-        .unwrap_or("");
+    let pi_customer = resp.get("customer").and_then(|c| c.as_str()).unwrap_or("");
     let customer_id = get_or_create_customer(wallet_address, state).await?;
     if pi_customer != customer_id {
         anyhow::bail!("PaymentIntent {payment_intent_id} does not belong to this account");
@@ -324,11 +318,7 @@ pub async fn confirm_payment_and_credit(
 }
 
 /// Best-effort: set the customer's email in Stripe.  Never fails the caller.
-pub async fn register_customer_email(
-    wallet_address: &str,
-    email: &str,
-    state: &StripeState,
-) {
+pub async fn register_customer_email(wallet_address: &str, email: &str, state: &StripeState) {
     if email.trim().is_empty() {
         return;
     }

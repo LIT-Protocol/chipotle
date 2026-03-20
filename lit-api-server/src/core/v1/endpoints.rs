@@ -561,9 +561,7 @@ async fn billing_balance_impl(
     api_key: &str,
     stripe_state: &Option<Arc<StripeState>>,
 ) -> Result<BillingBalanceResponse, ApiStatus> {
-    let stripe = stripe_state
-        .as_ref()
-        .ok_or_else(billing_disabled_err)?;
+    let stripe = stripe_state.as_ref().ok_or_else(billing_disabled_err)?;
     let wallet = stripe::api_key_to_wallet_address(api_key)
         .map_err(|e| ApiStatus::bad_request(e, "Invalid API key"))?;
     let customer_id = stripe::get_or_create_customer(&wallet, stripe)
@@ -605,9 +603,7 @@ async fn billing_create_payment_intent_impl(
     stripe_state: &Option<Arc<StripeState>>,
     req: Json<CreatePaymentIntentRequest>,
 ) -> Result<CreatePaymentIntentResponse, ApiStatus> {
-    let stripe = stripe_state
-        .as_ref()
-        .ok_or_else(billing_disabled_err)?;
+    let stripe = stripe_state.as_ref().ok_or_else(billing_disabled_err)?;
     let wallet = stripe::api_key_to_wallet_address(api_key)
         .map_err(|e| ApiStatus::bad_request(e, "Invalid API key"))?;
     let (client_secret, payment_intent_id) =
@@ -628,8 +624,7 @@ async fn billing_confirm_payment(
     stripe_state: &State<Option<Arc<StripeState>>>,
     req: Json<ConfirmPaymentRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
-    let result =
-        billing_confirm_payment_impl(api_key.0.as_str(), stripe_state.inner(), req).await;
+    let result = billing_confirm_payment_impl(api_key.0.as_str(), stripe_state.inner(), req).await;
     OpenApiResponse {
         response: ApiResult(result).into(),
     }
@@ -640,9 +635,7 @@ async fn billing_confirm_payment_impl(
     stripe_state: &Option<Arc<StripeState>>,
     req: Json<ConfirmPaymentRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let stripe = stripe_state
-        .as_ref()
-        .ok_or_else(billing_disabled_err)?;
+    let stripe = stripe_state.as_ref().ok_or_else(billing_disabled_err)?;
     let wallet = stripe::api_key_to_wallet_address(api_key)
         .map_err(|e| ApiStatus::bad_request(e, "Invalid API key"))?;
     stripe::confirm_payment_and_credit(&req.payment_intent_id, &wallet, stripe)

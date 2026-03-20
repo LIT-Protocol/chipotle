@@ -19,7 +19,7 @@ use crate::stripe::{self, StripeState};
 fn extract_api_key(request: &Request<'_>) -> Option<String> {
     // Authorization: Bearer <key>
     if let Some(v) = request.headers().get_one("Authorization") {
-        let mut parts = v.trim().split_whitespace();
+        let mut parts = v.split_whitespace();
         if let (Some(scheme), Some(key)) = (parts.next(), parts.next())
             && scheme.eq_ignore_ascii_case("bearer")
             && !key.trim().is_empty()
@@ -45,13 +45,12 @@ async fn charge_guard(
         return Outcome::Error((Status::Unauthorized, ()));
     };
 
-    if let Some(state) = request.rocket().state::<Option<Arc<StripeState>>>() {
-        if let Some(stripe) = state.as_ref() {
-            if let Err(e) = charge_fn(&key, stripe).await {
-                tracing::warn!("billing guard charge failed: {e}");
-                return Outcome::Error((Status::PaymentRequired, ()));
-            }
-        }
+    if let Some(state) = request.rocket().state::<Option<Arc<StripeState>>>()
+        && let Some(stripe) = state.as_ref()
+        && let Err(e) = charge_fn(&key, stripe).await
+    {
+        tracing::warn!("billing guard charge failed: {e}");
+        return Outcome::Error((Status::PaymentRequired, ()));
     }
 
     Outcome::Success(key)
