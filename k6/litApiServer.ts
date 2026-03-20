@@ -15,6 +15,7 @@ import type { Params, Response } from "k6/http";
  */
 export interface ApiKeyItem {
   id: string;
+  api_key_hash: string;
   name: string;
   description: string;
   expiration: string;
@@ -86,21 +87,20 @@ export interface AddGroupRequest {
   cid_hashes_permitted: string[];
 }
 
+export interface RemoveGroupRequest {
+  group_id: string;
+}
+
+export interface AddActionRequest {
+  name: string;
+  description: string;
+}
+
 export interface AddActionToGroupRequest {
   /** @minimum 0 */
   group_id: number;
   /** IPFS CID for the action (will be keccak256-hashed on server). */
   action_ipfs_cid: string;
-  /**
-   * Optional name for the action (stored in contract metadata).
-   * @nullable
-   */
-  name?: string | null;
-  /**
-   * Optional description for the action (stored in contract metadata).
-   * @nullable
-   */
-  description?: string | null;
 }
 
 export interface AddPkpToGroupRequest {
@@ -135,14 +135,34 @@ export interface AddUsageApiKeyRequest {
   can_create_groups: boolean;
   can_delete_groups: boolean;
   can_create_pkps: boolean;
-  /** Group IDs, where 0 is the wildcard for all groups. */
-  can_manage_ipfs_ids_in_groups: number[];
-  /** Group IDs, where 0 is the wildcard for all groups. */
-  can_add_pkp_to_groups: number[];
-  /** Group IDs, where 0 is the wildcard for all groups. */
-  can_remove_pkp_from_groups: number[];
-  /** Group IDs, where 0 is the wildcard for all groups. */
-  can_execute_in_groups: number[];
+  /** Group IDs to grant manage-IPFS-IDs permission. 0 is wildcard for all groups. */
+  manage_ipfs_ids_in_groups: number[];
+  /** Group IDs to grant add-PKP permission. 0 is wildcard for all groups. */
+  add_pkp_to_groups: number[];
+  /** Group IDs to grant remove-PKP permission. 0 is wildcard for all groups. */
+  remove_pkp_from_groups: number[];
+  /** Group IDs to grant execute permission. 0 is wildcard for all groups. */
+  execute_in_groups: number[];
+}
+
+/**
+ * Request for update_usage_api_key. Updates all permissions and metadata on an existing usage API key. API key via header.
+ */
+export interface UpdateUsageApiKeyRequest {
+  usage_api_key: string;
+  name: string;
+  description: string;
+  can_create_groups: boolean;
+  can_delete_groups: boolean;
+  can_create_pkps: boolean;
+  /** Group IDs to grant manage-IPFS-IDs permission. 0 is wildcard for all groups. */
+  manage_ipfs_ids_in_groups: number[];
+  /** Group IDs to grant add-PKP permission. 0 is wildcard for all groups. */
+  add_pkp_to_groups: number[];
+  /** Group IDs to grant remove-PKP permission. 0 is wildcard for all groups. */
+  remove_pkp_from_groups: number[];
+  /** Group IDs to grant execute permission. 0 is wildcard for all groups. */
+  execute_in_groups: number[];
 }
 
 /**
@@ -287,6 +307,24 @@ export type AddGroupHeaders = {
 
 export type AddGroupDefault = AccountOpResponse | ErrMessage;
 
+export type RemoveGroupHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type RemoveGroupDefault = AccountOpResponse | ErrMessage;
+
+export type AddActionHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type AddActionDefault = AccountOpResponse | ErrMessage;
+
 export type AddActionToGroupHeaders = {
   /**
    * Account or usage API key. Alternatively use Authorization: Bearer <key>.
@@ -322,6 +360,15 @@ export type AddUsageApiKeyHeaders = {
 };
 
 export type AddUsageApiKeyDefault = AddUsageApiKeyResponse | ErrMessage;
+
+export type UpdateUsageApiKeyHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type UpdateUsageApiKeyDefault = AccountOpResponse | ErrMessage;
 
 export type RemoveUsageApiKeyHeaders = {
   /**
@@ -772,6 +819,100 @@ export class LitApiServerClient {
     };
   }
 
+  removeGroup(
+    removeGroupRequest: RemoveGroupRequest,
+    headers: RemoveGroupHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: RemoveGroupDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/remove_group`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      JSON.stringify(removeGroupRequest),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
+        },
+      },
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "remove_group",
+    };
+  }
+
+  addAction(
+    addActionRequest: AddActionRequest,
+    headers: AddActionHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: AddActionDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/add_action`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      JSON.stringify(addActionRequest),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
+        },
+      },
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "add_action",
+    };
+  }
+
   addActionToGroup(
     addActionToGroupRequest: AddActionToGroupRequest,
     headers: AddActionToGroupHeaders,
@@ -957,6 +1098,53 @@ export class LitApiServerClient {
       response,
       data,
       operationId: "add_usage_api_key",
+    };
+  }
+
+  updateUsageApiKey(
+    updateUsageApiKeyRequest: UpdateUsageApiKeyRequest,
+    headers: UpdateUsageApiKeyHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: UpdateUsageApiKeyDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/update_usage_api_key`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      JSON.stringify(updateUsageApiKeyRequest),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
+        },
+      },
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "update_usage_api_key",
     };
   }
 

@@ -44,3 +44,7 @@ update_anvil: compile
 update_sepolia: compile
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
 	$(DEPLOYER_BIN) --action=update --network=base-sepolia --abifolder=artifacts/contracts --secret=$(DEPLOYER_SECRET) --address=$(address)
+
+update_base: compile
+	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
+	$(DEPLOYER_BIN) --action=update --network=base --abifolder=artifacts/contracts --secret=$(BASE_DEPLOYER_SECRET) --address=$(address)

@@ -3,6 +3,7 @@ use lit_api_server::accounts::signer_pool::start_signer_pool;
 use lit_api_server::actions::grpc::GrpcClientPool;
 use lit_api_server::config;
 use lit_api_server::core;
+use lit_api_server::core::v1::guards::cpu_overload::CpuOverloadMonitor;
 use lit_api_server::dstack;
 use lit_api_server::observability;
 use lit_api_server::utils::chain_info::Chain;
@@ -155,6 +156,7 @@ async fn main() -> Result<(), rocket::Error> {
             "/",
             routes![openapi_json, openapi_json_redirect, swagger_ui_redirect],
         )
+        .mount("/", core::v1::health::routes())
         .mount("/core/v1/", core_routes)
         .mount(
             "/core/v1/swagger-ui/",
@@ -168,7 +170,8 @@ async fn main() -> Result<(), rocket::Error> {
         .manage(default_http_client())
         // .manage(action_store)
         .manage(GrpcClientPool::<tonic::transport::Channel>::new())
-        .manage(signer_pool);
+        .manage(signer_pool)
+        .manage(CpuOverloadMonitor::start());
 
     {
         // /attestation at root — per Phala Get Attestation
