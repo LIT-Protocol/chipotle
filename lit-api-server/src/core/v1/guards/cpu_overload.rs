@@ -1,13 +1,20 @@
-//! CPU overload protection via load-average monitoring.
+//! CPU overload protection via load-average and PSI monitoring.
 //!
-//! Spawns a background task that samples `/proc/loadavg` every second and flips
-//! an atomic flag when the 1-minute load average exceeds a threshold.  The
-//! [`CpuAvailable`] request guard checks this flag and rejects with
-//! `429 Too Many Requests` when the system is overloaded, preventing latency
-//! degradation for requests that *are* admitted.
+//! Spawns a background task that samples `/proc/loadavg` and
+//! `/proc/pressure/cpu` every second and flips an atomic flag when either:
 //!
-//! Default threshold: `2 * num_cpus` (overridable via `CPU_OVERLOAD_MULTIPLIER`
-//! env var, e.g. `CPU_OVERLOAD_MULTIPLIER=1.5`).
+//! - The 1-minute load average exceeds a threshold, **or**
+//! - CPU pressure (PSI `some`) over the last 1-second window exceeds a
+//!   threshold (percentage of wall-clock time at least one task was waiting
+//!   for CPU).
+//!
+//! The PSI check catches short spikes before they register in the 1-minute
+//! load average, giving the NLB health check (`/health`) and the
+//! [`CpuAvailable`] request guard a faster signal to shed load.
+//!
+//! Default thresholds (overridable via env vars):
+//! - Load average: `2 * num_cpus` (`CPU_OVERLOAD_MULTIPLIER`, e.g. `1.5`)
+//! - PSI 1s: `50.0`% (`CPU_PSI_THRESHOLD`, e.g. `70.0`)
 
 use rocket::http::Status;
 use rocket::request::{FromRequest, Outcome, Request};
@@ -18,7 +25,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-/// Monitors system load average and exposes an overload flag.
+/// Monitors system load average + CPU pressure and exposes an overload flag.
 ///
 /// Register as Rocket managed state via `.manage(CpuOverloadMonitor::start())`.
 pub struct CpuOverloadMonitor {
@@ -26,47 +33,79 @@ pub struct CpuOverloadMonitor {
 }
 
 impl CpuOverloadMonitor {
-    /// Starts a background tokio task that samples `/proc/loadavg` every second.
+    /// Starts a background tokio task that samples system load every second.
     pub fn start() -> Self {
-        let multiplier: f64 = std::env::var("CPU_OVERLOAD_MULTIPLIER")
+        let load_multiplier: f64 = std::env::var("CPU_OVERLOAD_MULTIPLIER")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(2.0);
 
         let num_cpus = num_cpus::get() as f64;
-        let threshold = num_cpus * multiplier;
+        let load_threshold = num_cpus * load_multiplier;
+
+        // PSI threshold: percentage of wall-clock time (0–100) in a 1-second
+        // window where at least one task was waiting for CPU.
+        let psi_threshold: f64 = std::env::var("CPU_PSI_THRESHOLD")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(50.0);
+
         let overloaded = Arc::new(AtomicBool::new(false));
 
         tracing::info!(
             num_cpus = num_cpus as usize,
-            multiplier,
-            threshold,
+            load_multiplier,
+            load_threshold,
+            psi_threshold,
             "CPU overload monitor started (429 load shedding enabled)"
         );
 
         let flag = overloaded.clone();
         tokio::spawn(async move {
             let mut was_overloaded = false;
-            loop {
-                if let Some(load_avg) = read_1m_load_avg().await {
-                    let is_overloaded = load_avg > threshold;
-                    flag.store(is_overloaded, Ordering::Relaxed);
+            let mut prev_psi_total: Option<u64> = None;
 
-                    if is_overloaded && !was_overloaded {
-                        tracing::warn!(
-                            load_avg,
-                            threshold,
-                            "CPU overload detected - new requests will receive 429"
-                        );
-                    } else if !is_overloaded && was_overloaded {
-                        tracing::info!(
-                            load_avg,
-                            threshold,
-                            "CPU load returned to normal - accepting requests"
-                        );
+            loop {
+                let load_overloaded = read_1m_load_avg()
+                    .await
+                    .map(|avg| avg > load_threshold)
+                    .unwrap_or(false);
+
+                let psi_overloaded = match (read_psi_cpu_total().await, prev_psi_total) {
+                    (Some(current), Some(prev)) => {
+                        // Delta is microseconds of CPU stall time in the last
+                        // ~1 second.  Convert to a percentage of wall-clock
+                        // time (1s = 1_000_000 µs).
+                        let delta_us = current.saturating_sub(prev);
+                        let psi_pct = delta_us as f64 / 1_000_000.0 * 100.0;
+                        psi_pct > psi_threshold
                     }
-                    was_overloaded = is_overloaded;
+                    _ => false, // Need two readings to compute a rate.
+                };
+
+                // Update prev_psi_total for next iteration.
+                if let Some(t) = read_psi_cpu_total().await {
+                    prev_psi_total = Some(t);
                 }
+
+                let is_overloaded = load_overloaded || psi_overloaded;
+                flag.store(is_overloaded, Ordering::Relaxed);
+
+                if is_overloaded && !was_overloaded {
+                    tracing::warn!(
+                        load_overloaded,
+                        psi_overloaded,
+                        "CPU overload detected - new requests will receive 429"
+                    );
+                } else if !is_overloaded && was_overloaded {
+                    tracing::info!(
+                        load_overloaded,
+                        psi_overloaded,
+                        "CPU load returned to normal - accepting requests"
+                    );
+                }
+                was_overloaded = is_overloaded;
+
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
         });
@@ -94,6 +133,20 @@ async fn read_1m_load_avg() -> Option<f64> {
         .next()?
         .parse()
         .ok()
+}
+
+/// Reads the cumulative `some` total (microseconds) from `/proc/pressure/cpu`.
+///
+/// Format: `some avg10=X avg60=X avg300=X total=123456`
+async fn read_psi_cpu_total() -> Option<u64> {
+    let contents = tokio::fs::read_to_string("/proc/pressure/cpu").await.ok()?;
+    // First line is the `some` line.
+    let some_line = contents.lines().next()?;
+    // Find `total=<value>` at the end.
+    some_line
+        .split_whitespace()
+        .find_map(|token| token.strip_prefix("total="))
+        .and_then(|v| v.parse().ok())
 }
 
 /// Request guard that rejects with `429 Too Many Requests` when the system is CPU-overloaded.
@@ -181,9 +234,17 @@ mod tests {
 
     #[tokio::test]
     async fn read_load_avg_returns_some_on_linux() {
-        // /proc/loadavg should always be readable on Linux.
         let load = read_1m_load_avg().await;
         assert!(load.is_some(), "/proc/loadavg should be readable");
         assert!(load.unwrap() >= 0.0);
+    }
+
+    #[tokio::test]
+    async fn read_psi_cpu_total_returns_some_on_linux() {
+        let total = read_psi_cpu_total().await;
+        assert!(
+            total.is_some(),
+            "/proc/pressure/cpu should be readable on kernels >= 4.20"
+        );
     }
 }
