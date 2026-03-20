@@ -48,7 +48,7 @@ jobs:
           NETWORK=$(grep '^name' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
           ADDRESS=$(grep '^contract_address' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
 
-          echo "network=$NETWORK" >> "$GITHUB_OUTPUT"
+          echo "network=${{ secrets.BASE_CHAIN_RPC }}"" >> "$GITHUB_OUTPUT"
           echo "address=$ADDRESS" >> "$GITHUB_OUTPUT"
           echo "Resolved from $CONFIG: network=$NETWORK address=$ADDRESS"
 
