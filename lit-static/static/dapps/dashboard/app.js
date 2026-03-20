@@ -223,8 +223,8 @@ let _stripeCard = null;
 async function openAddFundsModal() {
   const overlay = document.getElementById('billing-modal-overlay');
   if (!overlay) return;
+  overlay.classList.add('is-open');
   overlay.setAttribute('aria-hidden', 'false');
-  overlay.style.display = 'flex';
 
   const statusEl = document.getElementById('billing-modal-status');
   if (statusEl) { statusEl.style.display = 'none'; }
@@ -253,8 +253,8 @@ async function openAddFundsModal() {
 function closeBillingModal() {
   const overlay = document.getElementById('billing-modal-overlay');
   if (overlay) {
+    overlay.classList.remove('is-open');
     overlay.setAttribute('aria-hidden', 'true');
-    overlay.style.display = '';
   }
 }
 

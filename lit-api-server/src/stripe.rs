@@ -15,7 +15,7 @@ use ethers::signers::{LocalWallet, Signer};
 
 /// Cost constants in US cents.
 pub const COST_MANAGEMENT_CENTS: i64 = 1; // $0.01
-pub const COST_LIT_ACTION_CENTS: i64 = 5; // $0.05
+pub const COST_LIT_ACTION_CENTS: i64 = 1; // $0.05
 /// Minimum top-up (500 cents = $5.00).
 pub const MIN_TOPUP_CENTS: i64 = 500;
 
@@ -247,6 +247,14 @@ pub async fn create_payment_intent(
 }
 
 /// Verify a PaymentIntent succeeded and credit the customer's account.
+///
+/// Replay protection:
+/// 1. Checks `metadata.credited == "true"` on the PaymentIntent — rejects if already applied.
+/// 2. Verifies the PaymentIntent's `customer` field matches the caller's Stripe customer —
+///    prevents one account from claiming another account's payment.
+/// 3. Marks the PaymentIntent as credited (`metadata[credited]=true`) **before** creating
+///    the balance transaction, so a crash or retry after this point is safe (the second call
+///    will be rejected by check 1).
 pub async fn confirm_payment_and_credit(
     payment_intent_id: &str,
     wallet_address: &str,
@@ -265,14 +273,42 @@ pub async fn confirm_payment_and_credit(
         );
     }
 
+    // Replay guard: reject if this intent was already credited.
+    let already_credited = resp
+        .get("metadata")
+        .and_then(|m| m.get("credited"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        == "true";
+    if already_credited {
+        anyhow::bail!("PaymentIntent {payment_intent_id} has already been credited");
+    }
+
+    // Ownership check: the PaymentIntent's customer must match the caller's customer.
+    let pi_customer = resp
+        .get("customer")
+        .and_then(|c| c.as_str())
+        .unwrap_or("");
+    let customer_id = get_or_create_customer(wallet_address, state).await?;
+    if pi_customer != customer_id {
+        anyhow::bail!("PaymentIntent {payment_intent_id} does not belong to this account");
+    }
+
     let amount = resp
         .get("amount")
         .and_then(|a| a.as_i64())
         .ok_or_else(|| anyhow::anyhow!("PaymentIntent: missing amount"))?;
 
-    let customer_id = get_or_create_customer(wallet_address, state).await?;
-    let credit = (-amount).to_string(); // negative = credit to customer
+    // Mark as credited before creating the balance transaction so that any subsequent
+    // call with the same intent ID is rejected even if the process crashes after this point.
+    stripe_post(
+        state,
+        &format!("payment_intents/{payment_intent_id}"),
+        &[("metadata[credited]", "true")],
+    )
+    .await?;
 
+    let credit = (-amount).to_string(); // negative = credit to customer
     stripe_post(
         state,
         &format!("customers/{customer_id}/balance_transactions"),
