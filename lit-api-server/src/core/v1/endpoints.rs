@@ -5,6 +5,7 @@ use crate::actions::grpc::GrpcClientPool;
 use crate::core::account_management;
 use crate::core::core_features;
 use crate::core::v1::guards::apikey::ApiKey;
+use crate::core::v1::guards::cpu_overload::CpuAvailable;
 use crate::core::v1::helpers::api_status::{ApiResult, ErrMessage};
 use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{
@@ -103,6 +104,7 @@ async fn create_wallet(
 #[post("/lit_action", format = "json", data = "<lit_action_request>")]
 #[tracing::instrument(name = "endpoint::lit_action", skip_all, parent = &request_span.span)]
 async fn lit_action(
+    _cpu: CpuAvailable,
     request_span: RequestSpan,
     api_key: ApiKey,
     grpc_client_pool: &State<GrpcClientPool<tonic::transport::Channel>>,
