@@ -198,11 +198,13 @@ pub async fn send_transaction(
         }
         Err(nonce_err) => {
             tracing::warn!("nonce resync failed: {nonce_err}");
+
+        Err(nonce_err) => {
+            tracing::warn!("nonce resync failed: {nonce_err}");
             signer_pool.release(signer_address).await?;
-            return Err(anyhow::anyhow!(
-                "Failed to resync nonce after send error (send error: {first_err}, nonce resync error: {nonce_err})"
-            ));
+            return Err(anyhow::anyhow!("Failed to send transaction (nonce resync failed): original error: {first_err}, nonce fetch error: {nonce_err}"));
         }
+
     }
 
     // Retry with the pinned nonce.
