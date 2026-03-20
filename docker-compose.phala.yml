@@ -14,6 +14,12 @@
 # Required secrets (set as encrypted Phala CVM environment variables):
 #   GCP_SERVICE_ACCOUNT_JSON  - GCP service account key (raw JSON or base64-encoded)
 #   GCP_PROJECT_ID            - GCP project ID (e.g. "my-gcp-project")
+#
+# Additional secrets required for custom-domain profile (dstack-ingress):
+#   NODE_DOMAIN               - Per-node domain (e.g. "node1.api.dev.litprotocol.com")
+#   CERTBOT_EMAIL             - Email for Let's Encrypt certificate notifications
+#   AWS_ACCESS_KEY_ID         - AWS IAM key for Route 53 DNS-01 ACME challenges
+#   AWS_SECRET_ACCESS_KEY     - AWS IAM secret for Route 53 DNS-01 ACME challenges
 
 # RUST_LOG filter shared by lit-actions and lit-api-server.
 # App code stays at trace; per-module overrides suppress low-value internals:
@@ -104,5 +110,42 @@ services:
       ROCKET_PORT: "8001"
     restart: unless-stopped
 
+  # dstack-ingress — TLS termination + attestation cert for custom domain (CPL-5).
+  # Activated with: docker compose --profile custom-domain up
+  #
+  # Issues a cert with both NODE_DOMAIN and ALIAS_DOMAIN as SANs via DNS-01
+  # (Route 53). The cert contains the CVM attestation identity, proving TLS is
+  # controlled exclusively by the TEE. NLB does TCP passthrough on :443.
+  #
+  # Automatically handles:
+  #   - Per-node DNS record (NODE_DOMAIN → Phala gateway CNAME)
+  #   - Shared attestation TXT append (_dstack-app-address.ALIAS_DOMAIN)
+  #   - nginx server_name for both domains
+  #
+  # Requires ALIAS_DOMAIN support: https://github.com/Dstack-TEE/dstack-examples/pull/83
+  # ROUTE53_INITIAL_WEIGHT intentionally NOT set — NLB handles traffic routing.
+  dstack-ingress:
+    profiles: ["custom-domain"]
+    image: dstacktee/dstack-ingress:latest
+    ports:
+      - "443:443"
+    environment:
+      DOMAIN: "${NODE_DOMAIN}"
+      ALIAS_DOMAIN: "api.dev.litprotocol.com"
+      DNS_PROVIDER: "route53"
+      TARGET_ENDPOINT: "http://lit-api-server:8000"
+      CERTBOT_EMAIL: "${CERTBOT_EMAIL}"
+      SET_CAA: "true"
+      AWS_ACCESS_KEY_ID: "${AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${AWS_SECRET_ACCESS_KEY}"
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      - cert-data:/etc/letsencrypt
+    depends_on:
+      lit-api-server:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   lit-socket:
+  cert-data:
