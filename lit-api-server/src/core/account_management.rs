@@ -49,6 +49,21 @@ async fn create_new_wallet() -> Result<(String, H160, [u8; 32], U256), ApiStatus
     Ok((public_key_string, wallet_address, secret, derivation_u256))
 }
 
+/// Parse `initial_balance` from request.
+/// Accepts `0x`-prefixed hex or base-10 decimal (matching the request docs).
+fn parse_initial_balance(s: &str) -> Result<U256, ApiStatus> {
+    let s = s.trim();
+    if s.starts_with("0x") || s.starts_with("0X") {
+        let bytes = hex_to_bytes(s)
+            .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex for U256"))?;
+        Ok(U256::from_big_endian(&bytes))
+    } else {
+        U256::from_dec_str(s).map_err(|e| {
+            ApiStatus::bad_request(anyhow::anyhow!(e), "invalid decimal for U256")
+        })
+    }
+}
+
 pub async fn new_account(
     http_client: &reqwest::Client,
     signer_pool: Arc<SignerPool>,
@@ -63,7 +78,7 @@ pub async fn new_account(
     let initial_balance = new_account_request
         .initial_balance
         .as_deref()
-        .map(parse_u256)
+        .map(parse_initial_balance)
         .transpose()?
         .unwrap_or(U256::zero());
 
@@ -133,7 +148,7 @@ pub async fn new_account(
         )
         .await
         {
-            let api_key_hash = accounts::api_key_hash(&api_key).to_string();
+            let api_key_hash = crate::utils::parse_with_hash::api_key_hash(&api_key).to_string();
             let _ = lookup_data::add_stripe_customer(&api_key_hash, &stripe_customer_id).await;
         }
     }
@@ -555,7 +570,7 @@ pub async fn record_stripe_meter_event_if_any(
     if !stripe::stripe_enabled() {
         return;
     }
-    let api_key_hash = accounts::api_key_hash(api_key).to_string();
+    let api_key_hash = crate::utils::parse_with_hash::api_key_hash(api_key).to_string();
     let Ok(Some(stripe_customer_id)) = lookup_data::get_stripe_customer_id(&api_key_hash).await
     else {
         return;

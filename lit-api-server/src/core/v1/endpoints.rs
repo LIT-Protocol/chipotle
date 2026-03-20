@@ -124,17 +124,6 @@ async fn create_wallet(
     }
 }
 
-#[allow(dead_code)]
-#[openapi(tag = "Signing")]
-#[post("/sign_with_pkp", format = "json", data = "<sign_request>")]
-async fn sign_with_pkp(
-    sign_request: Json<SignWithPKPRequest>,
-) -> OpenApiResponse<SignWithPkpResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(core_features::sign_with_pkp(sign_request).await).into(),
-    }
-}
-
 #[openapi(tag = "Actions")]
 #[post("/lit_action", format = "json", data = "<lit_action_request>")]
 #[tracing::instrument(name = "endpoint::lit_action", skip_all, parent = &request_span.span)]

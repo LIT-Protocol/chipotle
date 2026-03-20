@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bin = args.first().map(|s| s.as_str()).unwrap_or("deploy");
     let usage = || {
         eprintln!(
-            "Usage: {} --action=<action> --network=<network> --abifolder=<abifolder> [--secret=<secret>] [--address=<address>]",
+            "Usage: {} --action=<action> --network=<network> --abifolder=<abifolder> [--secret=<secret>] [--address=<address>] [--rpc_url=<rpc_url>]",
             bin
         );
         eprintln!("  --action    deploy or update");
@@ -61,6 +61,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let (rpc_url, chain_id) = get_network_and_chain_id(network.as_str());
+
+    let rpc_url  = match named.get("rpc_url") {
+        Some(r) => r,
+        None => rpc_url,
+    };
 
     let abis_folder = match named.get("abifolder") {
         Some(f) => f.trim_end_matches('/').to_string(),
