@@ -114,6 +114,16 @@ pub async fn send_transaction(
     signer_address: H160,
     client: Arc<SigningClient>,
 ) -> Result<bool> {
+    // Ensure that the externally provided client matches the client embedded in the
+    // ContractCall. This prevents accidental mismatches that could cause nonce
+    // resynchronization to use a different provider/signer than the one used to
+    // construct `function_call`.
+    if !std::sync::Arc::ptr_eq(&client, &function_call.client) {
+        signer_pool.release(signer_address).await?;
+        return Err(anyhow::anyhow!(
+            "send_transaction called with a client that does not match function_call.client"
+        ));
+    }
     // First attempt.  The Ok arm returns early so the PendingTransaction's borrow of
     // `function_call` is fully consumed before we ever reach the nonce-resync path below;
     // this lets the borrow checker accept the later mutable borrow of `function_call.tx`.
