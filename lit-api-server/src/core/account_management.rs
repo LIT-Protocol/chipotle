@@ -83,10 +83,21 @@ pub async fn new_account(
     )
     .await?;
 
-    // Best-effort: register the customer email in Stripe (does not fail account creation).
+    // Best-effort: eagerly create the Stripe customer (with $0 balance) and set the email
+    // if provided.  Neither failure should prevent account creation.
     if let Some(stripe) = stripe_state {
         let wallet_hex = bytes_to_0x_hex(wallet_address.as_bytes());
-        crate::stripe::register_customer_email(&wallet_hex, &email, &stripe).await;
+        match crate::stripe::get_customer_by_wallet(&wallet_hex, &stripe).await {
+            Ok(customer_id) => {
+                if !email.trim().is_empty() {
+                    let _ = crate::stripe::set_customer_email(&customer_id, email.trim(), &stripe)
+                        .await;
+                }
+            }
+            Err(e) => {
+                tracing::warn!("stripe: failed to create customer for new account: {e}");
+            }
+        }
     }
 
     Ok(NewAccountResponse {

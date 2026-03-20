@@ -114,7 +114,6 @@ pub fn api_key_to_wallet_address(api_key: &str) -> Result<String> {
     Ok(format!("{:?}", wallet.address()))
 }
 
-
 /// Find the Stripe customer for this wallet address, creating one if none exists.
 pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -> Result<String> {
     // Search by metadata.
@@ -146,7 +145,6 @@ pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -
         .ok_or_else(|| anyhow::anyhow!("Stripe: missing customer id"))?;
     Ok(id.to_string())
 }
-
 
 /// Return the current credit balance in cents (≤ 0 means credits available; the Stripe
 /// balance field is negative when the customer has a credit).
@@ -313,6 +311,17 @@ pub async fn confirm_payment_and_credit(
     Ok(())
 }
 
+/// Set (or update) the email on an existing Stripe customer.
+pub async fn set_customer_email(customer_id: &str, email: &str, state: &StripeState) -> Result<()> {
+    stripe_post(
+        state,
+        &format!("customers/{customer_id}"),
+        &[("email", email.trim())],
+    )
+    .await?;
+    Ok(())
+}
+
 /// Best-effort: set the customer's email in Stripe.  Never fails the caller.
 pub async fn register_customer_email(wallet_address: &str, email: &str, state: &StripeState) {
     if email.trim().is_empty() {
@@ -321,12 +330,7 @@ pub async fn register_customer_email(wallet_address: &str, email: &str, state: &
     let Ok(customer_id) = get_customer_by_wallet(wallet_address, state).await else {
         return;
     };
-    let _ = stripe_post(
-        state,
-        &format!("customers/{customer_id}"),
-        &[("email", email.trim())],
-    )
-    .await;
+    let _ = set_customer_email(&customer_id, email.trim(), state).await;
 }
 
 /// Format cents as a display string, e.g. 500 → "$5.00".
