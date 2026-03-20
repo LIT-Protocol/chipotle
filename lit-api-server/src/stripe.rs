@@ -132,9 +132,8 @@ pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -
         return Ok(id.to_string());
     };
 
-    // Not found 
+    // Not found
     Err(anyhow::anyhow!("Stripe customer not found"))
-
 }
 
 /// Return the current credit balance in cents (≤ 0 means credits available; the Stripe
