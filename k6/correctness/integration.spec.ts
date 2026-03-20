@@ -148,7 +148,29 @@ export default function (data: IntegrationSetupData) {
   }
   const groupId = groups[groups.length - 1].id; // use the most recently created group
 
-  // ── 8. addAction + addActionToGroup ──────────────────────────────────────
+  // ── 8. updateGroup — called while group is empty so the full-replace is safe ───
+  const updateGroupRes = client.updateGroup(
+    {
+      group_id: parseInt(groupId),
+      name: "k6-test-group-updated",
+      description: "Updated integration test group",
+      pkp_ids_permitted: [],
+      cid_hashes_permitted: [],
+    },
+    authHeaders,
+  );
+  if (!assertOk("updateGroup", "POST /update_group", updateGroupRes)) return;
+  checkAndLog(updateGroupRes.response, {
+    "updateGroup success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+  }, "updateGroup");
+
+  // ── 9. addAction + addActionToGroup ──────────────────────────────────────
   const addActionMetaRes = client.addAction(
     { name: "hello-world", description: "Hello World lit action" },
     authHeaders,
@@ -179,7 +201,7 @@ export default function (data: IntegrationSetupData) {
     },
   }, "addActionToGroup");
 
-  // ── 9. listActions ───────────────────────────────────────────────────────
+  // ── 10. listActions ──────────────────────────────────────────────────────
   const listActionsRes = client.listActions(
     { group_id: parseInt(groupId), page_number: 0, page_size: 10 },
     authHeaders,
@@ -194,7 +216,6 @@ export default function (data: IntegrationSetupData) {
       }
     },
   }, "listActions");
-
   // ── 10. addPkpToGroup ─────────────────────────────────────────────────────
   const addPkpRes = client.addPkpToGroup(
     { group_id: parseInt(groupId), pkp_id: walletAddress },
@@ -302,29 +323,7 @@ export default function (data: IntegrationSetupData) {
     },
   }, "listApiKeys");
 
-  // ── 15. updateGroup ───────────────────────────────────────────────────────
-  const updateGroupRes = client.updateGroup(
-    {
-      group_id: parseInt(groupId),
-      name: "k6-test-group-updated",
-      description: "Updated integration test group",
-      pkp_ids_permitted: [],
-      cid_hashes_permitted: [],
-    },
-    authHeaders,
-  );
-  if (!assertOk("updateGroup", "POST /update_group", updateGroupRes)) return;
-  checkAndLog(updateGroupRes.response, {
-    "updateGroup success": (r) => {
-      try {
-        return JSON.parse(r.body as string).success === true;
-      } catch {
-        return false;
-      }
-    },
-  }, "updateGroup");
-
-  // ── 16. updateActionMetadata ──────────────────────────────────────────────
+  // ── 15. updateActionMetadata ──────────────────────────────────────────────
   const updateActionRes = client.updateActionMetadata(
     {
       group_id: parseInt(groupId),
