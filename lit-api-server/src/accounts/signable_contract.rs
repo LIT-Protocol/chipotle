@@ -140,11 +140,27 @@ pub async fn send_transaction(
     };
 
     // Only nonce-too-low is worth retrying; anything else is a hard failure.
-    if !first_err
-        .to_string()
-        .to_lowercase()
-        .contains("nonce too low")
-    {
+    // Walk the error chain and look for known nonce-related messages in a centralized way.
+    let is_nonce_too_low = |err: &dyn std::error::Error| -> bool {
+        let mut current = err;
+        loop {
+            let msg = current.to_string();
+            if msg.contains("nonce too low")
+                || msg.contains("transaction nonce is too low")
+                || msg.contains("replacement transaction underpriced")
+            {
+                return true;
+            }
+            if let Some(source) = current.source() {
+                current = source;
+            } else {
+                break;
+            }
+        }
+        false
+    };
+
+    if !is_nonce_too_low(&first_err) {
         signer_pool.release(signer_address).await?;
         return Err(anyhow::anyhow!("Failed to send transaction: {first_err}"));
     }
