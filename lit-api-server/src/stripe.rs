@@ -115,7 +115,7 @@ pub fn api_key_to_wallet_address(api_key: &str) -> Result<String> {
 }
 
 /// Find the Stripe customer for this wallet address, creating one if none exists.
-pub async fn get_or_create_customer(wallet_address: &str, state: &StripeState) -> Result<String> {
+pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -> Result<String> {
     // Search by metadata.
     let query = format!("metadata['wallet_address']:'{wallet_address}'");
     let resp = stripe_get(
@@ -130,26 +130,11 @@ pub async fn get_or_create_customer(wallet_address: &str, state: &StripeState) -
         && let Some(id) = first.get("id").and_then(|i| i.as_str())
     {
         return Ok(id.to_string());
-    }
+    };
 
-    // Not found — create.
-    let resp = stripe_post(
-        state,
-        "customers",
-        &[
-            ("metadata[wallet_address]", wallet_address),
-            (
-                "description",
-                &format!("Lit Express Node — {wallet_address}"),
-            ),
-        ],
-    )
-    .await?;
+    // Not found 
+    Err(anyhow::anyhow!("Stripe customer not found"))
 
-    resp.get("id")
-        .and_then(|i| i.as_str())
-        .map(|s| s.to_string())
-        .ok_or_else(|| anyhow::anyhow!("Stripe customer create: missing id"))
 }
 
 /// Return the current credit balance in cents (≤ 0 means credits available; the Stripe
@@ -164,7 +149,7 @@ pub async fn get_credit_balance(customer_id: &str, state: &StripeState) -> Resul
 /// Returns `Err` if the balance would go positive (insufficient credits).
 async fn charge(api_key: &str, cost_cents: i64, state: &StripeState) -> Result<()> {
     let wallet = api_key_to_wallet_address(api_key)?;
-    let customer_id = get_or_create_customer(&wallet, state).await?;
+    let customer_id = get_customer_by_wallet(&wallet, state).await?;
     let balance = get_credit_balance(&customer_id, state).await?;
 
     if balance + cost_cents > 0 {
@@ -196,12 +181,10 @@ pub async fn charge_management(api_key: &str, state: &StripeState) -> Result<()>
     charge(api_key, COST_MANAGEMENT_CENTS, state).await
 }
 
-
 /// Charge $0.01 for a Lit Action execution.
 pub async fn charge_lit_action(api_key: &str, state: &StripeState) -> Result<()> {
     charge(api_key, COST_LIT_ACTION_CENTS, state).await
 }
-
 
 /// Create a PaymentIntent for `amount_cents`.  Returns `(client_secret, payment_intent_id)`.
 pub async fn create_payment_intent(
@@ -217,7 +200,7 @@ pub async fn create_payment_intent(
         );
     }
 
-    let customer_id = get_or_create_customer(wallet_address, state).await?;
+    let customer_id = get_customer_by_wallet(wallet_address, state).await?;
     let amount_str = amount_cents.to_string();
 
     let resp = stripe_post(
@@ -285,7 +268,7 @@ pub async fn confirm_payment_and_credit(
 
     // Ownership check: the PaymentIntent's customer must match the caller's customer.
     let pi_customer = resp.get("customer").and_then(|c| c.as_str()).unwrap_or("");
-    let customer_id = get_or_create_customer(wallet_address, state).await?;
+    let customer_id = get_customer_by_wallet(wallet_address, state).await?;
     if pi_customer != customer_id {
         anyhow::bail!("PaymentIntent {payment_intent_id} does not belong to this account");
     }
@@ -324,7 +307,7 @@ pub async fn register_customer_email(wallet_address: &str, email: &str, state: &
     if email.trim().is_empty() {
         return;
     }
-    let Ok(customer_id) = get_or_create_customer(wallet_address, state).await else {
+    let Ok(customer_id) = get_customer_by_wallet(wallet_address, state).await else {
         return;
     };
     let _ = stripe_post(

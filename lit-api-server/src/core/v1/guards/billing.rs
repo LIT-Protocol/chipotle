@@ -104,7 +104,7 @@ impl<'r> OpenApiFromRequest<'r> for BilledManagementApiKey {
 
 // ─── BilledLitActionApiKey ────────────────────────────────────────────────────
 
-/// Guards a lit-action endpoint ($0.05 per call).
+/// Guards a lit-action endpoint ($0.01 per call).
 pub struct BilledLitActionApiKey(pub String);
 
 #[rocket::async_trait]

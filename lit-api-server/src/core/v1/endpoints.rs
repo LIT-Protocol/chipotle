@@ -487,7 +487,7 @@ async fn update_usage_api_key_metadata(
     }
 }
 
-// ─── Billed Lit Action endpoint ($0.05) ───────────────────────────────────────
+// ─── Billed Lit Action endpoint ($0.01) ───────────────────────────────────────
 
 #[openapi(tag = "Actions")]
 #[post("/lit_action", format = "json", data = "<lit_action_request>")]
@@ -565,16 +565,13 @@ async fn billing_balance_impl(
     let wallet = stripe::api_key_to_wallet_address(api_key)
         .map_err(|e| ApiStatus::bad_request(e, "Invalid API key"))?;
     // Look up an existing Stripe customer without creating one.
-    let maybe_customer_id = stripe::get_customer_by_wallet(&wallet, stripe)
+    let customer_id = stripe::get_customer_by_wallet(&wallet, stripe)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "Stripe error"))?;
-    let balance = if let Some(customer_id) = maybe_customer_id {
+    let balance = 
         stripe::get_credit_balance(&customer_id, stripe)
             .await
-            .map_err(|e| ApiStatus::internal_server_error(e, "Stripe error"))?
-    } else {
-        0
-    };
+            .map_err(|e| ApiStatus::internal_server_error(e, "Stripe error"))?;
     let credits = -balance; // positive = available credit cents
     let display = if credits <= 0 {
         "No credits".to_string()
