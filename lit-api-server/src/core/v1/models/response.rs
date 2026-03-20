@@ -91,6 +91,28 @@ pub struct ApiKeyItem {
     pub can_execute_in_groups: Vec<u64>,
 }
 
+/// GET /billing/stripe_config — returns the Stripe publishable key for Stripe.js.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct StripeConfigResponse {
+    pub publishable_key: String,
+}
+
+/// GET /billing/balance — current credit balance for the authenticated API key.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct BillingBalanceResponse {
+    /// Balance in cents.  Negative means credits are available; zero means exhausted.
+    pub balance_cents: i64,
+    /// Human-readable, e.g. "$5.00 credit".
+    pub balance_display: String,
+}
+
+/// POST /billing/create_payment_intent — client secret for Stripe.js confirmCardPayment.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CreatePaymentIntentResponse {
+    pub client_secret: String,
+    pub payment_intent_id: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct NodeChainConfigResponse {
     pub chain_name: String,

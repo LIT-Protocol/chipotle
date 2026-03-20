@@ -29,10 +29,15 @@ function getBaseUrl() {
 function updateAuthUI() {
   const hasKey = !!getApiKey();
   document.body.classList.toggle('has-api-key', hasKey);
+  const balanceEl = document.getElementById('billing-balance-display');
+  const addFundsBtn = document.getElementById('btn-add-funds');
+  if (balanceEl) balanceEl.style.display = hasKey ? '' : 'none';
+  if (addFundsBtn) addFundsBtn.style.display = hasKey ? '' : 'none';
   if (hasKey) {
     refreshOverviewAccount();
     updateStatCards();
     preloadAllTables();
+    loadBillingBalance();
   }
 }
 
@@ -152,6 +157,7 @@ function initLogin() {
   document.getElementById('btn-create-account').addEventListener('click', async () => {
     const name = document.getElementById('new-account-name').value.trim();
     const desc = document.getElementById('new-account-desc').value.trim();
+    const email = document.getElementById('new-account-email').value.trim();
     hideStatus('login-status');
     if (!name) {
       showStatus('login-status', 'Enter an account name.', 'error');
@@ -165,7 +171,7 @@ function initLogin() {
         'Creating a new Lit Express account and returning an API key.'
       );
       const client = await getClient();
-      const res = await client.newAccount({ accountName: name, accountDescription: desc });
+      const res = await client.newAccount({ accountName: name, accountDescription: desc, email: email || undefined });
       setApiKey(res.api_key);
       showNewAccountBanner(res.api_key);
       document.getElementById('new-account-name').value = '';
@@ -193,6 +199,112 @@ function keyPreview(key) {
 
 function refreshOverviewAccount() {
   // Overview no longer displays API key or status; kept for any future use.
+}
+
+// ----- Billing -----
+async function loadBillingBalance() {
+  const apiKey = getApiKey();
+  if (!apiKey) return;
+  const el = document.getElementById('billing-balance-display');
+  if (!el) return;
+  try {
+    const client = await getClient();
+    const data = await client.getBillingBalance(apiKey);
+    el.textContent = data.balance_display || '';
+  } catch (_) {
+    el.textContent = '';
+  }
+}
+
+// Stripe card element singleton
+let _stripe = null;
+let _stripeCard = null;
+
+async function openAddFundsModal() {
+  const overlay = document.getElementById('billing-modal-overlay');
+  if (!overlay) return;
+  overlay.setAttribute('aria-hidden', 'false');
+  overlay.style.display = 'flex';
+
+  const statusEl = document.getElementById('billing-modal-status');
+  if (statusEl) { statusEl.style.display = 'none'; }
+
+  // Initialise Stripe.js if not already done
+  if (!_stripe) {
+    try {
+      const client = await getClient();
+      const cfg = await client.getStripeConfig();
+      _stripe = Stripe(cfg.publishable_key); // eslint-disable-line no-undef
+      const elements = _stripe.elements();
+      _stripeCard = elements.create('card');
+      _stripeCard.mount('#stripe-card-element');
+    } catch (e) {
+      if (statusEl) {
+        statusEl.textContent = 'Billing not available: ' + (e && e.message ? e.message : String(e));
+        statusEl.className = 'status error';
+        statusEl.style.display = 'block';
+      }
+      const payBtn = document.getElementById('billing-pay-btn');
+      if (payBtn) payBtn.disabled = true;
+    }
+  }
+}
+
+function closeBillingModal() {
+  const overlay = document.getElementById('billing-modal-overlay');
+  if (overlay) {
+    overlay.setAttribute('aria-hidden', 'true');
+    overlay.style.display = '';
+  }
+}
+
+function initBilling() {
+  const addFundsBtn = document.getElementById('btn-add-funds');
+  const closeBtn = document.getElementById('billing-modal-close-btn');
+  const cancelBtn = document.getElementById('billing-cancel-btn');
+  const payBtn = document.getElementById('billing-pay-btn');
+
+  if (addFundsBtn) addFundsBtn.addEventListener('click', openAddFundsModal);
+  if (closeBtn) closeBtn.addEventListener('click', closeBillingModal);
+  if (cancelBtn) cancelBtn.addEventListener('click', closeBillingModal);
+
+  if (payBtn) {
+    payBtn.addEventListener('click', async () => {
+      const apiKey = getApiKey();
+      if (!apiKey || !_stripe || !_stripeCard) return;
+
+      const amountCents = parseInt(document.getElementById('billing-amount').value, 10);
+      const statusEl = document.getElementById('billing-modal-status');
+
+      payBtn.disabled = true;
+      if (statusEl) { statusEl.style.display = 'none'; }
+
+      try {
+        const client = await getClient();
+        const intent = await client.createPaymentIntent(apiKey, amountCents);
+
+        const result = await _stripe.confirmCardPayment(intent.client_secret, {
+          payment_method: { card: _stripeCard },
+        });
+
+        if (result.error) {
+          throw new Error(result.error.message);
+        }
+
+        await client.confirmPayment(apiKey, intent.payment_intent_id);
+        closeBillingModal();
+        await loadBillingBalance();
+      } catch (e) {
+        if (statusEl) {
+          statusEl.textContent = 'Payment failed: ' + (e && e.message ? e.message : String(e));
+          statusEl.className = 'status error';
+          statusEl.style.display = 'block';
+        }
+      } finally {
+        payBtn.disabled = false;
+      }
+    });
+  }
 }
 
 function showNewAccountBanner(apiKey) {
@@ -1432,6 +1544,7 @@ function init() {
   initActionRunner(); // async; CodeJar loads lazily on first use
   initSidebar();
   initHeader();
+  initBilling();
 }
 
 init();

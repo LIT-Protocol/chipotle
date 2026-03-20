@@ -18,6 +18,7 @@ use crate::utils::generate_unique_derivation_path;
 use crate::utils::parse_with_hash::{
     hex_array_to_h160_array, hex_array_to_u256_array, ipfs_cid_to_u256, string_group_id_to_u256,
 };
+use crate::stripe::StripeState;
 use crate::{accounts, dstack};
 use elliptic_curve::group::GroupEncoding;
 use ethers::signers::{LocalWallet, Signer};
@@ -49,10 +50,12 @@ async fn create_new_wallet() -> Result<(String, H160, [u8; 32], U256), ApiStatus
 
 pub async fn new_account(
     signer_pool: Arc<SignerPool>,
+    stripe_state: Option<Arc<StripeState>>,
     new_account_request: Json<NewAccountRequest>,
 ) -> Result<NewAccountResponse, ApiStatus> {
     let account_name = new_account_request.account_name.clone();
     let account_description = new_account_request.account_description.clone();
+    let email = new_account_request.email.clone().unwrap_or_default();
 
     let (_public_key, wallet_address, secret, derivation_path) = create_new_wallet().await?;
     let api_key = base64_light::base64_encode_bytes(&secret);
@@ -79,6 +82,12 @@ pub async fn new_account(
         "Account Master Wallet",
     )
     .await?;
+
+    // Best-effort: register the customer email in Stripe (does not fail account creation).
+    if let Some(stripe) = stripe_state {
+        let wallet_hex = bytes_to_0x_hex(wallet_address.as_bytes());
+        crate::stripe::register_customer_email(&wallet_hex, &email, &stripe).await;
+    }
 
     Ok(NewAccountResponse {
         api_key: api_key.to_string(),

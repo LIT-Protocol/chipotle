@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 pub struct NewAccountRequest {
     pub account_name: String,
     pub account_description: String,
+    /// Optional email address — forwarded to Stripe for the customer record.  Not stored on-chain.
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 /// Request for add_group. permitted_actions and pkps are keccak256 hashes as hex strings (with or without 0x). API key via header.
@@ -138,6 +141,19 @@ pub struct RemoveGroupRequest {
 pub struct LitActionRequest {
     pub code: String,
     pub js_params: Option<serde_json::Value>,
+}
+
+/// POST /billing/create_payment_intent
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CreatePaymentIntentRequest {
+    /// Amount to charge in US cents (minimum 500 = $5.00).
+    pub amount_cents: i64,
+}
+
+/// POST /billing/confirm_payment
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ConfirmPaymentRequest {
+    pub payment_intent_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
