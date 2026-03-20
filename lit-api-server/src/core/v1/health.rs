@@ -56,7 +56,7 @@ async fn health(
     };
 
     let cpu_overloaded = cpu_monitor.is_overloaded();
-    let load_avg_1m = cpu_monitor.load_avg_1m();
+    let load_avg_1m = read_1m_load_avg().await.unwrap_or(0.0);
 
     let healthy = lit_actions_reachable && !cpu_overloaded;
 
@@ -75,6 +75,16 @@ async fn health(
             load_avg_1m,
         }),
     )
+}
+
+async fn read_1m_load_avg() -> Option<f64> {
+    tokio::fs::read_to_string("/proc/loadavg")
+        .await
+        .ok()?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
 }
 
 #[cfg(test)]
