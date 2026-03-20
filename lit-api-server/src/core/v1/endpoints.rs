@@ -487,7 +487,7 @@ async fn update_usage_api_key_metadata(
     }
 }
 
-// ─── Billed Lit Action endpoint ($0.05) ───────────────────────────────────────
+// ─── Billed Lit Action endpoint ($0.01) ───────────────────────────────────────
 
 #[openapi(tag = "Actions")]
 #[post("/lit_action", format = "json", data = "<lit_action_request>")]
