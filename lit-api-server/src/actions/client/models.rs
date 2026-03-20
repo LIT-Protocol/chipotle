@@ -61,4 +61,6 @@ pub struct ExecutionState {
     pub broadcast_and_collect_count: u32,
     #[serde(skip)]
     pub ops_count: u32,
+    #[serde(skip)]
+    pub wallet_permission_cache: HashMap<String, bool>,
 }

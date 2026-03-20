@@ -24,7 +24,7 @@ contract WritesFacet {
     ) public {
         SecurityLib.revertIfNotApiPayerOrOwner(msg.sender); // for now, the UI is the only one that can create accounts
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        if (s.allApiKeyHashes[apiKeyHash] != 0) {
+        if (s.allApiKeyHashesToMaster[apiKeyHash] != 0) {
             revert AppStorage.AccountAlreadyExists(apiKeyHash);
         }
         AppStorage.Account storage account = s.accounts[apiKeyHash];
@@ -39,7 +39,7 @@ contract WritesFacet {
         account.accountApiKey.apiKeyHash = apiKeyHash;
         account.accountApiKey.expiration = block.timestamp + 365 days * 10;
         account.accountApiKey.balance = 0;
-        s.allApiKeyHashes[apiKeyHash] = apiKeyHash;
+        s.allApiKeyHashesToMaster[apiKeyHash] = apiKeyHash;
         s.accountCount++;
         s.indexToAccountHash[s.accountCount] = apiKeyHash;
     }
@@ -61,7 +61,9 @@ contract WritesFacet {
     ) public {
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[accountApiKeyHash];
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashesToMaster[
+            accountApiKeyHash
+        ];
         AppStorage.UsageApiKey storage apiKeyStorage = s
             .accounts[masterAccountApiKeyHash]
             .usageApiKeys[usageApiKeyHash];
@@ -71,6 +73,12 @@ contract WritesFacet {
         apiKeyStorage.createGroups = createGroups;
         apiKeyStorage.deleteGroups = deleteGroups;
         apiKeyStorage.createPKPs = createPKPs;
+
+        // clear and reload - this isn't super efficient, but should be fine for most use cases.
+        apiKeyStorage.manageIPFSIdsInGroups.clear();
+        apiKeyStorage.addPkpToGroups.clear();
+        apiKeyStorage.removePkpFromGroups.clear();
+        apiKeyStorage.executeInGroups.clear();
         for (uint256 i = 0; i < manageIPFSIdsInGroups.length; i++) {
             apiKeyStorage.manageIPFSIdsInGroups.add(manageIPFSIdsInGroups[i]);
         }
@@ -89,7 +97,7 @@ contract WritesFacet {
         s.accounts[masterAccountApiKeyHash].usageApiKeysList.add(
             usageApiKeyHash
         );
-        s.allApiKeyHashes[usageApiKeyHash] = masterAccountApiKeyHash;
+        s.allApiKeyHashesToMaster[usageApiKeyHash] = masterAccountApiKeyHash;
     }
 
     function addGroup(
@@ -121,6 +129,50 @@ contract WritesFacet {
         uint256 accountApiKeyHash,
         uint256 groupId,
         string memory name,
+        string memory description,
+        uint256[] memory cidHashes,
+        address[] memory pkpIds
+    ) public {
+        if (cidHashes.length > 10) {
+            revert AppStorage.InvalidRequest(
+                "cidHashes must be less than 10 items to bulk update"
+            );
+        }
+        if (pkpIds.length > 10) {
+            revert AppStorage.InvalidRequest(
+                "pkpIds must be less than 10 items to bulk update"
+            );
+        }
+
+        SecurityLib.revertIfGroupDoesNotExist(
+            accountApiKeyHash,
+            groupId,
+            msg.sender
+        );
+        SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        AppStorage.Group storage group = s.accounts[accountApiKeyHash].groups[
+            groupId
+        ];
+        group.metadata.name = name;
+        group.metadata.description = description;
+
+        // clear and reload - this isn't super efficient.
+        group.cidHash.clear();
+        group.pkpId.clear();
+        for (uint256 i = 0; i < cidHashes.length; i++) {
+            group.cidHash.add(cidHashes[i]);
+        }
+        
+        for (uint256 i = 0; i < pkpIds.length; i++) {
+            group.pkpId.add(pkpIds[i]);
+        }
+    }
+
+    function updateGroupMetadata(
+        uint256 accountApiKeyHash,
+        uint256 groupId,
+        string memory name,
         string memory description
     ) public {
         SecurityLib.revertIfGroupDoesNotExist(
@@ -135,6 +187,22 @@ contract WritesFacet {
         ];
         group.metadata.name = name;
         group.metadata.description = description;
+    }
+
+    function removeGroup(
+        uint256 accountApiKeyHash,
+        uint256 groupId
+    ) public {
+        SecurityLib.revertIfGroupDoesNotExist(
+            accountApiKeyHash,
+            groupId,
+            msg.sender
+        );
+        SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        AppStorage.Account storage account = s.accounts[accountApiKeyHash];
+        account.groupList.remove(groupId);
+        delete account.groups[groupId];
     }
 
     function addPkpToGroup(
@@ -152,12 +220,26 @@ contract WritesFacet {
         s.accounts[accountApiKeyHash].groups[groupId].pkpId.add(pkpId);
     }
 
+    function addAction(
+        uint256 accountApiKeyHash,
+        string memory name,
+        string memory description
+    ) public {
+        SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
+        SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        AppStorage.Account storage account = s.accounts[accountApiKeyHash];
+        account.actionCount++;
+        uint256 actionId = account.actionCount;
+        account.actionMetadata[actionId].id = actionId;
+        account.actionMetadata[actionId].name = name;
+        account.actionMetadata[actionId].description = description;
+    }
+
     function addActionToGroup(
         uint256 accountApiKeyHash,
         uint256 groupId,
-        uint256 action,
-        string memory name,
-        string memory description
+        uint256 action
     ) public {
         SecurityLib.revertIfGroupDoesNotExist(
             accountApiKeyHash,
@@ -166,12 +248,7 @@ contract WritesFacet {
         );
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        AppStorage.Account storage account = s.accounts[accountApiKeyHash];
-        account.groups[groupId].cidHash.add(action);
-        account.actionMetadata[action].id = action;
-        account.actionMetadata[action].name = name;
-        account.actionMetadata[action].description = description;
-        account.actionCount++;
+        s.accounts[accountApiKeyHash].groups[groupId].cidHash.add(action);
     }
 
     function updateActionMetadata(
@@ -270,7 +347,7 @@ contract WritesFacet {
         AppStorage.Account storage account = s.accounts[accountApiKeyHash];
         account.usageApiKeysList.remove(usageApiKeyHash);
         delete account.usageApiKeys[usageApiKeyHash];
-        delete s.allApiKeyHashes[usageApiKeyHash];
+        delete s.allApiKeyHashesToMaster[usageApiKeyHash];
     }
 
     function registerWalletDerivation(
