@@ -156,6 +156,7 @@ async fn main() -> Result<(), rocket::Error> {
             "/",
             routes![openapi_json, openapi_json_redirect, swagger_ui_redirect],
         )
+        .mount("/", core::v1::health::routes())
         .mount("/core/v1/", core_routes)
         .mount(
             "/core/v1/swagger-ui/",
