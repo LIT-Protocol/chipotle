@@ -13,9 +13,9 @@
         "tab": "Building on Lit Chipotle",
         "pages": [
           "index",
-          "pricing",
           "dashboard",
           "api_direct",
+          "pricing",
           {
             "group": "Lit Actions",
             "pages": [
