@@ -98,12 +98,6 @@
                 <span class="account-dropdown-chevron" aria-hidden="true">▾</span>
               </button>
               <div class="account-dropdown-panel" id="account-dropdown-panel" role="menu" aria-hidden="true">
-                <div class="account-dropdown-item account-dropdown-api-key-row">
-                  <span class="account-dropdown-label">API key</span>
-                  <span class="account-dropdown-api-key-text mono" id="account-api-key-text">—</span>
-                  <button type="button" class="account-dropdown-copy" id="account-copy-btn" role="menuitem" title="Copy full API key">Copy</button>
-                </div>
-                <div class="account-dropdown-divider"></div>
                 <button type="button" class="account-dropdown-item account-dropdown-signout" id="account-signout-btn" role="menuitem">Sign out</button>
               </div>
             </div>
@@ -111,6 +105,18 @@
         </header>
 
         <div class="dashboard-content">
+          <!-- New account API key banner (shown once after account creation) -->
+          <div id="new-account-banner" class="new-account-banner" style="display:none;" role="alert" aria-live="assertive">
+            <div class="new-account-banner-body">
+              <strong>Account created.</strong> Save your API key now — it will not be shown again.
+              <div class="new-account-key-row">
+                <code id="new-account-key-text" class="new-account-key mono"></code>
+                <button type="button" id="new-account-copy-btn" class="btn btn-sm btn-outline">Copy</button>
+              </div>
+            </div>
+            <button type="button" id="new-account-dismiss-btn" class="new-account-dismiss" aria-label="Dismiss">&#x2715;</button>
+          </div>
+
           <!-- Stat cards -->
           <div class="stats-row">
             <div class="stat-card">
@@ -167,7 +173,7 @@
               <div class="card-body">
                 <div class="table-wrap">
                   <table class="data-table" id="usage-keys-table">
-                    <thead><tr><th>Name</th><th>Description</th><th>Expiration</th><th>Balance</th><th class="th-actions"></th></tr></thead>
+                    <thead><tr><th>Name</th><th>Description</th><th>Permissions</th><th>Expiration</th><th>Balance</th><th class="th-actions"></th></tr></thead>
                     <tbody id="usage-keys-tbody"></tbody>
                   </table>
                   <p id="usage-keys-empty" class="empty-state" style="display: none;">No usage API keys.</p>

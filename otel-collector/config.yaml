@@ -22,6 +22,26 @@ receivers:
         # collector via the otel-collector hostname on the compose bridge network.
         endpoint: 0.0.0.0:4317
 
+  # CVM host metrics — CPU, memory, disk I/O, network, and load averages.
+  # root_path tells the receiver to read /proc and /sys from the host
+  # bind-mounts rather than the container's own filesystem.
+  # NOTE: the filesystem scraper (disk *space*) is omitted because it needs
+  # statfs() on real mount points, which would require mounting the entire
+  # host root filesystem into the container. The disk scraper still reports
+  # I/O throughput via /proc/diskstats.
+  hostmetrics:
+    root_path: /host
+    collection_interval: 30s
+    scrapers:
+      cpu:
+      memory:
+      disk:
+        exclude:
+          devices: ["loop.*", "fd.*", "sr.*"]
+          match_type: regexp
+      network:
+      load:
+
 processors:
   memory_limiter:
     check_interval: 1s
@@ -70,7 +90,7 @@ service:
       exporters: [googlecloud]
 
     metrics:
-      receivers: [otlp]
+      receivers: [otlp, hostmetrics]
       processors: [memory_limiter, resource, batch]
       exporters: [googlecloud]
 

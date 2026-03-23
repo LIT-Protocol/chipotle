@@ -34,6 +34,13 @@ library AppStorage {
     error OnlyApiPayerOrPricingOperator(address caller);
     error OnlyApiPayerOrOwner(address caller);
     error NotMasterAccount(uint256 apiKeyHash);
+    error NotAllowedToCreateGroup(uint256 apiKeyHash);
+    error NotAllowedToDeleteGroup(uint256 apiKeyHash);
+    error NotAllowedToCreatePkp(uint256 apiKeyHash);
+    error NotAllowedToAddPkpToGroup(uint256 apiKeyHash, uint256 groupId);
+    error NotAllowedToRemovePkpFromGroup(uint256 apiKeyHash, uint256 groupId);
+    error NotAllowedToManageIPFSIdsInGroup(uint256 apiKeyHash, uint256 groupId);
+    error InvalidRequest(string message);
 
     struct PkpData {
         uint256 id; // keccak256 of the pkp id - this is used to prove existence of the struct.
@@ -96,7 +103,7 @@ library AppStorage {
     struct AccountConfigStorage {
         mapping(uint256 => Account) accounts; // mapping from a given api key to it's config
         mapping(uint256 => uint256) indexToAccountHash; // mapping from an index to an account hash
-        mapping(uint256 => uint256) allApiKeyHashes; // mapping from any api key has to it's master account api key hash
+        mapping(uint256 => uint256) allApiKeyHashesToMaster; // mapping from any api key has to it's master account api key hash
         mapping(uint256 => address) allPkpIds; // mapping from a counter to a pkp id, allowing us to get a list of all pkp ids ever generated
         mapping(uint256 => uint256) pricing; // mapping from a pricing item id to it's price
         EnumerableSet.AddressSet api_payers; // set of accounts that pays for state mutation made by api calls, optionally mutates state on behalf of an api key holder.
@@ -128,7 +135,7 @@ library AppStorage {
         address sender
     ) internal view returns (bool) {
         AccountConfigStorage storage s = getStorage();
-        uint256 masterAccountApiKeyHash = s.allApiKeyHashes[apiKeyHash];
+        uint256 masterAccountApiKeyHash = s.allApiKeyHashesToMaster[apiKeyHash];
         if (masterAccountApiKeyHash == 0) {
             return false;
         }

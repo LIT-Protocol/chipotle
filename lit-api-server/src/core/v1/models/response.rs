@@ -76,11 +76,19 @@ pub struct WalletItem {
 /// One item from list_api_keys (AccountConfig.sol UsageApiKey).
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ApiKeyItem {
-    pub id: String, // hash of the item, as stored on chain.
+    pub id: String,           // auto-increment metadata id, as stored on chain.
+    pub api_key_hash: String, // keccak256 hash of the usage API key string (0x-prefixed hex).
     pub name: String,
     pub description: String,
     pub expiration: String,
     pub balance: u64,
+    pub can_create_groups: bool,
+    pub can_delete_groups: bool,
+    pub can_create_pkps: bool,
+    pub can_manage_ipfs_ids_in_groups: Vec<u64>,
+    pub can_add_pkp_to_groups: Vec<u64>,
+    pub can_remove_pkp_from_groups: Vec<u64>,
+    pub can_execute_in_groups: Vec<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

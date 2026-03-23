@@ -5,13 +5,15 @@ use crate::actions::grpc::GrpcClientPool;
 use crate::core::account_management;
 use crate::core::core_features;
 use crate::core::v1::guards::apikey::ApiKey;
+use crate::core::v1::guards::cpu_overload::CpuAvailable;
 use crate::core::v1::helpers::api_status::{ApiResult, ErrMessage};
 use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{
-    AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest, AddUsageApiKeyRequest,
-    LitActionRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemovePkpFromGroupRequest,
-    RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
-    UpdateUsageApiKeyMetadataRequest,
+    AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
+    AddUsageApiKeyRequest, LitActionRequest, NewAccountRequest, RemoveActionFromGroupRequest,
+    RemoveGroupRequest, RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest,
+    UpdateActionMetadataRequest, UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest,
+    UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::ApiKeyItem;
 use crate::core::v1::models::response::WalletItem;
@@ -39,10 +41,13 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         lit_action,
         get_lit_action_ipfs_id,
         add_group,
+        remove_group,
+        add_action,
         add_action_to_group,
         add_pkp_to_group,
         remove_pkp_from_group,
         add_usage_api_key,
+        update_usage_api_key,
         remove_usage_api_key,
         update_group,
         remove_action_from_group,
@@ -99,6 +104,7 @@ async fn create_wallet(
 #[post("/lit_action", format = "json", data = "<lit_action_request>")]
 #[tracing::instrument(name = "endpoint::lit_action", skip_all, parent = &request_span.span)]
 async fn lit_action(
+    _cpu: CpuAvailable,
     request_span: RequestSpan,
     api_key: ApiKey,
     grpc_client_pool: &State<GrpcClientPool<tonic::transport::Channel>>,
@@ -123,10 +129,11 @@ async fn lit_action(
 }
 
 #[openapi(tag = "Account Management")]
-#[get("/get_lit_action_ipfs_id/<code>")]
-async fn get_lit_action_ipfs_id(code: String) -> OpenApiResponse<String, ErrMessage> {
+#[post("/get_lit_action_ipfs_id", format = "json", data = "<code>")]
+async fn get_lit_action_ipfs_id(code: Json<String>) -> OpenApiResponse<String, ErrMessage> {
     OpenApiResponse {
-        response: ApiResult(account_management::get_lit_action_ipfs_id(code).await).into(),
+        response: ApiResult(account_management::get_lit_action_ipfs_id(code.into_inner()).await)
+            .into(),
     }
 }
 
@@ -140,6 +147,38 @@ async fn add_group(
     OpenApiResponse {
         response: ApiResult(
             account_management::add_group(signer_pool.inner().clone(), api_key.0.as_str(), req)
+                .await,
+        )
+        .into(),
+    }
+}
+
+#[openapi(tag = "Account Management")]
+#[post("/remove_group", format = "json", data = "<req>")]
+async fn remove_group(
+    signer_pool: &State<Arc<SignerPool>>,
+    api_key: ApiKey,
+    req: Json<RemoveGroupRequest>,
+) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(
+            account_management::remove_group(signer_pool.inner().clone(), api_key.0.as_str(), req)
+                .await,
+        )
+        .into(),
+    }
+}
+
+#[openapi(tag = "Account Management")]
+#[post("/add_action", format = "json", data = "<req>")]
+async fn add_action(
+    signer_pool: &State<Arc<SignerPool>>,
+    api_key: ApiKey,
+    req: Json<AddActionRequest>,
+) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(
+            account_management::add_action(signer_pool.inner().clone(), api_key.0.as_str(), req)
                 .await,
         )
         .into(),
@@ -236,6 +275,26 @@ async fn remove_usage_api_key(
     OpenApiResponse {
         response: ApiResult(
             account_management::remove_usage_api_key(
+                signer_pool.inner().clone(),
+                api_key.0.as_str(),
+                req,
+            )
+            .await,
+        )
+        .into(),
+    }
+}
+
+#[openapi(tag = "Account Management")]
+#[post("/update_usage_api_key", format = "json", data = "<req>")]
+async fn update_usage_api_key(
+    signer_pool: &State<Arc<SignerPool>>,
+    api_key: ApiKey,
+    req: Json<UpdateUsageApiKeyRequest>,
+) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(
+            account_management::update_usage_api_key(
                 signer_pool.inner().clone(),
                 api_key.0.as_str(),
                 req,
@@ -371,7 +430,7 @@ async fn list_wallets(
 #[get("/list_wallets_in_group?<group_id>&<page_number>&<page_size>")]
 async fn list_wallets_in_group(
     api_key: ApiKey,
-    group_id: String,
+    group_id: u64,
     page_number: u64,
     page_size: u64,
 ) -> OpenApiResponse<Vec<WalletItem>, ErrMessage> {
@@ -379,7 +438,7 @@ async fn list_wallets_in_group(
         response: ApiResult(
             account_management::list_wallets_in_group(
                 api_key.0.as_str(),
-                group_id.as_str(),
+                group_id,
                 page_number,
                 page_size,
             )

@@ -1,0 +1,102 @@
+---
+title: "Overview"
+description: "Lit Actions are immutable JavaScript programs stored on IPFS and executed by the Lit network. They can sign data, encrypt and decrypt secrets, and make arbitrary HTTP requests — all in a verifiable, trustless way."
+---
+
+## What is a Lit Action?
+
+Lit Actions are immutable JavaScript programs stored on IPFS and executed by the Lit network. Each action is identified by its IPFS CID, which serves as both its address and an immutable commitment to its code. Once published to IPFS, an action's behavior can never be changed.
+
+Actions are executed on-node and have access to a set of [SDK functions](/lit-actions/sdk) that let them:
+
+- **Sign data** using the private key of a Programmable Key Pair (PKP)
+- **Encrypt and decrypt** data using a symmetric key derived from a PKP
+- **Make HTTP requests** to external data sources (APIs, oracles, blockchains)
+- **Set a response** that is returned to the caller after execution
+
+Because actions run on the Lit network and results are signed by PKPs, the outputs they produce carry a cryptographic proof of their origin and integrity.
+
+## Programmable Key Pairs (PKPs)
+
+A Programmable Key Pair (PKP) is a wallet — an elliptic-curve key pair — managed by the Lit network. An account can hold many PKPs and organize them into groups alongside permitted IPFS actions.
+
+When a Lit Action executes, it can retrieve the private key of a PKP using `Lit.Actions.getPrivateKey({ pkpId })` and use it (via [ethers.js](https://docs.ethers.org/v5/)) to sign transactions, messages, or any arbitrary data.
+
+Which actions are permitted to use which PKPs is enforced **on-chain** through the `AccountConfig` contract and managed via the [Dashboard](https://dashboard.dev.litprotocol.com/dapps/dashboard/).
+
+## What is a Proof?
+
+When a Lit Action retrieves data from an external source — for example, a price feed, a weather API, or another blockchain — and signs the result with a PKP, that signed output is called a **proof**.
+
+A proof answers the question: *"How do I know this data is authentic?"*
+
+Traditionally, when you send a transaction on Ethereum you sign it with your private key to prove you authorized it. A Lit Action proof works the same way: the data output is signed by a PKP to attest that it came from a specific, verifiable computation — not from an arbitrary off-chain script.
+
+### Why proofs matter
+
+- **Trustless data ingestion** — Smart contracts cannot make HTTP requests. A Lit Action can fetch external data and deliver it on-chain with a signature that the contract can verify.
+- **Verifiable computation** — Any party can independently verify that the signed output was produced by the specific action code (identified by IPFS CID) and signed by the specific PKP (identified by its public key / token ID).
+- **No trusted intermediary** — Because the action code is immutable on IPFS and the signing key is managed by the Lit network, neither the action author nor any single node can forge a result.
+
+## How Actions Fit into Chipotle
+
+In the Chipotle system, actions are organized within **groups**. A group ties together:
+
+- One or more **PKPs** (wallets available for signing inside the action)
+- One or more **IPFS CIDs** (the permitted action code)
+- **Usage API keys** scoped to run actions within that group
+
+This means access to both compute (which action runs) and key material (which PKP it can use) is controlled by a single on-chain configuration, managed through the Dashboard or directly via the `AccountConfig` smart contract on Base.
+
+```
+Account
+ └── Group
+      ├── PKP (wallet)
+      ├── IPFS CID (action)
+      └── Usage API Key
+```
+
+When you call the `/core/v1/lit_action` endpoint, the server validates that the API key is permitted to execute the submitted code against the requested PKP — before any execution begins.
+
+## The Action Runtime
+
+Inside a Lit Action, the `Lit.Actions` namespace exposes the current SDK. Key functions include:
+
+| Function | Description |
+|---|---|
+| `return value` (from `main`) | Return a value to the caller — the preferred response method |
+| `Lit.Actions.setResponse({ response })` | Legacy: set the response returned to the caller |
+| `Lit.Actions.getPrivateKey({ pkpId })` | Retrieve a PKP private key for signing |
+| `Lit.Actions.getLitActionPrivateKey()` | Retrieve this action's own identity key |
+| `Lit.Actions.Encrypt({ pkpId, message })` | Encrypt a string with a PKP-derived AES key |
+| `Lit.Actions.Decrypt({ pkpId, ciphertext })` | Decrypt ciphertext with a PKP-derived AES key |
+
+The `ethers` library (v5) is available as a global, making it straightforward to sign messages, construct transactions, or interact with any EVM chain.
+
+For the full API reference, see [Lit Actions SDK](/lit_actions).
+
+## A Minimal Example
+
+```javascript
+// Fetch ETH price from an API and sign it with a PKP.
+// pkpId is injected via js_params.
+async function main({ pkpId }) {
+  const res = await fetch("https://api.example.com/eth-price");
+  const { price } = await res.json();
+
+  const wallet = new ethers.Wallet(
+    await Lit.Actions.getPrivateKey({ pkpId })
+  );
+  const signature = await wallet.signMessage(`ETH price: ${price}`);
+
+  return { price, signature };
+}
+```
+
+The caller receives both the price and a signature that can be verified against the PKP's public key — a cryptographic proof that this specific action fetched and attested to this specific price.
+
+## Next Steps
+
+- [Examples](/lit-actions/examples) — Working code for common patterns
+- [Lit Actions SDK](/lit_actions) — Full API reference for the current runtime
+- [Migration from Naga](/lit_actions_from_naga) — Mapping deprecated Naga actions to current equivalents

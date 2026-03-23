@@ -14,39 +14,35 @@ pub struct AddGroupRequest {
     pub group_name: String,
     /// Description of the group (Group.metadata.description in AccountConfig.sol).
     pub group_description: String,
-    /// Keccak256 hashes of action IPFS CIDs (hex strings).
-    pub permitted_actions: Vec<String>,
-    /// Keccak256 hashes of PKP/wallet public keys (hex strings).
-    pub pkps: Vec<String>,
-    /// If true, all wallets are permitted to use the group (AccountConfig.sol Group.all_wallets_permitted).
-    #[serde(default)]
-    pub all_wallets_permitted: bool,
-    /// If true, all actions are permitted (AccountConfig.sol Group.all_actions_permitted).
-    #[serde(default)]
-    pub all_actions_permitted: bool,
+    /// pkp ids permitted to use the group (AccountConfig.sol Group.pkpId).
+    pub pkp_ids_permitted: Vec<String>,
+    /// Actions permitted to use the group (AccountConfig.sol Group.cidHash).
+    pub cid_hashes_permitted: Vec<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AddActionRequest {
+    pub name: String,
+    pub description: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AddActionToGroupRequest {
-    pub group_id: String,
+    pub group_id: u64,
     /// IPFS CID for the action (will be keccak256-hashed on server).
     pub action_ipfs_cid: String,
-    /// Optional name for the action (stored in contract metadata).
-    pub name: Option<String>,
-    /// Optional description for the action (stored in contract metadata).
-    pub description: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AddPkpToGroupRequest {
     /// Group ID (decimal or hex string).
-    pub group_id: String,
+    pub group_id: u64,
     pub pkp_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct RemovePkpFromGroupRequest {
-    pub group_id: String,
+    pub group_id: u64,
     pub pkp_id: String,
 }
 
@@ -54,19 +50,19 @@ pub struct RemovePkpFromGroupRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateGroupRequest {
     /// Group ID (decimal or hex string).
-    pub group_id: String,
+    pub group_id: u64,
     pub name: String,
     pub description: String,
     #[serde(default)]
-    pub all_wallets_permitted: bool,
+    pub pkp_ids_permitted: Vec<String>,
     #[serde(default)]
-    pub all_actions_permitted: bool,
+    pub cid_hashes_permitted: Vec<String>,
 }
 
 /// Request for remove_action_from_group. action_ipfs_cid is keccak256-hashed on server. API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct RemoveActionFromGroupRequest {
-    pub group_id: String,
+    pub group_id: u64,
     /// IPFS CID for the action (keccak256-hashed on server).
     pub action_ipfs_cid: String,
 }
@@ -74,7 +70,7 @@ pub struct RemoveActionFromGroupRequest {
 /// Request for update_action_metadata. action_ipfs_cid is keccak256-hashed on server. API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateActionMetadataRequest {
-    pub group_id: String,
+    pub group_id: u64,
     /// IPFS CID for the action (keccak256-hashed on server).
     pub action_ipfs_cid: String,
     pub name: String,
@@ -89,17 +85,52 @@ pub struct UpdateUsageApiKeyMetadataRequest {
     pub description: String,
 }
 
+/// Request for update_usage_api_key. Updates all permissions and metadata on an existing usage API key. API key via header.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateUsageApiKeyRequest {
+    pub usage_api_key: String,
+    pub name: String,
+    pub description: String,
+    pub can_create_groups: bool,
+    pub can_delete_groups: bool,
+    pub can_create_pkps: bool,
+    /// Group IDs to grant manage-IPFS-IDs permission. 0 is wildcard for all groups.
+    pub manage_ipfs_ids_in_groups: Vec<u64>,
+    /// Group IDs to grant add-PKP permission. 0 is wildcard for all groups.
+    pub add_pkp_to_groups: Vec<u64>,
+    /// Group IDs to grant remove-PKP permission. 0 is wildcard for all groups.
+    pub remove_pkp_from_groups: Vec<u64>,
+    /// Group IDs to grant execute permission. 0 is wildcard for all groups.
+    pub execute_in_groups: Vec<u64>,
+}
+
 /// Request for add_usage_api_key. expiration and balance as decimal strings (e.g. unix timestamp, wei). API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AddUsageApiKeyRequest {
     pub name: String,
     pub description: String,
+    pub can_create_groups: bool,
+    pub can_delete_groups: bool,
+    pub can_create_pkps: bool,
+    /// Group IDs to grant manage-IPFS-IDs permission. 0 is wildcard for all groups.
+    pub manage_ipfs_ids_in_groups: Vec<u64>,
+    /// Group IDs to grant add-PKP permission. 0 is wildcard for all groups.
+    pub add_pkp_to_groups: Vec<u64>,
+    /// Group IDs to grant remove-PKP permission. 0 is wildcard for all groups.
+    pub remove_pkp_from_groups: Vec<u64>,
+    /// Group IDs to grant execute permission. 0 is wildcard for all groups.
+    pub execute_in_groups: Vec<u64>,
 }
 
 /// API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct RemoveUsageApiKeyRequest {
     pub usage_api_key: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct RemoveGroupRequest {
+    pub group_id: String,
 }
 
 /// API key via header.

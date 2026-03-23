@@ -8,11 +8,42 @@
     "dark": "#EA580C"
   },
   "navigation": {
-    "groups": [
+    "tabs": [
       {
-        "group": "Building on Lit Chipotle",
+        "tab": "Building on Lit Chipotle",
         "pages": [
-          "index"
+          "index",
+          "dashboard",
+          "api_direct",
+          {
+            "group": "Lit Actions",
+            "pages": [
+              "lit-actions/index",
+              "lit-actions/examples",
+              "lit-actions/patterns",
+              {
+                "group": "Migration",
+                "pages": [
+                  "lit-actions/migration/changes",
+                  "lit-actions/migration/encryption"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Architecture",
+            "pages": [
+              "architecture/index",
+              "architecture/authModel",
+              "architecture/diagram"
+            ]
+          },
+          {
+            "group": "Reference",
+            "pages": [
+              "lit-actions/chipotle"
+            ]
+          }
         ]
       }
     ]

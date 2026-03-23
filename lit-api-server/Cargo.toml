@@ -30,6 +30,7 @@ ethers = { version = "2.0.8", features = ["abigen", "legacy"] }
 ethers-providers = "2"
 
 flume = "0.11.0"
+metrics = "0.23"
 futures = "0.3.31"
 hex = "0.4"
 sha3 = "0.10"
@@ -53,6 +54,7 @@ ipfs-hasher = "0.13.0"
 elliptic-curve = "0.13.8"
 k256 = { version = "0.13.4", features = ["ecdsa"] }
 moka = { version = "0.12.7", features = ["future"] }
+num_cpus = "1.16"
 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

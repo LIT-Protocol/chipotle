@@ -48,3 +48,4 @@ BASE_URL=http://localhost:8000 k6 run k6/smoke.spec.ts
 - `litApiServer.ts` – Generated TypeScript client (do not edit manually)
 - `k6-script.sample.ts` – Sample script exercising all endpoints
 - `smoke.spec.ts` – Minimal smoke test for `get_node_chain_config`
+- `LitActionCode/` – Shared Lit Action code (Hello World, Encrypt, Decrypt) for tests

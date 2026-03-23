@@ -1,6 +1,6 @@
-use ethers::utils::keccak256;
-
 use crate::utils::generate_lit_action_derivation_path;
+use ethers::utils::keccak256;
+use tracing::instrument;
 mod dstack;
 pub mod endpoints;
 
@@ -32,6 +32,7 @@ pub async fn get_admin_api_payer_key() -> Result<[u8; 32], String> {
     get_key(path.as_str(), purpose).await
 }
 
+#[instrument(name = "dstack::v1::get_key", level = "debug", err, skip_all)]
 async fn get_key(path: &str, purpose: &str) -> Result<[u8; 32], String> {
     let key_response = dstack::get_key(path, purpose)
         .await

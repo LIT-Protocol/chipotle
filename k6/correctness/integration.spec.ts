@@ -6,15 +6,29 @@
  *   k6 run k6/integration.spec.ts
  *   BASE_URL=https://your-instance.phala.network/core/v1 k6 run k6/integration.spec.ts
  */
-import type { Response } from "k6/http";
-import { checkAndLog } from "../check.ts";
+import { checkAndLog } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
+import { createAccountAndUsageKey } from "../setup.ts";
+import { assertOk } from "../helpers.ts";
+import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
+import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
 
-const BASE_URL =
-  __ENV.BASE_URL ||
-  "https://e364da71b0c9af3b9068daa6321edd6ee932aa89-8000.dstack-pha-prod5.phala.network/core/v1";
+export interface IntegrationSetupData {
+  apiKey: string;
+  walletAddress: string;
+  usageApiKey: string;
+}
 
-const HELLO_WORLD_CODE = 'Lit.Actions.setResponse({response: "Hello World!"})';
+export function setup(): IntegrationSetupData {
+  const { apiKey, walletAddress, usageApiKey } = createAccountAndUsageKey({
+    accountName: "k6-integration-test",
+    accountDescription: "Integration test account",
+    usageKeyName: "k6-integration-usage-key",
+    usageKeyDescription: "Integration test usage key",
+    setupContext: "integration",
+  });
+  return { apiKey, walletAddress, usageApiKey };
+}
 
 export const options = {
   vus: 1,
@@ -27,41 +41,9 @@ export const options = {
   },
 };
 
-function assertOk(
-  name: string,
-  endpoint: string,
-  res: { response: Response },
-): boolean {
-  const { response } = res;
-  const status = response?.status ?? 0;
-  const ok = status >= 200 && status < 300;
-  if (!ok) {
-    let msg = "";
-    if (status === 0) {
-      msg = "(no response / connection failed)";
-    } else {
-      try {
-        const body = JSON.parse(response.body as string);
-        msg =
-          body.message ??
-          body.error ??
-          body.detail ??
-          (typeof body === "string" ? body : JSON.stringify(body));
-      } catch {
-        msg = (response.body as string) || "(no body)";
-      }
-    }
-    console.error(`FAIL ${name} | ${endpoint} | ${status} | ${msg}`);
-  }
-  checkAndLog(response, {
-    [`${name} 2xx`]: (r) =>
-      (r?.status ?? 0) >= 200 && (r?.status ?? 0) < 300,
-  }, name);
-  return ok;
-}
-
-export default function () {
-  const client = new LitApiServerClient({ baseUrl: BASE_URL });
+export default function (data: IntegrationSetupData) {
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
+  const authHeaders = { "X-Api-Key": data.apiKey };
 
   // ── 1. getNodeChainConfig ─────────────────────────────────────────────────
   const chainConfigRes = client.getNodeChainConfig();
@@ -77,29 +59,14 @@ export default function () {
   }, "getNodeChainConfig");
 
   // ── 2. getLitActionIpfsId ─────────────────────────────────────────────────
-  const ipfsRes = client.getLitActionIpfsId(encodeURIComponent(HELLO_WORLD_CODE));
-  if (!assertOk("getLitActionIpfsId", "GET /get_lit_action_ipfs_id/{code}", ipfsRes)) return;
+  const ipfsRes = client.getLitActionIpfsId(HELLO_WORLD_CODE);
+  if (!assertOk("getLitActionIpfsId", "POST /get_lit_action_ipfs_id", ipfsRes)) return;
   const ipfsId = (ipfsRes.response.body as string).replace(/^"|"$/g, "").trim();
   checkAndLog(ipfsRes.response, {
     "ipfs id is non-empty string": () => ipfsId.length > 0,
   }, "getLitActionIpfsId");
 
-  // ── 3. newAccount ─────────────────────────────────────────────────────────
-  const newAccountRes = client.newAccount({
-    account_name: "k6-integration-test",
-    account_description: "Integration test account",
-  });
-  if (!assertOk("newAccount", "POST /new_account", newAccountRes)) return;
-  const newAccountData = newAccountRes.data as { api_key: string; wallet_address: string };
-  checkAndLog(newAccountRes.response, {
-    "newAccount returns api_key": () =>
-      typeof newAccountData.api_key === "string" && newAccountData.api_key.length > 0,
-    "newAccount returns wallet_address": () =>
-      typeof newAccountData.wallet_address === "string" && newAccountData.wallet_address.length > 0,
-  }, "newAccount");
-  const authHeaders = { "X-Api-Key": newAccountData.api_key };
-
-  // ── 4. accountExists ──────────────────────────────────────────────────────
+  // ── 3. accountExists ──────────────────────────────────────────────────────
   const existsRes = client.accountExists(authHeaders);
   if (!assertOk("accountExists", "GET /account_exists", existsRes)) return;
   checkAndLog(existsRes.response, {
@@ -112,7 +79,7 @@ export default function () {
     },
   }, "accountExists");
 
-  // ── 5. createWallet ───────────────────────────────────────────────────────
+  // ── 4. createWallet ───────────────────────────────────────────────────────
   const createWalletRes = client.createWallet(authHeaders);
   if (!assertOk("createWallet", "GET /create_wallet", createWalletRes)) return;
   const walletData = createWalletRes.data as { wallet_address: string };
@@ -122,7 +89,7 @@ export default function () {
   }, "createWallet");
   const walletAddress = walletData.wallet_address;
 
-  // ── 6. listWallets ────────────────────────────────────────────────────────
+  // ── 5. listWallets ────────────────────────────────────────────────────────
   const listWalletsRes = client.listWallets(
     { page_number: "0", page_size: "10" },
     authHeaders,
@@ -138,15 +105,13 @@ export default function () {
     },
   }, "listWallets");
 
-  // ── 7. addGroup ───────────────────────────────────────────────────────────
+  // ── 6. addGroup ───────────────────────────────────────────────────────────
   const addGroupRes = client.addGroup(
     {
       group_name: "k6-test-group",
       group_description: "Integration test group",
-      permitted_actions: [],
-      pkps: [],
-      all_wallets_permitted: true,
-      all_actions_permitted: true,
+      pkp_ids_permitted: [],
+      cid_hashes_permitted: [],
     },
     authHeaders,
   );
@@ -161,7 +126,7 @@ export default function () {
     },
   }, "addGroup");
 
-  // ── 8. listGroups — extract groupId for subsequent tests ──────────────────
+  // ── 7. listGroups — extract groupId for subsequent tests ──────────────────
   const listGroupsRes = client.listGroups(
     { page_number: "0", page_size: "10" },
     authHeaders,
@@ -183,14 +148,46 @@ export default function () {
   }
   const groupId = groups[groups.length - 1].id; // use the most recently created group
 
-  // ── 9. addActionToGroup ───────────────────────────────────────────────────
-  const addActionRes = client.addActionToGroup(
+  // ── 8. updateGroup — called while group is empty so the full-replace is safe ───
+  const updateGroupRes = client.updateGroup(
     {
-      group_id: groupId,
-      action_ipfs_cid: ipfsId,
-      name: "hello-world",
-      description: "Hello World lit action",
+      group_id: parseInt(groupId),
+      name: "k6-test-group-updated",
+      description: "Updated integration test group",
+      pkp_ids_permitted: [],
+      cid_hashes_permitted: [],
     },
+    authHeaders,
+  );
+  if (!assertOk("updateGroup", "POST /update_group", updateGroupRes)) return;
+  checkAndLog(updateGroupRes.response, {
+    "updateGroup success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+  }, "updateGroup");
+
+  // ── 9. addAction + addActionToGroup ──────────────────────────────────────
+  const addActionMetaRes = client.addAction(
+    { name: "hello-world", description: "Hello World lit action" },
+    authHeaders,
+  );
+  if (!assertOk("addAction", "POST /add_action", addActionMetaRes)) return;
+  checkAndLog(addActionMetaRes.response, {
+    "addAction success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+  }, "addAction");
+
+  const addActionRes = client.addActionToGroup(
+    { group_id: parseInt(groupId), action_ipfs_cid: ipfsId },
     authHeaders,
   );
   if (!assertOk("addActionToGroup", "POST /add_action_to_group", addActionRes)) return;
@@ -204,9 +201,9 @@ export default function () {
     },
   }, "addActionToGroup");
 
-  // ── 10. listActions ───────────────────────────────────────────────────────
+  // ── 10. listActions ──────────────────────────────────────────────────────
   const listActionsRes = client.listActions(
-    { group_id: groupId, page_number: "0", page_size: "10" },
+    { group_id: parseInt(groupId), page_number: 0, page_size: 10 },
     authHeaders,
   );
   if (!assertOk("listActions", "GET /list_actions", listActionsRes)) return;
@@ -219,10 +216,9 @@ export default function () {
       }
     },
   }, "listActions");
-
-  // ── 11. addPkpToGroup ─────────────────────────────────────────────────────
+  // ── 10. addPkpToGroup ─────────────────────────────────────────────────────
   const addPkpRes = client.addPkpToGroup(
-    { group_id: groupId, pkp_id: walletAddress },
+    { group_id: parseInt(groupId), pkp_id: walletAddress },
     authHeaders,
   );
   if (!assertOk("addPkpToGroup", "POST /add_pkp_to_group", addPkpRes)) return;
@@ -236,9 +232,9 @@ export default function () {
     },
   }, "addPkpToGroup");
 
-  // ── 12. listWalletsInGroup ────────────────────────────────────────────────
+  // ── 11. listWalletsInGroup ────────────────────────────────────────────────
   const listWiGRes = client.listWalletsInGroup(
-    { group_id: groupId, page_number: "0", page_size: "10" },
+    { group_id: parseInt(groupId), page_number: 0, page_size: 10 },
     authHeaders,
   );
   if (!assertOk("listWalletsInGroup", "GET /list_wallets_in_group", listWiGRes)) return;
@@ -252,33 +248,19 @@ export default function () {
     },
   }, "listWalletsInGroup");
 
-  // ── 13. litAction ─────────────────────────────────────────────────────────
-  const litActionRes = client.litAction(
-    { code: HELLO_WORLD_CODE, js_params: null },
-    authHeaders,
-  );
-  if (!assertOk("litAction", "POST /lit_action", litActionRes)) return;
-  checkAndLog(litActionRes.response, {
-    "litAction has no error": (r) => {
-      try {
-        return JSON.parse(r.body as string).has_error === false;
-      } catch {
-        return false;
-      }
-    },
-    "litAction response is Hello World!": (r) => {
-      try {
-        return JSON.parse(r.body as string).response === "Hello World!";
-      } catch {
-        return false;
-      }
-    },
-  }, "litAction");
-
-  // ── 14. addUsageApiKey ────────────────────────────────────────────────────
-  const expiration = String(Math.floor(Date.now() / 1000) + 86400); // 24 h from now
+  // ── 12. addUsageApiKey ────────────────────────────────────────────────────
   const addUsageKeyRes = client.addUsageApiKey(
-    { expiration, balance: "1000000000000000000", name: "k6-usage-key", description: "Integration test usage key" }, // 1 token in wei
+    {
+      name: "k6-usage-key",
+      description: "Integration test usage key",
+      can_create_groups: false,
+      can_delete_groups: false,
+      can_create_pkps: false,
+      manage_ipfs_ids_in_groups: [],
+      add_pkp_to_groups: [],
+      remove_pkp_from_groups: [],
+      execute_in_groups: [0],
+    },
     authHeaders,
   );
   if (!assertOk("addUsageApiKey", "POST /add_usage_api_key", addUsageKeyRes)) return;
@@ -300,8 +282,32 @@ export default function () {
     },
   }, "addUsageApiKey");
   const usageApiKey = (addUsageKeyRes.data as { usage_api_key: string }).usage_api_key;
+  const usageKeyHeaders = { "X-Api-Key": usageApiKey };
 
-  // ── 15. listApiKeys ───────────────────────────────────────────────────────
+  // ── 13. litAction ─────────────────────────────────────────────────────────
+  const litActionRes = client.litAction(
+    { code: HELLO_WORLD_CODE, js_params: null },
+    usageKeyHeaders,
+  );
+  if (!assertOk("litAction", "POST /lit_action", litActionRes)) return;
+  checkAndLog(litActionRes.response, {
+    "litAction has no error": (r) => {
+      try {
+        return JSON.parse(r.body as string).has_error === false;
+      } catch {
+        return false;
+      }
+    },
+    "litAction response is Hello World!": (r) => {
+      try {
+        return JSON.parse(r.body as string).response === "Hello World!";
+      } catch {
+        return false;
+      }
+    },
+  }, "litAction");
+
+  // ── 14. listApiKeys ───────────────────────────────────────────────────────
   const listApiKeysRes = client.listApiKeys(
     { page_number: "0", page_size: "10" },
     authHeaders,
@@ -317,32 +323,10 @@ export default function () {
     },
   }, "listApiKeys");
 
-  // ── 16. updateGroup ───────────────────────────────────────────────────────
-  const updateGroupRes = client.updateGroup(
-    {
-      group_id: groupId,
-      name: "k6-test-group-updated",
-      description: "Updated integration test group",
-      all_wallets_permitted: true,
-      all_actions_permitted: true,
-    },
-    authHeaders,
-  );
-  if (!assertOk("updateGroup", "POST /update_group", updateGroupRes)) return;
-  checkAndLog(updateGroupRes.response, {
-    "updateGroup success": (r) => {
-      try {
-        return JSON.parse(r.body as string).success === true;
-      } catch {
-        return false;
-      }
-    },
-  }, "updateGroup");
-
-  // ── 17. updateActionMetadata ──────────────────────────────────────────────
+  // ── 15. updateActionMetadata ──────────────────────────────────────────────
   const updateActionRes = client.updateActionMetadata(
     {
-      group_id: groupId,
+      group_id: parseInt(groupId),
       action_ipfs_cid: ipfsId,
       name: "hello-world-updated",
       description: "Updated Hello World lit action",
@@ -360,7 +344,7 @@ export default function () {
     },
   }, "updateActionMetadata");
 
-  // ── 18. updateUsageApiKeyMetadata ─────────────────────────────────────────
+  // ── 17. updateUsageApiKeyMetadata ─────────────────────────────────────────
   const updateUsageKeyRes = client.updateUsageApiKeyMetadata(
     { usage_api_key: usageApiKey, name: "k6-usage-key", description: "Integration test usage key" },
     authHeaders,
@@ -375,6 +359,33 @@ export default function () {
       }
     },
   }, "updateUsageApiKeyMetadata");
+
+  // ── 18. updateUsageApiKey ─────────────────────────────────────────────────
+  const updateUsageKeyPermsRes = client.updateUsageApiKey(
+    {
+      usage_api_key: usageApiKey,
+      name: "k6-usage-key-updated",
+      description: "Updated integration test usage key",
+      can_create_groups: false,
+      can_delete_groups: false,
+      can_create_pkps: false,
+      manage_ipfs_ids_in_groups: [],
+      add_pkp_to_groups: [],
+      remove_pkp_from_groups: [],
+      execute_in_groups: [0],
+    },
+    authHeaders,
+  );
+  if (!assertOk("updateUsageApiKey", "POST /update_usage_api_key", updateUsageKeyPermsRes)) return;
+  checkAndLog(updateUsageKeyPermsRes.response, {
+    "updateUsageApiKey success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+  }, "updateUsageApiKey");
 
   // ── 19. removeUsageApiKey ─────────────────────────────────────────────────
   const removeUsageKeyRes = client.removeUsageApiKey(
@@ -394,7 +405,7 @@ export default function () {
 
   // ── 20. removePkpFromGroup ────────────────────────────────────────────────
   const removePkpRes = client.removePkpFromGroup(
-    { group_id: groupId, pkp_id: walletAddress },
+    { group_id: parseInt(groupId), pkp_id: walletAddress },
     authHeaders,
   );
   if (!assertOk("removePkpFromGroup", "POST /remove_pkp_from_group", removePkpRes)) return;
@@ -410,7 +421,7 @@ export default function () {
 
   // ── 21. removeActionFromGroup ─────────────────────────────────────────────
   const removeActionRes = client.removeActionFromGroup(
-    { group_id: groupId, action_ipfs_cid: ipfsId },
+    { group_id: parseInt(groupId) , action_ipfs_cid: ipfsId },
     authHeaders,
   );
   assertOk("removeActionFromGroup", "POST /remove_action_from_group", removeActionRes);
@@ -423,4 +434,20 @@ export default function () {
       }
     },
   }, "removeActionFromGroup");
+
+  // ── 22. removeGroup ───────────────────────────────────────────────────────
+  const removeGroupRes = client.removeGroup(
+    { group_id: groupId },
+    authHeaders,
+  );
+  if (!assertOk("removeGroup", "POST /remove_group", removeGroupRes)) return;
+  checkAndLog(removeGroupRes.response, {
+    "removeGroup success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+  }, "removeGroup");
 }

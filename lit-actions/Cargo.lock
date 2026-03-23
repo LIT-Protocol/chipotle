@@ -5232,6 +5232,7 @@ dependencies = [
  "lit-core",
  "lit-core-derive",
  "lit-observability",
+ "metrics",
  "num_cpus",
  "once_cell",
  "openssl",
@@ -5318,6 +5319,7 @@ dependencies = [
  "lit-core",
  "lit-core-derive",
  "lit-logging",
+ "metrics",
  "nu-ansi-term",
  "opentelemetry 0.24.0",
  "opentelemetry-otlp 0.17.0",
@@ -5499,6 +5501,16 @@ dependencies = [
  "log",
  "objc",
  "paste",
+]
+
+[[package]]
+name = "metrics"
+version = "0.23.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3045b4193fbdc5b5681f32f11070da9be3609f189a79f3390706d42587f46bb5"
+dependencies = [
+ "ahash",
+ "portable-atomic",
 ]
 
 [[package]]

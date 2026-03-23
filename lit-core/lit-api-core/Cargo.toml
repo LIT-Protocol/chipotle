@@ -28,6 +28,7 @@ hyper = { workspace = true, optional = true }
 hyper-util = { workspace = true, optional = true }
 hyperlocal = { workspace = true, optional = true }
 ip_rfc = { version = "0.1.0" }
+metrics = "0.23"
 num_cpus = { version = "1.16" }
 once_cell.workspace = true
 openssl = { version = "0.10.71" }
