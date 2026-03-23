@@ -2,30 +2,30 @@
 
 ### Table of Contents
 
-*   [Welcome][1]
-*   [Encryption][2]
-*   [Encrypt][3]
-    *   [Parameters][4]
-*   [Decrypt][5]
-    *   [Parameters][6]
-*   [PKP Keys][7]
-*   [getPrivateKey][8]
-    *   [Parameters][9]
-*   [getLitActionPrivateKey][10]
-*   [getLitActionPublicKey][11]
-    *   [Parameters][12]
-*   [getLitActionWalletAddress][13]
-    *   [Parameters][14]
-*   [Action Utilities][15]
-*   [setResponse][16]
-    *   [Parameters][17]
-*   [Runtime Globals][18]
-*   [LitActions][19]
-*   [ethers][20]
+*   [Welcome](#welcome)
+*   [Encryption](#encryption)
+*   [Encrypt](#encrypt)
+    *   [Parameters](#parameters)
+*   [Decrypt](#decrypt)
+    *   [Parameters](#parameters-1)
+*   [PKP Keys](#pkp-keys)
+*   [getPrivateKey](#getprivatekey)
+    *   [Parameters](#parameters-2)
+*   [getLitActionPrivateKey](#getlitactionprivatekey)
+*   [getLitActionPublicKey](#getlitactionpublickey)
+    *   [Parameters](#parameters-3)
+*   [getLitActionWalletAddress](#getlitactionwalletaddress)
+    *   [Parameters](#parameters-4)
+*   [Action Utilities](#action-utilities)
+*   [setResponse](#setresponse)
+    *   [Parameters](#parameters-5)
+*   [Runtime Globals](#runtime-globals)
+*   [LitActions](#litactions)
+*   [ethers](#ethers)
 
 ## Welcome
 
-Welcome to the Lit Actions SDK Docs.  These functions can be used inside a Lit Action.  You should prefix each function with "Lit.Actions." so to call "encrypt()" you should do "Lit.Actions.encrypt()"  To understand how these functions fit together, please view the documentation for this SDK, located at [https://developer.litprotocol.com/][21]
+Welcome to the Lit Actions SDK Docs.  These functions can be used inside a Lit Action.  You should prefix each function with "Lit.Actions." so to call "encrypt()" you should do "Lit.Actions.encrypt()"  To understand how these functions fit together, please view the documentation for this SDK, located at [https://developer.litprotocol.com/](https://developer.litprotocol.com/)
 
 ## Encryption
 
@@ -35,12 +35,12 @@ Encryption and decryption functions.  These functions are used to encrypt and de
 
 ### Parameters
 
-*   `params` **[Object][22]**&#x20;
+*   `params` **[Object](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object)**&#x20;
 
-    *   `params.pkpId` **[string][23]** The ID of the PKP
-    *   `params.message` **[string][23]** The message to encrypt
+    *   `params.pkpId` **[string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)** The ID of the PKP
+    *   `params.message` **[string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)** The message to encrypt
 
-Returns **[Promise][24]<[string][23]>** The ciphertext
+Returns **[Promise](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Promise)<[string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)>** The ciphertext
 
 ## Lit.Actions.Decrypt
 
@@ -48,12 +48,12 @@ Decrypt data using AES with a symmetric key
 
 ### Parameters
 
-*   `params` **[Object][22]**&#x20;
+*   `params` **[Object](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object)**&#x20;
 
-    *   `params.pkpId` **[string][23]** The ID of the PKP
-    *   `params.ciphertext` **[string][23]** The ciphertext to decrypt
+    *   `params.pkpId` **[string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)** The ID of the PKP
+    *   `params.ciphertext` **[string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)** The ciphertext to decrypt
 
-Returns **[Promise][24]<[string][23]>** The decrypted plaintext
+Returns **[Promise](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Promise)<[string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)>** The decrypted plaintext
 
 ## PKP Keys
 
@@ -65,17 +65,17 @@ Get the private key for a PKP wallet
 
 ### Parameters
 
-*   `params` **[Object][22]**&#x20;
+*   `params` **[Object](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object)**&#x20;
 
-    *   `params.pkpId` **[string][23]** The ID of the PKP
+    *   `params.pkpId` **[string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)** The ID of the PKP
 
-Returns **[Promise][24]<[string][23]>** The private key secret
+Returns **[Promise](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Promise)<[string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)>** The private key secret
 
 ## Lit.Actions.getLitActionPrivateKey
 
 Get the private key for the currently executing Lit Action
 
-Returns **[Promise][24]<[string][23]>** The private key secret
+Returns **[Promise](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Promise)<[string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)>** The private key secret
 
 ## Lit.Actions.getLitActionPublicKey
 
@@ -83,11 +83,11 @@ Get the public key for a Lit Action by IPFS ID
 
 ### Parameters
 
-*   `params` **[Object][22]**&#x20;
+*   `params` **[Object](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object)**&#x20;
 
-    *   `params.ipfsId` **[string][23]** The IPFS ID of the Lit Action
+    *   `params.ipfsId` **[string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)** The IPFS ID of the Lit Action
 
-Returns **[Promise][24]<[string][23]>** The public key
+Returns **[Promise](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Promise)<[string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)>** The public key
 
 ## Lit.Actions.getLitActionWalletAddress
 
@@ -95,11 +95,11 @@ Get the wallet address for a Lit Action by IPFS ID
 
 ### Parameters
 
-*   `params` **[Object][22]**&#x20;
+*   `params` **[Object](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object)**&#x20;
 
-    *   `params.ipfsId` **[string][23]** The IPFS ID of the Lit Action
+    *   `params.ipfsId` **[string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)** The IPFS ID of the Lit Action
 
-Returns **[Promise][24]<[string][23]>** The wallet address
+Returns **[Promise](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Promise)<[string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)>** The wallet address
 
 ## Action Utilities
 
@@ -111,7 +111,7 @@ Set the response returned to the client
 
 ### Parameters
 
-*   `params` **[Object][22]**&#x20;
+*   `params` **[Object](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object)**&#x20;
 
     *   `params.response` **any** The response to send to the client. If this is not a string, it will be JSON-encoded before being sent. A value of undefined is encoded as null.
 
@@ -128,51 +128,3 @@ This alias is injected in the Lit Action execution environment and mirrors `Lit.
 
 The ethers.js v5 API exposed to Lit Actions for interacting with EVM chains.
 Includes wallets, providers, contracts, and cryptographic helpers.
-
-[1]: #welcome
-
-[2]: #encryption
-
-[3]: #encrypt
-
-[4]: #parameters
-
-[5]: #decrypt
-
-[6]: #parameters-1
-
-[7]: #pkp-keys
-
-[8]: #getprivatekey
-
-[9]: #parameters-2
-
-[10]: #getlitactionprivatekey
-
-[11]: #getlitactionpublickey
-
-[12]: #parameters-3
-
-[13]: #getlitactionwalletaddress
-
-[14]: #parameters-4
-
-[15]: #action-utilities
-
-[16]: #setresponse
-
-[17]: #parameters-5
-
-[18]: #runtime-globals
-
-[19]: #litactions
-
-[20]: #ethers
-
-[21]: https://developer.litprotocol.com/
-
-[22]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object
-
-[23]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String
-
-[24]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Promise
