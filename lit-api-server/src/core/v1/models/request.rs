@@ -5,6 +5,9 @@ use serde::{Deserialize, Serialize};
 pub struct NewAccountRequest {
     pub account_name: String,
     pub account_description: String,
+    /// Optional email address — forwarded to Stripe for the customer record.  Not stored on-chain.
+    #[serde(default)]
+    pub email: Option<String>,
 }
 
 /// Request for add_group. permitted_actions and pkps are keccak256 hashes as hex strings (with or without 0x). API key via header.
@@ -21,14 +24,16 @@ pub struct AddGroupRequest {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AddActionRequest {
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AddActionToGroupRequest {
     pub group_id: u64,
     /// IPFS CID for the action (will be keccak256-hashed on server).
     pub action_ipfs_cid: String,
-    /// Optional name for the action (stored in contract metadata).
-    pub name: Option<String>,
-    /// Optional description for the action (stored in contract metadata).
-    pub description: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
@@ -83,6 +88,25 @@ pub struct UpdateUsageApiKeyMetadataRequest {
     pub description: String,
 }
 
+/// Request for update_usage_api_key. Updates all permissions and metadata on an existing usage API key. API key via header.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct UpdateUsageApiKeyRequest {
+    pub usage_api_key: String,
+    pub name: String,
+    pub description: String,
+    pub can_create_groups: bool,
+    pub can_delete_groups: bool,
+    pub can_create_pkps: bool,
+    /// Group IDs to grant manage-IPFS-IDs permission. 0 is wildcard for all groups.
+    pub manage_ipfs_ids_in_groups: Vec<u64>,
+    /// Group IDs to grant add-PKP permission. 0 is wildcard for all groups.
+    pub add_pkp_to_groups: Vec<u64>,
+    /// Group IDs to grant remove-PKP permission. 0 is wildcard for all groups.
+    pub remove_pkp_from_groups: Vec<u64>,
+    /// Group IDs to grant execute permission. 0 is wildcard for all groups.
+    pub execute_in_groups: Vec<u64>,
+}
+
 /// Request for add_usage_api_key. expiration and balance as decimal strings (e.g. unix timestamp, wei). API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AddUsageApiKeyRequest {
@@ -91,14 +115,14 @@ pub struct AddUsageApiKeyRequest {
     pub can_create_groups: bool,
     pub can_delete_groups: bool,
     pub can_create_pkps: bool,
-    /// Group IDs, where 0 is the wildcard for all groups.
-    pub can_manage_ipfs_ids_in_groups: Vec<u64>,
-    /// Group IDs, where 0 is the wildcard for all groups.
-    pub can_add_pkp_to_groups: Vec<u64>,
-    /// Group IDs, where 0 is the wildcard for all groups.
-    pub can_remove_pkp_from_groups: Vec<u64>,
-    /// Group IDs, where 0 is the wildcard for all groups.
-    pub can_execute_in_groups: Vec<u64>,
+    /// Group IDs to grant manage-IPFS-IDs permission. 0 is wildcard for all groups.
+    pub manage_ipfs_ids_in_groups: Vec<u64>,
+    /// Group IDs to grant add-PKP permission. 0 is wildcard for all groups.
+    pub add_pkp_to_groups: Vec<u64>,
+    /// Group IDs to grant remove-PKP permission. 0 is wildcard for all groups.
+    pub remove_pkp_from_groups: Vec<u64>,
+    /// Group IDs to grant execute permission. 0 is wildcard for all groups.
+    pub execute_in_groups: Vec<u64>,
 }
 
 /// API key via header.
@@ -107,11 +131,29 @@ pub struct RemoveUsageApiKeyRequest {
     pub usage_api_key: String,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct RemoveGroupRequest {
+    pub group_id: String,
+}
+
 /// API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LitActionRequest {
     pub code: String,
     pub js_params: Option<serde_json::Value>,
+}
+
+/// POST /billing/create_payment_intent
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CreatePaymentIntentRequest {
+    /// Amount to charge in US cents (minimum 500 = $5.00).
+    pub amount_cents: i64,
+}
+
+/// POST /billing/confirm_payment
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ConfirmPaymentRequest {
+    pub payment_intent_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

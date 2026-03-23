@@ -115,8 +115,6 @@ export default function () {
   addActionToGroupRequest = {
     group_id: "furthermore",
     action_ipfs_cid: "although",
-    name: "mmm",
-    description: "jacket",
   };
   headers = {
     "X-Api-Key": "whether",

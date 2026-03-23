@@ -76,7 +76,8 @@ pub struct WalletItem {
 /// One item from list_api_keys (AccountConfig.sol UsageApiKey).
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ApiKeyItem {
-    pub id: String, // hash of the item, as stored on chain.
+    pub id: String,           // auto-increment metadata id, as stored on chain.
+    pub api_key_hash: String, // keccak256 hash of the usage API key string (0x-prefixed hex).
     pub name: String,
     pub description: String,
     pub expiration: String,
@@ -88,6 +89,28 @@ pub struct ApiKeyItem {
     pub can_add_pkp_to_groups: Vec<u64>,
     pub can_remove_pkp_from_groups: Vec<u64>,
     pub can_execute_in_groups: Vec<u64>,
+}
+
+/// GET /billing/stripe_config — returns the Stripe publishable key for Stripe.js.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct StripeConfigResponse {
+    pub publishable_key: String,
+}
+
+/// GET /billing/balance — current credit balance for the authenticated API key.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct BillingBalanceResponse {
+    /// Balance in cents.  Negative means credits are available; zero means exhausted.
+    pub balance_cents: i64,
+    /// Human-readable, e.g. "$5.00 credit".
+    pub balance_display: String,
+}
+
+/// POST /billing/create_payment_intent — client secret for Stripe.js confirmCardPayment.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CreatePaymentIntentResponse {
+    pub client_secret: String,
+    pub payment_intent_id: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
