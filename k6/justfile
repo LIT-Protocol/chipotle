@@ -3,7 +3,7 @@
 #
 # Usage:
 #   just seed-accounts
-#   just seed-accounts NETWORK=next
+#   just NETWORK=next seed-accounts
 #   just smoke
 #   just smoke NETWORK=next
 #   just smoke-local
@@ -11,8 +11,8 @@
 #   just soak-local
 #   just spike
 #   just spike-local
-#   just soak NETWORK=next BASE_URL=http://localhost:8000/core/v1
-#   just spike NETWORK=main BASE_URL='https://other.example.com/core/v1'
+#   just NETWORK=next BASE_URL=http://localhost:8000/core/v1 soak
+#   just NETWORK=main BASE_URL='https://other.example.com/core/v1' spike
 
 NETWORK := 'main'
 _base_url_main := 'https://api.dev.litprotocol.com/core/v1'
