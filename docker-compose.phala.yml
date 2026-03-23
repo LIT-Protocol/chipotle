@@ -110,7 +110,7 @@ services:
       ROCKET_PORT: "8001"
     restart: unless-stopped
 
-  # dstack-ingress — TLS termination + attestation cert for custom domain (CPL-5).
+  # dstack-ingress — TLS termination + attestation cert for custom domain (CPL-118).
   # Activated with: docker compose --profile custom-domain up
   #
   # Issues a cert with both NODE_DOMAIN and ALIAS_DOMAIN as SANs via DNS-01
@@ -126,7 +126,7 @@ services:
   # ROUTE53_INITIAL_WEIGHT intentionally NOT set — NLB handles traffic routing.
   dstack-ingress:
     profiles: ["custom-domain"]
-    image: dstacktee/dstack-ingress:latest
+    image: dstacktee/dstack-ingress:1.4@sha256:11c0481ca1e2ef9c959187ff3c01c7f59c26d631c7717a571ad994b96203bb0b
     ports:
       - "443:443"
     environment:
