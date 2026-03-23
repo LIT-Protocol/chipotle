@@ -13,8 +13,8 @@
         "tab": "Building on Lit Chipotle",
         "pages": [
           "index",
-          "dashboard",
           "pricing",
+          "dashboard",
           "api_direct",
           {
             "group": "Lit Actions",
@@ -41,9 +41,7 @@
           },
           {
             "group": "Actions Reference",
-            "pages": [
-              "lit-actions/chipotle"
-            ]
+            "pages": ["lit-actions/chipotle"]
           }
         ]
       }
