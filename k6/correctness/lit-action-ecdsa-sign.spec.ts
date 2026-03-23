@@ -11,7 +11,7 @@
  */
 import { checkAndLog } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
-import { createAccountAndUsageKey } from "../setup.ts";
+import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
 import { ECDSA_SIGN_CODE } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
@@ -28,14 +28,14 @@ export const options = {
 };
 
 export function setup() {
-  const { usageApiKey } = createAccountAndUsageKey({
-    accountName: "k6-ecdsa-sign",
-    accountDescription: "k6 ECDSA sign test account",
-    usageKeyName: "k6-ecdsa-usage-key",
-    usageKeyDescription: "k6 ECDSA sign test usage key",
-    setupContext: "ecdsa-sign",
-  });
-  return { usageKeyHeaders: { "X-Api-Key": usageApiKey } };
+  if (PRECREATED_ACCOUNTS.length === 0) {
+    throw new Error(
+      "No pre-created accounts found. Run accounts.seed.spec.ts first to generate k6/data/accounts.json",
+    );
+  }
+  const account =
+    PRECREATED_ACCOUNTS[Math.floor(Math.random() * PRECREATED_ACCOUNTS.length)];
+  return { usageKeyHeaders: { "X-Api-Key": account.usageApiKey } };
 }
 
 export default function (data: { usageKeyHeaders: { "X-Api-Key": string } }) {

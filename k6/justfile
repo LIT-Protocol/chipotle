@@ -2,33 +2,53 @@
 # Or cd k6 && just <recipe>
 #
 # Usage:
+#   just seed-accounts
+#   just seed-accounts NETWORK=next
 #   just smoke
+#   just smoke NETWORK=next
 #   just smoke-local
 #   just soak
 #   just soak-local
 #   just spike
 #   just spike-local
-#   just soak BASE_URL=http://localhost:8000/core/v1
-#   just spike BASE_URL='https://other.example.com/core/v1'
+#   just soak NETWORK=next BASE_URL=http://localhost:8000/core/v1
+#   just spike NETWORK=main BASE_URL='https://other.example.com/core/v1'
 
-_default_base_url := 'https://api.dev.litprotocol.com/core/v1'
+NETWORK := 'main'
+_base_url_main := 'https://api.dev.litprotocol.com/core/v1'
+_base_url_next := 'https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network/core/v1'
+_accounts_file_main := './data/accounts.dev.json'
+_accounts_file_next := './data/accounts.next.json'
+BASE_URL := if NETWORK == 'next' { _base_url_next } else { _base_url_main }
+ACCOUNTS_FILE := if NETWORK == 'next' { _accounts_file_next } else { _accounts_file_main }
 _corr_id := `echo "k6-$(date +%s)-$(head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"`
 
-smoke BASE_URL=_default_base_url:
-    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} k6 run --out cloud smoke.spec.ts
+[group: 'setup']
+seed-accounts ACCOUNTS_COUNT='25':
+    mkdir -p data
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} ACCOUNTS_COUNT={{ACCOUNTS_COUNT}} k6 run accounts.seed.spec.ts | grep '^{\"generated_at\"' > data/accounts.json
 
-smoke-local BASE_URL=_default_base_url:
-    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} k6 run smoke.spec.ts
+smoke:
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run --out cloud smoke.spec.ts
 
-soak BASE_URL=_default_base_url:
+smoke-local:
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run smoke.spec.ts
+
+soak:
     # K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} k6 cloud run --local-execution loadtest/soak.spec.ts
-    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} k6 run --out cloud loadtest/soak.spec.ts
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run --out cloud loadtest/soak.spec.ts
 
-soak-local BASE_URL=_default_base_url:
-    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} k6 run loadtest/soak.spec.ts
+soak-local:
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run loadtest/soak.spec.ts
 
-spike BASE_URL=_default_base_url:
-    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} k6 cloud run --local-execution loadtest/spike.spec.ts
+spike:
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run --out cloud loadtest/spike.spec.ts
 
-spike-local BASE_URL=_default_base_url:
-    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} k6 run loadtest/spike.spec.ts
+spike-local:
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run loadtest/spike.spec.ts
+
+breakpoint:
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run --out cloud loadtest/breakpoint.spec.ts
+
+breakpoint-local:
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run loadtest/breakpoint.spec.ts
