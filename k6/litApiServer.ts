@@ -40,6 +40,11 @@ export interface NewAccountResponse {
 export interface NewAccountRequest {
   account_name: string;
   account_description: string;
+  /**
+   * Optional email address — forwarded to Stripe for the customer record.  Not stored on-chain.
+   * @nullable
+   */
+  email?: string | null;
 }
 
 export interface CreateWalletResponse {
@@ -245,6 +250,46 @@ export interface NodeChainConfigResponse {
   testnet: boolean;
   token: string;
   contract_address: string;
+}
+
+/**
+ * GET /billing/stripe_config — returns the Stripe publishable key for Stripe.js.
+ */
+export interface StripeConfigResponse {
+  publishable_key: string;
+}
+
+/**
+ * GET /billing/balance — current credit balance for the authenticated API key.
+ */
+export interface BillingBalanceResponse {
+  /** Balance in cents.  Negative means credits are available; zero means exhausted. */
+  balance_cents: number;
+  /** Human-readable, e.g. "$5.00 credit". */
+  balance_display: string;
+}
+
+/**
+ * POST /billing/create_payment_intent — client secret for Stripe.js confirmCardPayment.
+ */
+export interface CreatePaymentIntentResponse {
+  client_secret: string;
+  payment_intent_id: string;
+}
+
+/**
+ * POST /billing/create_payment_intent
+ */
+export interface CreatePaymentIntentRequest {
+  /** Amount to charge in US cents (minimum 500 = $5.00). */
+  amount_cents: number;
+}
+
+/**
+ * POST /billing/confirm_payment
+ */
+export interface ConfirmPaymentRequest {
+  payment_intent_id: string;
 }
 
 export type ListApiKeysParams = {
@@ -505,6 +550,37 @@ export type GetNodeChainConfigDefault = NodeChainConfigResponse | ErrMessage;
 export type GetApiPayersDefault = string[] | ErrMessage;
 
 export type GetAdminApiPayerDefault = string | ErrMessage;
+
+export type BillingStripeConfigDefault = StripeConfigResponse | ErrMessage;
+
+export type BillingBalanceHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type BillingBalanceDefault = BillingBalanceResponse | ErrMessage;
+
+export type BillingCreatePaymentIntentHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type BillingCreatePaymentIntentDefault =
+  | CreatePaymentIntentResponse
+  | ErrMessage;
+
+export type BillingConfirmPaymentHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type BillingConfirmPaymentDefault = AccountOpResponse | ErrMessage;
 
 /**
  * This is the base client to use for interacting with the API.
@@ -1650,6 +1726,182 @@ export class LitApiServerClient {
       response,
       data,
       operationId: "get_admin_api_payer",
+    };
+  }
+
+  /**
+   * GET /billing/stripe_config — returns the Stripe publishable key. No auth required; the publishable key is safe to expose.
+   */
+  billingStripeConfig(requestParameters?: Params): {
+    response: Response;
+    data: BillingStripeConfigDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/billing/stripe_config`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "GET",
+      k6url.toString(),
+      undefined,
+      mergedRequestParameters,
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "billing_stripe_config",
+    };
+  }
+
+  /**
+   * GET /billing/balance — returns the current credit balance for the authenticated user.
+   */
+  billingBalance(
+    headers: BillingBalanceHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: BillingBalanceDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/billing/balance`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request("GET", k6url.toString(), undefined, {
+      ...mergedRequestParameters,
+      headers: {
+        ...mergedRequestParameters?.headers,
+        // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+        ...Object.fromEntries(
+          Object.entries(headers || {}).map(([key, value]) => [
+            key,
+            String(value),
+          ]),
+        ),
+      },
+    });
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "billing_balance",
+    };
+  }
+
+  /**
+   * POST /billing/create_payment_intent — creates a Stripe PaymentIntent and returns the client_secret for use with Stripe.js `confirmCardPayment`.
+   */
+  billingCreatePaymentIntent(
+    createPaymentIntentRequest: CreatePaymentIntentRequest,
+    headers: BillingCreatePaymentIntentHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: BillingCreatePaymentIntentDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/billing/create_payment_intent`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      JSON.stringify(createPaymentIntentRequest),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
+        },
+      },
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "billing_create_payment_intent",
+    };
+  }
+
+  /**
+   * POST /billing/confirm_payment — verifies a succeeded PaymentIntent and credits the account.
+   */
+  billingConfirmPayment(
+    confirmPaymentRequest: ConfirmPaymentRequest,
+    headers: BillingConfirmPaymentHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: BillingConfirmPaymentDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/billing/confirm_payment`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      JSON.stringify(confirmPaymentRequest),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
+        },
+      },
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "billing_confirm_payment",
     };
   }
 
