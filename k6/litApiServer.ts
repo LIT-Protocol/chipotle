@@ -253,6 +253,37 @@ export interface NodeChainConfigResponse {
 }
 
 /**
+ * GET /get_chain_config_keys — names of every supported ConfigKeys variant.
+ */
+export interface ChainConfigKeysResponse {
+  keys: string[];
+}
+
+/**
+ * GET /get_lit_action_client_config — effective ClientBuilder configuration values, including any chain-config overrides applied at startup.
+ */
+export interface LitActionClientConfigResponse {
+  /** @minimum 0 */
+  timeout_ms: number;
+  /** @minimum 0 */
+  async_timeout_ms: number;
+  /** @minimum 0 */
+  memory_limit_mb: number;
+  /** @minimum 0 */
+  max_code_length: number;
+  /** @minimum 0 */
+  max_response_length: number;
+  /** @minimum 0 */
+  max_console_log_length: number;
+  /** @minimum 0 */
+  max_fetch_count: number;
+  /** @minimum 0 */
+  max_get_keys_count: number;
+  /** @minimum 0 */
+  max_retries: number;
+}
+
+/**
  * GET /billing/stripe_config — returns the Stripe publishable key for Stripe.js.
  */
 export interface StripeConfigResponse {
@@ -546,6 +577,12 @@ export type ListActionsHeaders = {
 export type ListActionsDefault = ListMetadataItem[] | ErrMessage;
 
 export type GetNodeChainConfigDefault = NodeChainConfigResponse | ErrMessage;
+
+export type GetChainConfigKeysDefault = ChainConfigKeysResponse | ErrMessage;
+
+export type GetLitActionClientConfigDefault =
+  | LitActionClientConfigResponse
+  | ErrMessage;
 
 export type GetApiPayersDefault = string[] | ErrMessage;
 
@@ -1666,6 +1703,66 @@ export class LitApiServerClient {
       response,
       data,
       operationId: "get_node_chain_config",
+    };
+  }
+
+  getChainConfigKeys(requestParameters?: Params): {
+    response: Response;
+    data: GetChainConfigKeysDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/get_chain_config_keys`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "GET",
+      k6url.toString(),
+      undefined,
+      mergedRequestParameters,
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "get_chain_config_keys",
+    };
+  }
+
+  getLitActionClientConfig(requestParameters?: Params): {
+    response: Response;
+    data: GetLitActionClientConfigDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/get_lit_action_client_config`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "GET",
+      k6url.toString(),
+      undefined,
+      mergedRequestParameters,
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "get_lit_action_client_config",
     };
   }
 
