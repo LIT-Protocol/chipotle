@@ -13,15 +13,22 @@
         "tab": "Building on Lit Chipotle",
         "pages": [
           "index",
-          "dashboard",
-          "api_direct",
-          "pricing",
+          {
+            "group": "Management",
+            "pages": [
+              "management/dashboard",
+              "management/api_direct",
+              "management/pricing",
+              "management/api_keys"
+            ]
+          },
           {
             "group": "Lit Actions",
             "pages": [
               "lit-actions/index",
               "lit-actions/examples",
               "lit-actions/patterns",
+              "lit-actions/limits",
               {
                 "group": "Migration",
                 "pages": [
