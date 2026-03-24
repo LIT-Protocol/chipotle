@@ -19,6 +19,7 @@ use rocket_okapi::openapi;
 #[openapi(tag = "Actions")]
 #[post("/lit_action", format = "json", data = "<lit_action_request>")]
 #[tracing::instrument(name = "endpoint::lit_action", skip_all, parent = &request_span.span)]
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn lit_action(
     _cpu: CpuAvailable,
     request_span: RequestSpan,

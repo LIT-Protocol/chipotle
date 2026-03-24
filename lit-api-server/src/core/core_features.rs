@@ -112,19 +112,17 @@ async fn get_lit_action_client_builder(chain_config: Arc<ChainConfig>) -> Client
     if let Ok(Some(val)) = chain_config
         .get(ConfigKeys::LIT_ACTION_DEFAULT_TIMEOUT_MS)
         .await
+        && let Ok(ms) = val.parse::<u64>()
     {
-        if let Ok(ms) = val.parse::<u64>() {
-            builder.timeout_ms(ms);
-        }
+        builder.timeout_ms(ms);
     }
 
     if let Ok(Some(val)) = chain_config
         .get(ConfigKeys::LIT_ACTION_DEFAULT_MEMORY_LIMIT_MB)
         .await
+        && let Ok(mb) = val.parse::<u32>()
     {
-        if let Ok(mb) = val.parse::<u32>() {
-            builder.memory_limit_mb(mb);
-        }
+        builder.memory_limit_mb(mb);
     }
 
     builder
