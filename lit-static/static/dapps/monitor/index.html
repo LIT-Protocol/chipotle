@@ -218,6 +218,36 @@
 
 
     <div class="card">
+      <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Lit Action Client Configuration</h2>
+      <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+        <code>GET /get_lit_action_client_config</code> — effective builder values, including any chain-config overrides.
+      </p>
+      <div id="lit-action-config-results" style="display: none;">
+        <div class="result-row"><span class="result-label">timeout_ms</span><span class="result-value" id="lac-timeout-ms">—</span></div>
+        <div class="result-row"><span class="result-label">async_timeout_ms</span><span class="result-value" id="lac-async-timeout-ms">—</span></div>
+        <div class="result-row"><span class="result-label">memory_limit_mb</span><span class="result-value" id="lac-memory-limit-mb">—</span></div>
+        <div class="result-row"><span class="result-label">max_code_length</span><span class="result-value" id="lac-max-code-length">—</span></div>
+        <div class="result-row"><span class="result-label">max_response_length</span><span class="result-value" id="lac-max-response-length">—</span></div>
+        <div class="result-row"><span class="result-label">max_console_log_length</span><span class="result-value" id="lac-max-console-log-length">—</span></div>
+        <div class="result-row"><span class="result-label">max_fetch_count</span><span class="result-value" id="lac-max-fetch-count">—</span></div>
+        <div class="result-row"><span class="result-label">max_get_keys_count</span><span class="result-value" id="lac-max-get-keys-count">—</span></div>
+        <div class="result-row"><span class="result-label">max_retries</span><span class="result-value" id="lac-max-retries">—</span></div>
+      </div>
+      <div id="lit-action-config-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+    </div>
+
+
+    <div class="card">
+      <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Supported Chain Config Keys</h2>
+      <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+        <code>GET /get_chain_config_keys</code> — all recognised <code>ConfigKeys</code> variants that the node reads from chain.
+      </p>
+      <div id="chain-config-keys-list"></div>
+      <div id="chain-config-keys-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+    </div>
+
+
+    <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.25rem">
         <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Account Configuration Contract</h2>
         <button type="button" id="btn-refresh-contract" style="margin-top:0;padding:0.3rem 0.75rem;font-size:0.8rem;">Refresh</button>
@@ -254,6 +284,38 @@
         </div>
       </div>
       <div class="error" id="error" style="display: none"></div>
+    </div>
+
+
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.25rem">
+        <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Node Configuration</h2>
+        <button type="button" id="btn-refresh-node-config" style="margin-top:0;padding:0.3rem 0.75rem;font-size:0.8rem;">Refresh</button>
+      </div>
+      <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+        Key-value pairs stored on-chain via <code>setNodeConfiguration</code>. Read by the node every 30 seconds.
+      </p>
+
+      <table>
+        <thead>
+          <tr><th>Key</th><th>Value</th></tr>
+        </thead>
+        <tbody id="node-config-table">
+          <tr><td colspan="2" style="color:var(--muted)">Loading…</td></tr>
+        </tbody>
+      </table>
+      <div id="node-config-fetch-error" style="display:none;color:#f87171;font-size:0.85rem;margin-top:0.5rem;"></div>
+
+      <div class="form-group" style="margin-top:1.5rem">
+        <label for="node-config-key">Key</label>
+        <input type="text" id="node-config-key" placeholder="e.g. LIT_ACTION_DEFAULT_TIMEOUT_MS" />
+      </div>
+      <div class="form-group">
+        <label for="node-config-value">Value</label>
+        <input type="text" id="node-config-value" placeholder="e.g. 60000" />
+      </div>
+      <button type="button" id="btn-set-node-config">Set Configuration</button>
+      <div id="node-config-status" style="display:none;font-size:0.85rem;margin-top:0.5rem;font-family:'JetBrains Mono',monospace;word-break:break-all;"></div>
     </div>
 
 

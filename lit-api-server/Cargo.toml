@@ -25,34 +25,22 @@ dstack-sdk = "0.1.2"
 derive_builder = "0.12.0"
 derive_more = { version = "2" , features = ["display"] }
 
-# ed25519-dalek = { version = "2.2", features = ["rand_core"] }
 ethers = { version = "2.0.8", features = ["abigen", "legacy"] }
 ethers-providers = "2"
 
 flume = "0.11.0"
-metrics = "0.23"
 futures = "0.3.31"
 hex = "0.4"
 sha3 = "0.10"
 ipfs-hasher = "0.13.0"
-# lazy_static = "1.5.0"
-# hd-keys-curves-wasm = { version = "1.0.5", default-features = false, features = ["bls", "k256", "p256", "p384", "curve25519", "ed448", "jubjub", "decaf377", "pasta"] }
-# lit-rust-crypto = { version = "0.6.0", features = [
-#     "arithmetic",
-#     "bits",
-#     "ecdsa",
-#     "ecdsa-core",
-#     "digest",
-#     "hash2curve",
-#     "hex",
-#     "rand_core",
-#     "serde",
-#     "sha",
-#     "std",
-#     "zeroize",
-# ] }
 elliptic-curve = "0.13.8"
 k256 = { version = "0.13.4", features = ["ecdsa"] }
+lit-core = { path = "../lit-core/lit-core" }
+lit-core-derive = { path = "../lit-core/lit-core-derive" }
+lit-observability = { path = "../lit-core/lit-observability", features = ["channels"] }
+lit-actions-grpc = { path = "../lit-actions/grpc" }
+
+metrics = "0.23"
 moka = { version = "0.12.7", features = ["future"] }
 num_cpus = "1.16"
 
@@ -76,14 +64,8 @@ tonic = { version = "0.12", features = [
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rand = { version = "0.8" }
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
-# rand_core = "0.6"
-lit-core = { path = "../lit-core/lit-core" }
-lit-core-derive = { path = "../lit-core/lit-core-derive" }
-lit-observability = { path = "../lit-core/lit-observability", features = ["channels"] }
-
-# lit-api-core = { path = "../lit-core/lit-api-core" }
-lit-actions-grpc = { path = "../lit-actions/grpc" }
-# lit-actions-server = { path = "../lit-actions/server" }
+strum = "0.28.0"
+strum_macros = "0.28.0"
 url = "2"
 
 rocket_okapi = { version = "=0.9.0", features = ["swagger"] }

@@ -1,4 +1,5 @@
 use lit_api_server::accounts;
+use lit_api_server::accounts::chain_config::start_chain_config;
 use lit_api_server::accounts::signer_pool::start_signer_pool;
 use lit_api_server::actions::grpc::GrpcClientPool;
 use lit_api_server::config;
@@ -126,6 +127,14 @@ async fn main() -> Result<(), rocket::Error> {
 
     let signer_pool = Arc::new(signer_pool);
 
+    let chain_config = match start_chain_config().await {
+        Ok(cfg) => Arc::new(cfg),
+        Err(e) => {
+            eprintln!("Failed to start chain config: {:?}. Exiting.", e);
+            std::process::exit(1);
+        }
+    };
+
     let allowed_methods = HashSet::from([
         Method::from_str("Get").expect("Invalid method: Get"),
         Method::from_str("Options").expect("Invalid method: Options"),
@@ -174,6 +183,7 @@ async fn main() -> Result<(), rocket::Error> {
         // .manage(action_store)
         .manage(GrpcClientPool::<tonic::transport::Channel>::new())
         .manage(signer_pool)
+        .manage(chain_config)
         .manage(CpuOverloadMonitor::start())
         .manage(stripe_state);
 

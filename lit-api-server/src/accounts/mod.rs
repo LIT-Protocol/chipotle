@@ -1,3 +1,4 @@
+pub mod chain_config;
 pub mod contracts;
 use std::sync::Arc;
 
@@ -6,7 +7,9 @@ pub mod signable_contract;
 pub mod signer_pool;
 pub use anyhow::Result;
 
-use crate::accounts::contracts::account_config_contract::{PkpData, UsageApiKeyReturn};
+use crate::accounts::contracts::account_config_contract::{
+    KeyValueReturn, PkpData, UsageApiKeyReturn,
+};
 use crate::accounts::signable_contract::{
     get_read_only_account_config_contract, get_signable_account_config_contract, send_transaction,
 };
@@ -559,4 +562,10 @@ pub async fn can_execute_action_and_use_wallet(
         .call()
         .await?;
     Ok(result)
+}
+
+pub async fn get_node_configuration_values() -> Result<Vec<KeyValueReturn>> {
+    let contract = get_read_only_account_config_contract().await?;
+    let values = contract.node_configuration_values().call().await?;
+    Ok(values)
 }

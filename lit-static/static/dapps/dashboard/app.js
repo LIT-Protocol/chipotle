@@ -159,6 +159,10 @@ function initLogin() {
     const desc = document.getElementById('new-account-desc').value.trim();
     const email = document.getElementById('new-account-email').value.trim();
     hideStatus('login-status');
+    if (!email) {
+      showStatus('login-status', 'Enter an email address.', 'error');
+      return;
+    }
     if (!name) {
       showStatus('login-status', 'Enter an account name.', 'error');
       return;
@@ -912,13 +916,13 @@ function openGroupModal(item = null) {
   });
   if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
   if (saveBtn) saveBtn.addEventListener('click', async () => {
-    const name = document.getElementById(nameId).value.trim();
+    const name = document.getElementById(nameId).value.trim() || 'Group';
     const desc = document.getElementById(descId).value.trim();
     const pkpIdsPermitted = getSelectedStringValues('modal-group-pkp-ids');
     const cidHashesPermitted = getSelectedStringValues('modal-group-cid-hashes');
     const apiKey = getApiKey();
-    if (!apiKey || !name) {
-      showStatus('groups-status', 'Enter a group name.', 'error');
+    if (!apiKey) {
+      showStatus('groups-status', 'Log in first.', 'error');
       return;
     }
     closeModal();
@@ -1192,7 +1196,7 @@ function openUsageKeyModal(item = null) {
   }
   document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
   document.getElementById('modal-save-btn').addEventListener('click', async () => {
-    const name = document.getElementById('modal-usage-name').value.trim() || '';
+    const name = document.getElementById('modal-usage-name').value.trim() || 'Usage Key';
     const description = document.getElementById('modal-usage-desc').value.trim() || '';
     const apiKey = getApiKey();
     if (!apiKey) {

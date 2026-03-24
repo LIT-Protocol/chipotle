@@ -28,9 +28,9 @@ use tonic::Status;
 use tracing::{debug, error, info_span, instrument};
 
 // Same default limits as in lit-node's action client
-const DEFAULT_TIMEOUT_MS: u64 = 30000; // 30s
-const DEFAULT_MEMORY_LIMIT_MB: usize = 256; // 256MB
-const MEMORY_SAMPLE_INTERVAL_MS: u64 = 100; // 100ms
+const DEFAULT_TIMEOUT_MS: u64 = 1000 * 60 * 15; // 15 minutes
+const DEFAULT_MEMORY_LIMIT_MB: usize = 128; // 128MB
+const MEMORY_SAMPLE_INTERVAL_MS: u64 = 500; // 500ms
 const EXECUTION_TERMINATED_ERROR: &str = "Uncaught Error: execution terminated";
 
 #[derive(Debug, Copy, Clone, PartialEq)]

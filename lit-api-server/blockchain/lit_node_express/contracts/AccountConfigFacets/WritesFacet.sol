@@ -14,7 +14,8 @@ import {SecurityLib} from "./SecurityLib.sol";
 contract WritesFacet {
     using EnumerableSet for EnumerableSet.UintSet;
     using EnumerableSet for EnumerableSet.AddressSet;
-
+    using EnumerableSet for EnumerableSet.StringSet;
+    
     function newAccount(
         uint256 apiKeyHash,
         bool managed,
@@ -368,5 +369,15 @@ contract WritesFacet {
         account.pkpCount++;
         s.pkpCount++;
         s.allPkpIds[s.pkpCount] = pkpId;
+    }
+
+    function setNodeConfiguration(
+        string memory key,
+        string memory value
+    ) public {
+        SecurityLib.revertIfNotApiPayerOrOwner(msg.sender);
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        s.nodeConfigurationKeys.add(key);
+        s.nodeConfigurationValues[key] = value;
     }
 }
