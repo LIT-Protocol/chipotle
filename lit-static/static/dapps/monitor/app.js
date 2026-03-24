@@ -83,6 +83,10 @@ function el(id) {
   return document.getElementById(id);
 }
 
+function escapeHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
 function setValue(id, text, isEmpty) {
   const node = el(id);
   if (!node) return;
@@ -244,12 +248,58 @@ async function getApiPayers(serverUrl) {
   }
 }
 
+// ── fetchVersion ──────────────────────────────────────────────────────────────
+
+async function fetchVersion(serverUrl) {
+  const resultsEl = el('version-results');
+  const errEl = el('version-error');
+
+  if (errEl) errEl.style.display = 'none';
+  setValue('ver-version', '…', false);
+  const submodulesEl = el('ver-submodules');
+  if (submodulesEl) submodulesEl.innerHTML = '';
+  if (resultsEl) resultsEl.style.display = 'block';
+
+  try {
+    const res = await fetch(`${serverUrl}/version`);
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    const data = await res.json();
+
+    setValue('ver-name',           data.name           ?? '—', !data.name);
+    setValue('ver-version',        data.version        ?? '—', !data.version);
+    setValue('ver-commit-version', data.commit_version ?? '—', !data.commit_version);
+
+    if (submodulesEl) {
+      const rows = (data.submodule_versions ?? []);
+      if (rows.length === 0) {
+        submodulesEl.innerHTML = '<span style="color:var(--muted);font-size:0.85rem">None</span>';
+      } else {
+        submodulesEl.innerHTML =
+          `<table>` +
+            `<thead><tr><th>Submodule</th><th>Version</th></tr></thead>` +
+            `<tbody>` +
+              rows.map(([name, ver]) =>
+                `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(ver)}</td></tr>`
+              ).join('') +
+            `</tbody>` +
+          `</table>`;
+      }
+    }
+  } catch (e) {
+    if (resultsEl) resultsEl.style.display = 'none';
+    if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
+  }
+}
+
 // ── loadNetwork ───────────────────────────────────────────────────────────────
 
 async function loadNetwork() {
   const serverUrl = getServerUrl();
   await getNodeChainConfig(serverUrl); // Must run first to populate RPC URL
-  await getApiPayers(serverUrl);
+  await Promise.all([
+    getApiPayers(serverUrl),
+    fetchVersion(serverUrl),
+  ]);
   await fetchContractValues();
 }
 

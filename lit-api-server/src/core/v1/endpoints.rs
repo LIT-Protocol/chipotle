@@ -651,9 +651,13 @@ async fn billing_confirm_payment_impl(
 async fn get_version() -> OpenApiResponse<VersionResponse, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(Ok(VersionResponse {
-            version: crate::version::VERSION,
-            src_hash: crate::version::SRC_HASH,
-            git_commit: crate::version::GIT_COMMIT,
+            version: crate::version::CARGO_PKG_VERSION.to_string(),
+            commit_version: crate::version::GIT_VERSION.to_string(),
+            name: crate::version::CARGO_PKG_NAME.to_string(),
+            submodule_versions: crate::version::GIT_SUBMODULE_VERSIONS
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
         }))
         .into(),
     }

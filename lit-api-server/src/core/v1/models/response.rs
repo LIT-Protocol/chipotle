@@ -128,7 +128,8 @@ pub struct NodeChainConfigResponse {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct VersionResponse {
-    pub version: &'static str,
-    pub src_hash: &'static str,
-    pub git_commit: &'static str,
+    pub name: String,
+    pub version: String,
+    pub commit_version: String,
+    pub submodule_versions: Vec<(String, String)>,
 }
