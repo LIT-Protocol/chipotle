@@ -252,6 +252,14 @@ contract WritesFacet {
         if (removed) {
             account.actionCount--;
         }
+
+        // Remove the action from all groups that may reference it to avoid stale cidHash entries.
+        uint256 groupCount = account.groupList.length();
+        for (uint256 i = 0; i < groupCount; i++) {
+            uint256 groupId = account.groupList.at(i);
+            account.groups[groupId].cidHash.remove(actionHash);
+        }
+        account.actionHashesList.remove(actionHash);
         delete account.actionMetadata[actionHash];
     }
 
