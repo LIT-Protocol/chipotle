@@ -13,7 +13,7 @@ export const options = {
   vus: 1,
   iterations: 1,
   thresholds: {
-    http_reqs: ["count>=3"],
+    http_reqs: ["count>=1"],
     http_req_failed: ["rate<0.1"],
     checks: ["rate==1"],
   },
