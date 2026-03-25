@@ -26,7 +26,7 @@ _corr_id := `echo "k6-$(date +%s)-$(head -c 3 /dev/urandom | od -An -tx1 | tr -d
 [group: 'setup']
 seed-accounts ACCOUNTS_COUNT='25':
     mkdir -p data
-    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} ACCOUNTS_COUNT={{ACCOUNTS_COUNT}} k6 run accounts.seed.spec.ts | grep '^{\"generated_at\"' > data/accounts.json
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} ACCOUNTS_COUNT={{ACCOUNTS_COUNT}} k6 run accounts.seed.spec.ts | grep '^{\"generated_at\"' > {{ACCOUNTS_FILE}}
 
 smoke:
     K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run --out cloud smoke.spec.ts
