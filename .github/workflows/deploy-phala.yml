@@ -93,6 +93,8 @@ jobs:
             dockerfile: Dockerfile.otel-collector
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
