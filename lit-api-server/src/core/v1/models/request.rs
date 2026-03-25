@@ -25,6 +25,8 @@ pub struct AddGroupRequest {
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AddActionRequest {
+    /// IPFS CID for the action (keccak256-hashed on server).
+    pub action_ipfs_cid: String,
     pub name: String,
     pub description: String,
 }
@@ -60,6 +62,13 @@ pub struct UpdateGroupRequest {
     pub pkp_ids_permitted: Vec<String>,
     #[serde(default)]
     pub cid_hashes_permitted: Vec<String>,
+}
+
+/// Request for delete_action. action_ipfs_cid is keccak256-hashed on server. API key via header.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteActionRequest {
+    /// IPFS CID for the action (keccak256-hashed on server).
+    pub action_ipfs_cid: String,
 }
 
 /// Request for remove_action_from_group. action_ipfs_cid is keccak256-hashed on server. API key via header.

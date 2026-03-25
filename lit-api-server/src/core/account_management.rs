@@ -6,9 +6,10 @@ use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
-    AddUsageApiKeyRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemoveGroupRequest,
-    RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest, UpdateActionMetadataRequest,
-    UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
+    AddUsageApiKeyRequest, DeleteActionRequest, NewAccountRequest, RemoveActionFromGroupRequest,
+    RemoveGroupRequest, RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest,
+    UpdateActionMetadataRequest, UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest,
+    UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
     AccountOpResponse, AddUsageApiKeyResponse, ApiKeyItem, ChainConfigKeysResponse,
@@ -171,9 +172,22 @@ pub async fn add_action(
     api_key: &str,
     req: Json<AddActionRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    accounts::add_action(signer_pool, api_key, req.into_inner())
+    let action_hash = ipfs_cid_to_u256(&req.action_ipfs_cid)?;
+    accounts::add_action(signer_pool, api_key, action_hash, req.into_inner())
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "add_action failed"))?;
+    Ok(AccountOpResponse { success: true })
+}
+
+pub async fn delete_action(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    req: Json<DeleteActionRequest>,
+) -> Result<AccountOpResponse, ApiStatus> {
+    let action_hash = ipfs_cid_to_u256(&req.action_ipfs_cid)?;
+    accounts::remove_action(signer_pool, api_key, action_hash)
+        .await
+        .map_err(|e| ApiStatus::internal_server_error(e, "delete_action failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 

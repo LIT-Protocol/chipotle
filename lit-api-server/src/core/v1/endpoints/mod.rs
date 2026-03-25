@@ -24,6 +24,7 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         add_group,
         remove_group,
         add_action,
+        delete_action,
         add_action_to_group,
         add_pkp_to_group,
         remove_pkp_from_group,

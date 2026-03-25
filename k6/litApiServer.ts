@@ -97,6 +97,8 @@ export interface RemoveGroupRequest {
 }
 
 export interface AddActionRequest {
+  /** IPFS CID for the action (keccak256-hashed on server). */
+  action_ipfs_cid: string;
   name: string;
   description: string;
 }
@@ -190,6 +192,14 @@ export interface UpdateGroupRequest {
   description: string;
   pkp_ids_permitted?: string[];
   cid_hashes_permitted?: string[];
+}
+
+/**
+ * Request for delete_action. action_ipfs_cid is keccak256-hashed on server. API key via header.
+ */
+export interface DeleteActionRequest {
+  /** IPFS CID for the action (keccak256-hashed on server). */
+  action_ipfs_cid: string;
 }
 
 /**
@@ -470,6 +480,15 @@ export type UpdateGroupHeaders = {
 };
 
 export type UpdateGroupDefault = AccountOpResponse | ErrMessage;
+
+export type DeleteActionHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type DeleteActionDefault = AccountOpResponse | ErrMessage;
 
 export type RemoveActionFromGroupHeaders = {
   /**
@@ -1361,6 +1380,52 @@ export class LitApiServerClient {
       response,
       data,
       operationId: "update_group",
+    };
+  }
+
+  deleteAction(
+    deleteActionRequest: DeleteActionRequest,
+    headers: DeleteActionHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: DeleteActionDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/delete_action`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      JSON.stringify(deleteActionRequest),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
+        },
+      },
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "delete_action",
     };
   }
 
