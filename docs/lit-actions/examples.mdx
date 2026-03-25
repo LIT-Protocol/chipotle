@@ -13,7 +13,7 @@ The simplest pattern: retrieve a PKP's private key and sign an arbitrary message
 
 ```javascript
 // js_params: { pkpId, message }
-async function main() {
+async function main({ pkpId, message }) {
   const wallet = new ethers.Wallet(
     await Lit.Actions.getPrivateKey({ pkpId })
   );
@@ -32,7 +32,7 @@ Encrypt a sensitive string so that only the holder of the PKP can later decrypt 
 
 ```javascript
 // js_params: { pkpId, secret }
-async function main() {
+async function main({ pkpId, secret }) {
   const ciphertext = await Lit.Actions.Encrypt({ pkpId, message: secret });
   return { ciphertext };
 }
@@ -48,7 +48,7 @@ Decrypt a ciphertext that was previously produced by `Lit.Actions.Encrypt` using
 
 ```javascript
 // js_params: { pkpId, ciphertext }
-async function main() {
+async function main({ pkpId, ciphertext }) {
   const plaintext = await Lit.Actions.Decrypt({ pkpId, ciphertext });
   return { plaintext };
 }
@@ -62,7 +62,7 @@ Fetch the current price of ETH from a public API and sign the result. The caller
 
 ```javascript
 // js_params: { pkpId }
-async function main() {
+async function main({ pkpId }) {
   const res = await fetch(
     "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
   );
@@ -87,14 +87,14 @@ A smart contract can call `ecrecover` on the signature to confirm the price was 
 
 ---
 
-## 5. Weather-Gated Signing
+## 5. Gate a Signature on Live Weather Data
 
-Only sign a message if the current temperature at a given location exceeds a threshold. This demonstrates **condition-gated signing** using a live external data source.
+Fetch live weather for a city using a decrypted API key and only sign a message if the temperature exceeds a threshold. Demonstrates combining decryption, an authenticated HTTP request, and conditional signing in one action.
 
 ```javascript
 // js_params: { pkpId, city, minTempCelsius, message, encryptedWeatherApiKey }
 // Example: { pkpId: "0x...", city: "London", minTempCelsius: 20, message: "Approved", encryptedWeatherApiKey: "..." }
-async function main() {
+async function main({ pkpId, city, minTempCelsius, message, encryptedWeatherApiKey }) {
   const apiKey = await Lit.Actions.Decrypt({ pkpId, ciphertext: encryptedWeatherApiKey });
 
   const res = await fetch(
@@ -120,8 +120,6 @@ async function main() {
 }
 ```
 
-Note the use of `Lit.Actions.Decrypt` to retrieve the weather API key securely at runtime — the key is stored as ciphertext and never exposed in the action code or `js_params`. Pass `encryptedWeatherApiKey` as a `js_params` value (produced by Example 2).
-
 ---
 
 ## 6. Read from a Smart Contract
@@ -131,7 +129,7 @@ Call a view function on an EVM smart contract and return the result. Useful for 
 ```javascript
 // js_params: { pkpId, contractAddress, holderAddress }
 // Checks the ERC-20 balance of holderAddress and signs the result.
-async function main() {
+async function main({ pkpId, contractAddress, holderAddress }) {
   const rpcUrl = "https://mainnet.base.org";
   const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
 
@@ -167,7 +165,7 @@ Construct, sign, and broadcast an ETH transfer transaction from a PKP wallet. Th
 ```javascript
 // js_params: { pkpId, toAddress, amountEth, chainId, rpcUrl }
 // Example: { pkpId: "0x...", toAddress: "0x...", amountEth: "0.001", chainId: 8453, rpcUrl: "https://mainnet.base.org" }
-async function main() {
+async function main({ pkpId, toAddress, amountEth, chainId, rpcUrl }) {
   const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
   const wallet = new ethers.Wallet(
     await Lit.Actions.getPrivateKey({ pkpId }),

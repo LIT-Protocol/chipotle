@@ -80,7 +80,7 @@ For the full API reference, see [Lit Actions SDK](/lit-actions/chipotle).
 ```javascript
 // Fetch ETH price from an API and sign it with a PKP.
 // pkpId is injected via js_params.
-async function main() {
+async function main({ pkpId }) {
   const res = await fetch("https://api.example.com/eth-price");
   const { price } = await res.json();
 

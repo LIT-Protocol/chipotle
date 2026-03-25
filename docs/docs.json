@@ -13,19 +13,26 @@
         "tab": "Building on Lit Chipotle",
         "pages": [
           "index",
-          "dashboard",
-          "pricing",
-          "api_direct",
+          {
+            "group": "Management",
+            "pages": [
+              "management/dashboard",
+              "management/api_direct",
+              "management/pricing",
+              "management/api_keys"
+            ]
+          },
           {
             "group": "Lit Actions",
             "pages": [
               "lit-actions/index",
               "lit-actions/examples",
+              "lit-actions/patterns",
+              "lit-actions/limits",
               {
                 "group": "Migration",
                 "pages": [
                   "lit-actions/migration/changes",
-                  "lit-actions/migration/patterns",
                   "lit-actions/migration/encryption"
                 ]
               }
@@ -40,10 +47,8 @@
             ]
           },
           {
-            "group": "Reference",
-            "pages": [
-              "lit-actions/chipotle"
-            ]
+            "group": "Actions Reference",
+            "pages": ["lit-actions/chipotle"]
           }
         ]
       }
