@@ -47,5 +47,6 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         billing_balance,
         billing_create_payment_intent,
         billing_confirm_payment,
+        get_version,
     ]
 }
