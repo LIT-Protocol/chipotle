@@ -161,9 +161,20 @@ async fn main() -> Result<(), rocket::Error> {
 
     let (core_routes, openapi_spec) = core::v1::endpoints::routes_with_spec();
 
+    let mut mounted_core_routes = core_routes.clone();
+    for route in mounted_core_routes.iter_mut() {
+        *route = route
+            .clone()
+            .map_base(|base| format!("/core/v1/{}", base))
+            .expect("Failed to map base of a route.");
+    }
+
+    let metrics_fairings = lit_api_core::observability::MetricsFairings::new(mounted_core_routes);
+
     let mut r = rocket::build()
         .attach(observability::ObservabilityFairing::new())
         .attach(cors)
+        .attach(metrics_fairings)
         .mount(
             "/",
             routes![openapi_json, openapi_json_redirect, swagger_ui_redirect],
