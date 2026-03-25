@@ -95,7 +95,7 @@ library AppStorage {
         mapping(address => Metadata) pkpData; // mapping from a wallet address to it's metadata.  the ID is the derivationPath.
         bool managed; // whether the LIT-node can help manage the key.
         uint256 pkpCount; // counter for creating unique pkp ids
-        uint256 actionCount; // counter for creating unique action ids
+        uint256 actionCount; // count of unique actions registered to this account
         uint256 groupCount; // counter for creating unique group ids
     }
 
