@@ -92,8 +92,8 @@ A smart contract can call `ecrecover` on the signature to confirm the price was 
 Only sign a message if the current temperature at a given location exceeds a threshold. This demonstrates **condition-gated signing** using a live external data source.
 
 ```javascript
-// js_params: { pkpId, city, minTempCelsius, message }
-// Example: { pkpId: "0x...", city: "London", minTempCelsius: 20, message: "Approved" }
+// js_params: { pkpId, city, minTempCelsius, message, encryptedWeatherApiKey }
+// Example: { pkpId: "0x...", city: "London", minTempCelsius: 20, message: "Approved", encryptedWeatherApiKey: "..." }
 async function main() {
   const apiKey = await Lit.Actions.Decrypt({ pkpId, ciphertext: encryptedWeatherApiKey });
 
