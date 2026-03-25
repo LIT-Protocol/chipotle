@@ -981,9 +981,7 @@ function openAddActionModal() {
     try {
       showActionProgress('Adding action', `Adding action CID "${cid}" to group ${gid}.`);
       const client = await getClient();
-      if (name || desc) {
-        await client.addAction({ apiKey, actionIpfsCid: cid, name: name || '', description: desc || '' });
-      }
+      await client.addAction({ apiKey, actionIpfsCid: cid, name: name || '', description: desc || '' });
       await client.addActionToGroup({ apiKey, groupId: gid, actionIpfsCid: cid });
       if (groupIdEl) groupIdEl.value = gid;
       await loadActions(gid);
