@@ -16,10 +16,16 @@ on:
         description: "API base URL (optional; uses k6 spec fallback when empty)"
         required: false
         type: string
+      accounts_file:
+        description: "Optional accounts file override (e.g. ./k6/data/accounts.next.json)"
+        required: false
+        type: string
 
 jobs:
   correctness:
     runs-on: self-hosted
+    env:
+      ACCOUNTS_FILE: ${{ inputs.accounts_file || (github.ref_name == 'next' && './k6/data/accounts.next.json' || './k6/data/accounts.dev.json') }}
     steps:
       - uses: actions/checkout@v4
 

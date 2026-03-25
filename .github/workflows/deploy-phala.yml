@@ -204,6 +204,6 @@ jobs:
 
   k6-correctness:
     needs: [wait-for-api-available, k6-smoke]
-    uses: ./.github/workflows/correctness.yml
+    uses: ./.github/workflows/k6-correctness.yml
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
