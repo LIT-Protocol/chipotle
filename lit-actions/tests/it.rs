@@ -167,9 +167,12 @@ fn client(server: TestServer) -> TestClient {
 #[rstest]
 #[tokio::test]
 async fn nop(mut client: TestClient) {
-    let res = client.execute_js(indoc! {r#"async function main() { 
+    let res = client
+        .execute_js(indoc! {r#"async function main() {
     // Do nothing 
-    }"#}).await.unwrap();
+    }"#})
+        .await
+        .unwrap();
 
     assert_eq!(res.error, "");
     assert_eq!(res.success, true);
@@ -279,7 +282,7 @@ async fn lit_namespace_protection(mut client: TestClient) {
 #[rstest]
 #[tokio::test]
 async fn js_params(mut client: TestClient) {
-    {   
+    {
         let code = indoc! {r#"
             async function main({ Hello, WORLD }) {
             console.log(
@@ -493,7 +496,9 @@ async fn async_await(mut client: TestClient) {
 #[rstest]
 #[tokio::test]
 async fn reference_error(mut client: TestClient) {
-    let res = client.execute_js("async function main() { nonexisting_function() }").await;
+    let res = client
+        .execute_js("async function main() { nonexisting_function() }")
+        .await;
 
     assert_eq!(
         res.unwrap_err().to_string(),
