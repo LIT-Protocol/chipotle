@@ -21,7 +21,7 @@ use crate::core::v1::models::response::WalletItem;
 use crate::core::v1::models::response::{
     AccountOpResponse, AddUsageApiKeyResponse, BillingBalanceResponse, CreatePaymentIntentResponse,
     CreateWalletResponse, ListMetadataItem, LitActionResponse, NewAccountResponse,
-    NodeChainConfigResponse, StripeConfigResponse,
+    NodeChainConfigResponse, StripeConfigResponse, VersionResponse,
 };
 use crate::observability::RequestSpan;
 use crate::stripe::{self, StripeState};
@@ -63,6 +63,7 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         get_node_chain_config,
         get_api_payers,
         get_admin_api_payer,
+        get_version,
         billing_stripe_config,
         billing_balance,
         billing_create_payment_intent,
@@ -643,4 +644,21 @@ async fn billing_confirm_payment_impl(
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "Stripe error"))?;
     Ok(AccountOpResponse { success: true })
+}
+
+#[openapi(tag = "Info")]
+#[get("/version")]
+async fn get_version() -> OpenApiResponse<VersionResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(Ok(VersionResponse {
+            version: crate::version::CARGO_PKG_VERSION.to_string(),
+            commit_version: crate::version::GIT_VERSION.to_string(),
+            name: crate::version::CARGO_PKG_NAME.to_string(),
+            submodule_versions: crate::version::GIT_SUBMODULE_VERSIONS
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect(),
+        }))
+        .into(),
+    }
 }

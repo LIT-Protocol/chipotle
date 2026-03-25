@@ -125,3 +125,11 @@ pub struct NodeChainConfigResponse {
     pub rpc_url: String,
     pub contract_address: String,
 }
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct VersionResponse {
+    pub name: String,
+    pub version: String,
+    pub commit_version: String,
+    pub submodule_versions: Vec<(String, String)>,
+}
