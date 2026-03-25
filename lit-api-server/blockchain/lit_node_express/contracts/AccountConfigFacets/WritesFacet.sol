@@ -231,8 +231,10 @@ contract WritesFacet {
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         AppStorage.Account storage account = s.accounts[accountApiKeyHash];
-        account.actionCount++;
-        account.actionHashesList.add(actionHash);
+        bool added = account.actionHashesList.add(actionHash);
+        if (added) {
+            account.actionCount++;
+        }
         account.actionMetadata[actionHash].id = actionHash;
         account.actionMetadata[actionHash].name = name;
         account.actionMetadata[actionHash].description = description;
@@ -246,6 +248,10 @@ contract WritesFacet {
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         AppStorage.Account storage account = s.accounts[accountApiKeyHash];
+        bool removed = account.actionHashesList.remove(actionHash);
+        if (removed) {
+            account.actionCount--;
+        }
 
         // Remove the action from all groups that may reference it to avoid stale cidHash entries.
         uint256 groupCount = account.groupList.length();
