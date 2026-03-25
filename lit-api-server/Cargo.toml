@@ -39,6 +39,7 @@ lit-core = { path = "../lit-core/lit-core" }
 lit-core-derive = { path = "../lit-core/lit-core-derive" }
 lit-observability = { path = "../lit-core/lit-observability", features = ["channels"] }
 lit-actions-grpc = { path = "../lit-actions/grpc" }
+lit-api-core = { path = "../lit-core/lit-api-core" }
 
 metrics = "0.23"
 moka = { version = "0.12.7", features = ["future"] }

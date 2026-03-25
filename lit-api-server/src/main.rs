@@ -161,9 +161,12 @@ async fn main() -> Result<(), rocket::Error> {
 
     let (core_routes, openapi_spec) = core::v1::endpoints::routes_with_spec();
 
+    let metrics_fairings = lit_api_core::observability::MetricsFairings::new(core_routes.clone());
+
     let mut r = rocket::build()
         .attach(observability::ObservabilityFairing::new())
         .attach(cors)
+        .attach(metrics_fairings)
         .mount(
             "/",
             routes![openapi_json, openapi_json_redirect, swagger_ui_redirect],
