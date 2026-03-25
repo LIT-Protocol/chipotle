@@ -19,10 +19,10 @@ pub(crate) const DEFAULT_ASYNC_TIMEOUT_MS: u64 = 1000 * 60 * 15; // 15 minutes
 pub(crate) const DEFAULT_CLIENT_TIMEOUT_MS_BUFFER: u64 = 5_000;
 pub(crate) const DEFAULT_MEMORY_LIMIT_MB: u32 = 64; // 64MB
 
-pub(crate) const DEFAULT_MAX_CODE_LENGTH: usize = 16 * 1024 * 1024; // 16MB
-pub(crate) const DEFAULT_MAX_CONSOLE_LOG_LENGTH: usize = 1024 * 100; // 100KB
+pub(crate) const DEFAULT_MAX_CODE_LENGTH: u64 = 16 * 1024 * 1024; // 16MB
+pub(crate) const DEFAULT_MAX_CONSOLE_LOG_LENGTH: u64 = 1024 * 100; // 100KB
 pub(crate) const DEFAULT_MAX_FETCH_COUNT: u32 = 50;
-pub(crate) const DEFAULT_MAX_RESPONSE_LENGTH: usize = 1024 * 100; // 100KB
+pub(crate) const DEFAULT_MAX_RESPONSE_LENGTH: u64 = 1024 * 100; // 100KB
 pub(crate) const DEFAULT_MAX_GET_KEYS_COUNT: u32 = 10; // 10 signature requests per action execution
 pub(crate) const DEFAULT_MAX_RETRIES: u32 = 3;
 
@@ -51,11 +51,11 @@ pub struct Client {
     #[builder(default = "DEFAULT_MEMORY_LIMIT_MB")]
     memory_limit_mb: u32,
     #[builder(default = "DEFAULT_MAX_CODE_LENGTH")]
-    max_code_length: usize,
+    max_code_length: u64,
     #[builder(default = "DEFAULT_MAX_RESPONSE_LENGTH")]
-    max_response_length: usize,
+    max_response_length: u64,
     #[builder(default = "DEFAULT_MAX_CONSOLE_LOG_LENGTH")]
-    max_console_log_length: usize,
+    max_console_log_length: u64,
     #[builder(default = "DEFAULT_MAX_FETCH_COUNT")]
     max_fetch_count: u32,
     #[builder(default = "DEFAULT_MAX_GET_KEYS_COUNT")]

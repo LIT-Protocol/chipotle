@@ -308,15 +308,15 @@ pub(crate) async fn execute_js(
     // Add a wrapper function so that we can catch "return" statements and set the response
     let code = format!(
         "
-      {code}
-    
+        {code}
+        ;
         (async () => {{
         const params = {js_func_params} ;
-         const data = await main(params);
+        const data = await main(params);
         if (typeof data !== \"undefined\") {{
           LitActions.setResponse( {{ response: data }} );
         }}
-    }})();"
+        }})();"
     );
 
     if let Err(e) = worker

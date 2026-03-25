@@ -41,7 +41,7 @@ pub(super) async fn get_admin_api_payer() -> OpenApiResponse<String, ErrMessage>
     }
 }
 
-#[openapi(tag = "Configuration  ")]
+#[openapi(tag = "Configuration")]
 #[get("/version")]
 pub(super) async fn get_version() -> OpenApiResponse<VersionResponse, ErrMessage> {
     OpenApiResponse {

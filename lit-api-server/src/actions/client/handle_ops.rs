@@ -18,7 +18,7 @@ impl Client {
 
         Ok(match op {
             UnionResponse::SetResponse(SetResponseRequest { response }) => {
-                if response.len() > self.max_response_length {
+                if response.len() > self.max_response_length as usize {
                     bail!(
                         "Response is too long. Max length is {} bytes",
                         self.max_response_length
@@ -28,7 +28,7 @@ impl Client {
                 SetResponseResponse {}.into()
             }
             UnionResponse::Print(PrintRequest { message }) => {
-                if self.state.logs.len() + message.len() > self.max_console_log_length {
+                if self.state.logs.len() + message.len() > self.max_console_log_length as usize {
                     bail!(
                         "Console.log is printing something that is too long. Max length for all logs in a single request is {} bytes",
                         self.max_console_log_length

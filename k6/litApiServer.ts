@@ -252,13 +252,6 @@ export interface NodeChainConfigResponse {
   contract_address: string;
 }
 
-export interface VersionResponse {
-  name: string;
-  version: string;
-  commit_version: string;
-  submodule_versions: unknown[][];
-}
-
 /**
  * GET /get_chain_config_keys — names of every supported ConfigKeys variant.
  */
@@ -328,6 +321,13 @@ export interface CreatePaymentIntentRequest {
  */
 export interface ConfirmPaymentRequest {
   payment_intent_id: string;
+}
+
+export interface VersionResponse {
+  name: string;
+  version: string;
+  commit_version: string;
+  submodule_versions: unknown[][];
 }
 
 export type ListApiKeysParams = {
@@ -595,8 +595,6 @@ export type GetApiPayersDefault = string[] | ErrMessage;
 
 export type GetAdminApiPayerDefault = string | ErrMessage;
 
-export type GetVersionDefault = VersionResponse | ErrMessage;
-
 export type BillingStripeConfigDefault = StripeConfigResponse | ErrMessage;
 
 export type BillingBalanceHeaders = {
@@ -627,6 +625,8 @@ export type BillingConfirmPaymentHeaders = {
 };
 
 export type BillingConfirmPaymentDefault = AccountOpResponse | ErrMessage;
+
+export type GetVersionDefault = VersionResponse | ErrMessage;
 
 /**
  * This is the base client to use for interacting with the API.
@@ -1835,36 +1835,6 @@ export class LitApiServerClient {
     };
   }
 
-  getVersion(requestParameters?: Params): {
-    response: Response;
-    data: GetVersionDefault;
-    operationId: string;
-  } {
-    const k6url = new URL(this.cleanBaseUrl + `/version`);
-    const mergedRequestParameters = this._mergeRequestParameters(
-      requestParameters || {},
-      this.commonRequestParameters,
-    );
-    const response = http.request(
-      "GET",
-      k6url.toString(),
-      undefined,
-      mergedRequestParameters,
-    );
-    let data;
-
-    try {
-      data = response.json();
-    } catch {
-      data = response.body;
-    }
-    return {
-      response,
-      data,
-      operationId: "get_version",
-    };
-  }
-
   /**
    * GET /billing/stripe_config — returns the Stripe publishable key. No auth required; the publishable key is safe to expose.
    */
@@ -2038,6 +2008,36 @@ export class LitApiServerClient {
       response,
       data,
       operationId: "billing_confirm_payment",
+    };
+  }
+
+  getVersion(requestParameters?: Params): {
+    response: Response;
+    data: GetVersionDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/version`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "GET",
+      k6url.toString(),
+      undefined,
+      mergedRequestParameters,
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "get_version",
     };
   }
 
