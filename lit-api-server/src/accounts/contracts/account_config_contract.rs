@@ -2211,19 +2211,6 @@ pub mod account_config {
                 )
                 .expect("method not found (this should never happen)")
         }
-        ///Calls the contract's `removeAction` (0x40d4411b) function
-        pub fn remove_action(
-            &self,
-            account_api_key_hash: ::ethers::core::types::U256,
-            action_hash: ::ethers::core::types::U256,
-        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
-            self.0
-                .method_hash(
-                    [64, 212, 65, 27],
-                    (account_api_key_hash, action_hash),
-                )
-                .expect("method not found (this should never happen)")
-        }
         ///Calls the contract's `addActionToGroup` (0x1f52aa42) function
         pub fn add_action_to_group(
             &self,
@@ -2641,6 +2628,16 @@ pub mod account_config {
                         description,
                     ),
                 )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `removeAction` (0x40d4411b) function
+        pub fn remove_action(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            action_hash: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([64, 212, 65, 27], (account_api_key_hash, action_hash))
                 .expect("method not found (this should never happen)")
         }
         ///Calls the contract's `removeActionFromGroup` (0x5d861c72) function
@@ -3433,24 +3430,6 @@ pub mod account_config {
         pub description: ::std::string::String,
         pub action_hash: ::ethers::core::types::U256,
     }
-    ///Container type for all input parameters for the `removeAction` function with signature `removeAction(uint256,uint256)` and selector `0x40d4411b`
-    #[derive(
-        Clone,
-        ::ethers::contract::EthCall,
-        ::ethers::contract::EthDisplay,
-        serde::Serialize,
-        serde::Deserialize,
-        Default,
-        Debug,
-        PartialEq,
-        Eq,
-        Hash,
-    )]
-    #[ethcall(name = "removeAction", abi = "removeAction(uint256,uint256)")]
-    pub struct RemoveActionCall {
-        pub account_api_key_hash: ::ethers::core::types::U256,
-        pub action_hash: ::ethers::core::types::U256,
-    }
     ///Container type for all input parameters for the `addActionToGroup` function with signature `addActionToGroup(uint256,uint256,uint256)` and selector `0x1f52aa42`
     #[derive(
         Clone,
@@ -3848,10 +3827,7 @@ pub mod account_config {
         Eq,
         Hash,
     )]
-    #[ethcall(
-        name = "listActions",
-        abi = "listActions(uint256,uint256,uint256)"
-    )]
+    #[ethcall(name = "listActions", abi = "listActions(uint256,uint256,uint256)")]
     pub struct ListActionsCall {
         pub account_api_key_hash: ::ethers::core::types::U256,
         pub page_number: ::ethers::core::types::U256,
@@ -4137,6 +4113,24 @@ pub mod account_config {
         pub derivation_path: ::ethers::core::types::U256,
         pub name: ::std::string::String,
         pub description: ::std::string::String,
+    }
+    ///Container type for all input parameters for the `removeAction` function with signature `removeAction(uint256,uint256)` and selector `0x40d4411b`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(name = "removeAction", abi = "removeAction(uint256,uint256)")]
+    pub struct RemoveActionCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub action_hash: ::ethers::core::types::U256,
     }
     ///Container type for all input parameters for the `removeActionFromGroup` function with signature `removeActionFromGroup(uint256,uint256,uint256)` and selector `0x5d861c72`
     #[derive(
@@ -4730,8 +4724,7 @@ pub mod account_config {
             {
                 return Ok(Self::RegisterWalletDerivation(decoded));
             }
-            if let Ok(decoded) =
-                <RemoveActionCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            if let Ok(decoded) = <RemoveActionCall as ::ethers::core::abi::AbiDecode>::decode(data)
             {
                 return Ok(Self::RemoveAction(decoded));
             }
