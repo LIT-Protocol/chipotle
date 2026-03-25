@@ -200,6 +200,29 @@
     </div>
 
     <div class="card">
+      <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Server Version</h2>
+      <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+        <code>GET /version</code>
+      </p>
+      <div id="version-results" style="display: none; margin-top: 1rem">
+        <div class="result-row">
+          <span class="result-label">name</span>
+          <span class="result-value" id="ver-name">—</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">version</span>
+          <span class="result-value" id="ver-version">—</span>
+        </div>
+        <div class="result-row">
+          <span class="result-label">commit</span>
+          <span class="result-value" id="ver-commit-version">—</span>
+        </div>
+        <div style="margin-top: 0.75rem" id="ver-submodules"></div>
+      </div>
+      <div id="version-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+    </div>
+
+    <div class="card">
       <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Lit Node Express - Configuration</h2>
       <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
         <code>GET /get_node_chain_config</code> 

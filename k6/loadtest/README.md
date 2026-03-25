@@ -56,3 +56,35 @@ SOAK_VUS=4 k6 run k6/loadtest/soak.spec.ts
 | `SOAK_VUS`     | `3`     | Virtual users                  |
 
 Total test time ≈ 4 minutes (ramp-up/down) + `SOAK_DURATION`.
+
+---
+
+## Breakpoint Test
+
+**Breakpoint test**: step-wise increasing load up to a maximum number of VUs (default 30) to find the point where latency, error rate, or resource usage becomes unacceptable.
+
+```bash
+# Default: 1 → 5 → 10 → 20 → 30 VUs, 2m per step
+k6 run k6/loadtest/breakpoint.spec.ts
+
+# Custom max VUs (steps clamped to this value)
+BPT_MAX_VUS=40 k6 run k6/loadtest/breakpoint.spec.ts
+
+# Longer steps (3 minutes at each VU level)
+BPT_STEP_DURATION=3m k6 run k6/loadtest/breakpoint.spec.ts
+
+# Explicit steps (last value treated as breakpoint/max)
+BPT_STEPS=1,3,6,12,24 k6 run k6/loadtest/breakpoint.spec.ts
+
+# Custom base URL
+BASE_URL=http://localhost:8000/core/v1 k6 run k6/loadtest/breakpoint.spec.ts
+```
+
+**Environment variables:**
+
+| Variable           | Default | Description                                   |
+|--------------------|---------|-----------------------------------------------|
+| `BASE_URL`         | api.dev.litprotocol.com | API base URL (include `/core/v1`) |
+| `BPT_MAX_VUS`      | `30`    | Maximum/peak VUs for the test                 |
+| `BPT_STEP_DURATION`| `2m`    | Duration for each load step                   |
+| `BPT_STEPS`        | *none*  | Optional comma-separated list of VU levels    |

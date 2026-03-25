@@ -15,7 +15,7 @@
  */
 import { checkAndLog } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
-import { createAccountAndUsageKey } from "../setup.ts";
+import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
 import { ENCRYPT_CODE, DECRYPT_CODE } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
@@ -26,14 +26,14 @@ export interface EncryptDecryptSetupData {
 }
 
 export function setup(): EncryptDecryptSetupData {
-  const { usageApiKey, walletAddress } = createAccountAndUsageKey({
-    accountName: "k6-encrypt-decrypt",
-    accountDescription: "k6 encrypt/decrypt test account",
-    usageKeyName: "k6-encrypt-usage-key",
-    usageKeyDescription: "k6 encrypt/decrypt test usage key",
-    setupContext: "encrypt-decrypt",
-  });
-  return { usageApiKey, pkpId: walletAddress };
+  if (PRECREATED_ACCOUNTS.length === 0) {
+    throw new Error(
+      "No pre-created accounts found. Run accounts.seed.spec.ts first to generate k6/data/accounts.json",
+    );
+  }
+  const account =
+    PRECREATED_ACCOUNTS[Math.floor(Math.random() * PRECREATED_ACCOUNTS.length)];
+  return { usageApiKey: account.usageApiKey, pkpId: account.walletAddress };
 }
 
 export const options = {
