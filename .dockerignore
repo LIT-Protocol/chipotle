@@ -3,7 +3,7 @@
 **/.cargo/
 
 # Git
-.git/
+# .git/ is needed for the build process
 .gitignore
 
 # IDE

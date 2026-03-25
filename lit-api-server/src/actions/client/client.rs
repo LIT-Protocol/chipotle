@@ -3,7 +3,10 @@
 //! It holds all configuration data (including secrets) and manages state; none of
 //! which are shared with lit_actions, enabling a secure execution environment.
 
-use crate::actions::client::{ClientBuilder, DEFAULT_CLIENT_TIMEOUT_MS_BUFFER};
+use crate::actions::client::{
+    ClientBuilder, DEFAULT_ASYNC_TIMEOUT_MS, DEFAULT_CLIENT_TIMEOUT_MS_BUFFER,
+};
+use crate::core::v1::models::response::LitActionClientConfigResponse;
 use anyhow::{Result, bail};
 use std::path::PathBuf;
 
@@ -82,6 +85,21 @@ impl Client {
 
     pub fn reset_state(&mut self) {
         std::mem::take(&mut self.state);
+    }
+
+    /// Returns a snapshot of the effective configuration values for this client instance.
+    pub fn config_snapshot(&self) -> LitActionClientConfigResponse {
+        LitActionClientConfigResponse {
+            timeout_ms: self.timeout_ms,
+            async_timeout_ms: DEFAULT_ASYNC_TIMEOUT_MS,
+            memory_limit_mb: self.memory_limit_mb,
+            max_code_length: self.max_code_length,
+            max_response_length: self.max_response_length,
+            max_console_log_length: self.max_console_log_length,
+            max_fetch_count: self.max_fetch_count,
+            max_get_keys_count: self.max_get_keys_count,
+            max_retries: self.max_retries,
+        }
     }
 
     // async fn pay(&mut self, price_component: LitActionPriceComponent, price: u64) -> Result<()> {

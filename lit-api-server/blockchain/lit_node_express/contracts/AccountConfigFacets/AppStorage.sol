@@ -114,6 +114,8 @@ library AppStorage {
         address adminApiPayerAccount; // address of the default api payer
         uint256 requestedApiPayerCount; // number of accounts that are allowed to pay for state mutation made by api calls
         uint256 rebalanceAmount; // amount of ether to rebalance the api payers with.  If 0, then don't rebalance.
+        EnumerableSet.StringSet nodeConfigurationKeys;
+        mapping(string => string) nodeConfigurationValues;
     }
 
     function getStorage()

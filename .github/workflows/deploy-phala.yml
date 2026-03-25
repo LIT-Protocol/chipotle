@@ -93,6 +93,8 @@ jobs:
             dockerfile: Dockerfile.otel-collector
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
@@ -204,6 +206,6 @@ jobs:
 
   k6-correctness:
     needs: [wait-for-api-available, k6-smoke]
-    uses: ./.github/workflows/correctness.yml
+    uses: ./.github/workflows/k6-correctness.yml
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}

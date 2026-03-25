@@ -8,7 +8,7 @@
  */
 import { checkAndLog } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
-import { createAccountAndUsageKey } from "../setup.ts";
+import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
 import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
@@ -20,14 +20,18 @@ export interface IntegrationSetupData {
 }
 
 export function setup(): IntegrationSetupData {
-  const { apiKey, walletAddress, usageApiKey } = createAccountAndUsageKey({
-    accountName: "k6-integration-test",
-    accountDescription: "Integration test account",
-    usageKeyName: "k6-integration-usage-key",
-    usageKeyDescription: "Integration test usage key",
-    setupContext: "integration",
-  });
-  return { apiKey, walletAddress, usageApiKey };
+  if (PRECREATED_ACCOUNTS.length === 0) {
+    throw new Error(
+      "No pre-created accounts found. Run accounts.seed.spec.ts first to generate k6/data/accounts.json",
+    );
+  }
+  const account =
+    PRECREATED_ACCOUNTS[Math.floor(Math.random() * PRECREATED_ACCOUNTS.length)];
+  return {
+    apiKey: account.apiKey,
+    walletAddress: account.walletAddress,
+    usageApiKey: account.usageApiKey,
+  };
 }
 
 export const options = {

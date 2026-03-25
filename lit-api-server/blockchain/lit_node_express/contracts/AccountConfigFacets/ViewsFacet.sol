@@ -13,6 +13,7 @@ import {AppStorage} from "./AppStorage.sol";
 contract ViewsFacet {
     using EnumerableSet for EnumerableSet.UintSet;
     using EnumerableSet for EnumerableSet.AddressSet;
+    using EnumerableSet for EnumerableSet.StringSet;
 
     // used for returning data from the listApiKeys function.
     struct UsageApiKeyReturn {
@@ -33,6 +34,11 @@ contract ViewsFacet {
         AppStorage.Metadata metadata; // name and description of the group
         uint256[] cidHash; // keccak256 of an action ipfs cid
         address[] pkpId; // wallet address
+    }
+
+    struct KeyValueReturn {
+        string key;
+        string value;
     }
 
     /// @notice Getters for public state (ABI compatibility with original AccountConfig).
@@ -75,6 +81,25 @@ contract ViewsFacet {
 
     function rebalanceAmount() public view returns (uint256) {
         return AppStorage.getStorage().rebalanceAmount;
+    }
+
+    function nodeConfigurationKeys() public view returns (string[] memory) {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        return s.nodeConfigurationKeys.values();
+    }
+    function nodeConfigurationValue(string memory key) public view returns (string memory) {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        return s.nodeConfigurationValues[key];
+    }
+
+    function nodeConfigurationValues() public view returns (KeyValueReturn[] memory) {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        uint256 length = s.nodeConfigurationKeys.length();
+        KeyValueReturn[] memory values = new KeyValueReturn[](length);
+        for (uint256 i = 0; i < length; i++) {
+            values[i] = KeyValueReturn(s.nodeConfigurationKeys.at(i), s.nodeConfigurationValues[s.nodeConfigurationKeys.at(i)]);
+        }
+        return values;
     }
 
     function accountExistsAndIsMutable(

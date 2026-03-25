@@ -1,4 +1,5 @@
 use lit_api_server::accounts;
+use lit_api_server::accounts::chain_config::start_chain_config;
 use lit_api_server::accounts::signer_pool::start_signer_pool;
 use lit_api_server::actions::grpc::GrpcClientPool;
 use lit_api_server::config;
@@ -126,6 +127,14 @@ async fn main() -> Result<(), rocket::Error> {
 
     let signer_pool = Arc::new(signer_pool);
 
+    let chain_config = match start_chain_config().await {
+        Ok(cfg) => Arc::new(cfg),
+        Err(e) => {
+            eprintln!("Failed to start chain config: {:?}. Exiting.", e);
+            std::process::exit(1);
+        }
+    };
+
     let allowed_methods = HashSet::from([
         Method::from_str("Get").expect("Invalid method: Get"),
         Method::from_str("Options").expect("Invalid method: Options"),
@@ -152,9 +161,20 @@ async fn main() -> Result<(), rocket::Error> {
 
     let (core_routes, openapi_spec) = core::v1::endpoints::routes_with_spec();
 
+    let mut mounted_core_routes = core_routes.clone();
+    for route in mounted_core_routes.iter_mut() {
+        *route = route
+            .clone()
+            .map_base(|base| format!("/core/v1/{}", base))
+            .expect("Failed to map base of a route.");
+    }
+
+    let metrics_fairings = lit_api_core::observability::MetricsFairings::new(mounted_core_routes);
+
     let mut r = rocket::build()
         .attach(observability::ObservabilityFairing::new())
         .attach(cors)
+        .attach(metrics_fairings)
         .mount(
             "/",
             routes![openapi_json, openapi_json_redirect, swagger_ui_redirect],
@@ -174,6 +194,7 @@ async fn main() -> Result<(), rocket::Error> {
         // .manage(action_store)
         .manage(GrpcClientPool::<tonic::transport::Channel>::new())
         .manage(signer_pool)
+        .manage(chain_config)
         .manage(CpuOverloadMonitor::start())
         .manage(stripe_state);
 

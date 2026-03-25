@@ -93,7 +93,7 @@ Fetch live weather for a city using a decrypted API key and only sign a message 
 
 ```javascript
 // js_params: { pkpId, city, minTempCelsius, message, encryptedWeatherApiKey }
-// Example: { pkpId: "0x...", city: "London", minTempCelsius: 20, message: "Approved" }
+// Example: { pkpId: "0x...", city: "London", minTempCelsius: 20, message: "Approved", encryptedWeatherApiKey: "..." }
 async function main({ pkpId, city, minTempCelsius, message, encryptedWeatherApiKey }) {
   const apiKey = await Lit.Actions.Decrypt({ pkpId, ciphertext: encryptedWeatherApiKey });
 

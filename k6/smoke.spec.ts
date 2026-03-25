@@ -4,7 +4,7 @@
  */
 import { checkAndLog } from "./helpers.ts";
 import { LitApiServerClient } from "./litApiServer.ts";
-import { createAccountAndUsageKey } from "./setup.ts";
+import { PRECREATED_ACCOUNTS } from "./setup.ts";
 import { assertOk } from "./helpers.ts";
 import { HELLO_WORLD_CODE } from "./LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "./defaults.ts";
@@ -13,7 +13,7 @@ export const options = {
   vus: 1,
   iterations: 1,
   thresholds: {
-    http_reqs: ["count>=4"],
+    http_reqs: ["count>=1"],
     http_req_failed: ["rate<0.1"],
     checks: ["rate==1"],
   },
@@ -24,14 +24,14 @@ export interface SmokeSetupData {
 }
 
 export function setup(): SmokeSetupData {
-  const { usageApiKey } = createAccountAndUsageKey({
-    accountName: "k6-smoke-test",
-    accountDescription: "k6 smoke test account",
-    usageKeyName: "k6-smoke-usage-key",
-    usageKeyDescription: "k6 smoke test usage key",
-    setupContext: "smoke",
-  });
-  return { usageApiKey };
+  if (PRECREATED_ACCOUNTS.length === 0) {
+    throw new Error(
+      "No pre-created accounts found. Run accounts.seed.spec.ts first to generate k6/data/accounts.json",
+    );
+  }
+  const account =
+    PRECREATED_ACCOUNTS[Math.floor(Math.random() * PRECREATED_ACCOUNTS.length)];
+  return { usageApiKey: account.usageApiKey };
 }
 
 export default function (data: SmokeSetupData) {

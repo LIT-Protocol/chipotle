@@ -28,9 +28,9 @@ use tonic::Status;
 use tracing::{debug, error, info_span, instrument};
 
 // Same default limits as in lit-node's action client
-const DEFAULT_TIMEOUT_MS: u64 = 30000; // 30s
-const DEFAULT_MEMORY_LIMIT_MB: usize = 256; // 256MB
-const MEMORY_SAMPLE_INTERVAL_MS: u64 = 100; // 100ms
+const DEFAULT_TIMEOUT_MS: u64 = 1000 * 60 * 15; // 15 minutes
+const DEFAULT_MEMORY_LIMIT_MB: usize = 128; // 128MB
+const MEMORY_SAMPLE_INTERVAL_MS: u64 = 500; // 500ms
 const EXECUTION_TERMINATED_ERROR: &str = "Uncaught Error: execution terminated";
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -308,15 +308,15 @@ pub(crate) async fn execute_js(
     // Add a wrapper function so that we can catch "return" statements and set the response
     let code = format!(
         "
-      {code}
-    
+        {code}
+        ;
         (async () => {{
         const params = {js_func_params} ;
-         const data = await main(params);
+        const data = await main(params);
         if (typeof data !== \"undefined\") {{
           LitActions.setResponse( {{ response: data }} );
         }}
-    }})();"
+        }})();"
     );
 
     if let Err(e) = worker

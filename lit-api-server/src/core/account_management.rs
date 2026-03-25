@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::accounts::chain_config::config_key_names;
 use crate::accounts::signer_pool::SignerPool;
 use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::v1::helpers::api_status::ApiStatus;
@@ -10,8 +11,9 @@ use crate::core::v1::models::request::{
     UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
-    AccountOpResponse, AddUsageApiKeyResponse, ApiKeyItem, CreateWalletResponse, ListMetadataItem,
-    NewAccountResponse, NodeChainConfigResponse, WalletItem,
+    AccountOpResponse, AddUsageApiKeyResponse, ApiKeyItem, ChainConfigKeysResponse,
+    CreateWalletResponse, ListMetadataItem, NewAccountResponse, NodeChainConfigResponse,
+    WalletItem,
 };
 use crate::dstack::v1::get_client_key;
 use crate::stripe::StripeState;
@@ -571,6 +573,12 @@ pub async fn list_actions(
 
     let list = list.iter().map(action_metadata_to_item).collect();
     Ok(list)
+}
+
+pub fn get_chain_config_keys() -> ChainConfigKeysResponse {
+    ChainConfigKeysResponse {
+        keys: config_key_names(),
+    }
 }
 
 pub async fn get_chain_info() -> Result<NodeChainConfigResponse, ApiStatus> {
