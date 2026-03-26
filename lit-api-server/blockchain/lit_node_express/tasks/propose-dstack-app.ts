@@ -3,23 +3,26 @@ import SafeApiKit from "@safe-global/api-kit";
 import Safe from "@safe-global/protocol-kit";
 import { ethers } from "ethers";
 
-// Minimal ABI for DstackApp compose-hash whitelisting
-const DSTACK_APP_ABI = [
-  "function setComposeHash(bytes32 composeHash)",
+// AppAuth contract ABI for compose-hash whitelisting (from @phala/cloud SDK).
+// Each Phala CVM with on-chain KMS has its own AppAuth contract (the dstack_app_address).
+// NOTE: The KMS factory at 0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C is NOT the AppAuth —
+// pass the per-app dstack_app_address (visible via `phala cvms get <name> --json` → kms_info.dstack_app_address).
+const APP_AUTH_ABI = [
+  "function addComposeHash(bytes32 composeHash)",
   "function owner() view returns (address)",
 ];
 
-task("propose-dstack-app", "Propose a DstackApp compose-hash whitelisting through Safe")
+task("propose-dstack-app", "Propose an AppAuth compose-hash whitelisting through Safe")
   .addParam("safe", "Safe multisig address")
-  .addParam("dstackApp", "DstackApp contract address")
-  .addParam("composeHash", "The compose hash to whitelist")
+  .addParam("appAuth", "AppAuth contract address (per-app dstack_app_address, NOT the KMS factory)")
+  .addParam("composeHash", "The compose hash to whitelist (hex, 32 bytes)")
   .setAction(async (taskArgs, hre) => {
     const proposerKey = process.env.PROPOSER_PRIVATE_KEY;
     if (!proposerKey) {
       throw new Error("PROPOSER_PRIVATE_KEY environment variable is required");
     }
 
-    const { safe: safeAddress, dstackApp: dstackAppAddress, composeHash } = taskArgs;
+    const { safe: safeAddress, appAuth: appAuthAddress, composeHash } = taskArgs;
     const chainId = hre.network.config.chainId;
 
     if (!chainId) {
@@ -28,12 +31,13 @@ task("propose-dstack-app", "Propose a DstackApp compose-hash whitelisting throug
 
     console.log(`Network: ${hre.network.name} (chain ${chainId})`);
     console.log(`Safe: ${safeAddress}`);
-    console.log(`DstackApp: ${dstackAppAddress}`);
+    console.log(`AppAuth: ${appAuthAddress}`);
     console.log(`Compose Hash: ${composeHash}`);
 
-    // Encode the setComposeHash call
-    const iface = new ethers.Interface(DSTACK_APP_ABI);
-    const calldata = iface.encodeFunctionData("setComposeHash", [composeHash]);
+    // Encode the addComposeHash call
+    const iface = new ethers.Interface(APP_AUTH_ABI);
+    const composeHashBytes = composeHash.startsWith("0x") ? composeHash : `0x${composeHash}`;
+    const calldata = iface.encodeFunctionData("addComposeHash", [composeHashBytes]);
 
     console.log(`\nEncoded calldata: ${calldata}`);
 
@@ -51,7 +55,7 @@ task("propose-dstack-app", "Propose a DstackApp compose-hash whitelisting throug
     const safeTransaction = await protocolKit.createTransaction({
       transactions: [
         {
-          to: dstackAppAddress,
+          to: appAuthAddress,
           data: calldata,
           value: "0",
           operation: 0, // Call
