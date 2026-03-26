@@ -95,7 +95,7 @@ export default function (data: IntegrationSetupData) {
 
   // ── 5. listWallets ────────────────────────────────────────────────────────
   const listWalletsRes = client.listWallets(
-    { page_number: "0", page_size: "10" },
+    { page_number: 0, page_size: 10 },
     authHeaders,
   );
   if (!assertOk("listWallets", "GET /list_wallets", listWalletsRes)) return;
@@ -132,7 +132,7 @@ export default function (data: IntegrationSetupData) {
 
   // ── 7. listGroups — extract groupId for subsequent tests ──────────────────
   const listGroupsRes = client.listGroups(
-    { page_number: "0", page_size: "10" },
+    { page_number: 0, page_size: 10 },
     authHeaders,
   );
   if (!assertOk("listGroups", "GET /list_groups", listGroupsRes)) return;
@@ -313,7 +313,7 @@ export default function (data: IntegrationSetupData) {
 
   // ── 14. listApiKeys ───────────────────────────────────────────────────────
   const listApiKeysRes = client.listApiKeys(
-    { page_number: "0", page_size: "10" },
+    { page_number: 0, page_size: 10 },
     authHeaders,
   );
   if (!assertOk("listApiKeys", "GET /list_api_keys", listApiKeysRes)) return;
@@ -331,7 +331,7 @@ export default function (data: IntegrationSetupData) {
   const updateActionRes = client.updateActionMetadata(
     {
       group_id: parseInt(groupId),
-      action_ipfs_cid: ipfsId,
+      hashed_cid: ipfsId,
       name: "hello-world-updated",
       description: "Updated Hello World lit action",
     },
