@@ -67,7 +67,8 @@ jobs:
             echo "instance_type=tdx.small" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-next" >> "$GITHUB_OUTPUT"
             echo "node_config=NodeConfig.next.toml" >> "$GITHUB_OUTPUT"
-            BASE_URL="https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network"
+            echo "domain=test.chipotle.litprotocol.com" >> "$GITHUB_OUTPUT"
+            BASE_URL="https://test.chipotle.litprotocol.com"
           else
             echo "Unsupported branch for deployment"
             exit 1
