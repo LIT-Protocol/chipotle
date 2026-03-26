@@ -12,14 +12,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set deployment target
+      - name: Set API URL
         id: target
         run: |
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            echo "project=lit-static-prod" >> "$GITHUB_OUTPUT"
             echo "api_url=https://f8fce543471dc9f5f5643aa217422398c36e5edc-8000.dstack-base-prod5.phala.network" >> "$GITHUB_OUTPUT"
           else
-            echo "project=lit-static-next" >> "$GITHUB_OUTPUT"
             echo "api_url=https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network" >> "$GITHUB_OUTPUT"
           fi
 
@@ -31,4 +29,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy lit-static/static --project-name=${{ steps.target.outputs.project }}
+          command: pages deploy lit-static/static --project-name=lit-static --branch=${{ github.ref_name }}
