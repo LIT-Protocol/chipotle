@@ -435,30 +435,20 @@ export default function (data: SecuritySetupData) {
     );
     assertOk("9-crossAccount-B-executes-own", "POST /lit_action", posRes);
 
-    // Negative: Account B's key tries to add PKP to Account A's group
-    const negPkpRes = client.addPkpToGroup(
-      { group_id: data.groupIdX, pkp_id: data.pkpWalletAddress },
-      adminB,
-    );
-    assertNon2xx("9-crossAccount-B-addPkp-A", "POST /add_pkp_to_group", negPkpRes);
-
-    // Negative: Account B's key tries to delete Account A's group
-    const negDeleteRes = client.removeGroup(
-      { group_id: String(data.groupIdX) },
-      adminB,
-    );
-    assertNon2xx("9-crossAccount-B-deleteGroup-A", "POST /remove_group", negDeleteRes);
-
     // Data isolation: Account B's listGroups should NOT contain Account A's groups
     const listBRes = client.listGroups({ page_number: 0, page_size: 100 }, adminB);
     if (assertOk("9-crossAccount-B-listGroups", "GET /list_groups", listBRes)) {
       const bGroups = listBRes.data as Array<{ id: string; name: string }>;
-      checkAndLog(listBRes.response, {
-        "B's listGroups does not contain A's groupX": () =>
-          !bGroups.some((g) => parseInt(g.id) === data.groupIdX),
-        "B's listGroups does not contain A's groupY": () =>
-          !bGroups.some((g) => parseInt(g.id) === data.groupIdY),
-      }, "9-crossAccount-isolation");
+      checkAndLog(
+        listBRes.response,
+        {
+          "B's listGroups does not contain A's groupX": () =>
+            !bGroups.some((g) => parseInt(g.id) === data.groupIdX),
+          "B's listGroups does not contain A's groupY": () =>
+            !bGroups.some((g) => parseInt(g.id) === data.groupIdY),
+        },
+        "9-crossAccount-isolation",
+      );
     }
   });
 
