@@ -1,6 +1,5 @@
-# Phala CVM deployment: lit-api-server + lit-actions + lit-static + otel-collector
+# Phala CVM deployment: lit-api-server + lit-actions + otel-collector
 # lit-actions and lit-api-server share gRPC Unix socket at /tmp/lit_actions.sock.
-# lit-static serves SDKs, docs, dapps on port 8001.
 # otel-collector runs on the compose bridge network, receives OTLP on 0.0.0.0:4317,
 # and forwards telemetry to GCP. lit-actions reaches it via LIT_TELEMETRY_ENDPOINT;
 # lit-api-server reads the endpoint from NodeConfig.toml ([observability] telemetry_endpoint).
@@ -91,17 +90,6 @@ services:
     volumes:
       - '/proc:/host/proc:ro'
       - '/sys:/host/sys:ro'
-    restart: unless-stopped
-
-  lit-static:
-    image: ${DOCKER_IMAGE_LIT_STATIC}
-    command: ["lit-static"]
-    working_dir: /app
-    ports:
-      - "8001:8001"
-    environment:
-      ROCKET_ADDRESS: "0.0.0.0"
-      ROCKET_PORT: "8001"
     restart: unless-stopped
 
 volumes:

@@ -1,0 +1,34 @@
+name: Deploy Static Site
+on:
+  push:
+    branches: [main, next]
+    paths:
+      - 'lit-static/static/**'
+      - '.github/workflows/deploy-static.yml'
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set deployment target
+        id: target
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "project=lit-static-prod" >> "$GITHUB_OUTPUT"
+            echo "api_url=https://f8fce543471dc9f5f5643aa217422398c36e5edc-8000.dstack-base-prod5.phala.network" >> "$GITHUB_OUTPUT"
+          else
+            echo "project=lit-static-staging" >> "$GITHUB_OUTPUT"
+            echo "api_url=https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Inject API URL
+        run: sed -i "s|__LIT_API_BASE_URL__|${{ steps.target.outputs.api_url }}|g" lit-static/static/dapps/dashboard/app.js
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy lit-static/static --project-name=${{ steps.target.outputs.project }}

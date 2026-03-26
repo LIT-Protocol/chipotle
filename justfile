@@ -7,13 +7,11 @@ image_base := env('DOCKER_IMAGE', 'litptcl/lit-node-express')
 image_tag := env('DOCKER_TAG', `uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '\n'`)
 image_lit_actions     := image_base + '-lit-actions:'     + image_tag
 image_lit_api_server  := image_base + '-lit-api-server:'  + image_tag
-image_lit_static      := image_base + '-lit-static:'      + image_tag
 image_otel_collector  := image_base + '-otel-collector:'  + image_tag
 # main → chipotle-dev; any other branch → chipotle-next (override with PHALA_APP_NAME)
 app_name       := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo chipotle-dev || echo chipotle-next'`
 instance_type  := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo tdx.small || echo tdx.small'`
 gcp_project_id := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo chipotle-dev || echo chipotle-next'`
-base_url       := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo https://f8fce543471dc9f5f5643aa217422398c36e5edc-8000.dstack-base-prod5.phala.network || echo https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network'`
 node_config    := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo NodeConfig.main.toml || echo NodeConfig.next.toml'`
 
 import "justfile.deploy"
