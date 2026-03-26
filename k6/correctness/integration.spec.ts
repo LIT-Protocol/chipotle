@@ -220,6 +220,8 @@ export default function (data: IntegrationSetupData) {
       }
     },
   }, "listActions");
+  const listActionsBody = JSON.parse(listActionsRes.response.body as string) as { id: string }[];
+  const hashedCid = listActionsBody[0]?.id ?? "";
   // ── 10. addPkpToGroup ─────────────────────────────────────────────────────
   const addPkpRes = client.addPkpToGroup(
     { group_id: parseInt(groupId), pkp_id: walletAddress },
@@ -331,7 +333,7 @@ export default function (data: IntegrationSetupData) {
   const updateActionRes = client.updateActionMetadata(
     {
       group_id: parseInt(groupId),
-      hashed_cid: ipfsId,
+      hashed_cid: hashedCid,
       name: "hello-world-updated",
       description: "Updated Hello World lit action",
     },
@@ -425,7 +427,7 @@ export default function (data: IntegrationSetupData) {
 
   // ── 21. removeActionFromGroup ─────────────────────────────────────────────
   const removeActionRes = client.removeActionFromGroup(
-    { group_id: parseInt(groupId) , hashed_cid: ipfsId },
+    { group_id: parseInt(groupId), hashed_cid: hashedCid },
     authHeaders,
   );
   assertOk("removeActionFromGroup", "POST /remove_action_from_group", removeActionRes);
@@ -441,7 +443,7 @@ export default function (data: IntegrationSetupData) {
 
   // ── 21b. deleteAction ────────────────────────────────────────────────────
   const deleteActionRes = client.deleteAction(
-    { hashed_cid: ipfsId },
+    { hashed_cid: hashedCid },
     authHeaders,
   );
   assertOk("deleteAction", "POST /delete_action", deleteActionRes);
