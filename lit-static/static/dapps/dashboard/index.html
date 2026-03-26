@@ -223,21 +223,18 @@
             <div id="actions-status" class="status" style="display: none;"></div>
             <div class="card">
               <div class="card-header">
-                <h3 class="card-title">Actions in group</h3>
+                <h3 class="card-title">Actions</h3>
                 <div class="card-header-actions">
-                  <select id="actions-group-id" class="input input-sm" style="width: 12rem;">
-                    <option value="" disabled selected>Loading groups…</option>
-                  </select>
                   <button type="button" id="btn-load-actions" class="btn btn-sm btn-outline">Refresh</button>
                 </div>
               </div>
               <div class="card-body">
                 <div class="table-wrap">
                   <table class="data-table" id="actions-table">
-                    <thead><tr><th>Name</th><th>CID</th><th>Description</th><th class="th-actions"></th></tr></thead>
+                    <thead><tr><th>Name</th><th>Hashed CID</th><th>Description</th><th class="th-actions"></th></tr></thead>
                     <tbody id="actions-tbody"></tbody>
                   </table>
-                  <p id="actions-empty" class="empty-state" style="display: none;">No actions in this group.</p>
+                  <p id="actions-empty" class="empty-state" style="display: none;">No actions found.</p>
                 </div>
                 <div class="table-add-row">
                   <button type="button" id="btn-add-action" class="btn btn-primary">Add</button>

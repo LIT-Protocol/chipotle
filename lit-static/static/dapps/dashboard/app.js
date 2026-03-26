@@ -46,12 +46,10 @@ async function preloadAllTables() {
   const apiKey = getApiKey();
   if (!apiKey) return;
   try {
-    const groups = await loadGroups();
+    await loadGroups();
     await loadWallets();
     await loadUsageKeys();
-    const groupIdEl = document.getElementById('actions-group-id');
-    const groupId = (groupIdEl && groupIdEl.value.trim()) || (groups && groups.length > 0 ? String(groups[0].id) : '0');
-    await loadActions(groupId);
+    await loadActions();
   } catch (_) { /* ignore */ }
 }
 
@@ -540,7 +538,7 @@ async function confirmAndRemoveGroup(item) {
   }
 }
 
-function renderActionsTable(items, groupId) {
+function renderActionsTable(items) {
   const tbody = document.getElementById('actions-tbody');
   const empty = document.getElementById('actions-empty');
   if (!tbody) return;
@@ -564,14 +562,14 @@ function renderActionsTable(items, groupId) {
     editBtn.className = 'btn-icon';
     editBtn.title = 'Edit';
     editBtn.innerHTML = ICON_PENCIL;
-    editBtn.addEventListener('click', () => openEditActionModal(item, groupId));
+    editBtn.addEventListener('click', () => openEditActionModal(item));
     actionsCell.appendChild(editBtn);
     const delBtn = document.createElement('button');
     delBtn.type = 'button';
     delBtn.className = 'btn-icon btn-icon-danger';
     delBtn.title = 'Delete';
     delBtn.innerHTML = ICON_TRASH;
-    delBtn.addEventListener('click', () => confirmAndRemoveAction(item, groupId));
+    delBtn.addEventListener('click', () => confirmAndRemoveAction(item));
     actionsCell.appendChild(delBtn);
     tbody.appendChild(tr);
   });
@@ -784,17 +782,6 @@ async function loadUsageKeys() {
 }
 
 // ----- Load table data (used by preload and refresh buttons) -----
-function populateActionsGroupDropdown(groups) {
-  const sel = document.getElementById('actions-group-id');
-  if (!sel) return;
-  const current = sel.value;
-  sel.innerHTML = groups.length === 0
-    ? '<option value="" disabled selected>No groups</option>'
-    : groups.map(g => `<option value="${g.id}">${escapeHtml(g.name || String(g.id))}</option>`).join('');
-  // Restore previous selection if still valid, otherwise pick first.
-  if (current && [...sel.options].some(o => o.value === current)) sel.value = current;
-  else if (sel.options.length > 0) sel.selectedIndex = 0;
-}
 
 async function loadGroups() {
   const apiKey = getApiKey();
@@ -807,7 +794,6 @@ async function loadGroups() {
     const items = await client.listGroups({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
     window._groups = items;
     renderGroupsTable(items);
-    populateActionsGroupDropdown(items);
     window._statGroups = items.length;
     updateStatCards();
     return items;
@@ -841,17 +827,17 @@ async function loadWallets() {
   }
 }
 
-async function loadActions(groupId) {
+async function loadActions() {
   const apiKey = getApiKey();
-  if (!apiKey || !groupId) return;
+  if (!apiKey) return;
   hideStatus('actions-status');
   const btn = document.getElementById('btn-load-actions');
   if (btn) btn.disabled = true;
   try {
     const client = await getClient();
-    const items = await client.listActions({ apiKey, groupId, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
+    const items = await client.listActions({ apiKey, groupId: '0', pageNumber: '0', pageSize: LIST_PAGE_SIZE });
     window._actions = items;
-    renderActionsTable(items, groupId);
+    renderActionsTable(items);
     window._statActions = items.length;
     updateStatCards();
     return items;
@@ -952,12 +938,7 @@ function openEditGroupModal(item) { openGroupModal(item); }
 
 // ----- Action modals -----
 function openAddActionModal() {
-  const groupIdEl = document.getElementById('actions-group-id');
-  const groupId = (groupIdEl && groupIdEl.value.trim()) || '0';
-  const selectedOption = groupIdEl && groupIdEl.options[groupIdEl.selectedIndex];
-  const groupLabel = selectedOption ? selectedOption.textContent : groupId;
   const body =
-    '<div class="form-group"><label>Group</label><div class="input" style="background:var(--input-bg,#f3f4f6);color:var(--text-muted,#6b7280);cursor:default;" id="modal-action-group-id">' + escapeHtml(groupLabel) + '</div></div>' +
     '<div class="form-group"><label for="modal-action-cid">IPFS CID</label><input type="text" id="modal-action-cid" class="input" placeholder="Qm... or bafy..."></div>' +
     '<div class="form-group"><label for="modal-action-name">Name (optional)</label><input type="text" id="modal-action-name" class="input" placeholder="Action name"></div>' +
     '<div class="form-group"><label for="modal-action-desc">Description (optional)</label><input type="text" id="modal-action-desc" class="input" placeholder="Optional"></div>';
@@ -967,24 +948,21 @@ function openAddActionModal() {
   openModal('Add action', body, footer);
   document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
   document.getElementById('modal-add-btn').addEventListener('click', async () => {
-    const gid = groupId;
     const cid = document.getElementById('modal-action-cid').value.trim();
     const name = document.getElementById('modal-action-name').value.trim() || undefined;
     const desc = document.getElementById('modal-action-desc').value.trim() || undefined;
     const apiKey = getApiKey();
-    if (!apiKey || !gid || !cid) {
+    if (!apiKey || !cid) {
       showStatus('actions-status', 'Fill in the IPFS CID.', 'error');
       return;
     }
     closeModal();
     hideStatus('actions-status');
     try {
-      showActionProgress('Adding action', `Adding action CID "${cid}" to group ${gid}.`);
+      showActionProgress('Adding action', `Adding action CID "${cid}".`);
       const client = await getClient();
       await client.addAction({ apiKey, actionIpfsCid: cid, name: name || '', description: desc || '' });
-      await client.addActionToGroup({ apiKey, groupId: gid, actionIpfsCid: cid });
-      if (groupIdEl) groupIdEl.value = gid;
-      await loadActions(gid);
+      await loadActions();
       showStatus('actions-status', 'Action added.', 'success');
     } catch (e) {
       showStatus('actions-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
@@ -994,13 +972,10 @@ function openAddActionModal() {
   });
 }
 
-function openEditActionModal(item, groupId) {
-  const cid = item.ipfs_cid || item.cid || '';
-  const group = getGroupsStore().find((g) => String(g.id) === String(groupId));
-  const groupLabel = group ? (group.name || String(groupId)) : String(groupId);
+function openEditActionModal(item) {
+  const cid = item.ipfs_cid || item.cid || String(item.id ?? '');
   const body =
-    '<div class="form-group"><label>Group</label><div class="input" style="background:var(--input-bg,#f3f4f6);color:var(--text-muted,#6b7280);cursor:default;">' + escapeHtml(groupLabel) + '</div></div>' +
-    '<div class="form-group"><label>IPFS CID</label><div class="mono">' + escapeHtml(cid) + '</div></div>' +
+    '<div class="form-group"><label>Hashed CID</label><div class="mono">' + escapeHtml(cid) + '</div></div>' +
     '<div class="form-group"><label for="modal-edit-action-name">Name</label><input type="text" id="modal-edit-action-name" class="input" value="' + escapeHtml(item.name || '') + '"></div>' +
     '<div class="form-group"><label for="modal-edit-action-desc">Description</label><input type="text" id="modal-edit-action-desc" class="input" value="' + escapeHtml(item.description || '') + '"></div>';
   const footer =
@@ -1012,7 +987,7 @@ function openEditActionModal(item, groupId) {
     const name = document.getElementById('modal-edit-action-name').value.trim();
     const desc = document.getElementById('modal-edit-action-desc').value.trim();
     const apiKey = getApiKey();
-    if (!apiKey || !groupId || !cid || !name) {
+    if (!apiKey || !cid || !name) {
       showStatus('actions-status', 'Fill Name.', 'error');
       return;
     }
@@ -1021,8 +996,8 @@ function openEditActionModal(item, groupId) {
     try {
       showActionProgress('Updating action', `Updating action metadata for CID "${cid}".`);
       const client = await getClient();
-      await client.updateActionMetadata({ apiKey, groupId, actionIpfsCid: cid, name, description: desc });
-      await loadActions(groupId);
+      await client.updateActionMetadata({ apiKey, groupId: '0', hashedCid: cid, name, description: desc });
+      await loadActions();
       showStatus('actions-status', 'Action updated.', 'success');
     } catch (e) {
       showStatus('actions-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
@@ -1032,21 +1007,20 @@ function openEditActionModal(item, groupId) {
   });
 }
 
-async function confirmAndRemoveAction(item, groupId) {
+async function confirmAndRemoveAction(item) {
   const cid = item.ipfs_cid || item.cid || String(item.id ?? '');
   const name = item.name || cid;
-  const msg = 'Delete action "' + escapeHtml(name) + '" from this group and account? This cannot be undone.';
+  const msg = 'Delete action "' + escapeHtml(name) + '"? This cannot be undone.';
   const confirmed = await confirmDelete(msg);
   if (!confirmed) return;
   const apiKey = getApiKey();
   if (!apiKey) return;
   hideStatus('actions-status');
   try {
-    showActionProgress('Deleting action', `Deleting action CID "${cid}" from group ${groupId}.`);
+    showActionProgress('Deleting action', `Deleting action CID "${cid}".`);
     const client = await getClient();
-    await client.removeActionFromGroup({ apiKey, groupId, actionIpfsCid: cid });
-    await client.deleteAction({ apiKey, actionIpfsCid: cid });
-    await loadActions(groupId);
+    await client.deleteAction({ apiKey, hashedCid: cid });
+    await loadActions();
     showStatus('actions-status', 'Action deleted.', 'success');
   } catch (e) {
     showStatus('actions-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
@@ -1348,15 +1322,7 @@ function initGroups() {
 
 // ----- IPFS Actions -----
 function initActions() {
-  document.getElementById('btn-load-actions')?.addEventListener('click', () => {
-    const groupId = document.getElementById('actions-group-id').value.trim();
-    if (groupId) loadActions(groupId);
-    else showStatus('actions-status', 'Select a group.', 'error');
-  });
-  document.getElementById('actions-group-id')?.addEventListener('change', () => {
-    const groupId = document.getElementById('actions-group-id').value.trim();
-    if (groupId) loadActions(groupId);
-  });
+  document.getElementById('btn-load-actions')?.addEventListener('click', () => loadActions());
   document.getElementById('btn-add-action')?.addEventListener('click', () => openAddActionModal());
 }
 

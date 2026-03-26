@@ -425,7 +425,7 @@ export default function (data: IntegrationSetupData) {
 
   // ── 21. removeActionFromGroup ─────────────────────────────────────────────
   const removeActionRes = client.removeActionFromGroup(
-    { group_id: parseInt(groupId) , action_ipfs_cid: ipfsId },
+    { group_id: parseInt(groupId) , hashed_cid: ipfsId },
     authHeaders,
   );
   assertOk("removeActionFromGroup", "POST /remove_action_from_group", removeActionRes);
@@ -441,7 +441,7 @@ export default function (data: IntegrationSetupData) {
 
   // ── 21b. deleteAction ────────────────────────────────────────────────────
   const deleteActionRes = client.deleteAction(
-    { action_ipfs_cid: ipfsId },
+    { hashed_cid: ipfsId },
     authHeaders,
   );
   assertOk("deleteAction", "POST /delete_action", deleteActionRes);
