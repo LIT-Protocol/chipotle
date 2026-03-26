@@ -1,3 +1,4 @@
+pub mod chain_config;
 pub mod contracts;
 use std::sync::Arc;
 
@@ -6,7 +7,9 @@ pub mod signable_contract;
 pub mod signer_pool;
 pub use anyhow::Result;
 
-use crate::accounts::contracts::account_config_contract::{PkpData, UsageApiKeyReturn};
+use crate::accounts::contracts::account_config_contract::{
+    KeyValueReturn, PkpData, UsageApiKeyReturn,
+};
 use crate::accounts::signable_contract::{
     get_read_only_account_config_contract, get_signable_account_config_contract, send_transaction,
 };
@@ -84,16 +87,31 @@ pub async fn add_group(
     send_transaction(function_call, signer_pool, signer_address, client).await
 }
 
-/// Create a new action entry with name and description in the account's actionMetadata mapping.
+/// Create a new action entry with name, description, and IPFS CID hash in the account's actionMetadata mapping.
 pub async fn add_action(
     signer_pool: Arc<SignerPool>,
     api_key: &str,
+    action_hash: U256,
     req: AddActionRequest,
 ) -> Result<bool> {
     let (contract, signer_address, client) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
-    let function_call = contract.add_action(account_api_key_hash, req.name, req.description);
+    let function_call =
+        contract.add_action(account_api_key_hash, req.name, req.description, action_hash);
+    send_transaction(function_call, signer_pool, signer_address, client).await
+}
+
+/// Remove an action from the account by its hash (AccountConfig.removeAction).
+pub async fn remove_action(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    action_hash: U256,
+) -> Result<bool> {
+    let (contract, signer_address, client) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let function_call = contract.remove_action(account_api_key_hash, action_hash);
     send_transaction(function_call, signer_pool, signer_address, client).await
 }
 
@@ -446,7 +464,7 @@ pub async fn list_actions(
     let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
     let page = contract
-        .list_actions(account_api_key_hash, group_id, page_number, page_size)
+        .list_actions_in_group(account_api_key_hash, group_id, page_number, page_size)
         .call()
         .await?;
     Ok(page)
@@ -559,4 +577,10 @@ pub async fn can_execute_action_and_use_wallet(
         .call()
         .await?;
     Ok(result)
+}
+
+pub async fn get_node_configuration_values() -> Result<Vec<KeyValueReturn>> {
+    let contract = get_read_only_account_config_contract().await?;
+    let values = contract.node_configuration_values().call().await?;
+    Ok(values)
 }

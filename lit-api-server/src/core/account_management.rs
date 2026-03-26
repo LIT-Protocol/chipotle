@@ -1,23 +1,27 @@
 use std::sync::Arc;
 
+use crate::accounts::chain_config::config_key_names;
 use crate::accounts::signer_pool::SignerPool;
 use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
-    AddUsageApiKeyRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemoveGroupRequest,
-    RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest, UpdateActionMetadataRequest,
-    UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
+    AddUsageApiKeyRequest, DeleteActionRequest, NewAccountRequest, RemoveActionFromGroupRequest,
+    RemoveGroupRequest, RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest,
+    UpdateActionMetadataRequest, UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest,
+    UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
-    AccountOpResponse, AddUsageApiKeyResponse, ApiKeyItem, CreateWalletResponse, ListMetadataItem,
-    NewAccountResponse, NodeChainConfigResponse, WalletItem,
+    AccountOpResponse, AddUsageApiKeyResponse, ApiKeyItem, ChainConfigKeysResponse,
+    CreateWalletResponse, ListMetadataItem, NewAccountResponse, NodeChainConfigResponse,
+    WalletItem,
 };
 use crate::dstack::v1::get_client_key;
 use crate::stripe::StripeState;
 use crate::utils::generate_unique_derivation_path;
 use crate::utils::parse_with_hash::{
-    hex_array_to_h160_array, hex_array_to_u256_array, ipfs_cid_to_u256, string_group_id_to_u256,
+    hashed_cid_to_u256, hex_array_to_h160_array, hex_array_to_u256_array, ipfs_cid_to_u256,
+    string_group_id_to_u256,
 };
 use crate::{accounts, dstack};
 use elliptic_curve::group::GroupEncoding;
@@ -169,9 +173,28 @@ pub async fn add_action(
     api_key: &str,
     req: Json<AddActionRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    accounts::add_action(signer_pool, api_key, req.into_inner())
+    let action_hash = ipfs_cid_to_u256(&req.action_ipfs_cid)?;
+    accounts::add_action(signer_pool, api_key, action_hash, req.into_inner())
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "add_action failed"))?;
+    Ok(AccountOpResponse { success: true })
+}
+
+pub async fn delete_action(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    req: Json<DeleteActionRequest>,
+) -> Result<AccountOpResponse, ApiStatus> {
+    let action_hash = hashed_cid_to_u256(&req.hashed_cid)?;
+    if action_hash == U256::zero() {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Cannot remove action with hash 0x0"),
+            "Cannot remove action with hash 0x0",
+        ));
+    }
+    accounts::remove_action(signer_pool, api_key, action_hash)
+        .await
+        .map_err(|e| ApiStatus::internal_server_error(e, "delete_action failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
@@ -287,6 +310,12 @@ pub async fn remove_group(
     req: Json<RemoveGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = string_group_id_to_u256(&req.group_id)?;
+    if group_id == U256::zero() {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Cannot remove group with ID 0"),
+            "Cannot remove group with ID 0",
+        ));
+    }
     accounts::remove_group(signer_pool, api_key, group_id)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "remove_group failed"))?;
@@ -341,6 +370,12 @@ pub async fn update_group(
     req: Json<UpdateGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = U256::from(req.group_id);
+    if group_id == U256::zero() {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Cannot update group with ID 0"),
+            "Cannot update group with ID 0",
+        ));
+    }
     let cid_hashes = hex_array_to_u256_array(&req.cid_hashes_permitted)?;
     let pkp_ids = hex_array_to_h160_array(&req.pkp_ids_permitted)?;
     accounts::update_group(
@@ -363,7 +398,14 @@ pub async fn remove_action_from_group(
     req: Json<RemoveActionFromGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = U256::from(req.group_id);
-    accounts::remove_action_from_group_by_cid(signer_pool, api_key, group_id, &req.action_ipfs_cid)
+    if group_id == U256::zero() {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Cannot remove action from group with ID 0"),
+            "Cannot remove action from group with ID 0",
+        ));
+    }
+    let action_hash = hashed_cid_to_u256(&req.hashed_cid)?;
+    accounts::remove_action_from_group(signer_pool, api_key, group_id, action_hash)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "remove_action_from_group failed"))?;
     Ok(AccountOpResponse { success: true })
@@ -374,13 +416,18 @@ pub async fn update_action_metadata(
     api_key: &str,
     req: Json<UpdateActionMetadataRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let group_id = U256::from(req.group_id);
-    let action_hash = ipfs_cid_to_u256(&req.action_ipfs_cid)?;
+    let action_hash = hashed_cid_to_u256(&req.hashed_cid)?;
+    if action_hash == U256::zero() {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Cannot update action with hash 0x0"),
+            "Cannot update action with hash 0x0",
+        ));
+    }
     accounts::update_action_metadata(
         signer_pool,
         api_key,
         action_hash,
-        group_id,
+        U256::zero(),
         &req.name,
         &req.description,
     )
@@ -571,6 +618,12 @@ pub async fn list_actions(
 
     let list = list.iter().map(action_metadata_to_item).collect();
     Ok(list)
+}
+
+pub fn get_chain_config_keys() -> ChainConfigKeysResponse {
+    ChainConfigKeysResponse {
+        keys: config_key_names(),
+    }
 }
 
 pub async fn get_chain_info() -> Result<NodeChainConfigResponse, ApiStatus> {

@@ -34,6 +34,7 @@
 /**
  * @typedef {Object} AddActionOptions
  * @property {string} apiKey - Account API key
+ * @property {string} actionIpfsCid - IPFS CID for the action (keccak256-hashed on server)
  * @property {string} name - Name for the action (stored in contract actionMetadata)
  * @property {string} description - Description for the action
  */
@@ -105,17 +106,22 @@
  */
 
 /**
+ * @typedef {Object} DeleteActionOptions
+ * @property {string} apiKey - Account API key
+ * @property {string} hashedCid - Already-hashed CID for the action (0x-prefixed keccak256 hex string)
+ */
+
+/**
  * @typedef {Object} RemoveActionFromGroupOptions
  * @property {string} apiKey - Account API key
  * @property {string} groupId - Group ID (decimal or hex string)
- * @property {string} actionIpfsCid - IPFS CID for the action (keccak256-hashed on server)
+ * @property {string} hashedCid - Already-hashed CID for the action (0x-prefixed keccak256 hex string)
  */
 
 /**
  * @typedef {Object} UpdateActionMetadataOptions
  * @property {string} apiKey - Account API key
- * @property {string} groupId - Group ID (decimal or hex string)
- * @property {string} actionIpfsCid - IPFS CID for the action (keccak256-hashed on server)
+ * @property {string} hashedCid - Already-hashed CID for the action (0x-prefixed keccak256 hex string)
  * @property {string} name - Action name
  * @property {string} description - Action description
  */
@@ -423,8 +429,8 @@ export class LitNodeSimpleApiClient {
    * @param {AddActionOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async addAction({ apiKey, name, description }) {
-    const body = { name: name ?? '', description: description ?? '' };
+  async addAction({ apiKey, actionIpfsCid, name, description }) {
+    const body = { action_ipfs_cid: actionIpfsCid, name: name ?? '', description: description ?? '' };
     const res = await fetch(`${this.baseUrl}/add_action`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
@@ -617,15 +623,31 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
+   * POST /core/v1/delete_action
+   * Delete an action and its metadata from the account.
+   * @param {DeleteActionOptions} options
+   * @returns {Promise<AccountOpResponse>}
+   */
+  async deleteAction({ apiKey, hashedCid }) {
+    const body = { hashed_cid: hashedCid };
+    const res = await fetch(`${this.baseUrl}/delete_action`, {
+      method: 'POST',
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'delete_action');
+  }
+
+  /**
    * POST /core/v1/remove_action_from_group
-   * Remove an action from a group by IPFS CID (keccak256-hashed on server).
+   * Remove an action from a group by already-hashed CID.
    * @param {RemoveActionFromGroupOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async removeActionFromGroup({ apiKey, groupId, actionIpfsCid }) {
+  async removeActionFromGroup({ apiKey, groupId, hashedCid }) {
     const body = {
       group_id: Number(groupId),
-      action_ipfs_cid: actionIpfsCid,
+      hashed_cid: hashedCid,
     };
     const res = await fetch(`${this.baseUrl}/remove_action_from_group`, {
       method: 'POST',
@@ -637,14 +659,13 @@ export class LitNodeSimpleApiClient {
 
   /**
    * POST /core/v1/update_action_metadata
-   * Update action metadata (name, description) for an action in a group.
+   * Update action metadata (name, description) for an action.
    * @param {UpdateActionMetadataOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async updateActionMetadata({ apiKey, groupId, actionIpfsCid, name, description }) {
+  async updateActionMetadata({ apiKey, hashedCid, name, description }) {
     const body = {
-      group_id: Number(groupId),
-      action_ipfs_cid: actionIpfsCid,
+      hashed_cid: hashedCid,
       name: name ?? '',
       description: description ?? '',
     };

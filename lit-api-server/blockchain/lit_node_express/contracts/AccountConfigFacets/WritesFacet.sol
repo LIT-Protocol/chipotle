@@ -14,7 +14,8 @@ import {SecurityLib} from "./SecurityLib.sol";
 contract WritesFacet {
     using EnumerableSet for EnumerableSet.UintSet;
     using EnumerableSet for EnumerableSet.AddressSet;
-
+    using EnumerableSet for EnumerableSet.StringSet;
+    
     function newAccount(
         uint256 apiKeyHash,
         bool managed,
@@ -223,17 +224,46 @@ contract WritesFacet {
     function addAction(
         uint256 accountApiKeyHash,
         string memory name,
-        string memory description
+        string memory description,
+        uint256 actionHash
     ) public {
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         AppStorage.Account storage account = s.accounts[accountApiKeyHash];
-        account.actionCount++;
-        uint256 actionId = account.actionCount;
-        account.actionMetadata[actionId].id = actionId;
-        account.actionMetadata[actionId].name = name;
-        account.actionMetadata[actionId].description = description;
+        bool added = account.actionHashesList.add(actionHash);
+        if (added) {
+            account.actionCount++;
+        }
+        account.actionMetadata[actionHash].id = actionHash;
+        account.actionMetadata[actionHash].name = name;
+        account.actionMetadata[actionHash].description = description;
+    }
+
+    function removeAction(
+        uint256 accountApiKeyHash,
+        uint256 actionHash
+    ) public {
+        if (actionHash == 0) {
+            revert AppStorage.InvalidRequest("Cannot remove action with hash 0x0");
+        }
+        SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
+        SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        AppStorage.Account storage account = s.accounts[accountApiKeyHash];
+
+        bool removed = account.actionHashesList.remove(actionHash);
+        if (removed && account.actionCount > 0) {
+            account.actionCount--;
+        }
+
+        // Remove the action from all groups that may reference it to avoid stale cidHash entries.
+        uint256 groupCount = account.groupList.length();
+        for (uint256 i = 0; i < groupCount; i++) {
+            uint256 groupId = account.groupList.at(i);
+            account.groups[groupId].cidHash.remove(actionHash);
+        }
+        delete account.actionMetadata[actionHash];
     }
 
     function addActionToGroup(
@@ -258,15 +288,13 @@ contract WritesFacet {
         string memory name,
         string memory description
     ) public {
-        SecurityLib.revertIfActionDoesNotExist(
-            accountApiKeyHash,
-            groupId,
-            actionHash,
-            msg.sender
-        );
+        SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         AppStorage.Account storage account = s.accounts[accountApiKeyHash];
+        if (!account.actionHashesList.contains(actionHash)) {
+            revert AppStorage.ActionDoesNotExist(accountApiKeyHash, groupId, actionHash);
+        }
         account.actionMetadata[actionHash].name = name;
         account.actionMetadata[actionHash].description = description;
     }
@@ -368,5 +396,15 @@ contract WritesFacet {
         account.pkpCount++;
         s.pkpCount++;
         s.allPkpIds[s.pkpCount] = pkpId;
+    }
+
+    function setNodeConfiguration(
+        string memory key,
+        string memory value
+    ) public {
+        SecurityLib.revertIfNotApiPayerOrOwner(msg.sender);
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        s.nodeConfigurationKeys.add(key);
+        s.nodeConfigurationValues[key] = value;
     }
 }

@@ -6,6 +6,23 @@
 const ACCOUNT_CONFIG_VIEW_ABI = [
   {
     inputs: [],
+    name: 'nodeConfigurationValues',
+    outputs: [
+      {
+        components: [
+          { internalType: 'string', name: 'key',   type: 'string' },
+          { internalType: 'string', name: 'value', type: 'string' },
+        ],
+        internalType: 'struct ViewsFacet.KeyValueReturn[]',
+        name: '',
+        type: 'tuple[]',
+      },
+    ],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
+    inputs: [],
     name: 'pricingOperator',
     outputs: [{ internalType: 'address', name: '', type: 'address' }],
     stateMutability: 'view',
@@ -69,6 +86,19 @@ const SET_REQUESTED_API_PAYER_COUNT_ABI = [
   },
 ];
 
+const SET_NODE_CONFIGURATION_ABI = [
+  {
+    inputs: [
+      { internalType: 'string', name: 'key',   type: 'string' },
+      { internalType: 'string', name: 'value', type: 'string' },
+    ],
+    name: 'setNodeConfiguration',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+];
+
 const SET_ADMIN_API_PAYER_ABI = [
   {
     inputs: [{ internalType: 'address', name: 'newAdminApiPayerAccount', type: 'address' }],
@@ -81,6 +111,10 @@ const SET_ADMIN_API_PAYER_ABI = [
 
 function el(id) {
   return document.getElementById(id);
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function setValue(id, text, isEmpty) {
@@ -244,19 +278,69 @@ async function getApiPayers(serverUrl) {
   }
 }
 
+// ── fetchVersion ──────────────────────────────────────────────────────────────
+
+async function fetchVersion(serverUrl) {
+  const resultsEl = el('version-results');
+  const errEl = el('version-error');
+
+  if (errEl) errEl.style.display = 'none';
+  setValue('ver-version', '…', false);
+  const submodulesEl = el('ver-submodules');
+  if (submodulesEl) submodulesEl.innerHTML = '';
+  if (resultsEl) resultsEl.style.display = 'block';
+
+  try {
+    const res = await fetch(`${serverUrl}/version`);
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    const data = await res.json();
+
+    setValue('ver-name',           data.name           ?? '—', !data.name);
+    setValue('ver-version',        data.version        ?? '—', !data.version);
+    setValue('ver-commit-version', data.commit_version ?? '—', !data.commit_version);
+
+    if (submodulesEl) {
+      const rows = (data.submodule_versions ?? []);
+      if (rows.length === 0) {
+        submodulesEl.innerHTML = '<span style="color:var(--muted);font-size:0.85rem">None</span>';
+      } else {
+        submodulesEl.innerHTML =
+          `<table>` +
+            `<thead><tr><th>Submodule</th><th>Version</th></tr></thead>` +
+            `<tbody>` +
+              rows.map(([name, ver]) =>
+                `<tr><td>${escapeHtml(name)}</td><td>${escapeHtml(ver)}</td></tr>`
+              ).join('') +
+            `</tbody>` +
+          `</table>`;
+      }
+    }
+  } catch (e) {
+    if (resultsEl) resultsEl.style.display = 'none';
+    if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
+  }
+}
+
 // ── loadNetwork ───────────────────────────────────────────────────────────────
 
 async function loadNetwork() {
   const serverUrl = getServerUrl();
   await getNodeChainConfig(serverUrl); // Must run first to populate RPC URL
-  await getApiPayers(serverUrl);
+  await Promise.all([
+    getApiPayers(serverUrl),
+    fetchVersion(serverUrl),
+  ]);
   await fetchContractValues();
+  await fetchNodeConfigValues();
+  await fetchLitActionClientConfig(serverUrl);
+  await fetchChainConfigKeys(serverUrl);
 }
 
 async function refreshBalances() {
   const serverUrl = getServerUrl();
   await getApiPayers(serverUrl);
   await fetchContractValues();
+  await fetchNodeConfigValues();
 }
 
 (function () {
@@ -475,6 +559,158 @@ el('btn-set-rebalance-amount')?.addEventListener('click', async () => {
   } finally {
     btn.disabled = false;
   }
+});
+
+// ── getChainConfigKeys ────────────────────────────────────────────────────────
+
+async function fetchChainConfigKeys(serverUrl) {
+  const listEl = el('chain-config-keys-list');
+  const errEl = el('chain-config-keys-error');
+
+  if (errEl) errEl.style.display = 'none';
+  if (listEl) listEl.innerHTML = '<span style="color:var(--muted)">Loading…</span>';
+
+  try {
+    const res = await fetch(`${serverUrl}/get_chain_config_keys`);
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    const data = await res.json();
+    const keys = data.keys ?? [];
+
+    if (listEl) {
+      listEl.innerHTML = keys.length === 0
+        ? '<span style="color:var(--muted)">No keys returned.</span>'
+        : keys.map(k => `<div class="result-row"><span class="result-value">${escapeHtml(k)}</span></div>`).join('');
+    }
+  } catch (e) {
+    if (listEl) listEl.innerHTML = '';
+    if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
+  }
+}
+
+// ── getLitActionClientConfig ──────────────────────────────────────────────────
+
+async function fetchLitActionClientConfig(serverUrl) {
+  const resultsEl = el('lit-action-config-results');
+  const errEl = el('lit-action-config-error');
+
+  if (errEl) errEl.style.display = 'none';
+  if (resultsEl) resultsEl.style.display = 'block';
+
+  const fields = [
+    'lac-timeout-ms', 'lac-async-timeout-ms', 'lac-memory-limit-mb',
+    'lac-max-code-length', 'lac-max-response-length', 'lac-max-console-log-length',
+    'lac-max-fetch-count', 'lac-max-get-keys-count', 'lac-max-retries',
+  ];
+  fields.forEach(id => setValue(id, '…', false));
+
+  try {
+    const res = await fetch(`${serverUrl}/get_lit_action_client_config`);
+    if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+    const cfg = await res.json();
+
+    setValue('lac-timeout-ms',            cfg.timeout_ms           != null ? String(cfg.timeout_ms)           : '—', cfg.timeout_ms           == null);
+    setValue('lac-async-timeout-ms',      cfg.async_timeout_ms     != null ? String(cfg.async_timeout_ms)     : '—', cfg.async_timeout_ms     == null);
+    setValue('lac-memory-limit-mb',       cfg.memory_limit_mb      != null ? String(cfg.memory_limit_mb)      : '—', cfg.memory_limit_mb      == null);
+    setValue('lac-max-code-length',       cfg.max_code_length      != null ? String(cfg.max_code_length)      : '—', cfg.max_code_length      == null);
+    setValue('lac-max-response-length',   cfg.max_response_length  != null ? String(cfg.max_response_length)  : '—', cfg.max_response_length  == null);
+    setValue('lac-max-console-log-length',cfg.max_console_log_length != null ? String(cfg.max_console_log_length) : '—', cfg.max_console_log_length == null);
+    setValue('lac-max-fetch-count',       cfg.max_fetch_count      != null ? String(cfg.max_fetch_count)      : '—', cfg.max_fetch_count      == null);
+    setValue('lac-max-get-keys-count',    cfg.max_get_keys_count   != null ? String(cfg.max_get_keys_count)   : '—', cfg.max_get_keys_count   == null);
+    setValue('lac-max-retries',           cfg.max_retries          != null ? String(cfg.max_retries)          : '—', cfg.max_retries          == null);
+  } catch (e) {
+    if (resultsEl) resultsEl.style.display = 'none';
+    if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
+  }
+}
+
+// ── nodeConfigurationValues ───────────────────────────────────────────────────
+
+async function fetchNodeConfigValues() {
+  const rpcUrl = (el('cc-rpc-url')?.value || '').trim();
+  const contractAddress = (el('contract-address')?.value || '').trim();
+  const tableEl = el('node-config-table');
+  const errEl = el('node-config-fetch-error');
+
+  if (errEl) errEl.style.display = 'none';
+  if (!rpcUrl || !contractAddress) return;
+
+  if (tableEl) tableEl.innerHTML = '<tr><td colspan="2" style="color:var(--muted)">Loading…</td></tr>';
+
+  try {
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const contract = new ethers.Contract(contractAddress, ACCOUNT_CONFIG_VIEW_ABI, provider);
+    const pairs = await contract.nodeConfigurationValues();
+
+    if (!tableEl) return;
+    if (!pairs || pairs.length === 0) {
+      tableEl.innerHTML = '<tr><td colspan="2" style="color:var(--muted)">No configuration values set.</td></tr>';
+      return;
+    }
+    tableEl.innerHTML = pairs.map(([key, value]) =>
+      `<tr><td>${escapeHtml(key)}</td><td>${escapeHtml(value)}</td></tr>`
+    ).join('');
+  } catch (e) {
+    if (tableEl) tableEl.innerHTML = '';
+    if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
+  }
+}
+
+function escapeHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function showNodeConfigStatus(msg, isError) {
+  const node = el('node-config-status');
+  if (!node) return;
+  node.textContent = msg;
+  node.style.color = isError ? '#f87171' : '#34d399';
+  node.style.display = msg ? 'block' : 'none';
+}
+
+el('btn-set-node-config')?.addEventListener('click', async () => {
+  const contractAddress = (el('contract-address')?.value || '').trim();
+  const key   = (el('node-config-key')?.value   || '').trim();
+  const value = (el('node-config-value')?.value || '').trim();
+  const btn   = el('btn-set-node-config');
+
+  if (!contractAddress) {
+    showNodeConfigStatus('Contract address not yet loaded — select a network first.', true);
+    return;
+  }
+  if (!key) {
+    showNodeConfigStatus('Enter a configuration key.', true);
+    return;
+  }
+
+  btn.disabled = true;
+  showNodeConfigStatus('Connecting wallet…', false);
+
+  try {
+    const provider = await connectWallet();
+    const signer   = await provider.getSigner();
+    const contract = new ethers.Contract(contractAddress, SET_NODE_CONFIGURATION_ABI, signer);
+
+    showNodeConfigStatus('Waiting for signature…', false);
+    const tx = await contract.setNodeConfiguration(key, value);
+
+    showNodeConfigStatus('Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
+    await tx.wait();
+
+    showNodeConfigStatus('Done. Configuration key "' + key + '" set.', false);
+    el('node-config-key').value   = '';
+    el('node-config-value').value = '';
+    await fetchNodeConfigValues();
+  } catch (e) {
+    showNodeConfigStatus('Error: ' + (e?.reason || e?.message || String(e)), true);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+el('btn-refresh-node-config')?.addEventListener('click', async () => {
+  const btn = el('btn-refresh-node-config');
+  btn.disabled = true;
+  try { await fetchNodeConfigValues(); } finally { btn.disabled = false; }
 });
 
 el('cc-rpc-url')?.addEventListener('change', () => refreshBalances());

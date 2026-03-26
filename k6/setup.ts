@@ -5,8 +5,18 @@
 import { LitApiServerClient } from "./litApiServer.ts";
 import { assertOk } from "./helpers.ts";
 import { BASE_URL, COMMON_PARAMS, K6_RUN_ID } from "./defaults.ts";
+import { SharedArray } from "k6/data";
 
 export interface AccountAndUsageKey {
+  apiKey: string;
+  walletAddress: string;
+  usageApiKey: string;
+}
+
+/**
+ * Shape of a pre-created account record stored in the local JSON file.
+ */
+export interface PrecreatedAccount {
   apiKey: string;
   walletAddress: string;
   usageApiKey: string;
@@ -65,3 +75,44 @@ export function createAccountAndUsageKey(options: {
 
   return { apiKey, walletAddress, usageApiKey };
 }
+
+/**
+ * Shared pool of pre-created accounts, loaded from a JSON file on disk.
+ *
+ * The file is expected to be either:
+ *   - an object with an `accounts` array, or
+ *   - a bare array of account objects.
+ *
+ * You can override the path with ACCOUNTS_FILE; by default we look for
+ * `./data/accounts.json` relative to the k6 project root.
+ */
+const ACCOUNTS_FILE = __ENV.ACCOUNTS_FILE || "./data/accounts.json";
+
+export const PRECREATED_ACCOUNTS = new SharedArray<PrecreatedAccount>(
+  "precreated-accounts",
+  () => {
+    try {
+      const raw = open(ACCOUNTS_FILE);
+      const parsed = JSON.parse(raw as string);
+      if (Array.isArray(parsed)) {
+        return parsed as PrecreatedAccount[];
+      }
+      if (parsed && Array.isArray((parsed as any).accounts)) {
+        return (parsed as any).accounts as PrecreatedAccount[];
+      }
+      throw new Error(
+        `Invalid accounts file format in ${ACCOUNTS_FILE}; expected an array or { accounts: [...] }`,
+      );
+    } catch (e) {
+      // If the file does not exist yet or is temporarily invalid (e.g. being
+      // written by the seeding script), treat this as "no pre-created accounts".
+      console.warn(
+        `PRECREATED_ACCOUNTS: unable to load ${ACCOUNTS_FILE} (${String(
+          (e as Error).message ?? e,
+        )}); continuing with an empty pool`,
+      );
+      return [] as PrecreatedAccount[];
+    }
+  },
+);
+

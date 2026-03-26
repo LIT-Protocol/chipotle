@@ -36,7 +36,7 @@ Create a new account (returns API key and wallet address). Or verify an existing
     const res = await client.newAccount({
       accountName: 'My App',
       accountDescription: 'Optional description',
-      initialBalance: '0'  // optional
+      email: 'you@example.com'  // optional, forwarded to Stripe
     });
     console.log('API key:', res.api_key);
     console.log('Wallet:', res.wallet_address);
@@ -52,7 +52,7 @@ Create a new account (returns API key and wallet address). Or verify an existing
     # New account
     curl -s -X POST "https://api.dev.litprotocol.com/core/v1/new_account" \
       -H "Content-Type: application/json" \
-      -d '{"account_name":"My App","account_description":"Optional","initial_balance":"0"}'
+      -d '{"account_name":"My App","account_description":"Optional","email":"you@example.com"}'
     
     # Verify account (replace KEY with your API key)
     curl -s "http://localhost:8000/core/v1/account_exists" \
@@ -63,30 +63,33 @@ Create a new account (returns API key and wallet address). Or verify an existing
 
 ### 2. Add usage API key
 
-Create a usage API key with expiration and balance. The response includes the new key only once — store it.
+Create a scoped usage API key. The response includes the new key only once — store it. Permissions are defined by boolean flags and group ID arrays (use `0` as a wildcard for "all groups").
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
     ```javascript
-    // Expiration: e.g., 1 year from now (Unix timestamp). Balance: e.g., "1000000"
-    const expiration = String(Math.floor(Date.now() / 1000) + 365 * 24 * 3600);
-    const balance = '1000000';
-    
     const res = await client.addUsageApiKey({
       apiKey: accountApiKey,
-      expiration,
-      balance
+      name: 'My dApp Key',
+      description: 'Execute-only key for group 1',
+      canCreateGroups: false,
+      canDeleteGroups: false,
+      canCreatePkps: false,
+      manageIpfsIdsInGroups: [],
+      addPkpToGroups: [],
+      removePkpFromGroups: [],
+      executeInGroups: [1],     // grant execute in group 1; use [0] for all groups
     });
     console.log('New usage API key (store it now):', res.usage_api_key);
     ```
   </Tab>
   <Tab title="cURL">
     ```bash
-    # Replace KEY with account API key; set expiration (e.g., Unix ts) and balance
+    # Replace KEY with account API key
     curl -s -X POST "http://localhost:8000/core/v1/add_usage_api_key" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
-      -d '{"expiration":"9999999999","balance":"1000000"}'
+      -d '{"name":"My dApp Key","description":"Execute-only key for group 1","can_create_groups":false,"can_delete_groups":false,"can_create_pkps":false,"manage_ipfs_ids_in_groups":[],"add_pkp_to_groups":[],"remove_pkp_from_groups":[],"execute_in_groups":[1]}'
     ```
   </Tab>
 </Tabs>
@@ -117,28 +120,33 @@ Create a group (with optional permitted actions and PKPs). Then add an action (I
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
     ```javascript
-    // Create group (permitted_actions and pkps are keccak256 hashes; can be empty arrays)
+    // Create group (pkpIdsPermitted and cidHashesPermitted can be empty arrays)
     await client.addGroup({
       apiKey: accountApiKey,
       groupName: 'My Group',
       groupDescription: 'Optional',
-      permittedActions: [],
-      pkps: [],
-      allWalletsPermitted: true,
-      allActionsPermitted: false
+      pkpIdsPermitted: [],
+      cidHashesPermitted: [],
     });
-    
+
     // List groups to get the new group ID
     const groups = await client.listGroups({ apiKey: accountApiKey, pageNumber: '0', pageSize: '10' });
     const groupId = groups[groups.length - 1].id;
     
+    // Register action metadata (name/description) with the IPFS CID
+    await client.addAction({
+
     // Add an IPFS action (CID) to the group
     await client.addActionToGroup({
       apiKey: accountApiKey,
-      groupId,
       actionIpfsCid: 'QmYourIpfsCidHere',
-      name: 'My Action',
-      description: 'Optional'
+    });
+
+    // Add the action (IPFS CID) to the group
+    await client.addActionToGroup({
+      apiKey: accountApiKey,
+      groupId,
+      actionIpfsCid: 'QmYourIpfsCidHere'
     });
     ```
   </Tab>
@@ -148,17 +156,23 @@ Create a group (with optional permitted actions and PKPs). Then add an action (I
     curl -s -X POST "http://localhost:8000/core/v1/add_group" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
-      -d '{"group_name":"My Group","group_description":"","permitted_actions":[],"pkps":[],"all_wallets_permitted":true,"all_actions_permitted":false}'
+      -d '{"group_name":"My Group","group_description":"","pkp_ids_permitted":[],"cid_hashes_permitted":[]}'
     
     # List groups to get group_id (use the "id" from the response)
     curl -s "http://localhost:8000/core/v1/list_groups?page_number=0&page_size=10" \
       -H "X-Api-Key: KEY"
     
+    # Register action metadata (replace IPFS_CID)
+    curl -s -X POST "http://localhost:8000/core/v1/add_action" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{"action_ipfs_cid":"QmYourIpfsCidHere","name":"My Action","description":""}'
+
     # Add action to group (replace GROUP_ID and IPFS_CID)
     curl -s -X POST "http://localhost:8000/core/v1/add_action_to_group" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
-      -d '{"group_id":"GROUP_ID","action_ipfs_cid":"QmYourIpfsCidHere","name":"My Action","description":""}'
+      -d '{"group_id":"GROUP_ID","action_ipfs_cid":"QmYourIpfsCidHere"}'
     ```
   </Tab>
 </Tabs>
@@ -173,7 +187,7 @@ Restrict which wallets (PKPs) can be used in the group by adding their public ke
     await client.addPkpToGroup({
       apiKey: accountApiKey,
       groupId,
-      pkpPublicKey: walletPublicKeyHex  // from listWallets or createWallet flow
+      pkpId: walletId,  // from listWallets or createWallet flow
     });
     ```
   </Tab>
@@ -182,7 +196,7 @@ Restrict which wallets (PKPs) can be used in the group by adding their public ke
     curl -s -X POST "http://localhost:8000/core/v1/add_pkp_to_group" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
-      -d '{"group_id":"GROUP_ID","pkp_public_key":"YOUR_PKP_PUBLIC_KEY_HEX"}'
+      -d '{"group_id":"GROUP_ID","pkp_id":"YOUR_PKP_ID"}'
     ```
   </Tab>
 </Tabs>
@@ -227,8 +241,151 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
 - **list_actions** — List actions in a group (by `group_id`).
 - **list_wallets_in_group** — List wallets in a group.
 - **update_group** — Update group name, description, and permission flags.
+- **delete_action** — Delete an action (IPFS CID) and its metadata from the account.
 - **remove_action_from_group** / **remove_pkp_from_group** — Remove action or PKP from a group.
 - **get_node_chain_config** — Get node chain config - a quick way to find the location of contracts within the system.
+
+---
+
+### Add action
+
+Register a standalone action entry (name and description only). To make it executable, add its IPFS CID to a group with `add_action_to_group`.
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    await client.addAction({
+      apiKey: accountApiKey,
+      name: 'Price Oracle',
+      description: 'Fetches and signs ETH/USD price',
+    });
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s -X POST "http://localhost:8000/core/v1/add_action" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{"name":"Price Oracle","description":"Fetches and signs ETH/USD price"}'
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+### Remove usage API key
+
+Permanently remove a usage API key from the account. Any clients using this key will immediately lose access.
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    await client.removeUsageApiKey({
+      apiKey: accountApiKey,
+      usageApiKey: 'the-key-to-remove',
+    });
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s -X POST "http://localhost:8000/core/v1/remove_usage_api_key" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{"usage_api_key":"the-key-to-remove"}'
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+### Update usage API key
+
+Replace all permissions on an existing usage API key. This is a full overwrite — include every field, not just the ones you want to change.
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    await client.updateUsageApiKey({
+      apiKey: accountApiKey,
+      usageApiKey: 'the-key-to-update',
+      name: 'Updated Key',
+      description: 'Now also has PKP-create permission',
+      canCreateGroups: false,
+      canDeleteGroups: false,
+      canCreatePkps: true,
+      manageIpfsIdsInGroups: [],
+      addPkpToGroups: [],
+      removePkpFromGroups: [],
+      executeInGroups: [1],
+    });
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s -X POST "http://localhost:8000/core/v1/update_usage_api_key" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{"usage_api_key":"the-key-to-update","name":"Updated Key","description":"Now also has PKP-create permission","can_create_groups":false,"can_delete_groups":false,"can_create_pkps":true,"manage_ipfs_ids_in_groups":[],"add_pkp_to_groups":[],"remove_pkp_from_groups":[],"execute_in_groups":[1]}'
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+### Update usage API key metadata
+
+Update only the name and description of a usage API key without changing its permissions.
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    await client.updateUsageApiKeyMetadata({
+      apiKey: accountApiKey,
+      usageApiKey: 'the-key-to-update',
+      name: 'Renamed Key',
+      description: 'New description',
+    });
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s -X POST "http://localhost:8000/core/v1/update_usage_api_key_metadata" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{"usage_api_key":"the-key-to-update","name":"Renamed Key","description":"New description"}'
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+### Update action metadata
+
+Update the name and description of an action that is already registered in a group.
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    await client.updateActionMetadata({
+      apiKey: accountApiKey,
+      groupId: 1,
+      actionIpfsCid: 'QmYourIpfsCidHere',
+      name: 'Updated Action Name',
+      description: 'Updated description',
+    });
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s -X POST "http://localhost:8000/core/v1/update_action_metadata" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{"group_id":1,"action_ipfs_cid":"QmYourIpfsCidHere","name":"Updated Action Name","description":"Updated description"}'
+    ```
+  </Tab>
+</Tabs>
+
+---
 
 Both request/response shapes and OpenAPI spec are available directly in the dev system. For a Swagger UI implementation of the OpenAPI spec, please browse to:\
 \

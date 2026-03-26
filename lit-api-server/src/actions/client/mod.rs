@@ -14,20 +14,17 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-const DEFAULT_TIMEOUT_MS: u64 = 30_000; // 30s
-const DEFAULT_ASYNC_TIMEOUT_MS: u64 = 300_000; // 5m
-const DEFAULT_CLIENT_TIMEOUT_MS_BUFFER: u64 = 5_000;
-const DEFAULT_MEMORY_LIMIT_MB: u32 = 256; // 256MB
+pub(crate) const DEFAULT_TIMEOUT_MS: u64 = 1000 * 60 * 15; // 15 minutes
+pub(crate) const DEFAULT_ASYNC_TIMEOUT_MS: u64 = 1000 * 60 * 15; // 15 minutes
+pub(crate) const DEFAULT_CLIENT_TIMEOUT_MS_BUFFER: u64 = 5_000;
+pub(crate) const DEFAULT_MEMORY_LIMIT_MB: u32 = 64; // 64MB
 
-const DEFAULT_MAX_CODE_LENGTH: usize = 16 * 1024 * 1024; // 16MB
-const DEFAULT_MAX_CONSOLE_LOG_LENGTH: usize = 1024 * 100; // 100KB
-const DEFAULT_MAX_CONTRACT_CALL_COUNT: u32 = 30;
-const DEFAULT_MAX_FETCH_COUNT: u32 = 50;
-const DEFAULT_MAX_RESPONSE_LENGTH: usize = 1024 * 100; // 100KB
-const DEFAULT_MAX_SIGN_COUNT: u32 = 10; // 10 signature requests per action execution
-const DEFAULT_MAX_BROADCAST_AND_COLLECT_COUNT: u32 = 30;
-const DEFAULT_MAX_CALL_DEPTH: u32 = 5;
-const DEFAULT_MAX_RETRIES: u32 = 3;
+pub(crate) const DEFAULT_MAX_CODE_LENGTH: u64 = 16 * 1024 * 1024; // 16MB
+pub(crate) const DEFAULT_MAX_CONSOLE_LOG_LENGTH: u64 = 1024 * 100; // 100KB
+pub(crate) const DEFAULT_MAX_FETCH_COUNT: u32 = 50;
+pub(crate) const DEFAULT_MAX_RESPONSE_LENGTH: u64 = 1024 * 100; // 100KB
+pub(crate) const DEFAULT_MAX_GET_KEYS_COUNT: u32 = 10; // 10 signature requests per action execution
+pub(crate) const DEFAULT_MAX_RETRIES: u32 = 3;
 
 #[derive(Debug, Default, Clone, Builder, Serialize, Deserialize)]
 pub struct Client {
@@ -54,21 +51,15 @@ pub struct Client {
     #[builder(default = "DEFAULT_MEMORY_LIMIT_MB")]
     memory_limit_mb: u32,
     #[builder(default = "DEFAULT_MAX_CODE_LENGTH")]
-    max_code_length: usize,
+    max_code_length: u64,
     #[builder(default = "DEFAULT_MAX_RESPONSE_LENGTH")]
-    max_response_length: usize,
+    max_response_length: u64,
     #[builder(default = "DEFAULT_MAX_CONSOLE_LOG_LENGTH")]
-    max_console_log_length: usize,
+    max_console_log_length: u64,
     #[builder(default = "DEFAULT_MAX_FETCH_COUNT")]
     max_fetch_count: u32,
-    #[builder(default = "DEFAULT_MAX_SIGN_COUNT")]
-    max_sign_count: u32,
-    #[builder(default = "DEFAULT_MAX_CONTRACT_CALL_COUNT")]
-    max_contract_call_count: u32,
-    #[builder(default = "DEFAULT_MAX_BROADCAST_AND_COLLECT_COUNT")]
-    max_broadcast_and_collect_count: u32,
-    #[builder(default = "DEFAULT_MAX_CALL_DEPTH")]
-    max_call_depth: u32,
+    #[builder(default = "DEFAULT_MAX_GET_KEYS_COUNT")]
+    max_get_keys_count: u32,
     #[builder(default = "DEFAULT_MAX_RETRIES")]
     max_retries: u32,
 

@@ -39,7 +39,7 @@ The old patterns — IIFE (`(async () => { ... })()`) and `Lit.Actions.setRespon
 
 **After:**
 ```js
-async function main() {
+async function main({ pkpId, message }) {
   const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId }));
   const sig = await wallet.signMessage(message);
   return { sig };
@@ -152,7 +152,7 @@ Returns **Promise\<string>** — The wallet address
 
 #### `Lit.Actions.setResponse`
 
-Set the response returned to the client.
+Set the response returned to the client.   Note that while this function remains, the suggested pattern is to simple use the `return` keyword at the end of a function.
 
 **Parameters**
 
@@ -187,7 +187,7 @@ Previously asked the Lit Node to sign a message using the `eth_personalSign` alg
 
 **Replacement:** Use `Lit.Actions.getPrivateKey({ pkpId })` to retrieve the private key, then sign with `ethers.Wallet`:
 ```js
-async function main() {
+async function main({ pkpId, message }) {
   const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId }));
   const sig = await wallet.signMessage(message);
   return sig;

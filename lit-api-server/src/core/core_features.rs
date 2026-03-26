@@ -1,10 +1,11 @@
 use crate::accounts::can_execute_action;
+use crate::accounts::chain_config::{ChainConfig, ConfigKeys};
 use crate::actions::client::ClientBuilder;
 use crate::actions::client::models::DenoExecutionEnv;
 use crate::actions::grpc::GrpcClientPool;
 use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::LitActionRequest;
-use crate::core::v1::models::response::LitActionResponse;
+use crate::core::v1::models::response::{LitActionClientConfigResponse, LitActionResponse};
 use crate::observability::RequestSpan;
 use crate::utils::parse_with_hash::ipfs_cid_to_u256;
 use ipfs_hasher::IpfsHasher;
@@ -12,6 +13,7 @@ use moka::future::Cache;
 use rocket::serde::json::Json;
 use serde_json::json;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use tracing::instrument;
 
 #[instrument(name = "core_features::lit_action", level = "debug", skip_all, err)]
@@ -21,6 +23,7 @@ pub async fn lit_action(
     grpc_client_pool: &GrpcClientPool<tonic::transport::Channel>,
     ipfs_cache: &Cache<String, String>,
     http_client: &reqwest::Client,
+    chain_config: Arc<ChainConfig>,
     lit_action_request: Json<LitActionRequest>,
 ) -> Result<LitActionResponse, ApiStatus> {
     let request_id = request_span.request_id.clone();
@@ -46,16 +49,16 @@ pub async fn lit_action(
         http_client: Some(reqwest::Client::clone(http_client)),
     };
 
-    let mut client = match ClientBuilder::default()
+    let mut builder = get_lit_action_client_builder(chain_config).await;
+    builder
         .js_env(deno_execution_env)
         .request_id(request_id.clone())
         .http_headers(http_headers)
         .api_key(api_key.to_string())
         .ipfs_id(derived_ipfs_id.clone())
-        .client_grpc_channels((*grpc_client_pool).clone())
-        .build()
-        .map_err(|e| e.to_string())
-    {
+        .client_grpc_channels((*grpc_client_pool).clone());
+
+    let mut client = match builder.build().map_err(|e| e.to_string()) {
         Ok(client) => client,
         Err(e) => return Err(anyhow::anyhow!("failed to build client: {:?}", e).into()),
     };
@@ -89,7 +92,38 @@ pub async fn lit_action(
     Ok(lit_action_response)
 }
 
+pub async fn get_lit_action_client_config(
+    chain_config: Arc<ChainConfig>,
+) -> Result<LitActionClientConfigResponse, ApiStatus> {
+    let builder = get_lit_action_client_builder(chain_config).await;
+    let client = builder
+        .build()
+        .map_err(|e| anyhow::anyhow!("failed to build client: {e}"))?;
+    Ok(client.config_snapshot())
+}
+
 fn get_lit_action_ipfs_id(code: String) -> String {
     let ipfs_hasher = IpfsHasher::default();
     ipfs_hasher.compute(code.as_bytes())
+}
+
+async fn get_lit_action_client_builder(chain_config: Arc<ChainConfig>) -> ClientBuilder {
+    let mut builder = ClientBuilder::default();
+    if let Ok(Some(val)) = chain_config
+        .get(ConfigKeys::LIT_ACTION_DEFAULT_TIMEOUT_MS)
+        .await
+        && let Ok(ms) = val.parse::<u64>()
+    {
+        builder.timeout_ms(ms);
+    }
+
+    if let Ok(Some(val)) = chain_config
+        .get(ConfigKeys::LIT_ACTION_DEFAULT_MEMORY_LIMIT_MB)
+        .await
+        && let Ok(mb) = val.parse::<u32>()
+    {
+        builder.memory_limit_mb(mb);
+    }
+
+    builder
 }

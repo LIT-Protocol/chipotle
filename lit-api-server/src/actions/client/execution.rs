@@ -133,7 +133,7 @@ impl Client {
         // auth_context: &models::AuthContext,
         call_depth: u32,
     ) -> Result<ExecutionState> {
-        if code.len() > self.max_code_length {
+        if code.len() > self.max_code_length as usize {
             bail!(
                 "Code payload is too large ({} bytes). Max length is {} bytes.",
                 code.len(),

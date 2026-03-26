@@ -15,7 +15,7 @@
 import http from "k6/http";
 import { checkAndLog } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
-import { createAccountAndUsageKey } from "../setup.ts";
+import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
 import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
@@ -42,14 +42,14 @@ export interface ObservabilitySetupData {
 }
 
 export function setup(): ObservabilitySetupData {
-  const { usageApiKey } = createAccountAndUsageKey({
-    accountName: "k6-observability-headers",
-    accountDescription: "Observability header correctness test",
-    usageKeyName: "k6-observability-usage-key",
-    usageKeyDescription: "Observability header test usage key",
-    setupContext: "observability-headers",
-  });
-  return { usageApiKey };
+  if (PRECREATED_ACCOUNTS.length === 0) {
+    throw new Error(
+      "No pre-created accounts found. Run accounts.seed.spec.ts first to generate k6/data/accounts.json",
+    );
+  }
+  const account =
+    PRECREATED_ACCOUNTS[Math.floor(Math.random() * PRECREATED_ACCOUNTS.length)];
+  return { usageApiKey: account.usageApiKey };
 }
 
 export default function (data: ObservabilitySetupData) {
