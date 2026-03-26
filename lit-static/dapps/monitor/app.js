@@ -139,6 +139,7 @@ function showStatus(elementId, msg, isError) {
 /* ═══ Copy to clipboard ══════════════════════════════════════════════════════ */
 
 function copyText(text, triggerEl) {
+  if (!navigator.clipboard?.writeText) return;
   navigator.clipboard.writeText(text).then(() => {
     triggerEl.classList.add('copied');
     setTimeout(() => triggerEl.classList.remove('copied'), 1200);
@@ -156,7 +157,15 @@ function thresholdStorageKey() {
 function getThresholds() {
   try {
     const stored = JSON.parse(localStorage.getItem(thresholdStorageKey()));
-    if (stored) return { ...THRESHOLD_DEFAULTS, ...stored };
+    if (stored && typeof stored === 'object') {
+      const result = { ...THRESHOLD_DEFAULTS };
+      for (const key of ['warning', 'critical', 'target']) {
+        if (typeof stored[key] === 'number' && isFinite(stored[key]) && stored[key] >= 0) {
+          result[key] = stored[key];
+        }
+      }
+      return result;
+    }
   } catch {}
   return { ...THRESHOLD_DEFAULTS };
 }
@@ -498,10 +507,15 @@ async function fetchContractValues() {
     setValue('val-requested-api-payer-count', String(requestedApiPayerCount), false);
     setValue('val-rebalance-amount', ethers.formatEther(rebalanceAmountWei) + ' ETH', false);
     setValue('val-pkp-count', String(pkpCount), false);
-    populateApiPayerCountDropdown(Number(requestedApiPayerCount));
+    const payerCountSelect = el('payer-count');
+    if (!payerCountSelect || document.activeElement !== payerCountSelect) {
+      populateApiPayerCountDropdown(Number(requestedApiPayerCount));
+    }
 
     const rebalanceInput = el('rebalance-amount');
-    if (rebalanceInput) rebalanceInput.value = ethers.formatEther(rebalanceAmountWei);
+    if (rebalanceInput && document.activeElement !== rebalanceInput) {
+      rebalanceInput.value = ethers.formatEther(rebalanceAmountWei);
+    }
 
     // Fetch balances asynchronously so they don't block the main display.
     const balanceTargets = [
@@ -668,11 +682,9 @@ function updateCountdown() {
 
 async function doAutoRefresh() {
   if (isRefreshing) return;
-  isRefreshing = true;
   try {
     await refreshBalances();
   } finally {
-    isRefreshing = false;
     secondsLeft = REFRESH_INTERVAL;
     updateCountdown();
   }
@@ -707,13 +719,19 @@ async function loadNetwork() {
 }
 
 async function refreshBalances() {
-  const serverUrl = getServerUrl();
-  await Promise.all([
-    getApiPayers(serverUrl),
-    fetchContractValues(),
-    fetchNodeConfigValues(),
-  ]);
-  updateHealthSummary(); // pick up admin reserve after fetchContractValues
+  if (isRefreshing) return;
+  isRefreshing = true;
+  try {
+    const serverUrl = getServerUrl();
+    await Promise.all([
+      getApiPayers(serverUrl),
+      fetchContractValues(),
+      fetchNodeConfigValues(),
+    ]);
+    updateHealthSummary(); // pick up admin reserve after fetchContractValues
+  } finally {
+    isRefreshing = false;
+  }
 }
 
 /* ═══ Settings panel ═════════════════════════════════════════════════════════ */
