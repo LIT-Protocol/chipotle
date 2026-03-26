@@ -133,7 +133,7 @@ function showStatus(elementId, msg, isError) {
   if (!node) return;
   node.textContent = msg;
   node.style.color = isError ? '#f87171' : '#34d399';
-  node.style.display = msg ? 'block' : 'none';
+  node.style.display = msg ? '' : 'none';
 }
 
 /* ═══ Copy to clipboard ══════════════════════════════════════════════════════ */
