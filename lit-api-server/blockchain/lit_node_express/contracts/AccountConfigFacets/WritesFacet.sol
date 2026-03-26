@@ -248,6 +248,7 @@ contract WritesFacet {
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         AppStorage.Account storage account = s.accounts[accountApiKeyHash];
+
         bool removed = account.actionHashesList.remove(actionHash);
         if (removed) {
             account.actionCount--;
@@ -259,7 +260,8 @@ contract WritesFacet {
             uint256 groupId = account.groupList.at(i);
             account.groups[groupId].cidHash.remove(actionHash);
         }
-        account.actionHashesList.remove(actionHash);
+        delete account.actionMetadata[actionHash];
+
         delete account.actionMetadata[actionHash];
     }
 
