@@ -28,6 +28,7 @@ export interface SecuritySetupData {
   pkpWalletAddress: string;
 
   usageKey_executeX: string;
+  usageKey_executeY: string;
   usageKey_createGroups: string;
   usageKey_deleteGroups: string;
   usageKey_createPkps: string;
@@ -158,9 +159,8 @@ export function setup(): SecuritySetupData {
   const addActionToXRes = client.addActionToGroup({ group_id: groupIdX, action_ipfs_cid: ipfsId }, adminA);
   if (!assertOk("setup/addActionToGroupX", "POST /add_action_to_group", addActionToXRes)) throw new Error("setup failed: addActionToGroupX");
 
-  // Also add action to group Y (needed for execute_in_groups negative test — action exists in Y but key only has X)
-  const addActionToYRes = client.addActionToGroup({ group_id: groupIdY, action_ipfs_cid: ipfsId }, adminA);
-  if (!assertOk("setup/addActionToGroupY", "POST /add_action_to_group", addActionToYRes)) throw new Error("setup failed: addActionToGroupY");
+  // NOTE: action is intentionally NOT added to groupY — groupY stays empty so that
+  // a key with execute_in_groups=[groupIdY] is denied (tests group-level restriction).
 
   // Get hashed CID from list actions
   const listActionsRes = client.listActions({ group_id: groupIdX, page_number: 0, page_size: 10 }, adminA);
@@ -179,6 +179,7 @@ export function setup(): SecuritySetupData {
 
   // ── Create 11 usage keys ──────────────────────────────────────────────
   const usageKey_executeX = createUsageKey(client, adminA, "sec-executeX", { execute_in_groups: [groupIdX] });
+  const usageKey_executeY = createUsageKey(client, adminA, "sec-executeY", { execute_in_groups: [groupIdY] });
   const usageKey_createGroups = createUsageKey(client, adminA, "sec-createGroups", { can_create_groups: true });
   const usageKey_deleteGroups = createUsageKey(client, adminA, "sec-deleteGroups", { can_delete_groups: true });
   const usageKey_createPkps = createUsageKey(client, adminA, "sec-createPkps", { can_create_pkps: true });
@@ -228,7 +229,7 @@ export function setup(): SecuritySetupData {
 
   return {
     accountKeyA, walletAddressA, groupIdX, groupIdY, ipfsId, hashedCid, pkpWalletAddress,
-    usageKey_executeX, usageKey_createGroups, usageKey_deleteGroups, usageKey_createPkps,
+    usageKey_executeX, usageKey_executeY, usageKey_createGroups, usageKey_deleteGroups, usageKey_createPkps,
     usageKey_manageIpfsX, usageKey_addPkpX, usageKey_removePkpX, usageKey_executeWildcard,
     usageKey_zeroAccess, usageKey_lifecycle, usageKey_revocation,
     accountKeyB, usageKeyB, groupIdB,
@@ -256,12 +257,13 @@ export default function (data: SecuritySetupData) {
       },
     }, "1-execute-positive");
 
-    // Negative: key with zero execute perms cannot execute
+    // Negative: key scoped to groupY cannot execute action (action is in groupX and groupY,
+    // but key only has execute permission for groupY — tests group-level restriction)
     const negRes = client.litAction(
       { code: HELLO_WORLD_CODE, js_params: null },
-      authHeaders(data.usageKey_zeroAccess),
+      authHeaders(data.usageKey_executeY),
     );
-    assertDenied("1-execute-negative", "POST /lit_action", negRes, 403);
+    assertDenied("1-execute-negative-scoped", "POST /lit_action", negRes, 403);
   });
 
   // ── Test 2: can_create_groups ──────────────────────────────────────────
@@ -609,9 +611,8 @@ export default function (data: SecuritySetupData) {
 
   // ── Cleanup ────────────────────────────────────────────────────────────
   group("cleanup", () => {
-    // Remove actions from groups
+    // Remove action from groupX (action was never added to groupY)
     try { client.removeActionFromGroup({ group_id: data.groupIdX, hashed_cid: data.hashedCid }, adminA); } catch { /* ignore */ }
-    try { client.removeActionFromGroup({ group_id: data.groupIdY, hashed_cid: data.hashedCid }, adminA); } catch { /* ignore */ }
 
     // Remove PKP from group
     try { client.removePkpFromGroup({ group_id: data.groupIdX, pkp_id: data.pkpWalletAddress }, adminA); } catch { /* ignore */ }
@@ -621,7 +622,7 @@ export default function (data: SecuritySetupData) {
 
     // Remove usage keys (some may already be deleted by tests)
     const keysToRemove = [
-      data.usageKey_executeX, data.usageKey_createGroups, data.usageKey_deleteGroups,
+      data.usageKey_executeX, data.usageKey_executeY, data.usageKey_createGroups, data.usageKey_deleteGroups,
       data.usageKey_createPkps, data.usageKey_manageIpfsX, data.usageKey_addPkpX,
       data.usageKey_removePkpX, data.usageKey_executeWildcard, data.usageKey_zeroAccess,
       data.usageKey_lifecycle,
