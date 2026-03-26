@@ -159,34 +159,84 @@ async fn get_lit_action_client_builder(chain_config: Arc<ChainConfig>) -> Client
         }
     };
 
-    if let Some(v) = parse_config_value::<u64>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_TIMEOUT_MS, 0, MAX_TIMEOUT_MS) {
+    if let Some(v) = parse_config_value::<u64>(
+        &snapshot,
+        &ConfigKeys::LIT_ACTION_DEFAULT_TIMEOUT_MS,
+        0,
+        MAX_TIMEOUT_MS,
+    ) {
         builder.timeout_ms(v);
     }
-    if let Some(v) = parse_config_value::<u64>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_ASYNC_TIMEOUT_MS, 0, MAX_ASYNC_TIMEOUT_MS) {
+    if let Some(v) = parse_config_value::<u64>(
+        &snapshot,
+        &ConfigKeys::LIT_ACTION_DEFAULT_ASYNC_TIMEOUT_MS,
+        0,
+        MAX_ASYNC_TIMEOUT_MS,
+    ) {
         builder.async_timeout_ms(v);
     }
-    if let Some(v) = parse_config_value::<u32>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_MEMORY_LIMIT_MB, 0, MAX_MEMORY_LIMIT_MB) {
+    if let Some(v) = parse_config_value::<u32>(
+        &snapshot,
+        &ConfigKeys::LIT_ACTION_DEFAULT_MEMORY_LIMIT_MB,
+        0,
+        MAX_MEMORY_LIMIT_MB,
+    ) {
         builder.memory_limit_mb(v);
     }
-    if let Some(v) = parse_config_value::<u64>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_MAX_CODE_LENGTH, 0, MAX_MAX_CODE_LENGTH) {
+    if let Some(v) = parse_config_value::<u64>(
+        &snapshot,
+        &ConfigKeys::LIT_ACTION_DEFAULT_MAX_CODE_LENGTH,
+        0,
+        MAX_MAX_CODE_LENGTH,
+    ) {
         builder.max_code_length(v);
     }
-    if let Some(v) = parse_config_value::<u64>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_MAX_CONSOLE_LOG_LENGTH, 0, MAX_MAX_CONSOLE_LOG_LENGTH) {
+    if let Some(v) = parse_config_value::<u64>(
+        &snapshot,
+        &ConfigKeys::LIT_ACTION_DEFAULT_MAX_CONSOLE_LOG_LENGTH,
+        0,
+        MAX_MAX_CONSOLE_LOG_LENGTH,
+    ) {
         builder.max_console_log_length(v);
     }
-    if let Some(v) = parse_config_value::<u32>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_MAX_FETCH_COUNT, 0, MAX_MAX_FETCH_COUNT) {
+    if let Some(v) = parse_config_value::<u32>(
+        &snapshot,
+        &ConfigKeys::LIT_ACTION_DEFAULT_MAX_FETCH_COUNT,
+        0,
+        MAX_MAX_FETCH_COUNT,
+    ) {
         builder.max_fetch_count(v);
     }
-    if let Some(v) = parse_config_value::<u64>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_MAX_RESPONSE_LENGTH, 0, MAX_MAX_RESPONSE_LENGTH) {
+    if let Some(v) = parse_config_value::<u64>(
+        &snapshot,
+        &ConfigKeys::LIT_ACTION_DEFAULT_MAX_RESPONSE_LENGTH,
+        0,
+        MAX_MAX_RESPONSE_LENGTH,
+    ) {
         builder.max_response_length(v);
     }
-    if let Some(v) = parse_config_value::<u32>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_MAX_GET_KEYS_COUNT, 0, MAX_MAX_GET_KEYS_COUNT) {
+    if let Some(v) = parse_config_value::<u32>(
+        &snapshot,
+        &ConfigKeys::LIT_ACTION_DEFAULT_MAX_GET_KEYS_COUNT,
+        0,
+        MAX_MAX_GET_KEYS_COUNT,
+    ) {
         builder.max_get_keys_count(v);
     }
-    if let Some(v) = parse_config_value::<u32>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_MAX_RETRIES, 0, MAX_MAX_RETRIES) {
+    if let Some(v) = parse_config_value::<u32>(
+        &snapshot,
+        &ConfigKeys::LIT_ACTION_DEFAULT_MAX_RETRIES,
+        0,
+        MAX_MAX_RETRIES,
+    ) {
         builder.max_retries(v);
     }
-    if let Some(v) = parse_config_value::<u64>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_CLIENT_TIMEOUT_MS_BUFFER, 0, MAX_CLIENT_TIMEOUT_MS_BUFFER) {
+    if let Some(v) = parse_config_value::<u64>(
+        &snapshot,
+        &ConfigKeys::LIT_ACTION_DEFAULT_CLIENT_TIMEOUT_MS_BUFFER,
+        0,
+        MAX_CLIENT_TIMEOUT_MS_BUFFER,
+    ) {
         builder.client_timeout_ms_buffer(v);
     }
 
@@ -291,9 +341,7 @@ mod tests {
 
     #[test]
     fn config_snapshot_reflects_actual_values() {
-        use crate::actions::client::{
-            DEFAULT_ASYNC_TIMEOUT_MS, DEFAULT_CLIENT_TIMEOUT_MS_BUFFER,
-        };
+        use crate::actions::client::{DEFAULT_ASYNC_TIMEOUT_MS, DEFAULT_CLIENT_TIMEOUT_MS_BUFFER};
 
         let client = ClientBuilder::default()
             .async_timeout_ms(42_000u64)
@@ -305,7 +353,10 @@ mod tests {
         assert_eq!(snapshot.async_timeout_ms, 42_000);
         assert_ne!(snapshot.async_timeout_ms, DEFAULT_ASYNC_TIMEOUT_MS);
         assert_eq!(snapshot.client_timeout_ms_buffer, 10_000);
-        assert_ne!(snapshot.client_timeout_ms_buffer, DEFAULT_CLIENT_TIMEOUT_MS_BUFFER);
+        assert_ne!(
+            snapshot.client_timeout_ms_buffer,
+            DEFAULT_CLIENT_TIMEOUT_MS_BUFFER
+        );
     }
 
     #[test]
@@ -333,7 +384,10 @@ mod tests {
         let client = ClientBuilder::default().build().unwrap();
         let mut json_val = serde_json::to_value(&client).unwrap();
         // Remove the field to simulate an old serialized ActionJob
-        json_val.as_object_mut().unwrap().remove("client_timeout_ms_buffer");
+        json_val
+            .as_object_mut()
+            .unwrap()
+            .remove("client_timeout_ms_buffer");
         let deserialized: crate::actions::client::Client =
             serde_json::from_value(json_val).unwrap();
         assert_eq!(
