@@ -261,8 +261,6 @@ contract WritesFacet {
             account.groups[groupId].cidHash.remove(actionHash);
         }
         delete account.actionMetadata[actionHash];
-
-        delete account.actionMetadata[actionHash];
     }
 
     function addActionToGroup(
