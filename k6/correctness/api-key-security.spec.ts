@@ -262,7 +262,7 @@ export default function (data: SecuritySetupData) {
 
 
     // Negative: key scoped to groupY cannot execute action in groupX
-    // (action is only in groupX — key only has execute permission for groupY)
+    // (action is only in groupX; groupY has no actions and the key is scoped only to groupY)
 
     const negRes = client.litAction(
       { code: HELLO_WORLD_CODE, js_params: null },
