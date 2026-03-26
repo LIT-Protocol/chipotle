@@ -738,13 +738,19 @@ async function doAutoRefresh() {
 }
 
 // Page Visibility API — pause polling when tab is hidden, refresh immediately on return
-document.addEventListener('visibilitychange', () => {
+
+document.addEventListener('visibilitychange', async () => {
   if (document.hidden) {
     stopAutoRefresh();
   } else {
-    doAutoRefresh().then(() => startAutoRefresh());
+    try {
+      await doAutoRefresh();
+    } finally {
+      startAutoRefresh();
+    }
   }
 });
+
 
 /* ═══ Load / refresh ═════════════════════════════════════════════════════════ */
 
