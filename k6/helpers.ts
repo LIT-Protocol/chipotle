@@ -52,10 +52,6 @@ function responseTraceIds(response: Response | undefined): string {
 }
 
 /**
- * Assert HTTP response is 2xx. Logs failure and runs checkAndLog for k6 metrics.
- * Returns true if ok, false otherwise.
- */
-/**
  * Assert HTTP response has the expected non-2xx status (permission denial).
  * Returns true if the expected denial was confirmed, false otherwise.
  */
