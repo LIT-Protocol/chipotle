@@ -708,7 +708,9 @@ function startAutoRefresh() {
     secondsLeft--;
     updateCountdown();
     if (secondsLeft <= 0) {
-      doAutoRefresh();
+      doAutoRefresh().catch((err) => {
+        console.error('Auto-refresh failed:', err);
+      });
     }
   }, 1000);
 }
