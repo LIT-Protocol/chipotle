@@ -633,11 +633,11 @@ export default function (data: SecuritySetupData) {
 
     // Cleanup Account B resources
     try {
-      const listBActions = client.listActions({ group_id: data.groupIdB, page_number: 0, page_size: 10 }, adminB);
+      const listBActions = client.listActions({ group_id: String(data.groupIdB), page_number: 0, page_size: 10 }, adminB);
       const bActions = listBActions.data as Array<{ id: string }>;
       if (bActions && bActions.length > 0) {
         for (const action of bActions) {
-          try { client.removeActionFromGroup({ group_id: data.groupIdB, hashed_cid: action.id }, adminB); } catch { /* ignore */ }
+          try { client.removeActionFromGroup({ group_id: String(data.groupIdB), hashed_cid: action.id }, adminB); } catch { /* ignore */ }
           try { client.deleteAction({ hashed_cid: action.id }, adminB); } catch { /* ignore */ }
         }
       }
