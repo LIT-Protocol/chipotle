@@ -159,16 +159,6 @@ jobs:
             -e "s|\${CERTBOT_AWS_ACCESS_KEY_ID}|${{ vars.CERTBOT_AWS_ACCESS_KEY_ID }}|g" \
             -e "s|\${CERTBOT_AWS_SECRET_ACCESS_KEY}|${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}|g" \
             docker-compose.phala.yml > docker-compose.deploy.yml
-          if [ -z "$DOMAIN" ]; then
-            # No custom domain — remove entire dstack-ingress service and cert-data volume
-            awk '
-              /^  dstack-ingress:/ { skip=1; next }
-              skip && /^  [^ ]/ { skip=0 }
-              skip { next }
-              /^  cert-data:/ { next }
-              { print }
-            ' docker-compose.deploy.yml > docker-compose.deploy.tmp && mv docker-compose.deploy.tmp docker-compose.deploy.yml
-          fi
           cat docker-compose.deploy.yml
 
       - name: Setup Node.js
