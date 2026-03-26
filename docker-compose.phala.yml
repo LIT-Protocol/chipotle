@@ -121,6 +121,8 @@ services:
       TARGET_ENDPOINT: "http://lit-api-server:8000"
       CERTBOT_EMAIL: "${CERTBOT_EMAIL}"
       SET_CAA: "true"
+      # dstack-ingress expects AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY internally.
+      # https://docs.phala.network/dstack/dstack-ingress#supported-dns-providers
       AWS_ACCESS_KEY_ID: "${CERTBOT_AWS_ACCESS_KEY_ID}"
       AWS_SECRET_ACCESS_KEY: "${CERTBOT_AWS_SECRET_ACCESS_KEY}"
     volumes:
