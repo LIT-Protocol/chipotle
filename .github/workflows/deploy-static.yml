@@ -5,6 +5,10 @@ on:
     paths:
       - 'lit-static/static/**'
       - '.github/workflows/deploy-static.yml'
+  pull_request:
+    paths:
+      - 'lit-static/**'
+      - '.github/workflows/deploy-static.yml'
 
 jobs:
   deploy:
@@ -29,4 +33,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy lit-static/static --project-name=lit-static --branch=${{ github.ref_name }}
+          command: pages deploy lit-static/static --project-name=lit-static --branch=${{ github.head_ref || github.ref_name }}
