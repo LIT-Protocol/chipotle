@@ -20,7 +20,8 @@ use crate::dstack::v1::get_client_key;
 use crate::stripe::StripeState;
 use crate::utils::generate_unique_derivation_path;
 use crate::utils::parse_with_hash::{
-    hex_array_to_h160_array, hex_array_to_u256_array, ipfs_cid_to_u256, string_group_id_to_u256,
+    hashed_cid_to_u256, hex_array_to_h160_array, hex_array_to_u256_array, ipfs_cid_to_u256,
+    string_group_id_to_u256,
 };
 use crate::{accounts, dstack};
 use elliptic_curve::group::GroupEncoding;
@@ -184,7 +185,7 @@ pub async fn delete_action(
     api_key: &str,
     req: Json<DeleteActionRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let action_hash = ipfs_cid_to_u256(&req.action_ipfs_cid)?;
+    let action_hash = hashed_cid_to_u256(&req.hashed_cid)?;
     accounts::remove_action(signer_pool, api_key, action_hash)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "delete_action failed"))?;
@@ -379,7 +380,8 @@ pub async fn remove_action_from_group(
     req: Json<RemoveActionFromGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = U256::from(req.group_id);
-    accounts::remove_action_from_group_by_cid(signer_pool, api_key, group_id, &req.action_ipfs_cid)
+    let action_hash = hashed_cid_to_u256(&req.hashed_cid)?;
+    accounts::remove_action_from_group(signer_pool, api_key, group_id, action_hash)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "remove_action_from_group failed"))?;
     Ok(AccountOpResponse { success: true })

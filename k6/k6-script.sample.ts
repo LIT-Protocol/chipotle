@@ -214,7 +214,7 @@ export default function () {
    */
   removeActionFromGroupRequest = {
     group_id: "jaywalk",
-    action_ipfs_cid: "vice",
+    hashed_cid: "vice",
   };
   headers = {
     "X-Api-Key": "after",

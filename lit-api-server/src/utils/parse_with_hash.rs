@@ -74,6 +74,17 @@ pub fn string_group_id_to_u256(group_id: &str) -> Result<U256, ApiStatus> {
     })
 }
 
+/// Parse an already-hashed CID (0x-prefixed hex or decimal string) into U256.
+/// Unlike `ipfs_cid_to_u256`, this does NOT keccak256-hash the input.
+pub fn hashed_cid_to_u256(hashed_cid: &str) -> Result<U256, ApiStatus> {
+    parse_u256(hashed_cid).map_err(|e| {
+        ApiStatus::bad_request(
+            anyhow::anyhow!("Unable to parse hashed CID: {}", e),
+            "Unable to parse hashed CID",
+        )
+    })
+}
+
 fn string_to_bytes_to_hash_to_u256(s: &str) -> Result<U256, ApiStatus> {
     let bytes = keccak256(s.as_bytes());
     Ok(U256::from_big_endian(&bytes))

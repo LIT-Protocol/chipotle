@@ -64,19 +64,19 @@ pub struct UpdateGroupRequest {
     pub cid_hashes_permitted: Vec<String>,
 }
 
-/// Request for delete_action. action_ipfs_cid is keccak256-hashed on server. API key via header.
+/// Request for delete_action. hashed_cid is already a keccak256 hash (hex string). API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct DeleteActionRequest {
-    /// IPFS CID for the action (keccak256-hashed on server).
-    pub action_ipfs_cid: String,
+    /// Already-hashed CID for the action (0x-prefixed hex string).
+    pub hashed_cid: String,
 }
 
-/// Request for remove_action_from_group. action_ipfs_cid is keccak256-hashed on server. API key via header.
+/// Request for remove_action_from_group. hashed_cid is already a keccak256 hash (hex string). API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct RemoveActionFromGroupRequest {
     pub group_id: u64,
-    /// IPFS CID for the action (keccak256-hashed on server).
-    pub action_ipfs_cid: String,
+    /// Already-hashed CID for the action (0x-prefixed hex string).
+    pub hashed_cid: String,
 }
 
 /// Request for update_action_metadata. action_ipfs_cid is keccak256-hashed on server. API key via header.

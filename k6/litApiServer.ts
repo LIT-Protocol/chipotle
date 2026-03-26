@@ -104,11 +104,11 @@ export interface AddActionRequest {
 }
 
 /**
- * Request for delete_action. action_ipfs_cid is keccak256-hashed on server. API key via header.
+ * Request for delete_action. hashed_cid is already a keccak256 hash (hex string). API key via header.
  */
 export interface DeleteActionRequest {
-  /** IPFS CID for the action (keccak256-hashed on server). */
-  action_ipfs_cid: string;
+  /** Already-hashed CID for the action (0x-prefixed hex string). */
+  hashed_cid: string;
 }
 
 export interface AddActionToGroupRequest {
@@ -203,13 +203,13 @@ export interface UpdateGroupRequest {
 }
 
 /**
- * Request for remove_action_from_group. action_ipfs_cid is keccak256-hashed on server. API key via header.
+ * Request for remove_action_from_group. hashed_cid is already a keccak256 hash (hex string). API key via header.
  */
 export interface RemoveActionFromGroupRequest {
   /** @minimum 0 */
   group_id: number;
-  /** IPFS CID for the action (keccak256-hashed on server). */
-  action_ipfs_cid: string;
+  /** Already-hashed CID for the action (0x-prefixed hex string). */
+  hashed_cid: string;
 }
 
 /**
