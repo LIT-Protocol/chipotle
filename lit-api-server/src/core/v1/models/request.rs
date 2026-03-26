@@ -82,7 +82,6 @@ pub struct RemoveActionFromGroupRequest {
 /// Request for update_action_metadata. hashed_cid is already a keccak256 hash (hex string). API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateActionMetadataRequest {
-    pub group_id: u64,
     /// Already-hashed CID for the action (0x-prefixed hex string).
     pub hashed_cid: String,
     pub name: String,

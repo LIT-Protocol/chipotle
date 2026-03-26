@@ -121,7 +121,6 @@
 /**
  * @typedef {Object} UpdateActionMetadataOptions
  * @property {string} apiKey - Account API key
- * @property {string} groupId - Group ID (decimal or hex string)
  * @property {string} hashedCid - Already-hashed CID for the action (0x-prefixed keccak256 hex string)
  * @property {string} name - Action name
  * @property {string} description - Action description
@@ -664,9 +663,8 @@ export class LitNodeSimpleApiClient {
    * @param {UpdateActionMetadataOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async updateActionMetadata({ apiKey, groupId, hashedCid, name, description }) {
+  async updateActionMetadata({ apiKey, hashedCid, name, description }) {
     const body = {
-      group_id: Number(groupId),
       hashed_cid: hashedCid,
       name: name ?? '',
       description: description ?? '',

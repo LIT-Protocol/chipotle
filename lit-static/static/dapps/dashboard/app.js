@@ -996,7 +996,7 @@ function openEditActionModal(item) {
     try {
       showActionProgress('Updating action', `Updating action metadata for CID "${cid}".`);
       const client = await getClient();
-      await client.updateActionMetadata({ apiKey, groupId: '0', hashedCid: cid, name, description: desc });
+      await client.updateActionMetadata({ apiKey, hashedCid: cid, name, description: desc });
       await loadActions();
       showStatus('actions-status', 'Action updated.', 'success');
     } catch (e) {

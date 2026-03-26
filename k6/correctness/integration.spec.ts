@@ -332,7 +332,6 @@ export default function (data: IntegrationSetupData) {
   // ── 15. updateActionMetadata ──────────────────────────────────────────────
   const updateActionRes = client.updateActionMetadata(
     {
-      group_id: parseInt(groupId),
       hashed_cid: hashedCid,
       name: "hello-world-updated",
       description: "Updated Hello World lit action",

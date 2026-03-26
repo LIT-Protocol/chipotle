@@ -244,13 +244,16 @@ contract WritesFacet {
         uint256 accountApiKeyHash,
         uint256 actionHash
     ) public {
+        if (actionHash == 0) {
+            revert AppStorage.InvalidRequest("Cannot remove action with hash 0x0");
+        }
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         AppStorage.Account storage account = s.accounts[accountApiKeyHash];
 
         bool removed = account.actionHashesList.remove(actionHash);
-        if (removed) {
+        if (removed && account.actionCount > 0) {
             account.actionCount--;
         }
 

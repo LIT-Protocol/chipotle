@@ -186,6 +186,12 @@ pub async fn delete_action(
     req: Json<DeleteActionRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let action_hash = hashed_cid_to_u256(&req.hashed_cid)?;
+    if action_hash == U256::zero() {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Cannot remove action with hash 0x0"),
+            "Cannot remove action with hash 0x0",
+        ));
+    }
     accounts::remove_action(signer_pool, api_key, action_hash)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "delete_action failed"))?;
@@ -304,6 +310,12 @@ pub async fn remove_group(
     req: Json<RemoveGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = string_group_id_to_u256(&req.group_id)?;
+    if group_id == U256::zero() {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Cannot remove group with ID 0"),
+            "Cannot remove group with ID 0",
+        ));
+    }
     accounts::remove_group(signer_pool, api_key, group_id)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "remove_group failed"))?;
@@ -358,6 +370,12 @@ pub async fn update_group(
     req: Json<UpdateGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = U256::from(req.group_id);
+    if group_id == U256::zero() {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Cannot update group with ID 0"),
+            "Cannot update group with ID 0",
+        ));
+    }
     let cid_hashes = hex_array_to_u256_array(&req.cid_hashes_permitted)?;
     let pkp_ids = hex_array_to_h160_array(&req.pkp_ids_permitted)?;
     accounts::update_group(
@@ -380,6 +398,12 @@ pub async fn remove_action_from_group(
     req: Json<RemoveActionFromGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = U256::from(req.group_id);
+    if group_id == U256::zero() {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Cannot remove action from group with ID 0"),
+            "Cannot remove action from group with ID 0",
+        ));
+    }
     let action_hash = hashed_cid_to_u256(&req.hashed_cid)?;
     accounts::remove_action_from_group(signer_pool, api_key, group_id, action_hash)
         .await
@@ -392,13 +416,18 @@ pub async fn update_action_metadata(
     api_key: &str,
     req: Json<UpdateActionMetadataRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let group_id = U256::from(req.group_id);
     let action_hash = hashed_cid_to_u256(&req.hashed_cid)?;
+    if action_hash == U256::zero() {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Cannot update action with hash 0x0"),
+            "Cannot update action with hash 0x0",
+        ));
+    }
     accounts::update_action_metadata(
         signer_pool,
         api_key,
         action_hash,
-        group_id,
+        U256::zero(),
         &req.name,
         &req.description,
     )
