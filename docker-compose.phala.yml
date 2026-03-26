@@ -126,6 +126,9 @@ services:
       SET_CAA: "true"
       AWS_ACCESS_KEY_ID: "${CERTBOT_AWS_ACCESS_KEY_ID}"
       AWS_SECRET_ACCESS_KEY: "${CERTBOT_AWS_SECRET_ACCESS_KEY}"
+      # Optional: for STS role assumption instead of direct IAM keys
+      # AWS_ROLE_ARN: "${CERTBOT_AWS_ROLE_ARN}"
+      # AWS_REGION: "${CERTBOT_AWS_REGION}"
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock
       - cert-data:/etc/letsencrypt
