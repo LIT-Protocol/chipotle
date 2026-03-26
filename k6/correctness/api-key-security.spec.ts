@@ -162,11 +162,14 @@ export function setup(): SecuritySetupData {
   // NOTE: action is intentionally NOT added to groupY — groupY stays empty so that
   // a key with execute_in_groups=[groupIdY] is denied (tests group-level restriction).
 
-  // Get hashed CID from list actions
-  const listActionsRes = client.listActions({ group_id: groupIdX, page_number: 0, page_size: 10 }, adminA);
+  // Get hashed CID from list actions — filter by name to avoid picking a stale action on reused accounts
+  const actionName = `k6-sec-action-${K6_RUN_ID}`;
+  const listActionsRes = client.listActions({ group_id: groupIdX, page_number: 0, page_size: 100 }, adminA);
   if (!assertOk("setup/listActions", "GET /list_actions", listActionsRes)) throw new Error("setup failed: listActions");
-  const actions = listActionsRes.data as Array<{ id: string }>;
-  const hashedCid = actions[0]?.id ?? "";
+  const actions = listActionsRes.data as Array<{ id: string; name: string }>;
+  const ourAction = actions.find((a) => a.name === actionName);
+  if (!ourAction) throw new Error(`setup failed: could not find action '${actionName}' in listActions (found ${actions.length} actions)`);
+  const hashedCid = ourAction.id;
 
   // Create wallet (PKP)
   const createWalletRes = client.createWallet(adminA);
