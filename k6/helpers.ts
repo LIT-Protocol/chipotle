@@ -98,16 +98,16 @@ export function assertNon2xx(
 ): boolean {
   const { response } = res;
   const status = response?.status ?? 0;
-  const isError = status < 200 || status >= 300;
+  const isError = status > 0 && (status < 200 || status >= 300);
   if (!isError) {
     console.error(
-      `FAIL ${name} | ${endpoint} | expected non-2xx got ${status}${responseTraceIds(response)}`,
+      `FAIL ${name} | ${endpoint} | expected non-2xx got ${status}${status === 0 ? " (transport error — no HTTP response)" : ""}${responseTraceIds(response)}`,
     );
   }
   checkAndLog(response, {
     [`${name} non-2xx`]: (r) => {
       const s = r?.status ?? 0;
-      return s < 200 || s >= 300;
+      return s > 0 && (s < 200 || s >= 300);
     },
   }, name);
   return isError;
