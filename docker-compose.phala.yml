@@ -14,6 +14,8 @@
 # Required secrets (set as encrypted Phala CVM environment variables):
 #   GCP_SERVICE_ACCOUNT_JSON  - GCP service account key (raw JSON or base64-encoded)
 #   GCP_PROJECT_ID            - GCP project ID (e.g. "my-gcp-project")
+#   STRIPE_SECRET_KEY         - Stripe API secret key (test sandbox for staging, live for prod)
+#   STRIPE_PUBLISHABLE_KEY    - Stripe API publishable key (test sandbox for staging, live for prod)
 
 # RUST_LOG filter shared by lit-actions and lit-api-server.
 # App code stays at trace; per-module overrides suppress low-value internals:
@@ -58,6 +60,10 @@ services:
       ROCKET_PORT: "8000"
       # BASE_CHAIN_RPC is populated via an encrypted secret passed in through the Phala CLI/UI
       BASE_CHAIN_RPC: ${BASE_CHAIN_RPC}
+      # Stripe billing keys — resolved by Phala CVM at container startup from encrypted env vars.
+      # Use test sandbox keys for chipotle-next (staging), live keys for chipotle-dev (production).
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY}
     volumes:
       - lit-socket:/tmp
       - /var/run/dstack.sock:/var/run/dstack.sock

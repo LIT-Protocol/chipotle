@@ -15,12 +15,12 @@
 #     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
 #     <image>@<digest>
 #
-# Required secrets:
+# Required GitHub secrets:
 #   DOCKERHUB_TOKEN - Docker Hub PAT (Account Settings > Security > Access Tokens)
 #   PHALA_CLOUD_API_KEY - From Phala Cloud Dashboard > API Tokens
 #   PHALA_DSTACKAPP_PRIVATE_KEY - Private key for DstackApp (Onchain KMS on Base)
 #
-# Required vars:
+# Required GitHub vars:
 #   DOCKER_IMAGE - Base image path, e.g. docker.io/username/lit-node-express
 #                  Four images are pushed:
 #                    ${DOCKER_IMAGE}-lit-actions
@@ -28,6 +28,13 @@
 #                    ${DOCKER_IMAGE}-lit-static
 #                    ${DOCKER_IMAGE}-otel-collector
 #   DOCKERHUB_USERNAME - Docker Hub username
+#
+# Required Phala CVM encrypted env vars (per instance, set via Phala Cloud Dashboard):
+#   BASE_CHAIN_RPC             - RPC endpoint for the chain
+#   GCP_SERVICE_ACCOUNT_JSON   - GCP service account key (raw JSON or base64-encoded)
+#   GCP_PROJECT_ID             - GCP project ID (e.g. "my-gcp-project")
+#   STRIPE_SECRET_KEY          - Stripe API secret key (test sandbox for staging, live for prod)
+#   STRIPE_PUBLISHABLE_KEY     - Stripe API publishable key (test sandbox for staging, live for prod)
 
 name: Deploy to Phala CVM
 

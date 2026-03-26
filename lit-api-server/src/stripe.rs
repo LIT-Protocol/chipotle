@@ -9,9 +9,11 @@
 /// Customer identity: the Stripe customer is keyed by the wallet address derived from the API key
 /// (stored in customer metadata as `wallet_address`).
 use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 use ethers::signers::{LocalWallet, Signer};
+use reqwest::StatusCode;
 
 /// Cost constants in US cents.
 pub const COST_MANAGEMENT_CENTS: i64 = 1; // $0.01
@@ -36,11 +38,15 @@ pub fn init() -> Option<Arc<StripeState>> {
     if secret_key.is_empty() || publishable_key.is_empty() {
         return None;
     }
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()
+        .ok()?;
     tracing::info!("stripe: billing enabled");
     Some(Arc::new(StripeState {
         publishable_key,
         secret_key,
-        client: reqwest::Client::new(),
+        client,
     }))
 }
 
@@ -50,12 +56,38 @@ fn stripe_base() -> &'static str {
     "https://api.stripe.com/v1"
 }
 
+/// Parsed Stripe API response preserving the HTTP status code.
+#[derive(Debug)]
+pub struct StripeResponse {
+    pub status: StatusCode,
+    pub body: serde_json::Value,
+}
+
+/// Parse a Stripe API response from raw status + body text.
+///
+/// Accepts `(StatusCode, &str)` rather than `reqwest::Response` so this logic
+/// is trivially unit-testable without mocking HTTP.
+fn parse_stripe_response(status: StatusCode, body_text: &str) -> Result<StripeResponse> {
+    let body: serde_json::Value = serde_json::from_str(body_text)
+        .map_err(|e| anyhow::anyhow!("Stripe: invalid JSON (HTTP {status}): {e}"))?;
+
+    if let Some(e) = body.get("error") {
+        let msg = e
+            .get("message")
+            .and_then(|m| m.as_str())
+            .unwrap_or("unknown error");
+        anyhow::bail!("Stripe error (HTTP {status}): {msg}");
+    }
+
+    Ok(StripeResponse { status, body })
+}
+
 /// `GET /v1/<path>` with optional query params.
 async fn stripe_get(
     state: &StripeState,
     path: &str,
     query: &[(&str, &str)],
-) -> Result<serde_json::Value> {
+) -> Result<StripeResponse> {
     let url = format!("{}/{}", stripe_base(), path);
     let resp = state
         .client
@@ -64,16 +96,9 @@ async fn stripe_get(
         .query(query)
         .send()
         .await?;
-    let body: serde_json::Value = resp.json().await?;
-    if let Some(e) = body.get("error") {
-        anyhow::bail!(
-            "Stripe GET {path}: {}",
-            e.get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("unknown error")
-        );
-    }
-    Ok(body)
+    let status = resp.status();
+    let body_text = resp.text().await?;
+    parse_stripe_response(status, &body_text)
 }
 
 /// `POST /v1/<path>` with form-encoded body.
@@ -81,7 +106,7 @@ async fn stripe_post(
     state: &StripeState,
     path: &str,
     params: &[(&str, &str)],
-) -> Result<serde_json::Value> {
+) -> Result<StripeResponse> {
     let url = format!("{}/{}", stripe_base(), path);
     let resp = state
         .client
@@ -90,16 +115,9 @@ async fn stripe_post(
         .form(params)
         .send()
         .await?;
-    let body: serde_json::Value = resp.json().await?;
-    if let Some(e) = body.get("error") {
-        anyhow::bail!(
-            "Stripe POST {path}: {}",
-            e.get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("unknown error")
-        );
-    }
-    Ok(body)
+    let status = resp.status();
+    let body_text = resp.text().await?;
+    parse_stripe_response(status, &body_text)
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -125,7 +143,7 @@ pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -
     )
     .await?;
 
-    if let Some(data) = resp.get("data").and_then(|d| d.as_array())
+    if let Some(data) = resp.body.get("data").and_then(|d| d.as_array())
         && let Some(first) = data.first()
         && let Some(id) = first.get("id").and_then(|i| i.as_str())
     {
@@ -140,6 +158,7 @@ pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -
     )
     .await?;
     let id = resp
+        .body
         .get("id")
         .and_then(|i| i.as_str())
         .ok_or_else(|| anyhow::anyhow!("Stripe: missing customer id"))?;
@@ -150,7 +169,7 @@ pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -
 /// balance field is negative when the customer has a credit).
 pub async fn get_credit_balance(customer_id: &str, state: &StripeState) -> Result<i64> {
     let resp = stripe_get(state, &format!("customers/{customer_id}"), &[]).await?;
-    let balance = resp.get("balance").and_then(|b| b.as_i64()).unwrap_or(0);
+    let balance = resp.body.get("balance").and_then(|b| b.as_i64()).unwrap_or(0);
     Ok(balance)
 }
 
@@ -225,12 +244,14 @@ pub async fn create_payment_intent(
     .await?;
 
     let pi_id = resp
+        .body
         .get("id")
         .and_then(|i| i.as_str())
         .ok_or_else(|| anyhow::anyhow!("Stripe PaymentIntent: missing id"))?
         .to_string();
 
     let client_secret = resp
+        .body
         .get("client_secret")
         .and_then(|s| s.as_str())
         .ok_or_else(|| anyhow::anyhow!("Stripe PaymentIntent: missing client_secret"))?
@@ -255,17 +276,19 @@ pub async fn confirm_payment_and_credit(
 ) -> Result<()> {
     let resp = stripe_get(state, &format!("payment_intents/{payment_intent_id}"), &[]).await?;
 
-    let status = resp
+    let pi_status = resp
+        .body
         .get("status")
         .and_then(|s| s.as_str())
         .unwrap_or("unknown");
 
-    if status != "succeeded" {
-        anyhow::bail!("PaymentIntent {payment_intent_id} has status '{status}', not 'succeeded'");
+    if pi_status != "succeeded" {
+        anyhow::bail!("PaymentIntent {payment_intent_id} has status '{pi_status}', not 'succeeded'");
     }
 
     // Replay guard: reject if this intent was already credited.
     let already_credited = resp
+        .body
         .get("metadata")
         .and_then(|m| m.get("credited"))
         .and_then(|v| v.as_str())
@@ -276,13 +299,14 @@ pub async fn confirm_payment_and_credit(
     }
 
     // Ownership check: the PaymentIntent's customer must match the caller's customer.
-    let pi_customer = resp.get("customer").and_then(|c| c.as_str()).unwrap_or("");
+    let pi_customer = resp.body.get("customer").and_then(|c| c.as_str()).unwrap_or("");
     let customer_id = get_customer_by_wallet(wallet_address, state).await?;
     if pi_customer != customer_id {
         anyhow::bail!("PaymentIntent {payment_intent_id} does not belong to this account");
     }
 
     let amount = resp
+        .body
         .get("amount")
         .and_then(|a| a.as_i64())
         .ok_or_else(|| anyhow::anyhow!("PaymentIntent: missing amount"))?;
@@ -336,4 +360,58 @@ pub async fn register_customer_email(wallet_address: &str, email: &str, state: &
 /// Format cents as a display string, e.g. 500 → "$5.00".
 pub fn cents_to_display(cents: i64) -> String {
     format!("${}.{:02}", cents / 100, cents.abs() % 100)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_stripe_response_2xx_success() {
+        let body = r#"{"id": "cus_123", "object": "customer"}"#;
+        let resp = parse_stripe_response(StatusCode::OK, body).unwrap();
+        assert_eq!(resp.status, StatusCode::OK);
+        assert_eq!(resp.body["id"], "cus_123");
+    }
+
+    #[test]
+    fn parse_stripe_response_4xx_with_error() {
+        let body = r#"{"error": {"message": "Invalid API Key provided", "type": "authentication_error"}}"#;
+        let err = parse_stripe_response(StatusCode::UNAUTHORIZED, body).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("HTTP 401"), "expected HTTP 401 in: {msg}");
+        assert!(msg.contains("Invalid API Key provided"), "expected error message in: {msg}");
+    }
+
+    #[test]
+    fn parse_stripe_response_5xx_with_error() {
+        let body = r#"{"error": {"message": "Internal server error", "type": "api_error"}}"#;
+        let err = parse_stripe_response(StatusCode::INTERNAL_SERVER_ERROR, body).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("HTTP 500"), "expected HTTP 500 in: {msg}");
+    }
+
+    #[test]
+    fn parse_stripe_response_error_without_message() {
+        let body = r#"{"error": {"type": "api_error"}}"#;
+        let err = parse_stripe_response(StatusCode::BAD_REQUEST, body).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("unknown error"), "expected 'unknown error' in: {msg}");
+    }
+
+    #[test]
+    fn parse_stripe_response_non_json() {
+        let body = "<html>Bad Gateway</html>";
+        let err = parse_stripe_response(StatusCode::BAD_GATEWAY, body).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("invalid JSON"), "expected 'invalid JSON' in: {msg}");
+        assert!(msg.contains("HTTP 502"), "expected HTTP 502 in: {msg}");
+    }
+
+    #[test]
+    fn parse_stripe_response_2xx_with_no_error_field() {
+        let body = r#"{"balance": -500, "currency": "usd"}"#;
+        let resp = parse_stripe_response(StatusCode::OK, body).unwrap();
+        assert_eq!(resp.body["balance"], -500);
+    }
 }

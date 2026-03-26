@@ -32,7 +32,14 @@ jobs:
       - name: Install k6
         uses: grafana/setup-k6-action@v1
 
+      - name: billing.spec.ts
+        env:
+          BASE_URL: ${{ inputs.api_root_url }}
+          K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-billing
+        run: k6 run k6/correctness/billing.spec.ts
+
       - name: observability-headers.spec.ts
+        if: ${{ !cancelled() }}
         env:
           BASE_URL: ${{ inputs.api_root_url }}
           K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-observability-headers
