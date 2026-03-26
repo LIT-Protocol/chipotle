@@ -135,18 +135,17 @@ Create a group (with optional permitted actions and PKPs). Then add an action (I
     
     // Register action metadata (name/description) with the IPFS CID
     await client.addAction({
-
-    // Add an IPFS action (CID) to the group
-    await client.addActionToGroup({
       apiKey: accountApiKey,
       actionIpfsCid: 'QmYourIpfsCidHere',
+      name: 'My Action',
+      description: 'Optional description',
     });
 
     // Add the action (IPFS CID) to the group
     await client.addActionToGroup({
       apiKey: accountApiKey,
       groupId,
-      actionIpfsCid: 'QmYourIpfsCidHere'
+      actionIpfsCid: 'QmYourIpfsCidHere',
     });
     ```
   </Tab>
@@ -235,27 +234,33 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
 
 ### Other useful endpoints
 
+<Info>
+**Raw CID vs hashed CID:** Some endpoints accept a raw IPFS CID (`action_ipfs_cid`, e.g. `"QmYour..."`) — the server hashes it for you. Other endpoints require the already-hashed CID (`hashed_cid`, e.g. `"0xabc..."`) — a keccak256 hex string you get back from `list_actions`. As a rule: **creation endpoints** (`add_action`, `add_action_to_group`) take the raw CID; **update/delete endpoints** (`delete_action`, `remove_action_from_group`, `update_action_metadata`) take the hashed CID.
+</Info>
+
 - **list_api_keys** — List usage API keys (paginated).
 - **list_groups** — List groups.
 - **list_wallets** — List wallets.
 - **list_actions** — List actions in a group (by `group_id`).
 - **list_wallets_in_group** — List wallets in a group.
 - **update_group** — Update group name, description, and permission flags.
-- **delete_action** — Delete an action (IPFS CID) and its metadata from the account.
-- **remove_action_from_group** / **remove_pkp_from_group** — Remove action or PKP from a group.
+- **delete_action** — Delete an action and its metadata from the account. Body: `{"hashed_cid": "0x..."}` (already-hashed CID).
+- **remove_action_from_group** — Remove an action from a group. Body: `{"group_id": 1, "hashed_cid": "0x..."}` (already-hashed CID).
+- **remove_pkp_from_group** — Remove a PKP from a group.
 - **get_node_chain_config** — Get node chain config - a quick way to find the location of contracts within the system.
 
 ---
 
 ### Add action
 
-Register a standalone action entry (name and description only). To make it executable, add its IPFS CID to a group with `add_action_to_group`.
+Register a standalone action entry (IPFS CID, name, and description). The CID is keccak256-hashed on the server. To make it executable, add its IPFS CID to a group with `add_action_to_group`.
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
     ```javascript
     await client.addAction({
       apiKey: accountApiKey,
+      actionIpfsCid: 'QmYourIpfsCidHere',
       name: 'Price Oracle',
       description: 'Fetches and signs ETH/USD price',
     });
@@ -266,7 +271,7 @@ Register a standalone action entry (name and description only). To make it execu
     curl -s -X POST "http://localhost:8000/core/v1/add_action" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
-      -d '{"name":"Price Oracle","description":"Fetches and signs ETH/USD price"}'
+      -d '{"action_ipfs_cid":"QmYourIpfsCidHere","name":"Price Oracle","description":"Fetches and signs ETH/USD price"}'
     ```
   </Tab>
 </Tabs>
@@ -361,15 +366,14 @@ Update only the name and description of a usage API key without changing its per
 
 ### Update action metadata
 
-Update the name and description of an action that is already registered in a group.
+Update the name and description of a registered action. The action is identified by its already-hashed CID (`0x`-prefixed keccak256 hex string), which you can obtain from `list_actions`.
 
 <Tabs>
   <Tab title="JavaScript (Core SDK)">
     ```javascript
     await client.updateActionMetadata({
       apiKey: accountApiKey,
-      groupId: 1,
-      actionIpfsCid: 'QmYourIpfsCidHere',
+      hashedCid: '0xabc123...',  // already-hashed CID from list_actions
       name: 'Updated Action Name',
       description: 'Updated description',
     });
@@ -380,7 +384,7 @@ Update the name and description of an action that is already registered in a gro
     curl -s -X POST "http://localhost:8000/core/v1/update_action_metadata" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
-      -d '{"group_id":1,"action_ipfs_cid":"QmYourIpfsCidHere","name":"Updated Action Name","description":"Updated description"}'
+      -d '{"hashed_cid":"0xabc123...","name":"Updated Action Name","description":"Updated description"}'
     ```
   </Tab>
 </Tabs>
