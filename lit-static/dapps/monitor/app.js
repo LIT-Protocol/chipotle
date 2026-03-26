@@ -1,7 +1,9 @@
 /**
- * Lit Admin – read AccountConfig contract view functions directly.
- * ABI subset matches lit-api-server/src/accounts/contracts/AccountConfig.json (view functions only).
+ * Lit Node Monitor — Payer Safety Console
+ * Vanilla JS + ethers.js v6.13.0
  */
+
+/* ═══ ABIs ═══════════════════════════════════════════════════════════════════ */
 
 const ACCOUNT_CONFIG_VIEW_ABI = [
   {
@@ -109,12 +111,14 @@ const SET_ADMIN_API_PAYER_ABI = [
   },
 ];
 
+/* ═══ Utilities ══════════════════════════════════════════════════════════════ */
+
 function el(id) {
   return document.getElementById(id);
 }
 
 function escapeHtml(str) {
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
 function setValue(id, text, isEmpty) {
@@ -124,16 +128,154 @@ function setValue(id, text, isEmpty) {
   node.classList.toggle('empty', isEmpty);
 }
 
+function showStatus(elementId, msg, isError) {
+  const node = el(elementId);
+  if (!node) return;
+  node.textContent = msg;
+  node.style.color = isError ? '#f87171' : '#34d399';
+  node.style.display = msg ? 'block' : 'none';
+}
 
-// ── Network selector ──────────────────────────────────────────────────────────
+/* ═══ Copy to clipboard ══════════════════════════════════════════════════════ */
+
+function copyText(text, triggerEl) {
+  navigator.clipboard.writeText(text).then(() => {
+    triggerEl.classList.add('copied');
+    setTimeout(() => triggerEl.classList.remove('copied'), 1200);
+  }).catch(() => {});
+}
+
+/* ═══ Threshold management ═══════════════════════════════════════════════════ */
+
+const THRESHOLD_DEFAULTS = { warning: 0.02, critical: 0.005, target: 0.05 };
+
+function thresholdStorageKey() {
+  return 'lit-monitor-thresholds-' + getServerUrl();
+}
+
+function getThresholds() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(thresholdStorageKey()));
+    if (stored) return { ...THRESHOLD_DEFAULTS, ...stored };
+  } catch {}
+  return { ...THRESHOLD_DEFAULTS };
+}
+
+function saveThresholdsToStorage(t) {
+  localStorage.setItem(thresholdStorageKey(), JSON.stringify(t));
+}
+
+function classifyHealth(balance, thresholds) {
+  if (balance == null || isNaN(balance)) return 'unknown';
+  if (balance < thresholds.critical) return 'critical';
+  if (balance < thresholds.warning) return 'warning';
+  return 'healthy';
+}
+
+function loadThresholdInputs() {
+  const t = getThresholds();
+  const w = el('threshold-warning');
+  const c = el('threshold-critical');
+  const tgt = el('threshold-target');
+  if (w) w.value = t.warning;
+  if (c) c.value = t.critical;
+  if (tgt) tgt.value = t.target;
+}
+
+/* ═══ Payer data ═════════════════════════════════════════════════════════════ */
+
+let payerData = []; // [{ address, balance, health, index }]
+
+function getTokenLabel() {
+  const t = (el('cc-token')?.textContent || 'ETH').trim();
+  return t === '—' ? 'ETH' : t;
+}
+
+function renderPayerHealthTable() {
+  const listEl = el('api-payers-list');
+  if (!listEl || payerData.length === 0) return;
+
+  const thresholds = getThresholds();
+  payerData.forEach(p => { p.health = classifyHealth(p.balance, thresholds); });
+
+  const order = { critical: 0, warning: 1, unknown: 2, healthy: 3 };
+  const sorted = [...payerData].sort((a, b) => {
+    const od = (order[a.health] ?? 2) - (order[b.health] ?? 2);
+    if (od !== 0) return od;
+    if (a.balance == null) return 1;
+    if (b.balance == null) return -1;
+    return a.balance - b.balance;
+  });
+
+  const token = getTokenLabel();
+
+  listEl.innerHTML =
+    `<table><thead><tr>` +
+      `<th style="width:12px"></th><th>Payer</th><th>Address</th><th class="eth">${escapeHtml(token)}</th>` +
+    `</tr></thead><tbody>` +
+    sorted.map(p => {
+      const balText = p.balance != null ? p.balance.toFixed(6) : '…';
+      const balStyle = p.balance == null ? ' style="color:var(--muted)"' : '';
+      return `<tr class="payer-row ${p.health}">` +
+        `<td><span class="health-dot ${p.health}"></span></td>` +
+        `<td style="white-space:nowrap">Payer ${p.index}</td>` +
+        `<td class="copyable" data-copy="${escapeHtml(p.address)}">${escapeHtml(p.address)}</td>` +
+        `<td class="eth copyable" data-copy="${balText}"${balStyle}>${balText}${p.balance != null ? ' ' + escapeHtml(token) : ''}</td>` +
+      `</tr>`;
+    }).join('') +
+    `</tbody></table>`;
+
+  listEl.querySelectorAll('.copyable').forEach(cell => {
+    cell.style.cursor = 'pointer';
+    cell.title = 'Click to copy';
+    cell.addEventListener('click', () => copyText(cell.dataset.copy, cell));
+  });
+
+  updateHealthSummary();
+}
+
+function updateHealthSummary() {
+  const bar = el('health-summary');
+  if (!bar) return;
+
+  if (payerData.length === 0) {
+    bar.style.display = 'none';
+    return;
+  }
+
+  bar.style.display = '';
+  const counts = { healthy: 0, warning: 0, critical: 0, unknown: 0 };
+  let totalBalance = 0;
+  payerData.forEach(p => {
+    counts[p.health] = (counts[p.health] || 0) + 1;
+    if (p.balance != null) totalBalance += p.balance;
+  });
+
+  const token = getTokenLabel();
+  const parts = [];
+  if (counts.critical > 0) parts.push(`<span style="color:var(--critical)">${counts.critical} critical</span>`);
+  if (counts.warning > 0) parts.push(`<span style="color:var(--warning)">${counts.warning} warning</span>`);
+  if (counts.healthy > 0) parts.push(`<span style="color:var(--success)">${counts.healthy} healthy</span>`);
+  if (counts.unknown > 0) parts.push(`<span style="color:var(--muted)">${counts.unknown} loading</span>`);
+
+  const summaryText = el('health-summary-text');
+  if (summaryText) summaryText.innerHTML = `${payerData.length} payers: ${parts.join(' &middot; ')}`;
+
+  const poolTotal = el('health-pool-total');
+  if (poolTotal) poolTotal.textContent = totalBalance.toFixed(6) + ' ' + token;
+
+  const adminBal = el('val-admin-api-payer-balance');
+  const reserveEl = el('health-admin-reserve');
+  if (reserveEl) reserveEl.textContent = adminBal?.textContent || '—';
+}
+
+/* ═══ Network selector ═══════════════════════════════════════════════════════ */
 
 function getServerUrl() {
-  // Option values include trailing slash; strip it for consistent path joining.
   return (el('network')?.value || '').replace(/\/$/, '');
 }
 
-// ── resolveRpcUrlFromChainlist ───────────────────────────────────────────────────
-// Uses Whatever Origin CORS proxy (free, no domain whitelist) to fetch from chainlistapi.com.
+/* ═══ CORS proxy + chainlist ═════════════════════════════════════════════════ */
 
 const CORS_PROXY = 'https://whateverorigin.org/get?url=';
 
@@ -157,7 +299,7 @@ async function resolveRpcUrlFromChainlist(chainId) {
   }
 }
 
-// ── getNodeChainConfig ────────────────────────────────────────────────────────
+/* ═══ Data fetching ══════════════════════════════════════════════════════════ */
 
 async function getNodeChainConfig(serverUrl) {
   const resultsEl = el('chain-config-results');
@@ -190,7 +332,6 @@ async function getNodeChainConfig(serverUrl) {
 
     setValue('cc-contract-address', cfg.contract_address ?? '—', !cfg.contract_address);
 
-    // Propagate contract address to the contract card.
     const contractInput = el('contract-address');
     if (contractInput && cfg.contract_address) contractInput.value = cfg.contract_address;
   } catch (e) {
@@ -200,8 +341,6 @@ async function getNodeChainConfig(serverUrl) {
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
   }
 }
-
-// ── getApiPayers ──────────────────────────────────────────────────────────────
 
 async function getApiPayers(serverUrl) {
   const resultsEl = el('api-payers-results');
@@ -218,6 +357,7 @@ async function getApiPayers(serverUrl) {
     const payers = await res.json();
 
     if (!Array.isArray(payers) || payers.length === 0) {
+      payerData = [];
       let firstPayer = '';
       try {
         const fpRes = await fetch(`${serverUrl}/get_admin_api_payer`);
@@ -231,54 +371,39 @@ async function getApiPayers(serverUrl) {
         (firstPayer
           ? `<p style="font-size:0.85rem;margin:0.5rem 0 0;color:#f87171">` +
               `Please set the default API payer address: <br> ` +
-              `<span style="font-family:'JetBrains Mono',monospace;word-break:break-all">${firstPayer}</span>` +
-              `<br>Once this account is  set, please fund with native tokens. ` +
+              `<span style="font-family:'JetBrains Mono',monospace;word-break:break-all">${escapeHtml(firstPayer)}</span>` +
+              `<br>Once this account is set, please fund with native tokens.` +
             `</p>`
           : '');
+      updateHealthSummary();
       return;
     }
 
-    // Render table immediately, then fill balances as they resolve.
-    listEl.innerHTML =
-      `<table>` +
-        `<thead><tr>` +
-          `<th>Description</th>` +
-          `<th>Wallet</th>` +
-          `<th class="eth">ETH</th>` +
-        `</tr></thead>` +
-        `<tbody>` +
-          payers.map((addr, i) =>
-            `<tr>` +
-              `<td>Payer ${i + 1}</td>` +
-              `<td>${addr}</td>` +
-              `<td class="eth" id="payer-balance-${i}" style="color:var(--muted)">…</td>` +
-            `</tr>`
-          ).join('') +
-        `</tbody>` +
-      `</table>`;
+    // Initialize payer data with loading state
+    payerData = payers.map((addr, i) => ({ address: addr, balance: null, health: 'unknown', index: i + 1 }));
+    renderPayerHealthTable();
 
+    // Fetch all balances in parallel
     const rpcUrl = (el('cc-rpc-url')?.value || '').trim();
     if (rpcUrl) {
       const provider = new ethers.JsonRpcProvider(rpcUrl);
-      payers.forEach(async (addr, i) => {
-        try {
-          const balanceWei = await provider.getBalance(addr);
-          const balEl = document.getElementById(`payer-balance-${i}`);
-          if (balEl) {
-            const eth = parseFloat(ethers.formatEther(balanceWei));
-            balEl.textContent = eth.toFixed(6) + ' ETH';
-            balEl.style.color = '';
-          }
-        } catch {}
+      const results = await Promise.allSettled(
+        payers.map(addr => provider.getBalance(addr))
+      );
+      results.forEach((result, i) => {
+        if (result.status === 'fulfilled') {
+          payerData[i].balance = parseFloat(ethers.formatEther(result.value));
+        }
       });
+      renderPayerHealthTable();
     }
   } catch (e) {
+    payerData = [];
     if (resultsEl) resultsEl.style.display = 'none';
     if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
+    updateHealthSummary();
   }
 }
-
-// ── fetchVersion ──────────────────────────────────────────────────────────────
 
 async function fetchVersion(serverUrl) {
   const resultsEl = el('version-results');
@@ -321,45 +446,7 @@ async function fetchVersion(serverUrl) {
   }
 }
 
-// ── loadNetwork ───────────────────────────────────────────────────────────────
-
-async function loadNetwork() {
-  const serverUrl = getServerUrl();
-  await getNodeChainConfig(serverUrl); // Must run first to populate RPC URL
-  await Promise.all([
-    getApiPayers(serverUrl),
-    fetchVersion(serverUrl),
-  ]);
-  await fetchContractValues();
-  await fetchNodeConfigValues();
-  await fetchLitActionClientConfig(serverUrl);
-  await fetchChainConfigKeys(serverUrl);
-}
-
-async function refreshBalances() {
-  const serverUrl = getServerUrl();
-  await getApiPayers(serverUrl);
-  await fetchContractValues();
-  await fetchNodeConfigValues();
-}
-
-(function () {
-  const select = el('network');
-  if (!select) return;
-
-  // Pre-select the option whose hostname matches the current page.
-  const host = window.location.hostname;
-  for (const opt of select.options) {
-    try {
-      if (new URL(opt.value).hostname === host) { opt.selected = true; break; }
-    } catch {}
-  }
-
-  select.addEventListener('change', loadNetwork);
-  loadNetwork();
-})();
-
-// ── fetchContractValues ───────────────────────────────────────────────────────
+// ── fetchContractValues ───────────────────────────────────────────────────
 
 function showError(msg) {
   const err = el('error');
@@ -436,7 +523,7 @@ async function fetchContractValues() {
   }
 }
 
-// ── setRequestedApiPayerCount ─────────────────────────────────────────────────
+// ── setRequestedApiPayerCount ─────────────────────────────────────────────
 
 function populateApiPayerCountDropdown(currentValue) {
   const select = el('payer-count');
@@ -446,14 +533,6 @@ function populateApiPayerCountDropdown(currentValue) {
     .join('');
 }
 
-function showSignerCountStatus(msg, isError) {
-  const node = el('payer-count-status');
-  if (!node) return;
-  node.textContent = msg;
-  node.style.color = isError ? '#f87171' : '#34d399';
-  node.style.display = msg ? 'block' : 'none';
-}
-
 async function connectWallet() {
   if (!window.ethereum) throw new Error('Wallet not found. Install a wallet and try again.');
   const provider = new ethers.BrowserProvider(window.ethereum);
@@ -461,107 +540,7 @@ async function connectWallet() {
   return provider;
 }
 
-// ── setAdminApiPayerAccount ───────────────────────────────────────────────────
-
-function showDefaultApiPayerStatus(msg, isError) {
-  const node = el('default-api-payer-status');
-  if (!node) return;
-  node.textContent = msg;
-  node.style.color = isError ? '#f87171' : '#34d399';
-  node.style.display = msg ? 'block' : 'none';
-}
-
-el('btn-set-default-api-payer')?.addEventListener('click', async () => {
-  const contractAddress = (el('contract-address')?.value || '').trim();
-  const btn = el('btn-set-default-api-payer');
-  let newApiPayer;
-
-  try {
-    newApiPayer = ethers.getAddress((el('default-api-payer')?.value || '').trim());
-  } catch {
-    showDefaultApiPayerStatus('Enter a valid Ethereum address.', true);
-    return;
-  }
-
-  if (!contractAddress) {
-    showDefaultApiPayerStatus('Contract address not yet loaded — select a network first.', true);
-    return;
-  }
-
-  btn.disabled = true;
-  showDefaultApiPayerStatus('Connecting wallet…', false);
-
-  try {
-    const provider = await connectWallet();
-    const signer = await provider.getSigner();
-    const contract = new ethers.Contract(contractAddress, SET_ADMIN_API_PAYER_ABI, signer);
-
-    showDefaultApiPayerStatus('Waiting for signature…', false);
-    const tx = await contract.setAdminApiPayerAccount(newApiPayer);
-
-    showDefaultApiPayerStatus('Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
-    await tx.wait();
-
-    showDefaultApiPayerStatus('Done. Default API payer updated to ' + newApiPayer, false);
-    el('default-api-payer').value = '';
-  } catch (e) {
-    showDefaultApiPayerStatus('Error: ' + (e?.reason || e?.message || String(e)), true);
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-// ── setRebalanceAmount ────────────────────────────────────────────────────────
-
-function showRebalanceAmountStatus(msg, isError) {
-  const node = el('rebalance-amount-status');
-  if (!node) return;
-  node.textContent = msg;
-  node.style.color = isError ? '#f87171' : '#34d399';
-  node.style.display = msg ? 'block' : 'none';
-}
-
-el('btn-set-rebalance-amount')?.addEventListener('click', async () => {
-  const contractAddress = (el('contract-address')?.value || '').trim();
-  const btn = el('btn-set-rebalance-amount');
-  const raw = (el('rebalance-amount')?.value || '').trim();
-
-  if (!contractAddress) {
-    showRebalanceAmountStatus('Contract address not yet loaded — select a network first.', true);
-    return;
-  }
-
-  let amountWei;
-  try {
-    amountWei = ethers.parseEther(raw);
-  } catch {
-    showRebalanceAmountStatus('Enter a valid ETH amount (e.g. 0.05).', true);
-    return;
-  }
-
-  btn.disabled = true;
-  showRebalanceAmountStatus('Connecting wallet…', false);
-
-  try {
-    const provider = await connectWallet();
-    const signer = await provider.getSigner();
-    const contract = new ethers.Contract(contractAddress, SET_REBALANCE_AMOUNT_ABI, signer);
-
-    showRebalanceAmountStatus('Waiting for signature…', false);
-    const tx = await contract.setRebalanceAmount(amountWei);
-
-    showRebalanceAmountStatus('Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
-    await tx.wait();
-
-    showRebalanceAmountStatus('Done. Rebalance amount set to ' + ethers.formatEther(amountWei) + ' ETH', false);
-  } catch (e) {
-    showRebalanceAmountStatus('Error: ' + (e?.reason || e?.message || String(e)), true);
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-// ── getChainConfigKeys ────────────────────────────────────────────────────────
+// ── fetchChainConfigKeys ────────────────────────────────────────────────
 
 async function fetchChainConfigKeys(serverUrl) {
   const listEl = el('chain-config-keys-list');
@@ -587,7 +566,7 @@ async function fetchChainConfigKeys(serverUrl) {
   }
 }
 
-// ── getLitActionClientConfig ──────────────────────────────────────────────────
+// ── fetchLitActionClientConfig ──────────────────────────────────────────
 
 async function fetchLitActionClientConfig(serverUrl) {
   const resultsEl = el('lit-action-config-results');
@@ -623,7 +602,7 @@ async function fetchLitActionClientConfig(serverUrl) {
   }
 }
 
-// ── nodeConfigurationValues ───────────────────────────────────────────────────
+// ── nodeConfigurationValues ───────────────────────────────────────────────
 
 async function fetchNodeConfigValues() {
   const rpcUrl = (el('cc-rpc-url')?.value || '').trim();
@@ -655,17 +634,195 @@ async function fetchNodeConfigValues() {
   }
 }
 
-function escapeHtml(str) {
-  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+/* ═══ Auto-refresh ═══════════════════════════════════════════════════════════ */
+
+const REFRESH_INTERVAL = 30;
+let countdownTimer = null;
+let secondsLeft = REFRESH_INTERVAL;
+let isRefreshing = false;
+
+function startAutoRefresh() {
+  stopAutoRefresh();
+  secondsLeft = REFRESH_INTERVAL;
+  updateCountdown();
+  countdownTimer = setInterval(() => {
+    secondsLeft--;
+    updateCountdown();
+    if (secondsLeft <= 0) {
+      doAutoRefresh();
+    }
+  }, 1000);
 }
 
-function showNodeConfigStatus(msg, isError) {
-  const node = el('node-config-status');
-  if (!node) return;
-  node.textContent = msg;
-  node.style.color = isError ? '#f87171' : '#34d399';
-  node.style.display = msg ? 'block' : 'none';
+function stopAutoRefresh() {
+  if (countdownTimer) {
+    clearInterval(countdownTimer);
+    countdownTimer = null;
+  }
 }
+
+function updateCountdown() {
+  const cdEl = el('refresh-countdown');
+  if (cdEl) cdEl.textContent = secondsLeft + 's';
+}
+
+async function doAutoRefresh() {
+  if (isRefreshing) return;
+  isRefreshing = true;
+  try {
+    await refreshBalances();
+  } finally {
+    isRefreshing = false;
+    secondsLeft = REFRESH_INTERVAL;
+    updateCountdown();
+  }
+}
+
+// Page Visibility API — pause polling when tab is hidden, refresh immediately on return
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopAutoRefresh();
+  } else {
+    doAutoRefresh().then(() => startAutoRefresh());
+  }
+});
+
+/* ═══ Load / refresh ═════════════════════════════════════════════════════════ */
+
+async function loadNetwork() {
+  const serverUrl = getServerUrl();
+  stopAutoRefresh();
+  await getNodeChainConfig(serverUrl); // Must run first — populates RPC URL
+  await Promise.all([
+    getApiPayers(serverUrl),
+    fetchVersion(serverUrl),
+    fetchContractValues(),
+    fetchNodeConfigValues(),
+    fetchLitActionClientConfig(serverUrl),
+    fetchChainConfigKeys(serverUrl),
+  ]);
+  updateHealthSummary(); // pick up admin reserve after fetchContractValues
+  loadThresholdInputs();
+  startAutoRefresh();
+}
+
+async function refreshBalances() {
+  const serverUrl = getServerUrl();
+  await Promise.all([
+    getApiPayers(serverUrl),
+    fetchContractValues(),
+    fetchNodeConfigValues(),
+  ]);
+  updateHealthSummary(); // pick up admin reserve after fetchContractValues
+}
+
+/* ═══ Settings panel ═════════════════════════════════════════════════════════ */
+
+el('btn-toggle-settings')?.addEventListener('click', () => {
+  const panel = el('settings-panel');
+  if (panel) panel.classList.toggle('open');
+});
+
+el('btn-save-thresholds')?.addEventListener('click', () => {
+  const w = parseFloat(el('threshold-warning')?.value);
+  const c = parseFloat(el('threshold-critical')?.value);
+  const t = parseFloat(el('threshold-target')?.value);
+
+  if (isNaN(w) || isNaN(c) || isNaN(t) || w < 0 || c < 0 || t < 0) {
+    showStatus('threshold-status', 'Enter valid positive numbers.', true);
+    return;
+  }
+  if (c >= w) {
+    showStatus('threshold-status', 'Critical must be less than warning.', true);
+    return;
+  }
+
+  saveThresholdsToStorage({ warning: w, critical: c, target: t });
+  renderPayerHealthTable();
+  showStatus('threshold-status', 'Saved.', false);
+});
+
+/* ═══ Contract write handlers ════════════════════════════════════════════════ */
+
+el('btn-set-default-api-payer')?.addEventListener('click', async () => {
+  const contractAddress = (el('contract-address')?.value || '').trim();
+  const btn = el('btn-set-default-api-payer');
+  let newApiPayer;
+
+  try {
+    newApiPayer = ethers.getAddress((el('default-api-payer')?.value || '').trim());
+  } catch {
+    showStatus('default-api-payer-status', 'Enter a valid Ethereum address.', true);
+    return;
+  }
+
+  if (!contractAddress) {
+    showStatus('default-api-payer-status', 'Contract address not yet loaded — select a network first.', true);
+    return;
+  }
+
+  btn.disabled = true;
+  showStatus('default-api-payer-status', 'Connecting wallet…', false);
+
+  try {
+    const provider = await connectWallet();
+    const signer = await provider.getSigner();
+    const contract = new ethers.Contract(contractAddress, SET_ADMIN_API_PAYER_ABI, signer);
+
+    showStatus('default-api-payer-status', 'Waiting for signature…', false);
+    const tx = await contract.setAdminApiPayerAccount(newApiPayer);
+
+    showStatus('default-api-payer-status', 'Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
+    await tx.wait();
+
+    showStatus('default-api-payer-status', 'Done. Default API payer updated to ' + newApiPayer, false);
+    el('default-api-payer').value = '';
+  } catch (e) {
+    showStatus('default-api-payer-status', 'Error: ' + (e?.reason || e?.message || String(e)), true);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+el('btn-set-rebalance-amount')?.addEventListener('click', async () => {
+  const contractAddress = (el('contract-address')?.value || '').trim();
+  const btn = el('btn-set-rebalance-amount');
+  const raw = (el('rebalance-amount')?.value || '').trim();
+
+  if (!contractAddress) {
+    showStatus('rebalance-amount-status', 'Contract address not yet loaded — select a network first.', true);
+    return;
+  }
+
+  let amountWei;
+  try {
+    amountWei = ethers.parseEther(raw);
+  } catch {
+    showStatus('rebalance-amount-status', 'Enter a valid ETH amount (e.g. 0.05).', true);
+    return;
+  }
+
+  btn.disabled = true;
+  showStatus('rebalance-amount-status', 'Connecting wallet…', false);
+
+  try {
+    const provider = await connectWallet();
+    const signer = await provider.getSigner();
+    const contract = new ethers.Contract(contractAddress, SET_REBALANCE_AMOUNT_ABI, signer);
+
+    showStatus('rebalance-amount-status', 'Waiting for signature…', false);
+    const tx = await contract.setRebalanceAmount(amountWei);
+
+    showStatus('rebalance-amount-status', 'Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
+    await tx.wait();
+
+    showStatus('rebalance-amount-status', 'Done. Rebalance amount set to ' + ethers.formatEther(amountWei) + ' ETH', false);
+  } catch (e) {
+    showStatus('rebalance-amount-status', 'Error: ' + (e?.reason || e?.message || String(e)), true);
+  } finally {
+    btn.disabled = false;
+  }
+});
 
 el('btn-set-node-config')?.addEventListener('click', async () => {
   const contractAddress = (el('contract-address')?.value || '').trim();
@@ -674,34 +831,34 @@ el('btn-set-node-config')?.addEventListener('click', async () => {
   const btn   = el('btn-set-node-config');
 
   if (!contractAddress) {
-    showNodeConfigStatus('Contract address not yet loaded — select a network first.', true);
+    showStatus('node-config-status', 'Contract address not yet loaded — select a network first.', true);
     return;
   }
   if (!key) {
-    showNodeConfigStatus('Enter a configuration key.', true);
+    showStatus('node-config-status', 'Enter a configuration key.', true);
     return;
   }
 
   btn.disabled = true;
-  showNodeConfigStatus('Connecting wallet…', false);
+  showStatus('node-config-status', 'Connecting wallet…', false);
 
   try {
     const provider = await connectWallet();
     const signer   = await provider.getSigner();
     const contract = new ethers.Contract(contractAddress, SET_NODE_CONFIGURATION_ABI, signer);
 
-    showNodeConfigStatus('Waiting for signature…', false);
+    showStatus('node-config-status', 'Waiting for signature…', false);
     const tx = await contract.setNodeConfiguration(key, value);
 
-    showNodeConfigStatus('Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
+    showStatus('node-config-status', 'Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
     await tx.wait();
 
-    showNodeConfigStatus('Done. Configuration key "' + key + '" set.', false);
+    showStatus('node-config-status', 'Done. Configuration key "' + key + '" set.', false);
     el('node-config-key').value   = '';
     el('node-config-value').value = '';
     await fetchNodeConfigValues();
   } catch (e) {
-    showNodeConfigStatus('Error: ' + (e?.reason || e?.message || String(e)), true);
+    showStatus('node-config-status', 'Error: ' + (e?.reason || e?.message || String(e)), true);
   } finally {
     btn.disabled = false;
   }
@@ -725,6 +882,18 @@ el('btn-refresh-contract')?.addEventListener('click', async () => {
   }
 });
 
+el('btn-refresh-all')?.addEventListener('click', async () => {
+  const btn = el('btn-refresh-all');
+  btn.disabled = true;
+  try {
+    await refreshBalances();
+    secondsLeft = REFRESH_INTERVAL;
+    updateCountdown();
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 el('btn-set-payer-count')?.addEventListener('click', async () => {
   const select = el('payer-count');
   const contractAddress = (el('contract-address')?.value || '').trim();
@@ -732,36 +901,53 @@ el('btn-set-payer-count')?.addEventListener('click', async () => {
   const btn = el('btn-set-payer-count');
 
   if (!contractAddress) {
-    showSignerCountStatus('Contract address not yet loaded — select a network first.', true);
+    showStatus('payer-count-status', 'Contract address not yet loaded — select a network first.', true);
     return;
   }
   if (!newCount) {
-    showSignerCountStatus('Select a value first.', true);
+    showStatus('payer-count-status', 'Select a value first.', true);
     return;
   }
 
   btn.disabled = true;
   select.disabled = true;
-  showSignerCountStatus('Connecting wallet…', false);
+  showStatus('payer-count-status', 'Connecting wallet…', false);
 
   try {
     const provider = await connectWallet();
     const signer = await provider.getSigner();
     const contract = new ethers.Contract(contractAddress, SET_REQUESTED_API_PAYER_COUNT_ABI, signer);
 
-    showSignerCountStatus('Waiting for signature…', false);
+    showStatus('payer-count-status', 'Waiting for signature…', false);
     const tx = await contract.setRequestedApiPayerCount(newCount);
 
-    showSignerCountStatus('Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
+    showStatus('payer-count-status', 'Transaction submitted: ' + tx.hash + '. Waiting for confirmation…', false);
     await tx.wait();
 
-    showSignerCountStatus('Done. Requested payer count updated to ' + newCount, false);
+    showStatus('payer-count-status', 'Done. Requested payer count updated to ' + newCount, false);
     await refreshBalances();
   } catch (e) {
-    showSignerCountStatus('Error: ' + (e?.reason || e?.message || String(e)), true);
+    showStatus('payer-count-status', 'Error: ' + (e?.reason || e?.message || String(e)), true);
   } finally {
     btn.disabled = false;
     select.disabled = false;
   }
 });
 
+/* ═══ Initialization ═════════════════════════════════════════════════════════ */
+
+(function () {
+  const select = el('network');
+  if (!select) return;
+
+  // Pre-select the option whose hostname matches the current page.
+  const host = window.location.hostname;
+  for (const opt of select.options) {
+    try {
+      if (new URL(opt.value).hostname === host) { opt.selected = true; break; }
+    } catch {}
+  }
+
+  select.addEventListener('change', loadNetwork);
+  loadNetwork();
+})();
