@@ -393,7 +393,7 @@ pub async fn update_action_metadata(
     req: Json<UpdateActionMetadataRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = U256::from(req.group_id);
-    let action_hash = ipfs_cid_to_u256(&req.action_ipfs_cid)?;
+    let action_hash = hashed_cid_to_u256(&req.hashed_cid)?;
     accounts::update_action_metadata(
         signer_pool,
         api_key,

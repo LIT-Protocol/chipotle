@@ -285,15 +285,13 @@ contract WritesFacet {
         string memory name,
         string memory description
     ) public {
-        SecurityLib.revertIfActionDoesNotExist(
-            accountApiKeyHash,
-            groupId,
-            actionHash,
-            msg.sender
-        );
+        SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         AppStorage.Account storage account = s.accounts[accountApiKeyHash];
+        if (!account.actionHashesList.contains(actionHash)) {
+            revert AppStorage.ActionDoesNotExist(accountApiKeyHash, groupId, actionHash);
+        }
         account.actionMetadata[actionHash].name = name;
         account.actionMetadata[actionHash].description = description;
     }

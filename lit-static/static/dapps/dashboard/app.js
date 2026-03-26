@@ -973,7 +973,7 @@ function openAddActionModal() {
 }
 
 function openEditActionModal(item) {
-  const cid = item.ipfs_cid || item.cid || '';
+  const cid = item.ipfs_cid || item.cid || String(item.id ?? '');
   const body =
     '<div class="form-group"><label>Hashed CID</label><div class="mono">' + escapeHtml(cid) + '</div></div>' +
     '<div class="form-group"><label for="modal-edit-action-name">Name</label><input type="text" id="modal-edit-action-name" class="input" value="' + escapeHtml(item.name || '') + '"></div>' +
@@ -996,7 +996,7 @@ function openEditActionModal(item) {
     try {
       showActionProgress('Updating action', `Updating action metadata for CID "${cid}".`);
       const client = await getClient();
-      await client.updateActionMetadata({ apiKey, groupId: '0', actionIpfsCid: cid, name, description: desc });
+      await client.updateActionMetadata({ apiKey, groupId: '0', hashedCid: cid, name, description: desc });
       await loadActions();
       showStatus('actions-status', 'Action updated.', 'success');
     } catch (e) {
@@ -1019,7 +1019,7 @@ async function confirmAndRemoveAction(item) {
   try {
     showActionProgress('Deleting action', `Deleting action CID "${cid}".`);
     const client = await getClient();
-    await client.deleteAction({ apiKey, actionIpfsCid: cid });
+    await client.deleteAction({ apiKey, hashedCid: cid });
     await loadActions();
     showStatus('actions-status', 'Action deleted.', 'success');
   } catch (e) {
