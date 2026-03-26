@@ -42,6 +42,7 @@
             "group": "Architecture",
             "pages": [
               "architecture/index",
+              "architecture/groups",
               "architecture/authModel",
               "architecture/diagram"
             ]

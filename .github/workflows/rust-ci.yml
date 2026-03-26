@@ -23,7 +23,6 @@ jobs:
           - lit-core
           - lit-api-server
           - lit-api-server/blockchain/rust_generator_and_deployer
-          - lit-static
 
     steps:
       - uses: actions/checkout@v4
