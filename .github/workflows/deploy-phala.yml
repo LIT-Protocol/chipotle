@@ -59,21 +59,20 @@ jobs:
             echo "instance_type=tdx.large" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-dev" >> "$GITHUB_OUTPUT"
             echo "node_config=NodeConfig.main.toml" >> "$GITHUB_OUTPUT"
-            echo "domain=api.chipotle.litprotocol.com" >> "$GITHUB_OUTPUT"
-            BASE_URL="https://api.chipotle.litprotocol.com"
+            DOMAIN="api.chipotle.litprotocol.com"
           elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
             echo "phala_app_name=chipotle-next" >> "$GITHUB_OUTPUT"
             echo "instance_type=tdx.small" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-next" >> "$GITHUB_OUTPUT"
             echo "node_config=NodeConfig.next.toml" >> "$GITHUB_OUTPUT"
-            echo "domain=test.chipotle.litprotocol.com" >> "$GITHUB_OUTPUT"
-            BASE_URL="https://test.chipotle.litprotocol.com"
+            DOMAIN="test.chipotle.litprotocol.com"
           else
             echo "Unsupported branch for deployment"
             exit 1
           fi
-          echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
-          echo "api_root_url=${BASE_URL}/core/v1" >> "$GITHUB_OUTPUT"
+          echo "domain=${DOMAIN}" >> "$GITHUB_OUTPUT"
+          echo "base_url=https://${DOMAIN}" >> "$GITHUB_OUTPUT"
+          echo "api_root_url=https://${DOMAIN}/core/v1" >> "$GITHUB_OUTPUT"
 
   build:
     needs: [determine-target]
