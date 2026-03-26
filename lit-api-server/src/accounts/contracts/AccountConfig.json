@@ -151,6 +151,11 @@
           "internalType": "string",
           "name": "description",
           "type": "string"
+        },
+        {
+          "internalType": "uint256",
+          "name": "actionHash",
+          "type": "uint256"
         }
       ],
       "name": "addAction",
@@ -299,6 +304,24 @@
         }
       ],
       "name": "registerWalletDerivation",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "actionHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "removeAction",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
@@ -973,6 +996,52 @@
         },
         {
           "internalType": "uint256",
+          "name": "pageNumber",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "pageSize",
+          "type": "uint256"
+        }
+      ],
+      "name": "listActions",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "id",
+              "type": "uint256"
+            },
+            {
+              "internalType": "string",
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "internalType": "string",
+              "name": "description",
+              "type": "string"
+            }
+          ],
+          "internalType": "struct AppStorage.Metadata[]",
+          "name": "",
+          "type": "tuple[]"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
           "name": "groupId",
           "type": "uint256"
         },
@@ -987,7 +1056,7 @@
           "type": "uint256"
         }
       ],
-      "name": "listActions",
+      "name": "listActionsInGroup",
       "outputs": [
         {
           "components": [

@@ -8,9 +8,10 @@ use crate::core::v1::helpers::api_status::{ApiResult, ErrMessage};
 use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
-    AddUsageApiKeyRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemoveGroupRequest,
-    RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest, UpdateActionMetadataRequest,
-    UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
+    AddUsageApiKeyRequest, DeleteActionRequest, NewAccountRequest, RemoveActionFromGroupRequest,
+    RemoveGroupRequest, RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest,
+    UpdateActionMetadataRequest, UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest,
+    UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
     AccountOpResponse, AddUsageApiKeyResponse, ApiKeyItem, ChainConfigKeysResponse,
@@ -226,6 +227,22 @@ pub(super) async fn add_action(
     OpenApiResponse {
         response: ApiResult(
             account_management::add_action(signer_pool.inner().clone(), api_key.0.as_str(), req)
+                .await,
+        )
+        .into(),
+    }
+}
+
+#[openapi(tag = "Account Management")]
+#[post("/delete_action", format = "json", data = "<req>")]
+pub(super) async fn delete_action(
+    signer_pool: &State<Arc<SignerPool>>,
+    api_key: BilledManagementApiKey,
+    req: Json<DeleteActionRequest>,
+) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(
+            account_management::delete_action(signer_pool.inner().clone(), api_key.0.as_str(), req)
                 .await,
         )
         .into(),

@@ -260,6 +260,32 @@ contract ViewsFacet {
 
     function listActions(
         uint256 accountApiKeyHash,
+        uint256 pageNumber,
+        uint256 pageSize
+    ) public view returns (AppStorage.Metadata[] memory) {
+        AppStorage.Account storage account = getReadOnlyAccount(
+            accountApiKeyHash
+        );
+        (uint256 startIndex, uint256 pageLength) = getPageStartAndLength(
+            account.actionHashesList.length(),
+            pageNumber,
+            pageSize
+        );
+
+        AppStorage.Metadata[] memory pageMetadata = new AppStorage.Metadata[](
+            pageLength
+        );
+
+        for (uint256 i = 0; i < pageLength; i++) {
+            pageMetadata[i] = account.actionMetadata[
+                account.actionHashesList.at(startIndex + i)
+            ];
+        }
+        return pageMetadata;
+    }
+
+    function listActionsInGroup(
+        uint256 accountApiKeyHash,
         uint256 groupId,
         uint256 pageNumber,
         uint256 pageSize

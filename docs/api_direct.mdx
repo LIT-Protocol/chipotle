@@ -132,13 +132,19 @@ Create a group (with optional permitted actions and PKPs). Then add an action (I
     const groups = await client.listGroups({ apiKey: accountApiKey, pageNumber: '0', pageSize: '10' });
     const groupId = groups[groups.length - 1].id;
     
-    // Add an IPFS action (CID) to the group
-    await client.addActionToGroup({
+    // Register action metadata (name/description) with the IPFS CID
+    await client.addAction({
       apiKey: accountApiKey,
-      groupId,
       actionIpfsCid: 'QmYourIpfsCidHere',
       name: 'My Action',
       description: 'Optional'
+    });
+
+    // Add the action (IPFS CID) to the group
+    await client.addActionToGroup({
+      apiKey: accountApiKey,
+      groupId,
+      actionIpfsCid: 'QmYourIpfsCidHere'
     });
     ```
   </Tab>
@@ -154,11 +160,17 @@ Create a group (with optional permitted actions and PKPs). Then add an action (I
     curl -s "http://localhost:8000/core/v1/list_groups?page_number=0&page_size=10" \
       -H "X-Api-Key: KEY"
     
+    # Register action metadata (replace IPFS_CID)
+    curl -s -X POST "http://localhost:8000/core/v1/add_action" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{"action_ipfs_cid":"QmYourIpfsCidHere","name":"My Action","description":""}'
+
     # Add action to group (replace GROUP_ID and IPFS_CID)
     curl -s -X POST "http://localhost:8000/core/v1/add_action_to_group" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
-      -d '{"group_id":"GROUP_ID","action_ipfs_cid":"QmYourIpfsCidHere","name":"My Action","description":""}'
+      -d '{"group_id":"GROUP_ID","action_ipfs_cid":"QmYourIpfsCidHere"}'
     ```
   </Tab>
 </Tabs>
@@ -227,6 +239,7 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
 - **list_actions** — List actions in a group (by `group_id`).
 - **list_wallets_in_group** — List wallets in a group.
 - **update_group** — Update group name, description, and permission flags.
+- **delete_action** — Delete an action (IPFS CID) and its metadata from the account.
 - **remove_action_from_group** / **remove_pkp_from_group** — Remove action or PKP from a group.
 - **get_node_chain_config** — Get node chain config - a quick way to find the location of contracts within the system.
 
