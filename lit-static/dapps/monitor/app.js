@@ -133,17 +133,62 @@ function showStatus(elementId, msg, isError) {
   if (!node) return;
   node.textContent = msg;
   node.style.color = isError ? '#f87171' : '#34d399';
-  node.style.display = msg ? 'block' : 'none';
+  node.style.display = msg ? '' : 'none';
 }
 
 /* ═══ Copy to clipboard ══════════════════════════════════════════════════════ */
 
 function copyText(text, triggerEl) {
   if (!navigator.clipboard?.writeText) return;
-  navigator.clipboard.writeText(text).then(() => {
+  if (!triggerEl) return;
+
+  const handleSuccess = () => {
+    triggerEl.classList.remove('copy-failed');
     triggerEl.classList.add('copied');
     setTimeout(() => triggerEl.classList.remove('copied'), 1200);
-  }).catch(() => {});
+  };
+
+  const handleFailure = () => {
+    triggerEl.classList.remove('copied');
+    triggerEl.classList.add('copy-failed');
+    setTimeout(() => triggerEl.classList.remove('copy-failed'), 1200);
+  };
+
+  if (
+    typeof navigator !== 'undefined' &&
+    navigator.clipboard &&
+    typeof navigator.clipboard.writeText === 'function'
+  ) {
+    navigator.clipboard.writeText(text).then(handleSuccess).catch(handleFailure);
+    return;
+  }
+
+  // Fallback for older browsers / non-secure contexts
+  if (typeof document === 'undefined' || !document.body) {
+    handleFailure();
+    return;
+  }
+
+  try {
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.setAttribute('readonly', '');
+    textarea.style.position = 'fixed';
+    textarea.style.top = '-9999px';
+    textarea.style.left = '-9999px';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    const successful = typeof document.execCommand === 'function' && document.execCommand('copy');
+    document.body.removeChild(textarea);
+    if (successful) {
+      handleSuccess();
+    } else {
+      handleFailure();
+    }
+  } catch (e) {
+    handleFailure();
+  }
 }
 
 /* ═══ Threshold management ═══════════════════════════════════════════════════ */
@@ -663,7 +708,9 @@ function startAutoRefresh() {
     secondsLeft--;
     updateCountdown();
     if (secondsLeft <= 0) {
-      doAutoRefresh();
+      doAutoRefresh().catch((err) => {
+        console.error('Auto-refresh failed:', err);
+      });
     }
   }, 1000);
 }
@@ -691,13 +738,19 @@ async function doAutoRefresh() {
 }
 
 // Page Visibility API — pause polling when tab is hidden, refresh immediately on return
-document.addEventListener('visibilitychange', () => {
+
+document.addEventListener('visibilitychange', async () => {
   if (document.hidden) {
     stopAutoRefresh();
   } else {
-    doAutoRefresh().then(() => startAutoRefresh());
+    try {
+      await doAutoRefresh();
+    } finally {
+      startAutoRefresh();
+    }
   }
 });
+
 
 /* ═══ Load / refresh ═════════════════════════════════════════════════════════ */
 
