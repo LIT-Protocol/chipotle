@@ -41,6 +41,7 @@ pub fn init() -> Option<Arc<StripeState>> {
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(30))
         .build()
+        .map_err(|e| tracing::error!("stripe: failed to build HTTP client: {e}"))
         .ok()?;
     tracing::info!("stripe: billing enabled");
     Some(Arc::new(StripeState {

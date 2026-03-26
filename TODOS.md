@@ -8,12 +8,12 @@
 
 **Pros:** Immediate feedback on bad keys. Prevents silent billing failures. Catches test keys accidentally used in production (Stripe returns different key prefixes for test vs live).
 
-**Cons:** Adds a network call at startup (~200ms). Requires the Stripe client refactor (preserve HTTP status, add timeouts) which is shipping in the current PR.
+**Cons:** Adds a network call at startup (~200ms). Requires the Stripe client refactor (preserve HTTP status, add timeouts) which shipped in PR #184.
 
-**Context:** Identified during CEO plan review (2026-03-26). Codex flagged that the original Stripe client throws away HTTP status codes (stripe.rs:53,80) and uses a no-timeout reqwest::Client, making auth/availability distinction unreliable. The client refactor (shipping in this PR) fixes that prerequisite.
+**Context:** Identified during CEO plan review (2026-03-26). Codex flagged that the original Stripe client (`stripe_get`/`stripe_post` helpers) throws away HTTP status codes and uses a no-timeout reqwest::Client, making auth/availability distinction unreliable. The client refactor (PR #184) fixes that prerequisite.
 
 **Effort:** S (human: ~2h / CC: ~5 min)
 
 **Priority:** P2
 
-**Depends on:** Stripe client refactor (HTTP status preservation + request timeouts) — shipping in PR GTC6244/stripe-secrets-ci-docker.
+**Depends on:** Stripe client refactor (HTTP status preservation + request timeouts) — shipped in PR #184.
