@@ -34,6 +34,7 @@
 /**
  * @typedef {Object} AddActionOptions
  * @property {string} apiKey - Account API key
+ * @property {string} actionIpfsCid - IPFS CID for the action (keccak256-hashed on server)
  * @property {string} name - Name for the action (stored in contract actionMetadata)
  * @property {string} description - Description for the action
  */
@@ -102,6 +103,12 @@
  * @property {string} description - Group description
  * @property {string[]} [pkpIdsPermitted=[]] - PKP IDs permitted to use the group
  * @property {string[]} [cidHashesPermitted=[]] - Keccak256 hashes of permitted action IPFS CIDs
+ */
+
+/**
+ * @typedef {Object} DeleteActionOptions
+ * @property {string} apiKey - Account API key
+ * @property {string} actionIpfsCid - IPFS CID for the action (keccak256-hashed on server)
  */
 
 /**
@@ -423,8 +430,8 @@ export class LitNodeSimpleApiClient {
    * @param {AddActionOptions} options
    * @returns {Promise<AccountOpResponse>}
    */
-  async addAction({ apiKey, name, description }) {
-    const body = { name: name ?? '', description: description ?? '' };
+  async addAction({ apiKey, actionIpfsCid, name, description }) {
+    const body = { action_ipfs_cid: actionIpfsCid, name: name ?? '', description: description ?? '' };
     const res = await fetch(`${this.baseUrl}/add_action`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
@@ -614,6 +621,22 @@ export class LitNodeSimpleApiClient {
       body: JSON.stringify(body),
     });
     return parseResponse(res, 'update_group');
+  }
+
+  /**
+   * POST /core/v1/delete_action
+   * Delete an action (IPFS CID) and its metadata from the account.
+   * @param {DeleteActionOptions} options
+   * @returns {Promise<AccountOpResponse>}
+   */
+  async deleteAction({ apiKey, actionIpfsCid }) {
+    const body = { action_ipfs_cid: actionIpfsCid };
+    const res = await fetch(`${this.baseUrl}/delete_action`, {
+      method: 'POST',
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'delete_action');
   }
 
   /**

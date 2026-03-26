@@ -176,7 +176,7 @@ export default function (data: IntegrationSetupData) {
 
   // ── 9. addAction + addActionToGroup ──────────────────────────────────────
   const addActionMetaRes = client.addAction(
-    { name: "hello-world", description: "Hello World lit action" },
+    { action_ipfs_cid: ipfsId, name: "hello-world", description: "Hello World lit action" },
     authHeaders,
   );
   if (!assertOk("addAction", "POST /add_action", addActionMetaRes)) return;
@@ -438,6 +438,22 @@ export default function (data: IntegrationSetupData) {
       }
     },
   }, "removeActionFromGroup");
+
+  // ── 21b. deleteAction ────────────────────────────────────────────────────
+  const deleteActionRes = client.deleteAction(
+    { action_ipfs_cid: ipfsId },
+    authHeaders,
+  );
+  assertOk("deleteAction", "POST /delete_action", deleteActionRes);
+  checkAndLog(deleteActionRes.response, {
+    "deleteAction success": (r) => {
+      try {
+        return JSON.parse(r.body as string).success === true;
+      } catch {
+        return false;
+      }
+    },
+  }, "deleteAction");
 
   // ── 22. removeGroup ───────────────────────────────────────────────────────
   const removeGroupRes = client.removeGroup(

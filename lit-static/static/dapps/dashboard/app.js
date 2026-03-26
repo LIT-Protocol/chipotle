@@ -981,9 +981,7 @@ function openAddActionModal() {
     try {
       showActionProgress('Adding action', `Adding action CID "${cid}" to group ${gid}.`);
       const client = await getClient();
-      if (name || desc) {
-        await client.addAction({ apiKey, name: name || '', description: desc || '' });
-      }
+      await client.addAction({ apiKey, actionIpfsCid: cid, name: name || '', description: desc || '' });
       await client.addActionToGroup({ apiKey, groupId: gid, actionIpfsCid: cid });
       if (groupIdEl) groupIdEl.value = gid;
       await loadActions(gid);
@@ -1037,18 +1035,19 @@ function openEditActionModal(item, groupId) {
 async function confirmAndRemoveAction(item, groupId) {
   const cid = item.ipfs_cid || item.cid || String(item.id ?? '');
   const name = item.name || cid;
-  const msg = 'Remove action "' + escapeHtml(name) + '" from this group? This cannot be undone.';
+  const msg = 'Delete action "' + escapeHtml(name) + '" from this group and account? This cannot be undone.';
   const confirmed = await confirmDelete(msg);
   if (!confirmed) return;
   const apiKey = getApiKey();
   if (!apiKey) return;
   hideStatus('actions-status');
   try {
-    showActionProgress('Removing action', `Removing action CID "${cid}" from group ${groupId}.`);
+    showActionProgress('Deleting action', `Deleting action CID "${cid}" from group ${groupId}.`);
     const client = await getClient();
     await client.removeActionFromGroup({ apiKey, groupId, actionIpfsCid: cid });
+    await client.deleteAction({ apiKey, actionIpfsCid: cid });
     await loadActions(groupId);
-    showStatus('actions-status', 'Action removed.', 'success');
+    showStatus('actions-status', 'Action deleted.', 'success');
   } catch (e) {
     showStatus('actions-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
   } finally {
