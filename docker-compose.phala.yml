@@ -117,7 +117,8 @@ services:
       - "443:443"
     environment:
       # dstack-ingress expects DOMAIN, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY internally.
-      # https://phala.com/posts/zero-trust-https-how-to-setup-custom-domains-on-phala-cloud
+      # Route 53 provider docs (env vars, optional role assumption):
+      # https://github.com/Dstack-TEE/dstack-examples/blob/main/custom-domain/dstack-ingress/DNS_PROVIDERS.md
       DOMAIN: "${CERTBOT_DOMAIN}"
       DNS_PROVIDER: "route53"
       TARGET_ENDPOINT: "http://lit-api-server:8000"
