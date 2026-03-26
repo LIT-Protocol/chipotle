@@ -112,7 +112,6 @@ services:
   # Obtains a Let's Encrypt cert for DOMAIN via DNS-01 (Route 53), then
   # reverse-proxies HTTPS :443 → lit-api-server :8000.
   dstack-ingress:
-    profiles: ["custom-domain"]
     image: dstacktee/dstack-ingress:1.4@sha256:11c0481ca2e3566f514a1c8a2cc69af1e0bb9dab2e4ea49b469c81ec8e7c5c72
     ports:
       - "443:443"

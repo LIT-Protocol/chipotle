@@ -165,11 +165,7 @@ jobs:
             -e "s|\${AWS_ACCESS_KEY_ID}|${{ secrets.AWS_ACCESS_KEY_ID_CERTBOT }}|g" \
             -e "s|\${AWS_SECRET_ACCESS_KEY}|${{ secrets.AWS_SECRET_ACCESS_KEY_CERTBOT }}|g" \
             docker-compose.phala.yml > docker-compose.deploy.yml
-          if [ -n "$DOMAIN" ]; then
-            # Strip profiles: line so dstack-ingress starts unconditionally
-            # (phala deploy doesn't support compose profiles)
-            sed -i '/profiles:/d' docker-compose.deploy.yml
-          else
+          if [ -z "$DOMAIN" ]; then
             # No custom domain — remove entire dstack-ingress service and cert-data volume
             awk '
               /^  dstack-ingress:/ { skip=1; next }
