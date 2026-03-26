@@ -170,7 +170,11 @@ pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -
 /// balance field is negative when the customer has a credit).
 pub async fn get_credit_balance(customer_id: &str, state: &StripeState) -> Result<i64> {
     let resp = stripe_get(state, &format!("customers/{customer_id}"), &[]).await?;
-    let balance = resp.body.get("balance").and_then(|b| b.as_i64()).unwrap_or(0);
+    let balance = resp
+        .body
+        .get("balance")
+        .and_then(|b| b.as_i64())
+        .unwrap_or(0);
     Ok(balance)
 }
 
@@ -284,7 +288,9 @@ pub async fn confirm_payment_and_credit(
         .unwrap_or("unknown");
 
     if pi_status != "succeeded" {
-        anyhow::bail!("PaymentIntent {payment_intent_id} has status '{pi_status}', not 'succeeded'");
+        anyhow::bail!(
+            "PaymentIntent {payment_intent_id} has status '{pi_status}', not 'succeeded'"
+        );
     }
 
     // Replay guard: reject if this intent was already credited.
@@ -300,7 +306,11 @@ pub async fn confirm_payment_and_credit(
     }
 
     // Ownership check: the PaymentIntent's customer must match the caller's customer.
-    let pi_customer = resp.body.get("customer").and_then(|c| c.as_str()).unwrap_or("");
+    let pi_customer = resp
+        .body
+        .get("customer")
+        .and_then(|c| c.as_str())
+        .unwrap_or("");
     let customer_id = get_customer_by_wallet(wallet_address, state).await?;
     if pi_customer != customer_id {
         anyhow::bail!("PaymentIntent {payment_intent_id} does not belong to this account");
@@ -377,11 +387,15 @@ mod tests {
 
     #[test]
     fn parse_stripe_response_4xx_with_error() {
-        let body = r#"{"error": {"message": "Invalid API Key provided", "type": "authentication_error"}}"#;
+        let body =
+            r#"{"error": {"message": "Invalid API Key provided", "type": "authentication_error"}}"#;
         let err = parse_stripe_response(StatusCode::UNAUTHORIZED, body).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("HTTP 401"), "expected HTTP 401 in: {msg}");
-        assert!(msg.contains("Invalid API Key provided"), "expected error message in: {msg}");
+        assert!(
+            msg.contains("Invalid API Key provided"),
+            "expected error message in: {msg}"
+        );
     }
 
     #[test]
@@ -397,7 +411,10 @@ mod tests {
         let body = r#"{"error": {"type": "api_error"}}"#;
         let err = parse_stripe_response(StatusCode::BAD_REQUEST, body).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("unknown error"), "expected 'unknown error' in: {msg}");
+        assert!(
+            msg.contains("unknown error"),
+            "expected 'unknown error' in: {msg}"
+        );
     }
 
     #[test]
@@ -405,7 +422,10 @@ mod tests {
         let body = "<html>Bad Gateway</html>";
         let err = parse_stripe_response(StatusCode::BAD_GATEWAY, body).unwrap_err();
         let msg = err.to_string();
-        assert!(msg.contains("invalid JSON"), "expected 'invalid JSON' in: {msg}");
+        assert!(
+            msg.contains("invalid JSON"),
+            "expected 'invalid JSON' in: {msg}"
+        );
         assert!(msg.contains("HTTP 502"), "expected HTTP 502 in: {msg}");
     }
 
