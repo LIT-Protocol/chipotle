@@ -371,7 +371,7 @@ export default function (data: IntegrationSetupData) {
       name: "k6-usage-key-updated",
       description: "Updated integration test usage key",
       can_create_groups: false,
-      can_delete_groups: false,
+      can_delete_groups: true,
       can_create_pkps: false,
       manage_ipfs_ids_in_groups: [],
       add_pkp_to_groups: [],
