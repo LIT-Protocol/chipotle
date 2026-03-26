@@ -162,8 +162,8 @@ jobs:
             -e "s|\${GCP_PROJECT_ID}|${{ needs.determine-target.outputs.gcp_project_id }}|g" \
             -e "s|\${DOMAIN}|${DOMAIN}|g" \
             -e "s|\${CERTBOT_EMAIL}|${{ secrets.CERTBOT_EMAIL }}|g" \
-            -e "s|\${AWS_ACCESS_KEY_ID}|${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}|g" \
-            -e "s|\${AWS_SECRET_ACCESS_KEY}|${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}|g" \
+            -e "s|\${CERTBOT_AWS_ACCESS_KEY_ID}|${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}|g" \
+            -e "s|\${CERTBOT_AWS_SECRET_ACCESS_KEY}|${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}|g" \
             docker-compose.phala.yml > docker-compose.deploy.yml
           if [ -z "$DOMAIN" ]; then
             # No custom domain — remove entire dstack-ingress service and cert-data volume
