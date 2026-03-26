@@ -3,9 +3,7 @@
 //! It holds all configuration data (including secrets) and manages state; none of
 //! which are shared with lit_actions, enabling a secure execution environment.
 
-use crate::actions::client::{
-    ClientBuilder, DEFAULT_ASYNC_TIMEOUT_MS, DEFAULT_CLIENT_TIMEOUT_MS_BUFFER,
-};
+use crate::actions::client::ClientBuilder;
 use crate::core::v1::models::response::LitActionClientConfigResponse;
 use anyhow::{Result, bail};
 use std::path::PathBuf;
@@ -28,7 +26,7 @@ impl Client {
     }
 
     pub fn client_timeout(&self) -> Duration {
-        Duration::from_millis(self.timeout_ms + DEFAULT_CLIENT_TIMEOUT_MS_BUFFER)
+        Duration::from_millis(self.timeout_ms + self.client_timeout_ms_buffer)
     }
 
     pub fn request_id(&self) -> String {
@@ -91,7 +89,7 @@ impl Client {
     pub fn config_snapshot(&self) -> LitActionClientConfigResponse {
         LitActionClientConfigResponse {
             timeout_ms: self.timeout_ms,
-            async_timeout_ms: DEFAULT_ASYNC_TIMEOUT_MS,
+            async_timeout_ms: self.async_timeout_ms,
             memory_limit_mb: self.memory_limit_mb,
             max_code_length: self.max_code_length,
             max_response_length: self.max_response_length,
@@ -99,6 +97,7 @@ impl Client {
             max_fetch_count: self.max_fetch_count,
             max_get_keys_count: self.max_get_keys_count,
             max_retries: self.max_retries,
+            client_timeout_ms_buffer: self.client_timeout_ms_buffer,
         }
     }
 

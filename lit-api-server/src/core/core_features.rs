@@ -2,6 +2,11 @@ use crate::accounts::can_execute_action;
 use crate::accounts::chain_config::{ChainConfig, ConfigKeys};
 use crate::actions::client::ClientBuilder;
 use crate::actions::client::models::DenoExecutionEnv;
+use crate::actions::client::{
+    MAX_ASYNC_TIMEOUT_MS, MAX_CLIENT_TIMEOUT_MS_BUFFER, MAX_MAX_CODE_LENGTH,
+    MAX_MAX_CONSOLE_LOG_LENGTH, MAX_MAX_FETCH_COUNT, MAX_MAX_GET_KEYS_COUNT,
+    MAX_MAX_RESPONSE_LENGTH, MAX_MAX_RETRIES, MAX_MEMORY_LIMIT_MB, MAX_TIMEOUT_MS,
+};
 use crate::actions::grpc::GrpcClientPool;
 use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::LitActionRequest;
@@ -12,7 +17,7 @@ use ipfs_hasher::IpfsHasher;
 use moka::future::Cache;
 use rocket::serde::json::Json;
 use serde_json::json;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tracing::instrument;
 
@@ -107,23 +112,233 @@ fn get_lit_action_ipfs_id(code: String) -> String {
     ipfs_hasher.compute(code.as_bytes())
 }
 
+/// Parse a value from the chain config snapshot, validating it's within bounds.
+/// Returns `Some(value)` if valid, `None` otherwise (falls back to builder default).
+fn parse_config_value<T>(
+    snapshot: &HashMap<String, String>,
+    key: &ConfigKeys,
+    min: T,
+    max: T,
+) -> Option<T>
+where
+    T: std::str::FromStr + PartialOrd + std::fmt::Display,
+{
+    let val_str = snapshot.get(&key.to_string())?;
+    let val = val_str.parse::<T>().ok()?;
+    if val > min && val <= max {
+        Some(val)
+    } else {
+        tracing::warn!(
+            "chain_config: {key} value {val} out of bounds (>{min}, <={max}), using default"
+        );
+        None
+    }
+}
+
 async fn get_lit_action_client_builder(chain_config: Arc<ChainConfig>) -> ClientBuilder {
     let mut builder = ClientBuilder::default();
-    if let Ok(Some(val)) = chain_config
-        .get(ConfigKeys::LIT_ACTION_DEFAULT_TIMEOUT_MS)
-        .await
-        && let Ok(ms) = val.parse::<u64>()
-    {
-        builder.timeout_ms(ms);
-    }
 
-    if let Ok(Some(val)) = chain_config
-        .get(ConfigKeys::LIT_ACTION_DEFAULT_MEMORY_LIMIT_MB)
-        .await
-        && let Ok(mb) = val.parse::<u32>()
-    {
-        builder.memory_limit_mb(mb);
+    let keys = vec![
+        ConfigKeys::LIT_ACTION_DEFAULT_TIMEOUT_MS,
+        ConfigKeys::LIT_ACTION_DEFAULT_ASYNC_TIMEOUT_MS,
+        ConfigKeys::LIT_ACTION_DEFAULT_MEMORY_LIMIT_MB,
+        ConfigKeys::LIT_ACTION_DEFAULT_MAX_CODE_LENGTH,
+        ConfigKeys::LIT_ACTION_DEFAULT_MAX_CONSOLE_LOG_LENGTH,
+        ConfigKeys::LIT_ACTION_DEFAULT_MAX_FETCH_COUNT,
+        ConfigKeys::LIT_ACTION_DEFAULT_MAX_RESPONSE_LENGTH,
+        ConfigKeys::LIT_ACTION_DEFAULT_MAX_GET_KEYS_COUNT,
+        ConfigKeys::LIT_ACTION_DEFAULT_MAX_RETRIES,
+        ConfigKeys::LIT_ACTION_DEFAULT_CLIENT_TIMEOUT_MS_BUFFER,
+    ];
+
+    let snapshot = match chain_config.get_many(keys).await {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!("chain_config: get_many failed: {e}, using all defaults");
+            return builder;
+        }
+    };
+
+    if let Some(v) = parse_config_value::<u64>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_TIMEOUT_MS, 0, MAX_TIMEOUT_MS) {
+        builder.timeout_ms(v);
+    }
+    if let Some(v) = parse_config_value::<u64>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_ASYNC_TIMEOUT_MS, 0, MAX_ASYNC_TIMEOUT_MS) {
+        builder.async_timeout_ms(v);
+    }
+    if let Some(v) = parse_config_value::<u32>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_MEMORY_LIMIT_MB, 0, MAX_MEMORY_LIMIT_MB) {
+        builder.memory_limit_mb(v);
+    }
+    if let Some(v) = parse_config_value::<u64>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_MAX_CODE_LENGTH, 0, MAX_MAX_CODE_LENGTH) {
+        builder.max_code_length(v);
+    }
+    if let Some(v) = parse_config_value::<u64>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_MAX_CONSOLE_LOG_LENGTH, 0, MAX_MAX_CONSOLE_LOG_LENGTH) {
+        builder.max_console_log_length(v);
+    }
+    if let Some(v) = parse_config_value::<u32>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_MAX_FETCH_COUNT, 0, MAX_MAX_FETCH_COUNT) {
+        builder.max_fetch_count(v);
+    }
+    if let Some(v) = parse_config_value::<u64>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_MAX_RESPONSE_LENGTH, 0, MAX_MAX_RESPONSE_LENGTH) {
+        builder.max_response_length(v);
+    }
+    if let Some(v) = parse_config_value::<u32>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_MAX_GET_KEYS_COUNT, 0, MAX_MAX_GET_KEYS_COUNT) {
+        builder.max_get_keys_count(v);
+    }
+    if let Some(v) = parse_config_value::<u32>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_MAX_RETRIES, 0, MAX_MAX_RETRIES) {
+        builder.max_retries(v);
+    }
+    if let Some(v) = parse_config_value::<u64>(&snapshot, &ConfigKeys::LIT_ACTION_DEFAULT_CLIENT_TIMEOUT_MS_BUFFER, 0, MAX_CLIENT_TIMEOUT_MS_BUFFER) {
+        builder.client_timeout_ms_buffer(v);
     }
 
     builder
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_config_value_valid() {
+        let mut snapshot = HashMap::new();
+        snapshot.insert(
+            ConfigKeys::LIT_ACTION_DEFAULT_TIMEOUT_MS.to_string(),
+            "60000".to_string(),
+        );
+        let result = parse_config_value::<u64>(
+            &snapshot,
+            &ConfigKeys::LIT_ACTION_DEFAULT_TIMEOUT_MS,
+            0,
+            MAX_TIMEOUT_MS,
+        );
+        assert_eq!(result, Some(60000));
+    }
+
+    #[test]
+    fn parse_config_value_zero_rejected() {
+        let mut snapshot = HashMap::new();
+        snapshot.insert(
+            ConfigKeys::LIT_ACTION_DEFAULT_TIMEOUT_MS.to_string(),
+            "0".to_string(),
+        );
+        let result = parse_config_value::<u64>(
+            &snapshot,
+            &ConfigKeys::LIT_ACTION_DEFAULT_TIMEOUT_MS,
+            0,
+            MAX_TIMEOUT_MS,
+        );
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn parse_config_value_exceeds_max() {
+        let mut snapshot = HashMap::new();
+        snapshot.insert(
+            ConfigKeys::LIT_ACTION_DEFAULT_MEMORY_LIMIT_MB.to_string(),
+            "99999".to_string(),
+        );
+        let result = parse_config_value::<u32>(
+            &snapshot,
+            &ConfigKeys::LIT_ACTION_DEFAULT_MEMORY_LIMIT_MB,
+            0,
+            MAX_MEMORY_LIMIT_MB,
+        );
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn parse_config_value_unparseable() {
+        let mut snapshot = HashMap::new();
+        snapshot.insert(
+            ConfigKeys::LIT_ACTION_DEFAULT_TIMEOUT_MS.to_string(),
+            "not_a_number".to_string(),
+        );
+        let result = parse_config_value::<u64>(
+            &snapshot,
+            &ConfigKeys::LIT_ACTION_DEFAULT_TIMEOUT_MS,
+            0,
+            MAX_TIMEOUT_MS,
+        );
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn parse_config_value_missing_key() {
+        let snapshot = HashMap::new();
+        let result = parse_config_value::<u64>(
+            &snapshot,
+            &ConfigKeys::LIT_ACTION_DEFAULT_TIMEOUT_MS,
+            0,
+            MAX_TIMEOUT_MS,
+        );
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn parse_config_value_at_max_boundary() {
+        let mut snapshot = HashMap::new();
+        snapshot.insert(
+            ConfigKeys::LIT_ACTION_DEFAULT_MEMORY_LIMIT_MB.to_string(),
+            MAX_MEMORY_LIMIT_MB.to_string(),
+        );
+        let result = parse_config_value::<u32>(
+            &snapshot,
+            &ConfigKeys::LIT_ACTION_DEFAULT_MEMORY_LIMIT_MB,
+            0,
+            MAX_MEMORY_LIMIT_MB,
+        );
+        assert_eq!(result, Some(MAX_MEMORY_LIMIT_MB));
+    }
+
+    #[test]
+    fn config_snapshot_reflects_actual_values() {
+        use crate::actions::client::{
+            DEFAULT_ASYNC_TIMEOUT_MS, DEFAULT_CLIENT_TIMEOUT_MS_BUFFER,
+        };
+
+        let client = ClientBuilder::default()
+            .async_timeout_ms(42_000u64)
+            .client_timeout_ms_buffer(10_000u64)
+            .build()
+            .unwrap();
+
+        let snapshot = client.config_snapshot();
+        assert_eq!(snapshot.async_timeout_ms, 42_000);
+        assert_ne!(snapshot.async_timeout_ms, DEFAULT_ASYNC_TIMEOUT_MS);
+        assert_eq!(snapshot.client_timeout_ms_buffer, 10_000);
+        assert_ne!(snapshot.client_timeout_ms_buffer, DEFAULT_CLIENT_TIMEOUT_MS_BUFFER);
+    }
+
+    #[test]
+    fn client_timeout_uses_instance_buffer() {
+        use crate::actions::client::DEFAULT_CLIENT_TIMEOUT_MS_BUFFER;
+
+        let client = ClientBuilder::default()
+            .timeout_ms(1_000u64)
+            .client_timeout_ms_buffer(500u64)
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            client.client_timeout(),
+            tokio::time::Duration::from_millis(1_500)
+        );
+        // Verify it's NOT using the default constant
+        assert_ne!(500u64, DEFAULT_CLIENT_TIMEOUT_MS_BUFFER);
+    }
+
+    #[test]
+    fn serde_backward_compat_missing_buffer() {
+        use crate::actions::client::DEFAULT_CLIENT_TIMEOUT_MS_BUFFER;
+
+        let client = ClientBuilder::default().build().unwrap();
+        let mut json_val = serde_json::to_value(&client).unwrap();
+        // Remove the field to simulate an old serialized ActionJob
+        json_val.as_object_mut().unwrap().remove("client_timeout_ms_buffer");
+        let deserialized: crate::actions::client::Client =
+            serde_json::from_value(json_val).unwrap();
+        assert_eq!(
+            deserialized.config_snapshot().client_timeout_ms_buffer,
+            DEFAULT_CLIENT_TIMEOUT_MS_BUFFER
+        );
+    }
 }

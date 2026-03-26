@@ -132,6 +132,7 @@ pub struct LitActionClientConfigResponse {
     pub max_fetch_count: u32,
     pub max_get_keys_count: u32,
     pub max_retries: u32,
+    pub client_timeout_ms_buffer: u64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
