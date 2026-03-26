@@ -260,8 +260,10 @@ export default function (data: SecuritySetupData) {
       },
     }, "1-execute-positive");
 
-    // Negative: key scoped to groupY cannot execute action (action is in groupX and groupY,
-    // but key only has execute permission for groupY — tests group-level restriction)
+
+    // Negative: key scoped to groupY cannot execute action in groupX
+    // (action is only in groupX — key only has execute permission for groupY)
+
     const negRes = client.litAction(
       { code: HELLO_WORLD_CODE, js_params: null },
       authHeaders(data.usageKey_executeY),
