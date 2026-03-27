@@ -1,0 +1,36 @@
+name: Deploy Static Site
+on:
+  push:
+    branches: [main, next]
+    paths:
+      - 'lit-static/**'
+      - '.github/workflows/deploy-static.yml'
+  pull_request:
+    paths:
+      - 'lit-static/**'
+      - '.github/workflows/deploy-static.yml'
+
+jobs:
+  deploy:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set API URL
+        id: target
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "api_url=https://api.dev.litprotocol.com" >> "$GITHUB_OUTPUT"
+          else
+            echo "api_url=https://test.chipotle.litprotocol.com" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Inject API URL
+        run: sed -i "s|__LIT_API_BASE_URL__|${{ steps.target.outputs.api_url }}|g" lit-static/dapps/dashboard/app.js
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy lit-static --project-name=lit-static --branch=${{ github.head_ref || github.ref_name }}

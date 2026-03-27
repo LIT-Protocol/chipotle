@@ -16,7 +16,7 @@
 
 NETWORK := 'main'
 _base_url_main := 'https://api.dev.litprotocol.com/core/v1'
-_base_url_next := 'https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network/core/v1'
+_base_url_next := 'https://test.chipotle.litprotocol.com/core/v1'
 _accounts_file_main := './data/accounts.dev.json'
 _accounts_file_next := './data/accounts.next.json'
 BASE_URL := if NETWORK == 'next' { _base_url_next } else { _base_url_main }

@@ -20,6 +20,8 @@ facade:
 generate: compile facade
 	cd $(RUST_PROJECT) && cargo build --bin contract_generator
 	$(GENERATOR_BIN) --abifolder=artifacts/contracts --outputfolder=../../src/accounts/contracts/
+	mv ../../src/accounts/contracts/account_config.rs ../../src/accounts/contracts/account_config_contract.rs
+	cd ../../ && cargo fmt -- src/accounts/contracts/account_config_contract.rs
 
 # 3. Deploy contracts to Base mainnet.
 deploy_base: compile
@@ -47,3 +49,31 @@ update_sepolia: compile
 update_base: compile
 	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
 	$(DEPLOYER_BIN) --action=update --network=base --abifolder=artifacts/contracts --secret=$(BASE_DEPLOYER_SECRET) --address=$(address)
+
+# Propose diamond update via Safe multisig (Base mainnet).
+# Usage: make propose_update_base address=0x... safe=0x...
+propose_update_base: compile
+	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
+	$(DEPLOYER_BIN) --action=propose-update --network=base \
+		--abifolder=artifacts/contracts \
+		--secret=$(BASE_DEPLOYER_SECRET) \
+		--address=$(address) \
+		--output=diamond_cut_proposal.json
+	npx hardhat propose-diamond-cut \
+		--safe $(safe) \
+		--proposal diamond_cut_proposal.json \
+		--network base
+
+# Propose diamond update via Safe multisig (Base Sepolia).
+# Usage: make propose_update_sepolia address=0x... safe=0x...
+propose_update_sepolia: compile
+	cd $(RUST_PROJECT) && cargo build --bin contract_deployer
+	$(DEPLOYER_BIN) --action=propose-update --network=base-sepolia \
+		--abifolder=artifacts/contracts \
+		--secret=$(DEPLOYER_SECRET) \
+		--address=$(address) \
+		--output=diamond_cut_proposal.json
+	npx hardhat propose-diamond-cut \
+		--safe $(safe) \
+		--proposal diamond_cut_proposal.json \
+		--network base-sepolia

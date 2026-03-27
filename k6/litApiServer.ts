@@ -289,6 +289,8 @@ export interface LitActionClientConfigResponse {
   max_get_keys_count: number;
   /** @minimum 0 */
   max_retries: number;
+  /** @minimum 0 */
+  client_timeout_ms_buffer: number;
 }
 
 /**

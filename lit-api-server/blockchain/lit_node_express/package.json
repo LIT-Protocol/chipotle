@@ -2,6 +2,7 @@
   "name": "contracts",
   "version": "1.0.0",
   "devDependencies": {
+    "@nomicfoundation/hardhat-ethers": "^3.0.8",
     "@types/node": "^22.19.9",
     "hardhat": "^2.26.0",
     "hardhat-deploy": "^1.0.4",
@@ -10,6 +11,10 @@
     "typescript": "~5.8.0"
   },
   "dependencies": {
-    "@openzeppelin/contracts": "^5.4.0"
+    "@openzeppelin/contracts": "^5.4.0",
+    "@safe-global/api-kit": "^2.5.6",
+    "@safe-global/protocol-kit": "^5.2.2",
+    "dotenv": "^16.4.7",
+    "ethers": "^6.13.5"
   }
 }
