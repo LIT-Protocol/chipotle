@@ -1,0 +1,99 @@
+---
+title: "Groups"
+description: "How groups organize wallets, actions, and usage keys in Lit Chipotle."
+---
+
+## What is a Group?
+
+A **group** is the core organizing unit in Lit Chipotle. It binds together three things:
+
+1. **Wallets (PKPs)** — which wallets can be used
+2. **IPFS Actions** — which lit-actions can be executed
+3. **Usage API Keys** — which keys have access (via their permission arrays)
+
+Think of a group as an access-control boundary: a usage API key can only run actions and use wallets that belong to groups it has been granted access to.
+
+```
+                        ┌─────────────────────────┐
+                        │        Group 1           │
+                        │                          │
+  Usage Key A ─────────►│  Wallet X    Action CID  │
+  (execute_in: [1])     │  Wallet Y    Action CID  │
+                        │                          │
+                        └─────────────────────────┘
+
+                        ┌─────────────────────────┐
+                        │        Group 2           │
+                        │                          │
+  Usage Key B ─────────►│  Wallet Z    Action CID  │
+  (execute_in: [1,2])   │                          │
+                        │                          │
+                        └─────────────────────────┘
+```
+
+In this example, Key A can only use Group 1's wallets and actions. Key B can use both groups. The account key always has full access to all groups.
+
+## Why Groups Exist
+
+Without groups, every usage key would have access to every wallet and every action in your account. Groups let you:
+
+- **Scope a key to a single dApp** — give your price-oracle service a key that can only execute the price-oracle action using a specific wallet.
+- **Isolate environments** — separate staging actions from production actions.
+- **Rotate access safely** — revoke a usage key without affecting other keys or groups.
+
+## How Groups Connect to Everything
+
+| Resource | Relationship to Group |
+|---|---|
+| **Wallet (PKP)** | Added via `add_pkp_to_group`. A wallet can belong to multiple groups. |
+| **IPFS Action** | Added via `add_action_to_group` (raw CID, server hashes it). An action can belong to multiple groups. |
+| **Usage API Key** | Granted access at creation via permission arrays (e.g., `execute_in_groups: [1, 2]`). Use `[0]` as a wildcard for all groups. |
+| **Account Key** | Always has full access to all groups — no group scoping needed. |
+
+## Common Patterns
+
+### One group per dApp
+
+```
+Group "Price Oracle"     → wallet-A, action-QmPriceOracle
+Group "NFT Minter"       → wallet-B, action-QmMintNFT
+```
+
+Give each dApp its own usage key scoped to its group. If the price-oracle key leaks, the minter is unaffected.
+
+### All-access key for development
+
+Create a usage key with `execute_in_groups: [0]` (wildcard). This key can run any action in any group — useful for local development, but never deploy it.
+
+### Shared wallets across groups
+
+A single wallet can belong to multiple groups. This is useful when multiple dApps need to sign with the same address but run different actions.
+
+## Group Lifecycle
+
+1. **Create** — `POST /core/v1/add_group` with a name and optional pre-permitted PKPs and CID hashes.
+2. **Configure** — Add wallets (`add_pkp_to_group`) and actions (`add_action_to_group`).
+3. **Grant access** — Create or update usage keys with the group ID in their permission arrays.
+4. **Update** — `POST /core/v1/update_group` to change name, description, or permission lists.
+5. **Delete** — `POST /core/v1/remove_group` to remove the group. Usage keys that referenced it lose that access.
+
+## Permission Flags on Groups
+
+When creating a group, two convenience flags control default access:
+
+- **All wallets permitted** — any wallet in the account can be used via this group (no need to add individually).
+- **All actions permitted** — any registered action can be run via this group.
+
+These are set in the Dashboard's group creation form or via the `pkp_ids_permitted` and `cid_hashes_permitted` arrays in the API. On-chain, these flags are *not* separate booleans: they are encoded using wildcard values in the arrays:
+
+- To permit **all wallets**, include the zero PKP ID in `pkp_ids_permitted`:
+  - `pkp_ids_permitted: ["0x0000000000000000000000000000000000000000000000000000000000000000"]`
+- To permit **all actions**, include `0` in `cid_hashes_permitted`:
+  - `cid_hashes_permitted: [0]`
+
+Leaving these arrays empty or omitting them does **not** mean "all" — it means no wallets/actions are automatically permitted by default.
+## Further Reading
+
+- [API Reference](/management/api_direct) — Full endpoint docs for group management
+- [API Keys](/management/api_keys) — How usage keys connect to groups
+- [Architecture](/architecture/index) — System design overview

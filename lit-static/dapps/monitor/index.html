@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Lit Node Monitor – AccountConfig contract</title>
+    <title>Lit Node Monitor – Payer Safety Console</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -19,6 +19,8 @@
         --muted: #71717a;
         --accent: #a78bfa;
         --success: #34d399;
+        --warning: #fbbf24;
+        --critical: #f87171;
       }
       * {
         box-sizing: border-box;
@@ -43,6 +45,57 @@
         font-size: 0.9rem;
         margin-bottom: 1.5rem;
       }
+
+      /* ── Top bar: network selector + refresh ── */
+      .top-bar {
+        display: flex;
+        align-items: flex-end;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+      }
+      .refresh-controls {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding-bottom: 1px;
+      }
+      .countdown {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.8rem;
+        color: var(--muted);
+        min-width: 2.5em;
+      }
+
+      /* ── Health summary bar ── */
+      .health-bar {
+        display: flex;
+        gap: 2rem;
+        padding: 1rem 1.5rem;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        margin-bottom: 1.5rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .health-bar-item {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+      .health-bar-label {
+        font-size: 0.7rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .health-bar-value {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.85rem;
+      }
+
+      /* ── Two-column grid ── */
       .two-col {
         display: grid;
         grid-template-columns: 1fr 1fr;
@@ -191,26 +244,157 @@
       th.eth {
         text-align: right;
       }
+
+      /* ── Health dots ── */
+      .health-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+      .health-dot.healthy { background: var(--success); }
+      .health-dot.warning { background: var(--warning); }
+      .health-dot.critical { background: var(--critical); animation: pulse 1.5s infinite; }
+      .health-dot.unknown { background: var(--muted); }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+      }
+
+      /* ── Payer row health highlight ── */
+      .payer-row.critical td { color: var(--critical); }
+      .payer-row.warning td { color: var(--warning); }
+
+      /* ── Copy-to-clipboard ── */
+      .copyable {
+        cursor: pointer;
+        transition: color 0.15s;
+      }
+      .copyable:hover {
+        color: var(--accent) !important;
+      }
+      .copyable.copied {
+        color: var(--success) !important;
+      }
+
+      /* ── Settings panel ── */
+      .settings-toggle {
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.8rem;
+        padding: 0;
+        margin-top: 1rem;
+        font-family: 'Outfit', sans-serif;
+      }
+      .settings-toggle:hover {
+        color: var(--text);
+      }
+      .settings-panel {
+        display: none;
+        margin-top: 0.75rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid var(--border);
+      }
+      .settings-panel.open {
+        display: block;
+      }
+      .settings-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 0.5rem;
+      }
+      .settings-row label {
+        font-size: 0.8rem;
+        color: var(--muted);
+        min-width: 60px;
+      }
+      .settings-row input {
+        width: 100px;
+        padding: 0.3rem 0.5rem;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.8rem;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+      }
     </style>
   </head>
   <body>
     <h1>Lit Node Monitor</h1>
     <p class="subtitle">
-      Configuration and monitoring for the Lit Node Express server.
+      Payer Safety Console — configuration and health monitoring for the Lit Node Express server.
     </p>
 
-    <div class="form-group" style="max-width: 480px; margin-bottom: 1.5rem;">
-      <label for="network">Network</label>
-      <select id="network">
-        <option value="http://localhost:8000/core/v1/">Local Development</option>
-        <option value="https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network/core/v1/">Next - Phala</option>
-        <option value="https://f8fce543471dc9f5f5643aa217422398c36e5edc-8000.dstack-base-prod5.phala.network/core/v1/">Dev - Phala</option>
-      </select>
+    <!-- ═══ Top bar: Network selector + refresh controls ═══ -->
+    <div class="top-bar">
+      <div class="form-group" style="flex: 1; max-width: 480px; margin-bottom: 0;">
+        <label for="network">Network</label>
+        <select id="network">
+          <option value="http://localhost:8000/core/v1/">Local Development</option>
+          <option value="https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network/core/v1/">Next - Phala</option>
+          <option value="https://f8fce543471dc9f5f5643aa217422398c36e5edc-8000.dstack-base-prod5.phala.network/core/v1/">Dev - Phala</option>
+        </select>
+      </div>
+      <div class="refresh-controls">
+        <button type="button" id="btn-refresh-all" style="margin-top: 0; padding: 0.4rem 0.9rem; font-size: 0.85rem;">Refresh</button>
+        <span id="refresh-countdown" class="countdown">30s</span>
+      </div>
+    </div>
+
+    <!-- ═══ Health summary bar ═══ -->
+    <div id="health-summary" class="health-bar" style="display: none;">
+      <div class="health-bar-item">
+        <span class="health-bar-label">Pool Health</span>
+        <span class="health-bar-value" id="health-summary-text">—</span>
+      </div>
+      <div class="health-bar-item">
+        <span class="health-bar-label">Total Pool</span>
+        <span class="health-bar-value" id="health-pool-total">—</span>
+      </div>
+      <div class="health-bar-item">
+        <span class="health-bar-label">Admin Reserve</span>
+        <span class="health-bar-value" id="health-admin-reserve">—</span>
+      </div>
     </div>
 
     <div class="two-col">
       <!-- ═══ LEFT COLUMN — read-only / critical info ═══ -->
       <div class="col">
+
+        <!-- Payer Health Table (primary view) -->
+        <div class="card">
+          <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Payer Health</h2>
+          <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+            <code>GET /get_api_payers</code> — balance health based on configurable thresholds. Click addresses to copy.
+          </p>
+          <div id="api-payers-results" style="display: none; margin-top: 1rem">
+            <div id="api-payers-list"></div>
+          </div>
+          <div id="api-payers-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+
+          <button type="button" class="settings-toggle" id="btn-toggle-settings">&#9881; Thresholds</button>
+          <div id="settings-panel" class="settings-panel">
+            <div class="settings-row">
+              <label for="threshold-warning">Warning</label>
+              <input type="number" id="threshold-warning" step="0.001" min="0" placeholder="0.02" />
+            </div>
+            <div class="settings-row">
+              <label for="threshold-critical">Critical</label>
+              <input type="number" id="threshold-critical" step="0.001" min="0" placeholder="0.005" />
+            </div>
+            <div class="settings-row">
+              <label for="threshold-target">Target</label>
+              <input type="number" id="threshold-target" step="0.001" min="0" placeholder="0.05" />
+            </div>
+            <button type="button" id="btn-save-thresholds" style="font-size: 0.8rem; padding: 0.3rem 0.75rem;">Save</button>
+            <span id="threshold-status" style="display: none; font-size: 0.8rem; margin-left: 0.5rem;"></span>
+          </div>
+        </div>
 
         <div class="card">
           <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Server Version</h2>
@@ -317,17 +501,6 @@
             </div>
           </div>
           <div class="error" id="error" style="display: none"></div>
-        </div>
-
-        <div class="card">
-          <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Accounts used to pay for API calls</h2>
-          <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
-            <code>GET /get_api_payers</code>
-          </p>
-          <div id="api-payers-results" style="display: none; margin-top: 1rem">
-            <div id="api-payers-list"></div>
-          </div>
-          <div id="api-payers-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
         </div>
 
       </div>
