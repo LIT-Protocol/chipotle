@@ -73,10 +73,28 @@ pub async fn add_group(
     description: &str,
     cid_hashes: Vec<U256>,
     pkp_ids: Vec<Address>,
-) -> Result<bool> {
+) -> Result<U256> {
     let (contract, signer_address, client) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
+
+    // Simulate the call first to obtain the returned group ID.
+    let sim_call = contract.add_group(
+        account_api_key_hash,
+        name.to_string(),
+        description.to_string(),
+        cid_hashes.clone(),
+        pkp_ids.clone(),
+    );
+    let group_id = match sim_call.call().await {
+        Ok(id) => id,
+        Err(e) => {
+            // Release the signer back to the pool before propagating.
+            signer_pool.release(signer_address).await?;
+            return Err(e.into());
+        }
+    };
+
     let function_call = contract.add_group(
         account_api_key_hash,
         name.to_string(),
@@ -84,7 +102,8 @@ pub async fn add_group(
         cid_hashes,
         pkp_ids,
     );
-    send_transaction(function_call, signer_pool, signer_address, client).await
+    send_transaction(function_call, signer_pool, signer_address, client).await?;
+    Ok(group_id)
 }
 
 /// Create a new action entry with name, description, and IPFS CID hash in the account's actionMetadata mapping.

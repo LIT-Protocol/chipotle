@@ -108,8 +108,8 @@ pub(crate) async fn get_read_only_account_config_contract()
     Ok(contract)
 }
 
-pub async fn send_transaction(
-    mut function_call: ContractCall<SigningClient, ()>,
+pub async fn send_transaction<T: ethers::abi::Detokenize>(
+    mut function_call: ContractCall<SigningClient, T>,
     signer_pool: Arc<SignerPool>,
     signer_address: H160,
     client: Arc<SigningClient>,

@@ -2230,7 +2230,7 @@ pub mod account_config {
             description: ::std::string::String,
             cid_hashes: ::std::vec::Vec<::ethers::core::types::U256>,
             pkp_ids: ::std::vec::Vec<::ethers::core::types::Address>,
-        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::U256> {
             self.0
                 .method_hash(
                     [43, 18, 222, 230],

@@ -107,7 +107,7 @@ contract WritesFacet {
         string memory description,
         uint256[] memory cidHashes,
         address[] memory pkpIds
-    ) public {
+    ) public returns (uint256) {
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
@@ -124,6 +124,7 @@ contract WritesFacet {
         for (uint256 i = 0; i < pkpIds.length; i++) {
             group.pkpId.add(pkpIds[i]);
         }
+        return account.groupCount;
     }
 
     function updateGroup(
