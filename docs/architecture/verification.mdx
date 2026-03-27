@@ -9,11 +9,10 @@ description: "How to verify that your connection to Lit Chipotle terminates insi
 
 **How it works for Lit Chipotle:**
 
-1. The dstack DeRoT (Decentralized Root of Trust) running inside the CVM generates a x.509 certificate using the RootKey — a key derived from the dstack-KMS, which itself runs in a TEE.
-2. The certificate is sent to Let's Encrypt for signing. Authentication uses API access only (no HTTP challenge on ports 80/443), which can be fully controlled by the TEE.
-3. DNS [CAA records](https://letsencrypt.org/docs/caa/) for the domain restrict which CAs can issue certificates, ensuring only the TEE-controlled ACME flow can obtain a cert.
-4. The certificate, key, and their SHA-256 hashes are recorded as evidence files. These hashes are embedded in the Intel TDX attestation quote's `reportData` field.
-5. Because the quote is signed by Intel's TDX hardware root of trust and bound to these hashes, anyone can cryptographically prove the certificate was generated inside this specific enclave.
+1. The [dstack-ingress](https://github.com/Dstack-TEE/dstack-examples/tree/main/custom-domain/dstack-ingress) container, running inside the CVM, generates a private key and requests a TLS certificate from Let's Encrypt via DNS-01 challenge (Route 53). The private key never leaves the TEE.
+2. DNS [CAA records](https://letsencrypt.org/docs/caa/) for the domain restrict which CAs can issue certificates and require DNS-01 validation with a specific ACME account URI, ensuring only the TEE-controlled ACME flow can obtain a cert.
+4. The certificate and ACME account are recorded as evidence files. Their SHA-256 checksums are hashed into a single digest that is embedded in a TDX attestation quote's `reportData` field.
+5. Because the quote is signed by Intel's TDX hardware root of trust and bound to this digest, anyone can cryptographically prove the certificate was generated inside this specific TEE.
 
 **What this means:** When you connect to `api.chipotle.litprotocol.com` over HTTPS, the TLS handshake completes **inside the TEE**. No proxy, load balancer, or CDN can intercept the traffic. If the TLS handshake succeeds and the certificate is valid, you are provably talking to the TEE — not to any intermediary.
 
@@ -204,45 +203,75 @@ cosign verify \
 
 #### 3. Verify TLS terminates in the TEE (Network)
 
-**What this checks:** Was the TLS certificate generated inside the TEE? This confirms your encrypted connection goes directly into the secure hardware — no proxy or intermediary can see your traffic. The TEE records the certificate's hash in the attestation quote, so you can compare it against the certificate you actually received.
+**What this checks:** Was the TLS certificate generated inside the TEE? This confirms your encrypted connection goes directly into the secure hardware — no proxy or intermediary can see your traffic.
+
+Lit Chipotle uses [dstack-ingress](https://github.com/Dstack-TEE/dstack-examples/tree/main/custom-domain/dstack-ingress) for custom-domain TLS. Unlike the default dstack gateway (which embeds cert hashes directly in the CVM's boot-time TDX quote via `reportData`), dstack-ingress runs as an application container and generates a **separate** TDX evidence quote after obtaining the Let's Encrypt certificate. This evidence quote binds the certificate to TDX hardware through a checksum chain:
+
+1. dstack-ingress obtains a Let's Encrypt cert via DNS-01 inside the TEE
+2. It computes `SHA-256` of each evidence file (cert PEM, ACME account) → `sha256sum.txt`
+3. It computes `SHA-256(sha256sum.txt)` and requests a TDX quote with this hash as `reportData`
+4. The evidence files and quote are served at `/evidences/` on the custom domain
 
 ```bash
-# 3a. Compute the SHA-256 hash of the live TLS certificate (DER-encoded)
+# 3a. Download evidence files from the dstack-ingress container
+curl -sf https://api.chipotle.litprotocol.com/evidences/sha256sum.txt > evidences-sha256sum.txt
+curl -sf https://api.chipotle.litprotocol.com/evidences/quote.json > evidences-quote.json
+
+# Download the attested cert PEM (filename includes the domain)
+CERT_FILE=$(curl -sf https://api.chipotle.litprotocol.com/evidences/ \
+  | grep -o 'href="cert-[^"]*\.pem"' | sed 's/href="//;s/"//')
+curl -sf "https://api.chipotle.litprotocol.com/evidences/$CERT_FILE" > evidences-cert.pem
+
+# 3b. Verify the evidence checksum chain
+# The quote's reportData must equal SHA-256(sha256sum.txt)
+python3 -c '
+import hashlib, json
+
+# Compute SHA-256 of the sha256sum.txt file
+with open("evidences-sha256sum.txt", "rb") as f:
+    computed = hashlib.sha256(f.read()).hexdigest()
+
+# Extract reportData from the evidence quote
+eq = json.load(open("evidences-quote.json"))
+report_data = eq.get("report_data", "")
+# reportData is the hash zero-padded to 64 bytes (128 hex chars)
+attested = report_data[:64]
+
+print(f"SHA-256(sha256sum.txt): {computed}")
+print(f"Evidence reportData:    {attested}")
+assert computed == attested, "MISMATCH — evidence checksum chain broken"
+print("Evidence checksum chain OK")
+'
+
+# 3c. Verify the live TLS cert matches the attested cert
+# Extract the leaf cert (DER) fingerprint from what your TLS handshake received
 LIVE_CERT_HASH=$(openssl s_client -connect api.chipotle.litprotocol.com:443 \
   -servername api.chipotle.litprotocol.com </dev/null 2>/dev/null \
   | openssl x509 -outform DER 2>/dev/null \
   | openssl dgst -sha256 -hex 2>/dev/null | awk '{print $NF}')
-echo "Live TLS cert hash: $LIVE_CERT_HASH"
 
-# 3b. Extract the attested cert hash from the TDX quote
-# The TDX quote's reportData field (at byte offset 568 in the quote binary)
-# contains the SHA-256 hash of the certificate that was generated inside the TEE.
-# We already fetched attestation.json in Step 1 — reuse it here.
-ATTESTED_CERT_HASH=$(python3 -c '
-import json
-att = json.load(open("attestation.json"))
-q = att["quote"]
-if q.startswith("0x"):
-    q = q[2:]
-# TDX quote v4 format: reportData starts at byte 568 (hex char 1136)
-# First 32 bytes of reportData = SHA-256 of the TLS certificate
-report_data = q[1136:1136+128]
-cert_hash = report_data[:64]
-print(cert_hash)
-')
-echo "Attested cert hash:  $ATTESTED_CERT_HASH"
+# Extract the leaf cert (DER) fingerprint from the evidence PEM
+EVIDENCE_CERT_HASH=$(openssl x509 -in evidences-cert.pem -outform DER 2>/dev/null \
+  | openssl dgst -sha256 -hex 2>/dev/null | awk '{print $NF}')
 
-# 3c. Compare — if they match, the certificate was generated inside the TEE
-if [ "$LIVE_CERT_HASH" = "$ATTESTED_CERT_HASH" ]; then
-  echo "TLS certificate matches attestation — OK"
+echo "Live TLS cert hash:     $LIVE_CERT_HASH"
+echo "Evidence cert hash:     $EVIDENCE_CERT_HASH"
+
+if [ "$LIVE_CERT_HASH" = "$EVIDENCE_CERT_HASH" ]; then
+  echo "TLS certificate matches evidence — OK"
 else
-  echo "MISMATCH: the served certificate does not match the attested hash"
-  echo "This could indicate a proxy or man-in-the-middle between you and the TEE"
+  echo "MISMATCH: the served certificate does not match the attested evidence"
 fi
 
-# 3d. Verify CAA DNS records restrict certificate issuance to Let's Encrypt only
-# This ensures only the TEE-controlled ACME flow can obtain a certificate for this domain.
-dig CAA api.chipotle.litprotocol.com
+# 3d. Verify CAA DNS records restrict certificate issuance
+# dstack-ingress sets a CAA CNAME alias on the custom domain pointing to the
+# gateway domain, which holds the actual CAA records restricting issuance to
+# Let's Encrypt with DNS-01 validation and a specific ACME account URI.
+echo ""
+echo "CAA alias on custom domain:"
+dig CAA api.chipotle.litprotocol.com +short
+echo "Resolved CAA policy:"
+dig CAA dstack-base-prod5.phala.network +short
 ```
 
 #### 4. Verify on-chain governance (Governance)
@@ -282,7 +311,7 @@ The sections below explain what each verification step is actually checking and 
 | Check | What it proves |
 |-------|----------------|
 | **compose-hash** | The SHA-256 of the `app-compose.json` config (which includes `docker-compose.yaml` plus metadata) is recorded as an event in RTMR3. Recomputing the hash from `/info` and comparing it to the attested value proves the CVM is running the declared configuration. |
-| **Docker image digests** | All 4 images (lit-actions, lit-api-server, lit-static, otel-collector) use `@sha256:` digest pinning. Mutable tags like `:latest` would allow silent image substitution. |
+| **Docker image digests** | All images (lit-actions, lit-api-server, otel-collector, dstack-ingress) use `@sha256:` digest pinning. Mutable tags like `:latest` would allow silent image substitution. |
 | **Image provenance (Sigstore)** | Each image is signed with Sigstore cosign (keyless, GitHub OIDC). Verification proves the image was built by GitHub Actions from the `LIT-Protocol/lit-node-express` repository and recorded in the public Rekor transparency log. |
 | **RTMR3 event log replay** | Each event extends RTMR3 via a hash chain: `RTMR3_new = SHA384(RTMR3_old ‖ SHA384(event))`. The dstack-verifier replays all events from the initial value (48 zero bytes) and confirms the final value matches the RTMR3 in the TDX quote. This ensures no events were added, removed, or modified. |
 
@@ -309,9 +338,10 @@ The TDX quote contains hardware-measured registers that attest the entire boot c
 
 | Check | What it proves |
 |-------|----------------|
-| **Evidence files** | The CVM gateway's `/evidences/` endpoint serves `cert.pem`, `sha256sum.txt`, and `quote.json`. The SHA-256 hash of the certificate is embedded in the quote's `reportData`. |
-| **Certificate fingerprint match** | Comparing what `openssl s_client` returns against the attested cert hash proves TLS terminates inside the TEE, not at an intermediary. |
-| **CAA DNS records** | `dig CAA api.chipotle.litprotocol.com` should restrict certificate issuance to Let's Encrypt only, through the TEE-controlled ACME flow. |
+| **Evidence files** | dstack-ingress serves `/evidences/` with `cert-<domain>.pem`, `sha256sum.txt`, `acme-account.json`, and `quote.json`. The SHA-256 of `sha256sum.txt` is embedded in the evidence quote's `reportData`, creating a checksum chain from the TDX hardware root of trust to the certificate files. |
+| **Evidence checksum chain** | `SHA-256(sha256sum.txt)` must match `reportData` in `/evidences/quote.json`. This proves the evidence files were generated inside the TEE that produced the quote. |
+| **Certificate fingerprint match** | The leaf cert DER fingerprint from `openssl s_client` must match the leaf cert extracted from the evidence PEM. This proves the live TLS connection uses the same certificate attested by the TEE. |
+| **CAA DNS records** | The custom domain has a CAA CNAME alias pointing to the gateway domain (`_.dstack-base-prod5.phala.network`), which restricts certificate issuance to Let's Encrypt via DNS-01 with a specific ACME account URI — ensuring only the TEE-controlled ACME flow can obtain certificates. |
 
 #### Governance Layer
 
