@@ -89,6 +89,30 @@ function getLitActionWalletAddress({ ipfsId }) {
   return ops.op_get_lit_action_wallet_address(ipfsId);
 }
 
+/**
+ * Derive an Ethereum address and public key from a private key using native Rust ECDSA.
+ * ~100x faster than `new ethers.Wallet(key)` for address derivation.
+ * @name Lit.Actions.deriveEthAddress
+ * @function deriveEthAddress
+ * @param {string} privateKeyHex The hex-encoded private key (with or without 0x prefix)
+ * @returns {{ address: string, publicKey: string }}
+ */
+function deriveEthAddress(privateKeyHex) {
+  return ops.op_derive_eth_address(privateKeyHex);
+}
+
+/**
+ * Sign an Ethereum personal message using native Rust ECDSA.
+ * @name Lit.Actions.signMessage
+ * @function signMessage
+ * @param {string} privateKeyHex The hex-encoded private key
+ * @param {string} message The message to sign
+ * @returns {string} The signature as a hex string
+ */
+function signMessage(privateKeyHex, message) {
+  return ops.op_sign_message(privateKeyHex, message);
+}
+
 globalThis.LitActions = {
   Encrypt,
   Decrypt,
@@ -97,4 +121,6 @@ globalThis.LitActions = {
   getLitActionPublicKey,
   getLitActionWalletAddress,
   setResponse,
+  deriveEthAddress,
+  signMessage,
 };

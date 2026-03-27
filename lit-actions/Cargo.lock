@@ -5135,10 +5135,13 @@ dependencies = [
  "deno_error",
  "ethabi",
  "flume",
+ "hex",
+ "k256",
  "lazy_static",
  "lit-actions-grpc",
  "lit-observability",
  "serde_json",
+ "tiny-keccak",
  "tonic",
  "tracing",
 ]

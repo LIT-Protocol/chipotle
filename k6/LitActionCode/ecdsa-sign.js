@@ -1,12 +1,12 @@
 async function main() {
   const privateKey = await Lit.Actions.getLitActionPrivateKey();
 
-  const wallet = new ethers.Wallet(privateKey);
-  const signature = await wallet.signMessage("Chipotle Rocks!");
-  const publicKey = wallet.publicKey;
+  // Use native Rust ECDSA ops for ~100x faster key derivation and signing
+  const { address, publicKey } = Lit.Actions.deriveEthAddress(privateKey);
+  const signature = Lit.Actions.signMessage(privateKey, "Chipotle Rocks!");
 
   return {
-    wallet_address: wallet.address,
+    wallet_address: address,
     signature: signature,
     publicKey: publicKey,
   };

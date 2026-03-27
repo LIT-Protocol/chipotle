@@ -16,9 +16,12 @@ deno_core = { workspace = true }
 deno_error = { workspace = true }
 ethabi = { version = "18", default-features = false, features = ["serde"] }
 flume = { workspace = true }
+hex = "0.4"
+k256 = { version = "0.13", features = ["ecdsa", "ecdsa-core"] }
 lazy_static = "1"
 lit-actions-grpc = { workspace = true }
 lit-observability = { workspace = true, features = ["channels"] }
 serde_json = { workspace = true }
+tiny-keccak = { version = "2", features = ["keccak"] }
 tonic = { workspace = true }
 tracing = { workspace = true }

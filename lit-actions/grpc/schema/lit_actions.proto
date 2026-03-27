@@ -29,6 +29,7 @@ message ExecuteJsRequest {
     optional uint64 timeout = 4;       // milliseconds
     optional uint32 memory_limit = 5;  // megabytes
     map<string, string> http_headers = 6;
+    optional string lit_action_private_key = 7; // Pre-fetched key to avoid gRPC round-trip
   }
 
   message ErrorResponse {
@@ -91,6 +92,8 @@ message ExecuteJsResponse {
   message ExecutionResult {
     bool success = 1;
     string error = 2;
+    string response = 3; // Response set by LitActions.setResponse(), avoids gRPC round-trip
+    string logs = 4;     // Console output accumulated during execution
   }
 
   message SetResponseRequest {

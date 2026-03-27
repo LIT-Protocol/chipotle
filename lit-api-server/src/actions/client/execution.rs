@@ -165,6 +165,13 @@ impl Client {
             .await?
             .into_inner();
 
+        // Pre-fetch the lit action private key to avoid a gRPC round-trip during execution.
+        // This is safe because the key would be sent through the same channel anyway.
+        let prefetched_key = crate::dstack::v1::get_lit_action_key(&self.ipfs_id)
+            .await
+            .ok()
+            .map(|k| hex::encode(k));
+
         // Send initial execution request to server
         outbound_tx
             .send_async(
@@ -175,6 +182,7 @@ impl Client {
                     http_headers: self.http_headers.clone(),
                     timeout: Some(self.timeout_ms),
                     memory_limit: Some(self.memory_limit_mb),
+                    lit_action_private_key: prefetched_key,
                 }
                 .into(),
             )
@@ -188,6 +196,14 @@ impl Client {
                 Some(UnionResponse::Result(res)) => {
                     if !res.success {
                         bail!(res.error);
+                    }
+                    // Apply response and logs from the ExecutionResult (sent inline to
+                    // avoid separate gRPC round-trips for setResponse/print ops).
+                    if !res.response.is_empty() {
+                        self.state.response = res.response;
+                    }
+                    if !res.logs.is_empty() {
+                        self.state.logs.push_str(&res.logs);
                     }
                     // Return current state, which might be updated by subsequent code executions
                     return Ok(self.state.clone());

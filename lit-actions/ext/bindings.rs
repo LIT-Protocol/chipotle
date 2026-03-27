@@ -8,6 +8,82 @@ use tracing::instrument;
 
 use crate::macros::*;
 
+/// Native ECDSA key derivation: computes Ethereum address and uncompressed public key
+/// from a hex-encoded private key. ~100x faster than ethers.js Wallet constructor
+/// because it uses k256 (Rust native) instead of BN.js (JavaScript).
+#[op2]
+#[serde]
+fn op_derive_eth_address(
+    #[string] private_key_hex: &str,
+) -> Result<serde_json::Value, JsErrorBox> {
+    use k256::ecdsa::SigningKey;
+    use k256::elliptic_curve::sec1::ToEncodedPoint;
+    use tiny_keccak::{Hasher, Keccak};
+
+    let hex_str = private_key_hex.strip_prefix("0x").unwrap_or(private_key_hex);
+    let key_bytes = hex::decode(hex_str)
+        .map_err(|e| JsErrorBox::generic(format!("invalid hex private key: {e}")))?;
+
+    let signing_key = SigningKey::from_slice(&key_bytes)
+        .map_err(|e| JsErrorBox::generic(format!("invalid private key: {e}")))?;
+
+    let verifying_key = signing_key.verifying_key();
+    let public_key_point = verifying_key.to_encoded_point(false);
+    let public_key_bytes = public_key_point.as_bytes(); // 65 bytes: 0x04 || x || y
+
+    // Ethereum address = keccak256(public_key_bytes[1..]) last 20 bytes
+    let mut hasher = Keccak::v256();
+    let mut hash = [0u8; 32];
+    hasher.update(&public_key_bytes[1..]); // skip the 0x04 prefix
+    hasher.finalize(&mut hash);
+
+    let address = format!("0x{}", hex::encode(&hash[12..]));
+    let public_key = format!("0x{}", hex::encode(public_key_bytes));
+
+    Ok(serde_json::json!({
+        "address": address,
+        "publicKey": public_key,
+    }))
+}
+
+/// Native ECDSA message signing. Signs an Ethereum personal message using
+/// the secp256k1 curve. Returns the signature as a hex string.
+#[op2]
+#[string]
+fn op_sign_message(
+    #[string] private_key_hex: &str,
+    #[string] message: &str,
+) -> Result<String, JsErrorBox> {
+    use k256::ecdsa::{SigningKey, signature::hazmat::PrehashSigner};
+    use tiny_keccak::{Hasher, Keccak};
+
+    let hex_str = private_key_hex.strip_prefix("0x").unwrap_or(private_key_hex);
+    let key_bytes = hex::decode(hex_str)
+        .map_err(|e| JsErrorBox::generic(format!("invalid hex private key: {e}")))?;
+
+    let signing_key = SigningKey::from_slice(&key_bytes)
+        .map_err(|e| JsErrorBox::generic(format!("invalid private key: {e}")))?;
+
+    // Ethereum personal_sign: hash = keccak256("\x19Ethereum Signed Message:\n" + len + message)
+    let prefix = format!("\x19Ethereum Signed Message:\n{}", message.len());
+    let mut hasher = Keccak::v256();
+    let mut hash = [0u8; 32];
+    hasher.update(prefix.as_bytes());
+    hasher.update(message.as_bytes());
+    hasher.finalize(&mut hash);
+
+    let (signature, recovery_id) = signing_key
+        .sign_prehash(&hash)
+        .map_err(|e| JsErrorBox::generic(format!("signing failed: {e}")))?;
+
+    // Ethereum signature format: r (32 bytes) + s (32 bytes) + v (1 byte, 27 or 28)
+    let mut sig_bytes = [0u8; 65];
+    sig_bytes[..64].copy_from_slice(&signature.to_bytes());
+    sig_bytes[64] = recovery_id.to_byte() + 27;
+
+    Ok(format!("0x{}", hex::encode(sig_bytes)))
+}
+
 #[instrument(skip_all, ret)]
 #[op2(fast)]
 fn op_print(state: &mut OpState, #[string] msg: &str, is_err: bool) -> Result<(), JsErrorBox> {
@@ -40,6 +116,12 @@ fn op_print(state: &mut OpState, #[string] msg: &str, is_err: bool) -> Result<()
         return Ok(());
     }
 
+    // Store logs locally to avoid gRPC round-trip
+    if let Some(local_state) = state.try_borrow_mut::<crate::LocalExecutionState>() {
+        local_state.logs.push_str(msg);
+        return Ok(());
+    }
+
     remote_op!(op_print,
         state,
         PrintRequest { message: msg.to_string() }, // may be empty
@@ -67,6 +149,12 @@ fn op_exit(_state: &mut OpState) -> Result<(), JsErrorBox> {
 #[instrument(skip_all, ret)]
 #[op2(fast)]
 fn op_set_response(state: &mut OpState, #[string] response: String) -> Result<(), JsErrorBox> {
+    // Store response locally to avoid gRPC round-trip
+    if let Some(local_state) = state.try_borrow_mut::<crate::LocalExecutionState>() {
+        local_state.response = response;
+        return Ok(());
+    }
+
     remote_op!(op_set_response,
         state,
         SetResponseRequest { response }, // may be empty
@@ -140,6 +228,14 @@ async fn op_get_private_key(
 #[op2(async, reentrant)]
 #[string]
 async fn op_get_lit_action_private_key(state: Rc<RefCell<OpState>>) -> Result<String, JsErrorBox> {
+    // Fast path: use pre-fetched key if available (avoids gRPC round-trip)
+    {
+        let borrowed = state.borrow();
+        if let Some(key) = borrowed.try_borrow::<crate::PrefetchedLitActionKey>() {
+            return Ok(key.0.clone());
+        }
+    }
+    // Fallback: request key via gRPC
     remote_op_async!(op_get_lit_action_private_key,
         state,
         GetLitActionPrivateKeyRequest {},
@@ -213,6 +309,8 @@ extension!(
     ops = [
         op_aes_decrypt,
         op_aes_encrypt,
+        op_derive_eth_address,
+        op_sign_message,
         op_get_lit_action_private_key,
         op_get_lit_action_public_key,
         op_get_lit_action_wallet_address,

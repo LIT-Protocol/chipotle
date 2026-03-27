@@ -18,6 +18,52 @@ use tokio_stream::{Stream, StreamExt as _};
 use tonic::{Request, Response, Status};
 use tracing::{Instrument, debug, debug_span, error, instrument};
 
+/// A bounded pool of reusable threads for V8 isolate execution.
+/// Avoids the overhead of spawning a new OS thread per request.
+struct ThreadPool {
+    sender: flume::Sender<Box<dyn FnOnce() + Send>>,
+}
+
+impl ThreadPool {
+    fn new(size: usize) -> Self {
+        let (sender, receiver) = flume::bounded::<Box<dyn FnOnce() + Send>>(size);
+        for i in 0..size {
+            let rx = receiver.clone();
+            std::thread::Builder::new()
+                .name(format!("v8-worker-{i}"))
+                .spawn(move || {
+                    while let Ok(task) = rx.recv() {
+                        task();
+                    }
+                })
+                .expect("failed to spawn V8 worker thread");
+        }
+        Self { sender }
+    }
+
+    fn execute(&self, task: impl FnOnce() + Send + 'static) {
+        match self.sender.try_send(Box::new(task)) {
+            Ok(()) => {}
+            // Pool is full — spawn an overflow thread so we don't block
+            Err(flume::TrySendError::Full(task)) => {
+                std::thread::spawn(task);
+            }
+            // Should not happen
+            Err(flume::TrySendError::Disconnected(task)) => {
+                std::thread::spawn(task);
+            }
+        }
+    }
+}
+
+static THREAD_POOL: std::sync::LazyLock<ThreadPool> = std::sync::LazyLock::new(|| {
+    // Use num_cpus or a reasonable default
+    let pool_size = std::thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(8);
+    ThreadPool::new(pool_size)
+});
+
 #[derive(Default, PartialEq)]
 pub enum ServerType {
     #[default]
@@ -111,7 +157,7 @@ impl Action for Server {
                         debug!("{:?}", DebugExecutionRequest::from(&req));
                     }
 
-                    std::thread::spawn(move || {
+                    THREAD_POOL.execute(move || {
                         // Extract IDs from http_headers for log injection context.
                         // The request_id arrives pre-tagged with PRIVACY_MODE_TAG
                         // from lit-api-server if privacy mode was requested.
@@ -128,6 +174,8 @@ impl Action for Server {
                             set_request_context(request_id, correlation_id);
                         }
 
+                        let prefetched_key = req.lit_action_private_key.clone();
+
                         create_and_run_current_thread(
                             async move {
                                 let res = crate::runtime::execute_js(
@@ -141,12 +189,15 @@ impl Action for Server {
                                     outbound_tx.clone(),
                                     inbound_rx.clone(),
                                     is_test_server,
+                                    prefetched_key,
                                 )
                                 .await;
                                 let _ = outbound_tx
                                     .send_async(match res {
-                                        Ok(()) => Ok(ExecutionResult {
+                                        Ok(local_state) => Ok(ExecutionResult {
                                             success: true,
+                                            response: local_state.response,
+                                            logs: local_state.logs,
                                             ..Default::default()
                                         }
                                         .into()),
@@ -159,6 +210,7 @@ impl Action for Server {
                                                 Ok(ExecutionResult {
                                                     success: false,
                                                     error: format_error(&err),
+                                                    ..Default::default()
                                                 }
                                                 .into())
                                             }

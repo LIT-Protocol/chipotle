@@ -43,7 +43,13 @@ pub async fn lit_action(
     let code_to_run = lit_action_request.code.clone();
     let derived_ipfs_id = get_lit_action_ipfs_id(code_to_run.clone());
     let cid_hash = ipfs_cid_to_u256(&derived_ipfs_id)?;
-    if !can_execute_action(api_key, cid_hash).await? {
+
+    // Run auth check and client builder concurrently — they are independent
+    let (auth_result, builder) = tokio::join!(
+        can_execute_action(api_key, cid_hash),
+        get_lit_action_client_builder(chain_config)
+    );
+    if !auth_result? {
         let msg = format!(
             "The provided API key is not authorized to execute the specified action ({derived_ipfs_id}/{cid_hash})."
         );
@@ -55,7 +61,7 @@ pub async fn lit_action(
         http_client: Some(reqwest::Client::clone(http_client)),
     };
 
-    let mut builder = get_lit_action_client_builder(chain_config).await;
+    let mut builder = builder;
     builder
         .js_env(deno_execution_env)
         .request_id(request_id.clone())

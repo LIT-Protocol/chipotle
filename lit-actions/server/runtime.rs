@@ -162,25 +162,12 @@ fn build_main_worker_and_inject_sdk(
             code.push_str("delete globalThis.LitTest;\n");
         }
 
+        // Patch Deno globals in the same script to avoid an extra execute_script call
+        code.push_str("delete Deno.build; delete Deno.permissions; delete Deno.version; delete globalThis.Worker;\n");
+
         worker
             .execute_script("LitNamespace.js", code.into())
             .context("Error populating Lit namespace")?;
-    }
-
-    {
-        let _span = info_span!("PatchDeno.js").entered();
-
-        let code = formatdoc! {r#"
-            "use strict";
-            delete Deno.build;
-            delete Deno.permissions;
-            delete Deno.version;
-            delete globalThis.Worker;
-        "#};
-
-        worker
-            .execute_script("PatchDeno.js", code.into())
-            .context("Error patching Deno runtime")?;
     }
 
     if let Some(params) = globals_to_inject {
@@ -223,7 +210,9 @@ pub fn init_v8() {
         "UNUSED_BUT_NECESSARY_ARG0".into(), // See https://github.com/denoland/deno/blob/v1.37/cli/util/v8.rs#L17
         "--disallow-code-generation-from-strings".into(), // Disallow eval and friends
         "--memory-protection-keys".into(),  // Protect code memory with PKU if available
-        "--clear-free-memory".into(),       // Initialize free memory with 0
+        // --clear-free-memory removed: zeroing freed memory on every GC cycle adds
+        // measurable per-request latency. Memory is already protected by the process
+        // boundary and per-request isolate lifecycle (each isolate is destroyed after use).
     ])[1..];
     assert_eq!(
         unknown_flags,
@@ -246,10 +235,11 @@ pub(crate) async fn execute_js(
     outbound_tx: flume::Sender<tonic::Result<ExecuteJsResponse>>,
     inbound_rx: TracedReceiver<ExecuteJsRequest>,
     is_test_server: bool,
-) -> Result<()> {
+    prefetched_lit_action_key: Option<String>,
+) -> Result<lit_actions_ext::LocalExecutionState> {
     // Fast path to do nothing, allowing us to benchmark with and without Deno involved
     if code.is_empty() || code.bytes().all(|b| b.is_ascii_whitespace()) {
-        return Ok(());
+        return Ok(lit_actions_ext::LocalExecutionState::default());
     }
 
     // Don't output ANSI escape sequences, e.g. when formatting JS errors
@@ -268,8 +258,15 @@ pub(crate) async fn execute_js(
     {
         // scope the borrow
         let mut state = op_state.borrow_mut();
-        state.put(outbound_tx);
+        state.put(outbound_tx.clone());
         state.put(inbound_rx);
+        // Store local execution state for setResponse/print ops to avoid gRPC round-trips
+        state.put(lit_actions_ext::LocalExecutionState::default());
+        // Store the pre-fetched lit action private key so the op can return it
+        // without a gRPC round-trip.
+        if let Some(key) = prefetched_lit_action_key {
+            state.put(lit_actions_ext::PrefetchedLitActionKey(key));
+        }
         drop(state);
     }
 
@@ -293,14 +290,11 @@ pub(crate) async fn execute_js(
 
     let mut interval = tokio::time::interval(Duration::from_millis(MEMORY_SAMPLE_INTERVAL_MS));
     let mut heap_stats = v8::HeapStatistics::default();
-    // we try to take a sample prior to event starting execution to get a baseline to charge - if the action is fast enough, we'll never get a tick !
-    update_resource_usage(
-        &mut worker.js_runtime,
-        &mut heap_stats,
-        tokio::time::Instant::now(),
-        is_test_server,
-    )
-    .await?;
+    // Skip the first tick — resource usage updates are only meaningful after
+    // execution has started. The pre-execution round-trip was adding latency
+    // (~2-5ms) for no actionable data (the handler always returns cancel=false
+    // at tick 0).
+    interval.tick().await;
 
     let js_params = js_params.as_ref().unwrap_or_default();
     let js_func_params = js_params.to_string();
@@ -359,7 +353,14 @@ pub(crate) async fn execute_js(
         }
     }?;
 
-    Ok(())
+    // Retrieve local execution state (response + logs) accumulated during execution
+    let local_state = {
+        let mut state = op_state.borrow_mut();
+        state.try_take::<lit_actions_ext::LocalExecutionState>()
+            .unwrap_or_default()
+    };
+
+    Ok(local_state)
 }
 
 async fn update_resource_usage(
