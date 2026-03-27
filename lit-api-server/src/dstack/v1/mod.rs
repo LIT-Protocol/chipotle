@@ -4,6 +4,11 @@ use tracing::instrument;
 mod dstack;
 pub mod endpoints;
 
+/// Cache for dstack key derivation results. Keys are deterministic (same path+purpose → same key),
+/// so no TTL is needed. In-memory only, never persisted.
+static KEY_CACHE: std::sync::LazyLock<moka::future::Cache<String, [u8; 32]>> =
+    std::sync::LazyLock::new(|| moka::future::Cache::builder().max_capacity(1_000).build());
+
 /// Get the client key for a given derivation path.
 pub async fn get_client_key(derivation_path: &str) -> Result<[u8; 32], String> {
     let path = format!("v1/{}", derivation_path);
@@ -34,6 +39,13 @@ pub async fn get_admin_api_payer_key() -> Result<[u8; 32], String> {
 
 #[instrument(name = "dstack::v1::get_key", level = "debug", err, skip_all)]
 async fn get_key(path: &str, purpose: &str) -> Result<[u8; 32], String> {
+    let cache_key = format!("{}:{}", path, purpose);
+
+    if let Some(cached) = KEY_CACHE.get(&cache_key).await {
+        tracing::debug!("dstack key cache hit");
+        return Ok(cached);
+    }
+
     let key_response = dstack::get_key(path, purpose)
         .await
         .map_err(|e| format!("failed to get key: {e}"))?;
@@ -48,5 +60,6 @@ async fn get_key(path: &str, purpose: &str) -> Result<[u8; 32], String> {
     // While this looks a bit redundant, it's necessary to ensure that more than 1 secret can be exported
     // without compromising the security of the master key(s) used to derive them.
     let secret = keccak256(&secret);
+    KEY_CACHE.insert(cache_key, secret).await;
     Ok(secret)
 }

@@ -22,6 +22,17 @@ use crate::utils::parse_with_hash::{api_key_hash, usage_api_key_to_hash};
 use ethers::types::{Address, H160, U256};
 use tracing::instrument;
 
+/// Cache for `can_execute_action` results. Key is `"{api_key_hash}:{cid_hash}"`.
+/// Only `true` results are cached (to avoid caching transient RPC failures as denials).
+/// 10-second TTL bounds the window for stale permissions after revocation.
+static AUTH_CACHE: std::sync::LazyLock<moka::future::Cache<String, bool>> =
+    std::sync::LazyLock::new(|| {
+        moka::future::Cache::builder()
+            .max_capacity(10_000)
+            .time_to_live(std::time::Duration::from_secs(10))
+            .build()
+    });
+
 /// Create a new account. `initial_balance` is stored on the account's apiKey (AccountConfig.accountApiKey.balance).
 pub async fn new_account(
     signer_pool: Arc<SignerPool>,
@@ -536,12 +547,25 @@ pub async fn get_rebalance_amount() -> Result<U256> {
 
 #[instrument(name = "accounts::can_execute_action", level = "debug", skip_all, err)]
 pub async fn can_execute_action(api_key: &str, cid_hash: U256) -> Result<bool> {
-    let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
+    let cache_key = format!("{:?}:{}", account_api_key_hash, cid_hash);
+
+    if let Some(cached) = AUTH_CACHE.get(&cache_key).await {
+        tracing::debug!("auth cache hit");
+        return Ok(cached);
+    }
+
+    let contract = get_read_only_account_config_contract().await?;
     let can_execute = contract
         .can_execute_action(account_api_key_hash, cid_hash)
         .call()
         .await?;
+
+    // Only cache positive results to avoid caching transient RPC failures as denials
+    if can_execute {
+        AUTH_CACHE.insert(cache_key, true).await;
+    }
+
     Ok(can_execute)
 }
 

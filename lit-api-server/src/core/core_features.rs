@@ -13,8 +13,14 @@ use moka::future::Cache;
 use rocket::serde::json::Json;
 use serde_json::json;
 use std::collections::BTreeMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use tracing::instrument;
+
+/// Cache for IPFS hash computation. Keyed by a fast hash of the code string.
+static IPFS_HASH_CACHE: std::sync::LazyLock<moka::sync::Cache<u64, String>> =
+    std::sync::LazyLock::new(|| moka::sync::Cache::builder().max_capacity(10_000).build());
 
 #[instrument(name = "core_features::lit_action", level = "debug", skip_all, err)]
 pub async fn lit_action(
@@ -103,8 +109,14 @@ pub async fn get_lit_action_client_config(
 }
 
 fn get_lit_action_ipfs_id(code: String) -> String {
-    let ipfs_hasher = IpfsHasher::default();
-    ipfs_hasher.compute(code.as_bytes())
+    let mut hasher = DefaultHasher::new();
+    code.hash(&mut hasher);
+    let code_hash = hasher.finish();
+
+    IPFS_HASH_CACHE.get_with(code_hash, || {
+        let ipfs_hasher = IpfsHasher::default();
+        ipfs_hasher.compute(code.as_bytes())
+    })
 }
 
 async fn get_lit_action_client_builder(chain_config: Arc<ChainConfig>) -> ClientBuilder {

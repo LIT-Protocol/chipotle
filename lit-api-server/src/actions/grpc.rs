@@ -40,7 +40,7 @@ where
         F: FnOnce() -> Fut + Send,
     {
         loop {
-            tracing::info!("Connecting to address: {}", addr);
+            tracing::trace!("Connecting to address: {}", addr);
             let conn = self.get_connection(addr).await;
             match conn {
                 Some(client) => {
