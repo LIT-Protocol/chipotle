@@ -55,9 +55,15 @@ The sections below walk through Phala's [Complete Chain of Trust](https://docs.p
 
 This is a complete, end-to-end how-to. It mirrors the CI workflow that runs on every Lit Chipotle deployment and covers all layers of the chain of trust.
 
-**Prerequisites:** `python3`, `docker`, `openssl`, `dig`, and optionally [`cosign`](https://docs.sigstore.dev/cosign/system_config/installation/) and [`cast`](https://book.getfoundry.sh/getting-started/installation) (from Foundry).
+<Tip>
+**New to TEE verification?** You don't need to understand every cryptographic detail. Each step below is a self-contained check you can copy-paste into your terminal. The commands will output PASS or FAIL. If all steps pass, you have cryptographic proof that your connection terminates in genuine, unmodified TEE hardware running authorized code.
+</Tip>
+
+**Prerequisites:** `python3` (3.8+), `docker`, `openssl`, `dig`, and optionally [`cosign`](https://docs.sigstore.dev/cosign/system_config/installation/) and [`cast`](https://book.getfoundry.sh/getting-started/installation) (from Foundry).
 
 #### 1. Verify the TDX attestation quote (Platform)
+
+**What this checks:** Is the server running on real Intel TDX hardware? The TDX attestation quote is like a hardware-signed certificate of authenticity — Intel's chips sign a statement about what software is running, and this step verifies that signature is genuine.
 
 Fetch the attestation from the live API and run the official dstack verifier. This validates the Intel TDX quote signature (proving genuine hardware), replays the RTMR3 event log (proving no events were tampered with), and checks OS measurements.
 
@@ -148,7 +154,7 @@ curl -X POST https://cloud-api.phala.network/api/v1/attestations/verify \
 
 #### 2. Verify the application code (Application)
 
-Confirm that the running CVM is executing the exact code you expect.
+**What this checks:** Is the TEE running the exact code you expect, with no modifications? This step verifies the Docker images and their configuration match what was built in CI from the public GitHub repository.
 
 ```bash
 # Fetch app info (compose hash + full app-compose config)
@@ -176,7 +182,8 @@ compose = yaml.safe_load(json.loads(info["tcb_info"]["app_compose"])["docker_com
 for name, svc in compose.get("services", {}).items():
     img = svc.get("image", "")
     pinned = "@sha256:" in img
-    print(f"  {name}: {img[:80]}... {"OK" if pinned else "NOT PINNED"}")
+    status = "OK" if pinned else "NOT PINNED"
+    print(f"  {name}: {img[:80]}... {status}")
     assert pinned, f"{name} is not digest-pinned"
 print("All images digest-pinned OK")
 '
@@ -195,34 +202,71 @@ cosign verify \
 
 #### 3. Verify TLS terminates in the TEE (Network)
 
-Confirm that the TLS certificate served to your browser was generated inside the TEE.
+**What this checks:** Was the TLS certificate generated inside the TEE? This confirms your encrypted connection goes directly into the secure hardware — no proxy or intermediary can see your traffic. The TEE records the certificate's hash in the attestation quote, so you can compare it against the certificate you actually received.
 
 ```bash
-# 3a. Get the certificate fingerprint from the live TLS connection
-openssl s_client -connect api.chipotle.litprotocol.com:443 \
+# 3a. Compute the SHA-256 hash of the live TLS certificate (DER-encoded)
+LIVE_CERT_HASH=$(openssl s_client -connect api.chipotle.litprotocol.com:443 \
   -servername api.chipotle.litprotocol.com </dev/null 2>/dev/null \
-  | openssl x509 -noout -fingerprint -sha256
+  | openssl x509 -outform DER 2>/dev/null \
+  | openssl dgst -sha256 -hex 2>/dev/null | awk '{print $NF}')
+echo "Live TLS cert hash: $LIVE_CERT_HASH"
 
-# The /evidences/ endpoint on the CVM gateway serves cert.pem,
-# sha256sum.txt, and quote.json. The SHA-256 hash of the certificate
-# is embedded in the quote's reportData field — compare it with
-# the fingerprint above to confirm they match.
+# 3b. Extract the attested cert hash from the TDX quote
+# The TDX quote's reportData field (at byte offset 568 in the quote binary)
+# contains the SHA-256 hash of the certificate that was generated inside the TEE.
+# We already fetched attestation.json in Step 1 — reuse it here.
+ATTESTED_CERT_HASH=$(python3 -c '
+import json
+att = json.load(open("attestation.json"))
+q = att["quote"]
+if q.startswith("0x"):
+    q = q[2:]
+# TDX quote v4 format: reportData starts at byte 568 (hex char 1136)
+# First 32 bytes of reportData = SHA-256 of the TLS certificate
+report_data = q[1136:1136+128]
+cert_hash = report_data[:64]
+print(cert_hash)
+')
+echo "Attested cert hash:  $ATTESTED_CERT_HASH"
 
-# 3b. Verify CAA DNS records restrict issuance to Let's Encrypt
+# 3c. Compare — if they match, the certificate was generated inside the TEE
+if [ "$LIVE_CERT_HASH" = "$ATTESTED_CERT_HASH" ]; then
+  echo "TLS certificate matches attestation — OK"
+else
+  echo "MISMATCH: the served certificate does not match the attested hash"
+  echo "This could indicate a proxy or man-in-the-middle between you and the TEE"
+fi
+
+# 3d. Verify CAA DNS records restrict certificate issuance to Let's Encrypt only
+# This ensures only the TEE-controlled ACME flow can obtain a certificate for this domain.
 dig CAA api.chipotle.litprotocol.com
 ```
 
 #### 4. Verify on-chain governance (Governance)
 
-Confirm that the compose-hash running in the CVM was authorized on-chain.
+**What this checks:** Was the code running in the TEE authorized through on-chain governance? The compose-hash (a fingerprint of the entire application configuration) must be registered in a smart contract on Base before the CVM will accept it. This means deploying new code requires an on-chain transaction — you can audit the full history on Basescan.
 
 The compose-hash must be registered in the **DstackApp** smart contract on Base before the CVM will accept it. A separate **DstackKms** contract whitelists allowed OS images and KMS instances. You can inspect both on [Basescan](https://basescan.org).
 
+**Finding the DstackApp contract address:** The DstackApp contract is the on-chain governance contract that authorizes what code the CVM can run. To find the correct address for a given CVM:
+
+1. Go to the [Phala Cloud dashboard](https://cloud.phala.network) and look up the application by its `app_id` (available from `GET /info`). The dashboard shows the associated DstackApp contract address.
+2. Verify the contract is the one your CVM is attached to by checking the `app_id` in the `/info` response matches the app registered in the contract on Basescan.
+
+For Lit Chipotle production, the DstackApp contract is [`0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C`](https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C).
+
 ```bash
 # Requires `cast` from Foundry (https://book.getfoundry.sh)
+DSTACK_APP="0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C"
+
 # Check if the compose-hash is whitelisted in DstackApp
 COMPOSE_HASH=$(python3 -c 'import json; print("0x" + json.load(open("info.json"))["compose_hash"])')
-cast call <DSTACK_APP_ADDRESS> "allowedComposeHashes(bytes32)" "$COMPOSE_HASH" --rpc-url https://mainnet.base.org
+echo "Compose hash: $COMPOSE_HASH"
+cast call "$DSTACK_APP" "allowedComposeHashes(bytes32)" "$COMPOSE_HASH" --rpc-url https://mainnet.base.org
+
+# A return value of 0x...01 (true) means the compose-hash is whitelisted.
+# If it returns 0x...00 (false), the CVM is running unauthorized code.
 ```
 
 The **AccountConfig** contract ([`0x4c8eb9f329ebfdb369f0c90954875ef8f568ad24`](https://basescan.org/address/0x4c8eb9f329ebfdb369f0c90954875ef8f568ad24)) on Base governs Lit Chipotle's permission model — account ownership, API key scopes, PKP registries, and action groups. Inspect it on Basescan to verify ownership and permissions.
