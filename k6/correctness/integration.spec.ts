@@ -123,14 +123,16 @@ export default function (data: IntegrationSetupData) {
   checkAndLog(addGroupRes.response, {
     "addGroup success": (r) => {
       try {
-        return JSON.parse(r.body as string).success === true;
+        const body = JSON.parse(r.body as string);
+        return body.success === true && typeof body.group_id === "string";
       } catch {
         return false;
       }
     },
   }, "addGroup");
+  const groupId = (addGroupRes.data as { success: boolean; group_id: string }).group_id;
 
-  // ── 7. listGroups — extract groupId for subsequent tests ──────────────────
+  // ── 7. listGroups — verify group appears ──────────────────────────────────
   const listGroupsRes = client.listGroups(
     { page_number: 0, page_size: 10 },
     authHeaders,
@@ -145,12 +147,6 @@ export default function (data: IntegrationSetupData) {
       }
     },
   }, "listGroups");
-  const groups = listGroupsRes.data as Array<{ id: string; name: string; description: string }>;
-  if (!groups || groups.length === 0) {
-    console.error("listGroups returned empty array after addGroup");
-    return;
-  }
-  const groupId = groups[groups.length - 1].id; // use the most recently created group
 
   // ── 8. updateGroup — called while group is empty so the full-replace is safe ───
   const updateGroupRes = client.updateGroup(
