@@ -1,8 +1,13 @@
 # Deploy lit-api-server + lit-actions + lit-static + otel-collector to Phala CVM (tdx.large instance)
 #
-# Branch-based deployment:
-#   push to main            → chipotle-dev
-#   push to next or others  → chipotle-next
+# Deployment targets:
+#   push to next       → chipotle-next  (direct automated deploy)
+#   push to main       → chipotle-dev   (direct automated deploy)
+#   push tag v*        → chipotle-prod  (two-phase Safe multisig flow)
+#
+# Production (v* tag) deploys use a two-phase Safe multisig flow:
+#   Phase 1 (this workflow): build → prepare → propose addComposeHash to Safe
+#   Phase 2 (deploy-phala-execute.yml): execute Safe tx → commit deploy → verify → draft GitHub release
 #
 # Image provenance (DR-1b): Each image is signed with Sigstore (cosign keyless) immediately
 # after push. Signatures are recorded in the public Rekor transparency log, binding the image
@@ -15,15 +20,11 @@
 #     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
 #     <image>@<digest>
 #
-# Deployment strategy:
-#   push to main → Two-phase Safe multisig flow (prepare → propose → [signers approve] → execute via deploy-phala-execute.yml)
-#   push to next → Direct automated deploy (no multisig)
-#
 # Required secrets:
 #   DOCKERHUB_TOKEN - Docker Hub PAT (Account Settings > Security > Access Tokens)
 #   PHALA_CLOUD_API_KEY - From Phala Cloud Dashboard > API Tokens
-#   PHALA_DSTACKAPP_PRIVATE_KEY - Private key for DstackApp (used by next branch direct deploy)
-#   SAFE_PROPOSER_PRIVATE_KEY - Private key for proposing Safe transactions (main branch only)
+#   PHALA_DSTACKAPP_PRIVATE_KEY - Private key for DstackApp (used by next/dev direct deploy)
+#   SAFE_PROPOSER_PRIVATE_KEY - Private key for proposing Safe transactions (prod only)
 #
 # Required vars:
 #   DOCKER_IMAGE - Base image path, e.g. docker.io/username/lit-node-express
@@ -33,8 +34,8 @@
 #                    ${DOCKER_IMAGE}-lit-static
 #                    ${DOCKER_IMAGE}-otel-collector
 #   DOCKERHUB_USERNAME - Docker Hub username
-#   SAFE_ADDRESS_CHIPOTLE_PROD - Safe multisig address for chipotle prod (main branch)
-#   APP_AUTH_ADDRESS_CHIPOTLE_PROD - AppAuth contract address for chipotle prod (main branch)
+#   SAFE_ADDRESS_CHIPOTLE_PROD - Safe multisig address for chipotle prod (v* tags)
+#   APP_AUTH_ADDRESS_CHIPOTLE_PROD - AppAuth contract address for chipotle prod (v* tags)
 
 name: Deploy to Phala CVM
 
@@ -46,6 +47,7 @@ concurrency:
 on:
   push:
     branches: [main, next]
+    tags: ['v*']
 
 jobs:
   determine-target:
@@ -60,28 +62,43 @@ jobs:
       use_safe: ${{ steps.set.outputs.use_safe }}
       safe_address: ${{ steps.set.outputs.safe_address }}
       app_auth_address: ${{ steps.set.outputs.app_auth_address }}
+      version_tag: ${{ steps.set.outputs.version_tag }}
     steps:
       - name: Set deployment target
         id: set
         run: |
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          REF="${{ github.ref }}"
+          if [[ "$REF" == refs/tags/v* ]]; then
+            # Prod — Safe multisig two-phase deploy (triggered by v* tag push)
+            echo "phala_app_name=chipotle-prod" >> "$GITHUB_OUTPUT"
+            echo "instance_type=tdx.large" >> "$GITHUB_OUTPUT"
+            echo "gcp_project_id=chipotle-prod" >> "$GITHUB_OUTPUT"
+            echo "node_config=NodeConfig.prod.toml" >> "$GITHUB_OUTPUT"
+            echo "use_safe=true" >> "$GITHUB_OUTPUT"
+            echo "safe_address=${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" >> "$GITHUB_OUTPUT"
+            echo "app_auth_address=${{ vars.APP_AUTH_ADDRESS_CHIPOTLE_PROD }}" >> "$GITHUB_OUTPUT"
+            echo "version_tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            BASE_URL="TBD"
+          elif [ "$REF" = "refs/heads/main" ]; then
+            # Dev — direct automated deploy
             echo "phala_app_name=chipotle-dev" >> "$GITHUB_OUTPUT"
             echo "instance_type=tdx.large" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-dev" >> "$GITHUB_OUTPUT"
             echo "node_config=NodeConfig.main.toml" >> "$GITHUB_OUTPUT"
-            echo "use_safe=true" >> "$GITHUB_OUTPUT"
-            echo "safe_address=${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" >> "$GITHUB_OUTPUT"
-            echo "app_auth_address=${{ vars.APP_AUTH_ADDRESS_CHIPOTLE_PROD }}" >> "$GITHUB_OUTPUT"
+            echo "use_safe=false" >> "$GITHUB_OUTPUT"
+            echo "version_tag=" >> "$GITHUB_OUTPUT"
             BASE_URL="https://f8fce543471dc9f5f5643aa217422398c36e5edc-8000.dstack-base-prod5.phala.network"
-          elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
+          elif [ "$REF" = "refs/heads/next" ]; then
+            # Next — direct automated deploy
             echo "phala_app_name=chipotle-next" >> "$GITHUB_OUTPUT"
             echo "instance_type=tdx.small" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-next" >> "$GITHUB_OUTPUT"
             echo "node_config=NodeConfig.next.toml" >> "$GITHUB_OUTPUT"
             echo "use_safe=false" >> "$GITHUB_OUTPUT"
+            echo "version_tag=" >> "$GITHUB_OUTPUT"
             BASE_URL="https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network"
           else
-            echo "Unsupported branch for deployment"
+            echo "Unsupported ref for deployment: $REF"
             exit 1
           fi
           echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
@@ -145,7 +162,8 @@ jobs:
           path: digest-${{ matrix.service }}.txt
 
   # ---------------------------------------------------------------------------
-  # Direct deploy path (next branch): deploy immediately, then verify.
+  # Direct deploy path (next + dev): deploy immediately, then verify.
+  # Skipped for prod (v* tag) which uses the Safe multisig path below.
   # ---------------------------------------------------------------------------
   deploy:
     if: needs.determine-target.outputs.use_safe == 'false'
@@ -230,7 +248,7 @@ jobs:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
 
   # ---------------------------------------------------------------------------
-  # Safe multisig path (main branch): prepare + propose, then wait for manual
+  # Safe multisig path (prod, v* tag): prepare + propose, then wait for manual
   # Phase 2 execution via deploy-phala-execute.yml.
   # ---------------------------------------------------------------------------
 
@@ -356,8 +374,9 @@ jobs:
             --arg base_url "${{ needs.determine-target.outputs.base_url }}" \
             --arg api_root_url "${{ needs.determine-target.outputs.api_root_url }}" \
             --arg safe_address "${{ needs.determine-target.outputs.safe_address }}" \
+            --arg version_tag "${{ needs.determine-target.outputs.version_tag }}" \
             --arg source_sha "${{ github.sha }}" \
-            '{compose_hash: $compose_hash, commit_token: $commit_token, safe_tx_hash: $safe_tx_hash, phala_app_name: $phala_app_name, base_url: $base_url, api_root_url: $api_root_url, safe_address: $safe_address, source_sha: $source_sha}' \
+            '{compose_hash: $compose_hash, commit_token: $commit_token, safe_tx_hash: $safe_tx_hash, phala_app_name: $phala_app_name, base_url: $base_url, api_root_url: $api_root_url, safe_address: $safe_address, version_tag: $version_tag, source_sha: $source_sha}' \
             > deploy-context.json
           echo "Deployment context:"
           cat deploy-context.json
