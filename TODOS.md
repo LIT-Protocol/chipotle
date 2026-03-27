@@ -1,5 +1,53 @@
 # TODOS
 
+## Dashboard: initLogin null dereference
+- **What:** Add null check for `#login-api-key` element in `initLogin()` (`auth.js`). Currently crashes if the element is absent.
+- **Why:** Every other `getElementById` in the codebase uses optional chaining. This is the only unguarded access — will throw if the login panel HTML changes.
+- **Effort:** XS (CC: ~2 min)
+- **Priority:** P1
+- **Depends on:** None
+- **Context:** Found by adversarial review during PR1 ship. Pre-existing in the monolith. Fix: `if (apiKeyInput && getApiKey()) apiKeyInput.value = '';`
+
+## Dashboard: setOnAuthReady fires before init* complete
+- **What:** Move `setOnAuthReady(...)` call inside `init()` after all `init*` calls, instead of at module evaluation time in `app.js`.
+- **Why:** When a user is already logged in from a previous session, `_onAuthReady` fires during `initLogin`, before `initWallets/initGroups/initActions/initKeys` have attached their button listeners. Load functions work fine but button-disable logic hasn't run yet, allowing brief duplicate-click window.
+- **Effort:** XS (CC: ~2 min)
+- **Priority:** P2
+- **Depends on:** None
+- **Context:** Introduced by module refactor (PR1). Low risk but a real ordering hazard.
+
+## Dashboard: _confirmResolve promise race in ui-utils.js
+- **What:** Guard `confirmDelete()` to reject or queue if a confirm dialog is already pending. Currently a second concurrent call overwrites `_confirmResolve`, permanently leaking the first promise.
+- **Why:** Any `await confirmDelete(...)` caller that loses the race hangs silently forever. The `showActionProgress` non-dismissible modal reduces the window but doesn't eliminate it.
+- **Effort:** S (CC: ~5 min)
+- **Priority:** P2
+- **Depends on:** None
+- **Context:** Pre-existing in the monolith. Found by adversarial review during PR1 ship.
+
+## Dashboard: msOutside listener accumulation in groups.js
+- **What:** Remove the `document` click listener (`msOutside`) when the multi-select modal closes, instead of relying on the `!wrap.isConnected` guard on next click.
+- **Why:** Opening and closing modals 10+ times without a subsequent document click accumulates orphan listeners on `document`. Memory/performance leak in long sessions.
+- **Effort:** S (CC: ~5 min)
+- **Priority:** P3
+- **Depends on:** None
+- **Context:** Pre-existing in the monolith. Found by adversarial review during PR1 ship.
+
+## Dashboard: Form values read after closeModal in keys.js
+- **What:** In `openUsageKeyModal` save handler, collect all form values (group IDs, permission checkboxes) *before* calling `closeModal()`.
+- **Why:** Currently fragile — `closeModal` only hides the overlay but doesn't clear DOM. If `closeModal` is ever changed to clear innerHTML, `getSelectedGroupIds` would return empty arrays, silently creating a key with zero permissions.
+- **Effort:** XS (CC: ~2 min)
+- **Priority:** P3
+- **Depends on:** None
+- **Context:** Pre-existing in the monolith. Found by adversarial review during PR1 ship.
+
+## Dashboard: initActionRunner async getCode fallback
+- **What:** Initialize `getCode` and `getParams` fallback closures before the `await import(CodeJar)`, not only in the catch block.
+- **Why:** On slow connections, if a user clicks execute before CDN import resolves, `getCode`/`getParams` are `undefined` (declared with `let`). The inline fallback `codeEl?.textContent` works but is a fragile pattern.
+- **Effort:** XS (CC: ~2 min)
+- **Priority:** P3
+- **Depends on:** None
+- **Context:** Pre-existing pattern in the monolith. Found by adversarial review during PR1 ship.
+
 ## Monitor: Keyboard Shortcuts
 - **What:** Add keyboard shortcuts to the Lit Node Monitor: R to refresh, F to fund all critical, S to toggle settings panel.
 - **Why:** Operators use this tool daily. Keyboard shortcuts reduce friction for the most common actions.
