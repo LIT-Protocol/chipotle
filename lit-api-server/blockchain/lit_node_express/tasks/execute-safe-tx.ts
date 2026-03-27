@@ -57,4 +57,6 @@ task("execute-safe-tx", "Execute a Safe transaction after threshold signatures a
 
     console.log(`\nTransaction executed!`);
     console.log(`Transaction hash: ${executeTxResponse.hash}`);
+    // Machine-readable output for CI pipelines
+    console.log(`TX_HASH=${executeTxResponse.hash}`);
   });

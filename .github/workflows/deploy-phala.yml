@@ -18,7 +18,7 @@
 # Required secrets:
 #   DOCKERHUB_TOKEN - Docker Hub PAT (Account Settings > Security > Access Tokens)
 #   PHALA_CLOUD_API_KEY - From Phala Cloud Dashboard > API Tokens
-#   PHALA_DSTACKAPP_PRIVATE_KEY - Private key for DstackApp (Onchain KMS on Base)
+#   SAFE_PROPOSER_PRIVATE_KEY - Private key for proposing Safe transactions
 #
 # Required vars:
 #   DOCKER_IMAGE - Base image path, e.g. docker.io/username/lit-node-express
@@ -28,6 +28,10 @@
 #                    ${DOCKER_IMAGE}-lit-static
 #                    ${DOCKER_IMAGE}-otel-collector
 #   DOCKERHUB_USERNAME - Docker Hub username
+#   SAFE_ADDRESS_CHIPOTLE_DEV - Safe multisig address for chipotle-dev
+#   SAFE_ADDRESS_CHIPOTLE_NEXT - Safe multisig address for chipotle-next
+#   APP_AUTH_ADDRESS_CHIPOTLE_DEV - AppAuth contract address for chipotle-dev
+#   APP_AUTH_ADDRESS_CHIPOTLE_NEXT - AppAuth contract address for chipotle-next
 
 name: Deploy to Phala CVM
 
@@ -50,6 +54,8 @@ jobs:
       instance_type: ${{ steps.set.outputs.instance_type }}
       gcp_project_id: ${{ steps.set.outputs.gcp_project_id }}
       node_config: ${{ steps.set.outputs.node_config }}
+      safe_address: ${{ steps.set.outputs.safe_address }}
+      app_auth_address: ${{ steps.set.outputs.app_auth_address }}
     steps:
       - name: Set deployment target
         id: set
@@ -59,13 +65,16 @@ jobs:
             echo "instance_type=tdx.large" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-dev" >> "$GITHUB_OUTPUT"
             echo "node_config=NodeConfig.main.toml" >> "$GITHUB_OUTPUT"
+            echo "safe_address=${{ vars.SAFE_ADDRESS_CHIPOTLE_DEV }}" >> "$GITHUB_OUTPUT"
+            echo "app_auth_address=${{ vars.APP_AUTH_ADDRESS_CHIPOTLE_DEV }}" >> "$GITHUB_OUTPUT"
             BASE_URL="https://f8fce543471dc9f5f5643aa217422398c36e5edc-8000.dstack-base-prod5.phala.network"
           elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
             echo "phala_app_name=chipotle-next" >> "$GITHUB_OUTPUT"
             echo "instance_type=tdx.small" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-next" >> "$GITHUB_OUTPUT"
             echo "node_config=NodeConfig.next.toml" >> "$GITHUB_OUTPUT"
-            BASE_URL="https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network"
+            echo "safe_address=${{ vars.SAFE_ADDRESS_CHIPOTLE_NEXT }}" >> "$GITHUB_OUTPUT"
+            echo "app_auth_address=${{ vars.APP_AUTH_ADDRESS_CHIPOTLE_NEXT }}" >> "$GITHUB_OUTPUT"
           else
             echo "Unsupported branch for deployment"
             exit 1
@@ -130,9 +139,14 @@ jobs:
           name: digest-${{ matrix.service }}
           path: digest-${{ matrix.service }}.txt
 
-  deploy:
+  # Phase 1: Prepare the deployment and get the compose hash from the Phala API.
+  # This does NOT deploy — it returns a commit token for Phase 2.
+  prepare-deploy:
     needs: [determine-target, build]
     runs-on: self-hosted
+    outputs:
+      compose_hash: ${{ steps.prepare.outputs.compose_hash }}
+      commit_token: ${{ steps.prepare.outputs.commit_token }}
     steps:
       - uses: actions/checkout@v4
 
@@ -165,45 +179,94 @@ jobs:
       - name: Install Phala CLI
         run: npm install -g phala
 
-      - name: Deploy to Phala Cloud
+      - name: Prepare deployment (get compose hash + commit token)
+        id: prepare
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
-          PHALA_PRIVATE_KEY: ${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}
         run: |
-          phala deploy \
+          OUTPUT=$(phala deploy \
+            --prepare-only \
             -c docker-compose.deploy.yml \
             --cvm-id ${{ needs.determine-target.outputs.phala_app_name }} \
-            --private-key "$PHALA_PRIVATE_KEY"
+            --json)
+          echo "$OUTPUT"
+          COMPOSE_HASH=$(echo "$OUTPUT" | jq -r '.compose_hash')
+          COMMIT_TOKEN=$(echo "$OUTPUT" | jq -r '.commit_token')
+          if [ -z "$COMPOSE_HASH" ] || [ "$COMPOSE_HASH" = "null" ]; then
+            echo "::error::Failed to extract compose_hash from phala deploy --prepare-only output"
+            exit 1
+          fi
+          if [ -z "$COMMIT_TOKEN" ] || [ "$COMMIT_TOKEN" = "null" ]; then
+            echo "::error::Failed to extract commit_token from phala deploy --prepare-only output"
+            exit 1
+          fi
+          echo "compose_hash=$COMPOSE_HASH" >> "$GITHUB_OUTPUT"
+          echo "commit_token=$COMMIT_TOKEN" >> "$GITHUB_OUTPUT"
 
-  wait-for-api-available:
-    needs: [deploy, determine-target]
-    uses: ./.github/workflows/wait-for-api-restart.yml
-    with:
-      api_root_url: ${{ needs.determine-target.outputs.api_root_url }}
-      runner: '["self-hosted"]'
+  # Propose addComposeHash to Safe multisig for approval by signers.
+  propose-compose-hash:
+    needs: [determine-target, prepare-deploy]
+    runs-on: self-hosted
+    outputs:
+      safe_tx_hash: ${{ steps.propose.outputs.safe_tx_hash }}
+    steps:
+      - uses: actions/checkout@v4
 
-  verify-attestation:
-    needs: [wait-for-api-available, determine-target]
-    uses: ./.github/workflows/verify-attestation.yml
-    with:
-      attestation_url: ${{ needs.determine-target.outputs.base_url }}
-      runner: '["self-hosted"]'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
 
-  openapi-spec-check:
-    needs: [wait-for-api-available]
-    uses: ./.github/workflows/openapi-spec-check.yml
-    with:
-      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
-      runner: '["self-hosted"]'
+      - name: Install contract dependencies
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npm ci
 
-  k6-smoke:
-    needs: [wait-for-api-available, openapi-spec-check]
-    uses: ./.github/workflows/k6-smoke.yml
-    with:
-      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+      - name: Compile contracts
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npx hardhat compile
 
-  k6-correctness:
-    needs: [wait-for-api-available, k6-smoke]
-    uses: ./.github/workflows/correctness.yml
-    with:
-      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+      - name: Propose addComposeHash to Safe
+        id: propose
+        working-directory: lit-api-server/blockchain/lit_node_express
+        env:
+          PROPOSER_PRIVATE_KEY: ${{ secrets.SAFE_PROPOSER_PRIVATE_KEY }}
+        run: |
+          OUTPUT=$(npx hardhat propose-dstack-app \
+            --network base \
+            --safe "${{ needs.determine-target.outputs.safe_address }}" \
+            --app-auth "${{ needs.determine-target.outputs.app_auth_address }}" \
+            --compose-hash "${{ needs.prepare-deploy.outputs.compose_hash }}" \
+            2>&1 | tee /dev/stderr)
+          SAFE_TX_HASH=$(echo "$OUTPUT" | grep '^SAFE_TX_HASH=' | cut -d= -f2)
+          if [ -z "$SAFE_TX_HASH" ]; then
+            echo "::error::Failed to extract SAFE_TX_HASH from propose-dstack-app output"
+            exit 1
+          fi
+          echo "safe_tx_hash=$SAFE_TX_HASH" >> "$GITHUB_OUTPUT"
+
+  # Upload deployment context as artifact for the Phase 2 workflow.
+  upload-deploy-context:
+    needs: [determine-target, prepare-deploy, propose-compose-hash]
+    runs-on: self-hosted
+    steps:
+      - name: Create deployment context file
+        run: |
+          jq -n \
+            --arg compose_hash "${{ needs.prepare-deploy.outputs.compose_hash }}" \
+            --arg commit_token "${{ needs.prepare-deploy.outputs.commit_token }}" \
+            --arg safe_tx_hash "${{ needs.propose-compose-hash.outputs.safe_tx_hash }}" \
+            --arg phala_app_name "${{ needs.determine-target.outputs.phala_app_name }}" \
+            --arg base_url "${{ needs.determine-target.outputs.base_url }}" \
+            --arg api_root_url "${{ needs.determine-target.outputs.api_root_url }}" \
+            --arg safe_address "${{ needs.determine-target.outputs.safe_address }}" \
+            --arg source_sha "${{ github.sha }}" \
+            '{compose_hash: $compose_hash, commit_token: $commit_token, safe_tx_hash: $safe_tx_hash, phala_app_name: $phala_app_name, base_url: $base_url, api_root_url: $api_root_url, safe_address: $safe_address, source_sha: $source_sha}' \
+            > deploy-context.json
+          echo "Deployment context:"
+          cat deploy-context.json
+
+      - name: Upload deployment context
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-context
+          path: deploy-context.json
+          retention-days: 7

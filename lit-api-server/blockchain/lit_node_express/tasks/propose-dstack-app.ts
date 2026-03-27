@@ -86,4 +86,6 @@ task("propose-dstack-app", "Propose an AppAuth compose-hash whitelisting through
       `\nSafe UI: https://app.safe.global/transactions/queue?safe=base:${safeAddress}`
     );
     console.log(`Safe TX Hash: ${safeTxHash}`);
+    // Machine-readable output for CI pipelines
+    console.log(`SAFE_TX_HASH=${safeTxHash}`);
   });
