@@ -68,6 +68,8 @@ services:
       # Optional overide for NodeConfig.toml (chain, contract_address).
       # - ./NodeConfig.toml:/app/NodeConfig.toml:ro
     depends_on:
+      dstack-ingress:
+        condition: service_healthy
       lit-actions:
         condition: service_started
       otel-collector:
@@ -125,9 +127,12 @@ services:
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock
       - cert-data:/etc/letsencrypt
-    depends_on:
-      lit-api-server:
-        condition: service_started
+    healthcheck:
+      test: ["CMD", "test", "-f", "/etc/letsencrypt/live/${CERTBOT_DOMAIN}/fullchain.pem"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
     restart: unless-stopped
 
 volumes:
