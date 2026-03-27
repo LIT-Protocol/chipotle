@@ -156,11 +156,8 @@ Create a group (with optional permitted actions and PKPs). Then add an action (I
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"group_name":"My Group","group_description":"","pkp_ids_permitted":[],"cid_hashes_permitted":[]}'
-    
-    # List groups to get group_id (use the "id" from the response)
-    curl -s "http://localhost:8000/core/v1/list_groups?page_number=0&page_size=10" \
-      -H "X-Api-Key: KEY"
-    
+    # Response: {"success":true,"group_id":"1"}
+
     # Register action metadata (replace IPFS_CID)
     curl -s -X POST "http://localhost:8000/core/v1/add_action" \
       -H "Content-Type: application/json" \
