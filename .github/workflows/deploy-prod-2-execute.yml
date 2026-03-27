@@ -1,24 +1,23 @@
-# Phase 2: Execute Safe-approved compose hash and commit the Phala CVM deployment.
+# Phase 2: Verify Safe-approved compose hash and commit the Phala CVM deployment.
 #
-# This workflow runs AFTER Safe multisig signers have approved the addComposeHash
-# transaction proposed by Phase 1 (deploy-prod-1-propose.yml). It:
-#   1. Downloads the deployment context artifact from Phase 1
-#   2. Executes the approved Safe transaction on-chain
+# This workflow runs AFTER Safe multisig signers have approved AND executed the
+# addComposeHash transaction proposed by Phase 1 (deploy-prod-1-propose.yml). It:
+#   1. Downloads the deployment context from the Phase 1 draft release
+#   2. Verifies the Safe transaction was executed on-chain and extracts the tx hash
 #   3. Commits the Phala deployment using the on-chain tx hash
 #   4. Runs the full verification suite (attestation, OpenAPI, k6)
-#   5. Creates a draft GitHub release (if version tag is present)
+#   5. Publishes the draft GitHub release created by Phase 1
 #
 # Required secrets:
 #   PHALA_CLOUD_API_KEY - From Phala Cloud Dashboard > API Tokens
-#   SAFE_EXECUTOR_PRIVATE_KEY - Private key for executing approved Safe transactions
 
 name: "Deploy Prod 2: Execute and Verify"
 
 on:
   workflow_dispatch:
     inputs:
-      source_run_id:
-        description: "Run ID of the Phase 1 workflow (Deploy to Phala CVM)"
+      version_tag:
+        description: "Version tag from Phase 1 (e.g. v1.2.3)"
         required: true
         type: string
       safe_tx_hash:
@@ -44,12 +43,13 @@ jobs:
       version_tag: ${{ steps.read.outputs.version_tag }}
       source_sha: ${{ steps.read.outputs.source_sha }}
     steps:
-      - name: Download deployment context from Phase 1
-        uses: actions/download-artifact@v4
-        with:
-          name: deploy-context
-          run-id: ${{ inputs.source_run_id }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download deployment context from Phase 1 release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release download "${{ inputs.version_tag }}" \
+            --pattern "deploy-context.json"
 
       - name: Read deployment context
         id: read
@@ -88,11 +88,9 @@ jobs:
         working-directory: lit-api-server/blockchain/lit_node_express
         run: npx hardhat compile
 
-      - name: Execute Safe transaction
+      - name: Verify Safe transaction was executed
         id: execute
         working-directory: lit-api-server/blockchain/lit_node_express
-        env:
-          EXECUTOR_PRIVATE_KEY: ${{ secrets.SAFE_EXECUTOR_PRIVATE_KEY }}
         run: |
           OUTPUT=$(npx hardhat execute-safe-tx \
             --network base \
@@ -163,24 +161,18 @@ jobs:
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
 
-  # Create a draft GitHub release after all verification passes.
-  create-release:
+  # Publish the draft GitHub release created by Phase 1 after all verification passes.
+  publish-release:
     if: needs.download-context.outputs.version_tag != ''
     needs: [download-context, k6-correctness, verify-attestation]
     runs-on: self-hosted
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.download-context.outputs.source_sha }}
-
-      - name: Create draft GitHub release
+      - name: Publish draft release and remove deployment context asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          gh release create "${{ needs.download-context.outputs.version_tag }}" \
-            --draft \
-            --title "${{ needs.download-context.outputs.version_tag }}" \
-            --generate-notes \
-            --target "${{ needs.download-context.outputs.source_sha }}"
+          gh release delete-asset "${{ needs.download-context.outputs.version_tag }}" deploy-context.json --yes || true
+          gh release edit "${{ needs.download-context.outputs.version_tag }}" --draft=false

@@ -14,7 +14,7 @@
 #   1. Build + sign images with Sigstore
 #   2. phala deploy --prepare-only → get compose hash + commit token
 #   3. Propose addComposeHash(hash) to Safe multisig on Base
-#   4. Upload deployment context artifact for Phase 2
+#   4. Create draft GitHub release with deployment context for Phase 2
 #
 # Image provenance (DR-1b): Each image is signed with Sigstore (cosign keyless).
 # To verify:
@@ -208,10 +208,16 @@ jobs:
           fi
           echo "safe_tx_hash=$SAFE_TX_HASH" >> "$GITHUB_OUTPUT"
 
-  upload-deploy-context:
+  create-draft-release:
     needs: [prepare-deploy, propose-compose-hash]
     runs-on: self-hosted
+    permissions:
+      contents: write
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
       - name: Create deployment context file
         run: |
           jq -n \
@@ -229,9 +235,13 @@ jobs:
           echo "Deployment context:"
           cat deploy-context.json
 
-      - name: Upload deployment context
-        uses: actions/upload-artifact@v4
-        with:
-          name: deploy-context
-          path: deploy-context.json
-          retention-days: 7
+      - name: Create draft GitHub release with deployment context
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            deploy-context.json \
+            --draft \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            --target "${{ github.sha }}"

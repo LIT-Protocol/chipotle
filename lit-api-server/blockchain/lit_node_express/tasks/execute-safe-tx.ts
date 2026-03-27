@@ -1,16 +1,10 @@
 import { task } from "hardhat/config";
 import SafeApiKit from "@safe-global/api-kit";
-import Safe from "@safe-global/protocol-kit";
 
-task("execute-safe-tx", "Execute a Safe transaction after threshold signatures are collected")
+task("execute-safe-tx", "Verify a Safe transaction has been executed and return its on-chain tx hash")
   .addParam("safe", "Safe multisig address")
-  .addParam("safeTxHash", "The Safe transaction hash to execute")
+  .addParam("safeTxHash", "The Safe transaction hash to verify")
   .setAction(async (taskArgs, hre) => {
-    const executorKey = process.env.EXECUTOR_PRIVATE_KEY;
-    if (!executorKey) {
-      throw new Error("EXECUTOR_PRIVATE_KEY environment variable is required");
-    }
-
     const { safe: safeAddress, safeTxHash } = taskArgs;
     const chainId = hre.network.config.chainId;
 
@@ -24,39 +18,18 @@ task("execute-safe-tx", "Execute a Safe transaction after threshold signatures a
 
     const apiKit = new SafeApiKit({ chainId: BigInt(chainId) });
 
-    // Fetch the transaction and check signatures
     const safeTransaction = await apiKit.getTransaction(safeTxHash);
-    const threshold = (
-      await apiKit.getSafeInfo(safeAddress)
-    ).threshold;
-    const confirmations = safeTransaction.confirmations?.length ?? 0;
 
-    console.log(`\nThreshold: ${threshold}`);
-    console.log(`Confirmations: ${confirmations}`);
-
-    if (confirmations < threshold) {
+    if (!safeTransaction.isExecuted || !safeTransaction.transactionHash) {
       console.error(
-        `\nInsufficient signatures: ${confirmations}/${threshold}. ` +
-          `Need ${threshold - confirmations} more signature(s).`
+        `\nSafe transaction has not been executed yet. ` +
+          `Please execute the transaction in the Safe UI before running this workflow.`
       );
       process.exit(1);
     }
 
-    console.log(`\nThreshold met. Executing transaction on-chain...`);
-
-    const rpcUrl =
-      (hre.network.config as { url?: string }).url || "https://mainnet.base.org";
-
-    const protocolKit = await Safe.init({
-      provider: rpcUrl,
-      signer: executorKey,
-      safeAddress,
-    });
-
-    const executeTxResponse = await protocolKit.executeTransaction(safeTransaction);
-
-    console.log(`\nTransaction executed!`);
-    console.log(`Transaction hash: ${executeTxResponse.hash}`);
+    console.log(`\nTransaction already executed on-chain.`);
+    console.log(`Transaction hash: ${safeTransaction.transactionHash}`);
     // Machine-readable output for CI pipelines
-    console.log(`TX_HASH=${executeTxResponse.hash}`);
+    console.log(`TX_HASH=${safeTransaction.transactionHash}`);
   });
