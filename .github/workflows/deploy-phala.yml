@@ -81,7 +81,7 @@ jobs:
             echo "safe_address=${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" >> "$GITHUB_OUTPUT"
             echo "app_auth_address=${{ vars.APP_AUTH_ADDRESS_CHIPOTLE_PROD }}" >> "$GITHUB_OUTPUT"
             echo "version_tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-            DOMAIN="TBD"
+            DOMAIN="api.chipotle.litprotocol.com"
           elif [ "$REF" = "refs/heads/main" ]; then
             # Dev — direct automated deploy
             echo "phala_app_name=chipotle-dev" >> "$GITHUB_OUTPUT"
