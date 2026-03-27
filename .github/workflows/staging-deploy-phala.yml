@@ -33,7 +33,7 @@
 #   CERTBOT_AWS_ROLE_ARN      - IAM role ARN for STS assumption (required by dstack-ingress)
 #   CERTBOT_AWS_REGION        - AWS region for STS endpoint (e.g. "us-east-1")
 
-name: Deploy to Phala CVM
+name: "Staging: Deploy to Phala CVM"
 
 # Only one deploy job per-branch: abort any running job on same branch when a new commit is pushed.
 concurrency:
