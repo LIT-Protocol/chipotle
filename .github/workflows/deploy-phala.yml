@@ -90,7 +90,7 @@ jobs:
             echo "node_config=NodeConfig.main.toml" >> "$GITHUB_OUTPUT"
             echo "use_safe=false" >> "$GITHUB_OUTPUT"
             echo "version_tag=" >> "$GITHUB_OUTPUT"
-            DOMAIN="api.chipotle.litprotocol.com"
+            DOMAIN="api.dev.litprotocol.com"
           elif [ "$REF" = "refs/heads/next" ]; then
             # Next — direct automated deploy
             echo "phala_app_name=chipotle-next" >> "$GITHUB_OUTPUT"
