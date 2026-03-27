@@ -16,26 +16,24 @@ const FACETS = [
   'ViewsFacet',
   'APIConfigFacet',
   'BillingFacet',
-  'OwnershipFacet',
 ];
 
 const ARTIFACTS_DIR = "artifacts/contracts";
-// Pre-built artifacts for facets not compiled by Hardhat (e.g. OwnershipFacet)
-const DIAMOND_ARTIFACTS_DIR = "../rust_generator_and_deployer/src/diamond";
 const OUT_NAME = "AccountConfig";
 
 async function findArtifact(name) {
   // Hardhat stores artifacts at artifacts/contracts/<File>.sol/<Name>.json
-  for (const dir of [ARTIFACTS_DIR, "artifacts"]) {
-    const pattern = `${dir}/**/${name}.json`;
-    for await (const f of glob(pattern)) {
-      if (!f.endsWith(".dbg.json")) return f;
-    }
+  const pattern = `${ARTIFACTS_DIR}/**/${name}.json`;
+  const matches = [];
+  for await (const f of glob(pattern)) {
+    // Skip debug artifacts (*.dbg.json)
+    if (!f.endsWith(".dbg.json")) matches.push(f);
   }
-  // Fallback: pre-built artifacts in the Rust deployer (e.g. OwnershipFacet)
-  const fallback = path.join(DIAMOND_ARTIFACTS_DIR, `${name}.json`);
-  if (fs.existsSync(fallback)) return fallback;
-  throw new Error(`Artifact not found for: ${name}`);
+  if (matches.length === 0) throw new Error(`Artifact not found for: ${name}`);
+  if (matches.length > 1) {
+    console.warn(`Multiple artifacts for ${name}: ${matches.join(", ")} — using first`);
+  }
+  return matches[0];
 }
 
 function sigKey(item) {
