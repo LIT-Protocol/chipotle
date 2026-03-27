@@ -40,6 +40,10 @@ pub enum ChainConfigMessage {
         key: ConfigKeys,
         reply: flume::Sender<Option<String>>,
     },
+    GetMany {
+        keys: Vec<ConfigKeys>,
+        reply: flume::Sender<HashMap<String, String>>,
+    },
     Update {
         values: HashMap<String, String>,
     },
@@ -66,6 +70,23 @@ impl ChainConfig {
             .recv_async()
             .await
             .map_err(|e| anyhow::anyhow!("chain_config get recv: {e}"))
+    }
+
+    /// Get multiple configuration values in a single roundtrip.
+    /// Returns a map of key-name → value for keys that are set; missing keys are omitted.
+    pub async fn get_many(&self, keys: Vec<ConfigKeys>) -> Result<HashMap<String, String>> {
+        let (reply_tx, reply_rx) = flume::bounded(1);
+        self.tx
+            .send_async(ChainConfigMessage::GetMany {
+                keys,
+                reply: reply_tx,
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("chain_config get_many send: {e}"))?;
+        reply_rx
+            .recv_async()
+            .await
+            .map_err(|e| anyhow::anyhow!("chain_config get_many recv: {e}"))
     }
 }
 
@@ -111,6 +132,16 @@ async fn run_config_loop(
                     Ok(ChainConfigMessage::Get { key, reply }) => {
                         let _ = reply.send(values.get(&key.to_string()).cloned());
                     }
+                    Ok(ChainConfigMessage::GetMany { keys, reply }) => {
+                        let result: HashMap<String, String> = keys
+                            .into_iter()
+                            .filter_map(|k| {
+                                let key_str = k.to_string();
+                                values.get(&key_str).map(|v| (key_str, v.clone()))
+                            })
+                            .collect();
+                        let _ = reply.send(result);
+                    }
                     Ok(ChainConfigMessage::Update { values: new_values }) => {
                         values = new_values;
                     }
@@ -123,8 +154,17 @@ async fn run_config_loop(
             _ = interval.tick() => {
                 let tx = tx.clone();
                 tokio::spawn(async move {
-                    let new_values = load_config_from_chain().await;
-                    let _ = tx.send_async(ChainConfigMessage::Update { values: new_values }).await;
+                    match get_node_configuration_values().await {
+                        Ok(pairs) => {
+                            let new_values: HashMap<String, String> =
+                                pairs.into_iter().map(|kv| (kv.key, kv.value)).collect();
+                            tracing::debug!("chain_config: refreshed {} key(s) from chain", new_values.len());
+                            let _ = tx.send_async(ChainConfigMessage::Update { values: new_values }).await;
+                        }
+                        Err(e) => {
+                            tracing::warn!("chain_config: refresh failed, keeping previous values: {e}");
+                        }
+                    }
                 });
             }
         }
