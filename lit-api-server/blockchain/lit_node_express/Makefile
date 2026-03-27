@@ -20,6 +20,8 @@ facade:
 generate: compile facade
 	cd $(RUST_PROJECT) && cargo build --bin contract_generator
 	$(GENERATOR_BIN) --abifolder=artifacts/contracts --outputfolder=../../src/accounts/contracts/
+	mv ../../src/accounts/contracts/account_config.rs ../../src/accounts/contracts/account_config_contract.rs
+	cd ../../ && cargo fmt -- src/accounts/contracts/account_config_contract.rs
 
 # 3. Deploy contracts to Base mainnet.
 deploy_base: compile
