@@ -45,7 +45,14 @@
               "architecture/groups",
               "architecture/authModel",
               "architecture/diagram",
-              "architecture/verification"
+              {
+                "group": "Security & Verification",
+                "pages": [
+                  "architecture/verification/index",
+                  "architecture/verification/full-verification",
+                  "architecture/verification/chain-of-trust"
+                ]
+              }
             ]
           },
           {

@@ -1,56 +1,7 @@
 ---
-title: "Security & Verification"
-description: "How to verify that your connection to Lit Chipotle terminates inside a genuine TEE running unmodified code."
+title: "Full Verification Guide"
+description: "Step-by-step commands to verify every layer of the Lit Chipotle chain of trust: hardware attestation, application code, TLS certificates, and on-chain governance."
 ---
-
-## Zero-Trust TLS
-
-**What is Zero-Trust TLS?** In traditional web hosting, you trust the server operator not to inspect or tamper with your traffic. Zero-Trust TLS (ZT-TLS) eliminates this trust assumption entirely. The TLS private key is generated **inside** the Trusted Execution Environment (TEE) and **never leaves it** — not even the cloud provider, OS administrator, or Lit Protocol team can extract it.
-
-**How it works for Lit Chipotle:**
-
-1. The [dstack-ingress](https://github.com/Dstack-TEE/dstack-examples/tree/main/custom-domain/dstack-ingress) container, running inside the CVM, generates a private key and requests a TLS certificate from Let's Encrypt via DNS-01 challenge (Route 53). The private key never leaves the TEE.
-2. DNS [CAA records](https://letsencrypt.org/docs/caa/) for the domain restrict which CAs can issue certificates and require DNS-01 validation with a specific ACME account URI, ensuring only the TEE-controlled ACME flow can obtain a cert.
-4. The certificate and ACME account are recorded as evidence files. Their SHA-256 checksums are hashed into a single digest that is embedded in a TDX attestation quote's `reportData` field.
-5. Because the quote is signed by Intel's TDX hardware root of trust and bound to this digest, anyone can cryptographically prove the certificate was generated inside this specific TEE.
-
-**What this means:** When you connect to `api.chipotle.litprotocol.com` over HTTPS, the TLS handshake completes **inside the TEE**. No proxy, load balancer, or CDN can intercept the traffic. If the TLS handshake succeeds and the certificate is valid, you are provably talking to the TEE — not to any intermediary.
-
-**Contrast with traditional TLS:** Traditional TLS proves identity (the server holds the private key for this domain) but says nothing about *where* the key lives or *what code* uses it. ZT-TLS closes that gap: the key can only exist inside attested TEE hardware.
-
-<Note>
-Zero-Trust TLS means the encryption endpoint is the trust boundary. Once you verify the certificate was issued to the TEE, the HTTPS connection itself becomes your proof of confidentiality.
-</Note>
-
-For the full design, see [Phala: TEE-Controlled Domain Certificates](https://docs.phala.com/dstack/design-documents/tee-controlled-domain-certificates).
-
-## Quick TLS Verification
-
-Given Zero-Trust TLS, simple certificate validation already gives strong guarantees. This is sufficient for most users.
-
-```bash
-# Inspect the TLS certificate
-openssl s_client -connect api.chipotle.litprotocol.com:443 \
-  -servername api.chipotle.litprotocol.com </dev/null 2>/dev/null \
-  | openssl x509 -noout -fingerprint -sha256 -dates -subject
-```
-
-- The certificate is issued by **Let's Encrypt** (a public CA) to the exact domain.
-- Because ZT-TLS guarantees the private key lives only in the TEE, a valid TLS handshake = connection to the TEE.
-- For programmatic clients: **pin the certificate fingerprint** after initial verification (see [Certificate Pinning](#after-verification--certificate-pinning) below).
-
-## Full Chain of Trust Verification
-
-**Why go further?** TLS validation proves your connection is secure, but not:
-
-- What **code** is running inside the TEE
-- Whether the **hardware** is genuine Intel TDX
-- Whether the code was **authorized** by on-chain governance
-- Whether the **OS** and **KMS** are unmodified
-
-The sections below walk through Phala's [Complete Chain of Trust](https://docs.phala.com/phala-cloud/attestation/chain-of-trust), organized into the application layer (your code), the platform layer (hardware, OS, KMS, and network), and the governance layer (on-chain authorization).
-
-### Run a Full Verification
 
 This is a complete, end-to-end how-to. It mirrors the CI workflow that runs on every Lit Chipotle deployment and covers all layers of the chain of trust.
 
@@ -60,7 +11,7 @@ This is a complete, end-to-end how-to. It mirrors the CI workflow that runs on e
 
 **Prerequisites:** `python3` (3.8+), `docker`, `openssl`, `dig`, and optionally [`cosign`](https://docs.sigstore.dev/cosign/system_config/installation/) and [`cast`](https://book.getfoundry.sh/getting-started/installation) (from Foundry).
 
-#### 1. Verify the TDX attestation quote (Platform)
+## 1. Verify the TDX attestation quote (Platform)
 
 **What this checks:** Is the server running on real Intel TDX hardware? The TDX attestation quote is like a hardware-signed certificate of authenticity — Intel's chips sign a statement about what software is running, and this step verifies that signature is genuine.
 
@@ -151,7 +102,7 @@ curl -X POST https://cloud-api.phala.network/api/v1/attestations/verify \
   -d "{\"hex\": \"$QUOTE\"}"
 ```
 
-#### 2. Verify the application code (Application)
+## 2. Verify the application code (Application)
 
 **What this checks:** Is the TEE running the exact code you expect, with no modifications? This step verifies the Docker images and their configuration match what was built in CI from the public GitHub repository.
 
@@ -201,7 +152,7 @@ cosign verify \
   <image>@<digest>
 ```
 
-#### 3. Verify TLS terminates in the TEE (Network)
+## 3. Verify TLS terminates in the TEE (Network)
 
 **What this checks:** Was the TLS certificate generated inside the TEE? This confirms your encrypted connection goes directly into the secure hardware — no proxy or intermediary can see your traffic.
 
@@ -274,11 +225,11 @@ echo "Resolved CAA policy:"
 dig CAA dstack-base-prod5.phala.network +short
 ```
 
-#### 4. Verify on-chain governance (Governance)
+## 4. Verify on-chain governance (Governance)
 
 **What this checks:** Was the code running in the TEE authorized through on-chain governance? The compose-hash (a fingerprint of the entire application configuration) must be registered in a smart contract on Base before the CVM will accept it. This means deploying new code requires an on-chain transaction — you can audit the full history on Basescan.
 
-The compose-hash must be registered in the **DstackApp** smart contract on Base before the CVM will accept it. A separate **DstackKms** contract whitelists allowed OS images and KMS instances. You can inspect both on [Basescan](https://basescan.org).
+The compose-hash must be registered in the **DstackApp** smart contract on Base before the CVM will accept it. A separate **KMS Phala app** contract whitelists allowed OS images and KMS instances. You can inspect both on [Basescan](https://basescan.org).
 
 **Finding the DstackApp contract address:** The DstackApp contract is the on-chain governance contract that authorizes what code the CVM can run. To find the correct address for a given CVM:
 
@@ -307,74 +258,3 @@ cast call "$DSTACK_APP" "allowedComposeHashes(bytes32)" "$COMPOSE_HASH" --rpc-ur
 - **AccountConfig** — _details coming soon_
 
 Any governance action (e.g., whitelisting a new compose-hash, updating allowed OS images, or upgrading the AccountConfig Diamond) requires at least 2 of 3 signers. Production deployments use a two-phase workflow: CI proposes the transaction to the Safe, and signers approve it through the Safe UI before the deployment can proceed.
-
-### Understanding the Layers
-
-The sections below explain what each verification step is actually checking and why it matters. Refer to the [Phala Complete Chain of Trust](https://docs.phala.com/phala-cloud/attestation/chain-of-trust) for the canonical reference.
-
-#### Application Layer
-
-| Check | What it proves |
-|-------|----------------|
-| **compose-hash** | The SHA-256 of the `app-compose.json` config (which includes `docker-compose.yaml` plus metadata) is recorded as an event in RTMR3. Recomputing the hash from `/info` and comparing it to the attested value proves the CVM is running the declared configuration. |
-| **Docker image digests** | All images (lit-actions, lit-api-server, otel-collector, dstack-ingress) use `@sha256:` digest pinning. Mutable tags like `:latest` would allow silent image substitution. |
-| **Image provenance (Sigstore)** | Each image is signed with Sigstore cosign (keyless, GitHub OIDC). Verification proves the image was built by GitHub Actions from the `LIT-Protocol/lit-node-express` repository and recorded in the public Rekor transparency log. |
-| **RTMR3 event log replay** | Each event extends RTMR3 via a hash chain: `RTMR3_new = SHA384(RTMR3_old ‖ SHA384(event))`. The dstack-verifier replays all events from the initial value (48 zero bytes) and confirms the final value matches the RTMR3 in the TDX quote. This ensures no events were added, removed, or modified. |
-
-#### Platform Layer
-
-The TDX quote contains hardware-measured registers that attest the entire boot chain:
-
-| Register | What it measures |
-|----------|-----------------|
-| **MRTD** | Virtual firmware hash |
-| **RTMR0** | Hardware configuration |
-| **RTMR1** | Kernel measurements |
-| **RTMR2** | Boot parameters |
-| **RTMR3** | Application events (compose-hash, key-provider, etc.) |
-
-| Check | What it proves |
-|-------|----------------|
-| **TDX quote signature** | Intel signs the TDX quote with the hardware root of trust. Verification against the Intel root CA proves the quote came from genuine TDX hardware. The dstack-verifier and the Phala Cloud API both handle this. |
-| **OS measurements** | MRTD, RTMR0–2 values must match known-good values from the dstack release. The **DstackKms** contract on-chain whitelists allowed OS images via `allowedOsImages(bytes32)`. |
-| **KMS identity** | The `key-provider` event in RTMR3 records the KMS root CA public key hash. This binds the CVM to a specific trusted KMS — if someone substituted a rogue KMS, this hash would change and RTMR3 verification would fail. The DstackKms contract also whitelists KMS instances via `kmsAllowedAggregatedMrs(bytes32)`. |
-| **KMS attestation** | The KMS itself runs in a TEE with its own attestation quote. [Phala's Trust Center](https://github.com/Phala-Network/trust-center) verifies this independently. |
-
-#### Network Layer
-
-| Check | What it proves |
-|-------|----------------|
-| **Evidence files** | dstack-ingress serves `/evidences/` with `cert-<domain>.pem`, `sha256sum.txt`, `acme-account.json`, and `quote.json`. The SHA-256 of `sha256sum.txt` is embedded in the evidence quote's `reportData`, creating a checksum chain from the TDX hardware root of trust to the certificate files. |
-| **Evidence checksum chain** | `SHA-256(sha256sum.txt)` must match `reportData` in `/evidences/quote.json`. This proves the evidence files were generated inside the TEE that produced the quote. |
-| **Certificate fingerprint match** | The leaf cert DER fingerprint from `openssl s_client` must match the leaf cert extracted from the evidence PEM. This proves the live TLS connection uses the same certificate attested by the TEE. |
-| **CAA DNS records** | The custom domain has a CAA CNAME alias pointing to the gateway domain (`_.dstack-base-prod5.phala.network`), which restricts certificate issuance to Let's Encrypt via DNS-01 with a specific ACME account URI — ensuring only the TEE-controlled ACME flow can obtain certificates. |
-
-#### Governance Layer
-
-| Check | What it proves |
-|-------|----------------|
-| **DstackApp contract** | The compose-hash must be whitelisted via `allowedComposeHashes(bytes32)` before the CVM will boot. |
-| **KMS Phala app contract** | Whitelists allowed OS images (`allowedOsImages`) and KMS instances (`kmsAllowedAggregatedMrs`). Only whitelisted versions can boot. |
-| **AccountConfig contract** | Governs Lit Chipotle's permission model on Base — account ownership, API key scopes, PKP registries, and action groups. |
-| **Safe multisig** | All three contracts above are administered by a 2/3 Safe multisig ([`0xF688411c0FFc300cAb33EB1dA651DBb3E6891098`](https://basescan.org/address/0xF688411c0FFc300cAb33EB1dA651DBb3E6891098)) on Base. Production deployments use a two-phase CI workflow: propose → approve via Safe UI → execute. |
-
-If all checks pass, the CVM is running your exact code on genuine TEE hardware with no security gaps.
-
-## After Verification — Certificate Pinning
-
-Once full verification passes, pin the TLS certificate fingerprint:
-
-1. Record the SHA-256 fingerprint from the verification above.
-2. On subsequent connections, validate the cert matches the pinned fingerprint — this is fast and doesn't require re-running attestation.
-3. **When to re-verify**: After any CVM redeployment, a new TLS cert is generated inside the TEE. Re-run the full verification and update your pinned fingerprint.
-
-## Further Reading
-
-- [Phala: Zero-Trust TLS (TEE-Controlled Domain Certificates)](https://docs.phala.com/dstack/design-documents/tee-controlled-domain-certificates)
-- [Phala: Complete Chain of Trust](https://docs.phala.com/phala-cloud/attestation/chain-of-trust)
-- [Phala: Verify Your Application](https://docs.phala.com/phala-cloud/attestation/verify-your-application)
-- [Phala: Get Attestation](https://docs.phala.com/phala-cloud/attestation/get-attestation)
-- [RTMR3 Calculator](https://rtmr3-calculator.vercel.app/) — web tool for computing compose hashes
-- [dstack Verification Script](https://github.com/Dstack-TEE/dstack-examples/blob/main/attestation/rtmr3-based/verify.py) — reference Python implementation
-- [Phala Trust Center](https://github.com/Phala-Network/trust-center) — reference verification implementation
-- [Sigstore cosign](https://docs.sigstore.dev/cosign/overview/)
