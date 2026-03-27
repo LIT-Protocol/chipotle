@@ -109,7 +109,9 @@ services:
       # Route 53 provider docs (env vars, optional role assumption):
       # https://github.com/Dstack-TEE/dstack-examples/blob/main/custom-domain/dstack-ingress/DNS_PROVIDERS.md
       DOMAIN: "${CERTBOT_DOMAIN}"
-      GATEWAY_DOMAIN: "_.dstack-base-prod5.phala.network"
+      # DSTACK_GATEWAY_DOMAIN is auto-populated by Phala Cloud into the CVM.
+      # https://docs.phala.com/phala-cloud/networking/specifications
+      GATEWAY_DOMAIN: "_.${DSTACK_GATEWAY_DOMAIN}"
       DNS_PROVIDER: "route53"
       TARGET_ENDPOINT: "http://lit-api-server:8000"
       CERTBOT_EMAIL: "admin@litprotocol.com"
