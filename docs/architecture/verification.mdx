@@ -1,0 +1,226 @@
+---
+title: "Security & Verification"
+description: "How to verify that your connection to Lit Chipotle terminates inside a genuine TEE running unmodified code."
+---
+
+## Zero-Trust TLS
+
+**What is Zero-Trust TLS?** In traditional web hosting, you trust the server operator not to inspect or tamper with your traffic. Zero-Trust TLS (ZT-TLS) eliminates this trust assumption entirely. The TLS private key is generated **inside** the Trusted Execution Environment (TEE) and **never leaves it** — not even the cloud provider, OS administrator, or Lit Protocol team can extract it.
+
+**How it works for Lit Chipotle:**
+
+1. The dstack gateway running inside the CVM generates a private key using secrets derived from the dstack-KMS (itself a TEE).
+2. It requests a TLS certificate from Let's Encrypt via ACME DNS-01 challenge — no ports 80/443 are exposed during verification.
+3. DNS CAA records for the domain restrict which CAs can issue certificates, ensuring only TEE-controlled ACME can obtain a cert.
+4. The certificate, key, and their SHA-256 hashes are recorded as evidence files. These hashes are embedded in the Intel TDX attestation quote's `reportData` field.
+5. Because the quote is signed by Intel's TDX Attestation Key and bound to the hash chain, anyone can cryptographically prove the certificate was generated inside this specific enclave.
+
+**What this means:** When you connect to `api.chipotle.litprotocol.com` over HTTPS, the TLS handshake completes **inside the TEE**. No proxy, load balancer, or CDN can intercept the traffic. If the TLS handshake succeeds and the certificate is valid, you are provably talking to the TEE — not to any intermediary.
+
+**Contrast with traditional TLS:** Traditional TLS proves identity (the server holds the private key for this domain) but says nothing about *where* the key lives or *what code* uses it. ZT-TLS closes that gap: the key can only exist inside attested TEE hardware.
+
+<Note>
+Zero-Trust TLS means the encryption endpoint is the trust boundary. Once you verify the certificate was issued to the TEE, the HTTPS connection itself becomes your proof of confidentiality.
+</Note>
+
+For the full design, see [Phala: TEE-Controlled Domain Certificates](https://docs.phala.com/dstack/design-documents/tee-controlled-domain-certificates).
+
+## Quick TLS Verification
+
+Given Zero-Trust TLS, simple certificate validation already gives strong guarantees. This is sufficient for most users.
+
+```bash
+# Inspect the TLS certificate
+openssl s_client -connect api.chipotle.litprotocol.com:443 \
+  -servername api.chipotle.litprotocol.com </dev/null 2>/dev/null \
+  | openssl x509 -noout -fingerprint -sha256 -dates -subject
+```
+
+- The certificate is issued by **Let's Encrypt** (a public CA) to the exact domain.
+- Because ZT-TLS guarantees the private key lives only in the TEE, a valid TLS handshake = connection to the TEE.
+- For programmatic clients: **pin the certificate fingerprint** after initial verification (see [Certificate Pinning](#after-verification--certificate-pinning) below).
+
+## Full Chain of Trust Verification
+
+**Why go further?** TLS validation proves your connection is secure, but not:
+
+- What **code** is running inside the TEE
+- Whether the **hardware** is genuine Intel TDX
+- Whether the code was **authorized** by on-chain governance
+- Whether the **OS** and **KMS** are unmodified
+
+This section covers all 4 layers per the [Phala Complete Chain of Trust](https://docs.phala.com/phala-cloud/attestation/chain-of-trust).
+
+### Step 0: Quick Automated Verification
+
+This mirrors the CI workflow that runs on every deployment. Save the Python script below as `fix-attestation-event-log.py`, then run the verification commands.
+
+<CodeGroup>
+```python fix-attestation-event-log.py
+#!/usr/bin/env python3
+"""Fix event log for dstack verifier: compute digests for runtime events with empty digest.
+
+The dstack guest-agent strips digests from runtime events (RTMR3, event_type 0x08000001)
+to reduce response size. The digest is deterministically derived as
+SHA384(event_type || ":" || event || ":" || payload), so it can be recomputed.
+The Docker verifier's serde parser rejects digest="", so we fill in the computed digest
+before calling the verifier.
+"""
+import hashlib
+import json
+import struct
+import sys
+
+DSTACK_RUNTIME = 0x08000001
+
+
+def hex_to_bytes(s: str) -> bytes:
+    return bytes.fromhex(s) if s else b""
+
+
+def compute_digest(event: str, payload_hex: str) -> str:
+    payload = hex_to_bytes(payload_hex)
+    data = struct.pack("<I", DSTACK_RUNTIME) + b":" + event.encode() + b":" + payload
+    return hashlib.sha384(data).hexdigest()
+
+
+def main() -> None:
+    attest_path = sys.argv[1]
+    with open(attest_path) as f:
+        d = json.load(f)
+    events = json.loads(d["event_log"])
+    for e in events:
+        if e.get("digest") == "" and e.get("event_type") == DSTACK_RUNTIME:
+            e["digest"] = compute_digest(e.get("event", ""), e.get("event_payload", ""))
+    d["event_log"] = json.dumps(events)
+    q = d["quote"]
+    q = q[2:] if isinstance(q, str) and q.startswith("0x") else q
+    out = {"quote": q, "event_log": d["event_log"], "vm_config": d["vm_config"], "attestation": None}
+    json.dump(out, sys.stdout, separators=(",", ":"))
+
+
+if __name__ == "__main__":
+    main()
+```
+
+```bash Verification commands
+# 1. Fetch attestation from the live API
+curl -sf https://api.chipotle.litprotocol.com/attestation > attestation.json
+
+# 2. Fix empty digests in runtime events (see note below)
+python3 fix-attestation-event-log.py attestation.json > verify-request.json
+
+# 3. Run the official dstack verifier
+docker run --rm -v $(pwd):/verify -w /verify --platform linux/amd64 \
+  dstacktee/dstack-verifier:latest --verify /verify/verify-request.json
+
+# 4. Check result
+python3 -c '
+import json
+v = json.load(open("verify-request.json.verification.json"))
+print("VALID" if v.get("is_valid") else "INVALID")
+'
+```
+</CodeGroup>
+
+<Note>
+The dstack guest-agent strips digests from RTMR3 runtime events to reduce response size. The fix script recomputes them as `SHA384(event_type || ":" || event || ":" || payload)`. The Docker verifier's parser rejects empty digests, so this preprocessing step is necessary.
+</Note>
+
+### Layer 1: Application — Is This the Right Code?
+
+**compose-hash** — The SHA-256 of the docker-compose config is recorded in RTMR3. Fetch `/info` to get `compose_hash` and `tcb_info.app_compose`. To verify manually:
+
+```bash
+curl -sf https://api.chipotle.litprotocol.com/info | python3 -c '
+import sys, json
+info = json.load(sys.stdin)
+print("compose_hash:", info["compose_hash"])
+print("app_compose:", info["tcb_info"]["app_compose"][:200], "...")
+'
+```
+
+```bash
+# Recompute the hash from app_compose
+echo -n '<app_compose value>' | sha256sum
+```
+
+**Docker image digests** — All 4 images (lit-actions, lit-api-server, lit-static, otel-collector) must use `@sha256:` digest pinning (no mutable tags like `:latest`). Inspect the `app_compose` from `/info` to confirm.
+
+**Image provenance (Sigstore)** — Each image is signed with Sigstore cosign (keyless, GitHub OIDC). Verify that an image was built by GitHub Actions from the LIT-Protocol/lit-node-express repo:
+
+```bash
+cosign verify \
+  --certificate-identity-regexp "https://github.com/LIT-Protocol/lit-node-express/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  <image>@<digest>
+```
+
+This proves the image was built by GitHub Actions from the `LIT-Protocol/lit-node-express` repository.
+
+**RTMR3 event log replay** — Each event extends RTMR3: `RTMR3_new = SHA384(RTMR3_old || SHA384(event))`. The dstack-verifier replays all events and confirms the final value matches the quoted RTMR3. This ensures no events were added, removed, or modified.
+
+### Layer 2: Platform — Is the Hardware Genuine?
+
+**TDX quote signature** — Verified against Intel root CA. Proves genuine TDX hardware. The dstack-verifier handles this automatically. Alternatively, use the Phala Cloud API:
+
+```bash
+# Extract the quote hex and verify via Phala Cloud
+curl -sf https://api.chipotle.litprotocol.com/attestation \
+  | python3 -c 'import sys,json; q=json.load(sys.stdin)["quote"]; print(q[2:] if q.startswith("0x") else q)' \
+  > quote.hex
+
+curl -X POST https://cloud-api.phala.network/api/v1/attestations/verify \
+  -H "Content-Type: application/json" \
+  -d "{\"hex\": \"$(cat quote.hex)\"}"
+```
+
+**OS measurements (MRTD, RTMR0-2)** — Firmware, kernel, and boot parameters are measured into these registers. They must match known-good values from the dstack release.
+
+**KMS identity** — The `key-provider` event in RTMR3 records the KMS root CA public key hash. This binds the CVM to a specific trusted KMS — if someone substituted a rogue KMS, this hash would change and RTMR3 verification would fail.
+
+**KMS attestation** — The KMS itself runs in a TEE with its own attestation quote. Phala's Trust Center verifies this independently.
+
+### Layer 3: Network — Does TLS Terminate in the TEE?
+
+**Evidence files** — The `/evidences/` endpoint on the CVM serves `cert.pem`, `sha256sum.txt`, and `quote.json`. The SHA-256 hash of the certificate is embedded in the quote's `reportData`.
+
+**Certificate fingerprint match** — Compare what `openssl s_client` shows with the attested cert hash from the evidence files:
+
+```bash
+# Get the certificate fingerprint from the live connection
+openssl s_client -connect api.chipotle.litprotocol.com:443 \
+  -servername api.chipotle.litprotocol.com </dev/null 2>/dev/null \
+  | openssl x509 -noout -fingerprint -sha256
+
+# Compare with the attested hash from evidence files
+# The sha256sum.txt in /evidences/ should contain a matching hash
+```
+
+**CAA DNS records** — Verify that certificate issuance is restricted to Let's Encrypt only, through TEE-controlled ACME:
+
+```bash
+dig CAA api.chipotle.litprotocol.com
+```
+
+### Layer 4: Governance — Who Authorized This Code?
+
+**On-chain whitelisting** — The compose-hash must be registered in the DstackApp smart contract on Base before the CVM will accept it. This is controlled by the deployer key.
+
+**AccountConfig contract** — [`0x4c8eb9f329ebfdb369f0c90954875ef8f568ad24`](https://basescan.org/address/0x4c8eb9f329ebfdb369f0c90954875ef8f568ad24) on Base governs Lit Chipotle's permission model — account ownership, API key scopes, PKP registries, and action groups are all managed here. Inspect the contract on [Basescan](https://basescan.org/address/0x4c8eb9f329ebfdb369f0c90954875ef8f568ad24) to verify ownership and permissions.
+
+## After Verification — Certificate Pinning
+
+Once full verification passes, pin the TLS certificate fingerprint:
+
+1. Record the SHA-256 fingerprint from the verification above.
+2. On subsequent connections, validate the cert matches the pinned fingerprint — this is fast and doesn't require re-running attestation.
+3. **When to re-verify**: After any CVM redeployment, a new TLS cert is generated inside the TEE. Re-run the full verification and update your pinned fingerprint.
+
+## Further Reading
+
+- [Phala: Zero-Trust TLS (TEE-Controlled Domain Certificates)](https://docs.phala.com/dstack/design-documents/tee-controlled-domain-certificates)
+- [Phala: Complete Chain of Trust](https://docs.phala.com/phala-cloud/attestation/chain-of-trust)
+- [Phala: Verify Your Application](https://docs.phala.com/phala-cloud/attestation/verify-your-application)
+- [Phala: Get Attestation](https://docs.phala.com/phala-cloud/attestation/get-attestation)
+- [Sigstore cosign](https://docs.sigstore.dev/cosign/overview/)
