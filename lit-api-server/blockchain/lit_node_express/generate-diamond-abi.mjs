@@ -16,6 +16,7 @@ const FACETS = [
   'ViewsFacet',
   'APIConfigFacet',
   'BillingFacet',
+  'OwnershipFacet',
 ];
 
 const ARTIFACTS_DIR = "artifacts/contracts";
@@ -23,17 +24,14 @@ const OUT_NAME = "AccountConfig";
 
 async function findArtifact(name) {
   // Hardhat stores artifacts at artifacts/contracts/<File>.sol/<Name>.json
-  const pattern = `${ARTIFACTS_DIR}/**/${name}.json`;
-  const matches = [];
-  for await (const f of glob(pattern)) {
-    // Skip debug artifacts (*.dbg.json)
-    if (!f.endsWith(".dbg.json")) matches.push(f);
+  // Some facets (e.g. OwnershipFacet) live under artifacts/libraries/
+  for (const dir of [ARTIFACTS_DIR, "artifacts"]) {
+    const pattern = `${dir}/**/${name}.json`;
+    for await (const f of glob(pattern)) {
+      if (!f.endsWith(".dbg.json")) return f;
+    }
   }
-  if (matches.length === 0) throw new Error(`Artifact not found for: ${name}`);
-  if (matches.length > 1) {
-    console.warn(`Multiple artifacts for ${name}: ${matches.join(", ")} — using first`);
-  }
-  return matches[0];
+  throw new Error(`Artifact not found for: ${name}`);
 }
 
 function sigKey(item) {
