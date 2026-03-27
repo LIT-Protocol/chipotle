@@ -1,7 +1,7 @@
 # Phase 2: Execute Safe-approved compose hash and commit the Phala CVM deployment.
 #
 # This workflow runs AFTER Safe multisig signers have approved the addComposeHash
-# transaction proposed by Phase 1 (deploy-phala.yml). It:
+# transaction proposed by Phase 1 (prod-propose-compose-hash.yml). It:
 #   1. Downloads the deployment context artifact from Phase 1
 #   2. Executes the approved Safe transaction on-chain
 #   3. Commits the Phala deployment using the on-chain tx hash
@@ -12,7 +12,7 @@
 #   PHALA_CLOUD_API_KEY - From Phala Cloud Dashboard > API Tokens
 #   SAFE_EXECUTOR_PRIVATE_KEY - Private key for executing approved Safe transactions
 
-name: Execute Phala CVM Deploy (Phase 2)
+name: "Prod: Deploy Execute"
 
 on:
   workflow_dispatch:

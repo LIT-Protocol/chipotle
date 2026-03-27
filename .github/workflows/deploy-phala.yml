@@ -4,7 +4,7 @@
 #   push to next → chipotle-next (direct automated deploy)
 #   push to main → chipotle-dev  (direct automated deploy)
 #
-# For production (v* tag) deploys, see propose-compose-hash.yml and deploy-phala-execute.yml.
+# For production (v* tag) deploys, see prod-propose-compose-hash.yml and prod-deploy-execute.yml.
 #
 # Image provenance (DR-1b): Each image is signed with Sigstore (cosign keyless) immediately
 # after push. Signatures are recorded in the public Rekor transparency log, binding the image
