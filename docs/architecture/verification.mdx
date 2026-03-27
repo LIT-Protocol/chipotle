@@ -285,7 +285,7 @@ The compose-hash must be registered in the **DstackApp** smart contract on Base 
 1. Go to the [Phala Cloud dashboard](https://cloud.phala.network) and look up the application by its `app_id` (available from `GET /info`). The dashboard shows the associated DstackApp contract address.
 2. Verify the contract is the one your CVM is attached to by checking the `app_id` in the `/info` response matches the app registered in the contract on Basescan.
 
-For Lit Chipotle production, the DstackApp contract is [`0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C`](https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C).
+For Lit Chipotle production, the DstackApp contract is [`0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C`](https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C). The KMS Phala app contract is [`0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC`](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC).
 
 ```bash
 # Requires `cast` from Foundry (https://book.getfoundry.sh)
@@ -300,7 +300,13 @@ cast call "$DSTACK_APP" "allowedComposeHashes(bytes32)" "$COMPOSE_HASH" --rpc-ur
 # If it returns 0x...00 (false), the CVM is running unauthorized code.
 ```
 
-The **AccountConfig** contract ([`0x4c8eb9f329ebfdb369f0c90954875ef8f568ad24`](https://basescan.org/address/0x4c8eb9f329ebfdb369f0c90954875ef8f568ad24)) on Base governs Lit Chipotle's permission model — account ownership, API key scopes, PKP registries, and action groups. Inspect it on Basescan to verify ownership and permissions.
+**Governance via Safe multisig:** All on-chain governance actions are controlled by a 2/3 Safe multisig ([`0xF688411c0FFc300cAb33EB1dA651DBb3E6891098`](https://basescan.org/address/0xF688411c0FFc300cAb33EB1dA651DBb3E6891098)) on Base. This Safe administers:
+
+- **DstackApp** ([`0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C`](https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C)) — compose-hash whitelisting for the Lit Chipotle CVM
+- **KMS Phala app** ([`0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC`](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC)) — KMS configuration and allowed OS images
+- **AccountConfig** — _details coming soon_
+
+Any governance action (e.g., whitelisting a new compose-hash, updating allowed OS images, or upgrading the AccountConfig Diamond) requires at least 2 of 3 signers. Production deployments use a two-phase workflow: CI proposes the transaction to the Safe, and signers approve it through the Safe UI before the deployment can proceed.
 
 ### Understanding the Layers
 
@@ -347,9 +353,10 @@ The TDX quote contains hardware-measured registers that attest the entire boot c
 
 | Check | What it proves |
 |-------|----------------|
-| **DstackApp contract** | The compose-hash must be whitelisted via `allowedComposeHashes(bytes32)` before the CVM will boot. Only the deployer key can add hashes. |
-| **DstackKms contract** | Whitelists allowed OS images (`allowedOsImages`) and KMS instances (`kmsAllowedAggregatedMrs`). Only whitelisted versions can boot. |
+| **DstackApp contract** | The compose-hash must be whitelisted via `allowedComposeHashes(bytes32)` before the CVM will boot. |
+| **KMS Phala app contract** | Whitelists allowed OS images (`allowedOsImages`) and KMS instances (`kmsAllowedAggregatedMrs`). Only whitelisted versions can boot. |
 | **AccountConfig contract** | Governs Lit Chipotle's permission model on Base — account ownership, API key scopes, PKP registries, and action groups. |
+| **Safe multisig** | All three contracts above are administered by a 2/3 Safe multisig ([`0xF688411c0FFc300cAb33EB1dA651DBb3E6891098`](https://basescan.org/address/0xF688411c0FFc300cAb33EB1dA651DBb3E6891098)) on Base. Production deployments use a two-phase CI workflow: propose → approve via Safe UI → execute. |
 
 If all checks pass, the CVM is running your exact code on genuine TEE hardware with no security gaps.
 
