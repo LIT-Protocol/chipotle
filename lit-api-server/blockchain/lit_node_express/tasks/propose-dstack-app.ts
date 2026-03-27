@@ -71,7 +71,7 @@ task("propose-dstack-app", "Propose an AppAuth compose-hash whitelisting through
 
     const apiKit = new SafeApiKit({ chainId: BigInt(chainId) });
 
-    const signerAddress = await protocolKit.getAddress();
+    const signerAddress = new ethers.Wallet(proposerKey).address;
 
     await apiKit.proposeTransaction({
       safeAddress,

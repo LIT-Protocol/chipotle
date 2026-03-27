@@ -1,6 +1,7 @@
 import { task } from "hardhat/config";
 import SafeApiKit from "@safe-global/api-kit";
 import Safe from "@safe-global/protocol-kit";
+import { ethers } from "ethers";
 import { readFileSync } from "fs";
 
 task("propose-diamond-cut", "Propose a diamondCut transaction through a Safe multisig")
@@ -66,13 +67,7 @@ task("propose-diamond-cut", "Propose a diamondCut transaction through a Safe mul
     // Submit to Safe Transaction Service
     const apiKit = new SafeApiKit({ chainId: BigInt(chainId) });
 
-    const signerAddress = await (
-      await Safe.init({
-        provider: rpcUrl,
-        signer: proposerKey,
-        safeAddress,
-      })
-    ).getAddress();
+    const signerAddress = new ethers.Wallet(proposerKey).address;
 
     await apiKit.proposeTransaction({
       safeAddress,
