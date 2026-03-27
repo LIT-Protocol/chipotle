@@ -176,15 +176,17 @@ print("compose-hash OK")
 
 # 2b. Verify all images use @sha256: digest pinning (no mutable tags)
 python3 -c '
-import json, yaml
+import json, re
 info = json.load(open("info.json"))
-compose = yaml.safe_load(json.loads(info["tcb_info"]["app_compose"])["docker_compose_file"])
-for name, svc in compose.get("services", {}).items():
-    img = svc.get("image", "")
+compose_yaml = json.loads(info["tcb_info"]["app_compose"])["docker_compose_file"]
+images = re.findall(r"image:\s*(.+)", compose_yaml)
+assert images, "No image directives found"
+for img in images:
+    img = img.strip()
     pinned = "@sha256:" in img
     status = "OK" if pinned else "NOT PINNED"
-    print(f"  {name}: {img[:80]}... {status}")
-    assert pinned, f"{name} is not digest-pinned"
+    print(f"  {img[:80]}  {status}")
+    assert pinned, f"Image is not digest-pinned: {img}"
 print("All images digest-pinned OK")
 '
 ```
