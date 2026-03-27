@@ -257,7 +257,11 @@ pub async fn deploy_diamond(
         (),
     )
     .await?;
-    facet_cuts.extend(get_facet_cuts(&ownership_facet, existing_selectors, display));
+    facet_cuts.extend(get_facet_cuts(
+        &ownership_facet,
+        existing_selectors,
+        display,
+    ));
 
     let api_config = deploy_facet_from_json(
         abis_folder,
