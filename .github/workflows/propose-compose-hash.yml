@@ -1,0 +1,237 @@
+# Propose Compose Hash — Production deployment Phase 1
+#
+# Triggered by pushing a version tag (v*). Builds Sigstore-signed images, prepares
+# the Phala CVM deployment, and proposes the compose hash to the Safe multisig for
+# approval. After signers approve, Phase 2 (deploy-phala-execute.yml) is triggered
+# manually to execute the Safe transaction and finalize the deployment.
+#
+# This workflow is designed to be auditable by third parties. The compose hash is a
+# commitment to the exact container images that will run in the TEE. The Safe multisig
+# ensures that at least 2-of-N signers must approve before the hash is whitelisted
+# on the AppAuth (DstackApp) contract on Base.
+#
+# Flow:
+#   1. Build + sign images with Sigstore
+#   2. phala deploy --prepare-only → get compose hash + commit token
+#   3. Propose addComposeHash(hash) to Safe multisig on Base
+#   4. Upload deployment context artifact for Phase 2
+#
+# Image provenance (DR-1b): Each image is signed with Sigstore (cosign keyless).
+# To verify:
+#   cosign verify \
+#     --certificate-identity-regexp "https://github.com/LIT-Protocol/lit-node-express/.*" \
+#     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+#     <image>@<digest>
+#
+# Required secrets:
+#   DOCKERHUB_TOKEN - Docker Hub PAT
+#   PHALA_CLOUD_API_KEY - Phala Cloud API token
+#   SAFE_PROPOSER_PRIVATE_KEY - EOA key for proposing Safe transactions
+#
+# Required vars:
+#   DOCKER_IMAGE - Base image path (e.g. docker.io/username/lit-node-express)
+#   DOCKERHUB_USERNAME - Docker Hub username
+#   SAFE_ADDRESS_CHIPOTLE_PROD - Safe multisig address on Base
+#   APP_AUTH_ADDRESS_CHIPOTLE_PROD - AppAuth (DstackApp) contract address on Base
+#   CERTBOT_AWS_ACCESS_KEY_ID - Route 53 IAM access key for DNS-01 challenge
+#   CERTBOT_AWS_ROLE_ARN      - IAM role ARN for STS assumption
+#   CERTBOT_AWS_REGION        - AWS region for STS endpoint
+
+name: "Propose Compose Hash"
+
+concurrency:
+  group: propose-compose-hash
+  cancel-in-progress: true
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: self-hosted
+    permissions:
+      id-token: write  # required for Sigstore keyless signing (OIDC token)
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service: lit-actions
+            dockerfile: Dockerfile.lit-actions
+          - service: lit-api-server
+            dockerfile: Dockerfile.lit-api-server
+          - service: otel-collector
+            dockerfile: Dockerfile.otel-collector
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@v3
+
+      - name: Log in to Docker Registry
+        uses: docker/login-action@v3
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.service }}
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ vars.DOCKER_IMAGE }}-${{ matrix.service }}:${{ github.sha }}
+          build-args: |
+            ${{ matrix.service == 'lit-api-server' && 'NODE_CONFIG=NodeConfig.prod.toml' || '' }}
+
+      - name: Sign image with Sigstore (keyless)
+        run: |
+          cosign sign --yes \
+            "${{ vars.DOCKER_IMAGE }}-${{ matrix.service }}@${{ steps.push.outputs.digest }}"
+
+      - name: Save image digest
+        run: echo "${{ steps.push.outputs.digest }}" > digest-${{ matrix.service }}.txt
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.service }}
+          path: digest-${{ matrix.service }}.txt
+
+  prepare-deploy:
+    needs: [build]
+    runs-on: self-hosted
+    outputs:
+      compose_hash: ${{ steps.prepare.outputs.compose_hash }}
+      commit_token: ${{ steps.prepare.outputs.commit_token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download image digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          merge-multiple: true
+
+      - name: Prepare docker-compose for deployment (digest-pinned)
+        run: |
+          DIGEST_LIT_ACTIONS=$(cat digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DIGEST_LIT_API_SERVER=$(cat digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DIGEST_OTEL_COLLECTOR=$(cat digest-otel-collector.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DOMAIN="api.chipotle.litprotocol.com"
+          sed \
+            -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|${{ vars.DOCKER_IMAGE }}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
+            -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|${{ vars.DOCKER_IMAGE }}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
+            -e "s|\${DOCKER_IMAGE_OTEL_COLLECTOR}|${{ vars.DOCKER_IMAGE }}-otel-collector@${DIGEST_OTEL_COLLECTOR}|g" \
+            -e "s|\${GCP_PROJECT_ID}|chipotle-prod|g" \
+            -e "s|\${CERTBOT_DOMAIN}|${DOMAIN}|g" \
+            -e "s|\${CERTBOT_AWS_ACCESS_KEY_ID}|${{ vars.CERTBOT_AWS_ACCESS_KEY_ID }}|g" \
+            -e "s|\${CERTBOT_AWS_SECRET_ACCESS_KEY}|${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}|g" \
+            -e "s|\${CERTBOT_AWS_ROLE_ARN}|${{ vars.CERTBOT_AWS_ROLE_ARN }}|g" \
+            -e "s|\${CERTBOT_AWS_REGION}|${{ vars.CERTBOT_AWS_REGION }}|g" \
+            docker-compose.phala.yml > docker-compose.deploy.yml
+          cat docker-compose.deploy.yml
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Phala CLI
+        run: npm install -g phala
+
+      - name: Prepare deployment (get compose hash + commit token)
+        id: prepare
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+        run: |
+          OUTPUT=$(phala deploy \
+            --prepare-only \
+            -c docker-compose.deploy.yml \
+            --cvm-id chipotle-prod \
+            --json)
+          echo "$OUTPUT"
+          COMPOSE_HASH=$(echo "$OUTPUT" | jq -r '.compose_hash')
+          COMMIT_TOKEN=$(echo "$OUTPUT" | jq -r '.commit_token')
+          if [ -z "$COMPOSE_HASH" ] || [ "$COMPOSE_HASH" = "null" ]; then
+            echo "::error::Failed to extract compose_hash from phala deploy --prepare-only output"
+            exit 1
+          fi
+          if [ -z "$COMMIT_TOKEN" ] || [ "$COMMIT_TOKEN" = "null" ]; then
+            echo "::error::Failed to extract commit_token from phala deploy --prepare-only output"
+            exit 1
+          fi
+          echo "compose_hash=$COMPOSE_HASH" >> "$GITHUB_OUTPUT"
+          echo "commit_token=$COMMIT_TOKEN" >> "$GITHUB_OUTPUT"
+
+  propose-compose-hash:
+    needs: [prepare-deploy]
+    runs-on: self-hosted
+    outputs:
+      safe_tx_hash: ${{ steps.propose.outputs.safe_tx_hash }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install contract dependencies
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npm ci
+
+      - name: Compile contracts
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npx hardhat compile
+
+      - name: Propose addComposeHash to Safe
+        id: propose
+        working-directory: lit-api-server/blockchain/lit_node_express
+        env:
+          PROPOSER_PRIVATE_KEY: ${{ secrets.SAFE_PROPOSER_PRIVATE_KEY }}
+        run: |
+          OUTPUT=$(npx hardhat propose-dstack-app \
+            --network base \
+            --safe "${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" \
+            --app-auth "${{ vars.APP_AUTH_ADDRESS_CHIPOTLE_PROD }}" \
+            --compose-hash "${{ needs.prepare-deploy.outputs.compose_hash }}" \
+            2>&1 | tee /dev/stderr)
+          SAFE_TX_HASH=$(echo "$OUTPUT" | grep '^SAFE_TX_HASH=' | cut -d= -f2)
+          if [ -z "$SAFE_TX_HASH" ]; then
+            echo "::error::Failed to extract SAFE_TX_HASH from propose-dstack-app output"
+            exit 1
+          fi
+          echo "safe_tx_hash=$SAFE_TX_HASH" >> "$GITHUB_OUTPUT"
+
+  upload-deploy-context:
+    needs: [prepare-deploy, propose-compose-hash]
+    runs-on: self-hosted
+    steps:
+      - name: Create deployment context file
+        run: |
+          jq -n \
+            --arg compose_hash "${{ needs.prepare-deploy.outputs.compose_hash }}" \
+            --arg commit_token "${{ needs.prepare-deploy.outputs.commit_token }}" \
+            --arg safe_tx_hash "${{ needs.propose-compose-hash.outputs.safe_tx_hash }}" \
+            --arg phala_app_name "chipotle-prod" \
+            --arg base_url "https://api.chipotle.litprotocol.com" \
+            --arg api_root_url "https://api.chipotle.litprotocol.com/core/v1" \
+            --arg safe_address "${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" \
+            --arg version_tag "${{ github.ref_name }}" \
+            --arg source_sha "${{ github.sha }}" \
+            '{compose_hash: $compose_hash, commit_token: $commit_token, safe_tx_hash: $safe_tx_hash, phala_app_name: $phala_app_name, base_url: $base_url, api_root_url: $api_root_url, safe_address: $safe_address, version_tag: $version_tag, source_sha: $source_sha}' \
+            > deploy-context.json
+          echo "Deployment context:"
+          cat deploy-context.json
+
+      - name: Upload deployment context
+        uses: actions/upload-artifact@v4
+        with:
+          name: deploy-context
+          path: deploy-context.json
+          retention-days: 7
