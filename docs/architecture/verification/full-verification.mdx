@@ -1,0 +1,260 @@
+---
+title: "Full Verification Guide"
+description: "Step-by-step commands to verify every layer of the Lit Chipotle chain of trust: hardware attestation, application code, TLS certificates, and on-chain governance."
+---
+
+This is a complete, end-to-end how-to. It mirrors the CI workflow that runs on every Lit Chipotle deployment and covers all layers of the chain of trust.
+
+<Tip>
+**New to TEE verification?** You don't need to understand every cryptographic detail. Each step below is a self-contained check you can copy-paste into your terminal. The commands will output PASS or FAIL. If all steps pass, you have cryptographic proof that your connection terminates in genuine, unmodified TEE hardware running authorized code.
+</Tip>
+
+**Prerequisites:** `python3` (3.8+), `docker`, `openssl`, `dig`, and optionally [`cosign`](https://docs.sigstore.dev/cosign/system_config/installation/) and [`cast`](https://book.getfoundry.sh/getting-started/installation) (from Foundry).
+
+## 1. Verify the TDX attestation quote (Platform)
+
+**What this checks:** Is the server running on real Intel TDX hardware? The TDX attestation quote is like a hardware-signed certificate of authenticity — Intel's chips sign a statement about what software is running, and this step verifies that signature is genuine.
+
+Fetch the attestation from the live API and run the official dstack verifier. This validates the Intel TDX quote signature (proving genuine hardware), replays the RTMR3 event log (proving no events were tampered with), and checks OS measurements.
+
+Save the Python script below as `fix-attestation-event-log.py`, then run the verification commands.
+
+<CodeGroup>
+```python fix-attestation-event-log.py
+#!/usr/bin/env python3
+"""Fix event log for dstack verifier: compute digests for runtime events with empty digest.
+
+The dstack guest-agent strips digests from runtime events (RTMR3, event_type 0x08000001)
+to reduce response size. The digest is deterministically derived as
+SHA384(event_type || ":" || event || ":" || payload), so it can be recomputed.
+The Docker verifier's serde parser rejects digest="", so we fill in the computed digest
+before calling the verifier.
+"""
+import hashlib
+import json
+import struct
+import sys
+
+DSTACK_RUNTIME = 0x08000001
+
+
+def hex_to_bytes(s: str) -> bytes:
+    return bytes.fromhex(s) if s else b""
+
+
+def compute_digest(event: str, payload_hex: str) -> str:
+    payload = hex_to_bytes(payload_hex)
+    data = struct.pack("<I", DSTACK_RUNTIME) + b":" + event.encode() + b":" + payload
+    return hashlib.sha384(data).hexdigest()
+
+
+def main() -> None:
+    attest_path = sys.argv[1]
+    with open(attest_path) as f:
+        d = json.load(f)
+    events = json.loads(d["event_log"])
+    for e in events:
+        if e.get("digest") == "" and e.get("event_type") == DSTACK_RUNTIME:
+            e["digest"] = compute_digest(e.get("event", ""), e.get("event_payload", ""))
+    d["event_log"] = json.dumps(events)
+    q = d["quote"]
+    q = q[2:] if isinstance(q, str) and q.startswith("0x") else q
+    out = {"quote": q, "event_log": d["event_log"], "vm_config": d["vm_config"], "attestation": None}
+    json.dump(out, sys.stdout, separators=(",", ":"))
+
+
+if __name__ == "__main__":
+    main()
+```
+
+```bash Verification commands
+# 1. Fetch attestation from the live API
+curl -sf https://api.chipotle.litprotocol.com/attestation > attestation.json
+
+# 2. Fix empty digests in runtime events (see note below)
+python3 fix-attestation-event-log.py attestation.json > verify-request.json
+
+# 3. Run the official dstack verifier
+docker run --rm -v $(pwd):/verify -w /verify --platform linux/amd64 \
+  dstacktee/dstack-verifier:latest --verify /verify/verify-request.json
+
+# 4. Check result
+python3 -c '
+import json
+v = json.load(open("verify-request.json.verification.json"))
+print("VALID" if v.get("is_valid") else "INVALID")
+'
+```
+</CodeGroup>
+
+<Note>
+The dstack guest-agent strips digests from RTMR3 runtime events to reduce response size. The fix script recomputes them as `SHA384(event_type || ":" || event || ":" || payload)`. The Docker verifier's parser rejects empty digests, so this preprocessing step is necessary.
+</Note>
+
+If you prefer not to run the Docker verifier locally, you can verify the TDX quote signature via the Phala Cloud API:
+
+```bash
+# Extract the raw quote hex and verify via Phala Cloud
+QUOTE=$(python3 -c 'import json; q=json.load(open("attestation.json"))["quote"]; print(q[2:] if q.startswith("0x") else q)')
+
+curl -X POST https://cloud-api.phala.network/api/v1/attestations/verify \
+  -H "Content-Type: application/json" \
+  -d "{\"hex\": \"$QUOTE\"}"
+```
+
+## 2. Verify the application code (Application)
+
+**What this checks:** Is the TEE running the exact code you expect, with no modifications? This step verifies the Docker images and their configuration match what was built in CI from the public GitHub repository.
+
+```bash
+# Fetch app info (compose hash + full app-compose config)
+curl -sf https://api.chipotle.litprotocol.com/info > info.json
+
+# 2a. Verify compose-hash: the SHA-256 of the app-compose.json config
+#     (which includes docker-compose.yaml + metadata) is recorded in RTMR3.
+python3 -c '
+import json, hashlib
+info = json.load(open("info.json"))
+app_compose = info["tcb_info"]["app_compose"]
+computed = hashlib.sha256(app_compose.encode()).hexdigest()
+recorded = info["compose_hash"]
+print(f"Computed:  {computed}")
+print(f"Recorded:  {recorded}")
+assert computed == recorded, "MISMATCH"
+print("compose-hash OK")
+'
+
+# 2b. Verify all images use @sha256: digest pinning (no mutable tags)
+python3 -c '
+import json, re
+info = json.load(open("info.json"))
+compose_yaml = json.loads(info["tcb_info"]["app_compose"])["docker_compose_file"]
+images = re.findall(r"image:\s*(.+)", compose_yaml)
+assert images, "No image directives found"
+for img in images:
+    img = img.strip()
+    pinned = "@sha256:" in img
+    status = "OK" if pinned else "NOT PINNED"
+    print(f"  {img[:80]}  {status}")
+    assert pinned, f"Image is not digest-pinned: {img}"
+print("All images digest-pinned OK")
+'
+```
+
+**Verify image provenance with Sigstore** — Each image is signed with cosign (keyless, GitHub OIDC) during CI. This proves the image was built by GitHub Actions from the `LIT-Protocol/lit-node-express` repo:
+
+```bash
+# Install cosign: https://docs.sigstore.dev/cosign/system_config/installation/
+# Verify each image digest extracted from the compose config above
+cosign verify \
+  --certificate-identity-regexp "https://github.com/LIT-Protocol/lit-node-express/.*" \
+  --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+  <image>@<digest>
+```
+
+## 3. Verify TLS terminates in the TEE (Network)
+
+**What this checks:** Was the TLS certificate generated inside the TEE? This confirms your encrypted connection goes directly into the secure hardware — no proxy or intermediary can see your traffic.
+
+Lit Chipotle uses [dstack-ingress](https://github.com/Dstack-TEE/dstack-examples/tree/main/custom-domain/dstack-ingress) for custom-domain TLS. Unlike the default dstack gateway (which embeds cert hashes directly in the CVM's boot-time TDX quote via `reportData`), dstack-ingress runs as an application container and generates a **separate** TDX evidence quote after obtaining the Let's Encrypt certificate. This evidence quote binds the certificate to TDX hardware through a checksum chain:
+
+1. dstack-ingress obtains a Let's Encrypt cert via DNS-01 inside the TEE
+2. It computes `SHA-256` of each evidence file (cert PEM, ACME account) → `sha256sum.txt`
+3. It computes `SHA-256(sha256sum.txt)` and requests a TDX quote with this hash as `reportData`
+4. The evidence files and quote are served at `/evidences/` on the custom domain
+
+```bash
+# 3a. Download evidence files from the dstack-ingress container
+curl -sf https://api.chipotle.litprotocol.com/evidences/sha256sum.txt > evidences-sha256sum.txt
+curl -sf https://api.chipotle.litprotocol.com/evidences/quote.json > evidences-quote.json
+
+# Download the attested cert PEM (filename includes the domain)
+CERT_FILE=$(curl -sf https://api.chipotle.litprotocol.com/evidences/ \
+  | grep -o 'href="cert-[^"]*\.pem"' | sed 's/href="//;s/"//')
+curl -sf "https://api.chipotle.litprotocol.com/evidences/$CERT_FILE" > evidences-cert.pem
+
+# 3b. Verify the evidence checksum chain
+# The quote's reportData must equal SHA-256(sha256sum.txt)
+python3 -c '
+import hashlib, json
+
+# Compute SHA-256 of the sha256sum.txt file
+with open("evidences-sha256sum.txt", "rb") as f:
+    computed = hashlib.sha256(f.read()).hexdigest()
+
+# Extract reportData from the evidence quote
+eq = json.load(open("evidences-quote.json"))
+report_data = eq.get("report_data", "")
+# reportData is the hash zero-padded to 64 bytes (128 hex chars)
+attested = report_data[:64]
+
+print(f"SHA-256(sha256sum.txt): {computed}")
+print(f"Evidence reportData:    {attested}")
+assert computed == attested, "MISMATCH — evidence checksum chain broken"
+print("Evidence checksum chain OK")
+'
+
+# 3c. Verify the live TLS cert matches the attested cert
+# Extract the leaf cert (DER) fingerprint from what your TLS handshake received
+LIVE_CERT_HASH=$(openssl s_client -connect api.chipotle.litprotocol.com:443 \
+  -servername api.chipotle.litprotocol.com </dev/null 2>/dev/null \
+  | openssl x509 -outform DER 2>/dev/null \
+  | openssl dgst -sha256 -hex 2>/dev/null | awk '{print $NF}')
+
+# Extract the leaf cert (DER) fingerprint from the evidence PEM
+EVIDENCE_CERT_HASH=$(openssl x509 -in evidences-cert.pem -outform DER 2>/dev/null \
+  | openssl dgst -sha256 -hex 2>/dev/null | awk '{print $NF}')
+
+echo "Live TLS cert hash:     $LIVE_CERT_HASH"
+echo "Evidence cert hash:     $EVIDENCE_CERT_HASH"
+
+if [ "$LIVE_CERT_HASH" = "$EVIDENCE_CERT_HASH" ]; then
+  echo "TLS certificate matches evidence — OK"
+else
+  echo "MISMATCH: the served certificate does not match the attested evidence"
+fi
+
+# 3d. Verify CAA DNS records restrict certificate issuance
+# dstack-ingress sets a CAA CNAME alias on the custom domain pointing to the
+# gateway domain, which holds the actual CAA records restricting issuance to
+# Let's Encrypt with DNS-01 validation and a specific ACME account URI.
+echo ""
+echo "CAA alias on custom domain:"
+dig CAA api.chipotle.litprotocol.com +short
+echo "Resolved CAA policy:"
+dig CAA dstack-base-prod5.phala.network +short
+```
+
+## 4. Verify on-chain governance (Governance)
+
+**What this checks:** Was the code running in the TEE authorized through on-chain governance? The compose-hash (a fingerprint of the entire application configuration) must be registered in a smart contract on Base before the CVM will accept it. This means deploying new code requires an on-chain transaction — you can audit the full history on Basescan.
+
+The compose-hash must be registered in the **DstackApp** smart contract on Base before the CVM will accept it. A separate **KMS Phala app** contract whitelists allowed OS images and KMS instances. You can inspect both on [Basescan](https://basescan.org).
+
+**Finding the DstackApp contract address:** The DstackApp contract is the on-chain governance contract that authorizes what code the CVM can run. To find the correct address for a given CVM:
+
+1. Go to the [Phala Cloud dashboard](https://cloud.phala.network) and look up the application by its `app_id` (available from `GET /info`). The dashboard shows the associated DstackApp contract address.
+2. Verify the contract is the one your CVM is attached to by checking the `app_id` in the `/info` response matches the app registered in the contract on Basescan.
+
+For Lit Chipotle production, the DstackApp contract is [`0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C`](https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C). The KMS Phala app contract is [`0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC`](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC).
+
+```bash
+# Requires `cast` from Foundry (https://book.getfoundry.sh)
+DSTACK_APP="0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C"
+
+# Check if the compose-hash is whitelisted in DstackApp
+COMPOSE_HASH=$(python3 -c 'import json; print("0x" + json.load(open("info.json"))["compose_hash"])')
+echo "Compose hash: $COMPOSE_HASH"
+cast call "$DSTACK_APP" "allowedComposeHashes(bytes32)" "$COMPOSE_HASH" --rpc-url https://mainnet.base.org
+
+# A return value of 0x...01 (true) means the compose-hash is whitelisted.
+# If it returns 0x...00 (false), the CVM is running unauthorized code.
+```
+
+**Governance via Safe multisig:** All on-chain governance actions are controlled by a 2/3 Safe multisig ([`0xF688411c0FFc300cAb33EB1dA651DBb3E6891098`](https://basescan.org/address/0xF688411c0FFc300cAb33EB1dA651DBb3E6891098)) on Base. This Safe administers:
+
+- **DstackApp** ([`0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C`](https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C)) — compose-hash whitelisting for the Lit Chipotle CVM
+- **KMS Phala app** ([`0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC`](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC)) — KMS configuration and allowed OS images
+- **AccountConfig** — _details coming soon_
+
+Any governance action (e.g., whitelisting a new compose-hash, updating allowed OS images, or upgrading the AccountConfig Diamond) requires at least 2 of 3 signers. Production deployments use a two-phase workflow: CI proposes the transaction to the Safe, and signers approve it through the Safe UI before the deployment can proceed.

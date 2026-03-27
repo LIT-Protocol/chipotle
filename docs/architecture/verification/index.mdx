@@ -1,0 +1,64 @@
+---
+title: "Security & Verification"
+description: "How to verify that your connection to Lit Chipotle terminates inside a genuine TEE running unmodified code."
+---
+
+## Zero-Trust TLS
+
+**What is Zero-Trust TLS?** In traditional web hosting, you trust the server operator not to inspect or tamper with your traffic. Zero-Trust TLS (ZT-TLS) eliminates this trust assumption entirely. The TLS private key is generated **inside** the Trusted Execution Environment (TEE) and **never leaves it** — not even the cloud provider, OS administrator, or Lit Protocol team can extract it.
+
+**How it works for Lit Chipotle:**
+
+1. The [dstack-ingress](https://github.com/Dstack-TEE/dstack-examples/tree/main/custom-domain/dstack-ingress) container, running inside the CVM, generates a private key and requests a TLS certificate from Let's Encrypt via DNS-01 challenge (Route 53). The private key never leaves the TEE.
+2. DNS [CAA records](https://letsencrypt.org/docs/caa/) for the domain restrict which CAs can issue certificates and require DNS-01 validation with a specific ACME account URI, ensuring only the TEE-controlled ACME flow can obtain a cert.
+3. The certificate and ACME account are recorded as evidence files. Their SHA-256 checksums are hashed into a single digest that is embedded in a TDX attestation quote's `reportData` field.
+4. Because the quote is signed by Intel's TDX hardware root of trust and bound to this digest, anyone can cryptographically prove the certificate was generated inside this specific TEE.
+
+**What this means:** When you connect to `api.chipotle.litprotocol.com` over HTTPS, the TLS handshake completes **inside the TEE**. No proxy, load balancer, or CDN can intercept the traffic. If the TLS handshake succeeds and the certificate is valid, you are provably talking to the TEE — not to any intermediary.
+
+**Contrast with traditional TLS:** Traditional TLS proves identity (the server holds the private key for this domain) but says nothing about *where* the key lives or *what code* uses it. ZT-TLS closes that gap: the key can only exist inside attested TEE hardware.
+
+<Note>
+Zero-Trust TLS means the encryption endpoint is the trust boundary. Once you verify the certificate was issued to the TEE, the HTTPS connection itself becomes your proof of confidentiality.
+</Note>
+
+For the full design, see [Phala: TEE-Controlled Domain Certificates](https://docs.phala.com/dstack/design-documents/tee-controlled-domain-certificates).
+
+## Quick TLS Verification
+
+Given Zero-Trust TLS, simple certificate validation already gives strong guarantees. This is sufficient for most users.
+
+```bash
+# Inspect the TLS certificate
+openssl s_client -connect api.chipotle.litprotocol.com:443 \
+  -servername api.chipotle.litprotocol.com </dev/null 2>/dev/null \
+  | openssl x509 -noout -fingerprint -sha256 -dates -subject
+```
+
+- The certificate is issued by **Let's Encrypt** (a public CA) to the exact domain.
+- Because ZT-TLS guarantees the private key lives only in the TEE, a valid TLS handshake = connection to the TEE.
+- For programmatic clients: **pin the certificate fingerprint** after initial verification (see [Certificate Pinning](#certificate-pinning) below).
+
+## Certificate Pinning
+
+Once full verification passes, pin the TLS certificate fingerprint:
+
+1. Record the SHA-256 fingerprint from the verification above.
+2. On subsequent connections, validate the cert matches the pinned fingerprint — this is fast and doesn't require re-running attestation.
+3. **When to re-verify**: After any CVM redeployment, a new TLS cert is generated inside the TEE. Re-run the [full verification](/architecture/verification/full-verification) and update your pinned fingerprint.
+
+## What's Next
+
+- [Full Verification Guide](/architecture/verification/full-verification) — step-by-step commands to verify every layer of the chain of trust
+- [Chain of Trust Reference](/architecture/verification/chain-of-trust) — detailed explanation of what each verification step checks and why it matters
+
+## Further Reading
+
+- [Phala: Zero-Trust TLS (TEE-Controlled Domain Certificates)](https://docs.phala.com/dstack/design-documents/tee-controlled-domain-certificates)
+- [Phala: Complete Chain of Trust](https://docs.phala.com/phala-cloud/attestation/chain-of-trust)
+- [Phala: Verify Your Application](https://docs.phala.com/phala-cloud/attestation/verify-your-application)
+- [Phala: Get Attestation](https://docs.phala.com/phala-cloud/attestation/get-attestation)
+- [RTMR3 Calculator](https://rtmr3-calculator.vercel.app/) — web tool for computing compose hashes
+- [dstack Verification Script](https://github.com/Dstack-TEE/dstack-examples/blob/main/attestation/rtmr3-based/verify.py) — reference Python implementation
+- [Phala Trust Center](https://github.com/Phala-Network/trust-center) — reference verification implementation
+- [Sigstore cosign](https://docs.sigstore.dev/cosign/overview/)
