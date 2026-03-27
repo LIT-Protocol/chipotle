@@ -43,8 +43,7 @@ jobs:
 
       - name: Generate k6 client from spec
         run: |
-          npm install @grafana/openapi-to-k6
-          npx openapi-to-k6 --verbose "${{ runner.temp }}/openapi-from-source.json" "${{ runner.temp }}/k6-generated"
+          npx @grafana/openapi-to-k6 --verbose "${{ runner.temp }}/openapi-from-source.json" "${{ runner.temp }}/k6-generated"
 
       - name: Compare with committed litApiServer.ts
         run: |
