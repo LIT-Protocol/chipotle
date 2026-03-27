@@ -27,7 +27,7 @@ Action code submitted inline via the API or Dashboard must not exceed 10 MB. Dow
 |---|---|
 | Maximum execution time | 15 minutes |
 | Maximum memory | 128 MB |
-| Maximum outbound HTTP requests per action | 10 |
+| Maximum outbound HTTP requests per action | 100 |
 | Maximum response payload size | 1 MB |
 
 Actions that exceed the execution time limit are terminated and return a timeout error. Long-running workflows should be broken into smaller actions or offload heavy computation to an external service and fetch the result.
