@@ -300,10 +300,7 @@ pub async fn update_diamond(
     let data = build_diamond_update(client.clone(), abis_folder, diamond_address).await?;
 
     let diamond_cut_facet = DiamondCutFacet::new(diamond_address, client.clone());
-    print!(
-        "Cutting diamond with init  {:?} ...",
-        data.init_calldata
-    );
+    print!("Cutting diamond with init  {:?} ...", data.init_calldata);
     let tx = diamond_cut_facet.diamond_cut(data.facet_cuts, data.init_address, data.init_calldata);
     let pending_tx = tx.send().await?;
     let _receipt = pending_tx.await?;
@@ -349,18 +346,19 @@ pub async fn propose_update_diamond(
 
     // Build the encoded diamondCut calldata using the contract binding
     let diamond_cut_facet = DiamondCutFacet::new(diamond_address, client.clone());
-    let tx = diamond_cut_facet.diamond_cut(
-        data.facet_cuts,
-        data.init_address,
-        data.init_calldata,
-    );
+    let tx = diamond_cut_facet.diamond_cut(data.facet_cuts, data.init_address, data.init_calldata);
     let calldata = tx.calldata().expect("Failed to encode diamondCut calldata");
 
     // Build facets_deployed as a JSON object
     let facets_json: serde_json::Map<String, serde_json::Value> = data
         .facets_deployed
         .iter()
-        .map(|(name, addr)| (name.clone(), serde_json::Value::String(format!("{:?}", addr))))
+        .map(|(name, addr)| {
+            (
+                name.clone(),
+                serde_json::Value::String(format!("{:?}", addr)),
+            )
+        })
         .collect();
 
     let proposal = serde_json::json!({
