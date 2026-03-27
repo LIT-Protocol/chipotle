@@ -1,4 +1,4 @@
-# Deploy lit-api-server + lit-actions + lit-static + otel-collector to Phala CVM (tdx.large instance)
+# Deploy lit-api-server + lit-actions + otel-collector to Phala CVM (tdx.large instance)
 #
 # Deployment targets:
 #   push to next       → chipotle-next  (direct automated deploy)
@@ -28,14 +28,16 @@
 #
 # Required vars:
 #   DOCKER_IMAGE - Base image path, e.g. docker.io/username/lit-node-express
-#                  Four images are pushed:
+#                  Three images are pushed:
 #                    ${DOCKER_IMAGE}-lit-actions
 #                    ${DOCKER_IMAGE}-lit-api-server
-#                    ${DOCKER_IMAGE}-lit-static
 #                    ${DOCKER_IMAGE}-otel-collector
 #   DOCKERHUB_USERNAME - Docker Hub username
 #   SAFE_ADDRESS_CHIPOTLE_PROD - Safe multisig address for chipotle prod (v* tags)
 #   APP_AUTH_ADDRESS_CHIPOTLE_PROD - AppAuth contract address for chipotle prod (v* tags)
+#   CERTBOT_AWS_ACCESS_KEY_ID - Route 53 IAM access key for DNS-01 challenge
+#   CERTBOT_AWS_ROLE_ARN      - IAM role ARN for STS assumption (required by dstack-ingress)
+#   CERTBOT_AWS_REGION        - AWS region for STS endpoint (e.g. "us-east-1")
 
 name: Deploy to Phala CVM
 
@@ -63,6 +65,7 @@ jobs:
       safe_address: ${{ steps.set.outputs.safe_address }}
       app_auth_address: ${{ steps.set.outputs.app_auth_address }}
       version_tag: ${{ steps.set.outputs.version_tag }}
+      domain: ${{ steps.set.outputs.domain }}
     steps:
       - name: Set deployment target
         id: set
@@ -78,7 +81,7 @@ jobs:
             echo "safe_address=${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" >> "$GITHUB_OUTPUT"
             echo "app_auth_address=${{ vars.APP_AUTH_ADDRESS_CHIPOTLE_PROD }}" >> "$GITHUB_OUTPUT"
             echo "version_tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-            BASE_URL="TBD"
+            DOMAIN="TBD"
           elif [ "$REF" = "refs/heads/main" ]; then
             # Dev — direct automated deploy
             echo "phala_app_name=chipotle-dev" >> "$GITHUB_OUTPUT"
@@ -87,7 +90,7 @@ jobs:
             echo "node_config=NodeConfig.main.toml" >> "$GITHUB_OUTPUT"
             echo "use_safe=false" >> "$GITHUB_OUTPUT"
             echo "version_tag=" >> "$GITHUB_OUTPUT"
-            BASE_URL="https://f8fce543471dc9f5f5643aa217422398c36e5edc-8000.dstack-base-prod5.phala.network"
+            DOMAIN="api.chipotle.litprotocol.com"
           elif [ "$REF" = "refs/heads/next" ]; then
             # Next — direct automated deploy
             echo "phala_app_name=chipotle-next" >> "$GITHUB_OUTPUT"
@@ -96,13 +99,14 @@ jobs:
             echo "node_config=NodeConfig.next.toml" >> "$GITHUB_OUTPUT"
             echo "use_safe=false" >> "$GITHUB_OUTPUT"
             echo "version_tag=" >> "$GITHUB_OUTPUT"
-            BASE_URL="https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network"
+            DOMAIN="test.chipotle.litprotocol.com"
           else
             echo "Unsupported ref for deployment: $REF"
             exit 1
           fi
-          echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
-          echo "api_root_url=${BASE_URL}/core/v1" >> "$GITHUB_OUTPUT"
+          echo "domain=${DOMAIN}" >> "$GITHUB_OUTPUT"
+          echo "base_url=https://${DOMAIN}" >> "$GITHUB_OUTPUT"
+          echo "api_root_url=https://${DOMAIN}/core/v1" >> "$GITHUB_OUTPUT"
 
   build:
     needs: [determine-target]
@@ -118,12 +122,12 @@ jobs:
             dockerfile: Dockerfile.lit-actions
           - service: lit-api-server
             dockerfile: Dockerfile.lit-api-server
-          - service: lit-static
-            dockerfile: Dockerfile.lit-static
           - service: otel-collector
             dockerfile: Dockerfile.otel-collector
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install cosign
         uses: sigstore/cosign-installer@v3
@@ -144,7 +148,6 @@ jobs:
           push: true
           tags: ${{ vars.DOCKER_IMAGE }}-${{ matrix.service }}:${{ github.sha }}
           build-args: |
-            ${{ matrix.service == 'lit-static' && format('BASE_URL={0}', needs.determine-target.outputs.base_url) || '' }}
             ${{ matrix.service == 'lit-api-server' && format('NODE_CONFIG={0}', needs.determine-target.outputs.node_config) || '' }}
 
       - name: Sign image with Sigstore (keyless)
@@ -182,14 +185,18 @@ jobs:
         run: |
           DIGEST_LIT_ACTIONS=$(cat digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
           DIGEST_LIT_API_SERVER=$(cat digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
-          DIGEST_LIT_STATIC=$(cat digest-lit-static.txt | tr -d '\n' | sed 's/}[}]*$//')
           DIGEST_OTEL_COLLECTOR=$(cat digest-otel-collector.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DOMAIN="${{ needs.determine-target.outputs.domain }}"
           sed \
             -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|${{ vars.DOCKER_IMAGE }}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
             -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|${{ vars.DOCKER_IMAGE }}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
-            -e "s|\${DOCKER_IMAGE_LIT_STATIC}|${{ vars.DOCKER_IMAGE }}-lit-static@${DIGEST_LIT_STATIC}|g" \
             -e "s|\${DOCKER_IMAGE_OTEL_COLLECTOR}|${{ vars.DOCKER_IMAGE }}-otel-collector@${DIGEST_OTEL_COLLECTOR}|g" \
             -e "s|\${GCP_PROJECT_ID}|${{ needs.determine-target.outputs.gcp_project_id }}|g" \
+            -e "s|\${CERTBOT_DOMAIN}|${DOMAIN}|g" \
+            -e "s|\${CERTBOT_AWS_ACCESS_KEY_ID}|${{ vars.CERTBOT_AWS_ACCESS_KEY_ID }}|g" \
+            -e "s|\${CERTBOT_AWS_SECRET_ACCESS_KEY}|${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}|g" \
+            -e "s|\${CERTBOT_AWS_ROLE_ARN}|${{ vars.CERTBOT_AWS_ROLE_ARN }}|g" \
+            -e "s|\${CERTBOT_AWS_REGION}|${{ vars.CERTBOT_AWS_REGION }}|g" \
             docker-compose.phala.yml > docker-compose.deploy.yml
           cat docker-compose.deploy.yml
 
@@ -243,7 +250,7 @@ jobs:
 
   k6-correctness:
     needs: [wait-for-api-available, k6-smoke]
-    uses: ./.github/workflows/correctness.yml
+    uses: ./.github/workflows/k6-correctness.yml
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
 

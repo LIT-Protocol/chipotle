@@ -113,6 +113,28 @@ pub struct CreatePaymentIntentResponse {
     pub payment_intent_id: String,
 }
 
+/// GET /get_chain_config_keys — names of every supported ConfigKeys variant.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ChainConfigKeysResponse {
+    pub keys: Vec<String>,
+}
+
+/// GET /get_lit_action_client_config — effective ClientBuilder configuration values,
+/// including any chain-config overrides applied at startup.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct LitActionClientConfigResponse {
+    pub timeout_ms: u64,
+    pub async_timeout_ms: u64,
+    pub memory_limit_mb: u32,
+    pub max_code_length: u64,
+    pub max_response_length: u64,
+    pub max_console_log_length: u64,
+    pub max_fetch_count: u32,
+    pub max_get_keys_count: u32,
+    pub max_retries: u32,
+    pub client_timeout_ms_buffer: u64,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct NodeChainConfigResponse {
     pub chain_name: String,
@@ -124,4 +146,12 @@ pub struct NodeChainConfigResponse {
     #[schemars(skip)]
     pub rpc_url: String,
     pub contract_address: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct VersionResponse {
+    pub name: String,
+    pub version: String,
+    pub commit_version: String,
+    pub submodule_versions: Vec<(String, String)>,
 }

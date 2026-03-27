@@ -151,6 +151,11 @@
           "internalType": "string",
           "name": "description",
           "type": "string"
+        },
+        {
+          "internalType": "uint256",
+          "name": "actionHash",
+          "type": "uint256"
         }
       ],
       "name": "addAction",
@@ -312,6 +317,24 @@
         },
         {
           "internalType": "uint256",
+          "name": "actionHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "removeAction",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
           "name": "groupId",
           "type": "uint256"
         },
@@ -381,6 +404,24 @@
         }
       ],
       "name": "removeUsageApiKey",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "key",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "value",
+          "type": "string"
+        }
+      ],
+      "name": "setNodeConfiguration",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
@@ -955,6 +996,52 @@
         },
         {
           "internalType": "uint256",
+          "name": "pageNumber",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "pageSize",
+          "type": "uint256"
+        }
+      ],
+      "name": "listActions",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "uint256",
+              "name": "id",
+              "type": "uint256"
+            },
+            {
+              "internalType": "string",
+              "name": "name",
+              "type": "string"
+            },
+            {
+              "internalType": "string",
+              "name": "description",
+              "type": "string"
+            }
+          ],
+          "internalType": "struct AppStorage.Metadata[]",
+          "name": "",
+          "type": "tuple[]"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "accountApiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
           "name": "groupId",
           "type": "uint256"
         },
@@ -969,7 +1056,7 @@
           "type": "uint256"
         }
       ],
-      "name": "listActions",
+      "name": "listActionsInGroup",
       "outputs": [
         {
           "components": [
@@ -1304,6 +1391,63 @@
             }
           ],
           "internalType": "struct AppStorage.PkpData[]",
+          "name": "",
+          "type": "tuple[]"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "nodeConfigurationKeys",
+      "outputs": [
+        {
+          "internalType": "string[]",
+          "name": "",
+          "type": "string[]"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "key",
+          "type": "string"
+        }
+      ],
+      "name": "nodeConfigurationValue",
+      "outputs": [
+        {
+          "internalType": "string",
+          "name": "",
+          "type": "string"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "nodeConfigurationValues",
+      "outputs": [
+        {
+          "components": [
+            {
+              "internalType": "string",
+              "name": "key",
+              "type": "string"
+            },
+            {
+              "internalType": "string",
+              "name": "value",
+              "type": "string"
+            }
+          ],
+          "internalType": "struct ViewsFacet.KeyValueReturn[]",
           "name": "",
           "type": "tuple[]"
         }

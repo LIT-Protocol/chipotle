@@ -1,0 +1,264 @@
+---
+title: "API Keys"
+description: "Understanding account keys and usage keys in Lit Chipotle."
+---
+
+## API Keys
+
+Lit Chipotle uses two distinct types of API keys, each with a different scope and purpose.
+
+---
+
+### Account Key
+
+Your account key is created once, at account creation time. It is the master credential for your account — treat it like a password.
+
+- **Created:** Automatically generated when you create a new account. Displayed **once** in a one-time success message; copy and store it immediately.
+- **Purpose:** Full administrative access to your account — creating and deleting usage keys, managing groups, registering actions, and creating PKPs.
+- **Authentication:** Pass it in the `X-Api-Key` (or `Authorization: Bearer`) header to authenticate as the account owner.
+- **Security:** Because this key is your master credential, it should never be embedded in client-side code, shared with users, or rotated casually. If it is compromised, your entire account is at risk. Store it in a secrets manager or equivalent secure store.
+
+<Warning>
+The account key is shown only once at creation. There is no way to retrieve it again. If it is lost, you will need to contact support.
+</Warning>
+
+---
+
+### Usage Keys
+
+Usage keys are scoped, rotatable keys intended for day-to-day operations — for use in dApps, servers, cron jobs, or anywhere you need to run lit-actions without exposing your master credential.
+
+- **Created:** From the **Usage API Keys** section of the dashboard, or via the API. Like the account key, each usage key is shown **once** on creation.
+- **Purpose:** Running lit-actions and interacting with the node on behalf of your account. Access is enforced through groups — a usage key can only perform operations in the groups it has been explicitly granted access to.
+- **Authentication:** Pass the usage key in the `X-Api-Key` (or `Authorization: Bearer`) header just as you would the account key.
+- **Security model:** Usage keys enforce least-privilege access. By scoping each key to specific groups (and therefore specific IPFS actions and PKPs), you can give a key to a client or service without granting it access to your full account. If a key is compromised or no longer needed, delete it — this has no impact on other keys or your account.
+
+#### Key lifecycle
+
+| Action | Who can perform it |
+|---|---|
+| Create usage key | Account key only |
+| Update usage key permissions | Account key only |
+| Delete usage key | Account key only |
+| Run a lit-action | Account key or usage key (subject to group permissions) |
+
+---
+
+### Managing Usage Keys
+
+Usage keys can be managed through the [Dashboard](https://dashboard.dev.litprotocol.com/dapps/dashboard/) or directly via the REST API. Both require your account key to authenticate.
+
+#### Via the Dashboard
+
+In the **Usage API Keys** section of the [Dashboard](https://dashboard.dev.litprotocol.com/dapps/dashboard/):
+
+- **Add** — Click **Add**, optionally set a name and description, then confirm. The new key is displayed once — copy it immediately.
+- **Delete** — Select a key and delete it. This takes effect immediately; any service still using the key will receive authentication errors.
+
+For a full walkthrough of the dashboard workflow, see [Using the Dashboard](/management/dashboard#2-request-usage-api-keys).
+
+#### Via the API
+
+All usage key management endpoints are under `/core/v1/` and require your account key in the `X-Api-Key` (or `Authorization: Bearer`) header.
+
+---
+
+**Create a usage key** — `POST /core/v1/add_usage_api_key`
+
+Returns the new key once in the response (`usage_api_key`). Permissions are set at creation time — pass empty arrays to grant no group access initially.
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    const res = await client.addUsageApiKey({
+      apiKey: accountApiKey,
+      name: 'My dApp Key',
+      description: 'Executes price-feed action',
+      canCreateGroups: false,
+      canDeleteGroups: false,
+      canCreatePkps: false,
+      manageIpfsIdsInGroups: [],  // group IDs; [0] = wildcard for all groups
+      addPkpToGroups: [],
+      removePkpFromGroups: [],
+      executeInGroups: [1]        // allow execution in group ID 1
+    });
+    console.log('New usage key (store now):', res.usage_api_key);
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s -X POST "https://api.dev.litprotocol.com/core/v1/add_usage_api_key" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: YOUR_ACCOUNT_KEY" \
+      -d '{
+        "name": "My dApp Key",
+        "description": "Executes price-feed action",
+        "can_create_groups": false,
+        "can_delete_groups": false,
+        "can_create_pkps": false,
+        "manage_ipfs_ids_in_groups": [],
+        "add_pkp_to_groups": [],
+        "remove_pkp_from_groups": [],
+        "execute_in_groups": [1]
+      }'
+    ```
+  </Tab>
+</Tabs>
+
+**Permission fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `name` | string | Human-readable label for the key |
+| `description` | string | Optional description |
+| `can_create_groups` | bool | Allow this key to create new groups |
+| `can_delete_groups` | bool | Allow this key to delete groups |
+| `can_create_pkps` | bool | Allow this key to create PKPs |
+| `manage_ipfs_ids_in_groups` | `u64[]` | Group IDs where this key can add/remove IPFS actions. Use `[0]` as a wildcard for all groups. |
+| `add_pkp_to_groups` | `u64[]` | Group IDs where this key can add PKPs. Use `[0]` for all groups. |
+| `remove_pkp_from_groups` | `u64[]` | Group IDs where this key can remove PKPs. Use `[0]` for all groups. |
+| `execute_in_groups` | `u64[]` | Group IDs where this key can execute lit-actions. Use `[0]` for all groups. |
+
+---
+
+**List usage keys** — `GET /core/v1/list_api_keys?page_number=0&page_size=20`
+
+Returns a paginated list of usage keys on the account. The key value itself is not returned — only its hash and metadata. Each item includes the full permission set as it exists on-chain.
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    const keys = await client.listApiKeys({
+      apiKey: accountApiKey,
+      pageNumber: 0,
+      pageSize: 20
+    });
+    // Each item: { id, api_key_hash, name, description, expiration, balance,
+    //   can_create_groups, can_delete_groups, can_create_pkps,
+    //   can_manage_ipfs_ids_in_groups, can_add_pkp_to_groups,
+    //   can_remove_pkp_from_groups, can_execute_in_groups }
+    console.log(keys);
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s "https://api.dev.litprotocol.com/core/v1/list_api_keys?page_number=0&page_size=20" \
+      -H "X-Api-Key: YOUR_ACCOUNT_KEY"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+**Update a usage key's permissions** — `POST /core/v1/update_usage_api_key`
+
+Replaces all permissions on an existing usage key. Pass the usage key value (not the account key) in the body. The full permission set must be provided — any fields omitted will be reset to their defaults.
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    await client.updateUsageApiKey({
+      apiKey: accountApiKey,
+      usageApiKey: 'THE_USAGE_KEY_VALUE',
+      name: 'My dApp Key',
+      description: 'Now also manages groups',
+      canCreateGroups: true,
+      canDeleteGroups: false,
+      canCreatePkps: false,
+      manageIpfsIdsInGroups: [1],
+      addPkpToGroups: [],
+      removePkpFromGroups: [],
+      executeInGroups: [1]
+    });
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s -X POST "https://api.dev.litprotocol.com/core/v1/update_usage_api_key" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: YOUR_ACCOUNT_KEY" \
+      -d '{
+        "usage_api_key": "THE_USAGE_KEY_VALUE",
+        "name": "My dApp Key",
+        "description": "Now also manages groups",
+        "can_create_groups": true,
+        "can_delete_groups": false,
+        "can_create_pkps": false,
+        "manage_ipfs_ids_in_groups": [1],
+        "add_pkp_to_groups": [],
+        "remove_pkp_from_groups": [],
+        "execute_in_groups": [1]
+      }'
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+**Update a usage key's name/description only** — `POST /core/v1/update_usage_api_key_metadata`
+
+Updates only the name and description without touching permissions.
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    await client.updateUsageApiKeyMetadata({
+      apiKey: accountApiKey,
+      usageApiKey: 'THE_USAGE_KEY_VALUE',
+      name: 'Renamed Key',
+      description: 'Updated description'
+    });
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s -X POST "https://api.dev.litprotocol.com/core/v1/update_usage_api_key_metadata" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: YOUR_ACCOUNT_KEY" \
+      -d '{
+        "usage_api_key": "THE_USAGE_KEY_VALUE",
+        "name": "Renamed Key",
+        "description": "Updated description"
+      }'
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+**Delete a usage key** — `POST /core/v1/remove_usage_api_key`
+
+Permanently removes a usage key. Pass the key value (not an ID) in the request body. Takes effect immediately.
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    await client.removeUsageApiKey({
+      apiKey: accountApiKey,
+      usageApiKey: 'THE_USAGE_KEY_VALUE'
+    });
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s -X POST "https://api.dev.litprotocol.com/core/v1/remove_usage_api_key" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: YOUR_ACCOUNT_KEY" \
+      -d '{"usage_api_key": "THE_USAGE_KEY_VALUE"}'
+    ```
+  </Tab>
+</Tabs>
+
+For the full API reference and all available endpoints, see [Using the API directly](/management/api_direct) or browse the [Swagger UI](https://api.dev.litprotocol.com/swagger-ui/).
+
+---
+
+### Comparison
+
+| | Account Key | Usage Key |
+|---|---|---|
+| Created | At account creation | On demand |
+| Scope | Full account access | Group-scoped |
+| Rotatable | No (it is your identity) | Yes — create and delete freely |
+| Intended for | Secure admin contexts only | dApps, services, automation |
+| Risk if leaked | Full account compromise | Limited to permitted groups |

@@ -82,6 +82,13 @@ pub mod account_config {
                                     ::std::borrow::ToOwned::to_owned("string"),
                                 ),
                             },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("actionHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
                         ],
                         outputs: ::std::vec![],
                         constant: ::core::option::Option::None,
@@ -715,6 +722,52 @@ pub mod account_config {
                                 ),
                             },
                             ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("pageNumber"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("pageSize"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                        ],
+                        outputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::string::String::new(),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                ::std::boxed::Box::new(
+                                    ::ethers::core::abi::ethabi::ParamType::Tuple(::std::vec![
+                                        ::ethers::core::abi::ethabi::ParamType::Uint(256usize),
+                                        ::ethers::core::abi::ethabi::ParamType::String,
+                                        ::ethers::core::abi::ethabi::ParamType::String,
+                                    ],),
+                                ),
+                            ),
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("struct AppStorage.Metadata[]",),
+                            ),
+                        },],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("listActionsInGroup"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("listActionsInGroup"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
                                 name: ::std::borrow::ToOwned::to_owned("groupId"),
                                 kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
                                 internal_type: ::core::option::Option::Some(
@@ -1080,6 +1133,73 @@ pub mod account_config {
                     },],
                 ),
                 (
+                    ::std::borrow::ToOwned::to_owned("nodeConfigurationKeys"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("nodeConfigurationKeys",),
+                        inputs: ::std::vec![],
+                        outputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::string::String::new(),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                ::std::boxed::Box::new(
+                                    ::ethers::core::abi::ethabi::ParamType::String,
+                                ),
+                            ),
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("string[]"),
+                            ),
+                        },],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("nodeConfigurationValue"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("nodeConfigurationValue",),
+                        inputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::borrow::ToOwned::to_owned("key"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::String,
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("string"),
+                            ),
+                        },],
+                        outputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::string::String::new(),
+                            kind: ::ethers::core::abi::ethabi::ParamType::String,
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("string"),
+                            ),
+                        },],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("nodeConfigurationValues"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("nodeConfigurationValues",),
+                        inputs: ::std::vec![],
+                        outputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::string::String::new(),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                ::std::boxed::Box::new(
+                                    ::ethers::core::abi::ethabi::ParamType::Tuple(::std::vec![
+                                        ::ethers::core::abi::ethabi::ParamType::String,
+                                        ::ethers::core::abi::ethabi::ParamType::String,
+                                    ],),
+                                ),
+                            ),
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned(
+                                    "struct ViewsFacet.KeyValueReturn[]",
+                                ),
+                            ),
+                        },],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                    },],
+                ),
+                (
                     ::std::borrow::ToOwned::to_owned("pkpCount"),
                     ::std::vec![::ethers::core::abi::ethabi::Function {
                         name: ::std::borrow::ToOwned::to_owned("pkpCount"),
@@ -1187,6 +1307,31 @@ pub mod account_config {
                                 kind: ::ethers::core::abi::ethabi::ParamType::String,
                                 internal_type: ::core::option::Option::Some(
                                     ::std::borrow::ToOwned::to_owned("string"),
+                                ),
+                            },
+                        ],
+                        outputs: ::std::vec![],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("removeAction"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("removeAction"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("actionHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
                                 ),
                             },
                         ],
@@ -1356,6 +1501,31 @@ pub mod account_config {
                                 ::std::borrow::ToOwned::to_owned("address[]"),
                             ),
                         },],
+                        outputs: ::std::vec![],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("setNodeConfiguration"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("setNodeConfiguration",),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("key"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("string"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("value"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("string"),
+                                ),
+                            },
+                        ],
                         outputs: ::std::vec![],
                         constant: ::core::option::Option::None,
                         state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
@@ -2026,17 +2196,18 @@ pub mod account_config {
                 .method_hash([113, 159, 172, 67], api_key_hash)
                 .expect("method not found (this should never happen)")
         }
-        ///Calls the contract's `addAction` (0x0c6d7fbd) function
+        ///Calls the contract's `addAction` (0xb49b8b89) function
         pub fn add_action(
             &self,
             account_api_key_hash: ::ethers::core::types::U256,
             name: ::std::string::String,
             description: ::std::string::String,
+            action_hash: ::ethers::core::types::U256,
         ) -> ::ethers::contract::builders::ContractCall<M, ()> {
             self.0
                 .method_hash(
-                    [12, 109, 127, 189],
-                    (account_api_key_hash, name, description),
+                    [180, 155, 139, 137],
+                    (account_api_key_hash, name, description, action_hash),
                 )
                 .expect("method not found (this should never happen)")
         }
@@ -2258,8 +2429,22 @@ pub mod account_config {
                 .method_hash([111, 225, 251, 132], index)
                 .expect("method not found (this should never happen)")
         }
-        ///Calls the contract's `listActions` (0x542970ed) function
+        ///Calls the contract's `listActions` (0xc9176804) function
         pub fn list_actions(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            page_number: ::ethers::core::types::U256,
+            page_size: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::std::vec::Vec<Metadata>> {
+            self.0
+                .method_hash(
+                    [201, 23, 104, 4],
+                    (account_api_key_hash, page_number, page_size),
+                )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `listActionsInGroup` (0xea79e095) function
+        pub fn list_actions_in_group(
             &self,
             account_api_key_hash: ::ethers::core::types::U256,
             group_id: ::ethers::core::types::U256,
@@ -2268,7 +2453,7 @@ pub mod account_config {
         ) -> ::ethers::contract::builders::ContractCall<M, ::std::vec::Vec<Metadata>> {
             self.0
                 .method_hash(
-                    [84, 41, 112, 237],
+                    [234, 121, 224, 149],
                     (account_api_key_hash, group_id, page_number, page_size),
                 )
                 .expect("method not found (this should never happen)")
@@ -2363,6 +2548,33 @@ pub mod account_config {
                 )
                 .expect("method not found (this should never happen)")
         }
+        ///Calls the contract's `nodeConfigurationKeys` (0x6066dc14) function
+        pub fn node_configuration_keys(
+            &self,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::std::vec::Vec<::std::string::String>>
+        {
+            self.0
+                .method_hash([96, 102, 220, 20], ())
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `nodeConfigurationValue` (0x19615204) function
+        pub fn node_configuration_value(
+            &self,
+            key: ::std::string::String,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::std::string::String> {
+            self.0
+                .method_hash([25, 97, 82, 4], key)
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `nodeConfigurationValues` (0x03288902) function
+        pub fn node_configuration_values(
+            &self,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::std::vec::Vec<KeyValueReturn>>
+        {
+            self.0
+                .method_hash([3, 40, 137, 2], ())
+                .expect("method not found (this should never happen)")
+        }
         ///Calls the contract's `pkpCount` (0x223a7962) function
         pub fn pkp_count(
             &self,
@@ -2416,6 +2628,16 @@ pub mod account_config {
                         description,
                     ),
                 )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `removeAction` (0x40d4411b) function
+        pub fn remove_action(
+            &self,
+            account_api_key_hash: ::ethers::core::types::U256,
+            action_hash: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([64, 212, 65, 27], (account_api_key_hash, action_hash))
                 .expect("method not found (this should never happen)")
         }
         ///Calls the contract's `removeActionFromGroup` (0x5d861c72) function
@@ -2487,6 +2709,16 @@ pub mod account_config {
         ) -> ::ethers::contract::builders::ContractCall<M, ()> {
             self.0
                 .method_hash([174, 140, 73, 165], new_api_payers)
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `setNodeConfiguration` (0x9b80fe83) function
+        pub fn set_node_configuration(
+            &self,
+            key: ::std::string::String,
+            value: ::std::string::String,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([155, 128, 254, 131], (key, value))
                 .expect("method not found (this should never happen)")
         }
         ///Calls the contract's `setPricing` (0xca05588a) function
@@ -3178,7 +3410,7 @@ pub mod account_config {
     pub struct AccountExistsAndIsMutableCall {
         pub api_key_hash: ::ethers::core::types::U256,
     }
-    ///Container type for all input parameters for the `addAction` function with signature `addAction(uint256,string,string)` and selector `0x0c6d7fbd`
+    ///Container type for all input parameters for the `addAction` function with signature `addAction(uint256,string,string,uint256)` and selector `0xb49b8b89`
     #[derive(
         Clone,
         ::ethers::contract::EthCall,
@@ -3191,11 +3423,12 @@ pub mod account_config {
         Eq,
         Hash,
     )]
-    #[ethcall(name = "addAction", abi = "addAction(uint256,string,string)")]
+    #[ethcall(name = "addAction", abi = "addAction(uint256,string,string,uint256)")]
     pub struct AddActionCall {
         pub account_api_key_hash: ::ethers::core::types::U256,
         pub name: ::std::string::String,
         pub description: ::std::string::String,
+        pub action_hash: ::ethers::core::types::U256,
     }
     ///Container type for all input parameters for the `addActionToGroup` function with signature `addActionToGroup(uint256,uint256,uint256)` and selector `0x1f52aa42`
     #[derive(
@@ -3581,7 +3814,26 @@ pub mod account_config {
     pub struct IndexToAccountHashAtCall {
         pub index: ::ethers::core::types::U256,
     }
-    ///Container type for all input parameters for the `listActions` function with signature `listActions(uint256,uint256,uint256,uint256)` and selector `0x542970ed`
+    ///Container type for all input parameters for the `listActions` function with signature `listActions(uint256,uint256,uint256)` and selector `0xc9176804`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(name = "listActions", abi = "listActions(uint256,uint256,uint256)")]
+    pub struct ListActionsCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub page_number: ::ethers::core::types::U256,
+        pub page_size: ::ethers::core::types::U256,
+    }
+    ///Container type for all input parameters for the `listActionsInGroup` function with signature `listActionsInGroup(uint256,uint256,uint256,uint256)` and selector `0xea79e095`
     #[derive(
         Clone,
         ::ethers::contract::EthCall,
@@ -3595,10 +3847,10 @@ pub mod account_config {
         Hash,
     )]
     #[ethcall(
-        name = "listActions",
-        abi = "listActions(uint256,uint256,uint256,uint256)"
+        name = "listActionsInGroup",
+        abi = "listActionsInGroup(uint256,uint256,uint256,uint256)"
     )]
-    pub struct ListActionsCall {
+    pub struct ListActionsInGroupCall {
         pub account_api_key_hash: ::ethers::core::types::U256,
         pub group_id: ::ethers::core::types::U256,
         pub page_number: ::ethers::core::types::U256,
@@ -3726,6 +3978,56 @@ pub mod account_config {
         pub account_description: ::std::string::String,
         pub creator_wallet_address: ::ethers::core::types::Address,
     }
+    ///Container type for all input parameters for the `nodeConfigurationKeys` function with signature `nodeConfigurationKeys()` and selector `0x6066dc14`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(name = "nodeConfigurationKeys", abi = "nodeConfigurationKeys()")]
+    pub struct NodeConfigurationKeysCall;
+    ///Container type for all input parameters for the `nodeConfigurationValue` function with signature `nodeConfigurationValue(string)` and selector `0x19615204`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(
+        name = "nodeConfigurationValue",
+        abi = "nodeConfigurationValue(string)"
+    )]
+    pub struct NodeConfigurationValueCall {
+        pub key: ::std::string::String,
+    }
+    ///Container type for all input parameters for the `nodeConfigurationValues` function with signature `nodeConfigurationValues()` and selector `0x03288902`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(name = "nodeConfigurationValues", abi = "nodeConfigurationValues()")]
+    pub struct NodeConfigurationValuesCall;
     ///Container type for all input parameters for the `pkpCount` function with signature `pkpCount()` and selector `0x223a7962`
     #[derive(
         Clone,
@@ -3811,6 +4113,24 @@ pub mod account_config {
         pub derivation_path: ::ethers::core::types::U256,
         pub name: ::std::string::String,
         pub description: ::std::string::String,
+    }
+    ///Container type for all input parameters for the `removeAction` function with signature `removeAction(uint256,uint256)` and selector `0x40d4411b`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(name = "removeAction", abi = "removeAction(uint256,uint256)")]
+    pub struct RemoveActionCall {
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub action_hash: ::ethers::core::types::U256,
     }
     ///Container type for all input parameters for the `removeActionFromGroup` function with signature `removeActionFromGroup(uint256,uint256,uint256)` and selector `0x5d861c72`
     #[derive(
@@ -3943,6 +4263,27 @@ pub mod account_config {
     #[ethcall(name = "setApiPayers", abi = "setApiPayers(address[])")]
     pub struct SetApiPayersCall {
         pub new_api_payers: ::std::vec::Vec<::ethers::core::types::Address>,
+    }
+    ///Container type for all input parameters for the `setNodeConfiguration` function with signature `setNodeConfiguration(string,string)` and selector `0x9b80fe83`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(
+        name = "setNodeConfiguration",
+        abi = "setNodeConfiguration(string,string)"
+    )]
+    pub struct SetNodeConfigurationCall {
+        pub key: ::std::string::String,
+        pub value: ::std::string::String,
     }
     ///Container type for all input parameters for the `setPricing` function with signature `setPricing(uint256,uint256)` and selector `0xca05588a`
     #[derive(
@@ -4179,17 +4520,22 @@ pub mod account_config {
         GroupIdsForActionAndWallet(GroupIdsForActionAndWalletCall),
         IndexToAccountHashAt(IndexToAccountHashAtCall),
         ListActions(ListActionsCall),
+        ListActionsInGroup(ListActionsInGroupCall),
         ListApiKeys(ListApiKeysCall),
         ListGroupContents(ListGroupContentsCall),
         ListGroups(ListGroupsCall),
         ListPkps(ListPkpsCall),
         ListWalletsInGroup(ListWalletsInGroupCall),
         NewAccount(NewAccountCall),
+        NodeConfigurationKeys(NodeConfigurationKeysCall),
+        NodeConfigurationValue(NodeConfigurationValueCall),
+        NodeConfigurationValues(NodeConfigurationValuesCall),
         PkpCount(PkpCountCall),
         PricingAt(PricingAtCall),
         PricingOperator(PricingOperatorCall),
         RebalanceAmount(RebalanceAmountCall),
         RegisterWalletDerivation(RegisterWalletDerivationCall),
+        RemoveAction(RemoveActionCall),
         RemoveActionFromGroup(RemoveActionFromGroupCall),
         RemoveGroup(RemoveGroupCall),
         RemovePkpFromGroup(RemovePkpFromGroupCall),
@@ -4197,6 +4543,7 @@ pub mod account_config {
         RequestedApiPayerCount(RequestedApiPayerCountCall),
         SetAdminApiPayerAccount(SetAdminApiPayerAccountCall),
         SetApiPayers(SetApiPayersCall),
+        SetNodeConfiguration(SetNodeConfigurationCall),
         SetPricing(SetPricingCall),
         SetPricingOperator(SetPricingOperatorCall),
         SetRebalanceAmount(SetRebalanceAmountCall),
@@ -4314,6 +4661,11 @@ pub mod account_config {
             if let Ok(decoded) = <ListActionsCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::ListActions(decoded));
             }
+            if let Ok(decoded) =
+                <ListActionsInGroupCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::ListActionsInGroup(decoded));
+            }
             if let Ok(decoded) = <ListApiKeysCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::ListApiKeys(decoded));
             }
@@ -4336,6 +4688,21 @@ pub mod account_config {
             if let Ok(decoded) = <NewAccountCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::NewAccount(decoded));
             }
+            if let Ok(decoded) =
+                <NodeConfigurationKeysCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::NodeConfigurationKeys(decoded));
+            }
+            if let Ok(decoded) =
+                <NodeConfigurationValueCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::NodeConfigurationValue(decoded));
+            }
+            if let Ok(decoded) =
+                <NodeConfigurationValuesCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::NodeConfigurationValues(decoded));
+            }
             if let Ok(decoded) = <PkpCountCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::PkpCount(decoded));
             }
@@ -4356,6 +4723,10 @@ pub mod account_config {
                 <RegisterWalletDerivationCall as ::ethers::core::abi::AbiDecode>::decode(data)
             {
                 return Ok(Self::RegisterWalletDerivation(decoded));
+            }
+            if let Ok(decoded) = <RemoveActionCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::RemoveAction(decoded));
             }
             if let Ok(decoded) =
                 <RemoveActionFromGroupCall as ::ethers::core::abi::AbiDecode>::decode(data)
@@ -4388,6 +4759,11 @@ pub mod account_config {
             if let Ok(decoded) = <SetApiPayersCall as ::ethers::core::abi::AbiDecode>::decode(data)
             {
                 return Ok(Self::SetApiPayers(decoded));
+            }
+            if let Ok(decoded) =
+                <SetNodeConfigurationCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::SetNodeConfiguration(decoded));
             }
             if let Ok(decoded) = <SetPricingCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::SetPricing(decoded));
@@ -4480,6 +4856,9 @@ pub mod account_config {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
                 Self::ListActions(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::ListActionsInGroup(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
                 Self::ListApiKeys(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::ListGroupContents(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::ListGroups(element) => ::ethers::core::abi::AbiEncode::encode(element),
@@ -4488,6 +4867,15 @@ pub mod account_config {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
                 Self::NewAccount(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::NodeConfigurationKeys(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::NodeConfigurationValue(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::NodeConfigurationValues(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
                 Self::PkpCount(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::PricingAt(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::PricingOperator(element) => ::ethers::core::abi::AbiEncode::encode(element),
@@ -4495,6 +4883,7 @@ pub mod account_config {
                 Self::RegisterWalletDerivation(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
+                Self::RemoveAction(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::RemoveActionFromGroup(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
@@ -4510,6 +4899,9 @@ pub mod account_config {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
                 Self::SetApiPayers(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::SetNodeConfiguration(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
                 Self::SetPricing(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::SetPricingOperator(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
@@ -4563,17 +4955,22 @@ pub mod account_config {
                 Self::GroupIdsForActionAndWallet(element) => ::core::fmt::Display::fmt(element, f),
                 Self::IndexToAccountHashAt(element) => ::core::fmt::Display::fmt(element, f),
                 Self::ListActions(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ListActionsInGroup(element) => ::core::fmt::Display::fmt(element, f),
                 Self::ListApiKeys(element) => ::core::fmt::Display::fmt(element, f),
                 Self::ListGroupContents(element) => ::core::fmt::Display::fmt(element, f),
                 Self::ListGroups(element) => ::core::fmt::Display::fmt(element, f),
                 Self::ListPkps(element) => ::core::fmt::Display::fmt(element, f),
                 Self::ListWalletsInGroup(element) => ::core::fmt::Display::fmt(element, f),
                 Self::NewAccount(element) => ::core::fmt::Display::fmt(element, f),
+                Self::NodeConfigurationKeys(element) => ::core::fmt::Display::fmt(element, f),
+                Self::NodeConfigurationValue(element) => ::core::fmt::Display::fmt(element, f),
+                Self::NodeConfigurationValues(element) => ::core::fmt::Display::fmt(element, f),
                 Self::PkpCount(element) => ::core::fmt::Display::fmt(element, f),
                 Self::PricingAt(element) => ::core::fmt::Display::fmt(element, f),
                 Self::PricingOperator(element) => ::core::fmt::Display::fmt(element, f),
                 Self::RebalanceAmount(element) => ::core::fmt::Display::fmt(element, f),
                 Self::RegisterWalletDerivation(element) => ::core::fmt::Display::fmt(element, f),
+                Self::RemoveAction(element) => ::core::fmt::Display::fmt(element, f),
                 Self::RemoveActionFromGroup(element) => ::core::fmt::Display::fmt(element, f),
                 Self::RemoveGroup(element) => ::core::fmt::Display::fmt(element, f),
                 Self::RemovePkpFromGroup(element) => ::core::fmt::Display::fmt(element, f),
@@ -4581,6 +4978,7 @@ pub mod account_config {
                 Self::RequestedApiPayerCount(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetAdminApiPayerAccount(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetApiPayers(element) => ::core::fmt::Display::fmt(element, f),
+                Self::SetNodeConfiguration(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetPricing(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetPricingOperator(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetRebalanceAmount(element) => ::core::fmt::Display::fmt(element, f),
@@ -4713,6 +5111,11 @@ pub mod account_config {
             Self::ListActions(value)
         }
     }
+    impl ::core::convert::From<ListActionsInGroupCall> for AccountConfigCalls {
+        fn from(value: ListActionsInGroupCall) -> Self {
+            Self::ListActionsInGroup(value)
+        }
+    }
     impl ::core::convert::From<ListApiKeysCall> for AccountConfigCalls {
         fn from(value: ListApiKeysCall) -> Self {
             Self::ListApiKeys(value)
@@ -4743,6 +5146,21 @@ pub mod account_config {
             Self::NewAccount(value)
         }
     }
+    impl ::core::convert::From<NodeConfigurationKeysCall> for AccountConfigCalls {
+        fn from(value: NodeConfigurationKeysCall) -> Self {
+            Self::NodeConfigurationKeys(value)
+        }
+    }
+    impl ::core::convert::From<NodeConfigurationValueCall> for AccountConfigCalls {
+        fn from(value: NodeConfigurationValueCall) -> Self {
+            Self::NodeConfigurationValue(value)
+        }
+    }
+    impl ::core::convert::From<NodeConfigurationValuesCall> for AccountConfigCalls {
+        fn from(value: NodeConfigurationValuesCall) -> Self {
+            Self::NodeConfigurationValues(value)
+        }
+    }
     impl ::core::convert::From<PkpCountCall> for AccountConfigCalls {
         fn from(value: PkpCountCall) -> Self {
             Self::PkpCount(value)
@@ -4766,6 +5184,11 @@ pub mod account_config {
     impl ::core::convert::From<RegisterWalletDerivationCall> for AccountConfigCalls {
         fn from(value: RegisterWalletDerivationCall) -> Self {
             Self::RegisterWalletDerivation(value)
+        }
+    }
+    impl ::core::convert::From<RemoveActionCall> for AccountConfigCalls {
+        fn from(value: RemoveActionCall) -> Self {
+            Self::RemoveAction(value)
         }
     }
     impl ::core::convert::From<RemoveActionFromGroupCall> for AccountConfigCalls {
@@ -4801,6 +5224,11 @@ pub mod account_config {
     impl ::core::convert::From<SetApiPayersCall> for AccountConfigCalls {
         fn from(value: SetApiPayersCall) -> Self {
             Self::SetApiPayers(value)
+        }
+    }
+    impl ::core::convert::From<SetNodeConfigurationCall> for AccountConfigCalls {
+        fn from(value: SetNodeConfigurationCall) -> Self {
+            Self::SetNodeConfiguration(value)
         }
     }
     impl ::core::convert::From<SetPricingCall> for AccountConfigCalls {
@@ -5089,7 +5517,7 @@ pub mod account_config {
         Hash,
     )]
     pub struct IndexToAccountHashAtReturn(pub ::ethers::core::types::U256);
-    ///Container type for all return fields from the `listActions` function with signature `listActions(uint256,uint256,uint256,uint256)` and selector `0x542970ed`
+    ///Container type for all return fields from the `listActions` function with signature `listActions(uint256,uint256,uint256)` and selector `0xc9176804`
     #[derive(
         Clone,
         ::ethers::contract::EthAbiType,
@@ -5103,6 +5531,20 @@ pub mod account_config {
         Hash,
     )]
     pub struct ListActionsReturn(pub ::std::vec::Vec<Metadata>);
+    ///Container type for all return fields from the `listActionsInGroup` function with signature `listActionsInGroup(uint256,uint256,uint256,uint256)` and selector `0xea79e095`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    pub struct ListActionsInGroupReturn(pub ::std::vec::Vec<Metadata>);
     ///Container type for all return fields from the `listApiKeys` function with signature `listApiKeys(uint256,uint256,uint256)` and selector `0xc704668c`
     #[derive(
         Clone,
@@ -5173,6 +5615,48 @@ pub mod account_config {
         Hash,
     )]
     pub struct ListWalletsInGroupReturn(pub ::std::vec::Vec<PkpData>);
+    ///Container type for all return fields from the `nodeConfigurationKeys` function with signature `nodeConfigurationKeys()` and selector `0x6066dc14`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    pub struct NodeConfigurationKeysReturn(pub ::std::vec::Vec<::std::string::String>);
+    ///Container type for all return fields from the `nodeConfigurationValue` function with signature `nodeConfigurationValue(string)` and selector `0x19615204`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    pub struct NodeConfigurationValueReturn(pub ::std::string::String);
+    ///Container type for all return fields from the `nodeConfigurationValues` function with signature `nodeConfigurationValues()` and selector `0x03288902`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    pub struct NodeConfigurationValuesReturn(pub ::std::vec::Vec<KeyValueReturn>);
     ///Container type for all return fields from the `pkpCount` function with signature `pkpCount()` and selector `0x223a7962`
     #[derive(
         Clone,
@@ -5297,6 +5781,23 @@ pub mod account_config {
         pub metadata: Metadata,
         pub cid_hash: ::std::vec::Vec<::ethers::core::types::U256>,
         pub pkp_id: ::std::vec::Vec<::ethers::core::types::Address>,
+    }
+    ///`KeyValueReturn(string,string)`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    pub struct KeyValueReturn {
+        pub key: ::std::string::String,
+        pub value: ::std::string::String,
     }
     ///`UsageApiKeyReturn((uint256,string,string),uint256,uint256,uint256,uint256[],bool,bool,bool,uint256[],uint256[],uint256[])`
     #[derive(

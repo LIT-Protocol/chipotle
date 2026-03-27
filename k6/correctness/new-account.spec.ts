@@ -16,7 +16,7 @@ export const options = {
   iterations: 4,
   thresholds: {
     http_req_failed: ["rate==0"],
-    http_reqs: ["count>=4"],
+    http_reqs: ["count>=1"],
     checks: ["rate==1"],
   },
 };

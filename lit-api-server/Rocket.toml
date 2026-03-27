@@ -4,6 +4,6 @@ port = 8000
 logging = { level = "info" }
 
 [default.limits]
-form = "1 MiB"
-json = "1 MiB"
-file = "1 MiB"
+form = "10 MiB"
+json = "10 MiB"
+file = "10 MiB"

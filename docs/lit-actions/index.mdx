@@ -7,7 +7,7 @@ description: "Lit Actions are immutable JavaScript programs stored on IPFS and e
 
 Lit Actions are immutable JavaScript programs stored on IPFS and executed by the Lit network. Each action is identified by its IPFS CID, which serves as both its address and an immutable commitment to its code. Once published to IPFS, an action's behavior can never be changed.
 
-Actions are executed on-node and have access to a set of [SDK functions](/lit-actions/sdk) that let them:
+Actions are executed on-node and have access to a set of [SDK functions](/lit-actions/chipotle) that let them:
 
 - **Sign data** using the private key of a Programmable Key Pair (PKP)
 - **Encrypt and decrypt** data using a symmetric key derived from a PKP
@@ -73,14 +73,14 @@ Inside a Lit Action, the `Lit.Actions` namespace exposes the current SDK. Key fu
 
 The `ethers` library (v5) is available as a global, making it straightforward to sign messages, construct transactions, or interact with any EVM chain.
 
-For the full API reference, see [Lit Actions SDK](/lit_actions).
+For the full API reference, see [Lit Actions SDK](/lit-actions/chipotle).
 
 ## A Minimal Example
 
 ```javascript
 // Fetch ETH price from an API and sign it with a PKP.
 // pkpId is injected via js_params.
-async function main() {
+async function main({ pkpId }) {
   const res = await fetch("https://api.example.com/eth-price");
   const { price } = await res.json();
 
@@ -98,5 +98,5 @@ The caller receives both the price and a signature that can be verified against 
 ## Next Steps
 
 - [Examples](/lit-actions/examples) — Working code for common patterns
-- [Lit Actions SDK](/lit_actions) — Full API reference for the current runtime
-- [Migration from Naga](/lit_actions_from_naga) — Mapping deprecated Naga actions to current equivalents
+- [Lit Actions SDK](/lit-actions/chipotle) — Full API reference for the current runtime
+- [Migration from Naga](/lit-actions/migration/changes) — Mapping deprecated Naga actions to current equivalents

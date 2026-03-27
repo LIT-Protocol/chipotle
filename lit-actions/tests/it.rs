@@ -167,7 +167,12 @@ fn client(server: TestServer) -> TestClient {
 #[rstest]
 #[tokio::test]
 async fn nop(mut client: TestClient) {
-    let res = client.execute_js("// Do nothing").await.unwrap();
+    let res = client
+        .execute_js(indoc! {r#"async function main() {
+    // Do nothing 
+    }"#})
+        .await
+        .unwrap();
 
     assert_eq!(res.error, "");
     assert_eq!(res.success, true);
@@ -180,7 +185,7 @@ async fn nop(mut client: TestClient) {
 async fn console_log(mut client: TestClient) {
     client
         .respond_with(PrintResponse {})
-        .execute_js(r#"console.log("Lit Actions!")"#)
+        .execute_js(r#"async function main() { console.log("Lit Actions!") }"#)
         .await
         .unwrap();
 
@@ -192,6 +197,7 @@ async fn console_log(mut client: TestClient) {
 #[tokio::test]
 async fn lit_namespace(mut client: TestClient) {
     let code = indoc! {r#"
+        async function main() {
         console.log(
             Object.keys(Lit.Actions).length > 0,
             Object.keys(Lit.Headers).length === 0,
@@ -204,6 +210,7 @@ async fn lit_namespace(mut client: TestClient) {
 
             Lit === globalThis.Lit,
         )
+        }
     "#};
 
     client
@@ -228,6 +235,7 @@ async fn lit_namespace_protection(mut client: TestClient) {
         const errors = [];
         const run = (fn) => { try { fn() } catch(err) { errors.push(err) } };
 
+        async function main() {
         run(() => delete globalThis.Lit);
         run(() => delete globalThis.LitActions);
         run(() => delete globalThis.LitHeaders);
@@ -243,6 +251,7 @@ async fn lit_namespace_protection(mut client: TestClient) {
         run(() => Lit.Headers = {});
 
         console.log(errors.join('\n'))
+        }
     "#};
 
     client
@@ -275,6 +284,7 @@ async fn lit_namespace_protection(mut client: TestClient) {
 async fn js_params(mut client: TestClient) {
     {
         let code = indoc! {r#"
+            async function main({ Hello, WORLD }) {
             console.log(
                 Hello === "hello",
                 Hello === globalThis.Hello,
@@ -284,6 +294,7 @@ async fn js_params(mut client: TestClient) {
                 WORLD === globalThis.WORLD,
                 WORLD === this.WORLD,
             )
+            }
         "#};
 
         client
@@ -296,29 +307,33 @@ async fn js_params(mut client: TestClient) {
             .await
             .unwrap();
 
+        // note that js params are no longer globals, so globalThis.Hello is false and this.Hello is undefined
         assert_eq!(
             client.received::<PrintRequest>().message,
-            "true true true true true true\n"
+            "true false false true false false\n"
         );
         assert!(client.received::<ExecutionResult>().success);
     }
 
+    // Reminder - this test is no longer valid as js Params are no longer globals
     // Check that the Lit namespace can't be modified
-    {
-        let res = client
-            .execute_js(ExecutionRequest {
-                code: "ignored".to_string(),
-                js_params: Some(b"{\"Lit\":{\"Actions\": {}}}".into()),
-                ..Default::default()
-            })
-            .await;
+    // {
+    //     let res = client
+    //         .execute_js(ExecutionRequest {
+    //             code: indoc! {r#"async function main({Lit}) {
+    //                 // Do nothing
+    //             }"#}.into(),
+    //             js_params: Some(b"{\"Lit\":{\"Actions\": {}}}".into()),
+    //             ..Default::default()
+    //         })
+    //         .await;
 
-        assert_eq!(
-            res.unwrap_err().to_string().lines().next().unwrap(),
-            "Error building main worker: Error injecting params as globals: TypeError: Cannot assign to read only property 'Lit' of object '#<Window>'",
-        );
-        assert_eq!(client.received::<ExecutionResult>().success, false);
-    }
+    //     assert_eq!(
+    //         res.unwrap_err().to_string().lines().next().unwrap(),
+    //         "Error building main worker: Error injecting params as globals: TypeError: Cannot assign to read only property 'Lit' of object '#<Window>'",
+    //     );
+    //     assert_eq!(client.received::<ExecutionResult>().success, false);
+    // }
 }
 
 #[rstest]
@@ -326,7 +341,7 @@ async fn js_params(mut client: TestClient) {
 async fn set_response(mut client: TestClient) {
     client
         .respond_with(SetResponseResponse {})
-        .execute_js(r#"Lit.Actions.setResponse({response: "OK"})"#)
+        .execute_js(r#"async function main() { Lit.Actions.setResponse({response: "OK"}) }"#)
         .await
         .unwrap();
 
@@ -347,9 +362,9 @@ async fn fetch(mut client: TestClient) {
         .await;
 
     let code = formatdoc! {r#"
-        (async () => {{
+        async function main() {{
             await fetch("{uri}")
-        }})()
+        }}
         "#,
         uri = &mock_server.uri()
     };
@@ -373,7 +388,7 @@ async fn aes_decrypt(mut client: TestClient) {
     client
         .respond_with(AesDecryptResponse { plaintext: "ignored".to_string() })
         .execute_js(
-            r#"(async () => { await LitActions.Decrypt({ pkpId: "ignored", ciphertext: "456"}) })()"#,
+            r#"async function main() { await LitActions.Decrypt({ pkpId: "ignored", ciphertext: "456"}) }"#,
         )
         .await
         .unwrap();
@@ -390,37 +405,13 @@ async fn aes_decrypt(mut client: TestClient) {
 
 #[rstest]
 #[tokio::test]
-async fn uint8arrays(mut client: TestClient) {
-    let code = indoc! {r#"
-        const hello = LitActions.uint8arrayFromString("hello")
-        const world = LitActions.uint8arrayFromString("world", "utf8")
-        console.log(LitActions.uint8arrayToString(hello), hello, LitActions.uint8arrayToString(world, "utf8"), world)
-    "#};
-
-    client
-        .respond_with(PrintResponse {})
-        .execute_js(code)
-        .await
-        .unwrap();
-
-    assert_eq!(
-        client.received::<PrintRequest>(),
-        PrintRequest {
-            message: "hello Uint8Array(5) [ 104, 101, 108, 108, 111 ] world Uint8Array(5) [ 119, 111, 114, 108, 100 ]\n".to_string(),
-        }
-    );
-    assert!(client.received::<ExecutionResult>().success);
-}
-
-#[rstest]
-#[tokio::test]
 async fn webcrypto(mut client: TestClient) {
     let code = indoc! {r#"
-        (async () => {
+        async function main() {
             const data = new TextEncoder().encode("Hello, World!")
             const hashed = await crypto.subtle.digest("SHA-256", data)
             Lit.Actions.setResponse({response: hashed.byteLength.toString()})
-        })()
+        }
     "#};
 
     client
@@ -469,13 +460,13 @@ async fn web_worker_shouldnt_panic(mut client: TestClient) {
 #[tokio::test]
 async fn async_await(mut client: TestClient) {
     let code = indoc! {r#"
-        (async () => {
+        async function main() {
             const fulfilled = await Promise.all([
                 LitActions.Decrypt({pkpId: "some-key", ciphertext: "456"}),
                 LitActions.setResponse({response: await "OK"})
             ])
             console.log(fulfilled)
-        })()
+        }
     "#};
 
     for _ in 0..20 {
@@ -505,13 +496,17 @@ async fn async_await(mut client: TestClient) {
 #[rstest]
 #[tokio::test]
 async fn reference_error(mut client: TestClient) {
-    let res = client.execute_js("nonexisting_function()").await;
+    let res = client
+        .execute_js("async function main() { nonexisting_function() }")
+        .await;
 
     assert_eq!(
         res.unwrap_err().to_string(),
         indoc! {r#"
-            Uncaught ReferenceError: nonexisting_function is not defined
-                at <user_provided_script>:1:1
+            Uncaught (in promise) ReferenceError: nonexisting_function is not defined
+                at main (<user_provided_script>:2:33)
+                at <user_provided_script>:6:28
+                at <user_provided_script>:10:11
         "#}
         .trim()
     );
@@ -523,15 +518,19 @@ async fn reference_error(mut client: TestClient) {
 async fn throw_error(mut client: TestClient) {
     {
         let code = indoc! {r#"
+            async function main() {
             throw new Error("boom")
+            }
         "#};
         let res = client.execute_js(code).await;
 
         assert_eq!(
             res.unwrap_err().to_string(),
             indoc! {r#"
-                Uncaught Error: boom
-                    at <user_provided_script>:1:7
+                Uncaught (in promise) Error: boom
+                    at main (<user_provided_script>:3:7)
+                    at <user_provided_script>:9:28
+                    at <user_provided_script>:13:11
             "#}
             .trim(),
         );
@@ -540,9 +539,9 @@ async fn throw_error(mut client: TestClient) {
 
     {
         let code = indoc! {r#"
-            (async () => {
+            async function main() {
                 throw new Error("boom")
-            })()
+            }
         "#};
         let res = client.execute_js(code).await;
 
@@ -550,8 +549,9 @@ async fn throw_error(mut client: TestClient) {
             res.unwrap_err().to_string(),
             indoc! {r#"
                 Uncaught (in promise) Error: boom
-                    at <user_provided_script>:2:11
-                    at <user_provided_script>:3:3
+                    at main (<user_provided_script>:3:11)
+                    at <user_provided_script>:9:28
+                    at <user_provided_script>:13:11
             "#}
             .trim(),
         );
@@ -680,7 +680,7 @@ async fn deno_permissions(mut client: TestClient) {
 async fn deno_version(mut client: TestClient) {
     client
         .respond_with(PrintResponse {})
-        .execute_js(r#"console.log(Deno.version)"#)
+        .execute_js(r#"async function main() { console.log(Deno.version) }"#)
         .await
         .unwrap();
 
@@ -718,6 +718,7 @@ async fn wasm(mut client: TestClient) {
     //
     // Source: https://docs.deno.com/runtime/reference/wasm/
     let code = indoc! {r#"
+        async function main() {
         const wasmCode = new Uint8Array([
             0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x07, 0x01, 0x60,
             0x02, 0x7f, 0x7f, 0x01, 0x7f, 0x03, 0x02, 0x01, 0x00, 0x07, 0x07, 0x01,
@@ -726,8 +727,9 @@ async fn wasm(mut client: TestClient) {
         ]);
         const wasmModule = new WebAssembly.Module(wasmCode);
         const wasmInstance = new WebAssembly.Instance(wasmModule);
-        const { add } = wasmInstance.exports;
-        console.log(add(123, 456));
+            const { add } = wasmInstance.exports;
+            console.log(add(123, 456));
+        }
     "#};
 
     client

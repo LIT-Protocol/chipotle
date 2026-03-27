@@ -1,0 +1,296 @@
+---
+title: "API"
+description: "Using the API directly to configure Chipotle and execute actions."
+---
+
+
+## Using the API directly
+
+The same workflows can be done via the REST API. The API itself is under `/core/v1/`. All endpoints _that require authentication_ expect the API key in a header:
+
+- `X-Api-Key: your-api-key`
+- or `Authorization: Bearer your-api-key`
+
+Examples below assume `KEY=your_account_or_usage_api_key`. cURL snippets use `BASE=http://localhost:8000` (local dev node) and JavaScript snippets use `BASE=https://api.dev.litprotocol.com` (hosted dev API); change the `BASE` value if you want to target the other environment. The JavaScript examples use the Core SDK (`LitNodeSimpleApiClient`) from `core_sdk.js`.
+
+**API workflow:**
+
+1. [New account or verify account (login)](#1-new-account-or-verify-account-login)
+2. [Add usage API key](#2-add-usage-api-key)
+3. [Create wallet (PKP)](#3-create-a-wallet-pkp)
+4. [Add group and register IPFS action](#4-add-group-and-register-ipfs-action)
+5. [Add PKP to group (optional)](#5-add-pkp-to-group-optional)
+6. [Run lit-action](#6-run-lit-action)
+
+### 1. New account or verify account (login)
+
+Create a new account (returns API key and wallet address). Or verify an existing key with the `account_exists` function.
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    import { createClient } from './core_sdk.js';
+
+    const client = createClient('https://api.dev.litprotocol.com');
+
+    // New account
+    const res = await client.newAccount({
+      accountName: 'My App',
+      accountDescription: 'Optional description',
+      email: 'optional@example.com'  // optional — forwarded to Stripe
+    });
+    console.log('API key:', res.api_key);
+    console.log('Wallet:', res.wallet_address);
+    // Store res.api_key securely.
+
+    // Or verify existing key (login)
+    const exists = await client.accountExists(res.api_key);
+    console.log('Account exists:', exists);
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    # New account
+    curl -s -X POST "https://api.dev.litprotocol.com/core/v1/new_account" \
+      -H "Content-Type: application/json" \
+      -d '{"account_name":"My App","account_description":"Optional","email":"optional@example.com"}'
+
+    # Verify account (replace KEY with your API key)
+    curl -s "http://localhost:8000/core/v1/account_exists" \
+      -H "X-Api-Key: KEY"
+    ```
+  </Tab>
+</Tabs>
+
+### 2. Add usage API key
+
+Create a usage API key with fine-grained permissions. The response includes the new key only once — store it immediately.
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    const res = await client.addUsageApiKey({
+      apiKey: accountApiKey,
+      name: 'My Usage Key',
+      description: 'Used by my dApp',
+      canCreateGroups: false,
+      canDeleteGroups: false,
+      canCreatePkps: false,
+      manageIpfsIdsInGroups: [],   // group IDs; 0 = wildcard (all groups)
+      addPkpToGroups: [],
+      removePkpFromGroups: [],
+      executeInGroups: [groupId]   // grant execute permission for specific groups
+    });
+    console.log('New usage API key (store it now):', res.usage_api_key);
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s -X POST "http://localhost:8000/core/v1/add_usage_api_key" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{
+        "name": "My Usage Key",
+        "description": "Used by my dApp",
+        "can_create_groups": false,
+        "can_delete_groups": false,
+        "can_create_pkps": false,
+        "manage_ipfs_ids_in_groups": [],
+        "add_pkp_to_groups": [],
+        "remove_pkp_from_groups": [],
+        "execute_in_groups": [1]
+      }'
+    ```
+  </Tab>
+</Tabs>
+
+**Permission fields:**
+
+| Field | Type | Description |
+|---|---|---|
+| `can_create_groups` | bool | Allow this key to create new groups |
+| `can_delete_groups` | bool | Allow this key to delete groups |
+| `can_create_pkps` | bool | Allow this key to create PKPs |
+| `manage_ipfs_ids_in_groups` | `u64[]` | Group IDs where this key can add/remove IPFS actions. Use `[0]` as a wildcard for all groups. |
+| `add_pkp_to_groups` | `u64[]` | Group IDs where this key can add PKPs. Use `[0]` for all groups. |
+| `remove_pkp_from_groups` | `u64[]` | Group IDs where this key can remove PKPs. Use `[0]` for all groups. |
+| `execute_in_groups` | `u64[]` | Group IDs where this key can execute lit-actions. Use `[0]` for all groups. |
+
+### 3. Create a wallet (PKP)
+
+Request a new wallet (PKP) for the account. The server returns the wallet address and registers it.
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    const res = await client.createWallet(accountApiKey);
+    console.log('Wallet address:', res.wallet_address);
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s "http://localhost:8000/core/v1/create_wallet" \
+      -H "X-Api-Key: KEY"
+    ```
+  </Tab>
+</Tabs>
+
+### 4. Add group and register IPFS action
+
+Create a group, then add an action (IPFS CID) to scope which keys can run it.
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    // Create group
+    await client.addGroup({
+      apiKey: accountApiKey,
+      groupName: 'My Group',
+      groupDescription: 'Optional',
+      pkpIdsPermitted: [],        // PKP IDs pre-permitted in this group
+      cidHashesPermitted: []      // CID hashes pre-permitted in this group
+    });
+
+    // List groups to get the new group ID
+    const groups = await client.listGroups({ apiKey: accountApiKey, pageNumber: '0', pageSize: '10' });
+    const groupId = groups[groups.length - 1].id;
+
+    // Add an IPFS action (CID) to the group
+    await client.addActionToGroup({
+      apiKey: accountApiKey,
+      groupId,                              // u64
+      actionIpfsCid: 'QmYourIpfsCidHere'   // CID is hashed on the server
+    });
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    # Create group
+    curl -s -X POST "http://localhost:8000/core/v1/add_group" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{
+        "group_name": "My Group",
+        "group_description": "",
+        "pkp_ids_permitted": [],
+        "cid_hashes_permitted": []
+      }'
+
+    # List groups to get group_id
+    curl -s "http://localhost:8000/core/v1/list_groups?page_number=0&page_size=10" \
+      -H "X-Api-Key: KEY"
+
+    # Add action to group (replace GROUP_ID and IPFS_CID)
+    curl -s -X POST "http://localhost:8000/core/v1/add_action_to_group" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{"group_id": 1, "action_ipfs_cid": "QmYourIpfsCidHere"}'
+    ```
+  </Tab>
+</Tabs>
+
+### 5. Add PKP to group (optional)
+
+Restrict which wallets (PKPs) can be used in the group by adding their IDs to the group.
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    await client.addPkpToGroup({
+      apiKey: accountApiKey,
+      groupId,         // u64
+      pkpId: walletId  // PKP ID from listWallets or createWallet
+    });
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s -X POST "http://localhost:8000/core/v1/add_pkp_to_group" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{"group_id": 1, "pkp_id": "YOUR_PKP_ID"}'
+    ```
+  </Tab>
+</Tabs>
+
+### 6. Run lit-action
+
+Execute a lit-action by sending JavaScript code and optional params. Use a usage API key (or account key) in the header.
+
+<Tabs>
+  <Tab title="JavaScript (Core SDK)">
+    ```javascript
+    const result = await client.litAction({
+      apiKey: usageApiKey,
+      code: `
+        const message = "Hello from Lit Action";
+        const sig = await LitActions.signEcdsa({ toSign: new TextEncoder().encode(message), publicKey, sigName });
+        LitActions.setResponse({ response: { message, sig } });
+      `,
+      jsParams: { publicKey: '0x...', sigName: 'sig1' }
+    });
+    console.log(result.signatures, result.response, result.logs);
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s -X POST "http://localhost:8000/core/v1/lit_action" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: KEY" \
+      -d '{"code":"const msg = \"hello\"; LitActions.setResponse({ response: msg });","js_params":null}'
+    ```
+  </Tab>
+</Tabs>
+
+### Other useful endpoints
+
+<Info>
+**Raw CID vs hashed CID:** Some endpoints accept a raw IPFS CID (`action_ipfs_cid`, e.g. `"QmYour..."`) — the server hashes it for you. Other endpoints require the already-hashed CID (`hashed_cid`, e.g. `"0xabc..."`) — a keccak256 hex string you get back from `list_actions`. As a rule: **creation endpoints** (`add_action`, `add_action_to_group`) take the raw CID; **update/delete endpoints** (`delete_action`, `remove_action_from_group`, `update_action_metadata`) take the hashed CID.
+</Info>
+
+**Read / list (no billing charge):**
+
+- **`GET /list_api_keys?page_number&page_size`** — List usage API keys (paginated). Returns metadata only — key values are not returned.
+- **`GET /list_groups?page_number&page_size`** — List groups.
+- **`GET /list_wallets?page_number&page_size`** — List wallets (PKPs).
+- **`GET /list_wallets_in_group?group_id&page_number&page_size`** — List wallets in a group (`group_id` is a u64).
+- **`GET /list_actions?group_id&page_number&page_size`** — List actions registered to a group (`group_id` is a string).
+- **`GET /get_node_chain_config`** — Returns chain config, including contract addresses. No auth required.
+- **`GET /get_api_payers`** — Returns the list of API payer addresses. No auth required.
+- **`GET /get_admin_api_payer`** — Returns the admin payer address. No auth required.
+- **`POST /get_lit_action_ipfs_id`** — Compute the IPFS CID for a given JS code string. Body is a JSON string. No auth required.
+
+**Mutating management (billed):**
+
+- **`POST /remove_usage_api_key`** — Delete a usage key. Body: `{"usage_api_key": "..."}`.
+- **`POST /update_usage_api_key`** — Update all permissions on an existing usage key. Body: same shape as `add_usage_api_key`, plus `usage_api_key`.
+- **`POST /update_usage_api_key_metadata`** — Update only the name/description of a usage key. Body: `{"usage_api_key": "...", "name": "...", "description": "..."}`.
+- **`POST /remove_group`** — Delete a group. Body: `{"group_id": "..."}`.
+- **`POST /update_group`** — Update group name, description, and permitted PKP IDs / CID hashes. Body: `{"group_id": 1, "name": "...", "description": "...", "pkp_ids_permitted": [], "cid_hashes_permitted": []}`.
+- **`POST /add_action`** — Register a standalone action (name + description + IPFS CID). Body: `{"action_ipfs_cid": "Qm...", "name": "...", "description": "..."}`.
+- **`POST /delete_action`** — Delete an action and its metadata from the account. Body: `{"hashed_cid": "0x..."}` (already-hashed CID).
+- **`POST /remove_action_from_group`** — Remove an IPFS action from a group. Body: `{"group_id": 1, "hashed_cid": "0x..."}` (already-hashed CID).
+- **`POST /update_action_metadata`** — Update the name/description of a registered action. Body: `{"hashed_cid": "0x...", "name": "...", "description": "..."}`.
+- **`POST /remove_pkp_from_group`** — Remove a PKP from a group. Body: `{"group_id": 1, "pkp_id": "..."}`.
+
+**Billing:**
+
+- **`GET /billing/stripe_config`** — Returns the Stripe publishable key. No auth required.
+- **`GET /billing/balance`** — Returns the current credit balance for the authenticated account.
+- **`POST /billing/create_payment_intent`** — Creates a Stripe PaymentIntent. Body: `{"amount_cents": 500}` (minimum 500 = $5.00). Returns `client_secret` for use with Stripe.js.
+- **`POST /billing/confirm_payment`** — Verifies a succeeded PaymentIntent and credits the account. Body: `{"payment_intent_id": "pi_..."}`.
+
+---
+
+Both request/response shapes and OpenAPI spec are available directly in the dev system. For a Swagger UI implementation of the OpenAPI spec, please browse to:\
+\
+https://api.dev.litprotocol.com/swagger-ui/
+
+
+### Open API Specification
+
+The OpenAPI spec itself can be found at:\
+\
+[https://api.dev.litprotocol.com/core/v1/openapi.json](https://api.dev.litprotocol.com/core/v1/openapi.json)
+
+Note that these specs are subject to minor changes and will always be available with the dev server endpoints.

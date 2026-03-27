@@ -1,0 +1,59 @@
+---
+title: "Limits"
+description: "Default resource limits for Lit Actions on the Chipotle network."
+---
+
+## Limits
+
+The following limits apply to all Lit Action executions on Chipotle. They are designed to keep the network stable and fair for all users while covering the vast majority of real-world use cases.
+
+---
+
+### Code & Upload
+
+| Limit | Default |
+|---|---|
+| Maximum action code size (inline) | 256 KB |
+| Maximum IPFS action size | 512 KB |
+| Maximum `js_params` payload | 64 KB |
+
+Action code submitted inline via the API or Dashboard must not exceed 256 KB. For larger actions, upload your code to IPFS and submit the CID instead — the IPFS limit is 512 KB. If your action requires large static data, consider fetching it at runtime via `fetch` rather than bundling it into the action itself.
+
+---
+
+### Execution
+
+| Limit | Default |
+|---|---|
+| Maximum execution time | 30 seconds |
+| Maximum memory | 128 MB |
+| Maximum outbound HTTP requests per action | 10 |
+| Maximum response payload size | 1 MB |
+
+Actions that exceed the execution time limit are terminated and return a timeout error. Long-running workflows should be broken into smaller actions or offload heavy computation to an external service and fetch the result.
+
+---
+
+### Rate Limits
+
+| Limit | Default |
+|---|---|
+| Requests per minute (per usage key) | 60 |
+| Requests per minute (per account) | 120 |
+| Concurrent executions (per account) | 10 |
+
+Rate limits apply per API key. If you need higher throughput, creating additional usage keys does not increase your account-level limit — contact us to discuss your requirements.
+
+---
+
+### Need Higher Limits?
+
+The defaults above are suitable for most development and production workloads. If your use case requires higher limits — more throughput, longer execution time, larger payloads, or increased concurrency — we're happy to discuss it.
+
+Reach out through any of the following:
+
+- **Email:** [support@litprotocol.com](mailto:support@litprotocol.com)
+- **Discord:** [litgateway.com/discord](https://litgateway.com/discord)
+- **Telegram:** Contact the team via the Lit Protocol Telegram channel
+
+When you reach out, include a brief description of your use case and the specific limits you need — this helps us respond quickly with the right configuration for your account.

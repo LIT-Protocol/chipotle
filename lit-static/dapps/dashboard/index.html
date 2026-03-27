@@ -36,16 +36,16 @@
           <div class="login-card">
             <p class="form-hint" style="margin-bottom: 1rem;">Creates an account on Lit Express Node and returns a new API key. Store it securely.</p>
             <div class="form-group">
+              <label for="new-account-email">Email</label>
+              <input type="email" id="new-account-email" class="input" placeholder="you@example.com" required>
+            </div>
+            <div class="form-group">
               <label for="new-account-name">Account name</label>
               <input type="text" id="new-account-name" class="input" placeholder="My account">
             </div>
             <div class="form-group">
               <label for="new-account-desc">Account description</label>
               <input type="text" id="new-account-desc" class="input" placeholder="Optional">
-            </div>
-            <div class="form-group">
-              <label for="new-account-email">Email (optional)</label>
-              <input type="email" id="new-account-email" class="input" placeholder="you@example.com">
             </div>
             <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account</button>
           </div>
@@ -223,21 +223,18 @@
             <div id="actions-status" class="status" style="display: none;"></div>
             <div class="card">
               <div class="card-header">
-                <h3 class="card-title">Actions in group</h3>
+                <h3 class="card-title">Actions</h3>
                 <div class="card-header-actions">
-                  <select id="actions-group-id" class="input input-sm" style="width: 12rem;">
-                    <option value="" disabled selected>Loading groups…</option>
-                  </select>
                   <button type="button" id="btn-load-actions" class="btn btn-sm btn-outline">Refresh</button>
                 </div>
               </div>
               <div class="card-body">
                 <div class="table-wrap">
                   <table class="data-table" id="actions-table">
-                    <thead><tr><th>Name</th><th>CID</th><th>Description</th><th class="th-actions"></th></tr></thead>
+                    <thead><tr><th>Name</th><th>Hashed CID</th><th>Description</th><th class="th-actions"></th></tr></thead>
                     <tbody id="actions-tbody"></tbody>
                   </table>
-                  <p id="actions-empty" class="empty-state" style="display: none;">No actions in this group.</p>
+                  <p id="actions-empty" class="empty-state" style="display: none;">No actions found.</p>
                 </div>
                 <div class="table-add-row">
                   <button type="button" id="btn-add-action" class="btn btn-primary">Add</button>
@@ -286,7 +283,7 @@
                     <label for="action-runner-code" style="margin-bottom:0;">Lit Action code</label>
                     <div style="display:flex;align-items:center;gap:0.5rem;flex-shrink:0;">
                       <label for="action-runner-usage-key" style="margin-bottom:0;white-space:nowrap;font-size:0.8125rem;">Usage API Key</label>
-                      <input type="text" id="action-runner-usage-key" class="input" style="width:25rem;font-family:'JetBrains Mono',monospace;font-size:0.8125rem;padding:0.35rem 0.6rem;" placeholder="optional — overrides account key" />
+                      <input type="text" id="action-runner-usage-key" class="input" style="width:25rem;font-family:'JetBrains Mono',monospace;font-size:0.8125rem;padding:0.35rem 0.6rem;" placeholder="Usage API Key" />
                     </div>
                   </div>
                   <div id="action-runner-code" class="codejar-editor language-javascript" spellcheck="false"></div>

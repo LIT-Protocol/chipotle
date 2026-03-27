@@ -95,7 +95,7 @@ library AppStorage {
         mapping(address => Metadata) pkpData; // mapping from a wallet address to it's metadata.  the ID is the derivationPath.
         bool managed; // whether the LIT-node can help manage the key.
         uint256 pkpCount; // counter for creating unique pkp ids
-        uint256 actionCount; // counter for creating unique action ids
+        uint256 actionCount; // count of unique actions registered to this account
         uint256 groupCount; // counter for creating unique group ids
     }
 
@@ -114,6 +114,8 @@ library AppStorage {
         address adminApiPayerAccount; // address of the default api payer
         uint256 requestedApiPayerCount; // number of accounts that are allowed to pay for state mutation made by api calls
         uint256 rebalanceAmount; // amount of ether to rebalance the api payers with.  If 0, then don't rebalance.
+        EnumerableSet.StringSet nodeConfigurationKeys;
+        mapping(string => string) nodeConfigurationValues;
     }
 
     function getStorage()
