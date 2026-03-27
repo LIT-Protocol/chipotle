@@ -20,9 +20,9 @@ jobs:
         id: target
         run: |
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            echo "api_url=https://f8fce543471dc9f5f5643aa217422398c36e5edc-8000.dstack-base-prod5.phala.network" >> "$GITHUB_OUTPUT"
+            echo "api_url=https://api.dev.litprotocol.com" >> "$GITHUB_OUTPUT"
           else
-            echo "api_url=https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network" >> "$GITHUB_OUTPUT"
+            echo "api_url=https://test.chipotle.litprotocol.com" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Inject API URL
