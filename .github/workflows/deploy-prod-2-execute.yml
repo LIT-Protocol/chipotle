@@ -1,0 +1,178 @@
+# Phase 2: Verify Safe-approved compose hash and commit the Phala CVM deployment.
+#
+# This workflow runs AFTER Safe multisig signers have approved AND executed the
+# addComposeHash transaction proposed by Phase 1 (deploy-prod-1-propose.yml). It:
+#   1. Downloads the deployment context from the Phase 1 draft release
+#   2. Verifies the Safe transaction was executed on-chain and extracts the tx hash
+#   3. Commits the Phala deployment using the on-chain tx hash
+#   4. Runs the full verification suite (attestation, OpenAPI, k6)
+#   5. Publishes the draft GitHub release created by Phase 1
+#
+# Required secrets:
+#   PHALA_CLOUD_API_KEY - From Phala Cloud Dashboard > API Tokens
+
+name: "Deploy Prod 2: Execute and Verify"
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_tag:
+        description: "Version tag from Phase 1 (e.g. v1.2.3)"
+        required: true
+        type: string
+      safe_tx_hash:
+        description: "Safe transaction hash (from Phase 1 output, for verification)"
+        required: true
+        type: string
+
+concurrency:
+  group: deploy-phala-execute
+  cancel-in-progress: false
+
+jobs:
+  download-context:
+    runs-on: self-hosted
+    outputs:
+      compose_hash: ${{ steps.read.outputs.compose_hash }}
+      commit_token: ${{ steps.read.outputs.commit_token }}
+      safe_tx_hash: ${{ steps.read.outputs.safe_tx_hash }}
+      phala_app_name: ${{ steps.read.outputs.phala_app_name }}
+      base_url: ${{ steps.read.outputs.base_url }}
+      api_root_url: ${{ steps.read.outputs.api_root_url }}
+      safe_address: ${{ steps.read.outputs.safe_address }}
+      version_tag: ${{ steps.read.outputs.version_tag }}
+      source_sha: ${{ steps.read.outputs.source_sha }}
+    steps:
+      - name: Download deployment context from Phase 1 release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release download "${{ inputs.version_tag }}" \
+            --pattern "deploy-context.json"
+
+      - name: Read deployment context
+        id: read
+        run: |
+          cat deploy-context.json
+          for key in compose_hash commit_token safe_tx_hash phala_app_name base_url api_root_url safe_address version_tag source_sha; do
+            val=$(jq -r ".$key" deploy-context.json)
+            echo "$key=$val" >> "$GITHUB_OUTPUT"
+          done
+
+      - name: Verify safe_tx_hash matches
+        run: |
+          if [ "${{ steps.read.outputs.safe_tx_hash }}" != "${{ inputs.safe_tx_hash }}" ]; then
+            echo "::error::safe_tx_hash mismatch: artifact=${{ steps.read.outputs.safe_tx_hash }} input=${{ inputs.safe_tx_hash }}"
+            exit 1
+          fi
+          echo "safe_tx_hash verified: ${{ inputs.safe_tx_hash }}"
+
+  execute-safe-tx:
+    needs: [download-context]
+    runs-on: self-hosted
+    outputs:
+      tx_hash: ${{ steps.execute.outputs.tx_hash }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install contract dependencies
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npm ci
+
+      - name: Compile contracts
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npx hardhat compile
+
+      - name: Verify Safe transaction was executed
+        id: execute
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: |
+          OUTPUT=$(npx hardhat execute-safe-tx \
+            --network base \
+            --safe "${{ needs.download-context.outputs.safe_address }}" \
+            --safe-tx-hash "${{ needs.download-context.outputs.safe_tx_hash }}" \
+            2>&1 | tee /dev/stderr)
+          TX_HASH=$(echo "$OUTPUT" | grep '^TX_HASH=' | cut -d= -f2)
+          if [ -z "$TX_HASH" ]; then
+            echo "::error::Failed to extract TX_HASH from execute-safe-tx output"
+            exit 1
+          fi
+          echo "tx_hash=$TX_HASH" >> "$GITHUB_OUTPUT"
+
+  commit-deploy:
+    needs: [download-context, execute-safe-tx]
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Phala CLI
+        run: npm install -g phala
+
+      - name: Commit deployment to Phala (phase 2)
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+        run: |
+          phala deploy --commit \
+            --cvm-id "${{ needs.download-context.outputs.phala_app_name }}" \
+            --token "${{ needs.download-context.outputs.commit_token }}" \
+            --compose-hash "${{ needs.download-context.outputs.compose_hash }}" \
+            --transaction-hash "${{ needs.execute-safe-tx.outputs.tx_hash }}"
+
+  wait-for-api-available:
+    needs: [commit-deploy, download-context]
+    uses: ./.github/workflows/wait-for-api-restart.yml
+    with:
+      api_root_url: ${{ needs.download-context.outputs.api_root_url }}
+      runner: '["self-hosted"]'
+
+  verify-attestation:
+    needs: [wait-for-api-available, download-context]
+    uses: ./.github/workflows/verify-attestation.yml
+    with:
+      attestation_url: ${{ needs.download-context.outputs.base_url }}
+      runner: '["self-hosted"]'
+
+  openapi-spec-check:
+    needs: [wait-for-api-available]
+    uses: ./.github/workflows/openapi-spec-check.yml
+    with:
+      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+      runner: '["self-hosted"]'
+
+  k6-smoke:
+    needs: [wait-for-api-available, openapi-spec-check]
+    uses: ./.github/workflows/k6-smoke.yml
+    with:
+      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+
+  k6-correctness:
+    needs: [wait-for-api-available, k6-smoke]
+    uses: ./.github/workflows/k6-correctness.yml
+    with:
+      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+
+  # Publish the draft GitHub release created by Phase 1 after all verification passes.
+  publish-release:
+    if: needs.download-context.outputs.version_tag != ''
+    needs: [download-context, k6-correctness, verify-attestation]
+    runs-on: self-hosted
+    permissions:
+      contents: write
+    steps:
+      - name: Publish draft release and remove deployment context asset
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release delete-asset "${{ needs.download-context.outputs.version_tag }}" deploy-context.json --yes || true
+          gh release edit "${{ needs.download-context.outputs.version_tag }}" --draft=false
