@@ -34,6 +34,9 @@
 #   GCP_PROJECT_ID             - GCP project ID (e.g. "my-gcp-project")
 #   STRIPE_SECRET_KEY          - Stripe API secret key (test sandbox for staging, live for prod)
 #   STRIPE_PUBLISHABLE_KEY     - Stripe API publishable key (test sandbox for staging, live for prod)
+#   CERTBOT_AWS_ACCESS_KEY_ID - Route 53 IAM access key for DNS-01 challenge
+#   CERTBOT_AWS_ROLE_ARN      - IAM role ARN for STS assumption (required by dstack-ingress)
+#   CERTBOT_AWS_REGION        - AWS region for STS endpoint (e.g. "us-east-1")
 
 name: Deploy to Phala CVM
 
@@ -56,6 +59,7 @@ jobs:
       instance_type: ${{ steps.set.outputs.instance_type }}
       gcp_project_id: ${{ steps.set.outputs.gcp_project_id }}
       node_config: ${{ steps.set.outputs.node_config }}
+      domain: ${{ steps.set.outputs.domain }}
     steps:
       - name: Set deployment target
         id: set
@@ -65,19 +69,20 @@ jobs:
             echo "instance_type=tdx.large" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-dev" >> "$GITHUB_OUTPUT"
             echo "node_config=NodeConfig.main.toml" >> "$GITHUB_OUTPUT"
-            BASE_URL="https://f8fce543471dc9f5f5643aa217422398c36e5edc-8000.dstack-base-prod5.phala.network"
+            DOMAIN="api.chipotle.litprotocol.com"
           elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
             echo "phala_app_name=chipotle-next" >> "$GITHUB_OUTPUT"
             echo "instance_type=tdx.small" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-next" >> "$GITHUB_OUTPUT"
             echo "node_config=NodeConfig.next.toml" >> "$GITHUB_OUTPUT"
-            BASE_URL="https://969a8c14c9e13420705b19c7246aeed27897e7ea-8000.dstack-base-prod5.phala.network"
+            DOMAIN="test.chipotle.litprotocol.com"
           else
             echo "Unsupported branch for deployment"
             exit 1
           fi
-          echo "base_url=$BASE_URL" >> "$GITHUB_OUTPUT"
-          echo "api_root_url=${BASE_URL}/core/v1" >> "$GITHUB_OUTPUT"
+          echo "domain=${DOMAIN}" >> "$GITHUB_OUTPUT"
+          echo "base_url=https://${DOMAIN}" >> "$GITHUB_OUTPUT"
+          echo "api_root_url=https://${DOMAIN}/core/v1" >> "$GITHUB_OUTPUT"
 
   build:
     needs: [determine-target]
@@ -152,11 +157,17 @@ jobs:
           DIGEST_LIT_ACTIONS=$(cat digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
           DIGEST_LIT_API_SERVER=$(cat digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
           DIGEST_OTEL_COLLECTOR=$(cat digest-otel-collector.txt | tr -d '\n' | sed 's/}[}]*$//')
+          DOMAIN="${{ needs.determine-target.outputs.domain }}"
           sed \
             -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|${{ vars.DOCKER_IMAGE }}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
             -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|${{ vars.DOCKER_IMAGE }}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
             -e "s|\${DOCKER_IMAGE_OTEL_COLLECTOR}|${{ vars.DOCKER_IMAGE }}-otel-collector@${DIGEST_OTEL_COLLECTOR}|g" \
             -e "s|\${GCP_PROJECT_ID}|${{ needs.determine-target.outputs.gcp_project_id }}|g" \
+            -e "s|\${CERTBOT_DOMAIN}|${DOMAIN}|g" \
+            -e "s|\${CERTBOT_AWS_ACCESS_KEY_ID}|${{ vars.CERTBOT_AWS_ACCESS_KEY_ID }}|g" \
+            -e "s|\${CERTBOT_AWS_SECRET_ACCESS_KEY}|${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}|g" \
+            -e "s|\${CERTBOT_AWS_ROLE_ARN}|${{ vars.CERTBOT_AWS_ROLE_ARN }}|g" \
+            -e "s|\${CERTBOT_AWS_REGION}|${{ vars.CERTBOT_AWS_REGION }}|g" \
             docker-compose.phala.yml > docker-compose.deploy.yml
           cat docker-compose.deploy.yml
 

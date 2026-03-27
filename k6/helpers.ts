@@ -52,9 +52,63 @@ function responseTraceIds(response: Response | undefined): string {
 }
 
 /**
- * Assert HTTP response is 2xx. Logs failure and runs checkAndLog for k6 metrics.
- * Returns true if ok, false otherwise.
+ * Assert HTTP response has the expected non-2xx status (permission denial).
+ * Returns true if the expected denial was confirmed, false otherwise.
  */
+export function assertDenied(
+  name: string,
+  endpoint: string,
+  res: { response: Response },
+  expectedStatus = 403,
+): boolean {
+  const { response } = res;
+  const status = response?.status ?? 0;
+  const matched = status === expectedStatus;
+  if (!matched) {
+    let msg = "";
+    try {
+      const body = JSON.parse(response.body as string);
+      msg = body.message ?? body.error ?? JSON.stringify(body);
+    } catch {
+      msg = (response?.body as string) || "(no body)";
+    }
+    console.error(
+      `FAIL ${name} | ${endpoint} | expected ${expectedStatus} got ${status} | ${msg}${responseTraceIds(response)}`,
+    );
+  }
+  checkAndLog(response, {
+    [`${name} → ${expectedStatus}`]: (r) => (r?.status ?? 0) === expectedStatus,
+  }, name);
+  return matched;
+}
+
+/**
+ * Assert HTTP response is NOT 2xx (any error). Use when the exact error code
+ * is uncertain (e.g. contract reverts, deleted keys).
+ * Returns true if the response was non-2xx, false otherwise.
+ */
+export function assertNon2xx(
+  name: string,
+  endpoint: string,
+  res: { response: Response },
+): boolean {
+  const { response } = res;
+  const status = response?.status ?? 0;
+  const isError = status > 0 && (status < 200 || status >= 300);
+  if (!isError) {
+    console.error(
+      `FAIL ${name} | ${endpoint} | expected non-2xx got ${status}${status === 0 ? " (transport error — no HTTP response)" : ""}${responseTraceIds(response)}`,
+    );
+  }
+  checkAndLog(response, {
+    [`${name} non-2xx`]: (r) => {
+      const s = r?.status ?? 0;
+      return s > 0 && (s < 200 || s >= 300);
+    },
+  }, name);
+  return isError;
+}
+
 export function assertOk(
   name: string,
   endpoint: string,

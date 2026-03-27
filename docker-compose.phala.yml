@@ -15,6 +15,11 @@
 #   GCP_PROJECT_ID            - GCP project ID (e.g. "my-gcp-project")
 #   STRIPE_SECRET_KEY         - Stripe API secret key (test sandbox for staging, live for prod)
 #   STRIPE_PUBLISHABLE_KEY    - Stripe API publishable key (test sandbox for staging, live for prod)
+#   CERTBOT_DOMAIN            - Custom domain for TLS (e.g. "api.chipotle.litprotocol.com")
+#   CERTBOT_AWS_ACCESS_KEY_ID     - Route 53 IAM access key for DNS-01 challenge
+#   CERTBOT_AWS_SECRET_ACCESS_KEY - Route 53 IAM secret key for DNS-01 challenge
+#   CERTBOT_AWS_ROLE_ARN          - IAM role ARN for STS assumption (required by dstack-ingress)
+#   CERTBOT_AWS_REGION            - AWS region for STS endpoint (e.g. "us-east-1")
 
 # RUST_LOG filter shared by lit-actions and lit-api-server.
 # App code stays at trace; per-module overrides suppress low-value internals:
@@ -98,5 +103,39 @@ services:
       - '/sys:/host/sys:ro'
     restart: unless-stopped
 
+  # dstack-ingress — attestation-bound TLS termination inside the TEE.
+  # Obtains a Let's Encrypt cert for DOMAIN via DNS-01 (Route 53), then
+  # reverse-proxies HTTPS :443 → lit-api-server :8000.
+  dstack-ingress:
+    image: dstacktee/dstack-ingress:1.4@sha256:11c0481ca1e2ef9c959187ff3c01c7f59c26d631c7717a571ad994b96203bb0b
+    ports:
+      - "443:443"
+    environment:
+      # dstack-ingress expects DOMAIN, AWS_ACCESS_KEY_ID, and AWS_SECRET_ACCESS_KEY internally.
+      # Route 53 provider docs (env vars, optional role assumption):
+      # https://github.com/Dstack-TEE/dstack-examples/blob/main/custom-domain/dstack-ingress/DNS_PROVIDERS.md
+      DOMAIN: "${CERTBOT_DOMAIN}"
+      # DSTACK_GATEWAY_DOMAIN is auto-populated by Phala Cloud into the CVM.
+      # https://docs.phala.com/phala-cloud/networking/specifications
+      GATEWAY_DOMAIN: "_.${DSTACK_GATEWAY_DOMAIN}"
+      DNS_PROVIDER: "route53"
+      TARGET_ENDPOINT: "http://lit-api-server:8000"
+      CERTBOT_EMAIL: "admin@litprotocol.com"
+      SET_CAA: "true"
+      AWS_ACCESS_KEY_ID: "${CERTBOT_AWS_ACCESS_KEY_ID}"
+      AWS_SECRET_ACCESS_KEY: "${CERTBOT_AWS_SECRET_ACCESS_KEY}"
+      # STS role assumption — required by dstack-ingress for Route 53 access.
+      # The IAM user (AWS_ACCESS_KEY_ID) assumes this role to modify DNS records.
+      AWS_ROLE_ARN: "${CERTBOT_AWS_ROLE_ARN}"
+      AWS_REGION: "${CERTBOT_AWS_REGION}"
+    volumes:
+      - /var/run/dstack.sock:/var/run/dstack.sock
+      - cert-data:/etc/letsencrypt
+    depends_on:
+      lit-api-server:
+        condition: service_started
+    restart: unless-stopped
+
 volumes:
   lit-socket:
+  cert-data:
