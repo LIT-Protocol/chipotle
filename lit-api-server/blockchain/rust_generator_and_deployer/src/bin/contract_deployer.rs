@@ -36,8 +36,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!(
             "  --secret    optional deployer private key (hex). If blank or omitted, uses Anvil account #0."
         );
-        eprintln!("  --address   diamond contract address (required for update and propose-update)");
-        eprintln!("  --output    proposal JSON output path (propose-update only, default: diamond_cut_proposal.json)");
+        eprintln!(
+            "  --address   diamond contract address (required for update and propose-update)"
+        );
+        eprintln!(
+            "  --output    proposal JSON output path (propose-update only, default: diamond_cut_proposal.json)"
+        );
         std::process::exit(1);
     };
 
@@ -120,9 +124,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .cloned()
             .unwrap_or_else(|| "diamond_cut_proposal.json".to_string());
 
-        propose_update_diamond(rpc_url, chain_id, &abis_folder, secret, diamond_address, &output)
-            .await
-            .expect("Failed to propose diamond update");
+        propose_update_diamond(
+            rpc_url,
+            chain_id,
+            &abis_folder,
+            secret,
+            diamond_address,
+            &output,
+        )
+        .await
+        .expect("Failed to propose diamond update");
     }
     Ok(())
 }
@@ -139,7 +150,7 @@ fn parse_diamond_address(
             std::process::exit(1);
         }
     };
-    let diamond_address_bytes = hex::decode(diamond_address_str.trim_start_matches("0x"))
-        .expect("Invalid --address hex");
+    let diamond_address_bytes =
+        hex::decode(diamond_address_str.trim_start_matches("0x")).expect("Invalid --address hex");
     Address::from_slice(&diamond_address_bytes)
 }
