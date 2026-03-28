@@ -11,6 +11,9 @@
 
 name: Contract Upgrade
 
+permissions:
+  contents: read
+
 on:
   workflow_dispatch:
     inputs:
@@ -73,22 +76,15 @@ jobs:
         working-directory: lit-api-server/blockchain/rust_generator_and_deployer
         run: cargo build --bin contract_deployer
 
-      - name: Select deployer secret
-        id: secret
-        run: |
-          if [ "${{ steps.config.outputs.network }}" = "base" ]; then
-            echo "key=${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "key=${{ secrets.CONTRACT_DEPLOYER_SECRET_SEPOLIA }}" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Upgrade diamond facets
         working-directory: lit-api-server/blockchain/lit_node_express
+        env:
+          DEPLOYER_KEY: ${{ steps.config.outputs.network == 'base' && secrets.PHALA_DSTACKAPP_PRIVATE_KEY || secrets.CONTRACT_DEPLOYER_SECRET_SEPOLIA }}
         run: |
           ../rust_generator_and_deployer/target/debug/contract_deployer \
             --action=update \
             --network=${{ steps.config.outputs.network }} \
             --abifolder=artifacts/contracts \
-            --secret=${{ steps.secret.outputs.key }} \
+            --secret="$DEPLOYER_KEY" \
             --address=${{ steps.config.outputs.address }} \
             --rpc-url=${{ secrets.BASE_CHAIN_RPC }}

@@ -24,12 +24,18 @@ on:
     branches: [main, next]
   pull_request:
 
+permissions:
+  contents: read
+
 concurrency:
   group: phala-simulator-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   simulator:
+    if: >
+      github.event_name == 'push' ||
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
     name: dstack simulator attestation
     runs-on: self-hosted
 
