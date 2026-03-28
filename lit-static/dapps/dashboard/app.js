@@ -835,7 +835,7 @@ async function loadActions() {
   if (btn) btn.disabled = true;
   try {
     const client = await getClient();
-    const items = await client.listActions({ apiKey, groupId: '0', pageNumber: '0', pageSize: LIST_PAGE_SIZE });
+    const items = await client.listActions({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
     window._actions = items;
     renderActionsTable(items);
     window._statActions = items.length;
