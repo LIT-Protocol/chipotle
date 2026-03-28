@@ -13,11 +13,11 @@ The following limits apply to all Lit Action executions on Chipotle. They are de
 
 | Limit | Default |
 |---|---|
-| Maximum action code size (inline) | 256 KB |
-| Maximum IPFS action size | 512 KB |
+| Maximum action code size (inline) | 10 MB |
+| Maximum IPFS action size | N/A |
 | Maximum `js_params` payload | 64 KB |
 
-Action code submitted inline via the API or Dashboard must not exceed 256 KB. For larger actions, upload your code to IPFS and submit the CID instead — the IPFS limit is 512 KB. If your action requires large static data, consider fetching it at runtime via `fetch` rather than bundling it into the action itself.
+Action code submitted inline via the API or Dashboard must not exceed 10 MB. Downloading actions via IPFS is not currently supported. If your action requires large static data, consider fetching it at runtime via `fetch` rather than bundling it into the action itself.
 
 ---
 
@@ -25,24 +25,12 @@ Action code submitted inline via the API or Dashboard must not exceed 256 KB. Fo
 
 | Limit | Default |
 |---|---|
-| Maximum execution time | 30 seconds |
+| Maximum execution time | 15 minutes |
 | Maximum memory | 128 MB |
-| Maximum outbound HTTP requests per action | 10 |
+| Maximum outbound HTTP requests per action | 100 |
 | Maximum response payload size | 1 MB |
 
 Actions that exceed the execution time limit are terminated and return a timeout error. Long-running workflows should be broken into smaller actions or offload heavy computation to an external service and fetch the result.
-
----
-
-### Rate Limits
-
-| Limit | Default |
-|---|---|
-| Requests per minute (per usage key) | 60 |
-| Requests per minute (per account) | 120 |
-| Concurrent executions (per account) | 10 |
-
-Rate limits apply per API key. If you need higher throughput, creating additional usage keys does not increase your account-level limit — contact us to discuss your requirements.
 
 ---
 
