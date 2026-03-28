@@ -23,6 +23,9 @@
 #   PHALA_DSTACKAPP_PRIVATE_KEY - Private key for DstackApp on-chain KMS
 #   STRIPE_SECRET_KEY - Stripe API secret key (test sandbox for next, live for main)
 #   STRIPE_PUBLISHABLE_KEY - Stripe API publishable key (test sandbox for next, live for main)
+#   GCP_SERVICE_ACCOUNT_JSON - GCP service account key (raw JSON or base64-encoded)
+#   BASE_CHAIN_RPC - RPC endpoint for Base blockchain
+#   CERTBOT_AWS_SECRET_ACCESS_KEY - Route 53 IAM secret key for DNS-01 challenge
 #
 # Required GitHub vars:
 #   DOCKER_IMAGE - Base image path, e.g. docker.io/username/lit-node-express
@@ -52,8 +55,31 @@ concurrency:
 on:
   push:
     branches: [main, next]
+  workflow_dispatch:
 
 jobs:
+  validate-secrets:
+    runs-on: self-hosted
+    steps:
+      - name: Validate required secrets
+        env:
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
+          CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          PHALA_DSTACKAPP_PRIVATE_KEY: ${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}
+        run: |
+          missing=()
+          for secret in GCP_SERVICE_ACCOUNT_JSON BASE_CHAIN_RPC CERTBOT_AWS_SECRET_ACCESS_KEY PHALA_CLOUD_API_KEY PHALA_DSTACKAPP_PRIVATE_KEY; do
+            if [ -z "${!secret}" ]; then
+              missing+=("$secret")
+            fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required GitHub secrets: ${missing[*]}"
+            exit 1
+          fi
+
   determine-target:
     runs-on: self-hosted
     outputs:
@@ -89,7 +115,7 @@ jobs:
           echo "api_root_url=https://${DOMAIN}/core/v1" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: [determine-target]
+    needs: [validate-secrets, determine-target]
     runs-on: self-hosted
     permissions:
       id-token: write  # required for Sigstore keyless signing (OIDC token)
@@ -188,6 +214,9 @@ jobs:
           PHALA_PRIVATE_KEY: ${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
+          CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
         run: |
           phala deploy \
             -c docker-compose.deploy.yml \
@@ -195,6 +224,14 @@ jobs:
             --private-key "$PHALA_PRIVATE_KEY" \
             -e "STRIPE_SECRET_KEY=$STRIPE_SECRET_KEY" \
             -e "STRIPE_PUBLISHABLE_KEY=$STRIPE_PUBLISHABLE_KEY"
+            -e "GCP_SERVICE_ACCOUNT_JSON=$GCP_SERVICE_ACCOUNT_JSON" \
+            -e "GCP_PROJECT_ID=${{ needs.determine-target.outputs.gcp_project_id }}" \
+            -e "BASE_CHAIN_RPC=$BASE_CHAIN_RPC" \
+            -e "CERTBOT_DOMAIN=${{ needs.determine-target.outputs.domain }}" \
+            -e "CERTBOT_AWS_ACCESS_KEY_ID=${{ vars.CERTBOT_AWS_ACCESS_KEY_ID }}" \
+            -e "CERTBOT_AWS_SECRET_ACCESS_KEY=$CERTBOT_AWS_SECRET_ACCESS_KEY" \
+            -e "CERTBOT_AWS_ROLE_ARN=${{ vars.CERTBOT_AWS_ROLE_ARN }}" \
+            -e "CERTBOT_AWS_REGION=${{ vars.CERTBOT_AWS_REGION }}"
 
   wait-for-api-available:
     needs: [deploy, determine-target]
