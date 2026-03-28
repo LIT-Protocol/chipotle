@@ -618,11 +618,9 @@ pub async fn list_actions(
                 .await
                 .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?
         }
-        None => {
-            accounts::list_actions(api_key, pn, ps)
-                .await
-                .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?
-        }
+        None => accounts::list_actions(api_key, pn, ps)
+            .await
+            .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?,
     };
 
     let list = list.iter().map(action_metadata_to_item).collect();
