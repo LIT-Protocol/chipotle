@@ -21,6 +21,8 @@
 #   DOCKERHUB_TOKEN - Docker Hub PAT (Account Settings > Security > Access Tokens)
 #   PHALA_CLOUD_API_KEY - From Phala Cloud Dashboard > API Tokens
 #   PHALA_DSTACKAPP_PRIVATE_KEY - Private key for DstackApp on-chain KMS
+#   STRIPE_SECRET_KEY - Stripe API secret key (test sandbox for next, live for main)
+#   STRIPE_PUBLISHABLE_KEY - Stripe API publishable key (test sandbox for next, live for main)
 #
 # Required GitHub vars:
 #   DOCKER_IMAGE - Base image path, e.g. docker.io/username/lit-node-express
@@ -184,11 +186,15 @@ jobs:
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
           PHALA_PRIVATE_KEY: ${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
         run: |
           phala deploy \
             -c docker-compose.deploy.yml \
             --cvm-id ${{ needs.determine-target.outputs.phala_app_name }} \
-            --private-key "$PHALA_PRIVATE_KEY"
+            --private-key "$PHALA_PRIVATE_KEY" \
+            -e "STRIPE_SECRET_KEY=$STRIPE_SECRET_KEY" \
+            -e "STRIPE_PUBLISHABLE_KEY=$STRIPE_PUBLISHABLE_KEY"
 
   wait-for-api-available:
     needs: [deploy, determine-target]

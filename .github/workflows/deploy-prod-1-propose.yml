@@ -27,6 +27,8 @@
 #   DOCKERHUB_TOKEN - Docker Hub PAT
 #   PHALA_CLOUD_API_KEY - Phala Cloud API token
 #   SAFE_PROPOSER_PRIVATE_KEY - EOA key for proposing Safe transactions
+#   STRIPE_SECRET_KEY - Stripe API secret key (live)
+#   STRIPE_PUBLISHABLE_KEY - Stripe API publishable key (live)
 #
 # Required vars:
 #   DOCKER_IMAGE - Base image path (e.g. docker.io/username/lit-node-express)
@@ -148,11 +150,15 @@ jobs:
         id: prepare
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
         run: |
           OUTPUT=$(phala deploy \
             --prepare-only \
             -c docker-compose.deploy.yml \
             --cvm-id chipotle-prod \
+            -e "STRIPE_SECRET_KEY=$STRIPE_SECRET_KEY" \
+            -e "STRIPE_PUBLISHABLE_KEY=$STRIPE_PUBLISHABLE_KEY" \
             --json)
           echo "$OUTPUT"
           COMPOSE_HASH=$(echo "$OUTPUT" | jq -r '.compose_hash')
