@@ -18,7 +18,7 @@ jobs:
   deploy:
     if: >
       github.event_name == 'push' ||
-      contains(fromJSON('["OWNER","MEMBER"]'), github.event.pull_request.author_association)
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
