@@ -68,9 +68,11 @@ jobs:
           CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
           PHALA_DSTACKAPP_PRIVATE_KEY: ${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SANDBOX_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_SANDBOX_PUBLISHABLE_KEY }}
         run: |
           missing=()
-          for secret in GCP_SERVICE_ACCOUNT_JSON BASE_CHAIN_RPC CERTBOT_AWS_SECRET_ACCESS_KEY PHALA_CLOUD_API_KEY PHALA_DSTACKAPP_PRIVATE_KEY; do
+          for secret in GCP_SERVICE_ACCOUNT_JSON BASE_CHAIN_RPC CERTBOT_AWS_SECRET_ACCESS_KEY PHALA_CLOUD_API_KEY PHALA_DSTACKAPP_PRIVATE_KEY STRIPE_SECRET_KEY STRIPE_PUBLISHABLE_KEY; do
             if [ -z "${!secret}" ]; then
               missing+=("$secret")
             fi
@@ -212,8 +214,8 @@ jobs:
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
           PHALA_PRIVATE_KEY: ${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SANDBOX_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_SANDBOX_PUBLISHABLE_KEY }}
           GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
           BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
           CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
@@ -223,7 +225,7 @@ jobs:
             --cvm-id ${{ needs.determine-target.outputs.phala_app_name }} \
             --private-key "$PHALA_PRIVATE_KEY" \
             -e "STRIPE_SECRET_KEY=$STRIPE_SECRET_KEY" \
-            -e "STRIPE_PUBLISHABLE_KEY=$STRIPE_PUBLISHABLE_KEY"
+            -e "STRIPE_PUBLISHABLE_KEY=$STRIPE_PUBLISHABLE_KEY" \
             -e "GCP_SERVICE_ACCOUNT_JSON=$GCP_SERVICE_ACCOUNT_JSON" \
             -e "GCP_PROJECT_ID=${{ needs.determine-target.outputs.gcp_project_id }}" \
             -e "BASE_CHAIN_RPC=$BASE_CHAIN_RPC" \
