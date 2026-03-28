@@ -254,7 +254,7 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
 - **`GET /list_groups?page_number&page_size`** — List groups.
 - **`GET /list_wallets?page_number&page_size`** — List wallets (PKPs).
 - **`GET /list_wallets_in_group?group_id&page_number&page_size`** — List wallets in a group (`group_id` is a u64).
-- **`GET /list_actions?group_id&page_number&page_size`** — List actions registered to a group (`group_id` is a string).
+- **`GET /list_actions?[group_id]&page_number&page_size`** — List actions. When `group_id` is provided, lists actions in that group. When omitted, lists all actions on the account.
 - **`GET /get_node_chain_config`** — Returns chain config, including contract addresses. No auth required.
 - **`GET /get_api_payers`** — Returns the list of API payer addresses. No auth required.
 - **`GET /get_admin_api_payer`** — Returns the admin payer address. No auth required.

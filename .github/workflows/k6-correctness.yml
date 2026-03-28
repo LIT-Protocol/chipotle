@@ -3,6 +3,9 @@
 
 name: k6 Correctness
 
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:

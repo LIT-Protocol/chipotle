@@ -13,6 +13,7 @@ app_name       := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main
 instance_type  := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo tdx.small || echo tdx.small'`
 gcp_project_id := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo chipotle-dev || echo chipotle-next'`
 node_config    := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo NodeConfig.main.toml || echo NodeConfig.next.toml'`
+domain         := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo api.dev.litprotocol.com || echo test.chipotle.litprotocol.com'`
 
 import "justfile.deploy"
 import "justfile.sim"

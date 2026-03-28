@@ -454,8 +454,23 @@ pub async fn list_wallets_in_group(
     Ok(page)
 }
 
-/// List actions in a group (paginated). Returns metadata (id, name, description) per action.
+/// List all actions on the account (paginated). Returns metadata (id, name, description) per action.
 pub async fn list_actions(
+    api_key: &str,
+    page_number: U256,
+    page_size: U256,
+) -> Result<Vec<Metadata>> {
+    let contract = get_read_only_account_config_contract().await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let page = contract
+        .list_actions(account_api_key_hash, page_number, page_size)
+        .call()
+        .await?;
+    Ok(page)
+}
+
+/// List actions in a group (paginated). Returns metadata (id, name, description) per action.
+pub async fn list_actions_in_group(
     api_key: &str,
     group_id: U256,
     page_number: U256,

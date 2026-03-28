@@ -6,6 +6,9 @@ name: Rust CI
 on:
   pull_request:
 
+permissions:
+  contents: read
+
 # Cancel any in-progress run on the same branch/PR when a new commit is pushed.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -13,6 +16,9 @@ concurrency:
 
 jobs:
   check:
+    if: >
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
     name: ${{ matrix.crate }}
     runs-on: self-hosted
     strategy:

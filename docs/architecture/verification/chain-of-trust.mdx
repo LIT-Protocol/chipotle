@@ -1,0 +1,52 @@
+---
+title: "Chain of Trust Reference"
+description: "What each verification layer checks and why it matters — application, platform, network, and governance."
+---
+
+The sections below explain what each verification step is actually checking and why it matters. For the step-by-step commands, see the [Full Verification Guide](/architecture/verification/full-verification). For the canonical reference, see [Phala: Complete Chain of Trust](https://docs.phala.com/phala-cloud/attestation/chain-of-trust).
+
+## Application Layer
+
+| Check | What it proves |
+|-------|----------------|
+| **compose-hash** | The SHA-256 of the `app-compose.json` config (which includes `docker-compose.yaml` plus metadata) is recorded as an event in RTMR3. Recomputing the hash from `/info` and comparing it to the attested value proves the CVM is running the declared configuration. |
+| **Docker image digests** | All images (lit-actions, lit-api-server, otel-collector, dstack-ingress) use `@sha256:` digest pinning. Mutable tags like `:latest` would allow silent image substitution. |
+| **Image provenance (Sigstore)** | Each image is signed with Sigstore cosign (keyless, GitHub OIDC). Verification proves the image was built by GitHub Actions from the `LIT-Protocol/lit-node-express` repository and recorded in the public Rekor transparency log. |
+| **RTMR3 event log replay** | Each event extends RTMR3 via a hash chain: `RTMR3_new = SHA384(RTMR3_old ‖ SHA384(event))`. The dstack-verifier replays all events from the initial value (48 zero bytes) and confirms the final value matches the RTMR3 in the TDX quote. This ensures no events were added, removed, or modified. |
+
+## Platform Layer
+
+The TDX quote contains hardware-measured registers that attest the entire boot chain:
+
+| Register | What it measures |
+|----------|-----------------|
+| **MRTD** | Virtual firmware hash |
+| **RTMR0** | Hardware configuration |
+| **RTMR1** | Kernel measurements |
+| **RTMR2** | Boot parameters |
+| **RTMR3** | Application events (compose-hash, key-provider, etc.) |
+
+| Check | What it proves |
+|-------|----------------|
+| **TDX quote signature** | Intel signs the TDX quote with the hardware root of trust. Verification against the Intel root CA proves the quote came from genuine TDX hardware. The dstack-verifier and the Phala Cloud API both handle this. |
+| **OS measurements** | MRTD, RTMR0–2 values must match known-good values from the dstack release. The **DstackKms** contract on-chain whitelists allowed OS images via `allowedOsImages(bytes32)`. |
+| **KMS identity** | The `key-provider` event in RTMR3 records the KMS root CA public key hash. This binds the CVM to a specific trusted KMS — if someone substituted a rogue KMS, this hash would change and RTMR3 verification would fail. The DstackKms contract also whitelists KMS instances via `kmsAllowedAggregatedMrs(bytes32)`. |
+| **KMS attestation** | The KMS itself runs in a TEE with its own attestation quote. [Phala's Trust Center](https://github.com/Phala-Network/trust-center) verifies this independently. |
+
+## Network Layer
+
+| Check | What it proves |
+|-------|----------------|
+| **Evidence files** | dstack-ingress serves `/evidences/` with `cert-<domain>.pem`, `sha256sum.txt`, `acme-account.json`, and `quote.json`. The SHA-256 of `sha256sum.txt` is embedded in the evidence quote's `reportData`, creating a checksum chain from the TDX hardware root of trust to the certificate files. |
+| **Evidence checksum chain** | `SHA-256(sha256sum.txt)` must match `reportData` in `/evidences/quote.json`. This proves the evidence files were generated inside the TEE that produced the quote. |
+| **Certificate fingerprint match** | The leaf cert DER fingerprint from `openssl s_client` must match the leaf cert extracted from the evidence PEM. This proves the live TLS connection uses the same certificate attested by the TEE. |
+| **CAA DNS records** | The custom domain has a CAA CNAME alias pointing to the gateway domain (`_.dstack-base-prod5.phala.network`), which restricts certificate issuance to Let's Encrypt via DNS-01 with a specific ACME account URI — ensuring only the TEE-controlled ACME flow can obtain certificates. |
+
+## Governance Layer
+
+| Check | What it proves |
+|-------|----------------|
+| **DstackApp contract** | The compose-hash must be whitelisted via `allowedComposeHashes(bytes32)` before the CVM will boot. |
+| **KMS Phala app contract** | Whitelists allowed OS images (`allowedOsImages`) and KMS instances (`kmsAllowedAggregatedMrs`). Only whitelisted versions can boot. |
+| **AccountConfig contract** | Governs Lit Chipotle's permission model on Base — account ownership, API key scopes, PKP registries, and action groups. |
+| **Safe multisig** | All three contracts above are administered by a 2/3 Safe multisig ([`0xF688411c0FFc300cAb33EB1dA651DBb3E6891098`](https://basescan.org/address/0xF688411c0FFc300cAb33EB1dA651DBb3E6891098)) on Base. Production deployments use a two-phase CI workflow: propose → approve via Safe UI → execute. |

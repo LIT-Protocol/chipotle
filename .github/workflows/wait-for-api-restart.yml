@@ -12,6 +12,9 @@
 
 name: Wait for API restart
 
+permissions:
+  contents: read
+
 on:
   workflow_call:
     outputs:
