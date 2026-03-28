@@ -15,6 +15,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  debug-author-association:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "event_name=${{ github.event_name }}"
+          echo "author_association=${{ github.event.pull_request.author_association }}"
+          echo "actor=${{ github.actor }}"
   check:
     if: >
       github.event_name == 'push' ||
