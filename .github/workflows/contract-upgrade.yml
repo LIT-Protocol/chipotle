@@ -79,7 +79,7 @@ jobs:
       - name: Upgrade diamond facets
         working-directory: lit-api-server/blockchain/lit_node_express
         env:
-          DEPLOYER_KEY: ${{ steps.config.outputs.network == 'base' && secrets.PHALA_DSTACKAPP_PRIVATE_KEY || secrets.CONTRACT_DEPLOYER_SECRET_SEPOLIA }}
+          DEPLOYER_KEY: ${{ steps.config.outputs.network == 'base' && secrets.PHALA_DSTACKAPP_PRIVATE_KEY || (steps.config.outputs.network != 'base' && secrets.CONTRACT_DEPLOYER_SECRET_SEPOLIA) }}
         run: |
           ../rust_generator_and_deployer/target/debug/contract_deployer \
             --action=update \
