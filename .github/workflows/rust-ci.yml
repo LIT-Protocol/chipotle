@@ -1,5 +1,5 @@
 # Runs cargo fmt --check, cargo clippy, and cargo build --all-features
-# on every pull request.
+# on every pull request targeting any branch.
 
 name: Rust CI
 
