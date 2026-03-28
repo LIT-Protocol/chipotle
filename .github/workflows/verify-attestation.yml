@@ -10,6 +10,9 @@
 
 name: Verify Remote Attestation
 
+permissions:
+  contents: read
+
 on:
   workflow_call:
     inputs:

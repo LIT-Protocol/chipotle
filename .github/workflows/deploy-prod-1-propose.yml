@@ -135,7 +135,6 @@ jobs:
             -e "s|\${CERTBOT_AWS_ROLE_ARN}|${{ vars.CERTBOT_AWS_ROLE_ARN }}|g" \
             -e "s|\${CERTBOT_AWS_REGION}|${{ vars.CERTBOT_AWS_REGION }}|g" \
             docker-compose.phala.yml > docker-compose.deploy.yml
-          cat docker-compose.deploy.yml
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
