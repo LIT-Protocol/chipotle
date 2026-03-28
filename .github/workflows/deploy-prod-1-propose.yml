@@ -130,12 +130,11 @@ jobs:
             -e "s|\${DOCKER_IMAGE_OTEL_COLLECTOR}|${{ vars.DOCKER_IMAGE }}-otel-collector@${DIGEST_OTEL_COLLECTOR}|g" \
             -e "s|\${GCP_PROJECT_ID}|chipotle-prod|g" \
             -e "s|\${CERTBOT_DOMAIN}|${DOMAIN}|g" \
-            -e "s|\${CERTBOT_AWS_ACCESS_KEY_ID}|${{ vars.CERTBOT_AWS_ACCESS_KEY_ID }}|g" \
+            -e "s|\${CERTBOT_AWS_ACCESS_KEY_ID}|${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}|g" \
             -e "s|\${CERTBOT_AWS_SECRET_ACCESS_KEY}|${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}|g" \
-            -e "s|\${CERTBOT_AWS_ROLE_ARN}|${{ vars.CERTBOT_AWS_ROLE_ARN }}|g" \
+            -e "s|\${CERTBOT_AWS_ROLE_ARN}|${{ secrets.CERTBOT_AWS_ROLE_ARN }}|g" \
             -e "s|\${CERTBOT_AWS_REGION}|${{ vars.CERTBOT_AWS_REGION }}|g" \
             docker-compose.phala.yml > docker-compose.deploy.yml
-          cat docker-compose.deploy.yml
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

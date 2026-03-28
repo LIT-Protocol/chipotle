@@ -10,6 +10,10 @@ on:
       - 'lit-static/**'
       - '.github/workflows/deploy-static.yml'
 
+permissions:
+  contents: read
+  deployments: write
+
 jobs:
   deploy-main:
     if: github.ref == 'refs/heads/main'
@@ -44,7 +48,9 @@ jobs:
           command: pages deploy lit-static --project-name=lit-static-next --branch=main
 
   deploy-preview:
-    if: github.event_name == 'pull_request'
+    if: >
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
