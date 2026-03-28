@@ -18,7 +18,7 @@ jobs:
   check:
     if: >
       github.event_name == 'push' ||
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
     name: ${{ matrix.crate }}
     runs-on: self-hosted
     strategy:
