@@ -614,9 +614,15 @@ pub async fn list_actions(
     let list = match group_id {
         Some(gid_str) => {
             let gid = string_group_id_to_u256(gid_str)?;
-            accounts::list_actions_in_group(api_key, gid, pn, ps)
-                .await
-                .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?
+            if gid == U256::zero() {
+                accounts::list_actions(api_key, pn, ps)
+                    .await
+                    .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?
+            } else {
+                accounts::list_actions_in_group(api_key, gid, pn, ps)
+                    .await
+                    .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?
+            }
         }
         None => accounts::list_actions(api_key, pn, ps)
             .await
