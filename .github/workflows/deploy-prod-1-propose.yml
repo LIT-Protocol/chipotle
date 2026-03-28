@@ -27,6 +27,8 @@
 #   DOCKERHUB_TOKEN - Docker Hub PAT
 #   PHALA_CLOUD_API_KEY - Phala Cloud API token
 #   SAFE_PROPOSER_PRIVATE_KEY - EOA key for proposing Safe transactions
+#   STRIPE_SECRET_KEY - Stripe API secret key (live)
+#   STRIPE_PUBLISHABLE_KEY - Stripe API publishable key (live)
 #   GCP_SERVICE_ACCOUNT_JSON - GCP service account key (raw JSON or base64-encoded)
 #   BASE_CHAIN_RPC - RPC endpoint for Base blockchain
 #   CERTBOT_AWS_SECRET_ACCESS_KEY - Route 53 IAM secret key for DNS-01 challenge
@@ -175,6 +177,8 @@ jobs:
         id: prepare
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
           GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
           BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
           CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
@@ -183,6 +187,8 @@ jobs:
             --prepare-only \
             -c docker-compose.deploy.yml \
             --cvm-id chipotle-prod \
+            -e "STRIPE_SECRET_KEY=$STRIPE_SECRET_KEY" \
+            -e "STRIPE_PUBLISHABLE_KEY=$STRIPE_PUBLISHABLE_KEY" \
             -e "GCP_SERVICE_ACCOUNT_JSON=$GCP_SERVICE_ACCOUNT_JSON" \
             -e "GCP_PROJECT_ID=chipotle-prod" \
             -e "BASE_CHAIN_RPC=$BASE_CHAIN_RPC" \

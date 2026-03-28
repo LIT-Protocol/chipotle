@@ -17,21 +17,30 @@
 #     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
 #     <image>@<digest>
 #
-# Required secrets:
+# Required GitHub secrets:
 #   DOCKERHUB_TOKEN - Docker Hub PAT (Account Settings > Security > Access Tokens)
 #   PHALA_CLOUD_API_KEY - From Phala Cloud Dashboard > API Tokens
 #   PHALA_DSTACKAPP_PRIVATE_KEY - Private key for DstackApp on-chain KMS
+#   STRIPE_SECRET_KEY - Stripe API secret key (test sandbox for next, live for main)
+#   STRIPE_PUBLISHABLE_KEY - Stripe API publishable key (test sandbox for next, live for main)
 #   GCP_SERVICE_ACCOUNT_JSON - GCP service account key (raw JSON or base64-encoded)
 #   BASE_CHAIN_RPC - RPC endpoint for Base blockchain
 #   CERTBOT_AWS_SECRET_ACCESS_KEY - Route 53 IAM secret key for DNS-01 challenge
 #
-# Required vars:
+# Required GitHub vars:
 #   DOCKER_IMAGE - Base image path, e.g. docker.io/username/lit-node-express
 #                  Three images are pushed:
 #                    ${DOCKER_IMAGE}-lit-actions
 #                    ${DOCKER_IMAGE}-lit-api-server
 #                    ${DOCKER_IMAGE}-otel-collector
 #   DOCKERHUB_USERNAME - Docker Hub username
+#
+# Required Phala CVM encrypted env vars (per instance, set via Phala Cloud Dashboard):
+#   BASE_CHAIN_RPC             - RPC endpoint for the chain
+#   GCP_SERVICE_ACCOUNT_JSON   - GCP service account key (raw JSON or base64-encoded)
+#   GCP_PROJECT_ID             - GCP project ID (e.g. "my-gcp-project")
+#   STRIPE_SECRET_KEY          - Stripe API secret key (test sandbox for staging, live for prod)
+#   STRIPE_PUBLISHABLE_KEY     - Stripe API publishable key (test sandbox for staging, live for prod)
 #   CERTBOT_AWS_ACCESS_KEY_ID - Route 53 IAM access key for DNS-01 challenge
 #   CERTBOT_AWS_ROLE_ARN      - IAM role ARN for STS assumption (required by dstack-ingress)
 #   CERTBOT_AWS_REGION        - AWS region for STS endpoint (e.g. "us-east-1")
@@ -203,6 +212,8 @@ jobs:
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
           PHALA_PRIVATE_KEY: ${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
           GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
           BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
           CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
@@ -211,6 +222,8 @@ jobs:
             -c docker-compose.deploy.yml \
             --cvm-id ${{ needs.determine-target.outputs.phala_app_name }} \
             --private-key "$PHALA_PRIVATE_KEY" \
+            -e "STRIPE_SECRET_KEY=$STRIPE_SECRET_KEY" \
+            -e "STRIPE_PUBLISHABLE_KEY=$STRIPE_PUBLISHABLE_KEY"
             -e "GCP_SERVICE_ACCOUNT_JSON=$GCP_SERVICE_ACCOUNT_JSON" \
             -e "GCP_PROJECT_ID=${{ needs.determine-target.outputs.gcp_project_id }}" \
             -e "BASE_CHAIN_RPC=$BASE_CHAIN_RPC" \
