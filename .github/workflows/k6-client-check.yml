@@ -19,7 +19,7 @@ jobs:
   k6-client-check:
     if: >
       github.event_name == 'push' ||
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+      contains(fromJSON('["OWNER","MEMBER"]'), github.event.pull_request.author_association)
     name: k6-client-check
     runs-on: self-hosted
     steps:
