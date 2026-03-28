@@ -1,5 +1,5 @@
 # Runs cargo fmt --check, cargo clippy, and cargo build --all-features
-# on every pull request targeting any branch.
+# on every pull request.
 
 name: Rust CI
 
@@ -15,17 +15,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  debug-author-association:
-    runs-on: ubuntu-latest
-    steps:
-      - run: |
-          echo "event_name=${{ github.event_name }}"
-          echo "author_association=${{ github.event.pull_request.author_association }}"
-          echo "actor=${{ github.actor }}"
   check:
     if: >
       github.event_name == 'push' ||
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)
     name: ${{ matrix.crate }}
     runs-on: self-hosted
     strategy:

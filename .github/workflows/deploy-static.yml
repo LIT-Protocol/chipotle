@@ -50,7 +50,7 @@ jobs:
   deploy-preview:
     if: >
       github.event_name == 'pull_request' &&
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4

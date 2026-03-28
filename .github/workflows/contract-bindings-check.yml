@@ -16,7 +16,7 @@ jobs:
   contract-bindings:
     if: >
       github.event_name == 'push' ||
-      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR","CONTRIBUTOR"]'), github.event.pull_request.author_association)
     name: contract-bindings
     runs-on: self-hosted
     steps:
