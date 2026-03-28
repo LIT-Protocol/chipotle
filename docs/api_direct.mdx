@@ -241,7 +241,7 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
 - **list_api_keys** — List usage API keys (paginated).
 - **list_groups** — List groups.
 - **list_wallets** — List wallets.
-- **list_actions** — List actions in a group (by `group_id`).
+- **list_actions** — List actions. When `group_id` is provided, lists actions in that group. When omitted, lists all actions on the account.
 - **list_wallets_in_group** — List wallets in a group.
 - **update_group** — Update group name, description, and permission flags.
 - **delete_action** — Delete an action and its metadata from the account. Body: `{"hashed_cid": "0x..."}` (already-hashed CID).
