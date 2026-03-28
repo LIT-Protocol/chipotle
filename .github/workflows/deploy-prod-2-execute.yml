@@ -34,7 +34,6 @@ jobs:
     runs-on: self-hosted
     outputs:
       compose_hash: ${{ steps.read.outputs.compose_hash }}
-      commit_token: ${{ steps.read.outputs.commit_token }}
       safe_tx_hash: ${{ steps.read.outputs.safe_tx_hash }}
       phala_app_name: ${{ steps.read.outputs.phala_app_name }}
       base_url: ${{ steps.read.outputs.base_url }}
@@ -55,7 +54,7 @@ jobs:
         id: read
         run: |
           cat deploy-context.json
-          for key in compose_hash commit_token safe_tx_hash phala_app_name base_url api_root_url safe_address version_tag source_sha; do
+          for key in compose_hash safe_tx_hash phala_app_name base_url api_root_url safe_address version_tag source_sha; do
             val=$(jq -r ".$key" deploy-context.json)
             echo "$key=$val" >> "$GITHUB_OUTPUT"
           done
@@ -122,11 +121,13 @@ jobs:
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
         run: |
-          phala deploy --commit \
-            --cvm-id "${{ needs.download-context.outputs.phala_app_name }}" \
-            --token "${{ needs.download-context.outputs.commit_token }}" \
-            --compose-hash "${{ needs.download-context.outputs.compose_hash }}" \
-            --transaction-hash "${{ needs.execute-safe-tx.outputs.tx_hash }}"
+          # Commit the provisioned compose file update using the compose hash
+          # from Phase 1. The Safe multisig has already approved and executed
+          # the addComposeHash transaction on-chain.
+          phala api "/cvms/${{ needs.download-context.outputs.phala_app_name }}/compose_file" \
+            -X PATCH \
+            -F compose_hash="${{ needs.download-context.outputs.compose_hash }}" \
+            --json
 
   wait-for-api-available:
     needs: [commit-deploy, download-context]
