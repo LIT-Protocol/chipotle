@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lit Node Monitor – Payer Safety Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Outfit:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --bg: #0f0f12;
+        --card: #18181c;
+        --border: #2a2a30;
+        --text: #e4e4e7;
+        --muted: #71717a;
+        --accent: #a78bfa;
+        --success: #34d399;
+        --warning: #fbbf24;
+        --critical: #f87171;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        font-family: 'Outfit', sans-serif;
+        background: var(--bg);
+        color: var(--text);
+        padding: 2rem 3rem;
+        max-width: 1920px;
+        margin: 0 auto;
+      }
+      h1 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin-bottom: 0.25rem;
+      }
+      .subtitle {
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin-bottom: 1.5rem;
+      }
+
+      /* ── Top bar: network selector + refresh ── */
+      .top-bar {
+        display: flex;
+        align-items: flex-end;
+        gap: 1rem;
+        margin-bottom: 1.5rem;
+        flex-wrap: wrap;
+      }
+      .refresh-controls {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding-bottom: 1px;
+      }
+      .countdown {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.8rem;
+        color: var(--muted);
+        min-width: 2.5em;
+      }
+
+      /* ── Health summary bar ── */
+      .health-bar {
+        display: flex;
+        gap: 2rem;
+        padding: 1rem 1.5rem;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        margin-bottom: 1.5rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .health-bar-item {
+        display: flex;
+        flex-direction: column;
+        gap: 0.2rem;
+      }
+      .health-bar-label {
+        font-size: 0.7rem;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .health-bar-value {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.85rem;
+      }
+
+      /* ── Two-column grid ── */
+      .two-col {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 2rem;
+        align-items: start;
+      }
+      .col {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 1.25rem 1.5rem;
+      }
+      .form-group {
+        margin-bottom: 1rem;
+      }
+      .form-group label {
+        display: block;
+        font-size: 0.8rem;
+        color: var(--muted);
+        margin-bottom: 0.35rem;
+      }
+      .form-group input {
+        width: 100%;
+        padding: 0.6rem 0.75rem;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.85rem;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+      }
+      .form-group input::placeholder {
+        color: var(--muted);
+      }
+      .form-group select {
+        width: 100%;
+        padding: 0.6rem 0.75rem;
+        font-family: 'Outfit', sans-serif;
+        font-size: 0.85rem;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        cursor: pointer;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2371717a' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 0.75rem center;
+        padding-right: 2rem;
+      }
+      .form-group select:focus {
+        outline: none;
+        border-color: var(--accent);
+      }
+      button {
+        font-family: 'Outfit', sans-serif;
+        font-size: 0.9rem;
+        font-weight: 500;
+        padding: 0.6rem 1.2rem;
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        margin-top: 0.5rem;
+      }
+      button:hover {
+        opacity: 0.9;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .results {
+        margin-top: 1.5rem;
+      }
+      .results h2 {
+        font-size: 1rem;
+        font-weight: 600;
+        margin-bottom: 0.75rem;
+        color: var(--muted);
+      }
+      .result-row {
+        display: flex;
+        align-items: baseline;
+        gap: 0.75rem;
+        padding: 0.5rem 0;
+        border-bottom: 1px solid var(--border);
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.85rem;
+      }
+      .result-row:last-child {
+        border-bottom: none;
+      }
+      .result-label {
+        min-width: 120px;
+        color: var(--muted);
+      }
+      .result-value {
+        color: var(--text);
+        word-break: break-all;
+      }
+      .result-value.empty {
+        color: var(--muted);
+      }
+      .error {
+        color: #f87171;
+        font-size: 0.9rem;
+        margin-top: 1rem;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.85rem;
+      }
+      th {
+        text-align: left;
+        font-family: 'Outfit', sans-serif;
+        font-size: 0.75rem;
+        font-weight: 500;
+        color: var(--muted);
+        padding: 0 0 0.5rem;
+        border-bottom: 1px solid var(--border);
+      }
+      td {
+        padding: 0.5rem 0;
+        border-bottom: 1px solid var(--border);
+        color: var(--text);
+        word-break: break-all;
+      }
+      tr:last-child td {
+        border-bottom: none;
+      }
+      td.eth {
+        white-space: nowrap;
+        text-align: right;
+        word-break: normal;
+        padding-left: 1rem;
+      }
+      th.eth {
+        text-align: right;
+      }
+
+      /* ── Health dots ── */
+      .health-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        display: inline-block;
+      }
+      .health-dot.healthy { background: var(--success); }
+      .health-dot.warning { background: var(--warning); }
+      .health-dot.critical { background: var(--critical); animation: pulse 1.5s infinite; }
+      .health-dot.unknown { background: var(--muted); }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.4; }
+      }
+
+      /* ── Payer row health highlight ── */
+      .payer-row.critical td { color: var(--critical); }
+      .payer-row.warning td { color: var(--warning); }
+
+      /* ── Copy-to-clipboard ── */
+      .copyable {
+        cursor: pointer;
+        transition: color 0.15s;
+      }
+      .copyable:hover {
+        color: var(--accent) !important;
+      }
+      .copyable.copied {
+        color: var(--success) !important;
+      }
+
+      /* ── Settings panel ── */
+      .settings-toggle {
+        background: none;
+        border: none;
+        color: var(--muted);
+        cursor: pointer;
+        font-size: 0.8rem;
+        padding: 0;
+        margin-top: 1rem;
+        font-family: 'Outfit', sans-serif;
+      }
+      .settings-toggle:hover {
+        color: var(--text);
+      }
+      .settings-panel {
+        display: none;
+        margin-top: 0.75rem;
+        padding-top: 0.75rem;
+        border-top: 1px solid var(--border);
+      }
+      .settings-panel.open {
+        display: block;
+      }
+      .settings-row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        margin-bottom: 0.5rem;
+      }
+      .settings-row label {
+        font-size: 0.8rem;
+        color: var(--muted);
+        min-width: 60px;
+      }
+      .settings-row input {
+        width: 100px;
+        padding: 0.3rem 0.5rem;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.8rem;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        color: var(--text);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Lit Node Monitor</h1>
+    <p class="subtitle">
+      Payer Safety Console — configuration and health monitoring for the Lit Node Express server.
+    </p>
+
+    <!-- ═══ Top bar: Network selector + refresh controls ═══ -->
+    <div class="top-bar">
+      <div class="form-group" style="flex: 1; max-width: 480px; margin-bottom: 0;">
+        <label for="network">Network</label>
+        <select id="network">
+          <option value="http://localhost:8000/core/v1/">Local Development</option>
+          <option value="https://test.chipotle.litprotocol.com/core/v1/">Next - Phala</option>
+          <option value="https://api.dev.litprotocol.com/core/v1/">Dev - Phala</option>
+          <option value="https://api.chipotle.litprotocol.com/core/v1/">Prod - Phala</option>
+        </select>
+      </div>
+      <div class="refresh-controls">
+        <button type="button" id="btn-refresh-all" style="margin-top: 0; padding: 0.4rem 0.9rem; font-size: 0.85rem;">Refresh</button>
+        <span id="refresh-countdown" class="countdown">30s</span>
+      </div>
+    </div>
+
+    <!-- ═══ Health summary bar ═══ -->
+    <div id="health-summary" class="health-bar" style="display: none;">
+      <div class="health-bar-item">
+        <span class="health-bar-label">Pool Health</span>
+        <span class="health-bar-value" id="health-summary-text">—</span>
+      </div>
+      <div class="health-bar-item">
+        <span class="health-bar-label">Total Pool</span>
+        <span class="health-bar-value" id="health-pool-total">—</span>
+      </div>
+      <div class="health-bar-item">
+        <span class="health-bar-label">Admin Reserve</span>
+        <span class="health-bar-value" id="health-admin-reserve">—</span>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <!-- ═══ LEFT COLUMN — read-only / critical info ═══ -->
+      <div class="col">
+
+        <!-- Payer Health Table (primary view) -->
+        <div class="card">
+          <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Payer Health</h2>
+          <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+            <code>GET /get_api_payers</code> — balance health based on configurable thresholds. Click addresses to copy.
+          </p>
+          <div id="api-payers-results" style="display: none; margin-top: 1rem">
+            <div id="api-payers-list"></div>
+          </div>
+          <div id="api-payers-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+
+          <button type="button" class="settings-toggle" id="btn-toggle-settings">&#9881; Thresholds</button>
+          <div id="settings-panel" class="settings-panel">
+            <div class="settings-row">
+              <label for="threshold-warning">Warning</label>
+              <input type="number" id="threshold-warning" step="0.001" min="0" placeholder="0.02" />
+            </div>
+            <div class="settings-row">
+              <label for="threshold-critical">Critical</label>
+              <input type="number" id="threshold-critical" step="0.001" min="0" placeholder="0.005" />
+            </div>
+            <div class="settings-row">
+              <label for="threshold-target">Target</label>
+              <input type="number" id="threshold-target" step="0.001" min="0" placeholder="0.05" />
+            </div>
+            <button type="button" id="btn-save-thresholds" style="font-size: 0.8rem; padding: 0.3rem 0.75rem;">Save</button>
+            <span id="threshold-status" style="display: none; font-size: 0.8rem; margin-left: 0.5rem;"></span>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Server Version</h2>
+          <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+            <code>GET /version</code>
+          </p>
+          <div id="version-results" style="display: none; margin-top: 1rem">
+            <div class="result-row">
+              <span class="result-label">name</span>
+              <span class="result-value" id="ver-name">—</span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">version</span>
+              <span class="result-value" id="ver-version">—</span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">commit</span>
+              <span class="result-value" id="ver-commit-version">—</span>
+            </div>
+            <div style="margin-top: 0.75rem" id="ver-submodules"></div>
+          </div>
+          <div id="version-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+        </div>
+
+        <div class="card">
+          <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Lit Node Express - Configuration</h2>
+          <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+            <code>GET /get_node_chain_config</code>
+          </p>
+          <div id="chain-config-results" style="display: none; margin-top: 1rem">
+            <div class="result-row"><span class="result-label">chain_name</span><span class="result-value" id="cc-chain-name">—</span></div>
+            <div class="result-row"><span class="result-label">chain_id</span><span class="result-value" id="cc-chain-id">—</span></div>
+            <div class="result-row"><span class="result-label">is_evm</span><span class="result-value" id="cc-is-evm">—</span></div>
+            <div class="result-row"><span class="result-label">testnet</span><span class="result-value" id="cc-testnet">—</span></div>
+            <div class="result-row"><span class="result-label">token</span><span class="result-value" id="cc-token">—</span></div>
+            <div class="result-row"><span class="result-label">rpc_url</span><input type="text" id="cc-rpc-url" placeholder="—" style="flex:1;padding:0.3rem 0.5rem;font-family:'JetBrains Mono',monospace;font-size:0.85rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);" /></div>
+            <div class="result-row"><span class="result-label">contract_address</span><span class="result-value" id="cc-contract-address">—</span></div>
+          </div>
+          <div id="chain-config-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+        </div>
+
+        <div class="card">
+          <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Lit Action Client Configuration</h2>
+          <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+            <code>GET /get_lit_action_client_config</code> — effective builder values, including any chain-config overrides.
+          </p>
+          <div id="lit-action-config-results" style="display: none;">
+            <div class="result-row"><span class="result-label">timeout_ms</span><span class="result-value" id="lac-timeout-ms">—</span></div>
+            <div class="result-row"><span class="result-label">async_timeout_ms</span><span class="result-value" id="lac-async-timeout-ms">—</span></div>
+            <div class="result-row"><span class="result-label">memory_limit_mb</span><span class="result-value" id="lac-memory-limit-mb">—</span></div>
+            <div class="result-row"><span class="result-label">max_code_length</span><span class="result-value" id="lac-max-code-length">—</span></div>
+            <div class="result-row"><span class="result-label">max_response_length</span><span class="result-value" id="lac-max-response-length">—</span></div>
+            <div class="result-row"><span class="result-label">max_console_log_length</span><span class="result-value" id="lac-max-console-log-length">—</span></div>
+            <div class="result-row"><span class="result-label">max_fetch_count</span><span class="result-value" id="lac-max-fetch-count">—</span></div>
+            <div class="result-row"><span class="result-label">max_get_keys_count</span><span class="result-value" id="lac-max-get-keys-count">—</span></div>
+            <div class="result-row"><span class="result-label">max_retries</span><span class="result-value" id="lac-max-retries">—</span></div>
+          </div>
+          <div id="lit-action-config-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+        </div>
+
+        <div class="card">
+          <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Supported Chain Config Keys</h2>
+          <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+            <code>GET /get_chain_config_keys</code> — all recognised <code>ConfigKeys</code> variants that the node reads from chain.
+          </p>
+          <div id="chain-config-keys-list"></div>
+          <div id="chain-config-keys-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+        </div>
+
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.25rem">
+            <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Account Configuration Contract</h2>
+            <button type="button" id="btn-refresh-contract" style="margin-top:0;padding:0.3rem 0.75rem;font-size:0.8rem;">Refresh</button>
+          </div>
+          <input type="hidden" id="contract-address" />
+
+          <div class="results" id="results" style="display: none">
+            <h2>Contract values</h2>
+            <div class="result-row">
+              <span class="result-label">pricing</span
+              ><span class="result-value" id="val-pricing-operator">—</span
+              ><span class="result-value" id="val-pricing-operator-balance" style="color:var(--muted);margin-left:auto"></span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">admin Payer</span
+              ><span class="result-value" id="val-admin-api-payer">—</span
+              ><span class="result-value" id="val-admin-api-payer-balance" style="color:var(--muted);margin-left:auto"></span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">Actual #</span
+              ><span class="result-value" id="val-payer-count">—</span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">Requested #</span
+              ><span class="result-value" id="val-requested-api-payer-count">—</span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">Rebalance</span
+              ><span class="result-value" id="val-rebalance-amount">—</span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">PKP count</span
+              ><span class="result-value" id="val-pkp-count">—</span>
+            </div>
+          </div>
+          <div class="error" id="error" style="display: none"></div>
+        </div>
+
+      </div>
+
+      <!-- ═══ RIGHT COLUMN — updateable / interactive ═══ -->
+      <div class="col">
+
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.25rem">
+            <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Node Configuration</h2>
+            <button type="button" id="btn-refresh-node-config" style="margin-top:0;padding:0.3rem 0.75rem;font-size:0.8rem;">Refresh</button>
+          </div>
+          <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+            Key-value pairs stored on-chain via <code>setNodeConfiguration</code>. Read by the node every 30 seconds.
+          </p>
+
+          <table>
+            <thead>
+              <tr><th>Key</th><th>Value</th></tr>
+            </thead>
+            <tbody id="node-config-table">
+              <tr><td colspan="2" style="color:var(--muted)">Loading…</td></tr>
+            </tbody>
+          </table>
+          <div id="node-config-fetch-error" style="display:none;color:#f87171;font-size:0.85rem;margin-top:0.5rem;"></div>
+
+          <div class="form-group" style="margin-top:1.5rem">
+            <label for="node-config-key">Key</label>
+            <input type="text" id="node-config-key" placeholder="e.g. LIT_ACTION_DEFAULT_TIMEOUT_MS" />
+          </div>
+          <div class="form-group">
+            <label for="node-config-value">Value</label>
+            <input type="text" id="node-config-value" placeholder="e.g. 60000" />
+          </div>
+          <button type="button" id="btn-set-node-config">Set Configuration</button>
+          <div id="node-config-status" style="display:none;font-size:0.85rem;margin-top:0.5rem;font-family:'JetBrains Mono',monospace;word-break:break-all;"></div>
+        </div>
+
+        <div class="card">
+          <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Api Payer Accounts</h2>
+          <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+            Sets the default API payer account. and sets number of payers the node will use to process mutable API calls.  If rebalance is enabled, the node will rebalance the payers to ensure each payer has equal funds, using funds that exist in the admin API payer account.
+          </p>
+
+          <div class="form-group" style="margin-top: 1.25rem">
+            <label for="default-api-payer">Admin API payer address</label>
+            <input type="text" id="default-api-payer" placeholder="0x…" />
+          </div>
+          <button type="button" id="btn-set-default-api-payer">Set Default</button>
+          <div id="default-api-payer-status" style="display: none; font-size: 0.85rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
+
+          <div class="form-group">
+            <label for="payer-count">Requested payer count</label>
+            <select id="payer-count">
+              <option value="" disabled selected>loading…</option>
+            </select>
+          </div>
+          <button type="button" id="btn-set-payer-count">Confirm</button>
+          <div id="payer-count-status" style="display: none; font-size: 0.85rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
+
+          <div class="form-group" style="margin-top: 1.25rem">
+            <label for="rebalance-amount">Rebalance amount (ETH)</label>
+            <input type="text" id="rebalance-amount" placeholder="e.g. 0.05" />
+          </div>
+          <button type="button" id="btn-set-rebalance-amount">Set Rebalance Amount</button>
+          <div id="rebalance-amount-status" style="display: none; font-size: 0.85rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
+        </div>
+
+      </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.umd.min.js"></script>
+    <script src="app.js"></script>
+  </body>
+</html>

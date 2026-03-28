@@ -84,8 +84,14 @@ When creating a group, two convenience flags control default access:
 - **All wallets permitted** — any wallet in the account can be used via this group (no need to add individually).
 - **All actions permitted** — any registered action can be run via this group.
 
-These are set in the Dashboard's group creation form or via the `pkp_ids_permitted` and `cid_hashes_permitted` arrays in the API.
+These are set in the Dashboard's group creation form or via the `pkp_ids_permitted` and `cid_hashes_permitted` arrays in the API. On-chain, these flags are *not* separate booleans: they are encoded using wildcard values in the arrays:
 
+- To permit **all wallets**, include the zero PKP ID in `pkp_ids_permitted`:
+  - `pkp_ids_permitted: ["0x0000000000000000000000000000000000000000000000000000000000000000"]`
+- To permit **all actions**, include `0` in `cid_hashes_permitted`:
+  - `cid_hashes_permitted: [0]`
+
+Leaving these arrays empty or omitting them does **not** mean "all" — it means no wallets/actions are automatically permitted by default.
 ## Further Reading
 
 - [API Reference](/management/api_direct) — Full endpoint docs for group management

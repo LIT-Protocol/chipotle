@@ -205,7 +205,31 @@ export default function (data: IntegrationSetupData) {
     },
   }, "addActionToGroup");
 
-  // ── 10. listActions ──────────────────────────────────────────────────────
+  // ── 10a. listActions (account-level, no group_id) ────────────────────────
+  const listActionsAccountRes = client.listActions(
+    { page_number: 0, page_size: 10 },
+    authHeaders,
+  );
+  if (!assertOk("listActionsAccount", "GET /list_actions (account)", listActionsAccountRes)) return;
+  checkAndLog(listActionsAccountRes.response, {
+    "listActionsAccount returns array": (r) => {
+      try {
+        return Array.isArray(JSON.parse(r.body as string));
+      } catch {
+        return false;
+      }
+    },
+    "listActionsAccount contains added action": (r) => {
+      try {
+        const body = JSON.parse(r.body as string) as { name: string }[];
+        return body.some((a) => a.name === "hello-world");
+      } catch {
+        return false;
+      }
+    },
+  }, "listActionsAccount");
+
+  // ── 10b. listActions (in group) ─────────────────────────────────────────
   const listActionsRes = client.listActions(
     { group_id: parseInt(groupId), page_number: 0, page_size: 10 },
     authHeaders,

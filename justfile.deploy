@@ -1,6 +1,6 @@
 # Deploy group — included by root justfile. Uses: image_base, image_lit_actions,
-# image_lit_api_server, image_lit_static, image_otel_collector, app_name,
-# instance_type, gcp_project_id, base_url.
+# image_lit_api_server, image_otel_collector, app_name,
+# instance_type, gcp_project_id.
 
 # Install Phala CLI (optional; run before first deploy)
 [group: 'deploy']
@@ -18,7 +18,6 @@ docker-build: _check_docker
     set -eu
     docker build --platform linux/amd64 -f Dockerfile.lit-actions     -t {{image_lit_actions}}     .
     docker build --platform linux/amd64 -f Dockerfile.lit-api-server  -t {{image_lit_api_server}}  --build-arg NODE_CONFIG={{node_config}} .
-    docker build --platform linux/amd64 -f Dockerfile.lit-static      -t {{image_lit_static}}      --build-arg BASE_URL={{base_url}} .
     docker build --platform linux/amd64 -f Dockerfile.otel-collector  -t {{image_otel_collector}}  .
 
 # Push all images and capture each registry-assigned @sha256: digest.
@@ -33,13 +32,11 @@ docker-push: docker-build
     command -v jq >/dev/null 2>&1 || { echo "error: jq not found. Install from https://stedolan.github.io/jq/"; exit 1; }
     docker push {{image_lit_actions}}
     docker push {{image_lit_api_server}}
-    docker push {{image_lit_static}}
     docker push {{image_otel_collector}}
     docker inspect {{image_lit_actions}}     | jq -r '.[0].RepoDigests[0]' | sed 's/.*@//' > .digest-lit-actions.txt
     docker inspect {{image_lit_api_server}}  | jq -r '.[0].RepoDigests[0]' | sed 's/.*@//' > .digest-lit-api-server.txt
-    docker inspect {{image_lit_static}}      | jq -r '.[0].RepoDigests[0]' | sed 's/.*@//' > .digest-lit-static.txt
     docker inspect {{image_otel_collector}}  | jq -r '.[0].RepoDigests[0]' | sed 's/.*@//' > .digest-otel-collector.txt
-    for f in .digest-lit-actions.txt .digest-lit-api-server.txt .digest-lit-static.txt .digest-otel-collector.txt; do
+    for f in .digest-lit-actions.txt .digest-lit-api-server.txt .digest-otel-collector.txt; do
         [ -s "$f" ] || { echo "error: digest capture failed for $f"; exit 1; }
         printf "captured %s: %s\n" "$f" "$(cat $f)"
     done
@@ -56,21 +53,23 @@ deploy name=(app_name): docker-push _check_phala
     set -eu
     DIGEST_LIT_ACTIONS=$(cat .digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
     DIGEST_LIT_API_SERVER=$(cat .digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
-    DIGEST_LIT_STATIC=$(cat .digest-lit-static.txt | tr -d '\n' | sed 's/}[}]*$//')
     DIGEST_OTEL_COLLECTOR=$(cat .digest-otel-collector.txt | tr -d '\n' | sed 's/}[}]*$//')
     [ -n "$DIGEST_LIT_ACTIONS" ]    || { echo "error: lit-actions digest missing; run: just docker-build"; exit 1; }
     [ -n "$DIGEST_LIT_API_SERVER" ] || { echo "error: lit-api-server digest missing; run: just docker-build"; exit 1; }
-    [ -n "$DIGEST_LIT_STATIC" ]     || { echo "error: lit-static digest missing; run: just docker-build"; exit 1; }
     [ -n "$DIGEST_OTEL_COLLECTOR" ] || { echo "error: otel-collector digest missing; run: just docker-build"; exit 1; }
+    if [ -f .env ]; then set -a && . ./.env && set +a; fi
     sed \
         -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|{{image_base}}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
         -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|{{image_base}}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
-        -e "s|\${DOCKER_IMAGE_LIT_STATIC}|{{image_base}}-lit-static@${DIGEST_LIT_STATIC}|g" \
         -e "s|\${DOCKER_IMAGE_OTEL_COLLECTOR}|{{image_base}}-otel-collector@${DIGEST_OTEL_COLLECTOR}|g" \
         -e "s|\${GCP_PROJECT_ID}|{{gcp_project_id}}|g" \
+        -e "s|\${CERTBOT_DOMAIN}|{{domain}}|g" \
+        -e "s|\${CERTBOT_AWS_ACCESS_KEY_ID}|${CERTBOT_AWS_ACCESS_KEY_ID}|g" \
+        -e "s|\${CERTBOT_AWS_SECRET_ACCESS_KEY}|${CERTBOT_AWS_SECRET_ACCESS_KEY}|g" \
+        -e "s|\${CERTBOT_AWS_ROLE_ARN}|${CERTBOT_AWS_ROLE_ARN}|g" \
+        -e "s|\${CERTBOT_AWS_REGION}|${CERTBOT_AWS_REGION}|g" \
         docker-compose.phala.yml > docker-compose.deploy.yml
     cat docker-compose.deploy.yml
-    if [ -f .env ]; then set -a && . ./.env && set +a; fi
     [ -n "${PHALA_PRIVATE_KEY}" ] || { echo "error: PHALA_PRIVATE_KEY not set. Copy .env.example to .env and set your DstackApp key."; exit 1; }
     phala deploy -c docker-compose.deploy.yml --cvm-id {{app_name}} --private-key "${PHALA_PRIVATE_KEY}"
 
@@ -87,21 +86,23 @@ deploy-new name=(app_name): docker-push _check_phala
     echo "Deploying app: $APP_NAME"
     DIGEST_LIT_ACTIONS=$(cat .digest-lit-actions.txt | tr -d '\n' | sed 's/}[}]*$//')
     DIGEST_LIT_API_SERVER=$(cat .digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
-    DIGEST_LIT_STATIC=$(cat .digest-lit-static.txt | tr -d '\n' | sed 's/}[}]*$//')
     DIGEST_OTEL_COLLECTOR=$(cat .digest-otel-collector.txt | tr -d '\n' | sed 's/}[}]*$//')
     [ -n "$DIGEST_LIT_ACTIONS" ]    || { echo "error: lit-actions digest missing; run: just docker-build"; exit 1; }
     [ -n "$DIGEST_LIT_API_SERVER" ] || { echo "error: lit-api-server digest missing; run: just docker-build"; exit 1; }
-    [ -n "$DIGEST_LIT_STATIC" ]     || { echo "error: lit-static digest missing; run: just docker-build"; exit 1; }
     [ -n "$DIGEST_OTEL_COLLECTOR" ] || { echo "error: otel-collector digest missing; run: just docker-build"; exit 1; }
+    if [ -f .env ]; then set -a && . ./.env && set +a; fi
     sed \
         -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|{{image_base}}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
         -e "s|\${DOCKER_IMAGE_LIT_API_SERVER}|{{image_base}}-lit-api-server@${DIGEST_LIT_API_SERVER}|g" \
-        -e "s|\${DOCKER_IMAGE_LIT_STATIC}|{{image_base}}-lit-static@${DIGEST_LIT_STATIC}|g" \
         -e "s|\${DOCKER_IMAGE_OTEL_COLLECTOR}|{{image_base}}-otel-collector@${DIGEST_OTEL_COLLECTOR}|g" \
         -e "s|\${GCP_PROJECT_ID}|{{gcp_project_id}}|g" \
+        -e "s|\${CERTBOT_DOMAIN}|{{domain}}|g" \
+        -e "s|\${CERTBOT_AWS_ACCESS_KEY_ID}|${CERTBOT_AWS_ACCESS_KEY_ID}|g" \
+        -e "s|\${CERTBOT_AWS_SECRET_ACCESS_KEY}|${CERTBOT_AWS_SECRET_ACCESS_KEY}|g" \
+        -e "s|\${CERTBOT_AWS_ROLE_ARN}|${CERTBOT_AWS_ROLE_ARN}|g" \
+        -e "s|\${CERTBOT_AWS_REGION}|${CERTBOT_AWS_REGION}|g" \
         docker-compose.phala.yml > docker-compose.deploy.yml
     cat docker-compose.deploy.yml
-    if [ -f .env ]; then set -a && . ./.env && set +a; fi
     [ -n "${PHALA_PRIVATE_KEY}" ] || { echo "error: PHALA_PRIVATE_KEY not set. Copy .env.example to .env and set your DstackApp key."; exit 1; }
     phala deploy -c docker-compose.deploy.yml -n "$APP_NAME" --instance-type {{instance_type}} \
         --image dstack-0.5.6 \
@@ -112,7 +113,6 @@ deploy-new name=(app_name): docker-push _check_phala
 docker-run-local: docker-build
     DOCKER_IMAGE_LIT_ACTIONS={{image_lit_actions}} \
     DOCKER_IMAGE_LIT_API_SERVER={{image_lit_api_server}} \
-    DOCKER_IMAGE_LIT_STATIC={{image_lit_static}} \
     DOCKER_IMAGE_OTEL_COLLECTOR={{image_otel_collector}} \
     GCP_PROJECT_ID={{gcp_project_id}} \
     docker compose -f docker-compose.phala.yml up -d
