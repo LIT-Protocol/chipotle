@@ -582,7 +582,10 @@ export type ListWalletsInGroupHeaders = {
 export type ListWalletsInGroupDefault = WalletItem[] | ErrMessage;
 
 export type ListActionsParams = {
-  group_id: string;
+  /**
+   * @nullable
+   */
+  group_id?: string | null;
   /**
    * @minimum 0
    */

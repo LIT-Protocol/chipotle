@@ -152,7 +152,7 @@ pub(super) async fn list_wallets_in_group(
 #[get("/list_actions?<group_id>&<page_number>&<page_size>")]
 pub(super) async fn list_actions(
     api_key: ApiKey,
-    group_id: String,
+    group_id: Option<String>,
     page_number: u64,
     page_size: u64,
 ) -> OpenApiResponse<Vec<ListMetadataItem>, ErrMessage> {
@@ -160,7 +160,7 @@ pub(super) async fn list_actions(
         response: ApiResult(
             account_management::list_actions(
                 api_key.0.as_str(),
-                group_id.as_str(),
+                group_id.as_deref(),
                 page_number,
                 page_size,
             )

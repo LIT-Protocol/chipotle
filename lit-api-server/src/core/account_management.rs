@@ -605,16 +605,29 @@ pub async fn list_wallets_in_group(
 
 pub async fn list_actions(
     api_key: &str,
-    group_id: &str,
+    group_id: Option<&str>,
     page_number: u64,
     page_size: u64,
 ) -> Result<Vec<ListMetadataItem>, ApiStatus> {
-    let gid = string_group_id_to_u256(group_id)?;
     let pn = U256::from(page_number);
     let ps = U256::from(page_size);
-    let list = accounts::list_actions(api_key, gid, pn, ps)
-        .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?;
+    let list = match group_id {
+        Some(gid_str) => {
+            let gid = string_group_id_to_u256(gid_str)?;
+            if gid == U256::zero() {
+                accounts::list_actions(api_key, pn, ps)
+                    .await
+                    .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?
+            } else {
+                accounts::list_actions_in_group(api_key, gid, pn, ps)
+                    .await
+                    .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?
+            }
+        }
+        None => accounts::list_actions(api_key, pn, ps)
+            .await
+            .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?,
+    };
 
     let list = list.iter().map(action_metadata_to_item).collect();
     Ok(list)
