@@ -582,7 +582,7 @@ export type ListWalletsInGroupHeaders = {
 export type ListWalletsInGroupDefault = WalletItem[] | ErrMessage;
 
 export type ListActionsParams = {
-  group_id: string;
+  group_id?: string;
   /**
    * @minimum 0
    */
@@ -1715,10 +1715,13 @@ export class LitApiServerClient {
     data: ListActionsDefault;
     operationId: string;
   } {
+    const filteredParams = Object.fromEntries(
+      Object.entries(params).filter(([, v]) => v !== undefined),
+    );
     const k6url = new URL(
       this.cleanBaseUrl +
         `/list_actions` +
-        `?${new URLSearchParams(params).toString()}`,
+        `?${new URLSearchParams(filteredParams as Record<string, string>).toString()}`,
     );
     const mergedRequestParameters = this._mergeRequestParameters(
       requestParameters || {},
