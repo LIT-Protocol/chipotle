@@ -29,10 +29,13 @@ task("propose-dstack-app", "Propose an AppAuth compose-hash whitelisting through
       throw new Error(`Chain ID not configured for network ${hre.network.name}`);
     }
 
+    const proposerWallet = new ethers.Wallet(proposerKey);
+    const proposerAddress = proposerWallet.address;
     console.log(`Network: ${hre.network.name} (chain ${chainId})`);
     console.log(`Safe: ${safeAddress}`);
     console.log(`AppAuth: ${appAuthAddress}`);
     console.log(`Compose Hash: ${composeHash}`);
+    console.log(`Proposer address: ${proposerAddress}`);
 
     // Encode the addComposeHash call
     const iface = new ethers.Interface(APP_AUTH_ABI);
@@ -41,7 +44,7 @@ task("propose-dstack-app", "Propose an AppAuth compose-hash whitelisting through
 
     console.log(`\nEncoded calldata: ${calldata}`);
 
-    // Initialize Protocol Kit
+    // Initialize Protocol Kit (use any valid signer — we only need it to build the tx)
     const rpcUrl =
       (hre.network.config as { url?: string }).url || "https://mainnet.base.org";
 
@@ -51,7 +54,7 @@ task("propose-dstack-app", "Propose an AppAuth compose-hash whitelisting through
       safeAddress,
     });
 
-    // Create Safe transaction
+    // Create Safe transaction and compute its hash
     const safeTransaction = await protocolKit.createTransaction({
       transactions: [
         {
@@ -63,22 +66,45 @@ task("propose-dstack-app", "Propose an AppAuth compose-hash whitelisting through
       ],
     });
 
-    // Sign and propose
-    const signedTransaction = await protocolKit.signTransaction(safeTransaction);
-    const safeTxHash = await protocolKit.getTransactionHash(signedTransaction);
-
+    const safeTxHash = await protocolKit.getTransactionHash(safeTransaction);
     console.log(`\nSafe transaction hash: ${safeTxHash}`);
+
+    // Check if proposer is an owner. If not, sign as delegate using eth_sign
+    // (prepend "\x19Ethereum Signed Message:\n32" prefix).
+    const owners = await protocolKit.getOwners();
+    const isOwner = owners.some(
+      (o) => o.toLowerCase() === proposerAddress.toLowerCase()
+    );
+
+    let senderSignature: string;
+
+    if (isOwner) {
+      // Owner: use Protocol Kit's EIP-712 typed-data signature
+      const signed = await protocolKit.signTransaction(safeTransaction);
+      senderSignature = signed.encodedSignatures();
+    } else {
+      // Delegate: produce an eth_sign signature (pre-image hashed, v adjusted)
+      console.log(`\nProposer is not an owner — signing as delegate (eth_sign)`);
+      const messageBytes = ethers.getBytes(safeTxHash);
+      const rawSig = proposerWallet.signingKey.sign(
+        ethers.hashMessage(messageBytes)
+      );
+      // Safe expects v to be 31 or 32 for eth_sign signatures (v + 4)
+      const v = rawSig.v - 27 + 31;
+      senderSignature = ethers.solidityPacked(
+        ["bytes32", "bytes32", "uint8"],
+        [rawSig.r, rawSig.s, v]
+      );
+    }
 
     const apiKit = new SafeApiKit({ chainId: BigInt(chainId) });
 
-    const signerAddress = new ethers.Wallet(proposerKey).address;
-
     await apiKit.proposeTransaction({
       safeAddress,
-      safeTransactionData: signedTransaction.data,
+      safeTransactionData: safeTransaction.data,
       safeTxHash,
-      senderAddress: signerAddress,
-      senderSignature: signedTransaction.encodedSignatures(),
+      senderAddress: proposerAddress,
+      senderSignature,
     });
 
     console.log(`\nTransaction proposed to Safe Transaction Service.`);
