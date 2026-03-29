@@ -15,6 +15,7 @@ import { LitApiServerClient } from "../litApiServer.ts";
 import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS, K6_RUN_ID } from "../defaults.ts";
+import { topUpAccount, isBillingEnabled } from "../stripe.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -119,6 +120,11 @@ export function setup(): SecuritySetupData {
   const walletAddressA = accountA.walletAddress;
   const adminA = authHeaders(accountKeyA);
 
+  // Top up account A — this test makes many billed management and lit_action calls.
+  if (isBillingEnabled(client)) {
+    topUpAccount(client, adminA, 5000); // $50.00 for the many API calls
+  }
+
   // Create group X
   const addGroupXRes = client.addGroup(
     { group_name: `k6-sec-groupX-${K6_RUN_ID}`, group_description: "Security test group X", pkp_ids_permitted: [], cid_hashes_permitted: [] },
@@ -202,6 +208,10 @@ export function setup(): SecuritySetupData {
   if (!assertOk("setup/newAccountB", "POST /new_account", newAccountBRes)) throw new Error("setup failed: newAccountB");
   const accountKeyB = (newAccountBRes.data as { api_key: string }).api_key;
   const adminB = authHeaders(accountKeyB);
+
+  if (isBillingEnabled(client)) {
+    topUpAccount(client, adminB);
+  }
 
   // Create group under Account B
   const addGroupBRes = client.addGroup(

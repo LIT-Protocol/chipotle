@@ -37,6 +37,7 @@ import {
   DECRYPT_CODE,
 } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
+import { topUpAccount, isBillingEnabled } from "../stripe.ts";
 
 const BPT_MAX_VUS = parseInt(__ENV.BPT_MAX_VUS || "50", 10);
 const BPT_STEP_DURATION = __ENV.BPT_STEP_DURATION || "2m";
@@ -120,8 +121,13 @@ export function setup(): BreakpointSetupData {
   }
 
   const accounts: { usageApiKey: string; pkpId: string }[] = [];
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
+  const billing = isBillingEnabled(client);
   for (let i = 0; i < BPT_MAX_VUS; i++) {
     const acc = PRECREATED_ACCOUNTS[i];
+    if (billing) {
+      topUpAccount(client, { "X-Api-Key": acc.apiKey });
+    }
     accounts.push({ usageApiKey: acc.usageApiKey, pkpId: acc.walletAddress });
   }
 
