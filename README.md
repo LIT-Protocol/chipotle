@@ -219,10 +219,6 @@ See [lit-api-server/README.md](lit-api-server/README.md) for configuration and d
 
 ---
 
-## Contributing
-
-We welcome contributions. Please open an issue to discuss your idea before submitting a PR.
-
 ## License
 
 All rights reserved. Copyright Lit Protocol.
