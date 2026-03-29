@@ -12,7 +12,7 @@
 #
 # Flow:
 #   1. Build + sign images with Sigstore
-#   2. phala deploy --prepare-only → get compose hash + commit token
+#   2. Provision compose file update via Phala Cloud API → get compose hash
 #   3. Propose addComposeHash(hash) to Safe multisig on Base
 #   4. Create draft GitHub release with deployment context for Phase 2
 #
@@ -26,7 +26,7 @@
 # Required secrets:
 #   DOCKERHUB_TOKEN - Docker Hub PAT
 #   PHALA_CLOUD_API_KEY - Phala Cloud API token
-#   SAFE_PROPOSER_PRIVATE_KEY - EOA key for proposing Safe transactions
+#   SAFE_PROPOSER_PRIVATE_KEY - EOA key for proposing Safe transactions (owner or delegate)
 #   STRIPE_SECRET_KEY - Stripe API secret key (live)
 #   STRIPE_PUBLISHABLE_KEY - Stripe API publishable key (live)
 #   GCP_SERVICE_ACCOUNT_JSON - GCP service account key (raw JSON or base64-encoded)
@@ -37,7 +37,7 @@
 #   DOCKER_IMAGE - Base image path (e.g. docker.io/username/lit-node-express)
 #   DOCKERHUB_USERNAME - Docker Hub username
 #   SAFE_ADDRESS_CHIPOTLE_PROD - Safe multisig address on Base
-#   APP_AUTH_ADDRESS_CHIPOTLE_PROD - AppAuth (DstackApp) contract address on Base
+#   APP_AUTH_ADDRESS_CHIPOTLE_PROD - AppAuth (DstackApp) contract address on Base (fallback if CVM auto-detect fails)
 #   CERTBOT_AWS_ACCESS_KEY_ID - Route 53 IAM access key for DNS-01 challenge
 #   CERTBOT_AWS_ROLE_ARN      - IAM role ARN for STS assumption
 #   CERTBOT_AWS_REGION        - AWS region for STS endpoint
@@ -139,7 +139,7 @@ jobs:
     runs-on: self-hosted
     outputs:
       compose_hash: ${{ steps.prepare.outputs.compose_hash }}
-      commit_token: ${{ steps.prepare.outputs.commit_token }}
+      app_auth_address: ${{ steps.prepare.outputs.app_auth_address }}
     steps:
       - uses: actions/checkout@v4
 
@@ -175,7 +175,7 @@ jobs:
       - name: Install Phala CLI
         run: npm install -g phala
 
-      - name: Prepare deployment (get compose hash + commit token)
+      - name: Provision compose file update (get compose hash)
         id: prepare
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
@@ -185,34 +185,73 @@ jobs:
           BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
           CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
         run: |
-          OUTPUT=$(phala deploy \
-            --prepare-only \
-            -c docker-compose.deploy.yml \
-            --cvm-id chipotle-prod \
-            -e "STRIPE_SECRET_KEY=$STRIPE_SECRET_KEY" \
-            -e "STRIPE_PUBLISHABLE_KEY=$STRIPE_PUBLISHABLE_KEY" \
-            -e "GCP_SERVICE_ACCOUNT_JSON=$GCP_SERVICE_ACCOUNT_JSON" \
-            -e "GCP_PROJECT_ID=chipotle-prod" \
-            -e "BASE_CHAIN_RPC=$BASE_CHAIN_RPC" \
-            -e "CERTBOT_DOMAIN=api.chipotle.litprotocol.com" \
-            -e "CERTBOT_AWS_ACCESS_KEY_ID=${{ vars.CERTBOT_AWS_ACCESS_KEY_ID }}" \
-            -e "CERTBOT_AWS_SECRET_ACCESS_KEY=$CERTBOT_AWS_SECRET_ACCESS_KEY" \
-            -e "CERTBOT_AWS_ROLE_ARN=${{ vars.CERTBOT_AWS_ROLE_ARN }}" \
-            -e "CERTBOT_AWS_REGION=${{ vars.CERTBOT_AWS_REGION }}" \
-            --json)
-          echo "$OUTPUT"
-          COMPOSE_HASH=$(echo "$OUTPUT" | jq -r '.compose_hash')
-          COMMIT_TOKEN=$(echo "$OUTPUT" | jq -r '.commit_token')
-          if [ -z "$COMPOSE_HASH" ] || [ "$COMPOSE_HASH" = "null" ]; then
-            echo "::error::Failed to extract compose_hash from phala deploy --prepare-only output"
+          set -euo pipefail
+
+          # Build the API request payload with the docker-compose content and
+          # encrypted environment variables (secrets injected into the CVM).
+          COMPOSE_CONTENT=$(cat docker-compose.deploy.yml)
+          PROVISION_FILE=$(mktemp)
+          trap 'rm -f "$PROVISION_FILE"' EXIT
+          jq -n \
+            --arg dc "$COMPOSE_CONTENT" \
+            --arg stripe_sk "$STRIPE_SECRET_KEY" \
+            --arg stripe_pk "$STRIPE_PUBLISHABLE_KEY" \
+            --arg gcp_sa "$GCP_SERVICE_ACCOUNT_JSON" \
+            --arg base_rpc "$BASE_CHAIN_RPC" \
+            --arg certbot_domain "api.chipotle.litprotocol.com" \
+            --arg certbot_key_id "${{ vars.CERTBOT_AWS_ACCESS_KEY_ID }}" \
+            --arg certbot_secret "$CERTBOT_AWS_SECRET_ACCESS_KEY" \
+            --arg certbot_role "${{ vars.CERTBOT_AWS_ROLE_ARN }}" \
+            --arg certbot_region "${{ vars.CERTBOT_AWS_REGION }}" \
+            '{
+              name: "",
+              docker_compose_file: $dc,
+              encrypted_env: {
+                STRIPE_SECRET_KEY: $stripe_sk,
+                STRIPE_PUBLISHABLE_KEY: $stripe_pk,
+                GCP_SERVICE_ACCOUNT_JSON: $gcp_sa,
+                GCP_PROJECT_ID: "chipotle-prod",
+                BASE_CHAIN_RPC: $base_rpc,
+                CERTBOT_DOMAIN: $certbot_domain,
+                CERTBOT_AWS_ACCESS_KEY_ID: $certbot_key_id,
+                CERTBOT_AWS_SECRET_ACCESS_KEY: $certbot_secret,
+                CERTBOT_AWS_ROLE_ARN: $certbot_role,
+                CERTBOT_AWS_REGION: $certbot_region
+              }
+            }' > "$PROVISION_FILE"
+          echo "Request payload size: $(wc -c < "$PROVISION_FILE") bytes"
+
+          echo "Calling POST /cvms/chipotle-prod/compose_file/provision ..."
+          OUTPUT=$(phala api /cvms/chipotle-prod/compose_file/provision \
+            -X POST \
+            --input "$PROVISION_FILE" \
+            2>&1) || {
+            echo "::error::phala api call failed with exit code $?"
+            echo "Output: $OUTPUT"
             exit 1
-          fi
-          if [ -z "$COMMIT_TOKEN" ] || [ "$COMMIT_TOKEN" = "null" ]; then
-            echo "::error::Failed to extract commit_token from phala deploy --prepare-only output"
+          }
+          echo "API response: $OUTPUT"
+          COMPOSE_HASH=$(echo "$OUTPUT" | jq -r '.compose_hash')
+          if [ -z "$COMPOSE_HASH" ] || [ "$COMPOSE_HASH" = "null" ]; then
+            echo "::error::Failed to extract compose_hash from provision response"
             exit 1
           fi
           echo "compose_hash=$COMPOSE_HASH" >> "$GITHUB_OUTPUT"
-          echo "commit_token=$COMMIT_TOKEN" >> "$GITHUB_OUTPUT"
+
+          # Extract the AppAuth (dstack_app) address from the CVM's KMS info.
+          # This is the per-app contract that controls compose-hash whitelisting.
+          CVM_INFO=$(phala api /cvms/chipotle-prod --json 2>&1) || true
+          echo "CVM info (kms): $(echo "$CVM_INFO" | jq '.kms_info // .detail' 2>/dev/null)"
+          APP_AUTH=$(echo "$CVM_INFO" | jq -r '.kms_info.dstack_app_address // empty')
+          if [ -z "$APP_AUTH" ]; then
+            echo "::warning::Could not extract dstack_app_address from CVM info, falling back to APP_AUTH_ADDRESS_CHIPOTLE_PROD variable"
+            APP_AUTH="${{ vars.APP_AUTH_ADDRESS_CHIPOTLE_PROD }}"
+          fi
+          if [ -z "$APP_AUTH" ]; then
+            echo "::error::No AppAuth address available (neither from CVM info nor APP_AUTH_ADDRESS_CHIPOTLE_PROD variable)"
+            exit 1
+          fi
+          echo "app_auth_address=$APP_AUTH" >> "$GITHUB_OUTPUT"
 
   propose-compose-hash:
     needs: [prepare-deploy]
@@ -243,7 +282,7 @@ jobs:
           OUTPUT=$(npx hardhat propose-dstack-app \
             --network base \
             --safe "${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" \
-            --app-auth "${{ vars.APP_AUTH_ADDRESS_CHIPOTLE_PROD }}" \
+            --app-auth "${{ needs.prepare-deploy.outputs.app_auth_address }}" \
             --compose-hash "${{ needs.prepare-deploy.outputs.compose_hash }}" \
             2>&1 | tee /dev/stderr)
           SAFE_TX_HASH=$(echo "$OUTPUT" | grep '^SAFE_TX_HASH=' | cut -d= -f2)
@@ -267,7 +306,6 @@ jobs:
         run: |
           jq -n \
             --arg compose_hash "${{ needs.prepare-deploy.outputs.compose_hash }}" \
-            --arg commit_token "${{ needs.prepare-deploy.outputs.commit_token }}" \
             --arg safe_tx_hash "${{ needs.propose-compose-hash.outputs.safe_tx_hash }}" \
             --arg phala_app_name "chipotle-prod" \
             --arg base_url "https://api.chipotle.litprotocol.com" \
@@ -275,7 +313,7 @@ jobs:
             --arg safe_address "${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" \
             --arg version_tag "${{ github.ref_name }}" \
             --arg source_sha "${{ github.sha }}" \
-            '{compose_hash: $compose_hash, commit_token: $commit_token, safe_tx_hash: $safe_tx_hash, phala_app_name: $phala_app_name, base_url: $base_url, api_root_url: $api_root_url, safe_address: $safe_address, version_tag: $version_tag, source_sha: $source_sha}' \
+            '{compose_hash: $compose_hash, safe_tx_hash: $safe_tx_hash, phala_app_name: $phala_app_name, base_url: $base_url, api_root_url: $api_root_url, safe_address: $safe_address, version_tag: $version_tag, source_sha: $source_sha}' \
             > deploy-context.json
           echo "Deployment context:"
           cat deploy-context.json
