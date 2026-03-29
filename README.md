@@ -13,7 +13,8 @@
 </p>
 
 <p align="center">
-  Run JavaScript inside a TEE, sign with network-managed wallets, and return cryptographically verifiable results&thinsp;&mdash;&thinsp;no private keys to manage, no nodes to run.
+  Confidentially run JavaScript inside a TEE, sign with network-managed wallets, and return cryptographically verifiable results.<br/>
+  No private keys to manage, no nodes to run.
 </p>
 
 <p align="center">
