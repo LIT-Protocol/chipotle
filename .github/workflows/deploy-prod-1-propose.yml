@@ -31,15 +31,15 @@
 #   STRIPE_PUBLISHABLE_KEY - Stripe API publishable key (live)
 #   GCP_SERVICE_ACCOUNT_JSON - GCP service account key (raw JSON or base64-encoded)
 #   BASE_CHAIN_RPC - RPC endpoint for Base blockchain
+#   CERTBOT_AWS_ACCESS_KEY_ID - Route 53 IAM access key for DNS-01 challenge
 #   CERTBOT_AWS_SECRET_ACCESS_KEY - Route 53 IAM secret key for DNS-01 challenge
+#   CERTBOT_AWS_ROLE_ARN      - IAM role ARN for STS assumption
 #
 # Required vars:
 #   DOCKER_IMAGE - Base image path (e.g. docker.io/username/lit-node-express)
 #   DOCKERHUB_USERNAME - Docker Hub username
 #   SAFE_ADDRESS_CHIPOTLE_PROD - Safe multisig address on Base
 #   APP_AUTH_ADDRESS_CHIPOTLE_PROD - AppAuth (DstackApp) contract address on Base (fallback if CVM auto-detect fails)
-#   CERTBOT_AWS_ACCESS_KEY_ID - Route 53 IAM access key for DNS-01 challenge
-#   CERTBOT_AWS_ROLE_ARN      - IAM role ARN for STS assumption
 #   CERTBOT_AWS_REGION        - AWS region for STS endpoint
 
 name: "Deploy Prod 1: Propose Compose Hash"
@@ -61,14 +61,16 @@ jobs:
         env:
           GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
           BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
+          CERTBOT_AWS_ACCESS_KEY_ID: ${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}
           CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
+          CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
           SAFE_PROPOSER_PRIVATE_KEY: ${{ secrets.SAFE_PROPOSER_PRIVATE_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
         run: |
           missing=()
-          for secret in GCP_SERVICE_ACCOUNT_JSON BASE_CHAIN_RPC CERTBOT_AWS_SECRET_ACCESS_KEY PHALA_CLOUD_API_KEY SAFE_PROPOSER_PRIVATE_KEY STRIPE_SECRET_KEY STRIPE_PUBLISHABLE_KEY; do
+          for secret in GCP_SERVICE_ACCOUNT_JSON BASE_CHAIN_RPC CERTBOT_AWS_ACCESS_KEY_ID CERTBOT_AWS_SECRET_ACCESS_KEY CERTBOT_AWS_ROLE_ARN PHALA_CLOUD_API_KEY SAFE_PROPOSER_PRIVATE_KEY STRIPE_SECRET_KEY STRIPE_PUBLISHABLE_KEY; do
             if [ -z "${!secret}" ]; then
               missing+=("$secret")
             fi
@@ -180,7 +182,9 @@ jobs:
           STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
           GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
           BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
+          CERTBOT_AWS_ACCESS_KEY_ID: ${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}
           CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
+          CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
         run: |
           set -euo pipefail
 
@@ -196,9 +200,9 @@ jobs:
             --arg gcp_sa "$GCP_SERVICE_ACCOUNT_JSON" \
             --arg base_rpc "$BASE_CHAIN_RPC" \
             --arg certbot_domain "api.chipotle.litprotocol.com" \
-            --arg certbot_key_id "${{ vars.CERTBOT_AWS_ACCESS_KEY_ID }}" \
+            --arg certbot_key_id "$CERTBOT_AWS_ACCESS_KEY_ID" \
             --arg certbot_secret "$CERTBOT_AWS_SECRET_ACCESS_KEY" \
-            --arg certbot_role "${{ vars.CERTBOT_AWS_ROLE_ARN }}" \
+            --arg certbot_role "$CERTBOT_AWS_ROLE_ARN" \
             --arg certbot_region "${{ vars.CERTBOT_AWS_REGION }}" \
             '{
               name: "",
