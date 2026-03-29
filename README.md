@@ -152,13 +152,7 @@ See the full [Examples guide](https://docs.dev.litprotocol.com/lit-actions/examp
 
 ## API surface
 
-The server exposes three route groups. Every endpoint accepts `X-Api-Key` or `Authorization: Bearer <key>`.
-
-| Group | Base path | Purpose |
-|-------|-----------|---------|
-| **Core** | `/core/v1/` | Accounts, wallets (PKPs), Lit Actions, groups, permissions, billing |
-| **Transfer** | `/transfer/v1/` | Multi-chain balances and sends |
-| **Swaps** | `/swaps/v1/` | Cross-chain intent-based trading (quotes, fills, status) |
+Every endpoint accepts `X-Api-Key` or `Authorization: Bearer <key>`. The Core API is mounted at `/core/v1/`.
 
 Full OpenAPI spec: [`/core/v1/swagger-ui`](https://api.dev.litprotocol.com/core/v1/swagger-ui)
 
@@ -226,7 +220,6 @@ GET    /core/v1/version             Server version and commit hash
 | **Groups** | Permission policies binding PKPs to action CIDs and scoped API keys. Controls both *what* can execute and *who* can trigger it. |
 | **Encrypt / Decrypt** | PKP-derived symmetric encryption. Store ciphertexts anywhere — only permitted actions can decrypt. |
 | **On-Chain Permissions** | Smart contracts on Base control accounts, API key scopes, PKP registrations, and group membership. |
-| **Cross-Chain Transfers & Swaps** | Transfer API for multi-chain sends. Swaps API for cross-chain intent-based trading. |
 | **REST + SDK + Dashboard** | Three ways in: raw HTTP, the [Core SDK](https://docs.dev.litprotocol.com/management/api_direct), or the [Dashboard](https://docs.dev.litprotocol.com/management/dashboard). |
 | **Verifiable Deployment** | TEE attestation + on-chain state = cryptographic proof the node is running expected code. [Verification guide](https://docs.dev.litprotocol.com/architecture/verification/index) |
 
