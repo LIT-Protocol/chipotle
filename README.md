@@ -173,41 +173,7 @@ GET    /core/v1/version             Server version and commit hash
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                     YOUR APPLICATION                        │
-│              REST API  ·  JS SDK  ·  Dashboard              │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ HTTPS
-┌──────────────────────────▼──────────────────────────────────┐
-│                    TEE ENCLAVE (Phala / dstack)              │
-│                                                             │
-│  ┌─────────────┐    gRPC    ┌──────────────────────┐       │
-│  │  API Server  │◄─────────►│  Lit Actions Runtime  │       │
-│  │   (Rocket)   │           │   (Deno sandbox)     │       │
-│  └──────┬───────┘           └──────────┬───────────┘       │
-│         │                              │                    │
-│    Root key + derived             Executes JS with          │
-│    keys never leave               derived key material      │
-│    the enclave                                              │
-└─────────┼──────────────────────────────┼────────────────────┘
-          │ read/write permissions       │ fetch code
-          ▼                              ▼
-   ┌──────────────┐              ┌──────────────┐
-   │  BASE Chain   │              │     IPFS     │
-   │               │              │              │
-   │  Accounts     │              │  Lit Actions │
-   │  API Keys     │              │  (by CID)   │
-   │  PKPs         │              │  Immutable   │
-   │  Groups       │              │  Reusable    │
-   └──────────────┘              └──────────────┘
-```
-
-**TEE Enclave** — Holds the root key, derives signing and encryption keys on demand, and runs sandboxed JavaScript. Key material only exists transiently inside the enclave.
-**On-Chain (Base)** — Account contracts, API key registries, PKP registries, and group permission policies. All verifiable, all on-chain.
-**IPFS** — Lit Actions stored by content hash. Not owned by anyone — public, content-addressed code.
-
-> The system treats "self-sovereign" and "SaaS" as configurations of the same architecture, not distinct modes. The difference is who owns the Account contract and what scopes the API keys carry. [Learn more](https://docs.dev.litprotocol.com/architecture/authModel)
+See the [Architecture overview](https://docs.dev.litprotocol.com/architecture/index) and [Authentication model](https://docs.dev.litprotocol.com/architecture/authModel) in the docs.
 
 ---
 
