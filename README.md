@@ -9,24 +9,29 @@
 <h1 align="center">Lit Chipotle</h1>
 
 <p align="center">
-  <strong>Programmable keys &middot; Verifiable compute &middot; One API call</strong>
+  <strong>Programmable key management &middot; Verifiable compute &middot; One API call</strong>
 </p>
 
 <p align="center">
-  Run JavaScript inside a TEE, sign with on-chain wallets, and produce cryptographic proofs&thinsp;&mdash;&thinsp;no private keys to manage, no nodes to run.
+  Run JavaScript inside a TEE, sign with network-managed wallets, and return cryptographically verifiable results&thinsp;&mdash;&thinsp;no private keys to manage, no nodes to run.
 </p>
 
 <p align="center">
   <a href="https://github.com/LIT-Protocol/chipotle/stargazers"><img src="https://img.shields.io/github/stars/LIT-Protocol/chipotle?style=social" alt="Stars"></a>&nbsp;
   <a href="https://api.dev.litprotocol.com/core/v1/swagger-ui"><img src="https://img.shields.io/badge/API-Swagger_UI-85ea2d" alt="Swagger"></a>&nbsp;
-  <a href="https://dashboard.dev.litprotocol.com/dapps/dashboard/"><img src="https://img.shields.io/badge/Try-Dashboard-ff6b35" alt="Dashboard"></a>
+  <a href="https://dashboard.dev.litprotocol.com/dapps/dashboard/"><img src="https://img.shields.io/badge/Try-Dashboard-ff6b35" alt="Dashboard"></a>&nbsp;
+  <a href="https://docs.dev.litprotocol.com/"><img src="https://img.shields.io/badge/Docs-docs.dev.litprotocol.com-blue" alt="Docs"></a>
 </p>
 
 ---
 
 ## What is Chipotle?
 
-Chipotle is the **Lit Express Node** — a single HTTP API backed by a TEE enclave, on-chain smart contracts, and IPFS-stored code. You send JavaScript, the enclave runs it with access to derived key material, and you get back signed, verifiable results.
+Chipotle is the **Lit Express Node** — a managed service providing a REST API and web dashboard for programmable key management. It comprises three composable layers:
+
+1. **TEE Enclave** — holds the root key, derives signing and encryption keys on demand, and executes sandboxed JavaScript. Nothing that touches key material ever leaves the enclave.
+2. **On-Chain Permissions (Base)** — all authorization state lives on-chain: accounts, API key scopes, PKP registrations, and groups.
+3. **Lit Actions (IPFS)** — immutable JavaScript programs stored by content ID (CID). Public, content-addressed, tamper-proof.
 
 Think of it as **serverless functions that can hold private keys**.
 
@@ -35,7 +40,7 @@ Think of it as **serverless functions that can hold private keys**.
 <td width="50%">
 
 ### For Web3 developers
-Write a Lit Action in plain JavaScript. It can sign transactions, encrypt secrets, read on-chain state, fetch APIs, and produce cryptographic proofs — all enforced by on-chain permissions.
+Write a Lit Action in plain JavaScript. It can sign transactions, encrypt and decrypt secrets, read on-chain state, fetch external APIs, and return cryptographically signed proofs — all governed by on-chain permission groups.
 
 </td>
 <td width="50%">
@@ -106,10 +111,10 @@ Or skip the terminal and use the **[Dashboard](https://dashboard.dev.litprotocol
 
 ## What can you build?
 
-Lit Actions are self-contained JavaScript programs that execute inside a TEE with access to derived keys.
+Lit Actions are immutable JavaScript programs stored on IPFS and executed inside the TEE with access to derived keys. They can sign data, encrypt and decrypt secrets, make HTTP requests, and return cryptographically attested results.
 
 ```javascript
-// A trustless oracle in 12 lines
+// Fetch a live price and sign it as a verifiable proof
 async function main({ pkpId }) {
   const res = await fetch(
     "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
@@ -133,11 +138,13 @@ A smart contract can `ecrecover` the signature to confirm the price was attested
 | Pattern | Description |
 |---------|-------------|
 | **Sign a message** | Retrieve a PKP key, sign arbitrary data, return a verifiable signature |
-| **Encrypt / Decrypt** | Encrypt secrets to a PKP; only permitted actions can decrypt |
-| **Gate on external data** | Fetch weather, stock prices, or any API — only sign if conditions are met |
+| **Encrypt a secret** | Secure sensitive data using the PKP for storage anywhere |
+| **Decrypt a secret** | Recover plaintext from previously encrypted data using the same PKP |
+| **Gate on external data** | Fetch weather, prices, or any API — only sign if conditions are met |
 | **Read smart contracts** | Call view functions on any EVM chain and sign the result as a proof |
 | **Send ETH** | Construct, sign, and broadcast transactions from a PKP wallet |
-| **Cross-chain swaps** | Swap intents via the Swaps API with quote lifecycle management |
+
+See the full [Examples guide](https://docs.dev.litprotocol.com/lit-actions/examples) for copy-paste code.
 
 </details>
 
@@ -179,17 +186,18 @@ GET    /core/v1/version             Server version and commit hash
 └──────────────────────────┬──────────────────────────────────┘
                            │ HTTPS
 ┌──────────────────────────▼──────────────────────────────────┐
-│                    TEE ENCLAVE (Phala)                       │
+│                    TEE ENCLAVE (Phala / dstack)              │
 │                                                             │
 │  ┌─────────────┐    gRPC    ┌──────────────────────┐       │
 │  │  API Server  │◄─────────►│  Lit Actions Runtime  │       │
 │  │   (Rocket)   │           │   (Deno sandbox)     │       │
 │  └──────┬───────┘           └──────────┬───────────┘       │
 │         │                              │                    │
-│    Root key never                Executes JS with           │
-│    leaves enclave               derived key material        │
+│    Root key + derived             Executes JS with          │
+│    keys never leave               derived key material      │
+│    the enclave                                              │
 └─────────┼──────────────────────────────┼────────────────────┘
-          │ read permissions             │ fetch code
+          │ read/write permissions       │ fetch code
           ▼                              ▼
    ┌──────────────┐              ┌──────────────┐
    │  BASE Chain   │              │     IPFS     │
@@ -201,9 +209,11 @@ GET    /core/v1/version             Server version and commit hash
    └──────────────┘              └──────────────┘
 ```
 
-**TEE Enclave** — Holds root keys, runs sandboxed JavaScript, never exposes key material.
-**On-Chain (Base)** — Accounts, API key scopes, PKP registrations, and group permissions — all verifiable, all immutable.
-**IPFS** — Lit Actions stored by content hash. Public, reusable, tamper-proof.
+**TEE Enclave** — Holds the root key, derives signing and encryption keys on demand, and runs sandboxed JavaScript. Key material only exists transiently inside the enclave.
+**On-Chain (Base)** — Account contracts, API key registries, PKP registries, and group permission policies. All verifiable, all on-chain.
+**IPFS** — Lit Actions stored by content hash. Not owned by anyone — public, content-addressed code.
+
+> The system treats "self-sovereign" and "SaaS" as configurations of the same architecture, not distinct modes. The difference is who owns the Account contract and what scopes the API keys carry. [Learn more](https://docs.dev.litprotocol.com/architecture/authModel)
 
 ---
 
@@ -211,14 +221,14 @@ GET    /core/v1/version             Server version and commit hash
 
 | | |
 |---|---|
-| **Programmable Key Pairs (PKPs)** | On-chain registered wallets whose keys live inside the TEE. Sign anything, from any chain. |
-| **Sandboxed Execution** | Lit Actions run in a Deno V8 sandbox with memory limits, timeouts, and zero ambient authority. |
-| **On-Chain Permissions** | Smart contracts on Base control who can use which keys and which actions. Auditable and upgradeable. |
-| **Encrypt / Decrypt** | PKP-scoped encryption — store ciphertexts anywhere, only permitted actions can decrypt. |
+| **Programmable Key Pairs (PKPs)** | Network-managed elliptic-curve key pairs. Key material is derived on-demand from the root key inside the TEE — it never exists at rest. |
+| **Lit Actions** | Immutable JavaScript programs on IPFS. They can sign, encrypt, decrypt, fetch external data, and call smart contracts. |
+| **Groups** | Permission policies binding PKPs to action CIDs and scoped API keys. Controls both *what* can execute and *who* can trigger it. |
+| **Encrypt / Decrypt** | PKP-derived symmetric encryption. Store ciphertexts anywhere — only permitted actions can decrypt. |
+| **On-Chain Permissions** | Smart contracts on Base control accounts, API key scopes, PKP registrations, and group membership. |
 | **Cross-Chain Transfers & Swaps** | Transfer API for multi-chain sends. Swaps API for cross-chain intent-based trading. |
-| **OpenTelemetry Observability** | Built-in tracing and metrics. Plug in Jaeger, Grafana, or any OTEL-compatible backend. |
-| **REST + SDK + Dashboard** | Three ways in: raw HTTP, lightweight JS SDK, or a full management GUI. |
-| **Verifiable Deployment** | TEE attestation + on-chain state = cryptographic proof the node is running expected code. |
+| **REST + SDK + Dashboard** | Three ways in: raw HTTP, the [Core SDK](https://docs.dev.litprotocol.com/management/api_direct), or the [Dashboard](https://docs.dev.litprotocol.com/management/dashboard). |
+| **Verifiable Deployment** | TEE attestation + on-chain state = cryptographic proof the node is running expected code. [Verification guide](https://docs.dev.litprotocol.com/architecture/verification/index) |
 
 ---
 
@@ -238,12 +248,14 @@ See [lit-api-server/README.md](lit-api-server/README.md) for configuration and d
 
 | | |
 |---|---|
-| **Documentation** | [`docs/`](docs/) |
+| **Documentation** | [docs.dev.litprotocol.com](https://docs.dev.litprotocol.com/) |
 | **Dashboard** | [dashboard.dev.litprotocol.com](https://dashboard.dev.litprotocol.com/dapps/dashboard/) |
 | **API** | [api.dev.litprotocol.com](https://api.dev.litprotocol.com/) |
 | **OpenAPI / Swagger** | [Swagger UI](https://api.dev.litprotocol.com/core/v1/swagger-ui) |
-| **Architecture** | [Architecture overview](docs/architecture/index.mdx) |
-| **Lit Actions examples** | [Examples guide](docs/lit-actions/examples.mdx) |
+| **Architecture** | [Architecture overview](https://docs.dev.litprotocol.com/architecture/index) |
+| **Auth model** | [Authentication model](https://docs.dev.litprotocol.com/architecture/authModel) |
+| **Lit Actions** | [Overview](https://docs.dev.litprotocol.com/lit-actions/index) · [Examples](https://docs.dev.litprotocol.com/lit-actions/examples) · [Patterns](https://docs.dev.litprotocol.com/lit-actions/patterns) |
+| **Pricing** | [Credit-based pricing](https://docs.dev.litprotocol.com/management/pricing) |
 | **Lit Protocol** | [litprotocol.com](https://litprotocol.com) |
 
 ---
