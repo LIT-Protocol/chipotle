@@ -9,17 +9,16 @@
 <h1 align="center">Lit Chipotle</h1>
 
 <p align="center">
-  <strong>Programmable keys. Verifiable compute. One API call.</strong>
+  <strong>Programmable keys &middot; Verifiable compute &middot; One API call</strong>
 </p>
 
 <p align="center">
-  Run JavaScript inside a TEE, sign with on-chain wallets, and produce cryptographic proofs —<br>
-  no private keys to manage, no nodes to run.
+  Run JavaScript inside a TEE, sign with on-chain wallets, and produce cryptographic proofs&thinsp;&mdash;&thinsp;no private keys to manage, no nodes to run.
 </p>
 
 <p align="center">
-  <a href="https://github.com/LIT-Protocol/chipotle/stargazers"><img src="https://img.shields.io/github/stars/LIT-Protocol/chipotle?style=social" alt="Stars"></a>
-  <a href="https://api.dev.litprotocol.com/swagger-ui/"><img src="https://img.shields.io/badge/API-Swagger_UI-85ea2d" alt="Swagger"></a>
+  <a href="https://github.com/LIT-Protocol/chipotle/stargazers"><img src="https://img.shields.io/github/stars/LIT-Protocol/chipotle?style=social" alt="Stars"></a>&nbsp;
+  <a href="https://api.dev.litprotocol.com/core/v1/swagger-ui"><img src="https://img.shields.io/badge/API-Swagger_UI-85ea2d" alt="Swagger"></a>&nbsp;
   <a href="https://dashboard.dev.litprotocol.com/dapps/dashboard/"><img src="https://img.shields.io/badge/Try-Dashboard-ff6b35" alt="Dashboard"></a>
 </p>
 
@@ -27,7 +26,9 @@
 
 ## What is Chipotle?
 
-Chipotle is Lit Protocol's express node — a single HTTP endpoint backed by a **TEE enclave**, **on-chain smart contracts**, and **IPFS-stored code**. You send JavaScript, the enclave runs it with access to derived key material, and you get back signed, verifiable results. Think of it as **serverless functions that can hold private keys**.
+Chipotle is the **Lit Express Node** — a single HTTP API backed by a TEE enclave, on-chain smart contracts, and IPFS-stored code. You send JavaScript, the enclave runs it with access to derived key material, and you get back signed, verifiable results.
+
+Think of it as **serverless functions that can hold private keys**.
 
 <table>
 <tr>
@@ -48,20 +49,55 @@ A REST API with a JS SDK. Create an account, get an API key, call one endpoint. 
 
 ---
 
-## Zero to Lit Action in 60 seconds
+## Quickstart
+
+Everything below works right now against the live dev API. No SDK needed — just `curl`.
+
+### 1. Create an account
 
 ```bash
-# 1. Create an account
-curl -s https://api.dev.litprotocol.com/core/v1/handshake | jq
+curl -s -X POST https://api.dev.litprotocol.com/core/v1/new_account \
+  -H "Content-Type: application/json" \
+  -d '{"account_name": "my-app", "account_description": "Getting started"}' | jq
+```
 
-# 2. Run a Lit Action — sign a message with a PKP wallet
-curl -X POST https://api.dev.litprotocol.com/core/v1/lit_action \
-  -H "X-Api-Key: YOUR_API_KEY" \
+```json
+{
+  "api_key": "T6j+7BAA…",
+  "wallet_address": "0x3318…b0c5"
+}
+```
+
+### 2. Create a wallet (PKP)
+
+```bash
+curl -s https://api.dev.litprotocol.com/core/v1/create_wallet \
+  -H "X-Api-Key: $API_KEY" | jq
+```
+
+```json
+{
+  "wallet_address": "0x2a03…9bf6"
+}
+```
+
+### 3. Run a Lit Action
+
+```bash
+curl -s -X POST https://api.dev.litprotocol.com/core/v1/lit_action \
+  -H "X-Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
-    "code": "async function main({ pkpId, message }) { const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId })); return { signature: await wallet.signMessage(message) }; }",
-    "js_params": { "pkpId": "YOUR_PKP_ADDRESS", "message": "Hello from Chipotle!" }
-  }'
+    "code": "async function main() { return { hello: \"world\", timestamp: Date.now() }; }"
+  }' | jq
+```
+
+```json
+{
+  "response": { "hello": "world", "timestamp": 1711684200000 },
+  "logs": "",
+  "has_error": false
+}
 ```
 
 Or skip the terminal and use the **[Dashboard](https://dashboard.dev.litprotocol.com/dapps/dashboard/)** — a full GUI for account management, wallet creation, and action execution.
@@ -70,10 +106,10 @@ Or skip the terminal and use the **[Dashboard](https://dashboard.dev.litprotocol
 
 ## What can you build?
 
-Lit Actions are self-contained JavaScript programs that execute inside a TEE with access to derived keys. Here's a taste:
+Lit Actions are self-contained JavaScript programs that execute inside a TEE with access to derived keys.
 
 ```javascript
-// Fetch a live price, sign it as a verifiable proof — a trustless oracle in 12 lines
+// A trustless oracle in 12 lines
 async function main({ pkpId }) {
   const res = await fetch(
     "https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd"
@@ -92,7 +128,7 @@ async function main({ pkpId }) {
 A smart contract can `ecrecover` the signature to confirm the price was attested by a known PKP — **no off-chain trust required**.
 
 <details>
-<summary><strong>More examples</strong></summary>
+<summary><strong>More patterns</strong></summary>
 
 | Pattern | Description |
 |---------|-------------|
@@ -103,9 +139,34 @@ A smart contract can `ecrecover` the signature to confirm the price was attested
 | **Send ETH** | Construct, sign, and broadcast transactions from a PKP wallet |
 | **Cross-chain swaps** | Swap intents via the Swaps API with quote lifecycle management |
 
-See the full [Examples guide](docs/lit-actions/examples.mdx) for copy-paste code.
-
 </details>
+
+---
+
+## API surface
+
+The server exposes three route groups. Every endpoint accepts `X-Api-Key` or `Authorization: Bearer <key>`.
+
+| Group | Base path | Purpose |
+|-------|-----------|---------|
+| **Core** | `/core/v1/` | Accounts, wallets (PKPs), Lit Actions, groups, permissions, billing |
+| **Transfer** | `/transfer/v1/` | Multi-chain balances and sends |
+| **Swaps** | `/swaps/v1/` | Cross-chain intent-based trading (quotes, fills, status) |
+
+Full OpenAPI spec: [`/core/v1/swagger-ui`](https://api.dev.litprotocol.com/core/v1/swagger-ui)
+
+### Key endpoints
+
+```
+POST   /core/v1/new_account        Create an account → { api_key, wallet_address }
+GET    /core/v1/create_wallet       Mint a new PKP wallet
+POST   /core/v1/lit_action          Execute JavaScript in the TEE
+POST   /core/v1/add_action          Register a Lit Action (IPFS CID or inline)
+POST   /core/v1/add_group           Create a permission group
+GET    /core/v1/list_wallets        List all PKP wallets for the account
+GET    /core/v1/list_actions        List registered Lit Actions
+GET    /core/v1/version             Server version and commit hash
+```
 
 ---
 
@@ -114,16 +175,16 @@ See the full [Examples guide](docs/lit-actions/examples.mdx) for copy-paste code
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                     YOUR APPLICATION                        │
-│              REST API  ·  JS SDK  ·  Dashboard               │
+│              REST API  ·  JS SDK  ·  Dashboard              │
 └──────────────────────────┬──────────────────────────────────┘
                            │ HTTPS
 ┌──────────────────────────▼──────────────────────────────────┐
 │                    TEE ENCLAVE (Phala)                       │
 │                                                             │
-│  ┌─────────────┐    gRPC    ┌──────────────────────┐        │
-│  │  API Server  │◄─────────►│  Lit Actions Runtime  │        │
-│  │   (Rocket)   │           │   (Deno sandbox)     │        │
-│  └──────┬───────┘           └──────────┬───────────┘        │
+│  ┌─────────────┐    gRPC    ┌──────────────────────┐       │
+│  │  API Server  │◄─────────►│  Lit Actions Runtime  │       │
+│  │   (Rocket)   │           │   (Deno sandbox)     │       │
+│  └──────┬───────┘           └──────────┬───────────┘       │
 │         │                              │                    │
 │    Root key never                Executes JS with           │
 │    leaves enclave               derived key material        │
@@ -144,8 +205,6 @@ See the full [Examples guide](docs/lit-actions/examples.mdx) for copy-paste code
 **On-Chain (Base)** — Accounts, API key scopes, PKP registrations, and group permissions — all verifiable, all immutable.
 **IPFS** — Lit Actions stored by content hash. Public, reusable, tamper-proof.
 
-> The security model is emergent: a 3-of-5 multisig on the Account contract gives you self-sovereign control. A Stytch-authenticated account gives you SaaS convenience. Same API, same code, different trust assumptions. [Learn more](docs/architecture/index.mdx)
-
 ---
 
 ## Features
@@ -163,32 +222,15 @@ See the full [Examples guide](docs/lit-actions/examples.mdx) for copy-paste code
 
 ---
 
-## Project structure
-
-```
-lit-core/          Shared Rust libraries (config, encoding, API primitives, logging, observability)
-lit-actions/       Deno-based JS execution engine, gRPC interface, CLI, tests
-lit-api-server/    Rocket HTTP server — Core, Transfer, and Swaps APIs
-lit-static/        JavaScript SDKs and demo dApps (Dashboard, SWPS Wallet, Solver)
-k6/                Load tests, security tests, correctness tests
-docs/              Full documentation site (Mintlify)
-```
-
-See [lit-api-server/README.md](lit-api-server/README.md) and [lit-actions/README.md](lit-actions/README.md) for detailed module documentation.
-
----
-
 ## Running locally
 
 ```bash
-# Build and start the API server (Rust toolchain required)
 cd lit-api-server && cargo run
-
-# The API is live at http://localhost:8000
-# Swagger UI at http://localhost:8000/swagger-ui/
+# API → http://localhost:8000
+# Swagger → http://localhost:8000/core/v1/swagger-ui
 ```
 
-For the full stack (API server + Lit Actions runtime), see the [Deployment guide](docs/deployment).
+See [lit-api-server/README.md](lit-api-server/README.md) for configuration and deployment details.
 
 ---
 
@@ -199,9 +241,9 @@ For the full stack (API server + Lit Actions runtime), see the [Deployment guide
 | **Documentation** | [`docs/`](docs/) |
 | **Dashboard** | [dashboard.dev.litprotocol.com](https://dashboard.dev.litprotocol.com/dapps/dashboard/) |
 | **API** | [api.dev.litprotocol.com](https://api.dev.litprotocol.com/) |
-| **OpenAPI / Swagger** | [Swagger UI](https://api.dev.litprotocol.com/swagger-ui/) |
+| **OpenAPI / Swagger** | [Swagger UI](https://api.dev.litprotocol.com/core/v1/swagger-ui) |
 | **Architecture** | [Architecture overview](docs/architecture/index.mdx) |
-| **Lit Actions examples** | [7 patterns](docs/lit-actions/examples.mdx) |
+| **Lit Actions examples** | [Examples guide](docs/lit-actions/examples.mdx) |
 | **Lit Protocol** | [litprotocol.com](https://litprotocol.com) |
 
 ---
