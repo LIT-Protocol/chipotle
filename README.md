@@ -27,7 +27,7 @@
 
 ## What is Chipotle?
 
-Chipotle is a managed service providing a REST API and web dashboard for programmable key management. It comprises three composable layers:
+Chipotle is a REST API and web dashboard for confidential compute and programmable key management. It comprises three composable layers:
 
 1. **TEE Enclave** — holds the root key, derives signing and encryption keys on demand, and executes sandboxed JavaScript. Nothing that touches key material ever leaves the enclave.
 2. **On-Chain Permissions (Base)** — all authorization state lives on-chain: accounts, API key scopes, PKP registrations, and groups.
