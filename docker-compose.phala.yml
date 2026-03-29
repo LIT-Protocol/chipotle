@@ -13,8 +13,8 @@
 # Required secrets (set as encrypted Phala CVM environment variables):
 #   GCP_SERVICE_ACCOUNT_JSON  - GCP service account key (raw JSON or base64-encoded)
 #   GCP_PROJECT_ID            - GCP project ID (e.g. "my-gcp-project")
-#   STRIPE_SECRET_KEY         - Stripe API secret key (test sandbox for staging, live for prod)
-#   STRIPE_PUBLISHABLE_KEY    - Stripe API publishable key (test sandbox for staging, live for prod)
+#   STRIPE_SECRET_KEY         - Stripe API secret key (sandbox for dev, live for prod)
+#   STRIPE_PUBLISHABLE_KEY    - Stripe API publishable key (sandbox for dev, live for prod)
 #   CERTBOT_DOMAIN            - Custom domain for TLS (e.g. "api.chipotle.litprotocol.com")
 #   CERTBOT_AWS_ACCESS_KEY_ID     - Route 53 IAM access key for DNS-01 challenge
 #   CERTBOT_AWS_SECRET_ACCESS_KEY - Route 53 IAM secret key for DNS-01 challenge
@@ -65,7 +65,7 @@ services:
       # BASE_CHAIN_RPC is populated via an encrypted secret passed in through the Phala CLI/UI
       BASE_CHAIN_RPC: ${BASE_CHAIN_RPC}
       # Stripe billing keys — resolved by Phala CVM at container startup from encrypted env vars.
-      # Use test sandbox keys for chipotle-next (staging), live keys for chipotle-dev (production).
+      # Use sandbox keys for dev/next, live keys for prod.
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY}
     volumes:
