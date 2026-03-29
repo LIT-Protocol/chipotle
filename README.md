@@ -181,7 +181,7 @@ See the [Architecture overview](https://docs.dev.litprotocol.com/architecture/in
 
 | | |
 |---|---|
-| **Programmable Key Pairs (PKPs)** | Network-managed elliptic-curve key pairs. Key material is derived on-demand from the root key inside the TEE — it never exists at rest. |
+| **Programmable Key Pairs (PKPs)** | Network-managed elliptic-curve key pairs. Key material is derived on-demand from the root key inside the TEE — it never exists at rest, so it can't leak from storage. Keys will only resolve correctly when talking to an authentic Chipotle node, which the end user can [verify](https://docs.dev.litprotocol.com/architecture/verification/index). Fully verifiable trust chain. |
 | **Lit Actions** | Immutable JavaScript programs on IPFS. They can sign, encrypt, decrypt, fetch external data, and call smart contracts. |
 | **Groups** | Permission policies binding PKPs to action CIDs and scoped API keys. Controls both *what* can execute and *who* can trigger it. |
 | **Encrypt / Decrypt** | PKP-derived symmetric encryption. Store ciphertexts anywhere — only permitted actions can decrypt. |
