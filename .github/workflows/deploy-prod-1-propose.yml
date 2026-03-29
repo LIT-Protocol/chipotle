@@ -189,10 +189,10 @@ jobs:
 
           # Build the API request payload with the docker-compose content and
           # encrypted environment variables (secrets injected into the CVM).
-          # Piped directly to the API call to avoid writing secrets to disk.
           COMPOSE_CONTENT=$(cat docker-compose.deploy.yml)
-          echo "Calling POST /cvms/chipotle-prod/compose_file/provision ..."
-          OUTPUT=$(jq -n \
+          PROVISION_FILE=$(mktemp)
+          trap 'rm -f "$PROVISION_FILE"' EXIT
+          jq -n \
             --arg dc "$COMPOSE_CONTENT" \
             --arg stripe_sk "$STRIPE_SECRET_KEY" \
             --arg stripe_pk "$STRIPE_PUBLISHABLE_KEY" \
@@ -218,9 +218,13 @@ jobs:
                 CERTBOT_AWS_ROLE_ARN: $certbot_role,
                 CERTBOT_AWS_REGION: $certbot_region
               }
-            }' | phala api /cvms/chipotle-prod/compose_file/provision \
+            }' > "$PROVISION_FILE"
+          echo "Request payload size: $(wc -c < "$PROVISION_FILE") bytes"
+
+          echo "Calling POST /cvms/chipotle-prod/compose_file/provision ..."
+          OUTPUT=$(phala api /cvms/chipotle-prod/compose_file/provision \
             -X POST \
-            --input /dev/stdin \
+            --input "$PROVISION_FILE" \
             2>&1) || {
             echo "::error::phala api call failed with exit code $?"
             echo "Output: $OUTPUT"
