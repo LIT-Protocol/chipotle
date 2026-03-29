@@ -37,6 +37,9 @@
 #   DOCKER_IMAGE - Base image path (e.g. docker.io/username/lit-node-express)
 #   DOCKERHUB_USERNAME - Docker Hub username
 #   SAFE_ADDRESS_CHIPOTLE_PROD - Safe multisig address on Base
+#   APP_AUTH_ADDRESS_CHIPOTLE_PROD - AppAuth (DstackApp) contract address on Base (fallback if CVM auto-detect fails)
+#   CERTBOT_AWS_ACCESS_KEY_ID - Route 53 IAM access key for DNS-01 challenge
+#   CERTBOT_AWS_ROLE_ARN      - IAM role ARN for STS assumption
 #   CERTBOT_AWS_REGION        - AWS region for STS endpoint
 
 name: "Deploy Prod 1: Propose Compose Hash"
