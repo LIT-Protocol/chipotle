@@ -191,18 +191,6 @@ See the [Architecture overview](https://docs.dev.litprotocol.com/architecture/in
 
 ---
 
-## Running locally
-
-```bash
-cd lit-api-server && cargo run
-# API → http://localhost:8000
-# Swagger → http://localhost:8000/core/v1/swagger-ui
-```
-
-See [lit-api-server/README.md](lit-api-server/README.md) for configuration and deployment details.
-
----
-
 ## Links
 
 | | |
