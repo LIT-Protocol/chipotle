@@ -18,7 +18,6 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/LIT-Protocol/chipotle/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License"></a>
   <a href="https://github.com/LIT-Protocol/chipotle/stargazers"><img src="https://img.shields.io/github/stars/LIT-Protocol/chipotle?style=social" alt="Stars"></a>
   <a href="https://api.dev.litprotocol.com/swagger-ui/"><img src="https://img.shields.io/badge/API-Swagger_UI-85ea2d" alt="Swagger"></a>
   <a href="https://dashboard.dev.litprotocol.com/dapps/dashboard/"><img src="https://img.shields.io/badge/Try-Dashboard-ff6b35" alt="Dashboard"></a>
@@ -213,4 +212,4 @@ We welcome contributions. Please open an issue to discuss your idea before submi
 
 ## License
 
-Apache-2.0 — see [LICENSE](LICENSE)
+All rights reserved. Copyright Lit Protocol.
