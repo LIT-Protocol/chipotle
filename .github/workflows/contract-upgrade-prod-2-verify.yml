@@ -10,9 +10,6 @@
 #
 # Required secrets:
 #   BASE_CHAIN_RPC  - RPC endpoint for Base
-#
-# Required vars:
-#   SAFE_ADDRESS_CHIPOTLE_PROD  - Safe multisig address on Base
 
 name: "Contract Upgrade Prod 2: Verify"
 
@@ -59,7 +56,6 @@ jobs:
         run: |
           OUTPUT=$(npx hardhat execute-safe-tx \
             --network base \
-            --safe "${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" \
             --safe-tx-hash "${{ inputs.safe_tx_hash }}" \
             2>&1 | tee /dev/stderr)
           TX_HASH=$(echo "$OUTPUT" | grep '^TX_HASH=' | cut -d= -f2)

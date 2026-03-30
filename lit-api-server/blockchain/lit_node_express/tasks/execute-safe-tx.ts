@@ -2,10 +2,10 @@ import { task } from "hardhat/config";
 import SafeApiKit from "@safe-global/api-kit";
 
 task("execute-safe-tx", "Verify a Safe transaction has been executed and return its on-chain tx hash")
-  .addParam("safe", "Safe multisig address")
+  .addOptionalParam("safe", "Safe multisig address (resolved from Safe TX if omitted)")
   .addParam("safeTxHash", "The Safe transaction hash to verify")
   .setAction(async (taskArgs, hre) => {
-    const { safe: safeAddress, safeTxHash } = taskArgs;
+    const { safeTxHash } = taskArgs;
     const chainId = hre.network.config.chainId;
 
     if (!chainId) {
@@ -13,12 +13,13 @@ task("execute-safe-tx", "Verify a Safe transaction has been executed and return 
     }
 
     console.log(`Network: ${hre.network.name} (chain ${chainId})`);
-    console.log(`Safe: ${safeAddress}`);
     console.log(`Safe TX Hash: ${safeTxHash}`);
 
     const apiKit = new SafeApiKit({ chainId: BigInt(chainId) });
 
     const safeTransaction = await apiKit.getTransaction(safeTxHash);
+    const safeAddress = taskArgs.safe || safeTransaction.safe;
+    console.log(`Safe: ${safeAddress}`);
 
     if (!safeTransaction.isExecuted || !safeTransaction.transactionHash) {
       console.error(
