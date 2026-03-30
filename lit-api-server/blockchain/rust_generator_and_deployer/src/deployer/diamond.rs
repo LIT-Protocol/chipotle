@@ -6,6 +6,7 @@ use crate::diamond::c_diamond_cut_facet::{
 use crate::diamond::c_diamond_loupe_facet::{
     DIAMONDLOUPEFACET_ABI, DIAMONDLOUPEFACET_BYTECODE, DiamondLoupeFacet,
 };
+use crate::diamond::c_ownership_facet::{OWNERSHIPFACET_ABI, OWNERSHIPFACET_BYTECODE};
 use ethers::abi::FunctionExt;
 use ethers::core::types::Address;
 use ethers::prelude::*;
@@ -162,6 +163,18 @@ async fn build_diamond_update(
     facet_cuts.extend(facet_cuts_for_contract);
     facets_deployed.insert("WritesFacet".to_string(), writes_facet.address());
 
+    let ownership_facet = deploy_contract(
+        "OwnershipFacet",
+        (*OWNERSHIPFACET_ABI).clone(),
+        OWNERSHIPFACET_BYTECODE.clone(),
+        client.clone(),
+        (),
+    )
+    .await?;
+    let facet_cuts_for_contract = get_facet_cuts(&ownership_facet, &existing_selectors, true);
+    facet_cuts.extend(facet_cuts_for_contract);
+    facets_deployed.insert("OwnershipFacet".to_string(), ownership_facet.address());
+
     let diamond_init = deploy_facet_from_json(
         abis_folder,
         "AccountConfigFacets/DiamondInit.sol/DiamondInit.json",
@@ -235,6 +248,20 @@ pub async fn deploy_diamond(
     )
     .await?;
     facet_cuts.extend(get_facet_cuts(&diamond_loupe, existing_selectors, display));
+
+    let ownership_facet = deploy_contract(
+        "OwnershipFacet",
+        (*OWNERSHIPFACET_ABI).clone(),
+        OWNERSHIPFACET_BYTECODE.clone(),
+        client.clone(),
+        (),
+    )
+    .await?;
+    facet_cuts.extend(get_facet_cuts(
+        &ownership_facet,
+        existing_selectors,
+        display,
+    ));
 
     let api_config = deploy_facet_from_json(
         abis_folder,

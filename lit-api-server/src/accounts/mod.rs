@@ -73,10 +73,28 @@ pub async fn add_group(
     description: &str,
     cid_hashes: Vec<U256>,
     pkp_ids: Vec<Address>,
-) -> Result<bool> {
+) -> Result<U256> {
     let (contract, signer_address, client) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
+
+    // Simulate the call first to obtain the returned group ID.
+    let sim_call = contract.add_group(
+        account_api_key_hash,
+        name.to_string(),
+        description.to_string(),
+        cid_hashes.clone(),
+        pkp_ids.clone(),
+    );
+    let group_id = match sim_call.call().await {
+        Ok(id) => id,
+        Err(e) => {
+            // Release the signer back to the pool before propagating.
+            signer_pool.release(signer_address).await?;
+            return Err(e.into());
+        }
+    };
+
     let function_call = contract.add_group(
         account_api_key_hash,
         name.to_string(),
@@ -84,7 +102,8 @@ pub async fn add_group(
         cid_hashes,
         pkp_ids,
     );
-    send_transaction(function_call, signer_pool, signer_address, client).await
+    send_transaction(function_call, signer_pool, signer_address, client).await?;
+    Ok(group_id)
 }
 
 /// Create a new action entry with name, description, and IPFS CID hash in the account's actionMetadata mapping.
@@ -454,8 +473,23 @@ pub async fn list_wallets_in_group(
     Ok(page)
 }
 
-/// List actions in a group (paginated). Returns metadata (id, name, description) per action.
+/// List all actions on the account (paginated). Returns metadata (id, name, description) per action.
 pub async fn list_actions(
+    api_key: &str,
+    page_number: U256,
+    page_size: U256,
+) -> Result<Vec<Metadata>> {
+    let contract = get_read_only_account_config_contract().await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let page = contract
+        .list_actions(account_api_key_hash, page_number, page_size)
+        .call()
+        .await?;
+    Ok(page)
+}
+
+/// List actions in a group (paginated). Returns metadata (id, name, description) per action.
+pub async fn list_actions_in_group(
     api_key: &str,
     group_id: U256,
     page_number: U256,
@@ -577,6 +611,26 @@ pub async fn can_execute_action_and_use_wallet(
         .call()
         .await?;
     Ok(result)
+}
+
+/// Resolve any API key (master or usage) to the creator wallet address of its parent account.
+///
+/// This is the authoritative wallet address for billing: both master and usage keys resolve
+/// to the same account wallet, ensuring charges hit the correct Stripe customer.
+#[instrument(
+    name = "accounts::get_account_wallet_address",
+    level = "debug",
+    skip_all,
+    err
+)]
+pub async fn get_account_wallet_address(api_key: &str) -> Result<String> {
+    let contract = get_read_only_account_config_contract().await?;
+    let key_hash = api_key_hash(api_key);
+    let wallet_address = contract.get_account_wallet_address(key_hash).call().await?;
+    if wallet_address == H160::zero() {
+        anyhow::bail!("account has no wallet address");
+    }
+    Ok(format!("{:?}", wallet_address))
 }
 
 pub async fn get_node_configuration_values() -> Result<Vec<KeyValueReturn>> {

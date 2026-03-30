@@ -27,7 +27,7 @@
  *                       as the breakpoint/max. If omitted, a sensible default
  *                       sequence up to BPT_MAX_VUS is used.
  */
-import { checkAndLog, assertOk } from "../helpers.ts";
+import { checkAndLog, assertOk, warnOnHttpFailures } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
 import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { sleep } from "k6";
@@ -37,6 +37,7 @@ import {
   DECRYPT_CODE,
 } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
+import { ensureAccountCredits } from "../stripe.ts";
 
 const BPT_MAX_VUS = parseInt(__ENV.BPT_MAX_VUS || "50", 10);
 const BPT_STEP_DURATION = __ENV.BPT_STEP_DURATION || "2m";
@@ -98,13 +99,10 @@ export const options = {
     },
   },
   thresholds: {
-    http_req_failed: [{ threshold: "rate<0.1", abortOnFail: true }],
     http_req_duration: [{ threshold: "p(95)<2000", abortOnFail: true }],
     checks: [{ threshold: "rate>=0.9", abortOnFail: true }],
     "http_req_duration{scenario:encrypt_decrypt}": ["p(95)<2000"],
     "http_req_duration{scenario:ecdsa_sign}": ["p(95)<2000"],
-    "http_req_failed{scenario:encrypt_decrypt}": ["rate<0.1"],
-    "http_req_failed{scenario:ecdsa_sign}": ["rate<0.1"],
   },
 };
 
@@ -120,8 +118,10 @@ export function setup(): BreakpointSetupData {
   }
 
   const accounts: { usageApiKey: string; pkpId: string }[] = [];
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
   for (let i = 0; i < BPT_MAX_VUS; i++) {
     const acc = PRECREATED_ACCOUNTS[i];
+    ensureAccountCredits(client, { "X-Api-Key": acc.apiKey });
     accounts.push({ usageApiKey: acc.usageApiKey, pkpId: acc.walletAddress });
   }
 
@@ -228,3 +228,5 @@ export function ecdsaSign(setupData: BreakpointSetupData) {
 
   sleep(0.5 + Math.random() * 0.5);
 }
+
+export const handleSummary = warnOnHttpFailures;

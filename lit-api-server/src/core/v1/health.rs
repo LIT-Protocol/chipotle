@@ -11,12 +11,14 @@
 
 use crate::actions::grpc::GrpcClientPool;
 use crate::core::v1::guards::cpu_overload::CpuOverloadMonitor;
+use crate::stripe::StripeState;
 use lit_actions_grpc::unix;
 use rocket::http::Status;
 use rocket::serde::json::Json;
 use rocket::{Route, State, get, routes};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 const LIT_ACTIONS_SOCKET: &str = "/tmp/lit_actions.sock";
 
@@ -24,6 +26,7 @@ const LIT_ACTIONS_SOCKET: &str = "/tmp/lit_actions.sock";
 pub struct HealthResponse {
     pub lit_actions_reachable: bool,
     pub cpu_available: bool,
+    pub billing_keys_present: bool,
 }
 
 pub fn routes() -> Vec<Route> {
@@ -35,6 +38,7 @@ pub fn routes() -> Vec<Route> {
 async fn health(
     grpc_pool: &State<GrpcClientPool<tonic::transport::Channel>>,
     cpu_monitor: &State<CpuOverloadMonitor>,
+    stripe_state: &State<Option<Arc<StripeState>>>,
 ) -> (Status, Json<HealthResponse>) {
     // Check if we have a pooled gRPC connection to lit-actions.  If not, try
     // to connect (1s timeout via connect_to_socket).  This avoids the deadlock
@@ -54,7 +58,9 @@ async fn health(
     };
 
     let cpu_available = !cpu_monitor.is_overloaded();
+    let billing_keys_present = stripe_state.is_some();
 
+    // billing_keys_present is informational only — does NOT affect health status.
     let healthy = lit_actions_reachable && cpu_available;
 
     let status = if healthy {
@@ -68,6 +74,7 @@ async fn health(
         Json(HealthResponse {
             lit_actions_reachable,
             cpu_available,
+            billing_keys_present,
         }),
     )
 }
@@ -81,29 +88,32 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::AtomicBool;
 
-    fn build_rocket(overloaded: bool) -> rocket::Rocket<rocket::Build> {
+    fn build_rocket(
+        overloaded: bool,
+        stripe_state: Option<Arc<StripeState>>,
+    ) -> rocket::Rocket<rocket::Build> {
         let pool = GrpcClientPool::<tonic::transport::Channel>::new();
         let monitor = CpuOverloadMonitor::new_with_flag(Arc::new(AtomicBool::new(overloaded)));
         rocket::build()
             .manage(pool)
             .manage(monitor)
+            .manage(stripe_state)
             .mount("/", routes![health])
     }
 
     #[tokio::test]
     async fn health_returns_json_with_expected_shape() {
-        let client = Client::tracked(build_rocket(false))
+        let client = Client::tracked(build_rocket(false, None))
             .await
             .expect("valid rocket");
         let response = client.get("/health").dispatch().await;
         let body: HealthResponse = response.into_json().await.expect("valid json");
-        // Status code conveys healthy/unhealthy; body has diagnostics.
         assert!(body.cpu_available);
     }
 
     #[tokio::test]
     async fn health_reports_lit_actions_unreachable_when_no_socket() {
-        let client = Client::tracked(build_rocket(false))
+        let client = Client::tracked(build_rocket(false, None))
             .await
             .expect("valid rocket");
         let response = client.get("/health").dispatch().await;
@@ -114,12 +124,37 @@ mod tests {
 
     #[tokio::test]
     async fn health_returns_503_when_cpu_overloaded() {
-        let client = Client::tracked(build_rocket(true))
+        let client = Client::tracked(build_rocket(true, None))
             .await
             .expect("valid rocket");
         let response = client.get("/health").dispatch().await;
         assert_eq!(response.status(), Status::ServiceUnavailable);
         let body: HealthResponse = response.into_json().await.expect("valid json");
+        assert!(!body.cpu_available);
+    }
+
+    #[tokio::test]
+    async fn health_billing_keys_present_false_when_no_stripe() {
+        let client = Client::tracked(build_rocket(false, None))
+            .await
+            .expect("valid rocket");
+        let response = client.get("/health").dispatch().await;
+        let body: HealthResponse = response.into_json().await.expect("valid json");
+        assert!(!body.billing_keys_present);
+    }
+
+    #[tokio::test]
+    async fn health_billing_keys_present_does_not_affect_status() {
+        // billing_keys_present is purely informational — it never changes the
+        // HTTP status.  With CPU overloaded the endpoint returns 503 regardless
+        // of billing state.
+        let client = Client::tracked(build_rocket(true, None))
+            .await
+            .expect("valid rocket");
+        let response = client.get("/health").dispatch().await;
+        assert_eq!(response.status(), Status::ServiceUnavailable);
+        let body: HealthResponse = response.into_json().await.expect("valid json");
+        assert!(!body.billing_keys_present);
         assert!(!body.cpu_available);
     }
 }

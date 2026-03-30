@@ -12,9 +12,9 @@ use crate::core::v1::models::request::{
     UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
-    AccountOpResponse, AddUsageApiKeyResponse, ApiKeyItem, ChainConfigKeysResponse,
-    CreateWalletResponse, ListMetadataItem, NewAccountResponse, NodeChainConfigResponse,
-    WalletItem,
+    AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse, ApiKeyItem,
+    ChainConfigKeysResponse, CreateWalletResponse, ListMetadataItem, NewAccountResponse,
+    NodeChainConfigResponse, WalletItem,
 };
 use crate::dstack::v1::get_client_key;
 use crate::stripe::StripeState;
@@ -151,11 +151,11 @@ pub async fn add_group(
     signer_pool: Arc<SignerPool>,
     api_key: &str,
     req: Json<AddGroupRequest>,
-) -> Result<AccountOpResponse, ApiStatus> {
+) -> Result<AddGroupResponse, ApiStatus> {
     let cid_hashes = hex_array_to_u256_array(&req.cid_hashes_permitted)?;
     let pkp_ids = hex_array_to_h160_array(&req.pkp_ids_permitted)?;
 
-    accounts::add_group(
+    let group_id = accounts::add_group(
         signer_pool,
         api_key,
         &req.group_name,
@@ -165,7 +165,10 @@ pub async fn add_group(
     )
     .await
     .map_err(|e| ApiStatus::internal_server_error(e, "add_group failed"))?;
-    Ok(AccountOpResponse { success: true })
+    Ok(AddGroupResponse {
+        success: true,
+        group_id: group_id.to_string(),
+    })
 }
 
 pub async fn add_action(
@@ -605,16 +608,29 @@ pub async fn list_wallets_in_group(
 
 pub async fn list_actions(
     api_key: &str,
-    group_id: &str,
+    group_id: Option<&str>,
     page_number: u64,
     page_size: u64,
 ) -> Result<Vec<ListMetadataItem>, ApiStatus> {
-    let gid = string_group_id_to_u256(group_id)?;
     let pn = U256::from(page_number);
     let ps = U256::from(page_size);
-    let list = accounts::list_actions(api_key, gid, pn, ps)
-        .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?;
+    let list = match group_id {
+        Some(gid_str) => {
+            let gid = string_group_id_to_u256(gid_str)?;
+            if gid == U256::zero() {
+                accounts::list_actions(api_key, pn, ps)
+                    .await
+                    .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?
+            } else {
+                accounts::list_actions_in_group(api_key, gid, pn, ps)
+                    .await
+                    .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?
+            }
+        }
+        None => accounts::list_actions(api_key, pn, ps)
+            .await
+            .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?,
+    };
 
     let list = list.iter().map(action_metadata_to_item).collect();
     Ok(list)

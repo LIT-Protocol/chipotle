@@ -2,33 +2,8 @@
 **/target/
 **/.cargo/
 
-# Git
-# .git/ is needed for the build process
-.gitignore
-
 # IDE
 .vscode/
 
-# CI (not needed in image)
-.github/
-
 # Trunk
 .trunk/
-
-# Docker
-Dockerfile*
-docker-compose*.yml
-.dockerignore
-
-# Docs and tests (reduce image size)
-**/*.md
-**/benches/
-
-# Exclude test dirs except lit-actions/tests (workspace member required for cargo build)
-lit-api-server/tests/
-lit-core/tests/
-
-# Not needed for Phala build
-**/blockchain/
-lit-actions/docs/
-lit-actions/packages/

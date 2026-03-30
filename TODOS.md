@@ -48,6 +48,23 @@
 - **Depends on:** None
 - **Context:** Pre-existing pattern in the monolith. Found by adversarial review during PR1 ship.
 
+## P2: Startup Stripe key validation
+
+**What:** Add `stripe::validate_key()` that calls `GET /v1/balance` at startup. Auth errors (401) are fatal (exit). Availability errors (5xx, timeout) are graceful (billing disabled, retry on first billing request).
+
+**Why:** Currently `stripe::init()` only checks if env vars are present and non-empty. If the keys are invalid (revoked, wrong environment), billing silently fails on the first user request instead of at startup.
+
+**Pros:** Immediate feedback on bad keys. Prevents silent billing failures. Catches test keys accidentally used in production (Stripe returns different key prefixes for test vs live).
+
+**Cons:** Adds a network call at startup (~200ms). Requires the Stripe client refactor (preserve HTTP status, add timeouts) which shipped in PR #184.
+
+**Context:** Identified during CEO plan review (2026-03-26). Codex flagged that the original Stripe client (`stripe_get`/`stripe_post` helpers) throws away HTTP status codes and uses a no-timeout reqwest::Client, making auth/availability distinction unreliable. The client refactor (PR #184) fixes that prerequisite.
+
+**Effort:** S (human: ~2h / CC: ~5 min)
+
+**Priority:** P2
+
+**Depends on:** Stripe client refactor (HTTP status preservation + request timeouts) — shipped in PR #184.
 ## Enforce `max_get_keys_count` in handle_ops.rs
 
 **What:** The `max_get_keys_count` field exists on `Client`, is configurable via chain config, and exposed via the config endpoint — but key-returning handlers in `handle_ops.rs` (`GetPrivateKey`, `GetLitActionPrivateKey`, `GetLitActionPublicKey`, `GetLitActionWalletAddress`) never check it.

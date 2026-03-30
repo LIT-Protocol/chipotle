@@ -12,7 +12,7 @@
 #
 # Flow:
 #   1. Build + sign images with Sigstore
-#   2. phala deploy --prepare-only → get compose hash + commit token
+#   2. Provision compose file update via Phala Cloud API → get compose hash
 #   3. Propose addComposeHash(hash) to Safe multisig on Base
 #   4. Create draft GitHub release with deployment context for Phase 2
 #
@@ -26,15 +26,20 @@
 # Required secrets:
 #   DOCKERHUB_TOKEN - Docker Hub PAT
 #   PHALA_CLOUD_API_KEY - Phala Cloud API token
-#   SAFE_PROPOSER_PRIVATE_KEY - EOA key for proposing Safe transactions
+#   SAFE_PROPOSER_PRIVATE_KEY - EOA key for proposing Safe transactions (owner or delegate)
+#   STRIPE_SECRET_KEY - Stripe API secret key (live)
+#   STRIPE_PUBLISHABLE_KEY - Stripe API publishable key (live)
+#   GCP_SERVICE_ACCOUNT_JSON - GCP service account key (raw JSON or base64-encoded)
+#   BASE_CHAIN_RPC - RPC endpoint for Base blockchain
+#   CERTBOT_AWS_ACCESS_KEY_ID - Route 53 IAM access key for DNS-01 challenge
+#   CERTBOT_AWS_SECRET_ACCESS_KEY - Route 53 IAM secret key for DNS-01 challenge
+#   CERTBOT_AWS_ROLE_ARN      - IAM role ARN for STS assumption
 #
 # Required vars:
 #   DOCKER_IMAGE - Base image path (e.g. docker.io/username/lit-node-express)
 #   DOCKERHUB_USERNAME - Docker Hub username
 #   SAFE_ADDRESS_CHIPOTLE_PROD - Safe multisig address on Base
-#   APP_AUTH_ADDRESS_CHIPOTLE_PROD - AppAuth (DstackApp) contract address on Base
-#   CERTBOT_AWS_ACCESS_KEY_ID - Route 53 IAM access key for DNS-01 challenge
-#   CERTBOT_AWS_ROLE_ARN      - IAM role ARN for STS assumption
+#   APP_AUTH_ADDRESS_CHIPOTLE_PROD - AppAuth (DstackApp) contract address on Base (fallback if CVM auto-detect fails)
 #   CERTBOT_AWS_REGION        - AWS region for STS endpoint
 
 name: "Deploy Prod 1: Propose Compose Hash"
@@ -46,9 +51,37 @@ concurrency:
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
 
 jobs:
+  validate-secrets:
+    runs-on: self-hosted
+    steps:
+      - name: Validate required secrets
+        env:
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
+          CERTBOT_AWS_ACCESS_KEY_ID: ${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}
+          CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
+          CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          SAFE_PROPOSER_PRIVATE_KEY: ${{ secrets.SAFE_PROPOSER_PRIVATE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+        run: |
+          missing=()
+          for secret in GCP_SERVICE_ACCOUNT_JSON BASE_CHAIN_RPC CERTBOT_AWS_ACCESS_KEY_ID CERTBOT_AWS_SECRET_ACCESS_KEY CERTBOT_AWS_ROLE_ARN PHALA_CLOUD_API_KEY SAFE_PROPOSER_PRIVATE_KEY STRIPE_SECRET_KEY STRIPE_PUBLISHABLE_KEY; do
+            if [ -z "${!secret}" ]; then
+              missing+=("$secret")
+            fi
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "::error::Missing required GitHub secrets: ${missing[*]}"
+            exit 1
+          fi
+
   build:
+    needs: [validate-secrets]
     runs-on: self-hosted
     permissions:
       id-token: write  # required for Sigstore keyless signing (OIDC token)
@@ -108,7 +141,9 @@ jobs:
     runs-on: self-hosted
     outputs:
       compose_hash: ${{ steps.prepare.outputs.compose_hash }}
-      commit_token: ${{ steps.prepare.outputs.commit_token }}
+      provision_hash: ${{ steps.prepare.outputs.provision_hash }}
+      app_auth_address: ${{ steps.prepare.outputs.app_auth_address }}
+      encrypted_env: ${{ steps.encrypt-env.outputs.encrypted_env }}
     steps:
       - uses: actions/checkout@v4
 
@@ -130,12 +165,8 @@ jobs:
             -e "s|\${DOCKER_IMAGE_OTEL_COLLECTOR}|${{ vars.DOCKER_IMAGE }}-otel-collector@${DIGEST_OTEL_COLLECTOR}|g" \
             -e "s|\${GCP_PROJECT_ID}|chipotle-prod|g" \
             -e "s|\${CERTBOT_DOMAIN}|${DOMAIN}|g" \
-            -e "s|\${CERTBOT_AWS_ACCESS_KEY_ID}|${{ vars.CERTBOT_AWS_ACCESS_KEY_ID }}|g" \
-            -e "s|\${CERTBOT_AWS_SECRET_ACCESS_KEY}|${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}|g" \
-            -e "s|\${CERTBOT_AWS_ROLE_ARN}|${{ vars.CERTBOT_AWS_ROLE_ARN }}|g" \
             -e "s|\${CERTBOT_AWS_REGION}|${{ vars.CERTBOT_AWS_REGION }}|g" \
             docker-compose.phala.yml > docker-compose.deploy.yml
-          cat docker-compose.deploy.yml
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -145,29 +176,205 @@ jobs:
       - name: Install Phala CLI
         run: npm install -g phala
 
-      - name: Prepare deployment (get compose hash + commit token)
+      - name: Provision compose file update (get compose hash)
         id: prepare
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
         run: |
-          OUTPUT=$(phala deploy \
-            --prepare-only \
-            -c docker-compose.deploy.yml \
-            --cvm-id chipotle-prod \
-            --json)
-          echo "$OUTPUT"
-          COMPOSE_HASH=$(echo "$OUTPUT" | jq -r '.compose_hash')
-          COMMIT_TOKEN=$(echo "$OUTPUT" | jq -r '.commit_token')
-          if [ -z "$COMPOSE_HASH" ] || [ "$COMPOSE_HASH" = "null" ]; then
-            echo "::error::Failed to extract compose_hash from phala deploy --prepare-only output"
+          set -euo pipefail
+
+          # Build the API request payload with the docker-compose content and
+          # the list of allowed environment variable keys. The actual secret
+          # values are encrypted client-side in a separate step and sent
+          # during the Phase 2 commit call.
+          COMPOSE_CONTENT=$(cat docker-compose.deploy.yml)
+          PROVISION_FILE=$(mktemp)
+          trap 'rm -f "$PROVISION_FILE"' EXIT
+          jq -n \
+            --arg dc "$COMPOSE_CONTENT" \
+            '{
+              name: "",
+              docker_compose_file: $dc,
+              allowed_envs: [
+                "STRIPE_SECRET_KEY",
+                "STRIPE_PUBLISHABLE_KEY",
+                "GCP_SERVICE_ACCOUNT_JSON",
+                "GCP_PROJECT_ID",
+                "BASE_CHAIN_RPC",
+                "CERTBOT_DOMAIN",
+                "CERTBOT_AWS_ACCESS_KEY_ID",
+                "CERTBOT_AWS_SECRET_ACCESS_KEY",
+                "CERTBOT_AWS_ROLE_ARN",
+                "CERTBOT_AWS_REGION"
+              ]
+            }' > "$PROVISION_FILE"
+          echo "Request payload size: $(wc -c < "$PROVISION_FILE") bytes"
+
+          echo "Calling POST /cvms/chipotle-prod/compose_file/provision ..."
+          OUTPUT=$(phala api /cvms/chipotle-prod/compose_file/provision \
+            -X POST \
+            --input "$PROVISION_FILE" \
+            2>&1) || {
+            echo "::error::phala api call failed with exit code $?"
+            echo "Output: $OUTPUT"
+            exit 1
+          }
+          echo "API response: $OUTPUT"
+          PROVISION_HASH=$(echo "$OUTPUT" | jq -r '.compose_hash')
+          if [ -z "$PROVISION_HASH" ] || [ "$PROVISION_HASH" = "null" ]; then
+            echo "::error::Failed to extract compose_hash from provision response"
             exit 1
           fi
-          if [ -z "$COMMIT_TOKEN" ] || [ "$COMMIT_TOKEN" = "null" ]; then
-            echo "::error::Failed to extract commit_token from phala deploy --prepare-only output"
+          echo "provision_hash=$PROVISION_HASH" >> "$GITHUB_OUTPUT"
+
+          # Extract the KMS slug from the provision response. The provision
+          # endpoint returns a richer kms_info (with slug/id) than the CVM
+          # info endpoint. We need this slug to fetch the encryption pubkey.
+          KMS_SLUG=$(echo "$OUTPUT" | jq -r '.kms_info.slug // empty')
+          if [ -z "$KMS_SLUG" ]; then
+            KMS_SLUG=$(echo "$OUTPUT" | jq -r '.kms_info.id // empty')
+          fi
+          APP_ID=$(echo "$OUTPUT" | jq -r '.app_id // empty')
+          echo "KMS slug: $KMS_SLUG, app_id: $APP_ID"
+          echo "kms_slug=$KMS_SLUG" >> "$GITHUB_OUTPUT"
+          echo "app_id=$APP_ID" >> "$GITHUB_OUTPUT"
+
+          # Extract the AppAuth (dstack_app) address from the CVM's KMS info.
+          # This is the per-app contract that controls compose-hash whitelisting.
+          CVM_INFO=$(phala api /cvms/chipotle-prod --json 2>&1) || true
+          echo "CVM info (kms): $(echo "$CVM_INFO" | jq '.kms_info // .detail' 2>/dev/null)"
+          APP_AUTH=$(echo "$CVM_INFO" | jq -r '.kms_info.dstack_app_address // empty')
+          if [ -z "$APP_AUTH" ]; then
+            echo "::warning::Could not extract dstack_app_address from CVM info, falling back to APP_AUTH_ADDRESS_CHIPOTLE_PROD variable"
+            APP_AUTH="${{ vars.APP_AUTH_ADDRESS_CHIPOTLE_PROD }}"
+          fi
+          if [ -z "$APP_AUTH" ]; then
+            echo "::error::No AppAuth address available (neither from CVM info nor APP_AUTH_ADDRESS_CHIPOTLE_PROD variable)"
             exit 1
           fi
+          echo "app_auth_address=$APP_AUTH" >> "$GITHUB_OUTPUT"
+
+          # The provision API's compose_hash is a reference key for the
+          # PATCH/commit call — it does not match the hash the CVM computes
+          # at boot (SHA-256 of the full app-compose.json including server-
+          # managed fields like pre_launch_script, features, etc.).
+          # We fetch the full compose and compute the deploy hash client-side
+          # using the @phala/cloud SDK so the Safe proposal uses the correct
+          # value that the KMS will check via allowedComposeHashes.
+          echo "Fetching full app_compose from Phala API..."
+          FULL_COMPOSE=$(phala api /cvms/chipotle-prod/compose_file --json 2>&1) || {
+            echo "::error::Failed to fetch compose file: $FULL_COMPOSE"
+            exit 1
+          }
+
+          # Sanity check: the fetched compose's docker_compose_file should
+          # match what we just provisioned (if provision updated the server).
+          FETCHED_DC=$(echo "$FULL_COMPOSE" | jq -r '.docker_compose_file')
+          if [ "$FETCHED_DC" != "$COMPOSE_CONTENT" ]; then
+            echo "::warning::Fetched docker_compose_file does not match provisioned content. The provision may not have updated the compose file yet."
+            echo "Constructing full app_compose by merging server defaults with our compose..."
+            FULL_COMPOSE=$(echo "$FULL_COMPOSE" | jq --arg dc "$COMPOSE_CONTENT" '.docker_compose_file = $dc')
+          fi
+
+          # Compute the correct compose hash using the @phala/cloud SDK.
+          COMPOSE_HASH=$(echo "$FULL_COMPOSE" | node -e '
+            const path = require("path");
+            const prefix = require("child_process").execSync("npm prefix -g").toString().trim();
+            const { getComposeHash } = require(
+              require.resolve("@phala/cloud", { paths: [path.join(prefix, "lib/node_modules/phala")] })
+            );
+            let data = "";
+            process.stdin.on("data", chunk => data += chunk);
+            process.stdin.on("end", () => {
+              const appCompose = JSON.parse(data);
+              process.stdout.write(getComposeHash(appCompose));
+            });
+          ')
+          if [ -z "$COMPOSE_HASH" ]; then
+            echo "::error::Failed to compute compose hash client-side"
+            exit 1
+          fi
+          echo "Provision hash (API reference): $PROVISION_HASH"
+          echo "Compose hash (deploy/on-chain): $COMPOSE_HASH"
           echo "compose_hash=$COMPOSE_HASH" >> "$GITHUB_OUTPUT"
-          echo "commit_token=$COMMIT_TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch CVM encryption public key
+        id: fetch-pubkey
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          KMS_SLUG: ${{ steps.prepare.outputs.kms_slug }}
+          APP_ID: ${{ steps.prepare.outputs.app_id }}
+        run: |
+          set -euo pipefail
+
+          # Workaround: `phala envs encrypt` passes kms_type ("base") to the
+          # /kms/{kms}/pubkey/{app_id} API, but the API expects a KMS slug
+          # (e.g. "kms-base-prod5"). We fetch the pubkey using the correct
+          # slug from the provision response.
+          if [ -z "$KMS_SLUG" ] || [ -z "$APP_ID" ]; then
+            echo "::error::KMS_SLUG or APP_ID not set from provision step"
+            exit 1
+          fi
+
+          echo "Fetching encryption pubkey via /kms/$KMS_SLUG/pubkey/$APP_ID ..."
+          PUBKEY_RESPONSE=$(phala api "/kms/$KMS_SLUG/pubkey/$APP_ID" --json 2>&1) || {
+            echo "::error::Failed to fetch encryption pubkey: $PUBKEY_RESPONSE"
+            exit 1
+          }
+          PUBKEY=$(echo "$PUBKEY_RESPONSE" | jq -r '.public_key')
+          if [ -z "$PUBKEY" ] || [ "$PUBKEY" = "null" ]; then
+            echo "::error::Failed to extract public_key from KMS response"
+            exit 1
+          fi
+          echo "Got encryption pubkey: ${PUBKEY:0:16}..."
+          echo "encrypt_pubkey=$PUBKEY" >> "$GITHUB_OUTPUT"
+
+      - name: Encrypt environment variables for CVM
+        id: encrypt-env
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
+          CERTBOT_AWS_ACCESS_KEY_ID: ${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}
+          CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
+          CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
+          CERTBOT_AWS_REGION: ${{ vars.CERTBOT_AWS_REGION }}
+          ENCRYPT_PUBKEY: ${{ steps.fetch-pubkey.outputs.encrypt_pubkey }}
+        run: |
+          set -euo pipefail
+
+          # Encrypt env vars client-side using the @phala/cloud SDK's
+          # encryptEnvVars function (X25519 + AES-256-GCM). We resolve the
+          # SDK from the globally-installed phala package.
+          ENCRYPTED_ENV=$(node -e '
+            const path = require("path");
+            const prefix = require("child_process").execSync("npm prefix -g").toString().trim();
+            const { encryptEnvVars } = require(
+              require.resolve("@phala/cloud", { paths: [path.join(prefix, "lib/node_modules/phala")] })
+            );
+            const envs = [
+              { key: "STRIPE_SECRET_KEY", value: process.env.STRIPE_SECRET_KEY },
+              { key: "STRIPE_PUBLISHABLE_KEY", value: process.env.STRIPE_PUBLISHABLE_KEY },
+              { key: "GCP_SERVICE_ACCOUNT_JSON", value: process.env.GCP_SERVICE_ACCOUNT_JSON },
+              { key: "GCP_PROJECT_ID", value: "chipotle-prod" },
+              { key: "BASE_CHAIN_RPC", value: process.env.BASE_CHAIN_RPC },
+              { key: "CERTBOT_DOMAIN", value: "api.chipotle.litprotocol.com" },
+              { key: "CERTBOT_AWS_ACCESS_KEY_ID", value: process.env.CERTBOT_AWS_ACCESS_KEY_ID },
+              { key: "CERTBOT_AWS_SECRET_ACCESS_KEY", value: process.env.CERTBOT_AWS_SECRET_ACCESS_KEY },
+              { key: "CERTBOT_AWS_ROLE_ARN", value: process.env.CERTBOT_AWS_ROLE_ARN },
+              { key: "CERTBOT_AWS_REGION", value: process.env.CERTBOT_AWS_REGION },
+            ];
+            const pubkey = process.env.ENCRYPT_PUBKEY;
+            encryptEnvVars(envs, pubkey).then(hex => process.stdout.write(hex));
+          ')
+
+          if [ -z "$ENCRYPTED_ENV" ]; then
+            echo "::error::encryptEnvVars returned empty output"
+            exit 1
+          fi
+          echo "Encrypted env length: ${#ENCRYPTED_ENV} chars"
+          echo "encrypted_env=$ENCRYPTED_ENV" >> "$GITHUB_OUTPUT"
 
   propose-compose-hash:
     needs: [prepare-deploy]
@@ -198,7 +405,7 @@ jobs:
           OUTPUT=$(npx hardhat propose-dstack-app \
             --network base \
             --safe "${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" \
-            --app-auth "${{ vars.APP_AUTH_ADDRESS_CHIPOTLE_PROD }}" \
+            --app-auth "${{ needs.prepare-deploy.outputs.app_auth_address }}" \
             --compose-hash "${{ needs.prepare-deploy.outputs.compose_hash }}" \
             2>&1 | tee /dev/stderr)
           SAFE_TX_HASH=$(echo "$OUTPUT" | grep '^SAFE_TX_HASH=' | cut -d= -f2)
@@ -222,18 +429,29 @@ jobs:
         run: |
           jq -n \
             --arg compose_hash "${{ needs.prepare-deploy.outputs.compose_hash }}" \
-            --arg commit_token "${{ needs.prepare-deploy.outputs.commit_token }}" \
             --arg safe_tx_hash "${{ needs.propose-compose-hash.outputs.safe_tx_hash }}" \
             --arg phala_app_name "chipotle-prod" \
             --arg base_url "https://api.chipotle.litprotocol.com" \
             --arg api_root_url "https://api.chipotle.litprotocol.com/core/v1" \
             --arg safe_address "${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" \
+            --arg app_auth_address "${{ needs.prepare-deploy.outputs.app_auth_address }}" \
             --arg version_tag "${{ github.ref_name }}" \
             --arg source_sha "${{ github.sha }}" \
-            '{compose_hash: $compose_hash, commit_token: $commit_token, safe_tx_hash: $safe_tx_hash, phala_app_name: $phala_app_name, base_url: $base_url, api_root_url: $api_root_url, safe_address: $safe_address, version_tag: $version_tag, source_sha: $source_sha}' \
+            --arg encrypted_env "${{ needs.prepare-deploy.outputs.encrypted_env }}" \
+            --arg provision_hash "${{ needs.prepare-deploy.outputs.provision_hash }}" \
+            '{compose_hash: $compose_hash, provision_hash: $provision_hash, safe_tx_hash: $safe_tx_hash, phala_app_name: $phala_app_name, base_url: $base_url, api_root_url: $api_root_url, safe_address: $safe_address, app_auth_address: $app_auth_address, version_tag: $version_tag, source_sha: $source_sha, encrypted_env: $encrypted_env}' \
             > deploy-context.json
           echo "Deployment context:"
           cat deploy-context.json
+
+      - name: Install GitHub CLI
+        run: |
+          if command -v gh &> /dev/null; then exit 0; fi
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt-get update && sudo apt-get install -y gh
 
       - name: Create draft GitHub release with deployment context
         env:

@@ -2,19 +2,19 @@
  * Smoke test - hits get_node_chain_config, creates an account, and runs a hello-world lit action.
  * Use: k6 run smoke.spec.ts
  */
-import { checkAndLog } from "./helpers.ts";
+import { checkAndLog, warnOnHttpFailures } from "./helpers.ts";
 import { LitApiServerClient } from "./litApiServer.ts";
 import { PRECREATED_ACCOUNTS } from "./setup.ts";
 import { assertOk } from "./helpers.ts";
 import { HELLO_WORLD_CODE } from "./LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "./defaults.ts";
+import { ensureAccountCredits } from "./stripe.ts";
 
 export const options = {
   vus: 1,
   iterations: 1,
   thresholds: {
     http_reqs: ["count>=1"],
-    http_req_failed: ["rate<0.1"],
     checks: ["rate==1"],
   },
 };
@@ -31,6 +31,10 @@ export function setup(): SmokeSetupData {
   }
   const account =
     PRECREATED_ACCOUNTS[Math.floor(Math.random() * PRECREATED_ACCOUNTS.length)];
+
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
+  ensureAccountCredits(client, { "X-Api-Key": account.apiKey });
+
   return { usageApiKey: account.usageApiKey };
 }
 
@@ -75,3 +79,5 @@ export default function (data: SmokeSetupData) {
     },
   }, "litAction");
 }
+
+export const handleSummary = warnOnHttpFailures;

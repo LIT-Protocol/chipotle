@@ -206,6 +206,58 @@ async function main({ pkpId, ciphertext, holderAddress, nftContractAddress }) {
 }
 ```
 
+---
+
+## Securing RPC URLs — Hiding API Keys with Encryption
+
+Many RPC providers require an API key appended to the endpoint URL (e.g. `https://mainnet.infura.io/v3/YOUR_API_KEY`). Passing the full URL as a `js_params` value would expose the key to anyone who can inspect the action call. Instead, you can **encrypt the secret portion** of the URL and let the Lit Action decrypt and reassemble it at runtime inside the TEE.
+
+This pattern provides two guarantees:
+
+1. **The API key is never visible** to the caller or in the transaction parameters — it only exists in plaintext inside the TEE during execution.
+2. **The action is verifiably calling a specific chain** — the base URL is passed in the clear (or hardcoded), so observers can confirm which network the action targets, while the confidential key portion stays hidden.
+
+### Setup: Encrypt the API key
+
+Use a dedicated "secrets" PKP to encrypt the API key once. Store the resulting ciphertext alongside the action or in your configuration.
+
+```javascript
+// Encrypt the API key portion once and store the ciphertext.
+// js_params: { pkpId, apiKey }
+async function main({ pkpId, apiKey }) {
+  const ciphertext = await Lit.Actions.Encrypt({ pkpId, message: apiKey });
+  return { ciphertext };
+}
+```
+
+### Usage: Decrypt and connect at runtime
+
+The production action receives the encrypted API key, decrypts it inside the TEE, and assembles the full RPC URL.
+
+```javascript
+// js_params: { pkpId, encryptedApiKey, targetAddress }
+async function main({ pkpId, encryptedApiKey, targetAddress }) {
+  // Decrypt the API key inside the TEE — it never leaves the node.
+  const apiKey = await Lit.Actions.Decrypt({ pkpId, ciphertext: encryptedApiKey });
+
+  // Assemble the full RPC URL.
+  const provider = new ethers.providers.JsonRpcProvider(
+    `https://sepolia.infura.io/v3/${apiKey}`
+  );
+
+  // Use the provider as normal.
+  const balance = await provider.getBalance(targetAddress);
+
+  return { balance: ethers.utils.formatEther(balance) };
+}
+```
+
+<Note>
+You should hard-code the base URL directly in the action code rather than passing it as a parameter. Because the action is pinned to IPFS, hardcoding makes the target chain immutable — verifiable by anyone who inspects the action's CID.
+</Note>
+
+---
+
 ### Why this is safe to expose
 
 Sharing a PKP ID (the wallet address) with users is safe because:

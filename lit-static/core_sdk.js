@@ -406,7 +406,7 @@ export class LitNodeSimpleApiClient {
    * POST /core/v1/add_group
    * Add a group to an account with permitted action hashes and PKP hashes.
    * @param {AddGroupOptions} options
-   * @returns {Promise<AccountOpResponse>}
+   * @returns {Promise<AddGroupResponse>} Response with `success` and `group_id`.
    */
   async addGroup({ apiKey, groupName, groupDescription = '', pkpIdsPermitted = [], cidHashesPermitted = [] }) {
     const body = {
@@ -768,16 +768,24 @@ export class LitNodeSimpleApiClient {
 
   /**
    * GET /core/v1/list_actions
-   * List actions in a group (paginated). Returns metadata (id, name, description) per action.
-   * @param {ListPageWithGroupOptions} options
+   * List actions (paginated). When groupId is provided, lists actions in that group.
+   * When omitted, lists all actions on the account.
+   * @param {Object} options
+   * @param {string} options.apiKey - Account API key
+   * @param {string} [options.groupId] - Group ID. If omitted, lists all account-level actions.
+   * @param {string} [options.pageNumber='0'] - Page number (0-based)
+   * @param {string} [options.pageSize='10'] - Page size
    * @returns {Promise<ListMetadataItem[]>}
    */
   async listActions({ apiKey, groupId, pageNumber = '0', pageSize = '10' }) {
-    const params = new URLSearchParams({
-      group_id: groupId,
+    const entries = {
       page_number: String(pageNumber),
       page_size: String(pageSize),
-    });
+    };
+    if (groupId !== undefined) {
+      entries.group_id = groupId;
+    }
+    const params = new URLSearchParams(entries);
     const res = await fetch(`${this.baseUrl}/list_actions?${params}`, {
       headers: headersWithApiKey(apiKey),
     });

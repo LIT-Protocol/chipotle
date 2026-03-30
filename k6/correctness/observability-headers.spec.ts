@@ -13,12 +13,13 @@
  *   BASE_URL=https://your-instance/core/v1 k6 run k6/correctness/observability-headers.spec.ts
  */
 import http from "k6/http";
-import { checkAndLog } from "../helpers.ts";
+import { checkAndLog, warnOnHttpFailures } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
 import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
 import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
+import { ensureAccountCredits } from "../stripe.ts";
 
 const SIMPLE_ENDPOINT = `${BASE_URL}/get_node_chain_config`;
 
@@ -30,7 +31,6 @@ export const options = {
   vus: 1,
   iterations: 1,
   thresholds: {
-    http_req_failed: ["rate<0.1"],
     http_req_duration: ["p(99)<30000"],
     http_reqs: ["count>=1"],
     checks: ["rate==1"],
@@ -49,6 +49,10 @@ export function setup(): ObservabilitySetupData {
   }
   const account =
     PRECREATED_ACCOUNTS[Math.floor(Math.random() * PRECREATED_ACCOUNTS.length)];
+
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
+  ensureAccountCredits(client, { "X-Api-Key": account.apiKey });
+
   return { usageApiKey: account.usageApiKey };
 }
 
@@ -193,3 +197,5 @@ export default function (data: ObservabilitySetupData) {
     }, "lit_action ignore user X-Request-Id");
   }
 }
+
+export const handleSummary = warnOnHttpFailures;

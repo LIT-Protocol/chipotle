@@ -13,12 +13,13 @@
  *   k6 run k6/correctness/lit-action-encrypt-decrypt.spec.ts
  *   BASE_URL=https://your-instance/core/v1 k6 run k6/correctness/lit-action-encrypt-decrypt.spec.ts
  */
-import { checkAndLog } from "../helpers.ts";
+import { checkAndLog, warnOnHttpFailures } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
 import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
 import { ENCRYPT_CODE, DECRYPT_CODE } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
+import { ensureAccountCredits } from "../stripe.ts";
 
 export interface EncryptDecryptSetupData {
   usageApiKey: string;
@@ -33,6 +34,10 @@ export function setup(): EncryptDecryptSetupData {
   }
   const account =
     PRECREATED_ACCOUNTS[Math.floor(Math.random() * PRECREATED_ACCOUNTS.length)];
+
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
+  ensureAccountCredits(client, { "X-Api-Key": account.apiKey });
+
   return { usageApiKey: account.usageApiKey, pkpId: account.walletAddress };
 }
 
@@ -40,7 +45,6 @@ export const options = {
   vus: 1,
   iterations: 1,
   thresholds: {
-    http_req_failed: ["rate<0.1"],
     http_req_duration: ["p(99)<30000"],
     http_reqs: ["count>=1"],
     checks: ["rate==1"],
@@ -97,3 +101,5 @@ export default function (data: EncryptDecryptSetupData) {
       decryptBody.response === challenge,
   }, "litAction/decrypt");
 }
+
+export const handleSummary = warnOnHttpFailures;

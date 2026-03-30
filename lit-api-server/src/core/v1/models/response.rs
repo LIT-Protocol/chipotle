@@ -42,10 +42,17 @@ pub struct AddUsageApiKeyResponse {
     pub usage_api_key: String,
 }
 
-/// Response for account config operations (add_group, add_pkp_to_group, remove_pkp_from_group, add_usage_api_key, remove_usage_api_key).
+/// Response for account config operations (add_pkp_to_group, remove_pkp_from_group, add_usage_api_key, remove_usage_api_key).
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AccountOpResponse {
     pub success: bool,
+}
+
+/// Response for add_group, includes the on-chain group ID.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AddGroupResponse {
+    pub success: bool,
+    pub group_id: String,
 }
 
 /// Mirrors AccountConfig.sol Group struct (groupName, groupDescription, plus ids/hashes when returned).
