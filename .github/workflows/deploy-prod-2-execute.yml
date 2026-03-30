@@ -43,6 +43,15 @@ jobs:
       source_sha: ${{ steps.read.outputs.source_sha }}
       encrypted_env: ${{ steps.read.outputs.encrypted_env }}
     steps:
+      - name: Install GitHub CLI
+        run: |
+          if command -v gh &> /dev/null; then exit 0; fi
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt-get update && sudo apt-get install -y gh
+
       - name: Download deployment context from Phase 1 release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -195,6 +204,15 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Install GitHub CLI
+        run: |
+          if command -v gh &> /dev/null; then exit 0; fi
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt-get update && sudo apt-get install -y gh
+
       - name: Publish draft release and remove deployment context asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
