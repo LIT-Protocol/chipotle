@@ -120,8 +120,84 @@ jobs:
           echo "base_url=https://${DOMAIN}" >> "$GITHUB_OUTPUT"
           echo "api_root_url=https://${DOMAIN}/core/v1" >> "$GITHUB_OUTPUT"
 
+  detect-changes:
+    needs: [determine-target]
+    runs-on: self-hosted
+    outputs:
+      deploy_needed: ${{ steps.check.outputs.deploy_needed }}
+      deployed_sha: ${{ steps.check.outputs.deployed_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check if deploy-relevant paths changed
+        id: check
+        run: |
+          API_ROOT_URL="${{ needs.determine-target.outputs.api_root_url }}"
+
+          # For workflow_dispatch (manual trigger), always deploy
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual trigger — deploying unconditionally"
+            echo "deploy_needed=true" >> "$GITHUB_OUTPUT"
+            echo "deployed_sha=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Fetch the currently deployed commit version
+          COMMIT_VERSION=$(curl -sf "${API_ROOT_URL}/version" 2>/dev/null | jq -r '.commit_version // empty' 2>/dev/null || true)
+          if [ -z "$COMMIT_VERSION" ]; then
+            echo "Could not reach /version endpoint — deploying"
+            echo "deploy_needed=true" >> "$GITHUB_OUTPUT"
+            echo "deployed_sha=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "Deployed commit_version: $COMMIT_VERSION"
+
+          # Parse SHA from git describe --always output:
+          #   bare SHA: "abc1234" → "abc1234"
+          #   describe: "v0.3.14-5-gabc1234" → "abc1234"
+          if echo "$COMMIT_VERSION" | grep -qE '-g[0-9a-f]+$'; then
+            DEPLOYED_SHA=$(echo "$COMMIT_VERSION" | sed 's/.*-g//')
+          else
+            DEPLOYED_SHA="$COMMIT_VERSION"
+          fi
+
+          # Verify the SHA exists in the repo
+          if ! git rev-parse --verify "$DEPLOYED_SHA^{commit}" >/dev/null 2>&1; then
+            echo "Deployed SHA '$DEPLOYED_SHA' not found in repo history — deploying"
+            echo "deploy_needed=true" >> "$GITHUB_OUTPUT"
+            echo "deployed_sha=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "deployed_sha=$DEPLOYED_SHA" >> "$GITHUB_OUTPUT"
+
+          # Check for changes in deploy-relevant paths
+          DEPLOY_PATHS=(
+            lit-actions/
+            lit-api-server/
+            lit-core/
+            otel-collector/
+            Dockerfile.lit-actions
+            Dockerfile.lit-api-server
+            Dockerfile.otel-collector
+            docker-compose.phala.yml
+            .github/workflows/deploy-staging.yml
+          )
+          CHANGED=$(git diff --name-only "$DEPLOYED_SHA" HEAD -- "${DEPLOY_PATHS[@]}")
+          if [ -n "$CHANGED" ]; then
+            echo "Deploy-relevant changes detected:"
+            echo "$CHANGED"
+            echo "deploy_needed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "No deploy-relevant changes since $DEPLOYED_SHA — skipping build & deploy"
+            echo "deploy_needed=false" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
-    needs: [validate-secrets, determine-target]
+    needs: [validate-secrets, determine-target, detect-changes]
+    if: needs.detect-changes.outputs.deploy_needed == 'true'
     runs-on: self-hosted
     permissions:
       id-token: write  # required for Sigstore keyless signing (OIDC token)
@@ -177,7 +253,8 @@ jobs:
           path: digest-${{ matrix.service }}.txt
 
   deploy:
-    needs: [determine-target, build]
+    needs: [determine-target, build, detect-changes]
+    if: needs.detect-changes.outputs.deploy_needed == 'true'
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -239,11 +316,12 @@ jobs:
             -e "CERTBOT_AWS_REGION=${{ vars.CERTBOT_AWS_REGION }}"
 
   wait-for-api-available:
-    needs: [deploy, determine-target]
+    needs: [deploy, determine-target, detect-changes]
+    if: ${{ !cancelled() && needs.determine-target.result == 'success' && (needs.deploy.result == 'success' || needs.deploy.result == 'skipped') }}
     uses: ./.github/workflows/wait-for-api-restart.yml
     with:
       api_root_url: ${{ needs.determine-target.outputs.api_root_url }}
-      expected_sha: ${{ github.sha }}
+      expected_sha: ${{ needs.detect-changes.outputs.deploy_needed == 'true' && github.sha || needs.detect-changes.outputs.deployed_sha }}
       runner: '["self-hosted"]'
 
   verify-attestation:
