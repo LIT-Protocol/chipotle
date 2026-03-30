@@ -1,0 +1,106 @@
+# Contract Upgrade Prod — Phase 1: Propose
+#
+# Deploys new facet implementations and proposes a diamondCut transaction
+# through the Safe multisig. After signers approve and execute the Safe
+# transaction, run Phase 2 (contract-upgrade-prod-2-verify.yml) to verify
+# the on-chain state matches the source code.
+#
+# Network and contract address are read from:
+#   lit-api-server/NodeConfig.prod.toml
+#
+# Required secrets:
+#   SAFE_PROPOSER_PRIVATE_KEY  - EOA key used to deploy facets and propose Safe transactions
+#   BASE_CHAIN_RPC             - RPC endpoint for Base
+#
+# Required vars:
+#   SAFE_ADDRESS_CHIPOTLE_PROD   - Safe multisig address on Base
+
+name: "Contract Upgrade Prod 1: Propose"
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: contract-upgrade-prod
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read config from NodeConfig
+        id: config
+        run: |
+          CONFIG="lit-api-server/NodeConfig.prod.toml"
+
+          if [ ! -f "$CONFIG" ]; then
+            echo "::error::$CONFIG not found."
+            exit 1
+          fi
+
+          NETWORK=$(grep '^name' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          ADDRESS=$(grep '^contract_address' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+
+          echo "network=$NETWORK" >> "$GITHUB_OUTPUT"
+          echo "address=$ADDRESS" >> "$GITHUB_OUTPUT"
+          echo "Resolved from $CONFIG: network=$NETWORK address=$ADDRESS"
+
+      - uses: dtolnay/rust-toolchain@1.91
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install contract dependencies
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npm ci
+
+      - name: Compile contracts
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: |
+          npx hardhat clean
+          npx hardhat compile
+          node generate-diamond-abi.mjs
+
+      - name: Build contract deployer
+        working-directory: lit-api-server/blockchain/rust_generator_and_deployer
+        run: cargo build --bin contract_deployer
+
+      - name: Deploy facets and generate proposal
+        working-directory: lit-api-server/blockchain/lit_node_express
+        env:
+          DEPLOYER_KEY: ${{ secrets.SAFE_PROPOSER_PRIVATE_KEY }}
+        run: |
+          ../rust_generator_and_deployer/target/debug/contract_deployer \
+            --action=propose-update \
+            --network=${{ steps.config.outputs.network }} \
+            --abifolder=artifacts/contracts \
+            --secret="$DEPLOYER_KEY" \
+            --address=${{ steps.config.outputs.address }} \
+            --rpc-url=${{ secrets.BASE_CHAIN_RPC }} \
+            --output=diamond_cut_proposal.json
+
+      - name: Propose diamondCut to Safe multisig
+        working-directory: lit-api-server/blockchain/lit_node_express
+        env:
+          PROPOSER_PRIVATE_KEY: ${{ secrets.SAFE_PROPOSER_PRIVATE_KEY }}
+          BASE_RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
+        run: |
+          OUTPUT=$(npx hardhat propose-diamond-cut \
+            --safe "${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" \
+            --proposal diamond_cut_proposal.json \
+            --network base \
+            2>&1 | tee /dev/stderr)
+          SAFE_TX_HASH=$(echo "$OUTPUT" | grep '^Safe TX Hash:' | awk '{print $NF}')
+          echo "## Contract Upgrade Proposal" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Safe TX Hash:** \`$SAFE_TX_HASH\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Signers can review and approve in the [Safe UI](https://app.safe.global/transactions/queue?safe=base:${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }})." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "After execution, run **Contract Upgrade Prod 2: Verify** with this Safe TX Hash." >> "$GITHUB_STEP_SUMMARY"
