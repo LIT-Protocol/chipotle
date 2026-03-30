@@ -9,9 +9,8 @@
 #   lit-api-server/NodeConfig.prod.toml
 #
 # Required secrets:
-#   PHALA_DSTACKAPP_PRIVATE_KEY  - deployer wallet private key (deploys new facets on Base)
-#   SAFE_PROPOSER_PRIVATE_KEY    - EOA key for proposing Safe transactions
-#   BASE_CHAIN_RPC               - RPC endpoint for Base
+#   SAFE_PROPOSER_PRIVATE_KEY  - EOA key used to deploy facets and propose Safe transactions
+#   BASE_CHAIN_RPC             - RPC endpoint for Base
 #
 # Required vars:
 #   SAFE_ADDRESS_CHIPOTLE_PROD   - Safe multisig address on Base
@@ -75,7 +74,7 @@ jobs:
       - name: Deploy facets and generate proposal
         working-directory: lit-api-server/blockchain/lit_node_express
         env:
-          DEPLOYER_KEY: ${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}
+          DEPLOYER_KEY: ${{ secrets.SAFE_PROPOSER_PRIVATE_KEY }}
         run: |
           ../rust_generator_and_deployer/target/debug/contract_deployer \
             --action=propose-update \
