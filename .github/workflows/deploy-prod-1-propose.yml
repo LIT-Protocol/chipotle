@@ -141,6 +141,7 @@ jobs:
     runs-on: self-hosted
     outputs:
       compose_hash: ${{ steps.prepare.outputs.compose_hash }}
+      provision_hash: ${{ steps.prepare.outputs.provision_hash }}
       app_auth_address: ${{ steps.prepare.outputs.app_auth_address }}
       encrypted_env: ${{ steps.encrypt-env.outputs.encrypted_env }}
     steps:
@@ -219,12 +220,12 @@ jobs:
             exit 1
           }
           echo "API response: $OUTPUT"
-          COMPOSE_HASH=$(echo "$OUTPUT" | jq -r '.compose_hash')
-          if [ -z "$COMPOSE_HASH" ] || [ "$COMPOSE_HASH" = "null" ]; then
+          PROVISION_HASH=$(echo "$OUTPUT" | jq -r '.compose_hash')
+          if [ -z "$PROVISION_HASH" ] || [ "$PROVISION_HASH" = "null" ]; then
             echo "::error::Failed to extract compose_hash from provision response"
             exit 1
           fi
-          echo "compose_hash=$COMPOSE_HASH" >> "$GITHUB_OUTPUT"
+          echo "provision_hash=$PROVISION_HASH" >> "$GITHUB_OUTPUT"
 
           # Extract the KMS slug from the provision response. The provision
           # endpoint returns a richer kms_info (with slug/id) than the CVM
@@ -252,6 +253,50 @@ jobs:
             exit 1
           fi
           echo "app_auth_address=$APP_AUTH" >> "$GITHUB_OUTPUT"
+
+          # The provision API's compose_hash is a reference key for the
+          # PATCH/commit call — it does not match the hash the CVM computes
+          # at boot (SHA-256 of the full app-compose.json including server-
+          # managed fields like pre_launch_script, features, etc.).
+          # We fetch the full compose and compute the deploy hash client-side
+          # using the @phala/cloud SDK so the Safe proposal uses the correct
+          # value that the KMS will check via allowedComposeHashes.
+          echo "Fetching full app_compose from Phala API..."
+          FULL_COMPOSE=$(phala api /cvms/chipotle-prod/compose_file --json 2>&1) || {
+            echo "::error::Failed to fetch compose file: $FULL_COMPOSE"
+            exit 1
+          }
+
+          # Sanity check: the fetched compose's docker_compose_file should
+          # match what we just provisioned (if provision updated the server).
+          FETCHED_DC=$(echo "$FULL_COMPOSE" | jq -r '.docker_compose_file')
+          if [ "$FETCHED_DC" != "$COMPOSE_CONTENT" ]; then
+            echo "::warning::Fetched docker_compose_file does not match provisioned content. The provision may not have updated the compose file yet."
+            echo "Constructing full app_compose by merging server defaults with our compose..."
+            FULL_COMPOSE=$(echo "$FULL_COMPOSE" | jq --arg dc "$COMPOSE_CONTENT" '.docker_compose_file = $dc')
+          fi
+
+          # Compute the correct compose hash using the @phala/cloud SDK.
+          COMPOSE_HASH=$(echo "$FULL_COMPOSE" | node -e '
+            const path = require("path");
+            const prefix = require("child_process").execSync("npm prefix -g").toString().trim();
+            const { getComposeHash } = require(
+              require.resolve("@phala/cloud", { paths: [path.join(prefix, "lib/node_modules/phala")] })
+            );
+            let data = "";
+            process.stdin.on("data", chunk => data += chunk);
+            process.stdin.on("end", () => {
+              const appCompose = JSON.parse(data);
+              process.stdout.write(getComposeHash(appCompose));
+            });
+          ')
+          if [ -z "$COMPOSE_HASH" ]; then
+            echo "::error::Failed to compute compose hash client-side"
+            exit 1
+          fi
+          echo "Provision hash (API reference): $PROVISION_HASH"
+          echo "Compose hash (deploy/on-chain): $COMPOSE_HASH"
+          echo "compose_hash=$COMPOSE_HASH" >> "$GITHUB_OUTPUT"
 
       - name: Fetch CVM encryption public key
         id: fetch-pubkey
@@ -389,10 +434,12 @@ jobs:
             --arg base_url "https://api.chipotle.litprotocol.com" \
             --arg api_root_url "https://api.chipotle.litprotocol.com/core/v1" \
             --arg safe_address "${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" \
+            --arg app_auth_address "${{ needs.prepare-deploy.outputs.app_auth_address }}" \
             --arg version_tag "${{ github.ref_name }}" \
             --arg source_sha "${{ github.sha }}" \
             --arg encrypted_env "${{ needs.prepare-deploy.outputs.encrypted_env }}" \
-            '{compose_hash: $compose_hash, safe_tx_hash: $safe_tx_hash, phala_app_name: $phala_app_name, base_url: $base_url, api_root_url: $api_root_url, safe_address: $safe_address, version_tag: $version_tag, source_sha: $source_sha, encrypted_env: $encrypted_env}' \
+            --arg provision_hash "${{ needs.prepare-deploy.outputs.provision_hash }}" \
+            '{compose_hash: $compose_hash, provision_hash: $provision_hash, safe_tx_hash: $safe_tx_hash, phala_app_name: $phala_app_name, base_url: $base_url, api_root_url: $api_root_url, safe_address: $safe_address, app_auth_address: $app_auth_address, version_tag: $version_tag, source_sha: $source_sha, encrypted_env: $encrypted_env}' \
             > deploy-context.json
           echo "Deployment context:"
           cat deploy-context.json
