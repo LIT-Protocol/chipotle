@@ -16,6 +16,13 @@ import { assertOk } from "./helpers.ts";
 
 const TOPUP_AMOUNT_CENTS = 1000; // $10.00
 
+/**
+ * Minimum credit balance (in cents) below which we top up.
+ * Stripe balance is negative when credits are available, so -200 means $2.00.
+ * We top up when credits drop below $2.00 to ensure enough runway.
+ */
+const MIN_CREDIT_THRESHOLD_CENTS = 200;
+
 /** Cache the publishable key so we only fetch it once per k6 run. */
 let _publishableKey: string | null = null;
 
@@ -104,4 +111,52 @@ export function topUpAccount(
  */
 export function isBillingEnabled(client: LitApiServerClient): boolean {
   return getPublishableKey(client) !== null;
+}
+
+/**
+ * Return the account's available credits in cents (≥ 0).
+ * Stripe stores balance as negative when credits exist, so we negate.
+ * Returns 0 if the balance check fails (e.g. no Stripe customer yet).
+ */
+export function getAccountCredits(
+  client: LitApiServerClient,
+  authHeaders: { "X-Api-Key": string },
+): number {
+  const res = client.billingBalance(authHeaders);
+  if (res.response.status !== 200) {
+    return 0;
+  }
+  const data = res.data as import("./litApiServer.ts").BillingBalanceResponse;
+  // balance_cents is negative when credits are available
+  return Math.max(0, -data.balance_cents);
+}
+
+/**
+ * Ensure a pre-created account has sufficient Stripe credits for test execution.
+ *
+ * Handles accounts that:
+ * - May not have a Stripe customer yet (created on-demand by the server)
+ * - May already have sufficient credits (skips top-up)
+ * - Need a top-up to cover test costs
+ *
+ * @returns true if the account has sufficient credits (or billing is disabled), false on failure.
+ */
+export function ensureAccountCredits(
+  client: LitApiServerClient,
+  authHeaders: { "X-Api-Key": string },
+  minCreditsCents: number = MIN_CREDIT_THRESHOLD_CENTS,
+): boolean {
+  if (!isBillingEnabled(client)) {
+    return true;
+  }
+
+  const credits = getAccountCredits(client, authHeaders);
+  if (credits >= minCreditsCents) {
+    return true;
+  }
+
+  // Top up enough to reach the desired minimum.
+  const deficit = minCreditsCents - credits;
+  const topUpAmount = Math.max(TOPUP_AMOUNT_CENTS, deficit);
+  return topUpAccount(client, authHeaders, topUpAmount);
 }

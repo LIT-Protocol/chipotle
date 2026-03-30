@@ -27,7 +27,7 @@ import {
   DECRYPT_CODE,
 } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
-import { topUpAccount, isBillingEnabled } from "../stripe.ts";
+import { ensureAccountCredits } from "../stripe.ts";
 
 const SPIK_VUS = parseInt(__ENV.SPIK_VUS || "25", 10);
 const SPIK_DURATION = __ENV.SPIK_DURATION || "1m";
@@ -81,12 +81,9 @@ export function setup(): SpikeSetupData {
   // Use a distinct account per VU so each VU exercises a different PKP/usage key pair.
   const accounts: { usageApiKey: string; pkpId: string }[] = [];
   const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
-  const billing = isBillingEnabled(client);
   for (let i = 0; i < SPIK_VUS; i++) {
     const acc = PRECREATED_ACCOUNTS[i];
-    if (billing) {
-      topUpAccount(client, { "X-Api-Key": acc.apiKey });
-    }
+    ensureAccountCredits(client, { "X-Api-Key": acc.apiKey });
     accounts.push({ usageApiKey: acc.usageApiKey, pkpId: acc.walletAddress });
   }
 
