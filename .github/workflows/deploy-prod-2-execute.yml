@@ -41,6 +41,7 @@ jobs:
       safe_address: ${{ steps.read.outputs.safe_address }}
       version_tag: ${{ steps.read.outputs.version_tag }}
       source_sha: ${{ steps.read.outputs.source_sha }}
+      encrypted_env: ${{ steps.read.outputs.encrypted_env }}
     steps:
       - name: Download deployment context from Phase 1 release
         env:
@@ -54,7 +55,7 @@ jobs:
         id: read
         run: |
           cat deploy-context.json
-          for key in compose_hash safe_tx_hash phala_app_name base_url api_root_url safe_address version_tag source_sha; do
+          for key in compose_hash safe_tx_hash phala_app_name base_url api_root_url safe_address version_tag source_sha encrypted_env; do
             val=$(jq -r ".$key" deploy-context.json)
             echo "$key=$val" >> "$GITHUB_OUTPUT"
           done
@@ -120,13 +121,36 @@ jobs:
       - name: Commit deployment to Phala (phase 2)
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          COMPOSE_HASH: ${{ needs.download-context.outputs.compose_hash }}
+          ENCRYPTED_ENV: ${{ needs.download-context.outputs.encrypted_env }}
+          PHALA_APP_NAME: ${{ needs.download-context.outputs.phala_app_name }}
         run: |
           # Commit the provisioned compose file update using the compose hash
           # from Phase 1. The Safe multisig has already approved and executed
           # the addComposeHash transaction on-chain.
-          phala api "/cvms/${{ needs.download-context.outputs.phala_app_name }}/compose_file" \
+          #
+          # The encrypted_env (hex blob, sealed to the CVM's X25519 key) and
+          # env_keys are sent alongside compose_hash so that the CVM's
+          # encrypted environment is updated atomically with the compose file.
+          COMMIT_PAYLOAD=$(mktemp)
+          trap 'rm -f "$COMMIT_PAYLOAD"' EXIT
+
+          ENV_KEYS='["STRIPE_SECRET_KEY","STRIPE_PUBLISHABLE_KEY","GCP_SERVICE_ACCOUNT_JSON","GCP_PROJECT_ID","BASE_CHAIN_RPC","CERTBOT_DOMAIN","CERTBOT_AWS_ACCESS_KEY_ID","CERTBOT_AWS_SECRET_ACCESS_KEY","CERTBOT_AWS_ROLE_ARN","CERTBOT_AWS_REGION"]'
+
+          jq -n \
+            --arg hash "$COMPOSE_HASH" \
+            --arg env "$ENCRYPTED_ENV" \
+            --argjson keys "$ENV_KEYS" \
+            '{
+              compose_hash: $hash,
+              encrypted_env: $env,
+              env_keys: $keys,
+              update_env_vars: true
+            }' > "$COMMIT_PAYLOAD"
+
+          phala api "/cvms/$PHALA_APP_NAME/compose_file" \
             -X PATCH \
-            -F compose_hash="${{ needs.download-context.outputs.compose_hash }}" \
+            --input "$COMMIT_PAYLOAD" \
             --json
 
   wait-for-api-available:

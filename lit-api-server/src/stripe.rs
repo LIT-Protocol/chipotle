@@ -13,6 +13,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use ethers::signers::{LocalWallet, Signer};
+use moka::future::Cache;
 use reqwest::StatusCode;
 
 /// Cost constants in US cents.
@@ -28,6 +29,9 @@ pub struct StripeState {
     pub publishable_key: String,
     secret_key: String,
     client: reqwest::Client,
+    /// wallet_address → Stripe customer ID cache.
+    /// Avoids duplicate customer creation caused by Stripe Search API indexing lag.
+    customer_cache: Cache<String, String>,
 }
 
 /// Initialise Stripe from environment variables.  Returns `None` if the env vars are absent
@@ -43,11 +47,16 @@ pub fn init() -> Option<Arc<StripeState>> {
         .build()
         .map_err(|e| tracing::error!("stripe: failed to build HTTP client: {e}"))
         .ok()?;
+    let customer_cache = Cache::builder()
+        .max_capacity(10_000)
+        .time_to_idle(Duration::from_secs(3600))
+        .build();
     tracing::info!("stripe: billing enabled");
     Some(Arc::new(StripeState {
         publishable_key,
         secret_key,
         client,
+        customer_cache,
     }))
 }
 
@@ -134,36 +143,51 @@ pub fn api_key_to_wallet_address(api_key: &str) -> Result<String> {
 }
 
 /// Find the Stripe customer for this wallet address, creating one if none exists.
+///
+/// Results are cached in memory to avoid duplicate customer creation caused by
+/// Stripe Search API indexing lag (newly created customers may not appear in
+/// search results for several seconds).
+///
+/// Uses `try_get_with` to coalesce concurrent requests for the same wallet,
+/// preventing duplicate Stripe customer creation under concurrent load.
 pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -> Result<String> {
-    // Search by metadata.
-    let query = format!("metadata['wallet_address']:'{wallet_address}'");
-    let resp = stripe_get(
-        state,
-        "customers/search",
-        &[("query", query.as_str()), ("limit", "1")],
-    )
-    .await?;
+    let state = state.clone();
+    let wallet = wallet_address.to_string();
+    state
+        .customer_cache
+        .try_get_with(wallet.clone(), async {
+            // Search by metadata.
+            let query = format!("metadata['wallet_address']:'{wallet}'");
+            let resp = stripe_get(
+                &state,
+                "customers/search",
+                &[("query", query.as_str()), ("limit", "1")],
+            )
+            .await?;
 
-    if let Some(data) = resp.body.get("data").and_then(|d| d.as_array())
-        && let Some(first) = data.first()
-        && let Some(id) = first.get("id").and_then(|i| i.as_str())
-    {
-        return Ok(id.to_string());
-    };
+            if let Some(data) = resp.body.get("data").and_then(|d| d.as_array())
+                && let Some(first) = data.first()
+                && let Some(id) = first.get("id").and_then(|i| i.as_str())
+            {
+                return Ok(id.to_string());
+            };
 
-    // Not found, create a new customer
-    let resp = stripe_post(
-        state,
-        "customers",
-        &[("metadata[wallet_address]", wallet_address)],
-    )
-    .await?;
-    let id = resp
-        .body
-        .get("id")
-        .and_then(|i| i.as_str())
-        .ok_or_else(|| anyhow::anyhow!("Stripe: missing customer id"))?;
-    Ok(id.to_string())
+            // Not found, create a new customer
+            let resp = stripe_post(
+                &state,
+                "customers",
+                &[("metadata[wallet_address]", &wallet)],
+            )
+            .await?;
+            let id = resp
+                .body
+                .get("id")
+                .and_then(|i| i.as_str())
+                .ok_or_else(|| anyhow::anyhow!("Stripe: missing customer id"))?;
+            Ok(id.to_string())
+        })
+        .await
+        .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e}"))
 }
 
 /// Return the current credit balance in cents (≤ 0 means credits available; the Stripe
