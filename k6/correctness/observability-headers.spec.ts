@@ -19,6 +19,7 @@ import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
 import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
+import { topUpAccount, isBillingEnabled } from "../stripe.ts";
 
 const SIMPLE_ENDPOINT = `${BASE_URL}/get_node_chain_config`;
 
@@ -49,6 +50,12 @@ export function setup(): ObservabilitySetupData {
   }
   const account =
     PRECREATED_ACCOUNTS[Math.floor(Math.random() * PRECREATED_ACCOUNTS.length)];
+
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
+  if (isBillingEnabled(client)) {
+    topUpAccount(client, { "X-Api-Key": account.apiKey });
+  }
+
   return { usageApiKey: account.usageApiKey };
 }
 

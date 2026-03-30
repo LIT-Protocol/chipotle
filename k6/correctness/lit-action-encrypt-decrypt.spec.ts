@@ -19,6 +19,7 @@ import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
 import { ENCRYPT_CODE, DECRYPT_CODE } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
+import { topUpAccount, isBillingEnabled } from "../stripe.ts";
 
 export interface EncryptDecryptSetupData {
   usageApiKey: string;
@@ -33,6 +34,12 @@ export function setup(): EncryptDecryptSetupData {
   }
   const account =
     PRECREATED_ACCOUNTS[Math.floor(Math.random() * PRECREATED_ACCOUNTS.length)];
+
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
+  if (isBillingEnabled(client)) {
+    topUpAccount(client, { "X-Api-Key": account.apiKey });
+  }
+
   return { usageApiKey: account.usageApiKey, pkpId: account.walletAddress };
 }
 

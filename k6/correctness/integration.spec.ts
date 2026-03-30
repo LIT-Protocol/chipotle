@@ -12,6 +12,7 @@ import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
 import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
+import { topUpAccount, isBillingEnabled } from "../stripe.ts";
 
 export interface IntegrationSetupData {
   apiKey: string;
@@ -27,6 +28,13 @@ export function setup(): IntegrationSetupData {
   }
   const account =
     PRECREATED_ACCOUNTS[Math.floor(Math.random() * PRECREATED_ACCOUNTS.length)];
+
+  // Ensure the account has credits for integration test API calls.
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
+  if (isBillingEnabled(client)) {
+    topUpAccount(client, { "X-Api-Key": account.apiKey });
+  }
+
   return {
     apiKey: account.apiKey,
     walletAddress: account.walletAddress,
