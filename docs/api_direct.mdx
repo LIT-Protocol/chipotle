@@ -207,7 +207,7 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
     const result = await client.litAction({
       apiKey: accountApiKey,  // or usageApiKey
       code: `
-        async function main() {
+        async function main({ pkpId }) {
           const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId }));
           const sig = await wallet.signMessage("Hello from Lit Action");
           return { sig };
