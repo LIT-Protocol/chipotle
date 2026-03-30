@@ -347,10 +347,10 @@ pub(super) async fn remove_usage_api_key(
 
     // Evict the deleted usage key from the billing wallet cache so stale
     // mappings are never served after the key is removed on-chain.
-    if result.is_ok() {
-        if let Some(stripe) = stripe_state.as_ref() {
-            crate::stripe::invalidate_wallet_cache(&usage_key, stripe).await;
-        }
+    if result.is_ok()
+        && let Some(stripe) = stripe_state.as_ref()
+    {
+        crate::stripe::invalidate_wallet_cache(&usage_key, stripe).await;
     }
 
     OpenApiResponse {
