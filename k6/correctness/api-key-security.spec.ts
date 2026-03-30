@@ -15,7 +15,7 @@ import { LitApiServerClient } from "../litApiServer.ts";
 import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS, K6_RUN_ID } from "../defaults.ts";
-import { topUpAccount, isBillingEnabled } from "../stripe.ts";
+import { ensureAccountCredits } from "../stripe.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -119,10 +119,8 @@ export function setup(): SecuritySetupData {
   const walletAddressA = accountA.walletAddress;
   const adminA = authHeaders(accountKeyA);
 
-  // Top up account A — this test makes many billed management and lit_action calls.
-  if (isBillingEnabled(client)) {
-    topUpAccount(client, adminA, 5000); // $50.00 for the many API calls
-  }
+  // Ensure account A has enough credits — this test makes many billed calls.
+  ensureAccountCredits(client, adminA, 5000);
 
   // Create group X
   const addGroupXRes = client.addGroup(
@@ -200,9 +198,7 @@ export function setup(): SecuritySetupData {
   const accountKeyB = (newAccountBRes.data as { api_key: string }).api_key;
   const adminB = authHeaders(accountKeyB);
 
-  if (isBillingEnabled(client)) {
-    topUpAccount(client, adminB);
-  }
+  ensureAccountCredits(client, adminB);
 
   // Create group under Account B
   const addGroupBRes = client.addGroup(
