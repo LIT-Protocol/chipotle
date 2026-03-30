@@ -1,7 +1,7 @@
 # Reusable workflow: wait for an API deployment to complete
 #
-# Polls the /version endpoint until commit_version matches the expected SHA,
-# then confirms /health is OK.
+# Polls the /version endpoint until commit_version matches the expected
+# git-describe output for the given SHA, then confirms /health is OK.
 #
 # Call with api_root_url (direct) or phala_app_name (get from Phala CLI):
 #   uses: ./.github/workflows/wait-for-api-restart.yml
@@ -59,6 +59,11 @@ jobs:
     outputs:
       api_root_url: ${{ steps.resolve-url.outputs.api_root_url }}
     steps:
+      - name: Checkout (for git describe)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Setup Node.js
         if: inputs.phala_app_name != ''
         uses: actions/setup-node@v4
@@ -104,26 +109,28 @@ jobs:
         run: |
           BASE_URL="${{ steps.resolve-url.outputs.api_root_url }}"
           TIMEOUT="${{ inputs.timeout }}"
-          EXPECTED_SHA="${{ inputs.expected_sha }}"
-          # /version returns a short (7-char) SHA, so truncate to match
-          EXPECTED_SHA="${EXPECTED_SHA:0:7}"
           VERSION_URL="${BASE_URL}/version"
           HEALTH_URL="${BASE_URL%/core/v1}/health"
 
-          echo "Polling $VERSION_URL for commit_version == $EXPECTED_SHA (timeout: ${TIMEOUT}s)..."
+          # The API's commit_version is produced by git_version!() which runs
+          # git describe --always at compile time. Reproduce the same output
+          # here so we can compare directly.
+          EXPECTED_VERSION=$(git describe --always "${{ inputs.expected_sha }}")
+
+          echo "Polling $VERSION_URL for commit_version == $EXPECTED_VERSION (timeout: ${TIMEOUT}s)..."
           deadline=$(( $(date +%s) + TIMEOUT ))
 
           while true; do
-            CURRENT_SHA=$(curl -sf "$VERSION_URL" 2>/dev/null | jq -r '.commit_version // empty' 2>/dev/null || true)
-            if [ "$CURRENT_SHA" = "$EXPECTED_SHA" ]; then
-              echo "Version matched: $CURRENT_SHA"
+            CURRENT_VERSION=$(curl -sf "$VERSION_URL" 2>/dev/null | jq -r '.commit_version // empty' 2>/dev/null || true)
+            if [ "$CURRENT_VERSION" = "$EXPECTED_VERSION" ]; then
+              echo "Version matched: $CURRENT_VERSION"
               break
             fi
             if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "::error::Timed out after ${TIMEOUT}s waiting for version $EXPECTED_SHA (last seen: ${CURRENT_SHA:-<unavailable>})"
+              echo "::error::Timed out after ${TIMEOUT}s waiting for version $EXPECTED_VERSION (last seen: ${CURRENT_VERSION:-<unavailable>})"
               exit 1
             fi
-            echo "Current version: ${CURRENT_SHA:-<unavailable>}, waiting 10s..."
+            echo "Current version: ${CURRENT_VERSION:-<unavailable>}, expected: $EXPECTED_VERSION, waiting 10s..."
             sleep 10
           done
 
