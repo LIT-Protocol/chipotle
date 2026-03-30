@@ -74,7 +74,11 @@ curl -s -X POST https://api.dev.litprotocol.com/core/v1/new_account \
 }
 ```
 
-### 2. Create a wallet (PKP)
+### 2. Add funds
+
+Running Lit Actions and management calls require credits. Add funds via credit card in the [Dashboard](https://dashboard.dev.litprotocol.com/dapps/dashboard/) — click **Add Funds** in the top-right corner and select a credit package (minimum $5.00). See [Pricing](https://docs.dev.litprotocol.com/management/pricing) for details.
+
+### 3. Create a wallet (PKP)
 
 ```bash
 curl -s https://api.dev.litprotocol.com/core/v1/create_wallet \
@@ -87,7 +91,7 @@ curl -s https://api.dev.litprotocol.com/core/v1/create_wallet \
 }
 ```
 
-### 3. Run a Lit Action
+### 4. Run a Lit Action
 
 ```bash
 curl -s -X POST https://api.dev.litprotocol.com/core/v1/lit_action \
