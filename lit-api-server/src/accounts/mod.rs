@@ -613,6 +613,26 @@ pub async fn can_execute_action_and_use_wallet(
     Ok(result)
 }
 
+/// Resolve any API key (master or usage) to the creator wallet address of its parent account.
+///
+/// This is the authoritative wallet address for billing: both master and usage keys resolve
+/// to the same account wallet, ensuring charges hit the correct Stripe customer.
+#[instrument(
+    name = "accounts::get_account_wallet_address",
+    level = "debug",
+    skip_all,
+    err
+)]
+pub async fn get_account_wallet_address(api_key: &str) -> Result<String> {
+    let contract = get_read_only_account_config_contract().await?;
+    let key_hash = api_key_hash(api_key);
+    let wallet_address = contract.get_account_wallet_address(key_hash).call().await?;
+    if wallet_address == H160::zero() {
+        anyhow::bail!("account has no wallet address");
+    }
+    Ok(format!("{:?}", wallet_address))
+}
+
 pub async fn get_node_configuration_values() -> Result<Vec<KeyValueReturn>> {
     let contract = get_read_only_account_config_contract().await?;
     let values = contract.node_configuration_values().call().await?;
