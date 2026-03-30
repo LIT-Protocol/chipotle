@@ -6,6 +6,7 @@ import { LitApiServerClient } from "./litApiServer.ts";
 import { assertOk } from "./helpers.ts";
 import { BASE_URL, COMMON_PARAMS, K6_RUN_ID } from "./defaults.ts";
 import { SharedArray } from "k6/data";
+import { topUpAccount, isBillingEnabled } from "./stripe.ts";
 
 export interface AccountAndUsageKey {
   apiKey: string;
@@ -53,6 +54,16 @@ export function createAccountAndUsageKey(options: {
     wallet_address: string;
   };
   const authHeaders = { "X-Api-Key": apiKey };
+
+  // Top up the account BEFORE any billed management calls.
+  // addUsageApiKey is guarded by BilledManagementApiKey ($0.01/call),
+  // and new accounts start at $0 balance.
+  if (isBillingEnabled(client)) {
+    const topped = topUpAccount(client, authHeaders);
+    if (!topped) {
+      console.warn(`${prefix}topUp: failed to top up account — tests requiring credits may fail`);
+    }
+  }
 
   const addUsageKeyRes = client.addUsageApiKey(
     {
