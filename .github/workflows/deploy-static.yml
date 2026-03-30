@@ -29,7 +29,7 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy lit-static --project-name=lit-static --branch=main
+          command: pages deploy lit-static --project-name=lit-static-dev --branch=main
 
   deploy-next:
     if: github.ref == 'refs/heads/next'
@@ -63,4 +63,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy lit-static --project-name=lit-static --branch=${{ github.head_ref }}
+          command: pages deploy lit-static --project-name=lit-static-dev --branch=${{ github.head_ref }}
