@@ -1,6 +1,6 @@
 # Conventions: https://github.com/casey/just
 
-image_base := env('DOCKER_IMAGE', 'litptcl/lit-node-express')
+image_base := env('DOCKER_IMAGE', 'litptcl/chipotle')
 # Tag used only to satisfy the registry push requirement; the deploy step uses
 # the @sha256: digest captured after push, never this tag. Override with
 # DOCKER_TAG to reuse a previously-pushed image (digest files must then exist).
