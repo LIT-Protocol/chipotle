@@ -125,7 +125,6 @@ jobs:
     runs-on: self-hosted
     outputs:
       deploy_needed: ${{ steps.check.outputs.deploy_needed }}
-      deployed_sha: ${{ steps.check.outputs.deployed_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -140,7 +139,6 @@ jobs:
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "Manual trigger — deploying unconditionally"
             echo "deploy_needed=true" >> "$GITHUB_OUTPUT"
-            echo "deployed_sha=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -149,7 +147,6 @@ jobs:
           if [ -z "$COMMIT_VERSION" ]; then
             echo "Could not reach /version endpoint — deploying"
             echo "deploy_needed=true" >> "$GITHUB_OUTPUT"
-            echo "deployed_sha=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           echo "Deployed commit_version: $COMMIT_VERSION"
@@ -167,11 +164,8 @@ jobs:
           if ! git rev-parse --verify "$DEPLOYED_SHA^{commit}" >/dev/null 2>&1; then
             echo "Deployed SHA '$DEPLOYED_SHA' not found in repo history — deploying"
             echo "deploy_needed=true" >> "$GITHUB_OUTPUT"
-            echo "deployed_sha=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
-          echo "deployed_sha=$DEPLOYED_SHA" >> "$GITHUB_OUTPUT"
 
           # Check for changes in deploy-relevant paths
           DEPLOY_PATHS=(
@@ -321,7 +315,7 @@ jobs:
     uses: ./.github/workflows/wait-for-api-restart.yml
     with:
       api_root_url: ${{ needs.determine-target.outputs.api_root_url }}
-      expected_sha: ${{ needs.detect-changes.outputs.deploy_needed == 'true' && github.sha || needs.detect-changes.outputs.deployed_sha }}
+      expected_sha: ${{ needs.detect-changes.outputs.deploy_needed == 'true' && github.sha || '' }}
       runner: '["self-hosted"]'
 
   verify-attestation:
