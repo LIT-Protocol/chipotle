@@ -311,7 +311,7 @@ jobs:
 
   wait-for-api-available:
     needs: [deploy, determine-target, detect-changes]
-    if: ${{ !cancelled() && needs.determine-target.result == 'success' && (needs.deploy.result == 'success' || needs.deploy.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.determine-target.result == 'success' && needs.detect-changes.result == 'success' && (needs.deploy.result == 'success' || needs.deploy.result == 'skipped') }}
     uses: ./.github/workflows/wait-for-api-restart.yml
     with:
       api_root_url: ${{ needs.determine-target.outputs.api_root_url }}
