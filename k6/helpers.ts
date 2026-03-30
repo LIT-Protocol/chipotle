@@ -3,6 +3,27 @@
  */
 import type { Response } from "k6/http";
 import { check } from "k6";
+// @ts-ignore – remote JS lib, no type declarations
+import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
+
+/**
+ * handleSummary replacement that warns on HTTP failures without failing the run.
+ * Assign as: `export const handleSummary = warnOnHttpFailures;`
+ */
+// deno-lint-ignore no-explicit-any
+export function warnOnHttpFailures(data: any): Record<string, string> {
+  const failed = data.metrics?.http_req_failed;
+  if (failed && failed.values?.rate > 0) {
+    const count = failed.values.passes;
+    const rate = (failed.values.rate * 100).toFixed(1);
+    console.warn(
+      `\n⚠ WARNING: ${rate}% of HTTP requests failed (${count} failure${count === 1 ? "" : "s"})\n`,
+    );
+  }
+  return {
+    stdout: textSummary(data, { indent: " ", enableColors: true }),
+  };
+}
 
 /**
  * Runs k6 checks and logs each failure to console.

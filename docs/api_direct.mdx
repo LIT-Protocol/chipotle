@@ -15,11 +15,12 @@ Examples below assume `KEY=your_account_or_usage_api_key`. cURL snippets use `BA
 **API workflow:**
 
 1. [New account or verify account (login)](#1-new-account-or-verify-account-login)
-2. [Add usage API key](#2-add-usage-api-key)
-3. [Create wallet (PKP)](#3-create-a-wallet-pkp)
-4. [Add group and register IPFS action](#4-add-group-and-register-ipfs-action)
-5. [Add PKP to group (optional)](#5-add-pkp-to-group-optional)
-6. [Run lit-action](#6-run-lit-action)
+2. [Add funds](/management/pricing#paying-with-a-credit-card-via-stripe) (or [via the billing API](/management/api_direct#billing))
+3. [Add usage API key](#3-add-usage-api-key)
+4. [Create wallet (PKP)](#4-create-a-wallet-pkp)
+5. [Add group and register IPFS action](#5-add-group-and-register-ipfs-action)
+6. [Add PKP to group (optional)](#6-add-pkp-to-group-optional)
+7. [Run lit-action](#7-run-lit-action)
 
 ### 1. New account or verify account (login)
 
@@ -61,7 +62,7 @@ Create a new account (returns API key and wallet address). Or verify an existing
   </Tab>
 </Tabs>
 
-### 2. Add usage API key
+### 3. Add usage API key
 
 Create a scoped usage API key. The response includes the new key only once — store it. Permissions are defined by boolean flags and group ID arrays (use `0` as a wildcard for "all groups").
 
@@ -94,7 +95,7 @@ Create a scoped usage API key. The response includes the new key only once — s
   </Tab>
 </Tabs>
 
-### 3. Create a wallet (PKP)
+### 4. Create a wallet (PKP)
 
 Request a new wallet (PKP) for the account. The server returns the wallet address and registers it.
 
@@ -113,7 +114,7 @@ Request a new wallet (PKP) for the account. The server returns the wallet addres
   </Tab>
 </Tabs>
 
-### 4. Add group and register IPFS action
+### 5. Add group and register IPFS action
 
 Create a group (with optional permitted actions and PKPs). Then add an action (IPFS CID) to the group to scope which keys can run it.
 
@@ -156,11 +157,8 @@ Create a group (with optional permitted actions and PKPs). Then add an action (I
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"group_name":"My Group","group_description":"","pkp_ids_permitted":[],"cid_hashes_permitted":[]}'
-    
-    # List groups to get group_id (use the "id" from the response)
-    curl -s "http://localhost:8000/core/v1/list_groups?page_number=0&page_size=10" \
-      -H "X-Api-Key: KEY"
-    
+    # Response: {"success":true,"group_id":"1"}
+
     # Register action metadata (replace IPFS_CID)
     curl -s -X POST "http://localhost:8000/core/v1/add_action" \
       -H "Content-Type: application/json" \
@@ -176,7 +174,7 @@ Create a group (with optional permitted actions and PKPs). Then add an action (I
   </Tab>
 </Tabs>
 
-### 5. Add PKP to group (optional)
+### 6. Add PKP to group (optional)
 
 Restrict which wallets (PKPs) can be used in the group by adding their public keys (or wallet addresses) to the group.
 
@@ -200,7 +198,7 @@ Restrict which wallets (PKPs) can be used in the group by adding their public ke
   </Tab>
 </Tabs>
 
-### 6. Run lit-action
+### 7. Run lit-action
 
 Execute a lit-action by sending JavaScript code and optional params. Use a usage API key in the header.
 
@@ -210,7 +208,7 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
     const result = await client.litAction({
       apiKey: accountApiKey,  // or usageApiKey
       code: `
-        async function main() {
+        async function main({ pkpId }) {
           const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId }));
           const sig = await wallet.signMessage("Hello from Lit Action");
           return { sig };

@@ -915,16 +915,18 @@ function openGroupModal(item = null) {
     hideStatus('groups-status');
     try {
       const client = await getClient();
+      let createdGroupId;
       if (isEdit) {
         const id = String(Number(item.id));
         showActionProgress('Updating group', `Updating group "${name}".`);
         await client.updateGroup({ apiKey, groupId: id, name, description: desc, pkpIdsPermitted, cidHashesPermitted });
       } else {
         showActionProgress('Creating group', `Creating group "${name}".`);
-        await client.addGroup({ apiKey, groupName: name, groupDescription: desc, pkpIdsPermitted, cidHashesPermitted });
+        const result = await client.addGroup({ apiKey, groupName: name, groupDescription: desc, pkpIdsPermitted, cidHashesPermitted });
+        createdGroupId = result.group_id;
       }
       await loadGroups();
-      showStatus('groups-status', isEdit ? 'Group updated.' : 'Group created.', 'success');
+      showStatus('groups-status', isEdit ? 'Group updated.' : `Group created (ID: ${createdGroupId}).`, 'success');
     } catch (e) {
       showStatus('groups-status', 'Error: ' + (e && e.message ? e.message : String(e)), 'error');
     } finally {

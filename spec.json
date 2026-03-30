@@ -1,0 +1,2400 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "lit-api-server",
+    "description": "Lit Express Node API Server",
+    "version": "0.1.0"
+  },
+  "servers": [
+    {
+      "url": "/core/v1/",
+      "description": "Lit Protocol Express API (Core v1)"
+    }
+  ],
+  "paths": {
+    "/list_api_keys": {
+      "get": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "list_api_keys",
+        "parameters": [
+          {
+            "name": "page_number",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ApiKeyItem"
+                      }
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/new_account": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "new_account",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NewAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NewAccountResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/account_exists": {
+      "get": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "account_exists",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/create_wallet": {
+      "get": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "create_wallet",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CreateWalletResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/lit_action": {
+      "post": {
+        "tags": [
+          "Actions"
+        ],
+        "operationId": "lit_action",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LitActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/LitActionResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get_lit_action_ipfs_id": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "get_lit_action_ipfs_id",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/add_group": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "add_group",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddGroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AddGroupResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/remove_group": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "remove_group",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveGroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountOpResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/add_action": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "add_action",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountOpResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/delete_action": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "delete_action",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountOpResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/add_action_to_group": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "add_action_to_group",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddActionToGroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountOpResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/add_pkp_to_group": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "add_pkp_to_group",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddPkpToGroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountOpResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/remove_pkp_from_group": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "remove_pkp_from_group",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemovePkpFromGroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountOpResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/add_usage_api_key": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "add_usage_api_key",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddUsageApiKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AddUsageApiKeyResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/update_usage_api_key": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "update_usage_api_key",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUsageApiKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountOpResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/remove_usage_api_key": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "remove_usage_api_key",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveUsageApiKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountOpResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/update_group": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "update_group",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountOpResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/remove_action_from_group": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "remove_action_from_group",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RemoveActionFromGroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountOpResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/update_action_metadata": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "update_action_metadata",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateActionMetadataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountOpResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/update_usage_api_key_metadata": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "update_usage_api_key_metadata",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateUsageApiKeyMetadataRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountOpResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/list_groups": {
+      "get": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "list_groups",
+        "parameters": [
+          {
+            "name": "page_number",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ListMetadataItem"
+                      }
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/list_wallets": {
+      "get": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "list_wallets",
+        "parameters": [
+          {
+            "name": "page_number",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WalletItem"
+                      }
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/list_wallets_in_group": {
+      "get": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "list_wallets_in_group",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          {
+            "name": "page_number",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/WalletItem"
+                      }
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/list_actions": {
+      "get": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "list_actions",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "page_number",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          {
+            "name": "page_size",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ListMetadataItem"
+                      }
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get_node_chain_config": {
+      "get": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "get_node_chain_config",
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/NodeChainConfigResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get_chain_config_keys": {
+      "get": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "get_chain_config_keys",
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/ChainConfigKeysResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get_lit_action_client_config": {
+      "get": {
+        "tags": [
+          "Configuration"
+        ],
+        "operationId": "get_lit_action_client_config",
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/LitActionClientConfigResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get_api_payers": {
+      "get": {
+        "tags": [
+          "Configuration"
+        ],
+        "operationId": "get_api_payers",
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get_admin_api_payer": {
+      "get": {
+        "tags": [
+          "Configuration"
+        ],
+        "operationId": "get_admin_api_payer",
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/stripe_config": {
+      "get": {
+        "tags": [
+          "Billing"
+        ],
+        "description": "GET /billing/stripe_config — returns the Stripe publishable key. No auth required; the publishable key is safe to expose.",
+        "operationId": "billing_stripe_config",
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/StripeConfigResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/balance": {
+      "get": {
+        "tags": [
+          "Billing"
+        ],
+        "description": "GET /billing/balance — returns the current credit balance for the authenticated user.",
+        "operationId": "billing_balance",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/BillingBalanceResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/create_payment_intent": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "description": "POST /billing/create_payment_intent — creates a Stripe PaymentIntent and returns the client_secret for use with Stripe.js `confirmCardPayment`.",
+        "operationId": "billing_create_payment_intent",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePaymentIntentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CreatePaymentIntentResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/billing/confirm_payment": {
+      "post": {
+        "tags": [
+          "Billing"
+        ],
+        "description": "POST /billing/confirm_payment — verifies a succeeded PaymentIntent and credits the account.",
+        "operationId": "billing_confirm_payment",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConfirmPaymentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountOpResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/version": {
+      "get": {
+        "tags": [
+          "Configuration"
+        ],
+        "operationId": "get_version",
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/VersionResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiKeyItem": {
+        "description": "One item from list_api_keys (AccountConfig.sol UsageApiKey).",
+        "type": "object",
+        "required": [
+          "api_key_hash",
+          "balance",
+          "can_add_pkp_to_groups",
+          "can_create_groups",
+          "can_create_pkps",
+          "can_delete_groups",
+          "can_execute_in_groups",
+          "can_manage_ipfs_ids_in_groups",
+          "can_remove_pkp_from_groups",
+          "description",
+          "expiration",
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "api_key_hash": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "expiration": {
+            "type": "string"
+          },
+          "balance": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "can_create_groups": {
+            "type": "boolean"
+          },
+          "can_delete_groups": {
+            "type": "boolean"
+          },
+          "can_create_pkps": {
+            "type": "boolean"
+          },
+          "can_manage_ipfs_ids_in_groups": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "can_add_pkp_to_groups": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "can_remove_pkp_from_groups": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "can_execute_in_groups": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      },
+      "ErrMessage": {
+        "type": "string"
+      },
+      "NewAccountResponse": {
+        "type": "object",
+        "required": [
+          "api_key",
+          "wallet_address"
+        ],
+        "properties": {
+          "api_key": {
+            "type": "string"
+          },
+          "wallet_address": {
+            "type": "string"
+          }
+        }
+      },
+      "NewAccountRequest": {
+        "type": "object",
+        "required": [
+          "account_description",
+          "account_name"
+        ],
+        "properties": {
+          "account_name": {
+            "type": "string"
+          },
+          "account_description": {
+            "type": "string"
+          },
+          "email": {
+            "description": "Optional email address — forwarded to Stripe for the customer record.  Not stored on-chain.",
+            "default": null,
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "CreateWalletResponse": {
+        "type": "object",
+        "required": [
+          "wallet_address"
+        ],
+        "properties": {
+          "wallet_address": {
+            "type": "string"
+          }
+        }
+      },
+      "LitActionResponse": {
+        "type": "object",
+        "required": [
+          "has_error",
+          "logs",
+          "response"
+        ],
+        "properties": {
+          "response": {},
+          "logs": {
+            "type": "string"
+          },
+          "has_error": {
+            "type": "boolean"
+          }
+        }
+      },
+      "LitActionRequest": {
+        "description": "API key via header.",
+        "type": "object",
+        "required": [
+          "code"
+        ],
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "js_params": {
+            "nullable": true
+          }
+        }
+      },
+      "AddGroupResponse": {
+        "description": "Response for add_group, includes the on-chain group ID.",
+        "type": "object",
+        "required": [
+          "group_id",
+          "success"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "group_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AddGroupRequest": {
+        "description": "Request for add_group. permitted_actions and pkps are keccak256 hashes as hex strings (with or without 0x). API key via header.",
+        "type": "object",
+        "required": [
+          "cid_hashes_permitted",
+          "group_description",
+          "group_name",
+          "pkp_ids_permitted"
+        ],
+        "properties": {
+          "group_name": {
+            "description": "Name of the group (Group.metadata.name in AccountConfig.sol).",
+            "type": "string"
+          },
+          "group_description": {
+            "description": "Description of the group (Group.metadata.description in AccountConfig.sol).",
+            "type": "string"
+          },
+          "pkp_ids_permitted": {
+            "description": "pkp ids permitted to use the group (AccountConfig.sol Group.pkpId).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cid_hashes_permitted": {
+            "description": "Actions permitted to use the group (AccountConfig.sol Group.cidHash).",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "AccountOpResponse": {
+        "description": "Response for account config operations (add_pkp_to_group, remove_pkp_from_group, add_usage_api_key, remove_usage_api_key).",
+        "type": "object",
+        "required": [
+          "success"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
+      "RemoveGroupRequest": {
+        "type": "object",
+        "required": [
+          "group_id"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AddActionRequest": {
+        "type": "object",
+        "required": [
+          "action_ipfs_cid",
+          "description",
+          "name"
+        ],
+        "properties": {
+          "action_ipfs_cid": {
+            "description": "IPFS CID for the action (keccak256-hashed on server).",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      },
+      "DeleteActionRequest": {
+        "description": "Request for delete_action. hashed_cid is already a keccak256 hash (hex string). API key via header.",
+        "type": "object",
+        "required": [
+          "hashed_cid"
+        ],
+        "properties": {
+          "hashed_cid": {
+            "description": "Already-hashed CID for the action (0x-prefixed hex string).",
+            "type": "string"
+          }
+        }
+      },
+      "AddActionToGroupRequest": {
+        "type": "object",
+        "required": [
+          "action_ipfs_cid",
+          "group_id"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "action_ipfs_cid": {
+            "description": "IPFS CID for the action (will be keccak256-hashed on server).",
+            "type": "string"
+          }
+        }
+      },
+      "AddPkpToGroupRequest": {
+        "type": "object",
+        "required": [
+          "group_id",
+          "pkp_id"
+        ],
+        "properties": {
+          "group_id": {
+            "description": "Group ID (decimal or hex string).",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "pkp_id": {
+            "type": "string"
+          }
+        }
+      },
+      "RemovePkpFromGroupRequest": {
+        "type": "object",
+        "required": [
+          "group_id",
+          "pkp_id"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "pkp_id": {
+            "type": "string"
+          }
+        }
+      },
+      "AddUsageApiKeyResponse": {
+        "description": "Response for account config operations (add_group, add_pkp_to_group, remove_pkp_from_group, add_usage_api_key, remove_usage_api_key).",
+        "type": "object",
+        "required": [
+          "success",
+          "usage_api_key"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          },
+          "usage_api_key": {
+            "type": "string"
+          }
+        }
+      },
+      "AddUsageApiKeyRequest": {
+        "description": "Request for add_usage_api_key. expiration and balance as decimal strings (e.g. unix timestamp, wei). API key via header.",
+        "type": "object",
+        "required": [
+          "add_pkp_to_groups",
+          "can_create_groups",
+          "can_create_pkps",
+          "can_delete_groups",
+          "description",
+          "execute_in_groups",
+          "manage_ipfs_ids_in_groups",
+          "name",
+          "remove_pkp_from_groups"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "can_create_groups": {
+            "type": "boolean"
+          },
+          "can_delete_groups": {
+            "type": "boolean"
+          },
+          "can_create_pkps": {
+            "type": "boolean"
+          },
+          "manage_ipfs_ids_in_groups": {
+            "description": "Group IDs to grant manage-IPFS-IDs permission. 0 is wildcard for all groups.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "add_pkp_to_groups": {
+            "description": "Group IDs to grant add-PKP permission. 0 is wildcard for all groups.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "remove_pkp_from_groups": {
+            "description": "Group IDs to grant remove-PKP permission. 0 is wildcard for all groups.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "execute_in_groups": {
+            "description": "Group IDs to grant execute permission. 0 is wildcard for all groups.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      },
+      "UpdateUsageApiKeyRequest": {
+        "description": "Request for update_usage_api_key. Updates all permissions and metadata on an existing usage API key. API key via header.",
+        "type": "object",
+        "required": [
+          "add_pkp_to_groups",
+          "can_create_groups",
+          "can_create_pkps",
+          "can_delete_groups",
+          "description",
+          "execute_in_groups",
+          "manage_ipfs_ids_in_groups",
+          "name",
+          "remove_pkp_from_groups",
+          "usage_api_key"
+        ],
+        "properties": {
+          "usage_api_key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "can_create_groups": {
+            "type": "boolean"
+          },
+          "can_delete_groups": {
+            "type": "boolean"
+          },
+          "can_create_pkps": {
+            "type": "boolean"
+          },
+          "manage_ipfs_ids_in_groups": {
+            "description": "Group IDs to grant manage-IPFS-IDs permission. 0 is wildcard for all groups.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "add_pkp_to_groups": {
+            "description": "Group IDs to grant add-PKP permission. 0 is wildcard for all groups.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "remove_pkp_from_groups": {
+            "description": "Group IDs to grant remove-PKP permission. 0 is wildcard for all groups.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          },
+          "execute_in_groups": {
+            "description": "Group IDs to grant execute permission. 0 is wildcard for all groups.",
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "uint64",
+              "minimum": 0.0
+            }
+          }
+        }
+      },
+      "RemoveUsageApiKeyRequest": {
+        "description": "API key via header.",
+        "type": "object",
+        "required": [
+          "usage_api_key"
+        ],
+        "properties": {
+          "usage_api_key": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateGroupRequest": {
+        "description": "Request for update_group (AccountConfig.updateGroup). API key via header.",
+        "type": "object",
+        "required": [
+          "description",
+          "group_id",
+          "name"
+        ],
+        "properties": {
+          "group_id": {
+            "description": "Group ID (decimal or hex string).",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "pkp_ids_permitted": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "cid_hashes_permitted": {
+            "default": [],
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "RemoveActionFromGroupRequest": {
+        "description": "Request for remove_action_from_group. hashed_cid is already a keccak256 hash (hex string). API key via header.",
+        "type": "object",
+        "required": [
+          "group_id",
+          "hashed_cid"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "hashed_cid": {
+            "description": "Already-hashed CID for the action (0x-prefixed hex string).",
+            "type": "string"
+          }
+        }
+      },
+      "UpdateActionMetadataRequest": {
+        "description": "Request for update_action_metadata. hashed_cid is already a keccak256 hash (hex string). API key via header.",
+        "type": "object",
+        "required": [
+          "description",
+          "hashed_cid",
+          "name"
+        ],
+        "properties": {
+          "hashed_cid": {
+            "description": "Already-hashed CID for the action (0x-prefixed hex string).",
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateUsageApiKeyMetadataRequest": {
+        "description": "Request for update_usage_api_key_metadata (AccountConfig.updateUsageApiKeyMetadata). API key via header.",
+        "type": "object",
+        "required": [
+          "description",
+          "name",
+          "usage_api_key"
+        ],
+        "properties": {
+          "usage_api_key": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      },
+      "ListMetadataItem": {
+        "description": "One item from list_groups, list_wallets, list_wallets_in_group, or list_actions (AccountConfig.sol Metadata).",
+        "type": "object",
+        "required": [
+          "description",
+          "id",
+          "name"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      },
+      "WalletItem": {
+        "description": "One item from list_groups, list_wallets, list_wallets_in_group, or list_actions (AccountConfig.sol Metadata).",
+        "type": "object",
+        "required": [
+          "description",
+          "id",
+          "name",
+          "wallet_address"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "wallet_address": {
+            "type": "string"
+          }
+        }
+      },
+      "NodeChainConfigResponse": {
+        "type": "object",
+        "required": [
+          "chain_id",
+          "chain_name",
+          "contract_address",
+          "is_evm",
+          "testnet",
+          "token"
+        ],
+        "properties": {
+          "chain_name": {
+            "type": "string"
+          },
+          "chain_id": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "is_evm": {
+            "type": "boolean"
+          },
+          "testnet": {
+            "type": "boolean"
+          },
+          "token": {
+            "type": "string"
+          },
+          "contract_address": {
+            "type": "string"
+          }
+        }
+      },
+      "ChainConfigKeysResponse": {
+        "description": "GET /get_chain_config_keys — names of every supported ConfigKeys variant.",
+        "type": "object",
+        "required": [
+          "keys"
+        ],
+        "properties": {
+          "keys": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "LitActionClientConfigResponse": {
+        "description": "GET /get_lit_action_client_config — effective ClientBuilder configuration values, including any chain-config overrides applied at startup.",
+        "type": "object",
+        "required": [
+          "async_timeout_ms",
+          "client_timeout_ms_buffer",
+          "max_code_length",
+          "max_console_log_length",
+          "max_fetch_count",
+          "max_get_keys_count",
+          "max_response_length",
+          "max_retries",
+          "memory_limit_mb",
+          "timeout_ms"
+        ],
+        "properties": {
+          "timeout_ms": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "async_timeout_ms": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "memory_limit_mb": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0.0
+          },
+          "max_code_length": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "max_response_length": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "max_console_log_length": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "max_fetch_count": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0.0
+          },
+          "max_get_keys_count": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0.0
+          },
+          "max_retries": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0.0
+          },
+          "client_timeout_ms_buffer": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          }
+        }
+      },
+      "StripeConfigResponse": {
+        "description": "GET /billing/stripe_config — returns the Stripe publishable key for Stripe.js.",
+        "type": "object",
+        "required": [
+          "publishable_key"
+        ],
+        "properties": {
+          "publishable_key": {
+            "type": "string"
+          }
+        }
+      },
+      "BillingBalanceResponse": {
+        "description": "GET /billing/balance — current credit balance for the authenticated API key.",
+        "type": "object",
+        "required": [
+          "balance_cents",
+          "balance_display"
+        ],
+        "properties": {
+          "balance_cents": {
+            "description": "Balance in cents.  Negative means credits are available; zero means exhausted.",
+            "type": "integer",
+            "format": "int64"
+          },
+          "balance_display": {
+            "description": "Human-readable, e.g. \"$5.00 credit\".",
+            "type": "string"
+          }
+        }
+      },
+      "CreatePaymentIntentResponse": {
+        "description": "POST /billing/create_payment_intent — client secret for Stripe.js confirmCardPayment.",
+        "type": "object",
+        "required": [
+          "client_secret",
+          "payment_intent_id"
+        ],
+        "properties": {
+          "client_secret": {
+            "type": "string"
+          },
+          "payment_intent_id": {
+            "type": "string"
+          }
+        }
+      },
+      "CreatePaymentIntentRequest": {
+        "description": "POST /billing/create_payment_intent",
+        "type": "object",
+        "required": [
+          "amount_cents"
+        ],
+        "properties": {
+          "amount_cents": {
+            "description": "Amount to charge in US cents (minimum 500 = $5.00).",
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "ConfirmPaymentRequest": {
+        "description": "POST /billing/confirm_payment",
+        "type": "object",
+        "required": [
+          "payment_intent_id"
+        ],
+        "properties": {
+          "payment_intent_id": {
+            "type": "string"
+          }
+        }
+      },
+      "VersionResponse": {
+        "type": "object",
+        "required": [
+          "commit_version",
+          "name",
+          "submodule_versions",
+          "version"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          },
+          "commit_version": {
+            "type": "string"
+          },
+          "submodule_versions": {
+            "type": "array",
+            "items": {
+              "type": "array",
+              "items": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "string"
+                }
+              ],
+              "maxItems": 2,
+              "minItems": 2
+            }
+          }
+        }
+      }
+    }
+  }
+}

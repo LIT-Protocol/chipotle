@@ -10,11 +10,7 @@ RUN apt-get update && apt-get install -y \
     protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
-# lit-api-server has a path dependency on lit-actions/grpc
-COPY lit-core ./lit-core/
-COPY lit-actions ./lit-actions/
-COPY lit-api-server ./lit-api-server/
-COPY .git ./.git/
+COPY . .
 
 RUN cd lit-api-server && cargo build --release --features production --bin lit-api-server
 

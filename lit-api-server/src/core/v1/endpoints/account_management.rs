@@ -14,9 +14,9 @@ use crate::core::v1::models::request::{
     UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
-    AccountOpResponse, AddUsageApiKeyResponse, ApiKeyItem, ChainConfigKeysResponse,
-    CreateWalletResponse, ListMetadataItem, NewAccountResponse, NodeChainConfigResponse,
-    WalletItem,
+    AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse, ApiKeyItem,
+    ChainConfigKeysResponse, CreateWalletResponse, ListMetadataItem, NewAccountResponse,
+    NodeChainConfigResponse, WalletItem,
 };
 use crate::stripe::StripeState;
 use rocket::State;
@@ -191,7 +191,7 @@ pub(super) async fn add_group(
     signer_pool: &State<Arc<SignerPool>>,
     api_key: BilledManagementApiKey,
     req: Json<AddGroupRequest>,
-) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+) -> OpenApiResponse<AddGroupResponse, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
             account_management::add_group(signer_pool.inner().clone(), api_key.0.as_str(), req)
@@ -334,18 +334,27 @@ pub(super) async fn add_usage_api_key(
 pub(super) async fn remove_usage_api_key(
     signer_pool: &State<Arc<SignerPool>>,
     api_key: BilledManagementApiKey,
+    stripe_state: &State<Option<Arc<StripeState>>>,
     req: Json<RemoveUsageApiKeyRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    let usage_key = req.usage_api_key.clone();
+    let result = account_management::remove_usage_api_key(
+        signer_pool.inner().clone(),
+        api_key.0.as_str(),
+        req,
+    )
+    .await;
+
+    // Evict the deleted usage key from the billing wallet cache so stale
+    // mappings are never served after the key is removed on-chain.
+    if result.is_ok()
+        && let Some(stripe) = stripe_state.as_ref()
+    {
+        crate::stripe::invalidate_wallet_cache(&usage_key, stripe).await;
+    }
+
     OpenApiResponse {
-        response: ApiResult(
-            account_management::remove_usage_api_key(
-                signer_pool.inner().clone(),
-                api_key.0.as_str(),
-                req,
-            )
-            .await,
-        )
-        .into(),
+        response: ApiResult(result).into(),
     }
 }
 

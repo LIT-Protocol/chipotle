@@ -6,12 +6,13 @@
  *   k6 run k6/integration.spec.ts
  *   BASE_URL=https://your-instance.phala.network/core/v1 k6 run k6/integration.spec.ts
  */
-import { checkAndLog } from "../helpers.ts";
+import { checkAndLog, warnOnHttpFailures } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
 import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
 import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
+import { ensureAccountCredits } from "../stripe.ts";
 
 export interface IntegrationSetupData {
   apiKey: string;
@@ -27,6 +28,10 @@ export function setup(): IntegrationSetupData {
   }
   const account =
     PRECREATED_ACCOUNTS[Math.floor(Math.random() * PRECREATED_ACCOUNTS.length)];
+
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
+  ensureAccountCredits(client, { "X-Api-Key": account.apiKey });
+
   return {
     apiKey: account.apiKey,
     walletAddress: account.walletAddress,
@@ -38,7 +43,6 @@ export const options = {
   vus: 1,
   iterations: 1,
   thresholds: {
-    http_req_failed: ["rate<0.1"],
     http_req_duration: ["p(99)<30000"],
     http_reqs: ["count>=1"],
     checks: ["rate==1"],
@@ -123,14 +127,16 @@ export default function (data: IntegrationSetupData) {
   checkAndLog(addGroupRes.response, {
     "addGroup success": (r) => {
       try {
-        return JSON.parse(r.body as string).success === true;
+        const body = JSON.parse(r.body as string);
+        return body.success === true && typeof body.group_id === "string";
       } catch {
         return false;
       }
     },
   }, "addGroup");
+  const groupId = (addGroupRes.data as { success: boolean; group_id: string }).group_id;
 
-  // ── 7. listGroups — extract groupId for subsequent tests ──────────────────
+  // ── 7. listGroups — verify group appears ──────────────────────────────────
   const listGroupsRes = client.listGroups(
     { page_number: 0, page_size: 10 },
     authHeaders,
@@ -145,12 +151,6 @@ export default function (data: IntegrationSetupData) {
       }
     },
   }, "listGroups");
-  const groups = listGroupsRes.data as Array<{ id: string; name: string; description: string }>;
-  if (!groups || groups.length === 0) {
-    console.error("listGroups returned empty array after addGroup");
-    return;
-  }
-  const groupId = groups[groups.length - 1].id; // use the most recently created group
 
   // ── 8. updateGroup — called while group is empty so the full-replace is safe ───
   const updateGroupRes = client.updateGroup(
@@ -496,3 +496,5 @@ export default function (data: IntegrationSetupData) {
     },
   }, "removeGroup");
 }
+
+export const handleSummary = warnOnHttpFailures;

@@ -108,6 +108,17 @@ contract ViewsFacet {
         return AppStorage.accountExistsAndIsMutable(apiKeyHash, msg.sender);
     }
 
+    /// @notice Return the creator wallet address for the account that owns the given API key.
+    /// @dev Works with both master and usage API key hashes (resolves via allApiKeyHashesToMaster).
+    /// @param apiKeyHash keccak256 of a master or usage API key (base64-encoded).
+    /// @return The creator wallet address stored on the resolved master account.
+    function getAccountWalletAddress(
+        uint256 apiKeyHash
+    ) public view returns (address) {
+        AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
+        return account.creatorWalletAddress;
+    }
+
     function getWalletDerivation(
         uint256 apiKeyHash,
         address walletAddress

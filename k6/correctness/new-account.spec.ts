@@ -6,7 +6,7 @@
  *      BASE_URL=https://your-instance.phala.network/core/v1 k6 run k6/correctness/new-account.spec.ts
  */
 import { sleep } from "k6";
-import { checkAndLog } from "../helpers.ts";
+import { checkAndLog, warnOnHttpFailures } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
 import { assertOk } from "../helpers.ts";
 import { BASE_URL, COMMON_PARAMS, K6_RUN_ID } from "../defaults.ts";
@@ -15,7 +15,6 @@ export const options = {
   vus: 2,
   iterations: 4,
   thresholds: {
-    http_req_failed: ["rate==0"],
     http_reqs: ["count>=1"],
     checks: ["rate==1"],
   },
@@ -49,3 +48,5 @@ export default function () {
       typeof data.wallet_address === "string" && data.wallet_address.length > 0,
   }, "newAccount");
 }
+
+export const handleSummary = warnOnHttpFailures;

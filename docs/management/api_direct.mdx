@@ -16,11 +16,12 @@ Examples below assume `KEY=your_account_or_usage_api_key`. cURL snippets use `BA
 **API workflow:**
 
 1. [New account or verify account (login)](#1-new-account-or-verify-account-login)
-2. [Add usage API key](#2-add-usage-api-key)
-3. [Create wallet (PKP)](#3-create-a-wallet-pkp)
-4. [Add group and register IPFS action](#4-add-group-and-register-ipfs-action)
-5. [Add PKP to group (optional)](#5-add-pkp-to-group-optional)
-6. [Run lit-action](#6-run-lit-action)
+2. [Add funds](/management/pricing#paying-with-a-credit-card-via-stripe) (or [via the billing API](#billing))
+3. [Add usage API key](#3-add-usage-api-key)
+4. [Create wallet (PKP)](#4-create-a-wallet-pkp)
+5. [Add group and register IPFS action](#5-add-group-and-register-ipfs-action)
+6. [Add PKP to group (optional)](#6-add-pkp-to-group-optional)
+7. [Run lit-action](#7-run-lit-action)
 
 ### 1. New account or verify account (login)
 
@@ -62,7 +63,7 @@ Create a new account (returns API key and wallet address). Or verify an existing
   </Tab>
 </Tabs>
 
-### 2. Add usage API key
+### 3. Add usage API key
 
 Create a usage API key with fine-grained permissions. The response includes the new key only once — store it immediately.
 
@@ -116,7 +117,7 @@ Create a usage API key with fine-grained permissions. The response includes the 
 | `remove_pkp_from_groups` | `u64[]` | Group IDs where this key can remove PKPs. Use `[0]` for all groups. |
 | `execute_in_groups` | `u64[]` | Group IDs where this key can execute lit-actions. Use `[0]` for all groups. |
 
-### 3. Create a wallet (PKP)
+### 4. Create a wallet (PKP)
 
 Request a new wallet (PKP) for the account. The server returns the wallet address and registers it.
 
@@ -135,7 +136,7 @@ Request a new wallet (PKP) for the account. The server returns the wallet addres
   </Tab>
 </Tabs>
 
-### 4. Add group and register IPFS action
+### 5. Add group and register IPFS action
 
 Create a group, then add an action (IPFS CID) to scope which keys can run it.
 
@@ -175,12 +176,9 @@ Create a group, then add an action (IPFS CID) to scope which keys can run it.
         "pkp_ids_permitted": [],
         "cid_hashes_permitted": []
       }'
+    # Response: {"success":true,"group_id":"1"}
 
-    # List groups to get group_id
-    curl -s "http://localhost:8000/core/v1/list_groups?page_number=0&page_size=10" \
-      -H "X-Api-Key: KEY"
-
-    # Add action to group (replace GROUP_ID and IPFS_CID)
+    # Add action to group (use group_id from the response above)
     curl -s -X POST "http://localhost:8000/core/v1/add_action_to_group" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
@@ -189,7 +187,7 @@ Create a group, then add an action (IPFS CID) to scope which keys can run it.
   </Tab>
 </Tabs>
 
-### 5. Add PKP to group (optional)
+### 6. Add PKP to group (optional)
 
 Restrict which wallets (PKPs) can be used in the group by adding their IDs to the group.
 
@@ -213,7 +211,7 @@ Restrict which wallets (PKPs) can be used in the group by adding their IDs to th
   </Tab>
 </Tabs>
 
-### 6. Run lit-action
+### 7. Run lit-action
 
 Execute a lit-action by sending JavaScript code and optional params. Use a usage API key (or account key) in the header.
 
@@ -223,13 +221,15 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
     const result = await client.litAction({
       apiKey: usageApiKey,
       code: `
-        const message = "Hello from Lit Action";
-        const sig = await LitActions.signEcdsa({ toSign: new TextEncoder().encode(message), publicKey, sigName });
-        LitActions.setResponse({ response: { message, sig } });
+        async function main({ pkpId }) {
+          const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId }));
+          const sig = await wallet.signMessage("Hello from Lit Action");
+          return { sig };
+        }
       `,
-      jsParams: { publicKey: '0x...', sigName: 'sig1' }
+      jsParams: { pkpId: '0x...' }
     });
-    console.log(result.signatures, result.response, result.logs);
+    console.log(result.response, result.logs);
     ```
   </Tab>
   <Tab title="cURL">
@@ -237,7 +237,7 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
     curl -s -X POST "http://localhost:8000/core/v1/lit_action" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
-      -d '{"code":"const msg = \"hello\"; LitActions.setResponse({ response: msg });","js_params":null}'
+      -d '{"code":"async function main() { return \"hello\"; }","js_params":null}'
     ```
   </Tab>
 </Tabs>
@@ -273,7 +273,7 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
 - **`POST /update_action_metadata`** — Update the name/description of a registered action. Body: `{"hashed_cid": "0x...", "name": "...", "description": "..."}`.
 - **`POST /remove_pkp_from_group`** — Remove a PKP from a group. Body: `{"group_id": 1, "pkp_id": "..."}`.
 
-**Billing:**
+#### Billing
 
 - **`GET /billing/stripe_config`** — Returns the Stripe publishable key. No auth required.
 - **`GET /billing/balance`** — Returns the current credit balance for the authenticated account.

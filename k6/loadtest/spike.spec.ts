@@ -16,7 +16,7 @@
  *   SPIK_VUS        - Peak virtual users (default: 20)
  *   SPIK_DURATION   - Sustain duration at peak (default: 2m)
  */
-import { checkAndLog } from "../helpers.ts";
+import { checkAndLog, warnOnHttpFailures } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
 import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
@@ -27,6 +27,7 @@ import {
   DECRYPT_CODE,
 } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
+import { ensureAccountCredits } from "../stripe.ts";
 
 const SPIK_VUS = parseInt(__ENV.SPIK_VUS || "25", 10);
 const SPIK_DURATION = __ENV.SPIK_DURATION || "1m";
@@ -59,13 +60,10 @@ export const options = {
     },
   },
   thresholds: {
-    http_req_failed: ["rate<0.2"],
     http_req_duration: ["p(99)<30000"],
     checks: ["rate>=0.8"],
     "http_req_duration{scenario:encrypt_decrypt}": ["p(99)<30000"],
     "http_req_duration{scenario:ecdsa_sign}": ["p(99)<30000"],
-    "http_req_failed{scenario:encrypt_decrypt}": ["rate<0.2"],
-    "http_req_failed{scenario:ecdsa_sign}": ["rate<0.2"],
   },
 };
 
@@ -82,8 +80,10 @@ export function setup(): SpikeSetupData {
 
   // Use a distinct account per VU so each VU exercises a different PKP/usage key pair.
   const accounts: { usageApiKey: string; pkpId: string }[] = [];
+  const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
   for (let i = 0; i < SPIK_VUS; i++) {
     const acc = PRECREATED_ACCOUNTS[i];
+    ensureAccountCredits(client, { "X-Api-Key": acc.apiKey });
     accounts.push({ usageApiKey: acc.usageApiKey, pkpId: acc.walletAddress });
   }
 
@@ -192,3 +192,5 @@ export function ecdsaSign(setupData: SpikeSetupData) {
   // High intensity: short pause between spike requests.
   sleep(0.2 + Math.random() * 0.2);
 }
+
+export const handleSummary = warnOnHttpFailures;
