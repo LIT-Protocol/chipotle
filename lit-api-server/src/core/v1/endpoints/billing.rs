@@ -32,7 +32,12 @@ fn wallet_resolution_err(e: anyhow::Error) -> ApiStatus {
             "Invalid API key",
         )
     } else {
-        ApiStatus::internal_server_error(e, "Billing lookup failed")
+        // Log the underlying error for internal diagnostics without exposing details to clients.
+        eprintln!("wallet_resolution_err internal failure: {e:?}");
+        ApiStatus::internal_server_error(
+            anyhow::anyhow!("internal billing lookup error"),
+            "Billing lookup failed",
+        )
     }
 }
 
