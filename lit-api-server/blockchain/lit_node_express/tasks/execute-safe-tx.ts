@@ -28,6 +28,14 @@ task("execute-safe-tx", "Verify a Safe transaction has been executed and return 
       process.exit(1);
     }
 
+    if (safeTransaction.isSuccessful === false) {
+      console.error(
+        `\nSafe transaction was executed but REVERTED on-chain (tx: ${safeTransaction.transactionHash}). ` +
+        `The addComposeHash call did not succeed. Check the transaction on Basescan.`
+      );
+      process.exit(1);
+    }
+
     console.log(`\nTransaction already executed on-chain.`);
     console.log(`Transaction hash: ${safeTransaction.transactionHash}`);
     // Machine-readable output for CI pipelines
