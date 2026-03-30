@@ -253,18 +253,10 @@ jobs:
           fi
           echo "app_auth_address=$APP_AUTH" >> "$GITHUB_OUTPUT"
 
-      - name: Encrypt environment variables for CVM
-        id: encrypt-env
+      - name: Fetch CVM encryption public key
+        id: fetch-pubkey
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
-          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
-          BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
-          CERTBOT_AWS_ACCESS_KEY_ID: ${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}
-          CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
-          CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
-          CERTBOT_AWS_REGION: ${{ vars.CERTBOT_AWS_REGION }}
           KMS_SLUG: ${{ steps.prepare.outputs.kms_slug }}
           APP_ID: ${{ steps.prepare.outputs.app_id }}
         run: |
@@ -273,7 +265,7 @@ jobs:
           # Workaround: `phala envs encrypt` passes kms_type ("base") to the
           # /kms/{kms}/pubkey/{app_id} API, but the API expects a KMS slug
           # (e.g. "kms-base-prod5"). We fetch the pubkey using the correct
-          # slug from the provision response and encrypt with the SDK directly.
+          # slug from the provision response.
           if [ -z "$KMS_SLUG" ] || [ -z "$APP_ID" ]; then
             echo "::error::KMS_SLUG or APP_ID not set from provision step"
             exit 1
@@ -290,11 +282,26 @@ jobs:
             exit 1
           fi
           echo "Got encryption pubkey: ${PUBKEY:0:16}..."
+          echo "encrypt_pubkey=$PUBKEY" >> "$GITHUB_OUTPUT"
+
+      - name: Encrypt environment variables for CVM
+        id: encrypt-env
+        env:
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
+          CERTBOT_AWS_ACCESS_KEY_ID: ${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}
+          CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
+          CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
+          CERTBOT_AWS_REGION: ${{ vars.CERTBOT_AWS_REGION }}
+          ENCRYPT_PUBKEY: ${{ steps.fetch-pubkey.outputs.encrypt_pubkey }}
+        run: |
+          set -euo pipefail
 
           # Encrypt env vars client-side using the @phala/cloud SDK's
           # encryptEnvVars function (X25519 + AES-256-GCM). We resolve the
           # SDK from the globally-installed phala package.
-          export ENCRYPT_PUBKEY="$PUBKEY"
           ENCRYPTED_ENV=$(node -e '
             const path = require("path");
             const prefix = require("child_process").execSync("npm prefix -g").toString().trim();
