@@ -12,7 +12,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Result;
-use ethers::signers::{LocalWallet, Signer};
 use moka::future::Cache;
 use reqwest::StatusCode;
 
@@ -32,6 +31,10 @@ pub struct StripeState {
     /// wallet_address → Stripe customer ID cache.
     /// Avoids duplicate customer creation caused by Stripe Search API indexing lag.
     customer_cache: Cache<String, String>,
+    /// api_key → wallet_address cache.
+    /// Resolves both master and usage API keys to the account's creator wallet address
+    /// via the on-chain `allApiKeyHashesToMaster` mapping, avoiding a contract call per charge.
+    wallet_cache: Cache<String, String>,
 }
 
 /// Initialise Stripe from environment variables.  Returns `None` if the env vars are absent
@@ -51,12 +54,17 @@ pub fn init() -> Option<Arc<StripeState>> {
         .max_capacity(10_000)
         .time_to_idle(Duration::from_secs(3600))
         .build();
+    let wallet_cache = Cache::builder()
+        .max_capacity(10_000)
+        .time_to_idle(Duration::from_secs(3600))
+        .build();
     tracing::info!("stripe: billing enabled");
     Some(Arc::new(StripeState {
         publishable_key,
         secret_key,
         client,
         customer_cache,
+        wallet_cache,
     }))
 }
 
@@ -132,14 +140,27 @@ async fn stripe_post(
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-/// Derive the hex wallet address from a base64-encoded API key.
-pub fn api_key_to_wallet_address(api_key: &str) -> Result<String> {
-    let bytes = base64_light::base64_decode(api_key);
-    if bytes.len() < 32 {
-        anyhow::bail!("API key too short to derive wallet address");
-    }
-    let wallet = LocalWallet::from_bytes(&bytes[..32])?;
-    Ok(format!("{:?}", wallet.address()))
+/// Remove an API key from the wallet address cache.
+///
+/// Call this when a usage API key is deleted so that stale mappings are not served.
+pub async fn invalidate_wallet_cache(api_key: &str, state: &StripeState) {
+    state.wallet_cache.invalidate(api_key).await;
+}
+
+/// Resolve any API key (master or usage) to the account's creator wallet address.
+///
+/// Uses the on-chain `allApiKeyHashesToMaster` mapping so that usage API keys
+/// resolve to the same wallet (and therefore same Stripe customer) as their
+/// parent account key.  Results are cached for 1 hour.
+pub async fn resolve_wallet_address(api_key: &str, state: &StripeState) -> Result<String> {
+    let key = api_key.to_string();
+    state
+        .wallet_cache
+        .try_get_with(key, async {
+            crate::accounts::get_account_wallet_address(api_key).await
+        })
+        .await
+        .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e}"))
 }
 
 /// Find the Stripe customer for this wallet address, creating one if none exists.
@@ -205,7 +226,7 @@ pub async fn get_credit_balance(customer_id: &str, state: &StripeState) -> Resul
 /// Charge `cost_cents` against the customer's credit balance.
 /// Returns `Err` if the balance would go positive (insufficient credits).
 async fn charge(api_key: &str, cost_cents: i64, state: &StripeState) -> Result<()> {
-    let wallet = api_key_to_wallet_address(api_key)?;
+    let wallet = resolve_wallet_address(api_key, state).await?;
     let customer_id = get_customer_by_wallet(&wallet, state).await?;
     let balance = get_credit_balance(&customer_id, state).await?;
 
