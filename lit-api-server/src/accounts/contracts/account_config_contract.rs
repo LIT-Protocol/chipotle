@@ -176,7 +176,13 @@ pub mod account_config {
                                 ),
                             },
                         ],
-                        outputs: ::std::vec![],
+                        outputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::string::String::new(),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("uint256"),
+                            ),
+                        },],
                         constant: ::core::option::Option::None,
                         state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
                     },],
@@ -5304,6 +5310,20 @@ pub mod account_config {
         Hash,
     )]
     pub struct AccountExistsAndIsMutableReturn(pub bool);
+    ///Container type for all return fields from the `addGroup` function with signature `addGroup(uint256,string,string,uint256[],address[])` and selector `0x2b12dee6`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    pub struct AddGroupReturn(pub ::ethers::core::types::U256);
     ///Container type for all return fields from the `adminApiPayerAccount` function with signature `adminApiPayerAccount()` and selector `0x383603fe`
     #[derive(
         Clone,

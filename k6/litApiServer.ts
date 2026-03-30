@@ -72,13 +72,6 @@ export interface LitActionRequest {
 }
 
 /**
- * Response for account config operations (add_pkp_to_group, remove_pkp_from_group, add_usage_api_key, remove_usage_api_key).
- */
-export interface AccountOpResponse {
-  success: boolean;
-}
-
-/**
  * Response for add_group, includes the on-chain group ID.
  */
 export interface AddGroupResponse {
@@ -98,6 +91,13 @@ export interface AddGroupRequest {
   pkp_ids_permitted: string[];
   /** Actions permitted to use the group (AccountConfig.sol Group.cidHash). */
   cid_hashes_permitted: string[];
+}
+
+/**
+ * Response for account config operations (add_pkp_to_group, remove_pkp_from_group, add_usage_api_key, remove_usage_api_key).
+ */
+export interface AccountOpResponse {
+  success: boolean;
 }
 
 export interface RemoveGroupRequest {
