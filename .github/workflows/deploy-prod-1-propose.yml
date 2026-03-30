@@ -238,19 +238,16 @@ jobs:
           echo "kms_slug=$KMS_SLUG" >> "$GITHUB_OUTPUT"
           echo "app_id=$APP_ID" >> "$GITHUB_OUTPUT"
 
-          # Extract the AppAuth (dstack_app) address from the CVM's KMS info.
+          # The CVM's DstackApp contract address IS the app_id (with 0x prefix).
           # This is the per-app contract that controls compose-hash whitelisting.
-          CVM_INFO=$(phala api /cvms/chipotle-prod --json 2>&1) || true
-          echo "CVM info (kms): $(echo "$CVM_INFO" | jq '.kms_info // .detail' 2>/dev/null)"
-          APP_AUTH=$(echo "$CVM_INFO" | jq -r '.kms_info.dstack_app_address // empty')
-          if [ -z "$APP_AUTH" ]; then
-            echo "::warning::Could not extract dstack_app_address from CVM info, falling back to APP_AUTH_ADDRESS_CHIPOTLE_PROD variable"
-            APP_AUTH="${{ vars.APP_AUTH_ADDRESS_CHIPOTLE_PROD }}"
-          fi
-          if [ -z "$APP_AUTH" ]; then
-            echo "::error::No AppAuth address available (neither from CVM info nor APP_AUTH_ADDRESS_CHIPOTLE_PROD variable)"
+          # NOTE: Do NOT use kms_info.dstack_app_address — that is the KMS's own
+          # DstackApp contract, not the CVM's. Using it would whitelist the hash
+          # on the wrong contract and cause "Compose hash not allowed" at boot.
+          if [ -z "$APP_ID" ]; then
+            echo "::error::app_id not available from provision response"
             exit 1
           fi
+          APP_AUTH="0x${APP_ID}"
           echo "app_auth_address=$APP_AUTH" >> "$GITHUB_OUTPUT"
 
       - name: Fetch CVM encryption public key
@@ -389,10 +386,11 @@ jobs:
             --arg base_url "https://api.chipotle.litprotocol.com" \
             --arg api_root_url "https://api.chipotle.litprotocol.com/core/v1" \
             --arg safe_address "${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" \
+            --arg app_auth_address "${{ needs.prepare-deploy.outputs.app_auth_address }}" \
             --arg version_tag "${{ github.ref_name }}" \
             --arg source_sha "${{ github.sha }}" \
             --arg encrypted_env "${{ needs.prepare-deploy.outputs.encrypted_env }}" \
-            '{compose_hash: $compose_hash, safe_tx_hash: $safe_tx_hash, phala_app_name: $phala_app_name, base_url: $base_url, api_root_url: $api_root_url, safe_address: $safe_address, version_tag: $version_tag, source_sha: $source_sha, encrypted_env: $encrypted_env}' \
+            '{compose_hash: $compose_hash, safe_tx_hash: $safe_tx_hash, phala_app_name: $phala_app_name, base_url: $base_url, api_root_url: $api_root_url, safe_address: $safe_address, app_auth_address: $app_auth_address, version_tag: $version_tag, source_sha: $source_sha, encrypted_env: $encrypted_env}' \
             > deploy-context.json
           echo "Deployment context:"
           cat deploy-context.json
