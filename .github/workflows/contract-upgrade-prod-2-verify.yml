@@ -1,0 +1,95 @@
+# Contract Upgrade Prod — Phase 2: Verify
+#
+# Run this AFTER Safe multisig signers have approved and executed the
+# diamondCut transaction proposed by Phase 1 (contract-upgrade-prod-1-propose.yml).
+#
+# This workflow:
+#   1. Verifies the Safe transaction was executed on-chain
+#   2. Compiles contracts from the current source code
+#   3. Compares on-chain facet bytecode and selectors against compiled artifacts
+#
+# Required secrets:
+#   BASE_CHAIN_RPC  - RPC endpoint for Base
+#
+# Required vars:
+#   SAFE_ADDRESS_CHIPOTLE_PROD  - Safe multisig address on Base
+
+name: "Contract Upgrade Prod 2: Verify"
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      safe_tx_hash:
+        description: "Safe transaction hash from Phase 1"
+        required: true
+        type: string
+
+concurrency:
+  group: contract-upgrade-prod
+  cancel-in-progress: false
+
+jobs:
+  verify-safe-tx:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install contract dependencies
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npm ci
+
+      - name: Compile contracts
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: |
+          npx hardhat clean
+          npx hardhat compile
+
+      - name: Verify Safe transaction was executed
+        id: safe
+        working-directory: lit-api-server/blockchain/lit_node_express
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
+        run: |
+          OUTPUT=$(npx hardhat execute-safe-tx \
+            --network base \
+            --safe "${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" \
+            --safe-tx-hash "${{ inputs.safe_tx_hash }}" \
+            2>&1 | tee /dev/stderr)
+          TX_HASH=$(echo "$OUTPUT" | grep '^TX_HASH=' | cut -d= -f2)
+          if [ -z "$TX_HASH" ]; then
+            echo "::error::Safe transaction has not been executed yet."
+            exit 1
+          fi
+          echo "tx_hash=$TX_HASH" >> "$GITHUB_OUTPUT"
+
+      - name: Read contract address from NodeConfig
+        id: config
+        run: |
+          CONFIG="lit-api-server/NodeConfig.prod.toml"
+          ADDRESS=$(grep '^contract_address' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          echo "address=$ADDRESS" >> "$GITHUB_OUTPUT"
+
+      - name: Verify diamond facets match source code
+        working-directory: lit-api-server/blockchain/lit_node_express
+        env:
+          BASE_RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
+        run: |
+          npx hardhat verify-diamond-facets \
+            --network base \
+            --diamond "${{ steps.config.outputs.address }}"
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Contract Upgrade Verification" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Safe TX Hash:** \`${{ inputs.safe_tx_hash }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**On-chain TX:** \`${{ steps.safe.outputs.tx_hash }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Diamond:** \`${{ steps.config.outputs.address }}\`" >> "$GITHUB_STEP_SUMMARY"
