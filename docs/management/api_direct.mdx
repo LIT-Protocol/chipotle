@@ -270,7 +270,7 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
 - **`POST /update_action_metadata`** — Update the name/description of a registered action. Body: `{"hashed_cid": "0x...", "name": "...", "description": "..."}`.
 - **`POST /remove_pkp_from_group`** — Remove a PKP from a group. Body: `{"group_id": 1, "pkp_id": "..."}`.
 
-**Billing:**
+#### Billing
 
 - **`GET /billing/stripe_config`** — Returns the Stripe publishable key. No auth required.
 - **`GET /billing/balance`** — Returns the current credit balance for the authenticated account.
