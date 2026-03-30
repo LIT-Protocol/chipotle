@@ -7,6 +7,7 @@ import "./tasks/propose-diamond-cut";
 import "./tasks/execute-safe-tx";
 import "./tasks/propose-dstack-app";
 import "./tasks/transfer-ownership";
+import "./tasks/verify-compose-hash";
 
 const config: HardhatUserConfig = {
   solidity: {

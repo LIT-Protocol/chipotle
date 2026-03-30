@@ -4,9 +4,9 @@ import Safe from "@safe-global/protocol-kit";
 import { ethers } from "ethers";
 
 // AppAuth contract ABI for compose-hash whitelisting (from @phala/cloud SDK).
-// Each Phala CVM with on-chain KMS has its own AppAuth contract (the dstack_app_address).
-// NOTE: The KMS factory at 0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C is NOT the AppAuth —
-// pass the per-app dstack_app_address (visible via `phala cvms get <name> --json` → kms_info.dstack_app_address).
+// Each Phala CVM with on-chain KMS has its own AppAuth (DstackApp) contract.
+// The correct address comes from kms_info.dstack_app_address (matches the CVM's
+// app_id with 0x prefix).
 const APP_AUTH_ABI = [
   "function addComposeHash(bytes32 composeHash)",
   "function owner() view returns (address)",

@@ -210,7 +210,7 @@ async function main({ pkpId, ciphertext, holderAddress, nftContractAddress }) {
 
 ## Securing RPC URLs — Hiding API Keys with Encryption
 
-Many RPC providers require an API key appended to the endpoint URL (e.g. `https://mainnet.infura.io/v3/YOUR_API_KEY`). Passing the full URL as a `js_param` would expose the key to anyone who can inspect the action call. Instead, you can **encrypt the secret portion** of the URL and let the Lit Action decrypt and reassemble it at runtime inside the TEE.
+Many RPC providers require an API key appended to the endpoint URL (e.g. `https://mainnet.infura.io/v3/YOUR_API_KEY`). Passing the full URL as a `js_params` value would expose the key to anyone who can inspect the action call. Instead, you can **encrypt the secret portion** of the URL and let the Lit Action decrypt and reassemble it at runtime inside the TEE.
 
 This pattern provides two guarantees:
 
@@ -232,7 +232,7 @@ async function main({ pkpId, apiKey }) {
 
 ### Usage: Decrypt and connect at runtime
 
-The production action receives the base URL and the encrypted API key, decrypts the key inside the TEE, and assembles the full RPC URL.
+The production action receives the encrypted API key, decrypts it inside the TEE, and assembles the full RPC URL.
 
 ```javascript
 // js_params: { pkpId, encryptedApiKey, targetAddress }

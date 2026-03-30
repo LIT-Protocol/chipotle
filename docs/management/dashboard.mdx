@@ -65,10 +65,12 @@ Usage API keys (and the account key) are validated against the account's groups 
 ### 7. Run lit-actions
 
 In the **Action Runner** section, paste some Lit Action JavaScript code and optional JSON parameters. For example
-```
-    const message = "Hello from Lit Action";
-    const sig = await LitActions.signEcdsa({ toSign: new TextEncoder().encode(message), publicKey, sigName });
-    LitActions.setResponse({ response: { message, sig } });
+```js
+async function main({ pkpId }) {
+  const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId }));
+  const sig = await wallet.signMessage("Hello from Lit Action");
+  return { sig };
+}
 ```
  Choose the API key (account or usage key) to use for the request, then click **Execute**. The node runs the action and returns signatures, response, and logs. The key you use must be allowed to run that action (via the group and IPFS CID configuration).
 
