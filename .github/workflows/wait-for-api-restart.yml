@@ -105,6 +105,7 @@ jobs:
           BASE_URL="${{ steps.resolve-url.outputs.api_root_url }}"
           TIMEOUT="${{ inputs.timeout }}"
           EXPECTED_SHA="${{ inputs.expected_sha }}"
+          EXPECTED_SHA="${EXPECTED_SHA:0:7}"  # /version returns short SHA
           VERSION_URL="${BASE_URL}/version"
           HEALTH_URL="${BASE_URL%/core/v1}/health"
 
