@@ -140,11 +140,20 @@ async fn stripe_post(
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+/// Compute a non-sensitive cache key from a raw API key string.
+///
+/// Uses the same keccak256 hash that the contract uses, so no secret material
+/// is held in the cache's key set.  Avoids leaking raw API keys via memory
+/// dumps, debug tooling, or telemetry.
+fn cache_key(api_key: &str) -> String {
+    crate::utils::parse_with_hash::api_key_hash(api_key).to_string()
+}
+
 /// Remove an API key from the wallet address cache.
 ///
 /// Call this when a usage API key is deleted so that stale mappings are not served.
 pub async fn invalidate_wallet_cache(api_key: &str, state: &StripeState) {
-    state.wallet_cache.invalidate(api_key).await;
+    state.wallet_cache.invalidate(&cache_key(api_key)).await;
 }
 
 /// Resolve any API key (master or usage) to the account's creator wallet address.
@@ -152,8 +161,11 @@ pub async fn invalidate_wallet_cache(api_key: &str, state: &StripeState) {
 /// Uses the on-chain `allApiKeyHashesToMaster` mapping so that usage API keys
 /// resolve to the same wallet (and therefore same Stripe customer) as their
 /// parent account key.  Results are cached for 1 hour.
+///
+/// The cache is keyed by the keccak256 hash of the API key (not the raw key)
+/// to avoid holding secret material in memory.
 pub async fn resolve_wallet_address(api_key: &str, state: &StripeState) -> Result<String> {
-    let key = api_key.to_string();
+    let key = cache_key(api_key);
     state
         .wallet_cache
         .try_get_with(key, async {
