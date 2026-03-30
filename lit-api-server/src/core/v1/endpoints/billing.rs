@@ -20,6 +20,27 @@ pub(super) fn billing_disabled_err() -> ApiStatus {
     )
 }
 
+/// Map wallet resolution errors to the correct HTTP status.
+///
+/// "account has no wallet address" and contract reverts for missing accounts → 400.
+/// Everything else (RPC failures, timeouts) → 500.
+fn wallet_resolution_err(e: anyhow::Error) -> ApiStatus {
+    let msg = e.to_string();
+    if msg.contains("account has no wallet address") || msg.contains("AccountDoesNotExist") {
+        ApiStatus::bad_request(
+            anyhow::anyhow!("account not found for API key"),
+            "Invalid API key",
+        )
+    } else {
+        // Log the underlying error for internal diagnostics without exposing details to clients.
+        eprintln!("wallet_resolution_err internal failure: {e:?}");
+        ApiStatus::internal_server_error(
+            anyhow::anyhow!("internal billing lookup error"),
+            "Billing lookup failed",
+        )
+    }
+}
+
 /// GET /billing/stripe_config — returns the Stripe publishable key.
 /// No auth required; the publishable key is safe to expose.
 #[openapi(tag = "Billing")]
@@ -56,8 +77,9 @@ async fn billing_balance_impl(
     stripe_state: &Option<Arc<StripeState>>,
 ) -> Result<BillingBalanceResponse, ApiStatus> {
     let stripe = stripe_state.as_ref().ok_or_else(billing_disabled_err)?;
-    let wallet = stripe::api_key_to_wallet_address(api_key)
-        .map_err(|e| ApiStatus::bad_request(e, "Invalid API key"))?;
+    let wallet = stripe::resolve_wallet_address(api_key, stripe)
+        .await
+        .map_err(wallet_resolution_err)?;
     let customer_id = stripe::get_customer_by_wallet(&wallet, stripe)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "Stripe error"))?;
@@ -98,8 +120,9 @@ async fn billing_create_payment_intent_impl(
     req: Json<CreatePaymentIntentRequest>,
 ) -> Result<CreatePaymentIntentResponse, ApiStatus> {
     let stripe = stripe_state.as_ref().ok_or_else(billing_disabled_err)?;
-    let wallet = stripe::api_key_to_wallet_address(api_key)
-        .map_err(|e| ApiStatus::bad_request(e, "Invalid API key"))?;
+    let wallet = stripe::resolve_wallet_address(api_key, stripe)
+        .await
+        .map_err(wallet_resolution_err)?;
     let (client_secret, payment_intent_id) =
         stripe::create_payment_intent(&wallet, req.amount_cents, stripe)
             .await
@@ -130,8 +153,9 @@ async fn billing_confirm_payment_impl(
     req: Json<ConfirmPaymentRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let stripe = stripe_state.as_ref().ok_or_else(billing_disabled_err)?;
-    let wallet = stripe::api_key_to_wallet_address(api_key)
-        .map_err(|e| ApiStatus::bad_request(e, "Invalid API key"))?;
+    let wallet = stripe::resolve_wallet_address(api_key, stripe)
+        .await
+        .map_err(wallet_resolution_err)?;
     stripe::confirm_payment_and_credit(&req.payment_intent_id, &wallet, stripe)
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "Stripe error"))?;
