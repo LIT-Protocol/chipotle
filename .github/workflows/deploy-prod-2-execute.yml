@@ -158,6 +158,7 @@ jobs:
     uses: ./.github/workflows/wait-for-api-restart.yml
     with:
       api_root_url: ${{ needs.download-context.outputs.api_root_url }}
+      expected_sha: ${{ needs.download-context.outputs.source_sha }}
       runner: '["self-hosted"]'
 
   verify-attestation:
