@@ -220,13 +220,15 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
     const result = await client.litAction({
       apiKey: usageApiKey,
       code: `
-        const message = "Hello from Lit Action";
-        const sig = await LitActions.signEcdsa({ toSign: new TextEncoder().encode(message), publicKey, sigName });
-        LitActions.setResponse({ response: { message, sig } });
+        async function main({ pkpId }) {
+          const wallet = new ethers.Wallet(await Lit.Actions.getPrivateKey({ pkpId }));
+          const sig = await wallet.signMessage("Hello from Lit Action");
+          return { sig };
+        }
       `,
-      jsParams: { publicKey: '0x...', sigName: 'sig1' }
+      jsParams: { pkpId: '0x...' }
     });
-    console.log(result.signatures, result.response, result.logs);
+    console.log(result.response, result.logs);
     ```
   </Tab>
   <Tab title="cURL">
@@ -234,7 +236,7 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
     curl -s -X POST "http://localhost:8000/core/v1/lit_action" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
-      -d '{"code":"const msg = \"hello\"; LitActions.setResponse({ response: msg });","js_params":null}'
+      -d '{"code":"async function main() { return \"hello\"; }","js_params":null}'
     ```
   </Tab>
 </Tabs>
