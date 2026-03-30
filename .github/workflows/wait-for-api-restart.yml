@@ -1,12 +1,13 @@
 # Reusable workflow: wait for an API deployment to complete
 #
-# Polls the /version endpoint until commit_version matches the expected
-# git-describe output for the given SHA, then confirms /health is OK.
+# When expected_sha is provided, polls the /version endpoint until
+# commit_version matches the expected git-describe output, then confirms
+# /health is OK. When expected_sha is omitted, just confirms /health.
 #
 # Call with api_root_url (direct) or phala_app_name (get from Phala CLI):
 #   uses: ./.github/workflows/wait-for-api-restart.yml
 #   with:
-#     expected_sha: ${{ github.sha }}
+#     expected_sha: ${{ github.sha }}  # optional — omit to skip version check
 #     api_root_url: "https://example.com/core/v1"   # OR phala_app_name
 #     # phala_app_name: "lit-api-server"        # CVM name; requires PHALA_CLOUD_API_KEY secret
 #     # timeout: 600  # optional, seconds (default 600)
@@ -27,9 +28,10 @@ on:
         value: ${{ jobs.wait.outputs.api_root_url }}
     inputs:
       expected_sha:
-        description: "Expected git commit SHA for the new deployment"
-        required: true
+        description: "Expected git commit SHA for the new deployment (omit to skip version check)"
+        required: false
         type: string
+        default: ''
       api_root_url:
         description: "API base URL (e.g. https://example.com/core/v1); use when not using phala_app_name"
         required: false
@@ -60,6 +62,7 @@ jobs:
       api_root_url: ${{ steps.resolve-url.outputs.api_root_url }}
     steps:
       - name: Checkout (for git describe)
+        if: inputs.expected_sha != ''
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -105,12 +108,12 @@ jobs:
           echo "api_root_url=$BASE_URL" >> "$GITHUB_OUTPUT"
           echo "API base URL: $BASE_URL"
 
-      - name: Wait for expected version and health
+      - name: Wait for expected version
+        if: inputs.expected_sha != ''
         run: |
           BASE_URL="${{ steps.resolve-url.outputs.api_root_url }}"
           TIMEOUT="${{ inputs.timeout }}"
           VERSION_URL="${BASE_URL}/version"
-          HEALTH_URL="${BASE_URL%/core/v1}/health"
 
           # The API's commit_version is produced by git_version!() which runs
           # git describe --always at compile time. Reproduce the same output
@@ -134,11 +137,17 @@ jobs:
             sleep 10
           done
 
-          # Confirm health endpoint is OK
-          echo "Version matched — confirming $HEALTH_URL is healthy..."
+      - name: Confirm health
+        run: |
+          BASE_URL="${{ steps.resolve-url.outputs.api_root_url }}"
+          HEALTH_URL="${BASE_URL%/core/v1}/health"
+          TIMEOUT="${{ inputs.timeout }}"
+          deadline=$(( $(date +%s) + TIMEOUT ))
+
+          echo "Confirming $HEALTH_URL is healthy..."
           until curl -sf "$HEALTH_URL" > /dev/null; do
             if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "::error::Version matched but health check failed within timeout"
+              echo "::error::Health check failed within timeout"
               exit 1
             fi
             echo "Health not ready, retrying in 5s..."
