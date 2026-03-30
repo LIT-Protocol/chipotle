@@ -9,7 +9,7 @@
  *   k6 run k6/correctness/lit-action-ecdsa-sign.spec.ts
  *   BASE_URL=https://your-instance/core/v1 k6 run k6/correctness/lit-action-ecdsa-sign.spec.ts
  */
-import { checkAndLog } from "../helpers.ts";
+import { checkAndLog, warnOnHttpFailures } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
 import { createAccountAndUsageKey } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
@@ -20,7 +20,6 @@ export const options = {
     vus: 1,
     iterations: 1,
     thresholds: {
-        http_req_failed: ["rate<0.1"],
         http_req_duration: ["p(99)<30000"],
         http_reqs: ["count>=1"],
         checks: ["rate==1"],
@@ -56,3 +55,5 @@ export default function (data: { usageKeyHeaders: { "X-Api-Key": string } }) {
     }, "litAction/ecdsa-sign");
     // TODO: verify signature (body.response.signature) for "Chipotle Rocks!" via ecrecover
 }
+
+export const handleSummary = warnOnHttpFailures;

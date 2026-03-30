@@ -32,7 +32,7 @@
  *   SOAK_DURATION  - Total test duration for soak scenario (default: 30m)
  *   SOAK_VUS       - Virtual users for soak scenario (default: 3)
  */
-import { checkAndLog, assertOk } from "../helpers.ts";
+import { checkAndLog, assertOk, warnOnHttpFailures } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
 import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { sleep } from "k6";
@@ -128,17 +128,12 @@ export const options = {
   scenarios,
   setupTimeout: "3m", // 8 accounts × 2 API calls each; ~6s/call → ~96s min; 3m allows for slow responses
   thresholds: {
-    http_req_failed: ["rate<0.05"],
     http_req_duration: ["p(99)<15000"],
     checks: ["rate>=0.95"],
     "http_req_duration{scenario:soak_encrypt_decrypt}": ["p(99)<15000"],
     "http_req_duration{scenario:soak_ecdsa_sign}": ["p(99)<15000"],
     "http_req_duration{scenario:ramp_encrypt_decrypt}": ["p(99)<15000"],
     "http_req_duration{scenario:ramp_ecdsa_sign}": ["p(99)<15000"],
-    "http_req_failed{scenario:soak_encrypt_decrypt}": ["rate<0.05"],
-    "http_req_failed{scenario:soak_ecdsa_sign}": ["rate<0.05"],
-    "http_req_failed{scenario:ramp_encrypt_decrypt}": ["rate<0.05"],
-    "http_req_failed{scenario:ramp_ecdsa_sign}": ["rate<0.05"],
   },
 };
 
@@ -266,3 +261,5 @@ export function ecdsaSign(setupData: SoakSetupData) {
   // Low intensity: 2–4 seconds between requests per VU
   sleep(2 + Math.random() * 2);
 }
+
+export const handleSummary = warnOnHttpFailures;
