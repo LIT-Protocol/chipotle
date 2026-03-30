@@ -14,9 +14,9 @@ use crate::core::v1::models::request::{
     UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
-    AccountOpResponse, AddUsageApiKeyResponse, ApiKeyItem, ChainConfigKeysResponse,
-    CreateWalletResponse, ListMetadataItem, NewAccountResponse, NodeChainConfigResponse,
-    WalletItem,
+    AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse, ApiKeyItem,
+    ChainConfigKeysResponse, CreateWalletResponse, ListMetadataItem, NewAccountResponse,
+    NodeChainConfigResponse, WalletItem,
 };
 use crate::stripe::StripeState;
 use rocket::State;
@@ -191,7 +191,7 @@ pub(super) async fn add_group(
     signer_pool: &State<Arc<SignerPool>>,
     api_key: BilledManagementApiKey,
     req: Json<AddGroupRequest>,
-) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+) -> OpenApiResponse<AddGroupResponse, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(
             account_management::add_group(signer_pool.inner().clone(), api_key.0.as_str(), req)

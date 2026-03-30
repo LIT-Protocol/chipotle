@@ -42,7 +42,7 @@ import {
   DECRYPT_CODE,
 } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
-import { topUpAccount, isBillingEnabled } from "../stripe.ts";
+import { ensureAccountCredits } from "../stripe.ts";
 
 // Parse duration: "1h", "30m", "10m" etc.
 const SOAK_DURATION = __ENV.SOAK_DURATION || "30m";
@@ -154,12 +154,9 @@ export function setup(): SoakSetupData {
 
   const accounts: SoakAccountData[] = [];
   const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
-  const billing = isBillingEnabled(client);
   for (let i = 0; i < maxVus; i++) {
     const account = PRECREATED_ACCOUNTS[i];
-    if (billing) {
-      topUpAccount(client, { "X-Api-Key": account.apiKey });
-    }
+    ensureAccountCredits(client, { "X-Api-Key": account.apiKey });
     accounts.push({ usageApiKey: account.usageApiKey, pkpId: account.walletAddress });
   }
   return accounts;

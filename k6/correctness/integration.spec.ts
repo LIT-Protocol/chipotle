@@ -12,7 +12,7 @@ import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { assertOk } from "../helpers.ts";
 import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
-import { topUpAccount, isBillingEnabled } from "../stripe.ts";
+import { ensureAccountCredits } from "../stripe.ts";
 
 export interface IntegrationSetupData {
   apiKey: string;
@@ -29,11 +29,8 @@ export function setup(): IntegrationSetupData {
   const account =
     PRECREATED_ACCOUNTS[Math.floor(Math.random() * PRECREATED_ACCOUNTS.length)];
 
-  // Ensure the account has credits for integration test API calls.
   const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
-  if (isBillingEnabled(client)) {
-    topUpAccount(client, { "X-Api-Key": account.apiKey });
-  }
+  ensureAccountCredits(client, { "X-Api-Key": account.apiKey });
 
   return {
     apiKey: account.apiKey,
@@ -130,14 +127,16 @@ export default function (data: IntegrationSetupData) {
   checkAndLog(addGroupRes.response, {
     "addGroup success": (r) => {
       try {
-        return JSON.parse(r.body as string).success === true;
+        const body = JSON.parse(r.body as string);
+        return body.success === true && typeof body.group_id === "string";
       } catch {
         return false;
       }
     },
   }, "addGroup");
+  const groupId = (addGroupRes.data as { success: boolean; group_id: string }).group_id;
 
-  // ── 7. listGroups — extract groupId for subsequent tests ──────────────────
+  // ── 7. listGroups — verify group appears ──────────────────────────────────
   const listGroupsRes = client.listGroups(
     { page_number: 0, page_size: 10 },
     authHeaders,
@@ -152,12 +151,6 @@ export default function (data: IntegrationSetupData) {
       }
     },
   }, "listGroups");
-  const groups = listGroupsRes.data as Array<{ id: string; name: string; description: string }>;
-  if (!groups || groups.length === 0) {
-    console.error("listGroups returned empty array after addGroup");
-    return;
-  }
-  const groupId = groups[groups.length - 1].id; // use the most recently created group
 
   // ── 8. updateGroup — called while group is empty so the full-replace is safe ───
   const updateGroupRes = client.updateGroup(

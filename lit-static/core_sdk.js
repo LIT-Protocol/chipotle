@@ -406,7 +406,7 @@ export class LitNodeSimpleApiClient {
    * POST /core/v1/add_group
    * Add a group to an account with permitted action hashes and PKP hashes.
    * @param {AddGroupOptions} options
-   * @returns {Promise<AccountOpResponse>}
+   * @returns {Promise<AddGroupResponse>} Response with `success` and `group_id`.
    */
   async addGroup({ apiKey, groupName, groupDescription = '', pkpIdsPermitted = [], cidHashesPermitted = [] }) {
     const body = {

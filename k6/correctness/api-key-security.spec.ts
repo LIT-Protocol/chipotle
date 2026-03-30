@@ -15,7 +15,7 @@ import { LitApiServerClient } from "../litApiServer.ts";
 import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS, K6_RUN_ID } from "../defaults.ts";
-import { topUpAccount, isBillingEnabled } from "../stripe.ts";
+import { ensureAccountCredits } from "../stripe.ts";
 
 // ── Types ───────────────────────────────────────────────────────────────────
 
@@ -119,10 +119,8 @@ export function setup(): SecuritySetupData {
   const walletAddressA = accountA.walletAddress;
   const adminA = authHeaders(accountKeyA);
 
-  // Top up account A — this test makes many billed management and lit_action calls.
-  if (isBillingEnabled(client)) {
-    topUpAccount(client, adminA, 5000); // $50.00 for the many API calls
-  }
+  // Ensure account A has enough credits — this test makes many billed calls.
+  ensureAccountCredits(client, adminA, 5000);
 
   // Create group X
   const addGroupXRes = client.addGroup(
@@ -130,6 +128,7 @@ export function setup(): SecuritySetupData {
     adminA,
   );
   if (!assertOk("setup/addGroupX", "POST /add_group", addGroupXRes)) throw new Error("setup failed: addGroupX");
+  const groupIdX = parseInt((addGroupXRes.data as { group_id: string }).group_id);
 
   // Create group Y
   const addGroupYRes = client.addGroup(
@@ -137,16 +136,7 @@ export function setup(): SecuritySetupData {
     adminA,
   );
   if (!assertOk("setup/addGroupY", "POST /add_group", addGroupYRes)) throw new Error("setup failed: addGroupY");
-
-  // List groups to extract IDs
-  const listGroupsRes = client.listGroups({ page_number: 0, page_size: 100 }, adminA);
-  if (!assertOk("setup/listGroups", "GET /list_groups", listGroupsRes)) throw new Error("setup failed: listGroups");
-  const groups = listGroupsRes.data as Array<{ id: string; name: string }>;
-  const groupX = groups.find((g) => g.name === `k6-sec-groupX-${K6_RUN_ID}`);
-  const groupY = groups.find((g) => g.name === `k6-sec-groupY-${K6_RUN_ID}`);
-  if (!groupX || !groupY) throw new Error("setup failed: could not find created groups");
-  const groupIdX = parseInt(groupX.id);
-  const groupIdY = parseInt(groupY.id);
+  const groupIdY = parseInt((addGroupYRes.data as { group_id: string }).group_id);
 
   // Get IPFS CID for hello-world action
   const ipfsRes = client.getLitActionIpfsId(HELLO_WORLD_CODE);
@@ -208,9 +198,7 @@ export function setup(): SecuritySetupData {
   const accountKeyB = (newAccountBRes.data as { api_key: string }).api_key;
   const adminB = authHeaders(accountKeyB);
 
-  if (isBillingEnabled(client)) {
-    topUpAccount(client, adminB);
-  }
+  ensureAccountCredits(client, adminB);
 
   // Create group under Account B
   const addGroupBRes = client.addGroup(
@@ -218,13 +206,7 @@ export function setup(): SecuritySetupData {
     adminB,
   );
   if (!assertOk("setup/addGroupB", "POST /add_group", addGroupBRes)) throw new Error("setup failed: addGroupB");
-
-  const listGroupsBRes = client.listGroups({ page_number: 0, page_size: 100 }, adminB);
-  if (!assertOk("setup/listGroupsB", "GET /list_groups", listGroupsBRes)) throw new Error("setup failed: listGroupsB");
-  const groupsB = listGroupsBRes.data as Array<{ id: string; name: string }>;
-  const groupB = groupsB.find((g) => g.name === `k6-sec-groupB-${K6_RUN_ID}`);
-  if (!groupB) throw new Error("setup failed: could not find Account B group");
-  const groupIdB = parseInt(groupB.id);
+  const groupIdB = parseInt((addGroupBRes.data as { group_id: string }).group_id);
 
   // Add action to Account B's group
   const addActionBRes = client.addAction(
@@ -290,13 +272,9 @@ export default function (data: SecuritySetupData) {
     assertOk("2-createGroup-positive", "POST /add_group", posRes);
 
     // Clean up: delete the created group with admin key
-    const listRes = client.listGroups({ page_number: 0, page_size: 100 }, adminA);
-    if (assertOk("2-listGroups-cleanup", "GET /list_groups", listRes)) {
-      const gs = listRes.data as Array<{ id: string; name: string }>;
-      const created = gs.find((g) => g.name === `k6-sec-t2-pos-${K6_RUN_ID}`);
-      if (created) {
-        client.removeGroup({ group_id: created.id }, adminA);
-      }
+    const createdGroupId = (posRes.data as { group_id: string }).group_id;
+    if (createdGroupId) {
+      client.removeGroup({ group_id: createdGroupId }, adminA);
     }
 
     // Negative: key with can_create_groups=false
@@ -315,15 +293,11 @@ export default function (data: SecuritySetupData) {
       adminA,
     );
     assertOk("3-createTempGroup", "POST /add_group", tempRes);
-    const listRes = client.listGroups({ page_number: 0, page_size: 100 }, adminA);
-    assertOk("3-listGroups", "GET /list_groups", listRes);
-    const gs = listRes.data as Array<{ id: string; name: string }>;
-    const temp = gs.find((g) => g.name === `k6-sec-t3-temp-${K6_RUN_ID}`);
-    if (!temp) { console.error("3-deleteGroup: temp group not found"); return; }
+    const tempGroupId = (tempRes.data as { group_id: string }).group_id;
 
     // Positive: key with can_delete_groups=true
     const posRes = client.removeGroup(
-      { group_id: temp.id },
+      { group_id: tempGroupId },
       authHeaders(data.usageKey_deleteGroups),
     );
     assertOk("3-deleteGroup-positive", "POST /remove_group", posRes);
