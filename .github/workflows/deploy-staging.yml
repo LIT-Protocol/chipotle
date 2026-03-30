@@ -154,7 +154,7 @@ jobs:
           # Parse SHA from git describe --always output:
           #   bare SHA: "abc1234" → "abc1234"
           #   describe: "v0.3.14-5-gabc1234" → "abc1234"
-          if echo "$COMMIT_VERSION" | grep -qE '-g[0-9a-f]+$'; then
+          if echo "$COMMIT_VERSION" | grep -qE -- '-g[0-9a-f]+$'; then
             DEPLOYED_SHA=$(echo "$COMMIT_VERSION" | sed 's/.*-g//')
           else
             DEPLOYED_SHA="$COMMIT_VERSION"
