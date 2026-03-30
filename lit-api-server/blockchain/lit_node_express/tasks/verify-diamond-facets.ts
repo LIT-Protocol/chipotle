@@ -8,6 +8,7 @@ const FACET_ARTIFACTS = [
   "artifacts/contracts/AccountConfigFacets/BillingFacet.sol/BillingFacet.json",
   "artifacts/contracts/AccountConfigFacets/ViewsFacet.sol/ViewsFacet.json",
   "artifacts/contracts/AccountConfigFacets/WritesFacet.sol/WritesFacet.json",
+  "artifacts/contracts/libraries/diamond/OwnershipFacet.sol/OwnershipFacet.json",
 ];
 
 /**
