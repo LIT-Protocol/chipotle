@@ -295,7 +295,6 @@ jobs:
           CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
           CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
           CERTBOT_AWS_REGION: ${{ vars.CERTBOT_AWS_REGION }}
-          ENCRYPT_PUBKEY: ${{ steps.fetch-pubkey.outputs.encrypt_pubkey }}
         run: |
           set -euo pipefail
 
@@ -320,7 +319,8 @@ jobs:
               { key: "CERTBOT_AWS_ROLE_ARN", value: process.env.CERTBOT_AWS_ROLE_ARN },
               { key: "CERTBOT_AWS_REGION", value: process.env.CERTBOT_AWS_REGION },
             ];
-            encryptEnvVars(envs, process.env.ENCRYPT_PUBKEY).then(hex => process.stdout.write(hex));
+            const pubkey = "${{ steps.fetch-pubkey.outputs.encrypt_pubkey }}";
+            encryptEnvVars(envs, pubkey).then(hex => process.stdout.write(hex));
           ')
 
           if [ -z "$ENCRYPTED_ENV" ]; then
