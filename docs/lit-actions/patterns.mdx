@@ -232,7 +232,7 @@ async function main({ pkpId, apiKey }) {
 
 ### Usage: Decrypt and connect at runtime
 
-The production action receives the base URL and the encrypted API key, decrypts the key inside the TEE, and assembles the full RPC URL.
+The production action receives the encrypted API key, decrypts it inside the TEE, and assembles the full RPC URL.
 
 ```javascript
 // js_params: { pkpId, encryptedApiKey, targetAddress }
