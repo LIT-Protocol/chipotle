@@ -186,6 +186,11 @@ export function initLogin() {
     }
   });
 
+  // If a session already exists, trigger the auth-ready flow on load
+  if (getApiKey()) {
+    updateAuthUI();
+  }
+
   document.getElementById('btn-create-account').addEventListener('click', async () => {
     const name = document.getElementById('new-account-name').value.trim();
     const desc = document.getElementById('new-account-desc').value.trim();
