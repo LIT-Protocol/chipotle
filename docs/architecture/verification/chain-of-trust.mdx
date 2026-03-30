@@ -32,7 +32,6 @@ The TDX quote contains hardware-measured registers that attest the entire boot c
 | **OS measurements** | MRTD, RTMR0–2 values must match known-good values from the dstack release. The **DstackKms** contract on-chain whitelists allowed OS images via `allowedOsImages(bytes32)`. |
 | **KMS identity** | The `key-provider` event in RTMR3 records the KMS root CA public key hash. This binds the CVM to a specific trusted KMS — if someone substituted a rogue KMS, this hash would change and RTMR3 verification would fail. The DstackKms contract also whitelists KMS instances via `kmsAllowedAggregatedMrs(bytes32)`. |
 | **KMS attestation** | The KMS itself runs in a TEE with its own attestation quote. [Phala's Trust Center](https://github.com/Phala-Network/trust-center) verifies this independently. |
-| **device_id** | The `device_id` in `/info` is SHA-256 of the platform device identity. On Phala Cloud CVMs, the platform does not expose a device identity, so this field is SHA-256 of the empty string (`e3b0c44...b855`). This is expected and does not affect the security of the attestation. |
 
 ## Network Layer
 
