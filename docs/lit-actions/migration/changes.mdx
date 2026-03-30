@@ -59,6 +59,31 @@ async function main() {
 
 ---
 
+## Connecting to Chains
+
+In Datil and Naga, blockchain connectivity was managed by node operators. The network maintained a list of supported chains and their RPC endpoints, and developers used `Lit.Actions.getRpcUrl` to retrieve the URL for a given chain. If you needed support for a chain that wasn't already available, you had to contact Lit to have it added.
+
+**In Chipotle, this restriction no longer exists.** Connection information is now provided entirely by the client — you supply your own RPC URLs directly in your Lit Actions. This means **all EVM-compatible chains are available** without any configuration from Lit or node operators.
+
+**Before (Datil / Naga):**
+```js
+// Limited to chains pre-configured by node operators
+const rpcUrl = await Lit.Actions.getRpcUrl({ chain: "ethereum" });
+const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+```
+
+**After (Chipotle):**
+```js
+// Any chain — just supply your own RPC URL
+const provider = new ethers.providers.JsonRpcProvider("https://your-rpc-url");
+```
+
+<Note>
+If your RPC URL contains an API key, you can encrypt the key and have the Lit Action decrypt it at runtime — keeping the secret hidden while still verifiably targeting a specific chain. See [Securing RPC URLs](/lit-actions/patterns#securing-rpc-urls--hiding-api-keys-with-encryption) in the Patterns guide.
+</Note>
+
+You can connect to any chain by passing in the appropriate RPC endpoint — Ethereum, Polygon, Arbitrum, Base, or any other EVM-compatible network. There is no need to contact Lit to "add" chain support.
+
 ---
 
 ## Current Actions

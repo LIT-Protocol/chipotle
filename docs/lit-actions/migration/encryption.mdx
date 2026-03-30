@@ -40,9 +40,9 @@ Because the action is just an HTTP call, no SDK is required — you can call the
 
 ```js
 // jsParams: { pkpId, message, optional-userToken }
-async function main() {
+async function main({ pkpId, message }) {
   // Optional gate: verify caller before encrypting
-  const authRes = await some-gated-check;
+  const authRes = await someGatedCheck();
   if (!authRes.ok) {
     return { error: 'Unauthorized' };
   }
@@ -56,9 +56,9 @@ async function main() {
 
 ```js
 // jsParams: { pkpId, ciphertext, optional-userToken }
-async function main() {
+async function main({ pkpId, ciphertext }) {
   // Optional gate: check condition before decrypting
-  const authRes = await some-gated-check;
+  const authRes = await someGatedCheck();
   if (!authRes.ok) {
     return { error: 'Unauthorized' };
   }
