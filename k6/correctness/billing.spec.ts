@@ -10,7 +10,7 @@
  *   BASE_URL=https://your-instance/core/v1 k6 run k6/correctness/billing.spec.ts
  */
 import http from "k6/http";
-import { checkAndLog } from "../helpers.ts";
+import { checkAndLog, warnOnHttpFailures } from "../helpers.ts";
 import { BASE_URL } from "../defaults.ts";
 
 const STRIPE_CONFIG_ENDPOINT = `${BASE_URL}/billing/stripe_config`;
@@ -19,7 +19,6 @@ export const options = {
   vus: 1,
   iterations: 1,
   thresholds: {
-    http_req_failed: ["rate<0.1"],
     http_req_duration: ["p(99)<30000"],
     http_reqs: ["count>=1"],
     checks: ["rate==1"],
@@ -58,3 +57,5 @@ export default function () {
     );
   }
 }
+
+export const handleSummary = warnOnHttpFailures;

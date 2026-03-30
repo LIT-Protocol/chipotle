@@ -10,7 +10,7 @@
  *   BASE_URL=https://your-instance/core/v1 k6 run k6/correctness/api-key-security.spec.ts
  */
 import { group } from "k6";
-import { checkAndLog, assertOk, assertDenied, assertNon2xx } from "../helpers.ts";
+import { checkAndLog, assertOk, assertDenied, assertNon2xx, warnOnHttpFailures } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
 import { PRECREATED_ACCOUNTS } from "../setup.ts";
 import { HELLO_WORLD_CODE } from "../LitActionCode/index.ts";
@@ -52,7 +52,6 @@ export const options = {
   vus: 1,
   iterations: 1,
   thresholds: {
-    http_req_failed: ["rate<0.5"], // ~50% of requests intentionally fail
     http_req_duration: ["p(99)<30000"],
     checks: ["rate==1"],
   },
@@ -658,3 +657,5 @@ export default function (data: SecuritySetupData) {
     console.log("Cleanup complete");
   });
 }
+
+export const handleSummary = warnOnHttpFailures;

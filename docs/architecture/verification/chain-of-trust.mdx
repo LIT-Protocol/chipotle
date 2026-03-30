@@ -11,7 +11,7 @@ The sections below explain what each verification step is actually checking and 
 |-------|----------------|
 | **compose-hash** | The SHA-256 of the `app-compose.json` config (which includes `docker-compose.yaml` plus metadata) is recorded as an event in RTMR3. Recomputing the hash from `/info` and comparing it to the attested value proves the CVM is running the declared configuration. |
 | **Docker image digests** | All images (lit-actions, lit-api-server, otel-collector, dstack-ingress) use `@sha256:` digest pinning. Mutable tags like `:latest` would allow silent image substitution. |
-| **Image provenance (Sigstore)** | Each image is signed with Sigstore cosign (keyless, GitHub OIDC). Verification proves the image was built by GitHub Actions from the `LIT-Protocol/lit-node-express` repository and recorded in the public Rekor transparency log. |
+| **Image provenance (Sigstore)** | Each image is signed with Sigstore cosign (keyless, GitHub OIDC). Verification proves the image was built by GitHub Actions from the `LIT-Protocol/chipotle` repository and recorded in the public Rekor transparency log. |
 | **RTMR3 event log replay** | Each event extends RTMR3 via a hash chain: `RTMR3_new = SHA384(RTMR3_old ‖ SHA384(event))`. The dstack-verifier replays all events from the initial value (48 zero bytes) and confirms the final value matches the RTMR3 in the TDX quote. This ensures no events were added, removed, or modified. |
 
 ## Platform Layer

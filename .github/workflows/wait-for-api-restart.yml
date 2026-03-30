@@ -1,8 +1,12 @@
-# Reusable workflow: wait for an API restart to complete
+# Reusable workflow: wait for an API deployment to complete
+#
+# Polls the /version endpoint until commit_version matches the expected SHA,
+# then confirms /health is OK.
 #
 # Call with api_root_url (direct) or phala_app_name (get from Phala CLI):
 #   uses: ./.github/workflows/wait-for-api-restart.yml
 #   with:
+#     expected_sha: ${{ github.sha }}
 #     api_root_url: "https://example.com/core/v1"   # OR phala_app_name
 #     # phala_app_name: "lit-api-server"        # CVM name; requires PHALA_CLOUD_API_KEY secret
 #     # timeout: 600  # optional, seconds (default 600)
@@ -22,6 +26,10 @@ on:
         description: "API base URL (e.g. https://example.com/core/v1)"
         value: ${{ jobs.wait.outputs.api_root_url }}
     inputs:
+      expected_sha:
+        description: "Expected git commit SHA for the new deployment"
+        required: true
+        type: string
       api_root_url:
         description: "API base URL (e.g. https://example.com/core/v1); use when not using phala_app_name"
         required: false
@@ -92,46 +100,41 @@ jobs:
           echo "api_root_url=$BASE_URL" >> "$GITHUB_OUTPUT"
           echo "API base URL: $BASE_URL"
 
-      - name: Wait for API to become available
+      - name: Wait for expected version and health
         run: |
           BASE_URL="${{ steps.resolve-url.outputs.api_root_url }}"
           TIMEOUT="${{ inputs.timeout }}"
-
-          # Derive the health URL from the API root URL.
-          # api_root_url is e.g. https://example.com/core/v1 — strip the
-          # /core/v1 suffix to get the base, then append /health.
+          EXPECTED_SHA="${{ inputs.expected_sha }}"
+          # /version returns a short (7-char) SHA, so truncate to match
+          EXPECTED_SHA="${EXPECTED_SHA:0:7}"
+          VERSION_URL="${BASE_URL}/version"
           HEALTH_URL="${BASE_URL%/core/v1}/health"
 
-          # Step-function: if the API is currently up (stale instance still
-          # serving), wait for it to go down before polling for the new
-          # instance.  This avoids the race where we'd pass against the old
-          # deployment.
-          if curl -sf "$HEALTH_URL" > /dev/null 2>&1; then
-            echo "API is currently available — waiting for it to go down (deployment restart)..."
-            DOWN_DEADLINE=$(( $(date +%s) + 300 ))  # 5 min
-            while curl -sf "$HEALTH_URL" > /dev/null 2>&1; do
-              if [ "$(date +%s)" -ge "$DOWN_DEADLINE" ]; then
-                echo "::error::API never went down after 300s — deploy may have failed"
-                exit 1
-              fi
-              echo "Still up, rechecking in 5s..."
-              sleep 5
-            done
-            echo "API is down — waiting 15s for clean restart..."
-            sleep 15
-          else
-            echo "API is not currently available — polling for availability"
-          fi
-
-          # Poll for the API to come (back) up via the /health endpoint.
-          echo "Polling $HEALTH_URL (timeout: ${TIMEOUT}s)..."
+          echo "Polling $VERSION_URL for commit_version == $EXPECTED_SHA (timeout: ${TIMEOUT}s)..."
           deadline=$(( $(date +%s) + TIMEOUT ))
-          until curl -sf "$HEALTH_URL" > /dev/null; do
+
+          while true; do
+            CURRENT_SHA=$(curl -sf "$VERSION_URL" 2>/dev/null | jq -r '.commit_version // empty' 2>/dev/null || true)
+            if [ "$CURRENT_SHA" = "$EXPECTED_SHA" ]; then
+              echo "Version matched: $CURRENT_SHA"
+              break
+            fi
             if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "Timed out after ${TIMEOUT}s waiting for API"
+              echo "::error::Timed out after ${TIMEOUT}s waiting for version $EXPECTED_SHA (last seen: ${CURRENT_SHA:-<unavailable>})"
               exit 1
             fi
-            echo "Not ready, retrying in 10s..."
+            echo "Current version: ${CURRENT_SHA:-<unavailable>}, waiting 10s..."
             sleep 10
           done
-          echo "API is up"
+
+          # Confirm health endpoint is OK
+          echo "Version matched — confirming $HEALTH_URL is healthy..."
+          until curl -sf "$HEALTH_URL" > /dev/null; do
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::Version matched but health check failed within timeout"
+              exit 1
+            fi
+            echo "Health not ready, retrying in 5s..."
+            sleep 5
+          done
+          echo "API is up and healthy"

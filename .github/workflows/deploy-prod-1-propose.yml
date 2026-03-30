@@ -226,6 +226,18 @@ jobs:
           fi
           echo "compose_hash=$COMPOSE_HASH" >> "$GITHUB_OUTPUT"
 
+          # Extract the KMS slug from the provision response. The provision
+          # endpoint returns a richer kms_info (with slug/id) than the CVM
+          # info endpoint. We need this slug to fetch the encryption pubkey.
+          KMS_SLUG=$(echo "$OUTPUT" | jq -r '.kms_info.slug // empty')
+          if [ -z "$KMS_SLUG" ]; then
+            KMS_SLUG=$(echo "$OUTPUT" | jq -r '.kms_info.id // empty')
+          fi
+          APP_ID=$(echo "$OUTPUT" | jq -r '.app_id // empty')
+          echo "KMS slug: $KMS_SLUG, app_id: $APP_ID"
+          echo "kms_slug=$KMS_SLUG" >> "$GITHUB_OUTPUT"
+          echo "app_id=$APP_ID" >> "$GITHUB_OUTPUT"
+
           # Extract the AppAuth (dstack_app) address from the CVM's KMS info.
           # This is the per-app contract that controls compose-hash whitelisting.
           CVM_INFO=$(phala api /cvms/chipotle-prod --json 2>&1) || true
@@ -241,10 +253,40 @@ jobs:
           fi
           echo "app_auth_address=$APP_AUTH" >> "$GITHUB_OUTPUT"
 
+      - name: Fetch CVM encryption public key
+        id: fetch-pubkey
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          KMS_SLUG: ${{ steps.prepare.outputs.kms_slug }}
+          APP_ID: ${{ steps.prepare.outputs.app_id }}
+        run: |
+          set -euo pipefail
+
+          # Workaround: `phala envs encrypt` passes kms_type ("base") to the
+          # /kms/{kms}/pubkey/{app_id} API, but the API expects a KMS slug
+          # (e.g. "kms-base-prod5"). We fetch the pubkey using the correct
+          # slug from the provision response.
+          if [ -z "$KMS_SLUG" ] || [ -z "$APP_ID" ]; then
+            echo "::error::KMS_SLUG or APP_ID not set from provision step"
+            exit 1
+          fi
+
+          echo "Fetching encryption pubkey via /kms/$KMS_SLUG/pubkey/$APP_ID ..."
+          PUBKEY_RESPONSE=$(phala api "/kms/$KMS_SLUG/pubkey/$APP_ID" --json 2>&1) || {
+            echo "::error::Failed to fetch encryption pubkey: $PUBKEY_RESPONSE"
+            exit 1
+          }
+          PUBKEY=$(echo "$PUBKEY_RESPONSE" | jq -r '.public_key')
+          if [ -z "$PUBKEY" ] || [ "$PUBKEY" = "null" ]; then
+            echo "::error::Failed to extract public_key from KMS response"
+            exit 1
+          fi
+          echo "Got encryption pubkey: ${PUBKEY:0:16}..."
+          echo "encrypt_pubkey=$PUBKEY" >> "$GITHUB_OUTPUT"
+
       - name: Encrypt environment variables for CVM
         id: encrypt-env
         env:
-          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
           GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
@@ -252,25 +294,38 @@ jobs:
           CERTBOT_AWS_ACCESS_KEY_ID: ${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}
           CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
           CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
+          CERTBOT_AWS_REGION: ${{ vars.CERTBOT_AWS_REGION }}
+          ENCRYPT_PUBKEY: ${{ steps.fetch-pubkey.outputs.encrypt_pubkey }}
         run: |
           set -euo pipefail
 
-          # Encrypt env vars client-side using the CVM's X25519 public key.
-          # The resulting hex blob can only be decrypted inside the TEE.
-          ENCRYPTED_ENV=$(phala envs encrypt chipotle-prod -n \
-            -e "STRIPE_SECRET_KEY=$STRIPE_SECRET_KEY" \
-            -e "STRIPE_PUBLISHABLE_KEY=$STRIPE_PUBLISHABLE_KEY" \
-            -e "GCP_SERVICE_ACCOUNT_JSON=$GCP_SERVICE_ACCOUNT_JSON" \
-            -e "GCP_PROJECT_ID=chipotle-prod" \
-            -e "BASE_CHAIN_RPC=$BASE_CHAIN_RPC" \
-            -e "CERTBOT_DOMAIN=api.chipotle.litprotocol.com" \
-            -e "CERTBOT_AWS_ACCESS_KEY_ID=$CERTBOT_AWS_ACCESS_KEY_ID" \
-            -e "CERTBOT_AWS_SECRET_ACCESS_KEY=$CERTBOT_AWS_SECRET_ACCESS_KEY" \
-            -e "CERTBOT_AWS_ROLE_ARN=$CERTBOT_AWS_ROLE_ARN" \
-            -e "CERTBOT_AWS_REGION=${{ vars.CERTBOT_AWS_REGION }}")
+          # Encrypt env vars client-side using the @phala/cloud SDK's
+          # encryptEnvVars function (X25519 + AES-256-GCM). We resolve the
+          # SDK from the globally-installed phala package.
+          ENCRYPTED_ENV=$(node -e '
+            const path = require("path");
+            const prefix = require("child_process").execSync("npm prefix -g").toString().trim();
+            const { encryptEnvVars } = require(
+              require.resolve("@phala/cloud", { paths: [path.join(prefix, "lib/node_modules/phala")] })
+            );
+            const envs = [
+              { key: "STRIPE_SECRET_KEY", value: process.env.STRIPE_SECRET_KEY },
+              { key: "STRIPE_PUBLISHABLE_KEY", value: process.env.STRIPE_PUBLISHABLE_KEY },
+              { key: "GCP_SERVICE_ACCOUNT_JSON", value: process.env.GCP_SERVICE_ACCOUNT_JSON },
+              { key: "GCP_PROJECT_ID", value: "chipotle-prod" },
+              { key: "BASE_CHAIN_RPC", value: process.env.BASE_CHAIN_RPC },
+              { key: "CERTBOT_DOMAIN", value: "api.chipotle.litprotocol.com" },
+              { key: "CERTBOT_AWS_ACCESS_KEY_ID", value: process.env.CERTBOT_AWS_ACCESS_KEY_ID },
+              { key: "CERTBOT_AWS_SECRET_ACCESS_KEY", value: process.env.CERTBOT_AWS_SECRET_ACCESS_KEY },
+              { key: "CERTBOT_AWS_ROLE_ARN", value: process.env.CERTBOT_AWS_ROLE_ARN },
+              { key: "CERTBOT_AWS_REGION", value: process.env.CERTBOT_AWS_REGION },
+            ];
+            const pubkey = process.env.ENCRYPT_PUBKEY;
+            encryptEnvVars(envs, pubkey).then(hex => process.stdout.write(hex));
+          ')
 
           if [ -z "$ENCRYPTED_ENV" ]; then
-            echo "::error::phala envs encrypt returned empty output"
+            echo "::error::encryptEnvVars returned empty output"
             exit 1
           fi
           echo "Encrypted env length: ${#ENCRYPTED_ENV} chars"
