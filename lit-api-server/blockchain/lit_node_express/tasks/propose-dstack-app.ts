@@ -5,10 +5,8 @@ import { ethers } from "ethers";
 
 // AppAuth contract ABI for compose-hash whitelisting (from @phala/cloud SDK).
 // Each Phala CVM with on-chain KMS has its own AppAuth (DstackApp) contract.
-// The correct address is the CVM's app_id (with 0x prefix), available from the
-// provision response or `GET /info` → app_id.
-// NOTE: Do NOT use kms_info.dstack_app_address — that is the KMS's own DstackApp,
-// not the CVM's. Whitelisting on the wrong contract causes "Compose hash not allowed".
+// The correct address comes from kms_info.dstack_app_address (matches the CVM's
+// app_id with 0x prefix).
 const APP_AUTH_ABI = [
   "function addComposeHash(bytes32 composeHash)",
   "function owner() view returns (address)",

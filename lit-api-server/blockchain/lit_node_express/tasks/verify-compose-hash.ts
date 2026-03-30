@@ -34,8 +34,9 @@ task("verify-compose-hash", "Verify a compose hash is whitelisted on the DstackA
 
     if (!isAllowed) {
       console.error(
-        `\nCompose hash is NOT whitelisted on the DstackApp contract. ` +
-        `The addComposeHash transaction may have reverted or not been executed.`
+        `\nCompose hash is NOT whitelisted on DstackApp at ${appAuthAddress}. ` +
+        `The CVM will reject this deployment with "Compose hash not allowed". ` +
+        `Verify the Safe transaction targeted the correct contract (CVM app_id, not kms_info.dstack_app_address).`
       );
       process.exit(1);
     }
