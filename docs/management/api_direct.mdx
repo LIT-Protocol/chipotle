@@ -175,12 +175,9 @@ Create a group, then add an action (IPFS CID) to scope which keys can run it.
         "pkp_ids_permitted": [],
         "cid_hashes_permitted": []
       }'
+    # Response: {"success":true,"group_id":"1"}
 
-    # List groups to get group_id
-    curl -s "http://localhost:8000/core/v1/list_groups?page_number=0&page_size=10" \
-      -H "X-Api-Key: KEY"
-
-    # Add action to group (replace GROUP_ID and IPFS_CID)
+    # Add action to group (use group_id from the response above)
     curl -s -X POST "http://localhost:8000/core/v1/add_action_to_group" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
