@@ -1,10 +1,10 @@
-/// Decode standard Solidity revert reasons from raw EVM revert data.
-///
-/// Solidity encodes revert reasons in two forms:
-/// - `Error(string)` with selector `0x08c379a0`
-/// - `Panic(uint256)` with selector `0x4e487b71`
-///
-/// This module handles both without depending on ethers or any ABI library.
+//! Decode standard Solidity revert reasons from raw EVM revert data.
+//!
+//! Solidity encodes revert reasons in two forms:
+//! - `Error(string)` with selector `0x08c379a0`
+//! - `Panic(uint256)` with selector `0x4e487b71`
+//!
+//! This module handles both without depending on ethers or any ABI library.
 
 /// The 4-byte selector for `Error(string)` — `0x08c379a0`.
 const ERROR_SELECTOR: [u8; 4] = [0x08, 0xc3, 0x79, 0xa0];
