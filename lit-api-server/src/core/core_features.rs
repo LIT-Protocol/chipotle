@@ -22,6 +22,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 use tracing::instrument;
 
+#[allow(clippy::too_many_arguments)]
 #[instrument(name = "core_features::lit_action", level = "debug", skip_all, err)]
 pub async fn lit_action(
     request_span: &RequestSpan,
