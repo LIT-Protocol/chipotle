@@ -601,7 +601,7 @@ function populateApiPayerCountDropdown(currentValue) {
 function showWalletPicker() {
   return new Promise((resolve) => {
     const dialog = el('wallet-picker');
-    if (!dialog) { resolve('metamask'); return; }
+    if (!dialog || typeof dialog.showModal !== 'function') { resolve('metamask'); return; }
 
     const cleanup = () => {
       dialog.removeEventListener('click', handler);
@@ -635,14 +635,22 @@ async function connectWallet() {
 
   if (choice === 'walletconnect') {
     const chainIdText = (el('cc-chain-id')?.textContent || '').trim();
-    const parsed = parseInt(chainIdText, 10);
-    const chainId = Number.isFinite(parsed) && parsed > 0 ? parsed : 175188;
+    const parsed = Number(chainIdText);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new Error('Invalid or missing chain ID. Please wait for network configuration to load and try again.');
+    }
+    const chainId = parsed;
     const rpcUrl = (el('cc-rpc-url')?.value || '').trim();
 
     // Dynamically import WalletConnect Ethereum Provider
-    const { EthereumProvider } = await import(
-      'https://esm.sh/@walletconnect/ethereum-provider@2.23.9'
-    );
+    let EthereumProvider;
+    try {
+      ({ EthereumProvider } = await import(
+        'https://esm.sh/@walletconnect/ethereum-provider@2.23.9'
+      ));
+    } catch {
+      throw new Error('Failed to load WalletConnect. Check your network connection or try again.');
+    }
 
     // Disconnect any stale session before reconnecting (with timeout to avoid hanging)
     if (_wcProvider) {
