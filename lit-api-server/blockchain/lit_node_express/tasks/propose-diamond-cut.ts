@@ -104,14 +104,7 @@ task("propose-diamond-cut", "Propose a diamondCut transaction through a Safe mul
       });
     } catch (error: unknown) {
       // Surface the full API error body for debugging
-      if (error instanceof Error) {
-        const anyErr = error as Record<string, unknown>;
-        if (anyErr.response) {
-          const resp = anyErr.response as Record<string, unknown>;
-          console.error(`\nSafe API error status: ${resp.status}`);
-          console.error(`Safe API error body: ${JSON.stringify(resp.data ?? resp.body)}`);
-        }
-      }
+      console.error(`\nSafe API error:`, JSON.stringify(error, Object.getOwnPropertyNames(error as object), 2));
       throw error;
     }
 
