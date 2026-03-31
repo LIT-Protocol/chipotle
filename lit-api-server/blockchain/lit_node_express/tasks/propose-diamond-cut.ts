@@ -91,13 +91,29 @@ task("propose-diamond-cut", "Propose a diamondCut transaction through a Safe mul
     // Submit to Safe Transaction Service
     const apiKit = new SafeApiKit({ chainId: BigInt(chainId) });
 
-    await apiKit.proposeTransaction({
-      safeAddress,
-      safeTransactionData: safeTransaction.data,
-      safeTxHash,
-      senderAddress: proposerAddress,
-      senderSignature,
-    });
+    console.log(`\nProposer address: ${proposerAddress}`);
+    console.log(`Is owner: ${isOwner}`);
+
+    try {
+      await apiKit.proposeTransaction({
+        safeAddress,
+        safeTransactionData: safeTransaction.data,
+        safeTxHash,
+        senderAddress: proposerAddress,
+        senderSignature,
+      });
+    } catch (error: unknown) {
+      // Surface the full API error body for debugging
+      if (error instanceof Error) {
+        const anyErr = error as Record<string, unknown>;
+        if (anyErr.response) {
+          const resp = anyErr.response as Record<string, unknown>;
+          console.error(`\nSafe API error status: ${resp.status}`);
+          console.error(`Safe API error body: ${JSON.stringify(resp.data ?? resp.body)}`);
+        }
+      }
+      throw error;
+    }
 
     console.log(`\nTransaction proposed to Safe Transaction Service.`);
     console.log(
