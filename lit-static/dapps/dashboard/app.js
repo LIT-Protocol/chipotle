@@ -39,9 +39,10 @@ function updateUsageKeyOverrideUI() {
   if (badge) badge.style.display = hasOverride ? '' : 'none';
   if (input) input.value = sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE) || '';
   if (clearBtn) clearBtn.style.display = hasOverride ? '' : 'none';
-  // Hide billing when override is active (balance belongs to the account key, not the usage key)
-  if (balanceEl) balanceEl.style.display = hasOverride ? 'none' : '';
-  if (addFundsBtn) addFundsBtn.style.display = hasOverride ? 'none' : '';
+  // Only show billing when authenticated AND no override is active
+  const showBilling = !!getApiKey() && !hasOverride;
+  if (balanceEl) balanceEl.style.display = showBilling ? '' : 'none';
+  if (addFundsBtn) addFundsBtn.style.display = showBilling ? '' : 'none';
 }
 
 function getBaseUrl() {
