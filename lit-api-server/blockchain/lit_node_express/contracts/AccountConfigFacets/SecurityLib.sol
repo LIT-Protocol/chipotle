@@ -105,7 +105,7 @@ library SecurityLib {
             revert AppStorage.OnlyApiPayerOrPricingOperator(caller);
         }
     }
-    function revertIfNotConfigOperatorOrwner(address caller) internal view {
+    function revertIfNotConfigOperatorOrOwner(address caller) internal view {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         if (caller != s.configOperator && caller != LibDiamond.contractOwner()) {
             revert AppStorage.OnlyConfigOperatorOrOwner(caller);
