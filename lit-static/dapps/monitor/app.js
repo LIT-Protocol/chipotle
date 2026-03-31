@@ -113,7 +113,6 @@ const SET_ADMIN_API_PAYER_ABI = [
 
 /* ═══ WalletConnect ══════════════════════════════════════════════════════════ */
 
-// TODO: Replace with your own project ID from https://cloud.reown.com/
 const WALLETCONNECT_PROJECT_ID = '8feea2064504b04d14a55d6fbef18966';
 
 let _wcProvider = null; // cached WalletConnect provider instance
@@ -604,18 +603,26 @@ function showWalletPicker() {
     const dialog = el('wallet-picker');
     if (!dialog) { resolve('metamask'); return; }
 
+    const cleanup = () => {
+      dialog.removeEventListener('click', handler);
+      dialog.removeEventListener('cancel', onCancel);
+    };
+
     const handler = (e) => {
       const btn = e.target.closest('[data-wallet]');
       if (!btn) return;
-      dialog.removeEventListener('click', handler);
+      cleanup();
       dialog.close();
       resolve(btn.dataset.wallet);
     };
 
-    dialog.addEventListener('click', handler);
+    const onCancel = () => {
+      cleanup();
+      resolve('cancel');
+    };
 
-    // Handle backdrop click and Escape key
-    dialog.addEventListener('cancel', () => resolve('cancel'), { once: true });
+    dialog.addEventListener('click', handler);
+    dialog.addEventListener('cancel', onCancel, { once: true });
 
     dialog.showModal();
   });
@@ -628,17 +635,23 @@ async function connectWallet() {
 
   if (choice === 'walletconnect') {
     const chainIdText = (el('cc-chain-id')?.textContent || '').trim();
-    const chainId = chainIdText && chainIdText !== '—' ? parseInt(chainIdText, 10) : 175188;
+    const parsed = parseInt(chainIdText, 10);
+    const chainId = Number.isFinite(parsed) && parsed > 0 ? parsed : 175188;
     const rpcUrl = (el('cc-rpc-url')?.value || '').trim();
 
     // Dynamically import WalletConnect Ethereum Provider
     const { EthereumProvider } = await import(
-      'https://esm.sh/@walletconnect/ethereum-provider@2'
+      'https://esm.sh/@walletconnect/ethereum-provider@2.23.9'
     );
 
-    // Disconnect any stale session before reconnecting
+    // Disconnect any stale session before reconnecting (with timeout to avoid hanging)
     if (_wcProvider) {
-      try { await _wcProvider.disconnect(); } catch {}
+      try {
+        await Promise.race([
+          _wcProvider.disconnect(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+        ]);
+      } catch {}
       _wcProvider = null;
     }
 
