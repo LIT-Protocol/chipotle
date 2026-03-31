@@ -9,6 +9,7 @@ import {
     EnumerableSet
 } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {AppStorage} from "./AppStorage.sol";
+import { LibDiamond } from "../../libraries/LibDiamond.sol";
 
 library SecurityLib {
     using EnumerableSet for EnumerableSet.UintSet;
@@ -104,12 +105,18 @@ library SecurityLib {
             revert AppStorage.OnlyApiPayerOrPricingOperator(caller);
         }
     }
+    function revertIfNotConfigOperatorOrwner(address caller) internal view {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        if (caller != s.configOperator && caller != LibDiamond.contractOwner()) {
+            revert AppStorage.OnlyConfigOperatorOrOwner(caller);
+        }
+    }
 
     function revertIfNotApiPayerOrOwner(address caller) internal view {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         if (
             !s.api_payers.contains(caller) &&
-            caller != s.owner &&
+            caller != LibDiamond.contractOwner() &&
             caller != s.adminApiPayerAccount
         ) {
             revert AppStorage.OnlyApiPayerOrOwner(caller);
@@ -134,7 +141,7 @@ library SecurityLib {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         if (
             !s.api_payers.contains(caller) &&
-            caller != s.owner &&
+            caller != LibDiamond.contractOwner() &&
             caller != s.adminApiPayerAccount
         ) {
             revert AppStorage.OnlyApiPayerOrOwner(caller);
