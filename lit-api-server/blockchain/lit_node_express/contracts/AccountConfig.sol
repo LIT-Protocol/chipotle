@@ -32,7 +32,7 @@ contract AccountConfig {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         require(s.api_payers.length() == 0, "already initialized");
         s.pricingOperator = owner;
-        s.owner = owner;
+        s.configOperator = owner;
         s.pricing[1] = 1;
         s.requestedApiPayerCount = 3; // just a default for spinning up a new instance
     }

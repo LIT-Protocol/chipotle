@@ -898,6 +898,19 @@
       "type": "function"
     },
     {
+      "inputs": [],
+      "name": "configOperator",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
       "inputs": [
         {
           "internalType": "uint256",
@@ -1555,6 +1568,17 @@
       "inputs": [
         {
           "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        }
+      ],
+      "name": "OnlyConfigOperatorOrOwner",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
           "name": "newAdminApiPayerAccount",
           "type": "address"
         }
@@ -1573,6 +1597,19 @@
         }
       ],
       "name": "setApiPayers",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "newConfigOperator",
+          "type": "address"
+        }
+      ],
+      "name": "setConfigOperator",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
