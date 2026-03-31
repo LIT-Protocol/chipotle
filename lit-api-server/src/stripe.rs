@@ -17,7 +17,7 @@ use reqwest::StatusCode;
 
 /// Cost constants in US cents.
 pub const COST_MANAGEMENT_CENTS: i64 = 1; // $0.01
-pub const COST_LIT_ACTION_CENTS: i64 = 1; // $0.01
+pub const COST_LIT_ACTION_PER_SECOND_CENTS: i64 = 1; // $0.01 per second of execution
 /// Minimum top-up (500 cents = $5.00).
 pub const MIN_TOPUP_CENTS: i64 = 500;
 
@@ -25,6 +25,7 @@ pub const MIN_TOPUP_CENTS: i64 = 500;
 
 #[derive(Clone)]
 pub struct StripeState {
+    // NOTE: Debug is implemented manually below to redact secret_key.
     pub publishable_key: String,
     secret_key: String,
     client: reqwest::Client,
@@ -35,6 +36,15 @@ pub struct StripeState {
     /// Resolves both master and usage API keys to the account's creator wallet address
     /// via the on-chain `allApiKeyHashesToMaster` mapping, avoiding a contract call per charge.
     wallet_cache: Cache<String, String>,
+}
+
+impl std::fmt::Debug for StripeState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StripeState")
+            .field("publishable_key", &self.publishable_key)
+            .field("secret_key", &"[REDACTED]")
+            .finish()
+    }
 }
 
 /// Initialise Stripe from environment variables.  Returns `None` if the env vars are absent
@@ -271,9 +281,18 @@ pub async fn charge_management(api_key: &str, state: &StripeState) -> Result<()>
     charge(api_key, COST_MANAGEMENT_CENTS, state).await
 }
 
-/// Charge $0.01 for a Lit Action execution.
-pub async fn charge_lit_action(api_key: &str, state: &StripeState) -> Result<()> {
-    charge(api_key, COST_LIT_ACTION_CENTS, state).await
+/// Charge for `seconds` of Lit Action execution time.
+/// Returns `Ok(())` if the charge succeeds, `Err` if insufficient credits.
+pub async fn charge_lit_action_time(
+    api_key: &str,
+    seconds: u64,
+    state: &StripeState,
+) -> Result<()> {
+    let cost = COST_LIT_ACTION_PER_SECOND_CENTS * seconds as i64;
+    if cost == 0 {
+        return Ok(());
+    }
+    charge(api_key, cost, state).await
 }
 
 /// Create a PaymentIntent for `amount_cents`.  Returns `(client_secret, payment_intent_id)`.

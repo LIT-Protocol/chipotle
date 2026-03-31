@@ -12,6 +12,7 @@ use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::LitActionRequest;
 use crate::core::v1::models::response::{LitActionClientConfigResponse, LitActionResponse};
 use crate::observability::RequestSpan;
+use crate::stripe::StripeState;
 use crate::utils::parse_with_hash::ipfs_cid_to_u256;
 use ipfs_hasher::IpfsHasher;
 use moka::future::Cache;
@@ -29,6 +30,7 @@ pub async fn lit_action(
     ipfs_cache: &Cache<String, String>,
     http_client: &reqwest::Client,
     chain_config: Arc<ChainConfig>,
+    stripe_state: Option<Arc<StripeState>>,
     lit_action_request: Json<LitActionRequest>,
 ) -> Result<LitActionResponse, ApiStatus> {
     let request_id = request_span.request_id.clone();
@@ -62,6 +64,10 @@ pub async fn lit_action(
         .api_key(api_key.to_string())
         .ipfs_id(derived_ipfs_id.clone())
         .client_grpc_channels((*grpc_client_pool).clone());
+
+    if let Some(stripe) = stripe_state {
+        builder.stripe_state(stripe);
+    }
 
     let mut client = match builder.build().map_err(|e| e.to_string()) {
         Ok(client) => client,
