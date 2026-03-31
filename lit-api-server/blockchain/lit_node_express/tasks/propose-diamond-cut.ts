@@ -88,24 +88,32 @@ task("propose-diamond-cut", "Propose a diamondCut transaction through a Safe mul
       );
     }
 
-    // Submit to Safe Transaction Service
-    const apiKit = new SafeApiKit({ chainId: BigInt(chainId) });
-
+    // Submit to Safe Transaction Service via direct HTTP (the SDK swallows
+    // error response bodies, making 422 errors impossible to debug).
     console.log(`\nProposer address: ${proposerAddress}`);
     console.log(`Is owner: ${isOwner}`);
 
-    try {
-      await apiKit.proposeTransaction({
-        safeAddress,
-        safeTransactionData: safeTransaction.data,
-        safeTxHash,
-        senderAddress: proposerAddress,
-        senderSignature,
-      });
-    } catch (error: unknown) {
-      // Surface the full API error body for debugging
-      console.error(`\nSafe API error:`, JSON.stringify(error, Object.getOwnPropertyNames(error as object), 2));
-      throw error;
+    const txServiceUrl = `https://safe-transaction-base.safe.global/api/v1/safes/${safeAddress}/multisig-transactions/`;
+    const body = {
+      ...safeTransaction.data,
+      contractTransactionHash: safeTxHash,
+      sender: proposerAddress,
+      signature: senderSignature,
+    };
+
+    console.log(`\nPOST ${txServiceUrl}`);
+    console.log(`Request nonce: ${body.nonce}`);
+
+    const response = await fetch(txServiceUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error(`\nSafe API error ${response.status}: ${errorBody}`);
+      throw new Error(`Safe Transaction Service returned ${response.status}: ${errorBody}`);
     }
 
     console.log(`\nTransaction proposed to Safe Transaction Service.`);
