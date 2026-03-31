@@ -655,14 +655,19 @@ async function connectWallet() {
       _wcProvider = null;
     }
 
-    _wcProvider = await EthereumProvider.init({
-      projectId: WALLETCONNECT_PROJECT_ID,
-      chains: [chainId],
-      rpcMap: rpcUrl ? { [chainId]: rpcUrl } : undefined,
-      showQrModal: true,
-    });
+    try {
+      _wcProvider = await EthereumProvider.init({
+        projectId: WALLETCONNECT_PROJECT_ID,
+        chains: [chainId],
+        rpcMap: rpcUrl ? { [chainId]: rpcUrl } : undefined,
+        showQrModal: true,
+      });
 
-    await _wcProvider.connect();
+      await _wcProvider.connect();
+    } catch (err) {
+      _wcProvider = null;
+      throw err;
+    }
     return new ethers.BrowserProvider(_wcProvider);
   }
 
