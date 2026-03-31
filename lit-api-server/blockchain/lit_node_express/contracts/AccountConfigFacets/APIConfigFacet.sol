@@ -15,6 +15,12 @@ contract APIConfigFacet {
     using EnumerableSet for EnumerableSet.UintSet;
     using EnumerableSet for EnumerableSet.AddressSet;
 
+    function setConfigOperator(address newConfigOperator) public {
+        SecurityLib.revertIfNotConfigOperatorOrOwner(msg.sender);
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        s.configOperator = newConfigOperator;
+    }
+
     function setRequestedApiPayerCount(
         uint256 newRequestedApiPayerCount
     ) public {
