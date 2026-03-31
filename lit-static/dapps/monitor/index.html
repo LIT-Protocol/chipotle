@@ -322,6 +322,16 @@
         border-radius: 6px;
         color: var(--text);
       }
+
+      /* ── Wallet picker dialog ── */
+      dialog::backdrop {
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(4px);
+      }
+      dialog[data-wallet] button:hover,
+      #wallet-picker button[data-wallet]:hover {
+        border-color: var(--accent);
+      }
     </style>
   </head>
   <body>
@@ -572,6 +582,49 @@
 
       </div>
     </div>
+
+    <!-- ═══ Wallet Picker Dialog ═══ -->
+    <dialog id="wallet-picker" style="
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 2rem;
+      color: var(--text);
+      font-family: 'Outfit', sans-serif;
+      min-width: 320px;
+      max-width: 400px;
+    ">
+      <h3 style="margin: 0 0 0.5rem; font-size: 1.1rem; font-weight: 600;">Connect Wallet</h3>
+      <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1.25rem;">Choose how you'd like to connect.</p>
+      <div style="display: flex; flex-direction: column; gap: 0.75rem;">
+        <button type="button" data-wallet="metamask" style="
+          display: flex; align-items: center; gap: 0.75rem;
+          width: 100%; padding: 0.85rem 1rem;
+          background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+          color: var(--text); font-family: 'Outfit', sans-serif; font-size: 0.95rem; font-weight: 500;
+          cursor: pointer; margin-top: 0;
+        ">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M21.3 2L13.1 8.2l1.5-3.6L21.3 2z" fill="#E2761B" stroke="#E2761B" stroke-width=".1"/><path d="M2.7 2l8.1 6.3-1.4-3.7L2.7 2zm15.7 14.4l-2.2 3.3 4.6 1.3 1.3-4.5-3.7-.1zm-16.8.1l1.3 4.5 4.6-1.3-2.2-3.3-3.7.1z" fill="#E4761B" stroke="#E4761B" stroke-width=".1"/><path d="M7.3 10.5l-1.3 2 4.6.2-.2-5-3.1 2.8zm9.4 0l-3.2-2.9-.1 5.1 4.6-.2-1.3-2z" fill="#E4761B" stroke="#E4761B" stroke-width=".1"/></svg>
+          MetaMask / Browser Wallet
+        </button>
+        <button type="button" data-wallet="walletconnect" style="
+          display: flex; align-items: center; gap: 0.75rem;
+          width: 100%; padding: 0.85rem 1rem;
+          background: var(--bg); border: 1px solid var(--border); border-radius: 10px;
+          color: var(--text); font-family: 'Outfit', sans-serif; font-size: 0.95rem; font-weight: 500;
+          cursor: pointer; margin-top: 0;
+        ">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none"><path d="M6.09 8.56c3.26-3.19 8.54-3.19 11.8 0l.39.38a.4.4 0 010 .58l-1.34 1.31a.21.21 0 01-.3 0l-.54-.53a5.93 5.93 0 00-8.24 0l-.58.57a.21.21 0 01-.3 0L5.65 9.56a.4.4 0 010-.58l.44-.42zm14.58 2.71l1.2 1.17a.4.4 0 010 .58l-5.38 5.27a.42.42 0 01-.59 0l-3.82-3.74a.1.1 0 00-.15 0l-3.82 3.74a.42.42 0 01-.59 0L2.14 13.02a.4.4 0 010-.58l1.2-1.17a.42.42 0 01.59 0l3.82 3.74a.1.1 0 00.15 0l3.82-3.74a.42.42 0 01.59 0l3.82 3.74a.1.1 0 00.15 0l3.82-3.74a.42.42 0 01.59 0z" fill="#3B99FC"/></svg>
+          WalletConnect
+        </button>
+      </div>
+      <button type="button" data-wallet="cancel" style="
+        display: block; width: 100%; margin-top: 1rem; padding: 0.6rem;
+        background: none; border: 1px solid var(--border); border-radius: 8px;
+        color: var(--muted); font-family: 'Outfit', sans-serif; font-size: 0.85rem;
+        cursor: pointer;
+      ">Cancel</button>
+    </dialog>
 
     <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.umd.min.js"></script>
     <script src="app.js"></script>

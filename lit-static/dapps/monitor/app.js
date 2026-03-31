@@ -111,6 +111,13 @@ const SET_ADMIN_API_PAYER_ABI = [
   },
 ];
 
+/* ═══ WalletConnect ══════════════════════════════════════════════════════════ */
+
+// TODO: Replace with your own project ID from https://cloud.reown.com/
+const WALLETCONNECT_PROJECT_ID = '8feea2064504b04d14a55d6fbef18966';
+
+let _wcProvider = null; // cached WalletConnect provider instance
+
 /* ═══ Utilities ══════════════════════════════════════════════════════════════ */
 
 function el(id) {
@@ -592,8 +599,62 @@ function populateApiPayerCountDropdown(currentValue) {
     .join('');
 }
 
+function showWalletPicker() {
+  return new Promise((resolve) => {
+    const dialog = el('wallet-picker');
+    if (!dialog) { resolve('metamask'); return; }
+
+    const handler = (e) => {
+      const btn = e.target.closest('[data-wallet]');
+      if (!btn) return;
+      dialog.removeEventListener('click', handler);
+      dialog.close();
+      resolve(btn.dataset.wallet);
+    };
+
+    dialog.addEventListener('click', handler);
+
+    // Handle backdrop click and Escape key
+    dialog.addEventListener('cancel', () => resolve('cancel'), { once: true });
+
+    dialog.showModal();
+  });
+}
+
 async function connectWallet() {
-  if (!window.ethereum) throw new Error('Wallet not found. Install a wallet and try again.');
+  const choice = await showWalletPicker();
+
+  if (choice === 'cancel') throw new Error('Wallet connection cancelled.');
+
+  if (choice === 'walletconnect') {
+    const chainIdText = (el('cc-chain-id')?.textContent || '').trim();
+    const chainId = chainIdText && chainIdText !== '—' ? parseInt(chainIdText, 10) : 175188;
+    const rpcUrl = (el('cc-rpc-url')?.value || '').trim();
+
+    // Dynamically import WalletConnect Ethereum Provider
+    const { EthereumProvider } = await import(
+      'https://esm.sh/@walletconnect/ethereum-provider@2'
+    );
+
+    // Disconnect any stale session before reconnecting
+    if (_wcProvider) {
+      try { await _wcProvider.disconnect(); } catch {}
+      _wcProvider = null;
+    }
+
+    _wcProvider = await EthereumProvider.init({
+      projectId: WALLETCONNECT_PROJECT_ID,
+      chains: [chainId],
+      rpcMap: rpcUrl ? { [chainId]: rpcUrl } : undefined,
+      showQrModal: true,
+    });
+
+    await _wcProvider.connect();
+    return new ethers.BrowserProvider(_wcProvider);
+  }
+
+  // Default: MetaMask / browser wallet
+  if (!window.ethereum) throw new Error('No browser wallet found. Install MetaMask or use WalletConnect.');
   const provider = new ethers.BrowserProvider(window.ethereum);
   await provider.send('eth_requestAccounts', []);
   return provider;
