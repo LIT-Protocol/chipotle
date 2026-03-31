@@ -33,7 +33,7 @@ pub fn decode_revert(data: &[u8]) -> Option<String> {
 }
 
 /// Decode the `Error(string)` ABI encoding:
-///   - bytes 0..32:  offset to string data (always 0x20)
+///   - bytes 0..32:  offset to string data (must be 0x20)
 ///   - bytes 32..64: string length
 ///   - bytes 64..:   string content (padded to 32-byte boundary)
 fn decode_error_string(payload: &[u8]) -> Option<String> {
@@ -41,15 +41,27 @@ fn decode_error_string(payload: &[u8]) -> Option<String> {
         return None;
     }
 
-    // Read string length from bytes 32..64 (big-endian u256, but only the low bytes matter).
-    let len_bytes = &payload[32..64];
-    let len = u64::from_be_bytes(len_bytes[24..32].try_into().ok()?) as usize;
-
-    if payload.len() < 64 + len {
+    // Validate the ABI offset word (bytes 0..32). For standard Error(string),
+    // the high 31 bytes must be zero and the low byte must be 0x20.
+    if payload[..31].iter().any(|&b| b != 0) || payload[31] != 0x20 {
         return None;
     }
 
-    let s = std::str::from_utf8(&payload[64..64 + len]).ok()?;
+    // Read string length from bytes 32..64 (big-endian u256).
+    // Reject values that don't fit in the low 8 bytes.
+    let len_bytes = &payload[32..64];
+    if len_bytes[..24].iter().any(|&b| b != 0) {
+        return None;
+    }
+    let len = usize::try_from(u64::from_be_bytes(len_bytes[24..32].try_into().ok()?)).ok()?;
+
+    // Use checked_add to prevent overflow on 64 + len.
+    let end = 64usize.checked_add(len)?;
+    if payload.len() < end {
+        return None;
+    }
+
+    let s = std::str::from_utf8(&payload[64..end]).ok()?;
     Some(s.to_string())
 }
 
@@ -59,8 +71,12 @@ fn decode_panic_code(payload: &[u8]) -> Option<String> {
         return None;
     }
 
-    // The panic code is a uint256; only the low byte matters for known codes.
+    // The panic code is a uint256. All known Solidity panic codes fit in a
+    // single byte, so reject values with non-zero high bytes as malformed.
     let code_bytes = &payload[0..32];
+    if code_bytes[..24].iter().any(|&b| b != 0) {
+        return None;
+    }
     let code = u64::from_be_bytes(code_bytes[24..32].try_into().ok()?);
 
     let description = match code {
@@ -182,6 +198,52 @@ mod tests {
         let mut data = Vec::new();
         data.extend_from_slice(&PANIC_SELECTOR);
         data.extend_from_slice(&[0u8; 16]); // only 16 bytes
+        assert_eq!(decode_revert(&data), None);
+    }
+
+    #[test]
+    fn decode_error_string_bad_offset_returns_none() {
+        // Error selector with offset != 0x20
+        let mut data = Vec::new();
+        data.extend_from_slice(&ERROR_SELECTOR);
+        // offset = 0x40 (wrong)
+        data.extend_from_slice(&[0u8; 31]);
+        data.push(0x40);
+        // length = 5
+        data.extend_from_slice(&[0u8; 31]);
+        data.push(5);
+        data.extend_from_slice(b"hello");
+        data.extend_from_slice(&[0u8; 27]);
+        assert_eq!(decode_revert(&data), None);
+    }
+
+    #[test]
+    fn decode_error_string_nonzero_high_length_bytes_returns_none() {
+        // Error selector with non-zero high bytes in the length word
+        let mut data = Vec::new();
+        data.extend_from_slice(&ERROR_SELECTOR);
+        // offset = 0x20
+        data.extend_from_slice(&[0u8; 31]);
+        data.push(0x20);
+        // length word with non-zero high byte
+        let mut len_word = [0u8; 32];
+        len_word[0] = 1; // non-zero high byte
+        len_word[31] = 5;
+        data.extend_from_slice(&len_word);
+        data.extend_from_slice(b"hello");
+        data.extend_from_slice(&[0u8; 27]);
+        assert_eq!(decode_revert(&data), None);
+    }
+
+    #[test]
+    fn decode_panic_nonzero_high_bytes_returns_none() {
+        // Panic with non-zero high bytes in the code word
+        let mut data = Vec::new();
+        data.extend_from_slice(&PANIC_SELECTOR);
+        let mut code_word = [0u8; 32];
+        code_word[0] = 1; // non-zero high byte
+        code_word[31] = 0x01;
+        data.extend_from_slice(&code_word);
         assert_eq!(decode_revert(&data), None);
     }
 }
