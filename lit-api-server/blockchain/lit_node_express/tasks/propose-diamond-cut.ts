@@ -46,11 +46,12 @@ task("propose-diamond-cut", "Propose a diamondCut transaction through a Safe mul
       safeAddress,
     });
 
-    // Create the Safe transaction
+    // Create the Safe transaction (checksum the target address — the Rust
+    // deployer outputs lowercase hex which the Safe API rejects).
     const safeTransaction = await protocolKit.createTransaction({
       transactions: [
         {
-          to: proposalData.to,
+          to: ethers.getAddress(proposalData.to),
           data: proposalData.data,
           value: proposalData.value || "0",
           operation: proposalData.operation ?? 0,
@@ -94,26 +95,13 @@ task("propose-diamond-cut", "Propose a diamondCut transaction through a Safe mul
     console.log(`\nProposer address: ${proposerAddress}`);
     console.log(`Is owner: ${isOwner}`);
 
-    try {
-      await apiKit.proposeTransaction({
-        safeAddress,
-        safeTransactionData: safeTransaction.data,
-        safeTxHash,
-        senderAddress: proposerAddress,
-        senderSignature,
-      });
-    } catch (error: unknown) {
-      // Surface the full API error body for debugging
-      if (error instanceof Error) {
-        const anyErr = error as Record<string, unknown>;
-        if (anyErr.response) {
-          const resp = anyErr.response as Record<string, unknown>;
-          console.error(`\nSafe API error status: ${resp.status}`);
-          console.error(`Safe API error body: ${JSON.stringify(resp.data ?? resp.body)}`);
-        }
-      }
-      throw error;
-    }
+    await apiKit.proposeTransaction({
+      safeAddress,
+      safeTransactionData: safeTransaction.data,
+      safeTxHash,
+      senderAddress: proposerAddress,
+      senderSignature,
+    });
 
     console.log(`\nTransaction proposed to Safe Transaction Service.`);
     console.log(
