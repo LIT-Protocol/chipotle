@@ -8,7 +8,9 @@ use crate::accounts::contracts::account_config_contract::AccountConfigErrors;
 /// 1. Contract-specific custom errors (AccountConfigErrors)
 /// 2. Standard `Error(string)` / `Panic(uint256)` via lit-core
 /// 3. Falls back to the raw error's `Display` output
-pub fn decode_contract_revert(err: &ethers::contract::ContractError<impl ethers::providers::Middleware>) -> String {
+pub fn decode_contract_revert(
+    err: &ethers::contract::ContractError<impl ethers::providers::Middleware>,
+) -> String {
     // Try to extract the revert data bytes from the error.
     if let Some(data) = err.as_revert() {
         // First, try contract-specific custom error decoding.
@@ -28,4 +30,3 @@ pub fn decode_contract_revert(err: &ethers::contract::ContractError<impl ethers:
     // No revert data available — use the error's Display.
     format!("{err}")
 }
-

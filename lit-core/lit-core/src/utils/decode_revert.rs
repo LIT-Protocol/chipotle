@@ -110,10 +110,7 @@ mod tests {
         data.extend_from_slice(&[0u8; 31]);
         data.push(0x01);
 
-        assert_eq!(
-            decode_revert(&data),
-            Some("Panic(0x01): assertion failed".to_string())
-        );
+        assert_eq!(decode_revert(&data), Some("Panic(0x01): assertion failed".to_string()));
     }
 
     #[test]
