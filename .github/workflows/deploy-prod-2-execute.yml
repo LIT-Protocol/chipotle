@@ -54,6 +54,9 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
           sudo apt-get update && sudo apt-get install -y gh
 
+      - name: Clean up stale artifacts from previous runs
+        run: rm -f deploy-context.json
+
       - name: Download deployment context from Phase 1 release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
