@@ -62,7 +62,7 @@ pub struct ExecutionState {
     pub broadcast_and_collect_count: u32,
     #[serde(skip)]
     pub ops_count: u32,
-    /// Wall-clock start of execution, set on the first `UpdateResourceUsage` tick.
+    /// Wall-clock start of execution, set before the gRPC execution request is sent.
     /// Used to derive elapsed seconds for billing instead of the unreliable gRPC `tick` field.
     #[serde(skip)]
     pub execution_start: Option<Instant>,

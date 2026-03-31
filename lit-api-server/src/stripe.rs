@@ -288,7 +288,11 @@ pub async fn charge_lit_action_time(
     seconds: u64,
     state: &StripeState,
 ) -> Result<()> {
-    let cost = COST_LIT_ACTION_PER_SECOND_CENTS * seconds as i64;
+    let seconds_i64 =
+        i64::try_from(seconds).map_err(|_| anyhow::anyhow!("seconds overflow: {seconds}"))?;
+    let cost = COST_LIT_ACTION_PER_SECOND_CENTS
+        .checked_mul(seconds_i64)
+        .ok_or_else(|| anyhow::anyhow!("cost overflow for {seconds} seconds"))?;
     if cost == 0 {
         return Ok(());
     }

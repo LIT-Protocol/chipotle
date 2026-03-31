@@ -1,7 +1,10 @@
-/// Rocket request guards that extract the API key **and** debit a Stripe billing charge
-/// before the handler runs.
+/// Rocket request guards that extract the API key and enforce billing.
 ///
-/// If Stripe is not configured (no `StripeState` managed), the guard succeeds without charging.
+/// - `BilledManagementApiKey`: charges upfront ($0.01 per call).
+/// - `BilledLitActionApiKey`: checks credit availability only; per-second billing
+///   happens during execution via `UpdateResourceUsage`.
+///
+/// If Stripe is not configured (no `StripeState` managed), guards succeed without charging.
 /// If the customer has insufficient credits the guard fails with `402 Payment Required`.
 use std::sync::Arc;
 
