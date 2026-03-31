@@ -46,11 +46,12 @@ task("propose-diamond-cut", "Propose a diamondCut transaction through a Safe mul
       safeAddress,
     });
 
-    // Create the Safe transaction
+    // Create the Safe transaction (checksum the target address — the Rust
+    // deployer outputs lowercase hex which the Safe API rejects).
     const safeTransaction = await protocolKit.createTransaction({
       transactions: [
         {
-          to: proposalData.to,
+          to: ethers.getAddress(proposalData.to),
           data: proposalData.data,
           value: proposalData.value || "0",
           operation: proposalData.operation ?? 0,
