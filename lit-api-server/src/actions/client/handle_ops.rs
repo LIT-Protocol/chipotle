@@ -145,11 +145,12 @@ impl Client {
                 let cancel_action = if let Some(ref stripe) = self.stripe_state {
                     // Use wall-clock time from execution_start (set before execution begins)
                     // instead of the gRPC `tick` field, which reports near-zero.
-                    let current_second = self.state.execution_start
+                    let current_second = self
+                        .state
+                        .execution_start
                         .map(|s| s.elapsed().as_secs())
                         .unwrap_or(0);
-                    let new_seconds =
-                        current_second.saturating_sub(self.state.last_billed_second);
+                    let new_seconds = current_second.saturating_sub(self.state.last_billed_second);
 
                     if new_seconds > 0 {
                         self.state.unbilled_seconds += new_seconds;
@@ -170,9 +171,7 @@ impl Client {
                                 false
                             }
                             Err(e) => {
-                                warn!(
-                                    "Per-second billing failed, cancelling action: {e}"
-                                );
+                                warn!("Per-second billing failed, cancelling action: {e}");
                                 self.state.unbilled_seconds = 0;
                                 true
                             }

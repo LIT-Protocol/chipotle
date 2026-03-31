@@ -25,22 +25,23 @@ impl Client {
     async fn flush_unbilled_seconds(&mut self) -> Result<()> {
         if let Some(ref stripe) = self.stripe_state {
             // Minimum billed amount for any action is 1 second.
-            let seconds = self.state.unbilled_seconds.max(
-                if self.state.last_billed_second == 0 { 1 } else { 0 }
-            );
+            let seconds = self
+                .state
+                .unbilled_seconds
+                .max(if self.state.last_billed_second == 0 {
+                    1
+                } else {
+                    0
+                });
             if seconds == 0 {
                 return Ok(());
             }
-            crate::stripe::charge_lit_action_time(
-                &self.api_key,
-                seconds,
-                stripe,
-            )
-            .await
-            .map_err(|e| {
-                warn!("Failed to bill remaining {seconds} seconds at end of action: {e}");
-                anyhow!("Billing failed for {seconds} seconds of execution: {e}")
-            })?;
+            crate::stripe::charge_lit_action_time(&self.api_key, seconds, stripe)
+                .await
+                .map_err(|e| {
+                    warn!("Failed to bill remaining {seconds} seconds at end of action: {e}");
+                    anyhow!("Billing failed for {seconds} seconds of execution: {e}")
+                })?;
             self.state.unbilled_seconds = 0;
         }
         Ok(())
