@@ -221,7 +221,7 @@ jobs:
     needs: [wait-for-api-available, openapi-spec-check]
     uses: ./.github/workflows/k6-smoke.yml
     with:
-      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+      api_root_url: https://api.chipotle.litprotocol.com/core/v1
       env: prod
     secrets:
       accounts_json: ${{ secrets.K6_ACCOUNTS_PROD_JSON }}
@@ -230,7 +230,7 @@ jobs:
     needs: [wait-for-api-available, k6-smoke]
     uses: ./.github/workflows/k6-correctness.yml
     with:
-      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+      api_root_url: https://api.chipotle.litprotocol.com/core/v1
       env: prod
     secrets:
       accounts_json: ${{ secrets.K6_ACCOUNTS_PROD_JSON }}
