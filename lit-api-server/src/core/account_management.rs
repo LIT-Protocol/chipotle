@@ -38,15 +38,14 @@ use rocket::serde::json::Json;
 /// A more robust approach would decode the ABI revert selector bytes directly, but
 /// that requires regenerating Rust bindings (AccountConfig.json → account_config_contract.rs)
 /// to include the NotAllowedTo* error types. Track as follow-up.
-const PERMISSION_ERROR_PATTERNS: &[&str] = &[
-    "NotAllowedTo",
-    "NotMasterAccount",
-    "NoAccountAccess",
-];
+const PERMISSION_ERROR_PATTERNS: &[&str] = &["NotAllowedTo", "NotMasterAccount", "NoAccountAccess"];
 
 fn map_contract_error(e: anyhow::Error, context: &str) -> ApiStatus {
     let msg = format!("{}", e);
-    if PERMISSION_ERROR_PATTERNS.iter().any(|pat| msg.contains(pat)) {
+    if PERMISSION_ERROR_PATTERNS
+        .iter()
+        .any(|pat| msg.contains(pat))
+    {
         tracing::warn!("Permission denied for {context}: {msg}");
         ApiStatus::forbidden("Permission denied".to_string())
     } else {
