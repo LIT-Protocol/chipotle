@@ -207,7 +207,7 @@ jobs:
     needs: [wait-for-api-available, download-context]
     uses: ./.github/workflows/verify-attestation.yml
     with:
-      attestation_url: https://${{ vars.DOMAIN_PROD }}
+      base_url: https://${{ vars.DOMAIN_PROD }}
       runner: '["self-hosted"]'
 
   openapi-spec-check:
