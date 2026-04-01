@@ -16,7 +16,7 @@ permissions:
 on:
   workflow_call:
     inputs:
-      attestation_url:
+      base_url:
         description: "Base URL of the deployed CVM (e.g. https://host — /attestation is appended)"
         required: true
         type: string
@@ -27,7 +27,7 @@ on:
         default: '["self-hosted"]'
   workflow_dispatch:
     inputs:
-      attestation_url:
+      base_url:
         description: "Base URL of the deployed CVM (e.g. https://host)"
         required: true
         type: string
@@ -50,7 +50,7 @@ jobs:
       - name: Verify remote attestation
         run: |
           set -eu
-          ATTESTATION_URL="${{ inputs.attestation_url }}"
+          ATTESTATION_URL="${{ inputs.base_url }}"
           TMP_DIR=$(mktemp -d /tmp/verify-remote-XXXXXX)
 
           echo "Fetching attestation from $ATTESTATION_URL/attestation..."
