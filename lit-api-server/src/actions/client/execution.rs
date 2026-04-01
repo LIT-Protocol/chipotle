@@ -260,7 +260,9 @@ impl Client {
 
         // If the loop exited via an error (stream failure, send failure, connection
         // close), do a best-effort billing flush before propagating the error.
-        if loop_result.is_err() && let Err(e) = self.flush_unbilled_seconds().await {
+        if loop_result.is_err()
+            && let Err(e) = self.flush_unbilled_seconds().await
+        {
             warn!("Billing flush failed after error exit: {e}");
         }
         loop_result
