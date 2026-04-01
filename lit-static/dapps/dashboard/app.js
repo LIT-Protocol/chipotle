@@ -63,11 +63,15 @@ function updateAuthUI() {
   if (notRequiredEl) notRequiredEl.style.display = 'none';
   if (billingBanner) billingBanner.style.display = 'none';
   if (hasKey) {
+    const capturedKey = getApiKey();
     refreshOverviewAccount();
     updateStatCards();
     preloadAllTables();
     // Check billing availability then show appropriate UI
     checkBillingAvailable().then(available => {
+      // Guard: if the user logged out or switched accounts while the
+      // async check was in flight, do not mutate the UI.
+      if (getApiKey() !== capturedKey) return;
       if (available) {
         if (balanceEl) balanceEl.style.display = '';
         if (addFundsBtn) addFundsBtn.style.display = '';
@@ -75,6 +79,8 @@ function updateAuthUI() {
       } else {
         if (notRequiredEl) notRequiredEl.style.display = '';
         if (billingBanner) billingBanner.style.display = '';
+        // Schedule a retry so transient failures recover without a reload
+        setTimeout(() => updateAuthUI(), BILLING_RETRY_MS);
       }
     }).catch(() => {});
   }
