@@ -199,7 +199,7 @@ jobs:
     needs: [commit-deploy, download-context]
     uses: ./.github/workflows/wait-for-api-restart.yml
     with:
-      api_root_url: https://api.chipotle.litprotocol.com/core/v1
+      api_root_url: https://${{ vars.DOMAIN_PROD }}/core/v1
       expected_sha: ${{ needs.download-context.outputs.source_sha }}
       runner: '["self-hosted"]'
 
@@ -207,21 +207,21 @@ jobs:
     needs: [wait-for-api-available, download-context]
     uses: ./.github/workflows/verify-attestation.yml
     with:
-      attestation_url: https://api.chipotle.litprotocol.com
+      attestation_url: https://${{ vars.DOMAIN_PROD }}
       runner: '["self-hosted"]'
 
   openapi-spec-check:
     needs: [wait-for-api-available]
     uses: ./.github/workflows/openapi-spec-check.yml
     with:
-      api_root_url: https://api.chipotle.litprotocol.com/core/v1
+      api_root_url: https://${{ vars.DOMAIN_PROD }}/core/v1
       runner: '["self-hosted"]'
 
   k6-smoke:
     needs: [wait-for-api-available, openapi-spec-check]
     uses: ./.github/workflows/k6-smoke.yml
     with:
-      api_root_url: https://api.chipotle.litprotocol.com/core/v1
+      api_root_url: https://${{ vars.DOMAIN_PROD }}/core/v1
       env: prod
     secrets:
       accounts_json: ${{ secrets.K6_ACCOUNTS_PROD_JSON }}
@@ -230,7 +230,7 @@ jobs:
     needs: [wait-for-api-available, k6-smoke]
     uses: ./.github/workflows/k6-correctness.yml
     with:
-      api_root_url: https://api.chipotle.litprotocol.com/core/v1
+      api_root_url: https://${{ vars.DOMAIN_PROD }}/core/v1
       env: prod
     secrets:
       accounts_json: ${{ secrets.K6_ACCOUNTS_PROD_JSON }}
