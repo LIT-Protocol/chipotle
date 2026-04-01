@@ -17,12 +17,12 @@ fn main() {
             .to_string(),
         ..Default::default()
     });
-    if let Some(path_item) = spec.paths.get_mut("/lit_action") {
-        if let Some(ref mut op) = path_item.post {
-            op.responses
-                .responses
-                .insert("429".to_string(), too_many_requests);
-        }
+    if let Some(path_item) = spec.paths.get_mut("/lit_action")
+        && let Some(ref mut op) = path_item.post
+    {
+        op.responses
+            .responses
+            .insert("429".to_string(), too_many_requests);
     }
 
     println!(
