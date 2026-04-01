@@ -101,7 +101,19 @@ function hideStatus(elId) {
 async function getClient() {
   const baseUrl = getBaseUrl();
   const { createClient } = await import('../../core_sdk.js');
-  return createClient(baseUrl);
+  const client = createClient(baseUrl);
+  return new Proxy(client, {
+    get(target, prop) {
+      const val = target[prop];
+      if (typeof val !== 'function') return val;
+      return function (...args) {
+        const apiKey = (args[0] && typeof args[0] === 'object' && args[0].apiKey) || args[0];
+        const keyPreview = typeof apiKey === 'string' ? apiKey.substring(0, 6) + '…' : '(none)';
+        console.log(`[dashboard] ${prop} → ${baseUrl} | key: ${keyPreview}`);
+        return val.apply(target, args);
+      };
+    },
+  });
 }
 
 function updateStatCards() {
