@@ -514,6 +514,22 @@ pub mod account_config {
                     },],
                 ),
                 (
+                    ::std::borrow::ToOwned::to_owned("configOperator"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("configOperator"),
+                        inputs: ::std::vec![],
+                        outputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::string::String::new(),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("address"),
+                            ),
+                        },],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                    },],
+                ),
+                (
                     ::std::borrow::ToOwned::to_owned("creditApiKey"),
                     ::std::vec![::ethers::core::abi::ethabi::Function {
                         name: ::std::borrow::ToOwned::to_owned("creditApiKey"),
@@ -1535,6 +1551,22 @@ pub mod account_config {
                     },],
                 ),
                 (
+                    ::std::borrow::ToOwned::to_owned("setConfigOperator"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("setConfigOperator"),
+                        inputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::borrow::ToOwned::to_owned("newConfigOperator"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("address"),
+                            ),
+                        },],
+                        outputs: ::std::vec![],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                    },],
+                ),
+                (
                     ::std::borrow::ToOwned::to_owned("setNodeConfiguration"),
                     ::std::vec![::ethers::core::abi::ethabi::Function {
                         name: ::std::borrow::ToOwned::to_owned("setNodeConfiguration",),
@@ -2112,6 +2144,19 @@ pub mod account_config {
                     },],
                 ),
                 (
+                    ::std::borrow::ToOwned::to_owned("OnlyConfigOperatorOrOwner"),
+                    ::std::vec![::ethers::core::abi::ethabi::AbiError {
+                        name: ::std::borrow::ToOwned::to_owned("OnlyConfigOperatorOrOwner",),
+                        inputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::borrow::ToOwned::to_owned("caller"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("address"),
+                            ),
+                        },],
+                    },],
+                ),
+                (
                     ::std::borrow::ToOwned::to_owned("PkpDoesNotExist"),
                     ::std::vec![::ethers::core::abi::ethabi::AbiError {
                         name: ::std::borrow::ToOwned::to_owned("PkpDoesNotExist"),
@@ -2377,6 +2422,14 @@ pub mod account_config {
         ) -> ::ethers::contract::builders::ContractCall<M, bool> {
             self.0
                 .method_hash([134, 68, 113, 67], (api_key_hash, cid_hash, wallet_address))
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `configOperator` (0x142a62ce) function
+        pub fn config_operator(
+            &self,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::Address> {
+            self.0
+                .method_hash([20, 42, 98, 206], ())
                 .expect("method not found (this should never happen)")
         }
         ///Calls the contract's `creditApiKey` (0x683f2de8) function
@@ -2748,6 +2801,15 @@ pub mod account_config {
                 .method_hash([174, 140, 73, 165], new_api_payers)
                 .expect("method not found (this should never happen)")
         }
+        ///Calls the contract's `setConfigOperator` (0xeaca4614) function
+        pub fn set_config_operator(
+            &self,
+            new_config_operator: ::ethers::core::types::Address,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([234, 202, 70, 20], new_config_operator)
+                .expect("method not found (this should never happen)")
+        }
         ///Calls the contract's `setNodeConfiguration` (0x9b80fe83) function
         pub fn set_node_configuration(
             &self,
@@ -3101,6 +3163,26 @@ pub mod account_config {
     pub struct OnlyApiPayerOrPricingOperator {
         pub caller: ::ethers::core::types::Address,
     }
+    ///Custom Error type `OnlyConfigOperatorOrOwner` with signature `OnlyConfigOperatorOrOwner(address)` and selector `0x0bd0b9b4`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthError,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[etherror(
+        name = "OnlyConfigOperatorOrOwner",
+        abi = "OnlyConfigOperatorOrOwner(address)"
+    )]
+    pub struct OnlyConfigOperatorOrOwner {
+        pub caller: ::ethers::core::types::Address,
+    }
     ///Custom Error type `PkpDoesNotExist` with signature `PkpDoesNotExist(uint256,uint256,address)` and selector `0x2593917a`
     #[derive(
         Clone,
@@ -3166,6 +3248,7 @@ pub mod account_config {
         NotMasterAccount(NotMasterAccount),
         OnlyApiPayerOrOwner(OnlyApiPayerOrOwner),
         OnlyApiPayerOrPricingOperator(OnlyApiPayerOrPricingOperator),
+        OnlyConfigOperatorOrOwner(OnlyConfigOperatorOrOwner),
         PkpDoesNotExist(PkpDoesNotExist),
         UsageApiKeyDoesNotExist(UsageApiKeyDoesNotExist),
         /// The standard solidity revert string, with selector
@@ -3226,6 +3309,11 @@ pub mod account_config {
             {
                 return Ok(Self::OnlyApiPayerOrPricingOperator(decoded));
             }
+            if let Ok(decoded) =
+                <OnlyConfigOperatorOrOwner as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::OnlyConfigOperatorOrOwner(decoded));
+            }
             if let Ok(decoded) = <PkpDoesNotExist as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::PkpDoesNotExist(decoded));
             }
@@ -3260,6 +3348,9 @@ pub mod account_config {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
                 Self::OnlyApiPayerOrPricingOperator(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::OnlyConfigOperatorOrOwner(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
                 Self::PkpDoesNotExist(element) => ::ethers::core::abi::AbiEncode::encode(element),
@@ -3315,6 +3406,10 @@ pub mod account_config {
                     true
                 }
                 _ if selector
+                    == <OnlyConfigOperatorOrOwner as ::ethers::contract::EthError>::selector() => {
+                    true
+                }
+                _ if selector
                     == <PkpDoesNotExist as ::ethers::contract::EthError>::selector() => {
                     true
                 }
@@ -3341,6 +3436,7 @@ pub mod account_config {
                 Self::OnlyApiPayerOrPricingOperator(element) => {
                     ::core::fmt::Display::fmt(element, f)
                 }
+                Self::OnlyConfigOperatorOrOwner(element) => ::core::fmt::Display::fmt(element, f),
                 Self::PkpDoesNotExist(element) => ::core::fmt::Display::fmt(element, f),
                 Self::UsageApiKeyDoesNotExist(element) => ::core::fmt::Display::fmt(element, f),
                 Self::RevertString(s) => ::core::fmt::Display::fmt(s, f),
@@ -3400,6 +3496,11 @@ pub mod account_config {
     impl ::core::convert::From<OnlyApiPayerOrPricingOperator> for AccountConfigErrors {
         fn from(value: OnlyApiPayerOrPricingOperator) -> Self {
             Self::OnlyApiPayerOrPricingOperator(value)
+        }
+    }
+    impl ::core::convert::From<OnlyConfigOperatorOrOwner> for AccountConfigErrors {
+        fn from(value: OnlyConfigOperatorOrOwner) -> Self {
+            Self::OnlyConfigOperatorOrOwner(value)
         }
     }
     impl ::core::convert::From<PkpDoesNotExist> for AccountConfigErrors {
@@ -3720,6 +3821,21 @@ pub mod account_config {
         pub cid_hash: ::ethers::core::types::U256,
         pub wallet_address: ::ethers::core::types::Address,
     }
+    ///Container type for all input parameters for the `configOperator` function with signature `configOperator()` and selector `0x142a62ce`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(name = "configOperator", abi = "configOperator()")]
+    pub struct ConfigOperatorCall;
     ///Container type for all input parameters for the `creditApiKey` function with signature `creditApiKey(uint256,uint256)` and selector `0x683f2de8`
     #[derive(
         Clone,
@@ -4321,6 +4437,23 @@ pub mod account_config {
     pub struct SetApiPayersCall {
         pub new_api_payers: ::std::vec::Vec<::ethers::core::types::Address>,
     }
+    ///Container type for all input parameters for the `setConfigOperator` function with signature `setConfigOperator(address)` and selector `0xeaca4614`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(name = "setConfigOperator", abi = "setConfigOperator(address)")]
+    pub struct SetConfigOperatorCall {
+        pub new_config_operator: ::ethers::core::types::Address,
+    }
     ///Container type for all input parameters for the `setNodeConfiguration` function with signature `setNodeConfiguration(string,string)` and selector `0x9b80fe83`
     #[derive(
         Clone,
@@ -4569,6 +4702,7 @@ pub mod account_config {
         CanExecuteActionFast(CanExecuteActionFastCall),
         CanUseWalletInAction(CanUseWalletInActionCall),
         CanUseWalletInActionFast(CanUseWalletInActionFastCall),
+        ConfigOperator(ConfigOperatorCall),
         CreditApiKey(CreditApiKeyCall),
         DebitApiKey(DebitApiKeyCall),
         GetAccountWalletAddress(GetAccountWalletAddressCall),
@@ -4601,6 +4735,7 @@ pub mod account_config {
         RequestedApiPayerCount(RequestedApiPayerCountCall),
         SetAdminApiPayerAccount(SetAdminApiPayerAccountCall),
         SetApiPayers(SetApiPayersCall),
+        SetConfigOperator(SetConfigOperatorCall),
         SetNodeConfiguration(SetNodeConfigurationCall),
         SetPricing(SetPricingCall),
         SetPricingOperator(SetPricingOperatorCall),
@@ -4685,6 +4820,11 @@ pub mod account_config {
                 <CanUseWalletInActionFastCall as ::ethers::core::abi::AbiDecode>::decode(data)
             {
                 return Ok(Self::CanUseWalletInActionFast(decoded));
+            }
+            if let Ok(decoded) =
+                <ConfigOperatorCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::ConfigOperator(decoded));
             }
             if let Ok(decoded) = <CreditApiKeyCall as ::ethers::core::abi::AbiDecode>::decode(data)
             {
@@ -4824,6 +4964,11 @@ pub mod account_config {
                 return Ok(Self::SetApiPayers(decoded));
             }
             if let Ok(decoded) =
+                <SetConfigOperatorCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::SetConfigOperator(decoded));
+            }
+            if let Ok(decoded) =
                 <SetNodeConfigurationCall as ::ethers::core::abi::AbiDecode>::decode(data)
             {
                 return Ok(Self::SetNodeConfiguration(decoded));
@@ -4905,6 +5050,7 @@ pub mod account_config {
                 Self::CanUseWalletInActionFast(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
+                Self::ConfigOperator(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::CreditApiKey(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::DebitApiKey(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::GetAccountWalletAddress(element) => {
@@ -4965,6 +5111,7 @@ pub mod account_config {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
                 Self::SetApiPayers(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::SetConfigOperator(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::SetNodeConfiguration(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
@@ -5013,6 +5160,7 @@ pub mod account_config {
                 Self::CanExecuteActionFast(element) => ::core::fmt::Display::fmt(element, f),
                 Self::CanUseWalletInAction(element) => ::core::fmt::Display::fmt(element, f),
                 Self::CanUseWalletInActionFast(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ConfigOperator(element) => ::core::fmt::Display::fmt(element, f),
                 Self::CreditApiKey(element) => ::core::fmt::Display::fmt(element, f),
                 Self::DebitApiKey(element) => ::core::fmt::Display::fmt(element, f),
                 Self::GetAccountWalletAddress(element) => ::core::fmt::Display::fmt(element, f),
@@ -5045,6 +5193,7 @@ pub mod account_config {
                 Self::RequestedApiPayerCount(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetAdminApiPayerAccount(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetApiPayers(element) => ::core::fmt::Display::fmt(element, f),
+                Self::SetConfigOperator(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetNodeConfiguration(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetPricing(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetPricingOperator(element) => ::core::fmt::Display::fmt(element, f),
@@ -5136,6 +5285,11 @@ pub mod account_config {
     impl ::core::convert::From<CanUseWalletInActionFastCall> for AccountConfigCalls {
         fn from(value: CanUseWalletInActionFastCall) -> Self {
             Self::CanUseWalletInActionFast(value)
+        }
+    }
+    impl ::core::convert::From<ConfigOperatorCall> for AccountConfigCalls {
+        fn from(value: ConfigOperatorCall) -> Self {
+            Self::ConfigOperator(value)
         }
     }
     impl ::core::convert::From<CreditApiKeyCall> for AccountConfigCalls {
@@ -5296,6 +5450,11 @@ pub mod account_config {
     impl ::core::convert::From<SetApiPayersCall> for AccountConfigCalls {
         fn from(value: SetApiPayersCall) -> Self {
             Self::SetApiPayers(value)
+        }
+    }
+    impl ::core::convert::From<SetConfigOperatorCall> for AccountConfigCalls {
+        fn from(value: SetConfigOperatorCall) -> Self {
+            Self::SetConfigOperator(value)
         }
     }
     impl ::core::convert::From<SetNodeConfigurationCall> for AccountConfigCalls {
@@ -5533,6 +5692,20 @@ pub mod account_config {
         Hash,
     )]
     pub struct CanUseWalletInActionFastReturn(pub bool);
+    ///Container type for all return fields from the `configOperator` function with signature `configOperator()` and selector `0x142a62ce`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    pub struct ConfigOperatorReturn(pub ::ethers::core::types::Address);
     ///Container type for all return fields from the `getAccountWalletAddress` function with signature `getAccountWalletAddress(uint256)` and selector `0x50ed5bb8`
     #[derive(
         Clone,

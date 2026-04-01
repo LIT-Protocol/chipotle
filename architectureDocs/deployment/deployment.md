@@ -84,7 +84,7 @@ Configure these in **Settings → Secrets and variables → Actions**:
 |--------|-------------|
 | `PHALA_CLOUD_API_KEY` | From [Phala Cloud Dashboard](https://cloud.phala.network/dashboard) → Avatar → API Tokens |
 | `DOCKERHUB_USERNAME` (variable) | Docker Hub username |
-| `DOCKER_IMAGE` (variable) | Full image path, e.g. `docker.io/username/lit-node-express` |
+| `DOCKER_IMAGE` (variable) | Full image path, e.g. `docker.io/username/chipotle` |
 | `PHALA_APP_NAME` (variable) | CVM name, e.g. `lit-api-server` |
 | `DOCKERHUB_TOKEN` (secret) | Docker Hub PAT (Account Settings > Security > Access Tokens) |
 
@@ -105,12 +105,12 @@ just setup       # optional: install Phala CLI (requires npm)
 just deploy      # builds with UUID tag, pushes to registry, and deploys that image
 ```
 
-**Prerequisites:** Log in to Docker Hub (`docker login`) and ensure you have push access to `litptcl/lit-node-express`. The deploy command updates an existing CVM by name; for first-time deploy when no CVM exists, use `just deploy-new`.
+**Prerequisites:** Log in to Docker Hub (`docker login`) and ensure you have push access to `litptcl/chipotle`. The deploy command updates an existing CVM by name; for first-time deploy when no CVM exists, use `just deploy-new`.
 
 Override with `DOCKER_IMAGE` (repo path without tag) or `DOCKER_TAG` (to pin a specific build):
 
 ```bash
-DOCKER_IMAGE=ghcr.io/owner/lit-node-express just deploy
+DOCKER_IMAGE=ghcr.io/owner/chipotle just deploy
 DOCKER_TAG=abc123-def456 just deploy   # deploy a specific tag
 ```
 
@@ -119,13 +119,13 @@ Or run the commands directly (after `docker login` and `phala login`):
 ```bash
 # Build with UUID tag, push, and deploy
 TAG=$(uuidgen | tr '[:upper:]' '[:lower:]')
-docker build -f Dockerfile.phala -t litptcl/lit-node-express:$TAG .
-docker push litptcl/lit-node-express:$TAG
-sed "s|\${DOCKER_IMAGE}|litptcl/lit-node-express:$TAG|g" docker-compose.phala.yml > docker-compose.deploy.yml
+docker build -f Dockerfile.phala -t litptcl/chipotle:$TAG .
+docker push litptcl/chipotle:$TAG
+sed "s|\${DOCKER_IMAGE}|litptcl/chipotle:$TAG|g" docker-compose.phala.yml > docker-compose.deploy.yml
 phala deploy -c docker-compose.deploy.yml -n lit-api-server --instance-type tdx.large
 ```
 
-Environment variables: `DOCKER_IMAGE` (default: `litptcl/lit-node-express`, repo path without tag), `DOCKER_TAG` (default: auto-generated UUID), `PHALA_APP_NAME` (default: `lit-api-server`), `PHALA_INSTANCE_TYPE` (default: `tdx.large`).
+Environment variables: `DOCKER_IMAGE` (default: `litptcl/chipotle`, repo path without tag), `DOCKER_TAG` (default: auto-generated UUID), `PHALA_APP_NAME` (default: `lit-api-server`), `PHALA_INSTANCE_TYPE` (default: `tdx.large`).
 
 ## Instance Type
 

@@ -111,6 +111,12 @@ const SET_ADMIN_API_PAYER_ABI = [
   },
 ];
 
+/* ═══ WalletConnect ══════════════════════════════════════════════════════════ */
+
+const WALLETCONNECT_PROJECT_ID = '8feea2064504b04d14a55d6fbef18966';
+
+let _wcProvider = null; // cached WalletConnect provider instance
+
 /* ═══ Utilities ══════════════════════════════════════════════════════════════ */
 
 function el(id) {
@@ -592,8 +598,89 @@ function populateApiPayerCountDropdown(currentValue) {
     .join('');
 }
 
+function showWalletPicker() {
+  return new Promise((resolve) => {
+    const dialog = el('wallet-picker');
+    if (!dialog || typeof dialog.showModal !== 'function') { resolve('metamask'); return; }
+
+    const cleanup = () => {
+      dialog.removeEventListener('click', handler);
+      dialog.removeEventListener('cancel', onCancel);
+    };
+
+    const handler = (e) => {
+      const btn = e.target.closest('[data-wallet]');
+      if (!btn) return;
+      cleanup();
+      dialog.close();
+      resolve(btn.dataset.wallet);
+    };
+
+    const onCancel = () => {
+      cleanup();
+      resolve('cancel');
+    };
+
+    dialog.addEventListener('click', handler);
+    dialog.addEventListener('cancel', onCancel, { once: true });
+
+    dialog.showModal();
+  });
+}
+
 async function connectWallet() {
-  if (!window.ethereum) throw new Error('Wallet not found. Install a wallet and try again.');
+  const choice = await showWalletPicker();
+
+  if (choice === 'cancel') throw new Error('Wallet connection cancelled.');
+
+  if (choice === 'walletconnect') {
+    const chainIdText = (el('cc-chain-id')?.textContent || '').trim();
+    const parsed = Number(chainIdText);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      throw new Error('Invalid or missing chain ID. Please wait for network configuration to load and try again.');
+    }
+    const chainId = parsed;
+    const rpcUrl = (el('cc-rpc-url')?.value || '').trim();
+
+    // Dynamically import WalletConnect Ethereum Provider
+    let EthereumProvider;
+    try {
+      ({ EthereumProvider } = await import(
+        'https://esm.sh/@walletconnect/ethereum-provider@2.23.9'
+      ));
+    } catch {
+      throw new Error('Failed to load WalletConnect. Check your network connection or try again.');
+    }
+
+    // Disconnect any stale session before reconnecting (with timeout to avoid hanging)
+    if (_wcProvider) {
+      try {
+        await Promise.race([
+          _wcProvider.disconnect(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000)),
+        ]);
+      } catch {}
+      _wcProvider = null;
+    }
+
+    try {
+      _wcProvider = await EthereumProvider.init({
+        projectId: WALLETCONNECT_PROJECT_ID,
+        chains: [chainId],
+        rpcMap: rpcUrl ? { [chainId]: rpcUrl } : undefined,
+        showQrModal: true,
+      });
+
+      await _wcProvider.connect();
+    } catch (err) {
+      _wcProvider = null;
+      throw err;
+    }
+    return new ethers.BrowserProvider(_wcProvider);
+  }
+
+  // Default: MetaMask / browser wallet
+  if (!window.ethereum) throw new Error('No browser wallet found. Install MetaMask or use WalletConnect.');
   const provider = new ethers.BrowserProvider(window.ethereum);
   await provider.send('eth_requestAccounts', []);
   return provider;

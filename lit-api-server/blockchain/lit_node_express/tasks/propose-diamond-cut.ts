@@ -46,11 +46,12 @@ task("propose-diamond-cut", "Propose a diamondCut transaction through a Safe mul
       safeAddress,
     });
 
-    // Create the Safe transaction
+    // Create the Safe transaction (checksum the target address — the Rust
+    // deployer outputs lowercase hex which the Safe API rejects).
     const safeTransaction = await protocolKit.createTransaction({
       transactions: [
         {
-          to: proposalData.to,
+          to: ethers.getAddress(proposalData.to),
           data: proposalData.data,
           value: proposalData.value || "0",
           operation: proposalData.operation ?? 0,
@@ -58,31 +59,55 @@ task("propose-diamond-cut", "Propose a diamondCut transaction through a Safe mul
       ],
     });
 
-    // Sign the transaction with the proposer's key
-    const signedTransaction = await protocolKit.signTransaction(safeTransaction);
-    const safeTxHash = await protocolKit.getTransactionHash(signedTransaction);
-
+    const safeTxHash = await protocolKit.getTransactionHash(safeTransaction);
     console.log(`\nSafe transaction hash: ${safeTxHash}`);
+
+    // Check if proposer is an owner. If not, sign as delegate using eth_sign.
+    const proposerWallet = new ethers.Wallet(proposerKey);
+    const proposerAddress = proposerWallet.address;
+    const owners = await protocolKit.getOwners();
+    const isOwner = owners.some(
+      (o) => o.toLowerCase() === proposerAddress.toLowerCase()
+    );
+
+    let senderSignature: string;
+
+    if (isOwner) {
+      const signed = await protocolKit.signTransaction(safeTransaction);
+      senderSignature = signed.encodedSignatures();
+    } else {
+      console.log(`\nProposer is not an owner — signing as delegate (eth_sign)`);
+      const messageBytes = ethers.getBytes(safeTxHash);
+      const rawSig = proposerWallet.signingKey.sign(
+        ethers.hashMessage(messageBytes)
+      );
+      // Safe expects v to be 31 or 32 for eth_sign signatures (v + 4)
+      const v = rawSig.v - 27 + 31;
+      senderSignature = ethers.solidityPacked(
+        ["bytes32", "bytes32", "uint8"],
+        [rawSig.r, rawSig.s, v]
+      );
+    }
 
     // Submit to Safe Transaction Service
     const apiKit = new SafeApiKit({ chainId: BigInt(chainId) });
 
-    const signerAddress = new ethers.Wallet(proposerKey).address;
+    console.log(`\nProposer address: ${proposerAddress}`);
+    console.log(`Is owner: ${isOwner}`);
 
     await apiKit.proposeTransaction({
       safeAddress,
-      safeTransactionData: signedTransaction.data,
+      safeTransactionData: safeTransaction.data,
       safeTxHash,
-      senderAddress: signerAddress,
-      senderSignature: signedTransaction.encodedSignatures(),
+      senderAddress: proposerAddress,
+      senderSignature,
     });
 
     console.log(`\nTransaction proposed to Safe Transaction Service.`);
     console.log(
       `\nSafe UI: https://app.safe.global/transactions/queue?safe=base:${safeAddress}`
     );
-    console.log(
-      `\nOther signers can review and sign the transaction in the Safe UI.`
-    );
     console.log(`Safe TX Hash: ${safeTxHash}`);
+    // Machine-readable output for CI pipelines
+    console.log(`SAFE_TX_HASH=${safeTxHash}`);
   });

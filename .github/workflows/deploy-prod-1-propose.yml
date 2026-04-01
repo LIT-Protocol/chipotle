@@ -19,7 +19,7 @@
 # Image provenance (DR-1b): Each image is signed with Sigstore (cosign keyless).
 # To verify:
 #   cosign verify \
-#     --certificate-identity-regexp "https://github.com/LIT-Protocol/lit-node-express/.*" \
+#     --certificate-identity-regexp "https://github.com/LIT-Protocol/chipotle/.*" \
 #     --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
 #     <image>@<digest>
 #
@@ -36,7 +36,7 @@
 #   CERTBOT_AWS_ROLE_ARN      - IAM role ARN for STS assumption
 #
 # Required vars:
-#   DOCKER_IMAGE - Base image path (e.g. docker.io/username/lit-node-express)
+#   DOCKER_IMAGE - Base image path (e.g. docker.io/username/chipotle)
 #   DOCKERHUB_USERNAME - Docker Hub username
 #   SAFE_ADDRESS_CHIPOTLE_PROD - Safe multisig address on Base
 #   APP_AUTH_ADDRESS_CHIPOTLE_PROD - AppAuth (DstackApp) contract address on Base (fallback if CVM auto-detect fails)
@@ -97,8 +97,14 @@ jobs:
           - service: otel-collector
             dockerfile: Dockerfile.otel-collector
     steps:
+      # Check out by commit SHA, not by tag ref. actions/checkout@v4 does a
+      # "ref fixup" fetch that overwrites annotated tag refs with raw commit
+      # pointers (git fetch origin +<sha>:refs/tags/<tag>), which causes
+      # git describe --always to skip the tag. Checking out by SHA avoids the
+      # fixup entirely, keeping annotated tags intact for git_version!().
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Install cosign

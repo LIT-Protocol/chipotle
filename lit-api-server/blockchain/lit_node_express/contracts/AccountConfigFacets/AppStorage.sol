@@ -41,6 +41,8 @@ library AppStorage {
     error NotAllowedToRemovePkpFromGroup(uint256 apiKeyHash, uint256 groupId);
     error NotAllowedToManageIPFSIdsInGroup(uint256 apiKeyHash, uint256 groupId);
     error InvalidRequest(string message);
+    error OnlyConfigOperatorOrOwner(address caller);
+    
 
     struct PkpData {
         uint256 id; // keccak256 of the pkp id - this is used to prove existence of the struct.

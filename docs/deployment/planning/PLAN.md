@@ -4,7 +4,7 @@
 
 ## Context
 
-Each lit-api-server runs on a Phala CVM. **Automated verification** (company-run, post-deployment) uses the verifier tool and publishes results. End users MAY optionally run the verifier themselves; they may also trust the published results. After verification, the TLS certificate serves as a **trust anchor**; subsequent connections validate the presented cert (e.g. certificate pinning). No per-request attestation.
+Each chipotle instance runs on a Phala CVM. **Automated verification** (company-run, post-deployment) uses the verifier tool and publishes results. End users MAY optionally run the verifier themselves; they may also trust the published results. After verification, the TLS certificate serves as a **trust anchor**; subsequent connections validate the presented cert (e.g. certificate pinning). No per-request attestation.
 
 **Custom domain as trust anchor**: The company domain MUST be the end-user target. TLS terminates at the custom domain with a TEE-controlled certificate. No redirect pattern that places the custom domain outside the chain.
 

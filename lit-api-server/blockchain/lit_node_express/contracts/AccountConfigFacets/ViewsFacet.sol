@@ -56,6 +56,10 @@ contract ViewsFacet {
         return AppStorage.getStorage().pricingOperator;
     }
 
+    function configOperator() public view returns (address) {
+        return AppStorage.getStorage().configOperator;
+    }
+
     function pkpCount() public view returns (uint256) {
         return AppStorage.getStorage().pkpCount;
     }
