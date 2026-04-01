@@ -3,6 +3,7 @@ pub mod backtrace;
 pub mod binary;
 pub mod cache;
 pub mod debug;
+pub mod decode_revert;
 pub mod env;
 pub mod hash;
 #[cfg(feature = "ipfs")]
