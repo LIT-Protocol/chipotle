@@ -222,12 +222,18 @@ jobs:
     uses: ./.github/workflows/k6-smoke.yml
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+      env: prod
+    secrets:
+      accounts_json: ${{ secrets.K6_ACCOUNTS_PROD_JSON }}
 
   k6-correctness:
     needs: [wait-for-api-available, k6-smoke]
     uses: ./.github/workflows/k6-correctness.yml
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+      env: prod
+    secrets:
+      accounts_json: ${{ secrets.K6_ACCOUNTS_PROD_JSON }}
 
   # Publish the draft GitHub release created by Phase 1 after all verification passes.
   publish-release:
