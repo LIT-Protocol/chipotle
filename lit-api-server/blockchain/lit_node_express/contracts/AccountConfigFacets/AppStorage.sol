@@ -42,6 +42,7 @@ library AppStorage {
     error NotAllowedToManageIPFSIdsInGroup(uint256 apiKeyHash, uint256 groupId);
     error InvalidRequest(string message);
     error OnlyConfigOperatorOrOwner(address caller);
+    
 
     struct PkpData {
         uint256 id; // keccak256 of the pkp id - this is used to prove existence of the struct.
@@ -108,7 +109,7 @@ library AppStorage {
         mapping(uint256 => address) allPkpIds; // mapping from a counter to a pkp id, allowing us to get a list of all pkp ids ever generated
         mapping(uint256 => uint256) pricing; // mapping from a pricing item id to it's price
         EnumerableSet.AddressSet api_payers; // set of accounts that pays for state mutation made by api calls, optionally mutates state on behalf of an api key holder.
-        address configOperator; // account that can set the api_payer
+        address configOperator; // account that can make operational changes.
         address pricingOperator; // account that can mutate certain state for operational purposes ( like pricing ).
         uint256 pkpCount; // counter for creating unique pkp ids
         uint256 accountCount; // counter for creating unique account ids

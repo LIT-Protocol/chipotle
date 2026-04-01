@@ -31,6 +31,28 @@ use ipfs_hasher::IpfsHasher;
 use lit_core::utils::binary::{bytes_to_0x_hex, hex_to_bytes};
 use rocket::serde::json::Json;
 
+/// Map a contract error to the appropriate HTTP status.
+/// Permission-related contract reverts become 403 Forbidden; everything else stays 500.
+///
+/// NOTE: This matches on the stringified error from `decode_contract_revert` output.
+/// A more robust approach would decode the ABI revert selector bytes directly, but
+/// that requires regenerating Rust bindings (AccountConfig.json → account_config_contract.rs)
+/// to include the NotAllowedTo* error types. Track as follow-up.
+const PERMISSION_ERROR_PATTERNS: &[&str] = &["NotAllowedTo", "NotMasterAccount", "NoAccountAccess"];
+
+fn map_contract_error(e: anyhow::Error, context: &str) -> ApiStatus {
+    let msg = format!("{}", e);
+    if PERMISSION_ERROR_PATTERNS
+        .iter()
+        .any(|pat| msg.contains(pat))
+    {
+        tracing::warn!("Permission denied for {context}: {msg}");
+        ApiStatus::forbidden("Permission denied".to_string())
+    } else {
+        ApiStatus::internal_server_error(e, context)
+    }
+}
+
 // Create a new wallet and return the public key, wallet address, and secret.
 async fn create_new_wallet() -> Result<(String, H160, [u8; 32], U256), ApiStatus> {
     let (derivation_u256, derivation_path) = generate_unique_derivation_path();
@@ -133,7 +155,8 @@ pub async fn create_wallet(
         "Wallet",
         "Wallet",
     )
-    .await?;
+    .await
+    .map_err(|e| map_contract_error(e, "create_wallet failed"))?;
 
     Ok(CreateWalletResponse {
         wallet_address: bytes_to_0x_hex(wallet_address.as_bytes()),
@@ -164,7 +187,7 @@ pub async fn add_group(
         pkp_ids,
     )
     .await
-    .map_err(|e| ApiStatus::internal_server_error(e, "add_group failed"))?;
+    .map_err(|e| map_contract_error(e, "add_group failed"))?;
     Ok(AddGroupResponse {
         success: true,
         group_id: group_id.to_string(),
@@ -209,7 +232,7 @@ pub async fn add_action_to_group(
     let group_id = U256::from(req.group_id);
     accounts::add_action_to_group(signer_pool, api_key, group_id, &req.action_ipfs_cid)
         .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "add_action_to_group failed"))?;
+        .map_err(|e| map_contract_error(e, "add_action_to_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
@@ -229,7 +252,7 @@ pub async fn add_pkp_to_group(
     let wallet_address = H160::from_slice(&wallet_address_bytes);
     accounts::add_pkp_to_group(signer_pool, api_key, group_id, wallet_address)
         .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "add_pkp_to_group failed"))?;
+        .map_err(|e| map_contract_error(e, "add_pkp_to_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
@@ -249,7 +272,7 @@ pub async fn remove_pkp_from_group(
     let wallet_address = H160::from_slice(&src);
     accounts::remove_pkp_from_group(signer_pool, api_key, group_id, wallet_address)
         .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "remove_pkp_from_group failed"))?;
+        .map_err(|e| map_contract_error(e, "remove_pkp_from_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
@@ -321,7 +344,7 @@ pub async fn remove_group(
     }
     accounts::remove_group(signer_pool, api_key, group_id)
         .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "remove_group failed"))?;
+        .map_err(|e| map_contract_error(e, "remove_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 
@@ -410,7 +433,7 @@ pub async fn remove_action_from_group(
     let action_hash = hashed_cid_to_u256(&req.hashed_cid)?;
     accounts::remove_action_from_group(signer_pool, api_key, group_id, action_hash)
         .await
-        .map_err(|e| ApiStatus::internal_server_error(e, "remove_action_from_group failed"))?;
+        .map_err(|e| map_contract_error(e, "remove_action_from_group failed"))?;
     Ok(AccountOpResponse { success: true })
 }
 

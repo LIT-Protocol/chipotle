@@ -17,38 +17,41 @@
 NETWORK := 'main'
 _base_url_main := 'https://api.dev.litprotocol.com/core/v1'
 _base_url_next := 'https://test.chipotle.litprotocol.com/core/v1'
+_base_url_prod := 'https://api.chipotle.litprotocol.com/core/v1'
 _accounts_file_main := './data/accounts.dev.json'
 _accounts_file_next := './data/accounts.next.json'
-BASE_URL := if NETWORK == 'next' { _base_url_next } else { _base_url_main }
-ACCOUNTS_FILE := if NETWORK == 'next' { _accounts_file_next } else { _accounts_file_main }
+_accounts_file_prod := './data/accounts.prod.json'
+BASE_URL := if NETWORK == 'prod' { _base_url_prod } else if NETWORK == 'next' { _base_url_next } else { _base_url_main }
+ACCOUNTS_FILE := if NETWORK == 'prod' { _accounts_file_prod } else if NETWORK == 'next' { _accounts_file_next } else { _accounts_file_main }
+_env := if NETWORK == 'prod' { 'prod' } else { 'staging' }
 _corr_id := `echo "k6-$(date +%s)-$(head -c 3 /dev/urandom | od -An -tx1 | tr -d ' \n')"`
 
 [group: 'setup']
 seed-accounts ACCOUNTS_COUNT='25':
     mkdir -p data
-    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} ACCOUNTS_COUNT={{ACCOUNTS_COUNT}} k6 run accounts.seed.spec.ts | grep '^{\"generated_at\"' > {{ACCOUNTS_FILE}}
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} K6_ACCOUNTS_FILE={{ACCOUNTS_FILE}} K6_ENV={{_env}} ACCOUNTS_COUNT={{ACCOUNTS_COUNT}} k6 run accounts.seed.spec.ts | grep '^{\"generated_at\"' > {{ACCOUNTS_FILE}}
 
 smoke:
-    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run --out cloud smoke.spec.ts
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} K6_ACCOUNTS_FILE={{ACCOUNTS_FILE}} K6_ENV={{_env}} k6 run --out cloud smoke.spec.ts
 
 smoke-local:
-    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run smoke.spec.ts
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} K6_ACCOUNTS_FILE={{ACCOUNTS_FILE}} K6_ENV={{_env}} k6 run smoke.spec.ts
 
 soak:
     # K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} k6 cloud run --local-execution loadtest/soak.spec.ts
-    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run --out cloud loadtest/soak.spec.ts
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} K6_ACCOUNTS_FILE={{ACCOUNTS_FILE}} K6_ENV={{_env}} k6 run --out cloud loadtest/soak.spec.ts
 
 soak-local:
-    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run loadtest/soak.spec.ts
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} K6_ACCOUNTS_FILE={{ACCOUNTS_FILE}} K6_ENV={{_env}} k6 run loadtest/soak.spec.ts
 
 spike:
-    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run --out cloud loadtest/spike.spec.ts
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} K6_ACCOUNTS_FILE={{ACCOUNTS_FILE}} K6_ENV={{_env}} k6 run --out cloud loadtest/spike.spec.ts
 
 spike-local:
-    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run loadtest/spike.spec.ts
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} K6_ACCOUNTS_FILE={{ACCOUNTS_FILE}} K6_ENV={{_env}} k6 run loadtest/spike.spec.ts
 
 breakpoint:
-    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run --out cloud loadtest/breakpoint.spec.ts
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} K6_ACCOUNTS_FILE={{ACCOUNTS_FILE}} K6_ENV={{_env}} k6 run --out cloud loadtest/breakpoint.spec.ts
 
 breakpoint-local:
-    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} ACCOUNTS_FILE={{ACCOUNTS_FILE}} k6 run loadtest/breakpoint.spec.ts
+    K6_CORRELATION_ID={{_corr_id}} BASE_URL={{BASE_URL}} K6_ACCOUNTS_FILE={{ACCOUNTS_FILE}} K6_ENV={{_env}} k6 run loadtest/breakpoint.spec.ts
