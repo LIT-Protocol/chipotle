@@ -74,7 +74,11 @@ curl -s -X POST https://api.chipotle.litprotocol.com/core/v1/new_account \
 }
 ```
 
-### 2. Create a usage API key
+### 2. Add funds
+
+Lit Action execution and write/metered management operations require credits. Add funds via credit card in the [Dashboard](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) — click **Add Funds** in the top-right corner and select a credit package (minimum $5.00). See [Pricing](https://developer.litprotocol.com/management/pricing) for details.
+
+### 3. Create a usage API key
 
 Your account key is the master credential — don't embed it in apps. Create a scoped usage key instead:
 
@@ -102,10 +106,6 @@ curl -s -X POST https://api.chipotle.litprotocol.com/core/v1/add_usage_api_key \
 ```
 
 Save this key — it's shown only once. Use it in place of your account key for the remaining steps. See [API Keys](https://developer.litprotocol.com/management/api_keys) for details on scoping permissions.
-
-### 3. Add funds
-
-Lit Action execution and write/metered management operations require credits. Add funds via credit card in the [Dashboard](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) — click **Add Funds** in the top-right corner and select a credit package (minimum $5.00). See [Pricing](https://developer.litprotocol.com/management/pricing) for details.
 
 ### 4. Create a wallet (PKP)
 
