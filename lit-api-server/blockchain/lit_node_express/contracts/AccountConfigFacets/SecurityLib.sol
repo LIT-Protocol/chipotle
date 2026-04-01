@@ -9,7 +9,7 @@ import {
     EnumerableSet
 } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {AppStorage} from "./AppStorage.sol";
-import { LibDiamond } from "../../libraries/LibDiamond.sol";
+import {LibDiamond} from "../../libraries/LibDiamond.sol";
 
 library SecurityLib {
     using EnumerableSet for EnumerableSet.UintSet;
