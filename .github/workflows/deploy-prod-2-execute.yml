@@ -30,6 +30,17 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  trigger-static-deploy:
+    runs-on: self-hosted
+    steps:
+      - name: Trigger static site deploy
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh workflow run "Deploy Prod 3: Static Site" \
+            -f version_tag="${{ inputs.version_tag }}"
+
   download-context:
     runs-on: self-hosted
     outputs:
