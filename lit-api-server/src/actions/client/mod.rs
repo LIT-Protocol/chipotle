@@ -8,9 +8,11 @@ pub mod op_code_helpers;
 use crate::actions::client::models::DenoExecutionEnv;
 use crate::actions::client::models::ExecutionState;
 use crate::actions::grpc::GrpcClientPool;
+use crate::stripe::StripeState;
 use derive_builder::Builder;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -86,8 +88,12 @@ pub struct Client {
     #[serde(skip)]
     pub(crate) client_grpc_channels: GrpcClientPool<tonic::transport::Channel>,
 
-    // #[builder(default)]
-    // pub dynamic_payment: DynamicPayment,
+    /// Stripe state for per-second billing during Lit Action execution.
+    /// `None` when billing is disabled.
+    #[builder(default, setter(into, strip_option))]
+    #[serde(skip)]
+    pub(crate) stripe_state: Option<Arc<StripeState>>,
+
     // State
     #[builder(setter(skip))]
     #[serde(skip)]
