@@ -19,7 +19,9 @@ fn main() {
     });
     if let Some(path_item) = spec.paths.get_mut("/lit_action") {
         if let Some(ref mut op) = path_item.post {
-            op.responses.responses.insert("429".to_string(), too_many_requests);
+            op.responses
+                .responses
+                .insert("429".to_string(), too_many_requests);
         }
     }
 
