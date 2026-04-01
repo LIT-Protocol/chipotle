@@ -59,7 +59,7 @@ jobs:
         env:
           BASE_URL: ${{ inputs.api_root_url }}
           K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-billing
-          K6_ACCOUNTS_FILE: ${{ steps.accounts-file.outputs.path || env.ACCOUNTS_FILE }}
+          K6_ACCOUNTS_FILE: ${{ steps.accounts-file.outputs.path || env.K6_ACCOUNTS_FILE }}
           K6_ENV: ${{ inputs.env }}
         run: k6 run k6/correctness/billing.spec.ts
 
@@ -68,7 +68,7 @@ jobs:
         env:
           BASE_URL: ${{ inputs.api_root_url }}
           K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-observability-headers
-          K6_ACCOUNTS_FILE: ${{ steps.accounts-file.outputs.path || env.ACCOUNTS_FILE }}
+          K6_ACCOUNTS_FILE: ${{ steps.accounts-file.outputs.path || env.K6_ACCOUNTS_FILE }}
           K6_ENV: ${{ inputs.env }}
         run: k6 run k6/correctness/observability-headers.spec.ts
 
@@ -77,7 +77,7 @@ jobs:
         env:
           BASE_URL: ${{ inputs.api_root_url }}
           K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-integration
-          K6_ACCOUNTS_FILE: ${{ steps.accounts-file.outputs.path || env.ACCOUNTS_FILE }}
+          K6_ACCOUNTS_FILE: ${{ steps.accounts-file.outputs.path || env.K6_ACCOUNTS_FILE }}
           K6_ENV: ${{ inputs.env }}
         run: k6 run k6/correctness/integration.spec.ts
 
@@ -86,7 +86,7 @@ jobs:
         env:
           BASE_URL: ${{ inputs.api_root_url }}
           K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-new-account
-          K6_ACCOUNTS_FILE: ${{ steps.accounts-file.outputs.path || env.ACCOUNTS_FILE }}
+          K6_ACCOUNTS_FILE: ${{ steps.accounts-file.outputs.path || env.K6_ACCOUNTS_FILE }}
           K6_ENV: ${{ inputs.env }}
         run: k6 run k6/correctness/new-account.spec.ts
 
@@ -95,7 +95,7 @@ jobs:
         env:
           BASE_URL: ${{ inputs.api_root_url }}
           K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-ecdsa-sign
-          K6_ACCOUNTS_FILE: ${{ steps.accounts-file.outputs.path || env.ACCOUNTS_FILE }}
+          K6_ACCOUNTS_FILE: ${{ steps.accounts-file.outputs.path || env.K6_ACCOUNTS_FILE }}
           K6_ENV: ${{ inputs.env }}
         run: k6 run k6/correctness/lit-action-ecdsa-sign.spec.ts
 
@@ -104,7 +104,7 @@ jobs:
         env:
           BASE_URL: ${{ inputs.api_root_url }}
           K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-encrypt-decrypt
-          K6_ACCOUNTS_FILE: ${{ steps.accounts-file.outputs.path || env.ACCOUNTS_FILE }}
+          K6_ACCOUNTS_FILE: ${{ steps.accounts-file.outputs.path || env.K6_ACCOUNTS_FILE }}
           K6_ENV: ${{ inputs.env }}
         run: k6 run k6/correctness/lit-action-encrypt-decrypt.spec.ts
 

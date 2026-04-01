@@ -59,7 +59,7 @@ jobs:
         env:
           BASE_URL: ${{ inputs.api_root_url }}
           K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-smoke
-          K6_ACCOUNTS_FILE: ${{ steps.accounts-file.outputs.path || env.ACCOUNTS_FILE }}
+          K6_ACCOUNTS_FILE: ${{ steps.accounts-file.outputs.path || env.K6_ACCOUNTS_FILE }}
           K6_ENV: ${{ inputs.env }}
         run: k6 run k6/smoke.spec.ts
 
