@@ -74,11 +74,40 @@ curl -s -X POST https://api.chipotle.litprotocol.com/core/v1/new_account \
 }
 ```
 
-### 2. Add funds
+### 2. Create a usage API key
+
+Your account key is the master credential — don't embed it in apps. Create a scoped usage key instead:
+
+```bash
+curl -s -X POST https://api.chipotle.litprotocol.com/core/v1/add_usage_api_key \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: $API_KEY" \
+  -d '{
+    "name": "My dApp Key",
+    "description": "Getting started",
+    "can_create_groups": false,
+    "can_delete_groups": false,
+    "can_create_pkps": true,
+    "manage_ipfs_ids_in_groups": [],
+    "add_pkp_to_groups": [],
+    "remove_pkp_from_groups": [],
+    "execute_in_groups": [0]
+  }' | jq
+```
+
+```json
+{
+  "usage_api_key": "Xk9m+2CA…"
+}
+```
+
+Save this key — it's shown only once. Use it in place of your account key for the remaining steps. See [API Keys](https://developer.litprotocol.com/management/api_keys) for details on scoping permissions.
+
+### 3. Add funds
 
 Lit Action execution and write/metered management operations require credits. Add funds via credit card in the [Dashboard](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) — click **Add Funds** in the top-right corner and select a credit package (minimum $5.00). See [Pricing](https://developer.litprotocol.com/management/pricing) for details.
 
-### 3. Create a wallet (PKP)
+### 4. Create a wallet (PKP)
 
 ```bash
 curl -s https://api.chipotle.litprotocol.com/core/v1/create_wallet \
@@ -91,7 +120,7 @@ curl -s https://api.chipotle.litprotocol.com/core/v1/create_wallet \
 }
 ```
 
-### 4. Run a Lit Action
+### 5. Run a Lit Action
 
 ```bash
 curl -s -X POST https://api.chipotle.litprotocol.com/core/v1/lit_action \
