@@ -85,14 +85,19 @@ impl Client {
                 // &auth_context,
                 0,
             ));
-            let execution_result = tokio::time::timeout(timeout, execution)
-                .await
-                .map_err(|e| {
-                    unexpected_err(
-                        e,
+            let execution_result = match tokio::time::timeout(timeout, execution).await {
+                Ok(result) => result,
+                Err(_) => {
+                    // Flush any accumulated billing before returning the timeout error.
+                    if let Err(e) = self.flush_unbilled_seconds().await {
+                        warn!("Billing flush failed on timeout: {e}");
+                    }
+                    return Err(unexpected_err(
+                        anyhow!("timeout"),
                         Some(format!("lit_actions didn't respond within {timeout:?}")),
-                    )
-                })?;
+                    ));
+                }
+            };
             match execution_result {
                 Ok(state) => return Ok(state),
                 Err(e) => {
@@ -212,45 +217,52 @@ impl Client {
             .await
             .context("failed to send execution request")?;
 
-        // Handle responses from server
-        while let Some(resp) = stream.try_next().await? {
-            match resp.union {
-                // Return final result from server
-                Some(UnionResponse::Result(res)) => {
-                    // NOTE: Side effects (signatures, contract calls) have already
-                    // executed by this point. If billing fails here, the caller gets
-                    // an error but the effects are not reversible. This is an accepted
-                    // tradeoff — the alternative (pre-billing) was removed in favour
-                    // of per-second metering.
-                    self.flush_unbilled_seconds().await?;
-                    if !res.success {
-                        bail!(res.error);
-                    }
-                    // Return current state, which might be updated by subsequent code executions
-                    return Ok(self.state.clone());
-                }
-                // Handle op requests
-                Some(op) => {
-                    let resp = self.handle_op(op, call_depth).await.unwrap_or_else(|e| {
-                        ErrorResponse {
-                            error: e.to_string(),
+        // Handle responses from server.
+        // Wrap the loop in a closure so we can always flush billing on exit,
+        // even if stream reads or op sends fail mid-flight.
+        let loop_result: Result<ExecutionState> = async {
+            while let Some(resp) = stream.try_next().await? {
+                match resp.union {
+                    // Return final result from server
+                    Some(UnionResponse::Result(res)) => {
+                        // NOTE: Side effects (signatures, contract calls) have already
+                        // executed by this point. If billing fails here, the caller gets
+                        // an error but the effects are not reversible. This is an accepted
+                        // tradeoff — the alternative (pre-billing) was removed in favour
+                        // of per-second metering.
+                        self.flush_unbilled_seconds().await?;
+                        if !res.success {
+                            bail!(res.error);
                         }
-                        .into()
-                    });
-                    outbound_tx
-                        .send_async(resp)
-                        .await
-                        .context("failed to send op response")?;
-                }
-                // Ignore empty responses
-                None => {}
-            };
+                        // Return current state, which might be updated by subsequent code executions
+                        return Ok(self.state.clone());
+                    }
+                    // Handle op requests
+                    Some(op) => {
+                        let resp = self.handle_op(op, call_depth).await.unwrap_or_else(|e| {
+                            ErrorResponse {
+                                error: e.to_string(),
+                            }
+                            .into()
+                        });
+                        outbound_tx
+                            .send_async(resp)
+                            .await
+                            .context("failed to send op response")?;
+                    }
+                    // Ignore empty responses
+                    None => {}
+                };
+            }
+            bail!("Server unexpectedly closed connection")
         }
+        .await;
 
-        // Best-effort flush — connection already lost, so log but don't mask the real error.
-        if let Err(e) = self.flush_unbilled_seconds().await {
-            warn!("Billing flush failed after connection close: {e}");
+        // If the loop exited via an error (stream failure, send failure, connection
+        // close), do a best-effort billing flush before propagating the error.
+        if loop_result.is_err() && let Err(e) = self.flush_unbilled_seconds().await {
+            warn!("Billing flush failed after error exit: {e}");
         }
-        bail!("Server unexpectedly closed connection")
+        loop_result
     }
 }
