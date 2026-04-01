@@ -250,3 +250,26 @@ jobs:
         run: |
           gh release delete-asset "${{ needs.download-context.outputs.version_tag }}" deploy-context.json --yes || true
           gh release edit "${{ needs.download-context.outputs.version_tag }}" --draft=false
+
+  trigger-deploy-3:
+    needs: [publish-release, download-context]
+    runs-on: self-hosted
+    permissions:
+      actions: write
+    steps:
+      - name: Install GitHub CLI
+        run: |
+          if command -v gh &> /dev/null; then exit 0; fi
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt-get update && sudo apt-get install -y gh
+
+      - name: Trigger Deploy Prod 3 (Static Site)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh workflow run deploy-prod-3-static.yml \
+            -f version_tag="${{ needs.download-context.outputs.version_tag }}"
