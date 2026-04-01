@@ -1,4 +1,5 @@
 pub use crate::accounts::contracts::account_config_contract::AccountConfig;
+use crate::accounts::decode_revert::decode_contract_revert;
 use crate::accounts::signer_pool::SignerPool;
 use crate::config::GLOBAL_NODE_CONFIG;
 pub use crate::utils::chain_info::Chain;
@@ -151,8 +152,9 @@ pub async fn send_transaction<T: ethers::abi::Detokenize>(
     };
 
     if !is_nonce_too_low(&first_err) {
+        let decoded = decode_contract_revert(&first_err);
         signer_pool.release(signer_address).await?;
-        return Err(anyhow::anyhow!("Failed to send transaction: {first_err}"));
+        return Err(anyhow::anyhow!("Failed to send transaction: {decoded}"));
     }
 
     // Fetch the current pending nonce from the chain and pin it on the transaction.
@@ -199,8 +201,9 @@ pub async fn send_transaction<T: ethers::abi::Detokenize>(
     let tx = match function_call.send().await {
         Ok(tx) => tx,
         Err(retry_err) => {
+            let decoded = decode_contract_revert(&retry_err);
             signer_pool.release(signer_address).await?;
-            return Err(anyhow::anyhow!("Failed to send transaction: {retry_err}"));
+            return Err(anyhow::anyhow!("Failed to send transaction: {decoded}"));
         }
     };
 
