@@ -57,7 +57,7 @@ A REST API with a JS SDK. Create an account, get an API key, call one endpoint. 
 
 ## Quickstart
 
-Everything below works right now against the live dev API. No SDK needed — just `curl`.
+Everything below works right now against the live API. No SDK needed — just `curl`.
 
 ### 1. Create an account
 
