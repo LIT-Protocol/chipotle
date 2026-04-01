@@ -230,6 +230,9 @@
                 }
               }
             }
+          },
+          "429": {
+            "description": "Too Many Requests — the node is CPU-overloaded and shedding load. Clients receiving this response should retry the request up to five times with exponential backoff."
           }
         }
       }
