@@ -14,6 +14,8 @@ function getApiKey() {
 function setApiKey(v) {
   if (v) sessionStorage.setItem(STORAGE_KEY_API, v);
   else sessionStorage.removeItem(STORAGE_KEY_API);
+  _billingAvailable = null;
+  _billingCheckedAt = 0;
   updateAuthUI();
 }
 
@@ -26,18 +28,55 @@ function getBaseUrl() {
   return '__LIT_API_BASE_URL__';
 }
 
+// Track whether billing (Stripe) is available for this environment
+let _billingAvailable = null; // null = not yet checked, true/false after check
+let _billingCheckedAt = 0;
+const BILLING_RETRY_MS = 30000; // retry failed checks after 30s
+
+async function checkBillingAvailable() {
+  // If billing is confirmed available, return immediately (permanent cache)
+  if (_billingAvailable === true) return true;
+  // If a previous check failed, retry after the TTL expires
+  if (_billingAvailable === false && (Date.now() - _billingCheckedAt) < BILLING_RETRY_MS) {
+    return false;
+  }
+  try {
+    const client = await getClient();
+    await client.getStripeConfig();
+    _billingAvailable = true;
+  } catch (_) {
+    _billingAvailable = false;
+  }
+  _billingCheckedAt = Date.now();
+  return _billingAvailable;
+}
+
 function updateAuthUI() {
   const hasKey = !!getApiKey();
   document.body.classList.toggle('has-api-key', hasKey);
   const balanceEl = document.getElementById('billing-balance-display');
   const addFundsBtn = document.getElementById('btn-add-funds');
-  if (balanceEl) balanceEl.style.display = hasKey ? '' : 'none';
-  if (addFundsBtn) addFundsBtn.style.display = hasKey ? '' : 'none';
+  const notRequiredEl = document.getElementById('billing-not-required');
+  const billingBanner = document.getElementById('billing-disabled-banner');
+  if (balanceEl) balanceEl.style.display = 'none';
+  if (addFundsBtn) addFundsBtn.style.display = 'none';
+  if (notRequiredEl) notRequiredEl.style.display = 'none';
+  if (billingBanner) billingBanner.style.display = 'none';
   if (hasKey) {
     refreshOverviewAccount();
     updateStatCards();
     preloadAllTables();
-    loadBillingBalance();
+    // Check billing availability then show appropriate UI
+    checkBillingAvailable().then(available => {
+      if (available) {
+        if (balanceEl) balanceEl.style.display = '';
+        if (addFundsBtn) addFundsBtn.style.display = '';
+        loadBillingBalance();
+      } else {
+        if (notRequiredEl) notRequiredEl.style.display = '';
+        if (billingBanner) billingBanner.style.display = '';
+      }
+    }).catch(() => {});
   }
 }
 
@@ -223,6 +262,7 @@ let _stripe = null;
 let _stripeCard = null;
 
 async function openAddFundsModal() {
+  if (_billingAvailable === false) return;
   const overlay = document.getElementById('billing-modal-overlay');
   if (!overlay) return;
   overlay.classList.add('is-open');
