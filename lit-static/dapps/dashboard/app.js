@@ -36,7 +36,10 @@ function updateUsageKeyOverrideUI() {
   const balanceEl = document.getElementById('billing-balance-display');
   const addFundsBtn = document.getElementById('btn-add-funds');
   const hasOverride = !!sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE);
-  if (badge) badge.style.display = hasOverride ? '' : 'none';
+  if (badge) {
+    badge.style.display = hasOverride ? '' : 'none';
+    if (hasOverride) badge.textContent = 'Using Key: ' + sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE).substring(0, 6) + '…';
+  }
   if (input) input.value = sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE) || '';
   if (clearBtn) clearBtn.style.display = hasOverride ? '' : 'none';
   // Only show billing when authenticated AND no override is active
