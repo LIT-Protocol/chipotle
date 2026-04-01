@@ -101,7 +101,7 @@ pub mod account_config {
                         name: ::std::borrow::ToOwned::to_owned("addActionToGroup"),
                         inputs: ::std::vec![
                             ::ethers::core::abi::ethabi::Param {
-                                name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
                                 kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
                                 internal_type: ::core::option::Option::Some(
                                     ::std::borrow::ToOwned::to_owned("uint256"),
@@ -133,7 +133,7 @@ pub mod account_config {
                         name: ::std::borrow::ToOwned::to_owned("addGroup"),
                         inputs: ::std::vec![
                             ::ethers::core::abi::ethabi::Param {
-                                name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
                                 kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
                                 internal_type: ::core::option::Option::Some(
                                     ::std::borrow::ToOwned::to_owned("uint256"),
@@ -193,7 +193,7 @@ pub mod account_config {
                         name: ::std::borrow::ToOwned::to_owned("addPkpToGroup"),
                         inputs: ::std::vec![
                             ::ethers::core::abi::ethabi::Param {
-                                name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
                                 kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
                                 internal_type: ::core::option::Option::Some(
                                     ::std::borrow::ToOwned::to_owned("uint256"),
@@ -1319,7 +1319,7 @@ pub mod account_config {
                         name: ::std::borrow::ToOwned::to_owned("registerWalletDerivation",),
                         inputs: ::std::vec![
                             ::ethers::core::abi::ethabi::Param {
-                                name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
                                 kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
                                 internal_type: ::core::option::Option::Some(
                                     ::std::borrow::ToOwned::to_owned("uint256"),
@@ -1390,7 +1390,7 @@ pub mod account_config {
                         name: ::std::borrow::ToOwned::to_owned("removeActionFromGroup",),
                         inputs: ::std::vec![
                             ::ethers::core::abi::ethabi::Param {
-                                name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
                                 kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
                                 internal_type: ::core::option::Option::Some(
                                     ::std::borrow::ToOwned::to_owned("uint256"),
@@ -1422,7 +1422,7 @@ pub mod account_config {
                         name: ::std::borrow::ToOwned::to_owned("removeGroup"),
                         inputs: ::std::vec![
                             ::ethers::core::abi::ethabi::Param {
-                                name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
                                 kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
                                 internal_type: ::core::option::Option::Some(
                                     ::std::borrow::ToOwned::to_owned("uint256"),
@@ -1447,7 +1447,7 @@ pub mod account_config {
                         name: ::std::borrow::ToOwned::to_owned("removePkpFromGroup"),
                         inputs: ::std::vec![
                             ::ethers::core::abi::ethabi::Param {
-                                name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
                                 kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
                                 internal_type: ::core::option::Option::Some(
                                     ::std::borrow::ToOwned::to_owned("uint256"),
@@ -2105,6 +2105,111 @@ pub mod account_config {
                     },],
                 ),
                 (
+                    ::std::borrow::ToOwned::to_owned("NotAllowedToAddPkpToGroup"),
+                    ::std::vec![::ethers::core::abi::ethabi::AbiError {
+                        name: ::std::borrow::ToOwned::to_owned("NotAllowedToAddPkpToGroup",),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                        ],
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("NotAllowedToCreateGroup"),
+                    ::std::vec![::ethers::core::abi::ethabi::AbiError {
+                        name: ::std::borrow::ToOwned::to_owned("NotAllowedToCreateGroup",),
+                        inputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("uint256"),
+                            ),
+                        },],
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("NotAllowedToCreatePkp"),
+                    ::std::vec![::ethers::core::abi::ethabi::AbiError {
+                        name: ::std::borrow::ToOwned::to_owned("NotAllowedToCreatePkp",),
+                        inputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("uint256"),
+                            ),
+                        },],
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("NotAllowedToDeleteGroup"),
+                    ::std::vec![::ethers::core::abi::ethabi::AbiError {
+                        name: ::std::borrow::ToOwned::to_owned("NotAllowedToDeleteGroup",),
+                        inputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("uint256"),
+                            ),
+                        },],
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("NotAllowedToManageIPFSIdsInGroup"),
+                    ::std::vec![::ethers::core::abi::ethabi::AbiError {
+                        name: ::std::borrow::ToOwned::to_owned("NotAllowedToManageIPFSIdsInGroup",),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                        ],
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("NotAllowedToRemovePkpFromGroup"),
+                    ::std::vec![::ethers::core::abi::ethabi::AbiError {
+                        name: ::std::borrow::ToOwned::to_owned("NotAllowedToRemovePkpFromGroup",),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                        ],
+                    },],
+                ),
+                (
                     ::std::borrow::ToOwned::to_owned("NotMasterAccount"),
                     ::std::vec![::ethers::core::abi::ethabi::AbiError {
                         name: ::std::borrow::ToOwned::to_owned("NotMasterAccount"),
@@ -2287,18 +2392,18 @@ pub mod account_config {
         ///Calls the contract's `addActionToGroup` (0x1f52aa42) function
         pub fn add_action_to_group(
             &self,
-            account_api_key_hash: ::ethers::core::types::U256,
+            api_key_hash: ::ethers::core::types::U256,
             group_id: ::ethers::core::types::U256,
             action: ::ethers::core::types::U256,
         ) -> ::ethers::contract::builders::ContractCall<M, ()> {
             self.0
-                .method_hash([31, 82, 170, 66], (account_api_key_hash, group_id, action))
+                .method_hash([31, 82, 170, 66], (api_key_hash, group_id, action))
                 .expect("method not found (this should never happen)")
         }
         ///Calls the contract's `addGroup` (0x2b12dee6) function
         pub fn add_group(
             &self,
-            account_api_key_hash: ::ethers::core::types::U256,
+            api_key_hash: ::ethers::core::types::U256,
             name: ::std::string::String,
             description: ::std::string::String,
             cid_hashes: ::std::vec::Vec<::ethers::core::types::U256>,
@@ -2307,22 +2412,19 @@ pub mod account_config {
             self.0
                 .method_hash(
                     [43, 18, 222, 230],
-                    (account_api_key_hash, name, description, cid_hashes, pkp_ids),
+                    (api_key_hash, name, description, cid_hashes, pkp_ids),
                 )
                 .expect("method not found (this should never happen)")
         }
         ///Calls the contract's `addPkpToGroup` (0x7817d782) function
         pub fn add_pkp_to_group(
             &self,
-            account_api_key_hash: ::ethers::core::types::U256,
+            api_key_hash: ::ethers::core::types::U256,
             group_id: ::ethers::core::types::U256,
             pkp_id: ::ethers::core::types::Address,
         ) -> ::ethers::contract::builders::ContractCall<M, ()> {
             self.0
-                .method_hash(
-                    [120, 23, 215, 130],
-                    (account_api_key_hash, group_id, pkp_id),
-                )
+                .method_hash([120, 23, 215, 130], (api_key_hash, group_id, pkp_id))
                 .expect("method not found (this should never happen)")
         }
         ///Calls the contract's `adminApiPayerAccount` (0x383603fe) function
@@ -2701,7 +2803,7 @@ pub mod account_config {
         ///Calls the contract's `registerWalletDerivation` (0x92141552) function
         pub fn register_wallet_derivation(
             &self,
-            account_api_key_hash: ::ethers::core::types::U256,
+            api_key_hash: ::ethers::core::types::U256,
             pkp_id: ::ethers::core::types::Address,
             derivation_path: ::ethers::core::types::U256,
             name: ::std::string::String,
@@ -2710,13 +2812,7 @@ pub mod account_config {
             self.0
                 .method_hash(
                     [146, 20, 21, 82],
-                    (
-                        account_api_key_hash,
-                        pkp_id,
-                        derivation_path,
-                        name,
-                        description,
-                    ),
+                    (api_key_hash, pkp_id, derivation_path, name, description),
                 )
                 .expect("method not found (this should never happen)")
         }
@@ -2733,33 +2829,33 @@ pub mod account_config {
         ///Calls the contract's `removeActionFromGroup` (0x5d861c72) function
         pub fn remove_action_from_group(
             &self,
-            account_api_key_hash: ::ethers::core::types::U256,
+            api_key_hash: ::ethers::core::types::U256,
             group_id: ::ethers::core::types::U256,
             action: ::ethers::core::types::U256,
         ) -> ::ethers::contract::builders::ContractCall<M, ()> {
             self.0
-                .method_hash([93, 134, 28, 114], (account_api_key_hash, group_id, action))
+                .method_hash([93, 134, 28, 114], (api_key_hash, group_id, action))
                 .expect("method not found (this should never happen)")
         }
         ///Calls the contract's `removeGroup` (0x7834e203) function
         pub fn remove_group(
             &self,
-            account_api_key_hash: ::ethers::core::types::U256,
+            api_key_hash: ::ethers::core::types::U256,
             group_id: ::ethers::core::types::U256,
         ) -> ::ethers::contract::builders::ContractCall<M, ()> {
             self.0
-                .method_hash([120, 52, 226, 3], (account_api_key_hash, group_id))
+                .method_hash([120, 52, 226, 3], (api_key_hash, group_id))
                 .expect("method not found (this should never happen)")
         }
         ///Calls the contract's `removePkpFromGroup` (0x4a42c40a) function
         pub fn remove_pkp_from_group(
             &self,
-            account_api_key_hash: ::ethers::core::types::U256,
+            api_key_hash: ::ethers::core::types::U256,
             group_id: ::ethers::core::types::U256,
             pkp_id: ::ethers::core::types::Address,
         ) -> ::ethers::contract::builders::ContractCall<M, ()> {
             self.0
-                .method_hash([74, 66, 196, 10], (account_api_key_hash, group_id, pkp_id))
+                .method_hash([74, 66, 196, 10], (api_key_hash, group_id, pkp_id))
                 .expect("method not found (this should never happen)")
         }
         ///Calls the contract's `removeUsageApiKey` (0xc5f5b984) function
@@ -3109,6 +3205,126 @@ pub mod account_config {
         pub api_key_hash: ::ethers::core::types::U256,
         pub sender: ::ethers::core::types::Address,
     }
+    ///Custom Error type `NotAllowedToAddPkpToGroup` with signature `NotAllowedToAddPkpToGroup(uint256,uint256)` and selector `0x4d5f50e1`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthError,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[etherror(
+        name = "NotAllowedToAddPkpToGroup",
+        abi = "NotAllowedToAddPkpToGroup(uint256,uint256)"
+    )]
+    pub struct NotAllowedToAddPkpToGroup {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub group_id: ::ethers::core::types::U256,
+    }
+    ///Custom Error type `NotAllowedToCreateGroup` with signature `NotAllowedToCreateGroup(uint256)` and selector `0x853f5f31`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthError,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[etherror(
+        name = "NotAllowedToCreateGroup",
+        abi = "NotAllowedToCreateGroup(uint256)"
+    )]
+    pub struct NotAllowedToCreateGroup {
+        pub api_key_hash: ::ethers::core::types::U256,
+    }
+    ///Custom Error type `NotAllowedToCreatePkp` with signature `NotAllowedToCreatePkp(uint256)` and selector `0x1149a6a5`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthError,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[etherror(name = "NotAllowedToCreatePkp", abi = "NotAllowedToCreatePkp(uint256)")]
+    pub struct NotAllowedToCreatePkp {
+        pub api_key_hash: ::ethers::core::types::U256,
+    }
+    ///Custom Error type `NotAllowedToDeleteGroup` with signature `NotAllowedToDeleteGroup(uint256)` and selector `0x472ed77d`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthError,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[etherror(
+        name = "NotAllowedToDeleteGroup",
+        abi = "NotAllowedToDeleteGroup(uint256)"
+    )]
+    pub struct NotAllowedToDeleteGroup {
+        pub api_key_hash: ::ethers::core::types::U256,
+    }
+    ///Custom Error type `NotAllowedToManageIPFSIdsInGroup` with signature `NotAllowedToManageIPFSIdsInGroup(uint256,uint256)` and selector `0xc5a2be52`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthError,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[etherror(
+        name = "NotAllowedToManageIPFSIdsInGroup",
+        abi = "NotAllowedToManageIPFSIdsInGroup(uint256,uint256)"
+    )]
+    pub struct NotAllowedToManageIPFSIdsInGroup {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub group_id: ::ethers::core::types::U256,
+    }
+    ///Custom Error type `NotAllowedToRemovePkpFromGroup` with signature `NotAllowedToRemovePkpFromGroup(uint256,uint256)` and selector `0x68fa29e4`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthError,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[etherror(
+        name = "NotAllowedToRemovePkpFromGroup",
+        abi = "NotAllowedToRemovePkpFromGroup(uint256,uint256)"
+    )]
+    pub struct NotAllowedToRemovePkpFromGroup {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub group_id: ::ethers::core::types::U256,
+    }
     ///Custom Error type `NotMasterAccount` with signature `NotMasterAccount(uint256)` and selector `0x1d0932ee`
     #[derive(
         Clone,
@@ -3245,6 +3461,12 @@ pub mod account_config {
         InsufficientBalance(InsufficientBalance),
         InvalidRequest(InvalidRequest),
         NoAccountAccess(NoAccountAccess),
+        NotAllowedToAddPkpToGroup(NotAllowedToAddPkpToGroup),
+        NotAllowedToCreateGroup(NotAllowedToCreateGroup),
+        NotAllowedToCreatePkp(NotAllowedToCreatePkp),
+        NotAllowedToDeleteGroup(NotAllowedToDeleteGroup),
+        NotAllowedToManageIPFSIdsInGroup(NotAllowedToManageIPFSIdsInGroup),
+        NotAllowedToRemovePkpFromGroup(NotAllowedToRemovePkpFromGroup),
         NotMasterAccount(NotMasterAccount),
         OnlyApiPayerOrOwner(OnlyApiPayerOrOwner),
         OnlyApiPayerOrPricingOperator(OnlyApiPayerOrPricingOperator),
@@ -3295,6 +3517,36 @@ pub mod account_config {
             if let Ok(decoded) = <NoAccountAccess as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::NoAccountAccess(decoded));
             }
+            if let Ok(decoded) =
+                <NotAllowedToAddPkpToGroup as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::NotAllowedToAddPkpToGroup(decoded));
+            }
+            if let Ok(decoded) =
+                <NotAllowedToCreateGroup as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::NotAllowedToCreateGroup(decoded));
+            }
+            if let Ok(decoded) =
+                <NotAllowedToCreatePkp as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::NotAllowedToCreatePkp(decoded));
+            }
+            if let Ok(decoded) =
+                <NotAllowedToDeleteGroup as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::NotAllowedToDeleteGroup(decoded));
+            }
+            if let Ok(decoded) =
+                <NotAllowedToManageIPFSIdsInGroup as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::NotAllowedToManageIPFSIdsInGroup(decoded));
+            }
+            if let Ok(decoded) =
+                <NotAllowedToRemovePkpFromGroup as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::NotAllowedToRemovePkpFromGroup(decoded));
+            }
             if let Ok(decoded) = <NotMasterAccount as ::ethers::core::abi::AbiDecode>::decode(data)
             {
                 return Ok(Self::NotMasterAccount(decoded));
@@ -3343,6 +3595,24 @@ pub mod account_config {
                 }
                 Self::InvalidRequest(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::NoAccountAccess(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::NotAllowedToAddPkpToGroup(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::NotAllowedToCreateGroup(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::NotAllowedToCreatePkp(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::NotAllowedToDeleteGroup(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::NotAllowedToManageIPFSIdsInGroup(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
+                Self::NotAllowedToRemovePkpFromGroup(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
                 Self::NotMasterAccount(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::OnlyApiPayerOrOwner(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
@@ -3394,6 +3664,30 @@ pub mod account_config {
                     true
                 }
                 _ if selector
+                    == <NotAllowedToAddPkpToGroup as ::ethers::contract::EthError>::selector() => {
+                    true
+                }
+                _ if selector
+                    == <NotAllowedToCreateGroup as ::ethers::contract::EthError>::selector() => {
+                    true
+                }
+                _ if selector
+                    == <NotAllowedToCreatePkp as ::ethers::contract::EthError>::selector() => {
+                    true
+                }
+                _ if selector
+                    == <NotAllowedToDeleteGroup as ::ethers::contract::EthError>::selector() => {
+                    true
+                }
+                _ if selector
+                    == <NotAllowedToManageIPFSIdsInGroup as ::ethers::contract::EthError>::selector() => {
+                    true
+                }
+                _ if selector
+                    == <NotAllowedToRemovePkpFromGroup as ::ethers::contract::EthError>::selector() => {
+                    true
+                }
+                _ if selector
                     == <NotMasterAccount as ::ethers::contract::EthError>::selector() => {
                     true
                 }
@@ -3431,6 +3725,16 @@ pub mod account_config {
                 Self::InsufficientBalance(element) => ::core::fmt::Display::fmt(element, f),
                 Self::InvalidRequest(element) => ::core::fmt::Display::fmt(element, f),
                 Self::NoAccountAccess(element) => ::core::fmt::Display::fmt(element, f),
+                Self::NotAllowedToAddPkpToGroup(element) => ::core::fmt::Display::fmt(element, f),
+                Self::NotAllowedToCreateGroup(element) => ::core::fmt::Display::fmt(element, f),
+                Self::NotAllowedToCreatePkp(element) => ::core::fmt::Display::fmt(element, f),
+                Self::NotAllowedToDeleteGroup(element) => ::core::fmt::Display::fmt(element, f),
+                Self::NotAllowedToManageIPFSIdsInGroup(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::NotAllowedToRemovePkpFromGroup(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
                 Self::NotMasterAccount(element) => ::core::fmt::Display::fmt(element, f),
                 Self::OnlyApiPayerOrOwner(element) => ::core::fmt::Display::fmt(element, f),
                 Self::OnlyApiPayerOrPricingOperator(element) => {
@@ -3481,6 +3785,36 @@ pub mod account_config {
     impl ::core::convert::From<NoAccountAccess> for AccountConfigErrors {
         fn from(value: NoAccountAccess) -> Self {
             Self::NoAccountAccess(value)
+        }
+    }
+    impl ::core::convert::From<NotAllowedToAddPkpToGroup> for AccountConfigErrors {
+        fn from(value: NotAllowedToAddPkpToGroup) -> Self {
+            Self::NotAllowedToAddPkpToGroup(value)
+        }
+    }
+    impl ::core::convert::From<NotAllowedToCreateGroup> for AccountConfigErrors {
+        fn from(value: NotAllowedToCreateGroup) -> Self {
+            Self::NotAllowedToCreateGroup(value)
+        }
+    }
+    impl ::core::convert::From<NotAllowedToCreatePkp> for AccountConfigErrors {
+        fn from(value: NotAllowedToCreatePkp) -> Self {
+            Self::NotAllowedToCreatePkp(value)
+        }
+    }
+    impl ::core::convert::From<NotAllowedToDeleteGroup> for AccountConfigErrors {
+        fn from(value: NotAllowedToDeleteGroup) -> Self {
+            Self::NotAllowedToDeleteGroup(value)
+        }
+    }
+    impl ::core::convert::From<NotAllowedToManageIPFSIdsInGroup> for AccountConfigErrors {
+        fn from(value: NotAllowedToManageIPFSIdsInGroup) -> Self {
+            Self::NotAllowedToManageIPFSIdsInGroup(value)
+        }
+    }
+    impl ::core::convert::From<NotAllowedToRemovePkpFromGroup> for AccountConfigErrors {
+        fn from(value: NotAllowedToRemovePkpFromGroup) -> Self {
+            Self::NotAllowedToRemovePkpFromGroup(value)
         }
     }
     impl ::core::convert::From<NotMasterAccount> for AccountConfigErrors {
@@ -3586,7 +3920,7 @@ pub mod account_config {
         abi = "addActionToGroup(uint256,uint256,uint256)"
     )]
     pub struct AddActionToGroupCall {
-        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub api_key_hash: ::ethers::core::types::U256,
         pub group_id: ::ethers::core::types::U256,
         pub action: ::ethers::core::types::U256,
     }
@@ -3608,7 +3942,7 @@ pub mod account_config {
         abi = "addGroup(uint256,string,string,uint256[],address[])"
     )]
     pub struct AddGroupCall {
-        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub api_key_hash: ::ethers::core::types::U256,
         pub name: ::std::string::String,
         pub description: ::std::string::String,
         pub cid_hashes: ::std::vec::Vec<::ethers::core::types::U256>,
@@ -3629,7 +3963,7 @@ pub mod account_config {
     )]
     #[ethcall(name = "addPkpToGroup", abi = "addPkpToGroup(uint256,uint256,address)")]
     pub struct AddPkpToGroupCall {
-        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub api_key_hash: ::ethers::core::types::U256,
         pub group_id: ::ethers::core::types::U256,
         pub pkp_id: ::ethers::core::types::Address,
     }
@@ -4281,7 +4615,7 @@ pub mod account_config {
         abi = "registerWalletDerivation(uint256,address,uint256,string,string)"
     )]
     pub struct RegisterWalletDerivationCall {
-        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub api_key_hash: ::ethers::core::types::U256,
         pub pkp_id: ::ethers::core::types::Address,
         pub derivation_path: ::ethers::core::types::U256,
         pub name: ::std::string::String,
@@ -4323,7 +4657,7 @@ pub mod account_config {
         abi = "removeActionFromGroup(uint256,uint256,uint256)"
     )]
     pub struct RemoveActionFromGroupCall {
-        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub api_key_hash: ::ethers::core::types::U256,
         pub group_id: ::ethers::core::types::U256,
         pub action: ::ethers::core::types::U256,
     }
@@ -4342,7 +4676,7 @@ pub mod account_config {
     )]
     #[ethcall(name = "removeGroup", abi = "removeGroup(uint256,uint256)")]
     pub struct RemoveGroupCall {
-        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub api_key_hash: ::ethers::core::types::U256,
         pub group_id: ::ethers::core::types::U256,
     }
     ///Container type for all input parameters for the `removePkpFromGroup` function with signature `removePkpFromGroup(uint256,uint256,address)` and selector `0x4a42c40a`
@@ -4363,7 +4697,7 @@ pub mod account_config {
         abi = "removePkpFromGroup(uint256,uint256,address)"
     )]
     pub struct RemovePkpFromGroupCall {
-        pub account_api_key_hash: ::ethers::core::types::U256,
+        pub api_key_hash: ::ethers::core::types::U256,
         pub group_id: ::ethers::core::types::U256,
         pub pkp_id: ::ethers::core::types::Address,
     }
