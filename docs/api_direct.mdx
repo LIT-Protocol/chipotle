@@ -10,7 +10,7 @@ The same workflows can be done via the REST API. The API itself is under `/core/
 - `X-Api-Key: your-api-key`
 - or `Authorization: Bearer your-api-key`
 
-Examples below assume `KEY=your_account_or_usage_api_key`. cURL snippets use `BASE=http://localhost:8000` (local dev node) and JavaScript snippets use `BASE=https://api.chipotle.litprotocol.com` (hosted dev API); change the `BASE` value if you want to target the other environment. The JavaScript examples use the Core SDK (`LitNodeSimpleApiClient`) from `core_sdk.js`.
+Examples below assume `KEY=your_account_or_usage_api_key`. cURL snippets use `BASE=https://api.chipotle.litprotocol.com` (hosted production API) and JavaScript snippets use `BASE=https://api.dev.litprotocol.com` (hosted dev API); change the `BASE` value if you want to target the other environment. The JavaScript examples use the Core SDK (`LitNodeSimpleApiClient`) from `core_sdk.js`.
 
 **API workflow:**
 
@@ -56,7 +56,7 @@ Create a new account (returns API key and wallet address). Or verify an existing
       -d '{"account_name":"My App","account_description":"Optional","email":"you@example.com"}'
     
     # Verify account (replace KEY with your API key)
-    curl -s "http://localhost:8000/core/v1/account_exists" \
+    curl -s "https://api.chipotle.litprotocol.com/core/v1/account_exists" \
       -H "X-Api-Key: KEY"
     ```
   </Tab>
@@ -87,7 +87,7 @@ Create a scoped usage API key. The response includes the new key only once â€” s
   <Tab title="cURL">
     ```bash
     # Replace KEY with account API key
-    curl -s -X POST "http://localhost:8000/core/v1/add_usage_api_key" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/add_usage_api_key" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"name":"My dApp Key","description":"Execute-only key for group 1","can_create_groups":false,"can_delete_groups":false,"can_create_pkps":false,"manage_ipfs_ids_in_groups":[],"add_pkp_to_groups":[],"remove_pkp_from_groups":[],"execute_in_groups":[1]}'
@@ -108,7 +108,7 @@ Request a new wallet (PKP) for the account. The server returns the wallet addres
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s "http://localhost:8000/core/v1/create_wallet" \
+    curl -s "https://api.chipotle.litprotocol.com/core/v1/create_wallet" \
       -H "X-Api-Key: KEY"
     ```
   </Tab>
@@ -153,20 +153,20 @@ Create a group (with optional permitted actions and PKPs). Then add an action (I
   <Tab title="cURL">
     ```bash
     # Create group
-    curl -s -X POST "http://localhost:8000/core/v1/add_group" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/add_group" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"group_name":"My Group","group_description":"","pkp_ids_permitted":[],"cid_hashes_permitted":[]}'
     # Response: {"success":true,"group_id":"1"}
 
     # Register action metadata (replace IPFS_CID)
-    curl -s -X POST "http://localhost:8000/core/v1/add_action" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/add_action" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"action_ipfs_cid":"QmYourIpfsCidHere","name":"My Action","description":""}'
 
     # Add action to group (replace GROUP_ID and IPFS_CID)
-    curl -s -X POST "http://localhost:8000/core/v1/add_action_to_group" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/add_action_to_group" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"group_id":"GROUP_ID","action_ipfs_cid":"QmYourIpfsCidHere"}'
@@ -190,7 +190,7 @@ Restrict which wallets (PKPs) can be used in the group by adding their public ke
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s -X POST "http://localhost:8000/core/v1/add_pkp_to_group" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/add_pkp_to_group" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"group_id":"GROUP_ID","pkp_id":"YOUR_PKP_ID"}'
@@ -222,7 +222,7 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
   <Tab title="cURL">
     ```bash
     # Replace KEY with account or usage API key. Include the code and js_params in the request body.
-    curl -s -X POST "http://localhost:8000/core/v1/lit_action" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/lit_action" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"code":"async function main() { return \"hello\"; }","js_params":null}'
@@ -266,7 +266,7 @@ Register a standalone action entry (IPFS CID, name, and description). The CID is
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s -X POST "http://localhost:8000/core/v1/add_action" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/add_action" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"action_ipfs_cid":"QmYourIpfsCidHere","name":"Price Oracle","description":"Fetches and signs ETH/USD price"}'
@@ -291,7 +291,7 @@ Permanently remove a usage API key from the account. Any clients using this key 
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s -X POST "http://localhost:8000/core/v1/remove_usage_api_key" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/remove_usage_api_key" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"usage_api_key":"the-key-to-remove"}'
@@ -325,7 +325,7 @@ Replace all permissions on an existing usage API key. This is a full overwrite â
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s -X POST "http://localhost:8000/core/v1/update_usage_api_key" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/update_usage_api_key" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"usage_api_key":"the-key-to-update","name":"Updated Key","description":"Now also has PKP-create permission","can_create_groups":false,"can_delete_groups":false,"can_create_pkps":true,"manage_ipfs_ids_in_groups":[],"add_pkp_to_groups":[],"remove_pkp_from_groups":[],"execute_in_groups":[1]}'
@@ -352,7 +352,7 @@ Update only the name and description of a usage API key without changing its per
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s -X POST "http://localhost:8000/core/v1/update_usage_api_key_metadata" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/update_usage_api_key_metadata" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"usage_api_key":"the-key-to-update","name":"Renamed Key","description":"New description"}'
@@ -379,7 +379,7 @@ Update the name and description of a registered action. The action is identified
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s -X POST "http://localhost:8000/core/v1/update_action_metadata" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/update_action_metadata" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"hashed_cid":"0xabc123...","name":"Updated Action Name","description":"Updated description"}'
