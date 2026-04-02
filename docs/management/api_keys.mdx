@@ -87,7 +87,7 @@ Returns the new key once in the response (`usage_api_key`). Permissions are set 
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s -X POST "https://api.dev.litprotocol.com/core/v1/add_usage_api_key" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/add_usage_api_key" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: YOUR_ACCOUNT_KEY" \
       -d '{
@@ -142,7 +142,7 @@ Returns a paginated list of usage keys on the account. The key value itself is n
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s "https://api.dev.litprotocol.com/core/v1/list_api_keys?page_number=0&page_size=20" \
+    curl -s "https://api.chipotle.litprotocol.com/core/v1/list_api_keys?page_number=0&page_size=20" \
       -H "X-Api-Key: YOUR_ACCOUNT_KEY"
     ```
   </Tab>
@@ -174,7 +174,7 @@ Replaces all permissions on an existing usage key. Pass the usage key value (not
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s -X POST "https://api.dev.litprotocol.com/core/v1/update_usage_api_key" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/update_usage_api_key" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: YOUR_ACCOUNT_KEY" \
       -d '{
@@ -212,7 +212,7 @@ Updates only the name and description without touching permissions.
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s -X POST "https://api.dev.litprotocol.com/core/v1/update_usage_api_key_metadata" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/update_usage_api_key_metadata" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: YOUR_ACCOUNT_KEY" \
       -d '{
@@ -241,7 +241,7 @@ Permanently removes a usage key. Pass the key value (not an ID) in the request b
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s -X POST "https://api.dev.litprotocol.com/core/v1/remove_usage_api_key" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/remove_usage_api_key" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: YOUR_ACCOUNT_KEY" \
       -d '{"usage_api_key": "THE_USAGE_KEY_VALUE"}'
