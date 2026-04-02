@@ -31,7 +31,7 @@ Create a new account (returns API key and wallet address). Or verify an existing
     ```javascript
     import { createClient } from './core_sdk.js';
     
-    const client = createClient('https://api.dev.litprotocol.com');
+    const client = createClient('https://api.chipotle.litprotocol.com');
     
     // New account
     const res = await client.newAccount({
@@ -391,13 +391,13 @@ Update the name and description of a registered action. The action is identified
 
 Both request/response shapes and OpenAPI spec are available directly in the dev system. For a Swagger UI implementation of the OpenAPI spec, please browse to:\
 \
-https://api.dev.litprotocol.com/swagger-ui/
+https://api.chipotle.litprotocol.com/core/v1/swagger-ui
 
 
 ### Open API Specification
 
 The OpenAPI spec itself can be found at:\
 \
-[https://api.dev.litprotocol.com/core/v1/openapi.json](https://api.dev.litprotocol.com/core/v1/openapi.json)
+[https://api.chipotle.litprotocol.com/core/v1/openapi.json](https://api.chipotle.litprotocol.com/core/v1/openapi.json)
 
 Note that these specs are subject to minor changes and will always be available with the dev server endpoints.
