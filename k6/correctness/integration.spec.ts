@@ -244,8 +244,9 @@ export default function (data: IntegrationSetupData) {
       }
     },
   }, "listActions");
-  const listActionsBody = JSON.parse(listActionsRes.response.body as string) as { id: string }[];
-  const hashedCid = listActionsBody[0]?.id ?? "";
+  const listActionsBody = JSON.parse(listActionsRes.response.body as string) as { id: string; name: string }[];
+  const actionItem = listActionsBody.find((a) => a.name === "hello-world");
+  const hashedCid = actionItem?.id ?? "";
   // ── 10. addPkpToGroup ─────────────────────────────────────────────────────
   const addPkpRes = client.addPkpToGroup(
     { group_id: parseInt(groupId), pkp_id: walletAddress },

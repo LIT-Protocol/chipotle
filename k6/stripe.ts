@@ -15,6 +15,7 @@ import type {
 import { assertOk } from "./helpers.ts";
 
 const TOPUP_AMOUNT_CENTS = 1000; // $10.00
+const IS_PROD = __ENV.K6_ENV === "prod";
 
 /**
  * Minimum credit balance (in cents) below which we top up.
@@ -59,6 +60,11 @@ export function topUpAccount(
   authHeaders: { "X-Api-Key": string },
   amountCents: number = TOPUP_AMOUNT_CENTS,
 ): boolean {
+  if (IS_PROD) {
+    console.warn("stripe: top-up disabled in prod — accounts must be pre-funded");
+    return false;
+  }
+
   const pk = getPublishableKey(client);
   if (!pk) {
     console.warn("stripe: billing not enabled on server — skipping top-up");
@@ -153,6 +159,13 @@ export function ensureAccountCredits(
   const credits = getAccountCredits(client, authHeaders);
   if (credits >= minCreditsCents) {
     return true;
+  }
+
+  if (IS_PROD) {
+    console.warn(
+      `stripe: account has ${credits} cents but needs ${minCreditsCents} — top-up disabled in prod`,
+    );
+    return false;
   }
 
   // Top up enough to reach the desired minimum.

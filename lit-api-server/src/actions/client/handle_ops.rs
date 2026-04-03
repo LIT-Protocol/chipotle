@@ -1,9 +1,12 @@
 use super::op_code_helpers;
 use anyhow::{Result, bail};
 use lit_actions_grpc::proto::*;
-use tracing::instrument;
+use tracing::{instrument, warn};
 
 use super::Client;
+
+/// How many seconds of execution to accumulate before flushing a charge to Stripe.
+const BILLING_FLUSH_INTERVAL_SECS: u64 = 5;
 
 impl Client {
     #[instrument(level = "debug", skip(self, op), err)]
@@ -139,12 +142,46 @@ impl Client {
                 tick: _,
                 used_kb: _,
             }) => {
-                // // For now, we'll just return a success response
-                // let r = self
-                //     .dynamic_payment
-                //     .add(LitActionPriceComponent::MemoryUsage, used_kb as u64);
-                // let cancel_action = r.is_err();
-                let cancel_action = false;
+                let cancel_action = if let Some(ref stripe) = self.stripe_state {
+                    // Use wall-clock time from execution_start (set before execution begins)
+                    // instead of the gRPC `tick` field, which reports near-zero.
+                    let current_second = self
+                        .state
+                        .execution_start
+                        .map(|s| s.elapsed().as_secs())
+                        .unwrap_or(0);
+                    let new_seconds = current_second.saturating_sub(self.state.last_billed_second);
+
+                    if new_seconds > 0 {
+                        self.state.unbilled_seconds += new_seconds;
+                        self.state.last_billed_second = current_second;
+                    }
+
+                    // Flush to Stripe every BILLING_FLUSH_INTERVAL_SECS accumulated seconds
+                    if self.state.unbilled_seconds >= BILLING_FLUSH_INTERVAL_SECS {
+                        match crate::stripe::charge_lit_action_time(
+                            &self.api_key,
+                            self.state.unbilled_seconds,
+                            stripe,
+                        )
+                        .await
+                        {
+                            Ok(()) => {
+                                self.state.unbilled_seconds = 0;
+                                false
+                            }
+                            Err(e) => {
+                                warn!("Per-second billing failed, cancelling action: {e}");
+                                self.state.unbilled_seconds = 0;
+                                true
+                            }
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                };
                 UpdateResourceUsageResponse { cancel_action }.into()
             }
             UnionResponse::Result(_) => unreachable!(), // handled in main loop
