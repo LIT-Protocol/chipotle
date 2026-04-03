@@ -2,7 +2,7 @@
  * Groups — CRUD, table rendering, multi-select builders.
  */
 
-import { getApiKey, getClient, getGroupsStore, setGroupsStore, getWalletsStore, getActionsStore, setStat, updateStatCards, LIST_PAGE_SIZE } from './auth.js';
+import { getEffectiveApiKey, getClient, getGroupsStore, setGroupsStore, getWalletsStore, getActionsStore, setStat, updateStatCards, LIST_PAGE_SIZE } from './auth.js';
 import { escapeHtml, showStatus, hideStatus, showActionProgress, closeActionProgress, openModal, closeModal, confirmDelete, formatError, logError, ICON_PENCIL, ICON_TRASH } from './ui-utils.js';
 
 // ----- Multi-select builders -----
@@ -139,7 +139,7 @@ export function renderGroupsTable(items) {
 // ----- Load -----
 
 export async function loadGroups() {
-  const apiKey = getApiKey();
+  const apiKey = getEffectiveApiKey();
   if (!apiKey) return;
   hideStatus('groups-status');
   const btn = document.getElementById('btn-load-groups');
@@ -168,7 +168,7 @@ async function confirmAndRemoveGroup(item) {
   const msg = 'Delete group "' + label + '"? This cannot be undone.';
   const confirmed = await confirmDelete(msg);
   if (!confirmed) return;
-  const apiKey = getApiKey();
+  const apiKey = getEffectiveApiKey();
   if (!apiKey) return;
   hideStatus('groups-status');
   try {
@@ -229,7 +229,7 @@ function openGroupModal(item = null) {
     const desc = document.getElementById(descId).value.trim();
     const pkpIdsPermitted = getSelectedStringValues('modal-group-pkp-ids');
     const cidHashesPermitted = getSelectedStringValues('modal-group-cid-hashes');
-    const apiKey = getApiKey();
+    const apiKey = getEffectiveApiKey();
     if (!apiKey) {
       showStatus('groups-status', 'Log in first.', 'error');
       return;

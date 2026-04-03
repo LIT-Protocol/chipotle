@@ -2,7 +2,7 @@
  * Usage API Keys — table rendering, CRUD, permission summary.
  */
 
-import { getApiKey, getClient, getUsageKeysStore, setUsageKeysStore, getGroupsStore, setStat, updateStatCards, maskApiKey, LIST_PAGE_SIZE } from './auth.js';
+import { getEffectiveApiKey, getClient, getUsageKeysStore, setUsageKeysStore, getGroupsStore, setStat, updateStatCards, maskApiKey, LIST_PAGE_SIZE } from './auth.js';
 import { escapeHtml, showStatus, hideStatus, showActionProgress, closeActionProgress, openModal, closeModal, confirmDelete, copyToClipboard, formatError, logError, ICON_PENCIL, ICON_TRASH, ICON_COPY } from './ui-utils.js';
 import { buildGroupMultiSelect, attachGroupMultiSelectLogic, updateMultiSelectSummary, getSelectedGroupIds } from './groups.js';
 
@@ -109,7 +109,7 @@ export function renderUsageKeysTable() {
 // ----- Load -----
 
 export async function loadUsageKeys() {
-  const apiKey = getApiKey();
+  const apiKey = getEffectiveApiKey();
   if (!apiKey) return [];
   hideStatus('overview-status-usage-keys');
   const btn = document.getElementById('btn-load-usage-keys');
@@ -206,7 +206,7 @@ function openUsageKeyModal(item = null) {
   document.getElementById('modal-save-btn').addEventListener('click', async () => {
     const name = document.getElementById('modal-usage-name').value.trim() || 'Usage Key';
     const description = document.getElementById('modal-usage-desc').value.trim() || '';
-    const apiKey = getApiKey();
+    const apiKey = getEffectiveApiKey();
     if (!apiKey) {
       showStatus('overview-status-usage-keys', 'Log in first.', 'error');
       return;
@@ -305,7 +305,7 @@ async function confirmAndRemoveUsageKey(item) {
   const msg = 'Remove usage API key "' + escapeHtml(masked) + '" from this account? This cannot be undone.';
   const confirmed = await confirmDelete(msg);
   if (!confirmed) return;
-  const apiKey = getApiKey();
+  const apiKey = getEffectiveApiKey();
   if (!apiKey) return;
   hideStatus('overview-status-usage-keys');
   try {

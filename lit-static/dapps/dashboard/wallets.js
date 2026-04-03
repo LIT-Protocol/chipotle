@@ -2,7 +2,7 @@
  * Wallets — table rendering, CRUD.
  */
 
-import { getApiKey, getClient, getWalletsStore, setWalletsStore, setStat, updateStatCards, LIST_PAGE_SIZE } from './auth.js';
+import { getEffectiveApiKey, getClient, getWalletsStore, setWalletsStore, setStat, updateStatCards, LIST_PAGE_SIZE } from './auth.js';
 import { escapeHtml, showStatus, hideStatus, showActionProgress, closeActionProgress, openModal, closeModal, copyToClipboard, formatError, logError } from './ui-utils.js';
 
 // ----- Table rendering -----
@@ -41,7 +41,7 @@ export function renderWalletsTable(items) {
 // ----- Load -----
 
 export async function loadWallets() {
-  const apiKey = getApiKey();
+  const apiKey = getEffectiveApiKey();
   if (!apiKey) return;
   hideStatus('wallets-status');
   const btn = document.getElementById('btn-load-wallets');
@@ -74,7 +74,7 @@ function openAddWalletModal() {
   openModal('Create wallet', body, footer);
   document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
   document.getElementById('modal-add-btn').addEventListener('click', async () => {
-    const apiKey = getApiKey();
+    const apiKey = getEffectiveApiKey();
     if (!apiKey) return;
     const addBtn = document.getElementById('modal-add-btn');
     if (addBtn) addBtn.disabled = true;

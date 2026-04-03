@@ -2,7 +2,7 @@
  * Action Runner — CodeJar editor, execute Lit Actions, get IPFS CID.
  */
 
-import { getApiKey, getClient, getBaseUrl } from './auth.js';
+import { getApiKey, getEffectiveApiKey, getClient, getBaseUrl } from './auth.js';
 import { hideStatus, formatError, logError } from './ui-utils.js';
 
 let _codeJarEditor = null;
@@ -45,7 +45,7 @@ export async function initActionRunner() {
     const accountKey = getApiKey();
     const usageKeyEl = document.getElementById('action-runner-usage-key');
     const usageKey = usageKeyEl?.value?.trim() ?? '';
-    const apiKey = usageKey || accountKey;
+    const apiKey = usageKey || getEffectiveApiKey();
     const code = (getCode ? getCode() : (codeEl?.textContent ?? '')).trim();
     const paramsRaw = (getParams ? getParams() : (paramsEl?.textContent ?? '')).trim();
 

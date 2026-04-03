@@ -3,8 +3,8 @@
  * Imports all feature modules and orchestrates initialization.
  */
 
-import { getApiKey, setTheme, getTheme, setApiKey, setOnAuthReady, updateStatCards, initLogin } from './auth.js';
-import { initModalClose, initConfirmClose, showStatus, logError } from './ui-utils.js';
+import { getApiKey, setTheme, getTheme, setApiKey, setOnAuthReady, updateStatCards, initLogin, setUsageKeyOverride, toggleOverrideEnabled, updateUsageKeyOverrideUI, clearOverrideState } from './auth.js';
+import { initModalClose, initConfirmClose, showStatus, hideStatus, logError } from './ui-utils.js';
 import { initBilling, loadBillingBalance } from './billing.js';
 import { initGroups, loadGroups } from './groups.js';
 import { initKeys, loadUsageKeys } from './keys.js';
@@ -28,6 +28,36 @@ async function preloadAllTables() {
     failures.forEach((f) => logError('preload', f.reason));
     showStatus('login-status', 'Some data failed to load. Check individual sections for details.', 'error');
   }
+}
+
+// ----- Usage key override UI -----
+
+function initUsageKeyOverride() {
+  const overrideInput = document.getElementById('usage-key-override-input');
+  const applyBtn = document.getElementById('usage-key-override-apply');
+  const clearBtn = document.getElementById('usage-key-override-clear');
+  if (applyBtn) {
+    applyBtn.addEventListener('click', () => {
+      const val = (overrideInput?.value || '').trim();
+      if (!val) {
+        showStatus('overview-status', 'Enter a usage API key to apply.', 'error');
+        return;
+      }
+      setUsageKeyOverride(val);
+      hideStatus('overview-status');
+      showStatus('overview-status', 'Usage API key override applied. All dashboard operations will now use this key.', 'success');
+      preloadAllTables();
+    });
+  }
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      setUsageKeyOverride('');
+      hideStatus('overview-status');
+      showStatus('overview-status', 'Usage API key override cleared. Using account API key.', 'success');
+      preloadAllTables();
+    });
+  }
+  updateUsageKeyOverrideUI();
 }
 
 // ----- Sidebar scroll -----
@@ -98,11 +128,21 @@ function initHeader() {
     if (dropdown && !dropdown.contains(e.target)) closeAccountDropdown();
   });
 
+  const toggleOverrideBtn = document.getElementById('toggle-usage-override-btn');
+  if (toggleOverrideBtn) {
+    toggleOverrideBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAccountDropdown();
+      toggleOverrideEnabled();
+    });
+  }
+
   const signoutBtn = document.getElementById('account-signout-btn');
   if (signoutBtn) {
     signoutBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       closeAccountDropdown();
+      clearOverrideState();
       setApiKey('');
     });
   }
@@ -114,6 +154,7 @@ setOnAuthReady(() => {
   updateStatCards();
   preloadAllTables();
   loadBillingBalance();
+  updateUsageKeyOverrideUI();
 });
 
 // ----- Init -----
@@ -131,6 +172,7 @@ function init() {
   initSidebar();
   initHeader();
   initBilling();
+  initUsageKeyOverride();
 }
 
 init();

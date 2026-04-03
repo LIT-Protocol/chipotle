@@ -2,7 +2,7 @@
  * IPFS Actions — table rendering, CRUD.
  */
 
-import { getApiKey, getClient, getActionsStore, setActionsStore, setStat, updateStatCards, LIST_PAGE_SIZE } from './auth.js';
+import { getEffectiveApiKey, getClient, getActionsStore, setActionsStore, setStat, updateStatCards, LIST_PAGE_SIZE } from './auth.js';
 import { escapeHtml, showStatus, hideStatus, showActionProgress, closeActionProgress, openModal, closeModal, confirmDelete, formatError, logError, ICON_PENCIL, ICON_TRASH } from './ui-utils.js';
 
 // ----- Table rendering -----
@@ -47,7 +47,7 @@ export function renderActionsTable(items) {
 // ----- Load -----
 
 export async function loadActions() {
-  const apiKey = getApiKey();
+  const apiKey = getEffectiveApiKey();
   if (!apiKey) return;
   hideStatus('actions-status');
   const btn = document.getElementById('btn-load-actions');
@@ -85,7 +85,7 @@ function openAddActionModal() {
     const cid = document.getElementById('modal-action-cid').value.trim();
     const name = document.getElementById('modal-action-name').value.trim() || undefined;
     const desc = document.getElementById('modal-action-desc').value.trim() || undefined;
-    const apiKey = getApiKey();
+    const apiKey = getEffectiveApiKey();
     if (!apiKey || !cid) {
       showStatus('actions-status', 'Fill in the IPFS CID.', 'error');
       return;
@@ -123,7 +123,7 @@ function openEditActionModal(item) {
   document.getElementById('modal-save-btn').addEventListener('click', async () => {
     const name = document.getElementById('modal-edit-action-name').value.trim();
     const desc = document.getElementById('modal-edit-action-desc').value.trim();
-    const apiKey = getApiKey();
+    const apiKey = getEffectiveApiKey();
     if (!apiKey || !cid || !name) {
       showStatus('actions-status', 'Fill Name.', 'error');
       return;
@@ -153,7 +153,7 @@ async function confirmAndRemoveAction(item) {
   const msg = 'Delete action "' + escapeHtml(name) + '"? This cannot be undone.';
   const confirmed = await confirmDelete(msg);
   if (!confirmed) return;
-  const apiKey = getApiKey();
+  const apiKey = getEffectiveApiKey();
   if (!apiKey) return;
   hideStatus('actions-status');
   try {

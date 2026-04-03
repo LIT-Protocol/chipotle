@@ -6,6 +6,8 @@ import { showStatus, hideStatus, formatError, logError, showActionProgress, clos
 
 const STORAGE_KEY_API = 'accountconfig_api_key';
 const STORAGE_KEY_THEME = 'accountconfig_theme';
+const STORAGE_KEY_USAGE_OVERRIDE = 'accountconfig_usage_key_override';
+const STORAGE_KEY_OVERRIDE_ENABLED = 'accountconfig_usage_override_enabled';
 export const LIST_PAGE_SIZE = '20';
 
 // ----- API key session -----
@@ -18,6 +20,60 @@ export function setApiKey(v) {
   if (v) sessionStorage.setItem(STORAGE_KEY_API, v);
   else sessionStorage.removeItem(STORAGE_KEY_API);
   updateAuthUI();
+}
+
+/** Returns the usage API key override if set, otherwise the account API key. */
+export function getEffectiveApiKey() {
+  return sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE) || getApiKey();
+}
+
+export function setUsageKeyOverride(v) {
+  if (v) sessionStorage.setItem(STORAGE_KEY_USAGE_OVERRIDE, v);
+  else sessionStorage.removeItem(STORAGE_KEY_USAGE_OVERRIDE);
+  updateUsageKeyOverrideUI();
+}
+
+export function isOverrideEnabled() {
+  return sessionStorage.getItem(STORAGE_KEY_OVERRIDE_ENABLED) === 'true';
+}
+
+export function toggleOverrideEnabled() {
+  const next = !isOverrideEnabled();
+  if (next) {
+    sessionStorage.setItem(STORAGE_KEY_OVERRIDE_ENABLED, 'true');
+  } else {
+    sessionStorage.removeItem(STORAGE_KEY_OVERRIDE_ENABLED);
+    setUsageKeyOverride('');
+  }
+  updateUsageKeyOverrideUI();
+}
+
+export function updateUsageKeyOverrideUI() {
+  const card = document.getElementById('usage-key-override-card');
+  const badge = document.getElementById('usage-key-override-badge');
+  const input = document.getElementById('usage-key-override-input');
+  const clearBtn = document.getElementById('usage-key-override-clear');
+  const balanceEl = document.getElementById('billing-balance-display');
+  const addFundsBtn = document.getElementById('btn-add-funds');
+  const toggleBtn = document.getElementById('toggle-usage-override-btn');
+  const enabled = isOverrideEnabled();
+  const hasOverride = !!sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE);
+  if (card) card.style.display = enabled ? '' : 'none';
+  if (badge) {
+    badge.style.display = hasOverride ? '' : 'none';
+    if (hasOverride) badge.textContent = 'Using Key: ' + sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE).substring(0, 6) + '\u2026';
+  }
+  if (input) input.value = sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE) || '';
+  if (clearBtn) clearBtn.style.display = hasOverride ? '' : 'none';
+  if (toggleBtn) toggleBtn.textContent = enabled ? '\u2713 Usage Key Override' : 'Usage Key Override';
+  const showBilling = !!getApiKey() && !hasOverride;
+  if (balanceEl) balanceEl.style.display = showBilling ? '' : 'none';
+  if (addFundsBtn) addFundsBtn.style.display = showBilling ? '' : 'none';
+}
+
+export function clearOverrideState() {
+  sessionStorage.removeItem(STORAGE_KEY_OVERRIDE_ENABLED);
+  setUsageKeyOverride('');
 }
 
 // ----- Base URL -----
@@ -38,7 +94,19 @@ export async function getClient() {
   if (_clientInstance && _clientBaseUrl === baseUrl) return _clientInstance;
   try {
     const { createClient } = await import('../../core_sdk.js');
-    _clientInstance = createClient(baseUrl);
+    const client = createClient(baseUrl);
+    _clientInstance = new Proxy(client, {
+      get(target, prop) {
+        const val = target[prop];
+        if (typeof val !== 'function') return val;
+        return function (...args) {
+          const apiKey = (args[0] && typeof args[0] === 'object' && args[0].apiKey) || args[0];
+          const keyPreview = typeof apiKey === 'string' ? apiKey.substring(0, 6) + '\u2026' : '(none)';
+          console.log(`[dashboard] ${prop} \u2192 ${baseUrl} | key: ${keyPreview}`);
+          return val.apply(target, args);
+        };
+      },
+    });
     _clientBaseUrl = baseUrl;
     return _clientInstance;
   } catch (e) {
