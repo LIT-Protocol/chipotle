@@ -18,6 +18,20 @@ impl Client {
         // NOTE: Do not log `op` here — response variants (GetPrivateKeyResponse,
         // GetLitActionPrivateKeyResponse, AesDecryptResponse) carry secret material.
         self.state.ops_count += 1;
+        let op_type = match &op {
+            UnionResponse::SetResponse(_) => "SetResponse",
+            UnionResponse::Print(_) => "Print",
+            UnionResponse::IncrementFetchCount(_) => "IncrementFetchCount",
+            UnionResponse::AesEncrypt(_) => "AesEncrypt",
+            UnionResponse::AesDecrypt(_) => "AesDecrypt",
+            UnionResponse::GetPrivateKey(_) => "GetPrivateKey",
+            UnionResponse::GetLitActionPrivateKey(_) => "GetLitActionPrivateKey",
+            UnionResponse::GetLitActionPublicKey(_) => "GetLitActionPublicKey",
+            UnionResponse::GetLitActionWalletAddress(_) => "GetLitActionWalletAddress",
+            UnionResponse::UpdateResourceUsage(_) => "UpdateResourceUsage",
+            UnionResponse::Result(_) => "Result",
+        };
+        tracing::debug!(op_type, ops_count = self.state.ops_count, "handle_op");
 
         Ok(match op {
             UnionResponse::SetResponse(SetResponseRequest { response }) => {

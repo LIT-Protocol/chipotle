@@ -1,8 +1,10 @@
 use crate::utils::parse_with_hash::{ipfs_cid_to_u256, wallet_string_to_h160};
 use anyhow::Result;
+use tracing::instrument;
 pub mod encryption;
 pub mod private_keys;
 
+#[instrument(name = "op::can_use_wallet_in_action", level = "debug", skip(api_key), err)]
 pub async fn can_use_wallet_in_action(
     api_key: &str,
     ipfs_id: &str,
@@ -17,6 +19,7 @@ pub async fn can_use_wallet_in_action(
     Ok(can_use)
 }
 
+#[instrument(name = "op::can_use_wallet_in_action_cached", level = "debug", skip(state, api_key), fields(cache_hit), err)]
 pub async fn can_use_wallet_in_action_cached(
     state: &mut crate::actions::client::models::ExecutionState,
     api_key: &str,
@@ -24,8 +27,10 @@ pub async fn can_use_wallet_in_action_cached(
     wallet_address: &str,
 ) -> Result<bool> {
     if let Some(&cached) = state.wallet_permission_cache.get(wallet_address) {
+        tracing::Span::current().record("cache_hit", true);
         return Ok(cached);
     }
+    tracing::Span::current().record("cache_hit", false);
     let result = can_use_wallet_in_action(api_key, ipfs_id, wallet_address).await?;
     state
         .wallet_permission_cache
