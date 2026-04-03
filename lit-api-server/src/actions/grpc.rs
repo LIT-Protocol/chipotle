@@ -39,7 +39,11 @@ where
         Fut: Future<Output = anyhow::Result<C>> + Send,
         F: FnOnce() -> Fut + Send,
     {
-        let span = tracing::debug_span!("grpc_pool::create_or_get_connection", addr, reused = tracing::field::Empty);
+        let span = tracing::debug_span!(
+            "grpc_pool::create_or_get_connection",
+            addr,
+            reused = tracing::field::Empty
+        );
         let _guard = span.enter();
         loop {
             tracing::debug!("Connecting to address: {}", addr);

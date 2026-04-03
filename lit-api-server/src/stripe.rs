@@ -185,7 +185,10 @@ pub async fn resolve_wallet_address(api_key: &str, state: &StripeState) -> Resul
         })
         .await
         .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e}"));
-    tracing::debug!(success = result.is_ok(), "stripe::resolve_wallet_address: done");
+    tracing::debug!(
+        success = result.is_ok(),
+        "stripe::resolve_wallet_address: done"
+    );
     result
 }
 
@@ -198,7 +201,10 @@ pub async fn resolve_wallet_address(api_key: &str, state: &StripeState) -> Resul
 /// Uses `try_get_with` to coalesce concurrent requests for the same wallet,
 /// preventing duplicate Stripe customer creation under concurrent load.
 pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -> Result<String> {
-    tracing::debug!(wallet_address, "stripe::get_customer_by_wallet: looking up customer");
+    tracing::debug!(
+        wallet_address,
+        "stripe::get_customer_by_wallet: looking up customer"
+    );
     let state = state.clone();
     let wallet = wallet_address.to_string();
     state

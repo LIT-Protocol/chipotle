@@ -20,7 +20,7 @@ use rocket::serde::json::Json;
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use tracing::{instrument, Instrument};
+use tracing::{Instrument, instrument};
 
 #[allow(clippy::too_many_arguments)]
 #[instrument(name = "core_features::lit_action", level = "debug", skip_all, err)]
