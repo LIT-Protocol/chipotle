@@ -11,7 +11,7 @@ The same workflows can be done via the REST API. The API itself is under `/core/
 - `X-Api-Key: your-api-key`
 - or `Authorization: Bearer your-api-key`
 
-Examples below assume `KEY=your_account_or_usage_api_key`. cURL snippets use `BASE=http://localhost:8000` (local dev node) and JavaScript snippets use `BASE=https://api.dev.litprotocol.com` (hosted dev API); change the `BASE` value if you want to target the other environment. The JavaScript examples use the Core SDK (`LitNodeSimpleApiClient`) from `core_sdk.js`.
+Examples below assume `KEY=your_account_or_usage_api_key`. cURL snippets use `BASE=https://api.chipotle.litprotocol.com` (hosted production API) and JavaScript snippets use `BASE=https://api.dev.litprotocol.com` (hosted dev API); change the `BASE` value if you want to target the other environment. The JavaScript examples use the Core SDK (`LitNodeSimpleApiClient`) from `core_sdk.js`.
 
 **API workflow:**
 
@@ -32,7 +32,7 @@ Create a new account (returns API key and wallet address). Or verify an existing
     ```javascript
     import { createClient } from './core_sdk.js';
 
-    const client = createClient('https://api.dev.litprotocol.com');
+    const client = createClient('https://api.chipotle.litprotocol.com');
 
     // New account
     const res = await client.newAccount({
@@ -52,12 +52,12 @@ Create a new account (returns API key and wallet address). Or verify an existing
   <Tab title="cURL">
     ```bash
     # New account
-    curl -s -X POST "https://api.dev.litprotocol.com/core/v1/new_account" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/new_account" \
       -H "Content-Type: application/json" \
       -d '{"account_name":"My App","account_description":"Optional","email":"optional@example.com"}'
 
     # Verify account (replace KEY with your API key)
-    curl -s "http://localhost:8000/core/v1/account_exists" \
+    curl -s "https://api.chipotle.litprotocol.com/core/v1/account_exists" \
       -H "X-Api-Key: KEY"
     ```
   </Tab>
@@ -87,7 +87,7 @@ Create a usage API key with fine-grained permissions. The response includes the 
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s -X POST "http://localhost:8000/core/v1/add_usage_api_key" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/add_usage_api_key" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{
@@ -130,7 +130,7 @@ Request a new wallet (PKP) for the account. The server returns the wallet addres
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s "http://localhost:8000/core/v1/create_wallet" \
+    curl -s "https://api.chipotle.litprotocol.com/core/v1/create_wallet" \
       -H "X-Api-Key: KEY"
     ```
   </Tab>
@@ -167,7 +167,7 @@ Create a group, then add an action (IPFS CID) to scope which keys can run it.
   <Tab title="cURL">
     ```bash
     # Create group
-    curl -s -X POST "http://localhost:8000/core/v1/add_group" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/add_group" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{
@@ -179,7 +179,7 @@ Create a group, then add an action (IPFS CID) to scope which keys can run it.
     # Response: {"success":true,"group_id":"1"}
 
     # Add action to group (use group_id from the response above)
-    curl -s -X POST "http://localhost:8000/core/v1/add_action_to_group" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/add_action_to_group" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"group_id": 1, "action_ipfs_cid": "QmYourIpfsCidHere"}'
@@ -203,7 +203,7 @@ Restrict which wallets (PKPs) can be used in the group by adding their IDs to th
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s -X POST "http://localhost:8000/core/v1/add_pkp_to_group" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/add_pkp_to_group" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"group_id": 1, "pkp_id": "YOUR_PKP_ID"}'
@@ -234,7 +234,7 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
   </Tab>
   <Tab title="cURL">
     ```bash
-    curl -s -X POST "http://localhost:8000/core/v1/lit_action" \
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/lit_action" \
       -H "Content-Type: application/json" \
       -H "X-Api-Key: KEY" \
       -d '{"code":"async function main() { return \"hello\"; }","js_params":null}'
@@ -284,13 +284,13 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
 
 Both request/response shapes and OpenAPI spec are available directly in the dev system. For a Swagger UI implementation of the OpenAPI spec, please browse to:\
 \
-https://api.dev.litprotocol.com/swagger-ui/
+https://api.chipotle.litprotocol.com/core/v1/swagger-ui
 
 
 ### Open API Specification
 
 The OpenAPI spec itself can be found at:\
 \
-[https://api.dev.litprotocol.com/core/v1/openapi.json](https://api.dev.litprotocol.com/core/v1/openapi.json)
+[https://api.chipotle.litprotocol.com/core/v1/openapi.json](https://api.chipotle.litprotocol.com/core/v1/openapi.json)
 
 Note that these specs are subject to minor changes and will always be available with the dev server endpoints.

@@ -70,12 +70,7 @@
     "dark": "/logo/dark.svg"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "https://developer.litprotocol.com/support/intro"
-      }
-    ]
+    "links": []
   },
   "contextual": {
     "options": [
