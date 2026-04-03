@@ -32,7 +32,7 @@ struct Args {
         long,
         env = "LIT_STRICT_IMPORTS",
         default_value = "true",
-        help = "Reject CDN modules not present in the integrity manifest"
+        help = "Require CDN modules to be in the integrity manifest. Without --integrity-lock, unknown modules are rejected. With --integrity-lock, unknown modules are verified via TOFU and auto-pinned."
     )]
     strict_imports: bool,
 }
@@ -51,7 +51,9 @@ fn main() -> anyhow::Result<()> {
 
     // Load integrity manifest for CDN module verification
     let integrity_manifest = if let Some(path) = &args.integrity_lock {
-        let contents = std::fs::read_to_string(path).expect("failed to read integrity.lock file");
+        let contents = std::fs::read_to_string(path).map_err(|e| {
+            anyhow::anyhow!("Failed to read integrity.lock at {}: {e}", path.display())
+        })?;
         let manifest = CdnModuleLoader::parse_integrity_lock(&contents);
         info!(
             "Loaded integrity manifest with {} entries from {:?}",

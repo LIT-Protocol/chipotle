@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use base64::Engine;
+use deno_core::error::ModuleLoaderError;
 use deno_core::{
     ModuleLoadResponse, ModuleLoader, ModuleSource, ModuleSourceCode, ModuleSpecifier, ModuleType,
     RequestedModuleType, ResolutionKind,
@@ -31,11 +32,12 @@ const ALLOWED_CDN_PREFIX: &str = "https://cdn.jsdelivr.net/";
 /// Maximum response body size (10 MB).
 const MAX_MODULE_SIZE_BYTES: usize = 10 * 1024 * 1024;
 
+/// Maximum total cached bytes before evicting oldest entries (100 MB).
+const MAX_CACHE_BYTES: usize = 100 * 1024 * 1024;
+
 /// HTTP request timeout.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// A module loader that only allows imports from approved CDN URLs
-/// and verifies each module's SHA-384 integrity hash against a manifest.
 /// Thread-safe cache for fetched and integrity-verified module sources.
 pub type ModuleCache = Arc<RwLock<HashMap<String, Vec<u8>>>>;
 
@@ -45,8 +47,10 @@ pub struct CdnModuleLoader {
     /// If true (production), reject any module not present in the integrity manifest.
     strict: bool,
     /// Reusable HTTP client with timeouts and redirect policy.
-    client: reqwest::Client,
+    /// Shared across all loader instances to enable connection pooling.
+    client: Arc<reqwest::Client>,
     /// Cache of fetched module sources, shared across loader instances.
+    /// Bounded by MAX_CACHE_BYTES; oldest entries evicted when full.
     cache: ModuleCache,
     /// Path to integrity.lock file on disk. When set, enables trust-on-first-use:
     /// new modules are double-fetched, verified, and pinned to the lockfile.
@@ -64,27 +68,35 @@ impl CdnModuleLoader {
             strict,
             Arc::new(RwLock::new(HashMap::new())),
             None,
+            None,
         )
     }
 
-    /// Create a new `CdnModuleLoader` with a shared cache and optional lockfile path.
+    /// Build the default HTTP client with security-hardened settings.
+    pub fn build_http_client() -> Arc<reqwest::Client> {
+        Arc::new(
+            reqwest::Client::builder()
+                .timeout(FETCH_TIMEOUT)
+                .connect_timeout(Duration::from_secs(10))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("failed to build HTTP client"),
+        )
+    }
+
+    /// Create a new `CdnModuleLoader` with a shared cache, optional lockfile path,
+    /// and optional shared HTTP client.
     pub fn with_options(
         integrity: Arc<RwLock<HashMap<String, String>>>,
         strict: bool,
         cache: ModuleCache,
         lockfile_path: Option<PathBuf>,
+        client: Option<Arc<reqwest::Client>>,
     ) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(FETCH_TIMEOUT)
-            .connect_timeout(Duration::from_secs(10))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .expect("failed to build HTTP client");
-
         Self {
             integrity,
             strict,
-            client,
+            client: client.unwrap_or_else(Self::build_http_client),
             cache,
             lockfile_path,
         }
@@ -154,7 +166,6 @@ impl CdnModuleLoader {
 
         // Must contain @ for version pinning (but not just a leading @ for scoped packages)
         let version_at = if spec.starts_with('@') {
-            // Scoped package: @scope/pkg@version — find the second @
             spec[1..].find('@').map(|i| i + 1)
         } else {
             spec.find('@')
@@ -162,7 +173,6 @@ impl CdnModuleLoader {
 
         let version_at = version_at?;
 
-        // Verify there's actually a version after the @
         let after_at = &spec[version_at + 1..];
         if after_at.is_empty() {
             return None;
@@ -180,15 +190,123 @@ impl CdnModuleLoader {
         }
         Some(url)
     }
+
+    /// Fetch a URL with streaming body read, enforcing size limits during download.
+    /// Returns the response bytes and optionally the SRI hash from CDN headers.
+    async fn fetch_with_size_limit(
+        client: &reqwest::Client,
+        url: &str,
+        label: &str,
+    ) -> Result<(Vec<u8>, Option<String>), ModuleLoaderError> {
+        let response = client.get(url).send().await.map_err(|e| {
+            error!(module_url = %url, fetch = label, error = %e, "CDN module fetch failed");
+            JsErrorBox::generic(format!("{label} fetch failed for {url}: {e}"))
+        })?;
+
+        let status = response.status();
+        if status.is_redirection() {
+            error!(module_url = %url, fetch = label, http_status = %status, "CDN module fetch rejected: redirect");
+            return Err(JsErrorBox::generic(format!(
+                "Module {url} returned a redirect (HTTP {status}). \
+                 Redirects are not allowed for CDN module imports."
+            ))
+            .into());
+        }
+
+        if !status.is_success() {
+            error!(module_url = %url, fetch = label, http_status = %status, "CDN module fetch failed: non-success status");
+            return Err(JsErrorBox::generic(format!(
+                "{label} fetch failed for {url}: HTTP {status}"
+            ))
+            .into());
+        }
+
+        // Extract SRI hash from CDN response headers (jsDelivr provides this)
+        let cdn_sri_hash = response
+            .headers()
+            .get("x-sri-hash")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("sha384-"))
+            .map(|s| s.to_string());
+
+        if let Some(ref sri) = cdn_sri_hash {
+            debug!(module_url = %url, fetch = label, cdn_sri = %format!("sha384-{sri}"), "CDN provided SRI hash");
+        }
+
+        // Pre-check content-length header
+        if let Some(len) = response.content_length() {
+            if len as usize > MAX_MODULE_SIZE_BYTES {
+                error!(module_url = %url, fetch = label, content_length = len, max_bytes = MAX_MODULE_SIZE_BYTES, "CDN module rejected: exceeds size limit");
+                return Err(JsErrorBox::generic(format!(
+                    "Module {url} exceeds maximum size ({len} bytes > {MAX_MODULE_SIZE_BYTES} bytes)"
+                ))
+                .into());
+            }
+        }
+
+        // Stream body with hard size cap to prevent OOM even if content-length is absent/wrong
+        let mut bytes = Vec::new();
+        let mut response = response;
+        while let Some(chunk) = response.chunk().await.map_err(|e| {
+            error!(module_url = %url, fetch = label, error = %e, "CDN module fetch: failed to read chunk");
+            JsErrorBox::generic(format!("Failed to read response body for {url}: {e}"))
+        })? {
+            if bytes.len() + chunk.len() > MAX_MODULE_SIZE_BYTES {
+                error!(module_url = %url, fetch = label, body_size = bytes.len() + chunk.len(), max_bytes = MAX_MODULE_SIZE_BYTES, "CDN module rejected: body exceeds size limit during streaming");
+                return Err(JsErrorBox::generic(format!(
+                    "Module {url} exceeds maximum size (> {MAX_MODULE_SIZE_BYTES} bytes)"
+                ))
+                .into());
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+
+        info!(module_url = %url, fetch = label, size_bytes = bytes.len(), "CDN module fetch: download complete");
+        Ok((bytes, cdn_sri_hash))
+    }
 }
 
 impl ModuleLoader for CdnModuleLoader {
     fn resolve(
         &self,
         specifier: &str,
-        _referrer: &str,
+        referrer: &str,
         _kind: ResolutionKind,
-    ) -> Result<ModuleSpecifier, deno_core::error::ModuleLoaderError> {
+    ) -> Result<ModuleSpecifier, ModuleLoaderError> {
+        // Resolve relative imports against the referrer when the referrer is a jsDelivr URL.
+        // ESM modules on jsDelivr can have relative imports between files in the same package.
+        if (specifier.starts_with("./") || specifier.starts_with("../"))
+            && Self::is_allowed_cdn(referrer)
+        {
+            let base = ModuleSpecifier::parse(referrer).map_err(|e| {
+                JsErrorBox::generic(format!("Invalid referrer URL: {referrer}: {e}"))
+            })?;
+            let resolved = base.join(specifier).map_err(|e| {
+                JsErrorBox::generic(format!(
+                    "Failed to resolve relative import \"{specifier}\" against {referrer}: {e}"
+                ))
+            })?;
+            if Self::is_allowed_cdn(resolved.as_str()) {
+                info!(
+                    specifier,
+                    referrer,
+                    resolved_url = %resolved,
+                    "CDN module resolve: relative import resolved against jsDelivr referrer"
+                );
+                return Ok(resolved);
+            }
+            warn!(
+                specifier,
+                referrer,
+                resolved_url = %resolved,
+                "CDN module resolve rejected: relative import resolved to non-jsDelivr URL"
+            );
+            return Err(JsErrorBox::generic(format!(
+                "Relative import \"{specifier}\" resolved to {resolved}, which is not on the allowed CDN"
+            ))
+            .into());
+        }
+
         // If it's already a full jsDelivr URL, pass through
         if Self::is_allowed_cdn(specifier) {
             info!(specifier, "CDN module resolve: full URL accepted");
@@ -212,8 +330,7 @@ impl ModuleLoader for CdnModuleLoader {
         // Reject everything else
         warn!(
             specifier,
-            referrer = _referrer,
-            "CDN module resolve rejected: not a valid npm specifier or jsDelivr URL"
+            referrer, "CDN module resolve rejected: not a valid npm specifier or jsDelivr URL"
         );
         Err(JsErrorBox::generic(format!(
             "Invalid import specifier: \"{specifier}\". \
@@ -294,77 +411,14 @@ impl ModuleLoader for CdnModuleLoader {
         let fut = async move {
             info!(module_url = %url, "CDN module fetch: downloading");
 
-            // Fetch the module source from the CDN (redirects disabled)
-            let response = client.get(&url).send().await.map_err(|e| {
-                error!(module_url = %url, error = %e, "CDN module fetch failed");
-                JsErrorBox::generic(format!("Failed to fetch module {url}: {e}"))
-            })?;
-
-            let status = response.status();
-            if status.is_redirection() {
-                error!(module_url = %url, http_status = %status, "CDN module fetch rejected: redirect");
-                return Err(JsErrorBox::generic(format!(
-                    "Module {url} returned a redirect (HTTP {status}). \
-                     Redirects are not allowed for CDN module imports."
-                ))
-                .into());
-            }
-
-            if !status.is_success() {
-                error!(module_url = %url, http_status = %status, "CDN module fetch failed: non-success status");
-                return Err(JsErrorBox::generic(format!(
-                    "Failed to fetch module {url}: HTTP {status}"
-                ))
-                .into());
-            }
-
-            // Extract SRI hash from CDN response headers (jsDelivr provides this)
-            let cdn_sri_hash = response
-                .headers()
-                .get("x-sri-hash")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|v| v.strip_prefix("sha384-"))
-                .map(|s| s.to_string());
-
-            if let Some(ref sri) = cdn_sri_hash {
-                debug!(module_url = %url, cdn_sri = %format!("sha384-{sri}"), "CDN provided SRI hash in response header");
-            }
-
-            // Enforce response size limit
-            if let Some(len) = response.content_length() {
-                if len as usize > MAX_MODULE_SIZE_BYTES {
-                    error!(module_url = %url, content_length = len, max_bytes = MAX_MODULE_SIZE_BYTES, "CDN module rejected: exceeds size limit");
-                    return Err(JsErrorBox::generic(format!(
-                        "Module {url} exceeds maximum size ({len} bytes > {MAX_MODULE_SIZE_BYTES} bytes)"
-                    ))
-                    .into());
-                }
-            }
-
-            let bytes = response.bytes().await.map_err(|e| {
-                error!(module_url = %url, error = %e, "CDN module fetch: failed to read response body");
-                JsErrorBox::generic(format!(
-                    "Failed to read response body for {url}: {e}"
-                ))
-            })?;
-
-            if bytes.len() > MAX_MODULE_SIZE_BYTES {
-                error!(module_url = %url, body_size = bytes.len(), max_bytes = MAX_MODULE_SIZE_BYTES, "CDN module rejected: body exceeds size limit");
-                return Err(JsErrorBox::generic(format!(
-                    "Module {url} exceeds maximum size ({} bytes > {MAX_MODULE_SIZE_BYTES} bytes)",
-                    bytes.len()
-                ))
-                .into());
-            }
-
-            info!(module_url = %url, size_bytes = bytes.len(), "CDN module fetch: download complete");
+            let (bytes, cdn_sri_hash) =
+                Self::fetch_with_size_limit(&client, &url, "Primary").await?;
 
             let mut hasher = Sha384::new();
             hasher.update(&bytes);
             let actual_digest = hasher.finalize();
 
-            let actual_b64 = base64::engine::general_purpose::STANDARD
-                .encode(&actual_digest);
+            let actual_b64 = base64::engine::general_purpose::STANDARD.encode(&actual_digest);
 
             if let Some(expected_b64) = &expected_hash {
                 // Known module: verify against stored hash
@@ -377,7 +431,6 @@ impl ModuleLoader for CdnModuleLoader {
                         ))
                     })?;
 
-                // Constant-time comparison to prevent timing side-channels
                 if actual_digest.len() != expected_digest.len()
                     || !constant_time_eq(&actual_digest, &expected_digest)
                 {
@@ -401,41 +454,21 @@ impl ModuleLoader for CdnModuleLoader {
                 );
             } else {
                 // Unknown module: trust-on-first-use (TOFU)
-                // Fetch the module a second time and verify the hash matches.
                 info!(
                     module_url = %url,
                     first_hash = %format!("sha384-{actual_b64}"),
                     "TOFU: new module detected, starting verification fetch"
                 );
 
-                let response2 = client.get(&url).send().await.map_err(|e| {
-                    error!(module_url = %url, error = %e, "TOFU: verification fetch failed");
-                    JsErrorBox::generic(format!(
-                        "TOFU verification fetch failed for {url}: {e}"
-                    ))
-                })?;
-
-                let status2 = response2.status();
-                if !status2.is_success() {
-                    error!(module_url = %url, http_status = %status2, "TOFU: verification fetch returned non-success status");
-                    return Err(JsErrorBox::generic(format!(
-                        "TOFU verification fetch failed for {url}: HTTP {status2}"
-                    ))
-                    .into());
-                }
-
-                let bytes2 = response2.bytes().await.map_err(|e| {
-                    error!(module_url = %url, error = %e, "TOFU: verification fetch failed to read body");
-                    JsErrorBox::generic(format!(
-                        "TOFU verification: failed to read response body for {url}: {e}"
-                    ))
-                })?;
+                // Second fetch with identical protections (redirect/status/size checks)
+                let (bytes2, _) =
+                    Self::fetch_with_size_limit(&client, &url, "TOFU verification").await?;
 
                 let mut hasher2 = Sha384::new();
                 hasher2.update(&bytes2);
                 let verify_digest = hasher2.finalize();
-                let verify_b64 = base64::engine::general_purpose::STANDARD
-                    .encode(&verify_digest);
+                let verify_b64 =
+                    base64::engine::general_purpose::STANDARD.encode(&verify_digest);
 
                 if !constant_time_eq(&actual_digest, &verify_digest) {
                     error!(
@@ -460,7 +493,7 @@ impl ModuleLoader for CdnModuleLoader {
                     "TOFU: verification passed — both fetches produced identical hash"
                 );
 
-                // Verify against CDN's SRI hash header if available (three-way check)
+                // Verify against CDN's SRI hash header if available
                 if let Some(ref sri_b64) = cdn_sri_hash {
                     let sri_digest = base64::engine::general_purpose::STANDARD
                         .decode(sri_b64)
@@ -491,7 +524,11 @@ impl ModuleLoader for CdnModuleLoader {
                     );
                 }
 
-                // Pin to lockfile on disk
+                // Pin to lockfile on disk.
+                // Note: each JS execution runs on its own dedicated thread via
+                // create_and_run_current_thread, so blocking I/O here does not starve
+                // other async work. Concurrent appends are safe because we re-check
+                // the in-memory map under write lock before writing.
                 if let Some(ref path) = lockfile_path {
                     use std::io::Write;
                     let mut file = std::fs::OpenOptions::new()
@@ -530,20 +567,27 @@ impl ModuleLoader for CdnModuleLoader {
                 }
             }
 
-            let bytes_vec = bytes.to_vec();
-
-            // Cache the verified module source
+            // Cache the verified module source (bounded by MAX_CACHE_BYTES)
             if let Ok(mut cache_w) = cache.write() {
-                cache_w.insert(url.clone(), bytes_vec.clone());
-                debug!(module_url = %url, "CDN module cached for future requests");
+                let total: usize = cache_w.values().map(|v| v.len()).sum();
+                if total + bytes.len() <= MAX_CACHE_BYTES {
+                    cache_w.insert(url.clone(), bytes.clone());
+                    debug!(module_url = %url, "CDN module cached for future requests");
+                } else {
+                    warn!(module_url = %url, cache_bytes = total, module_bytes = bytes.len(), max_cache = MAX_CACHE_BYTES, "CDN module cache full, skipping cache insertion");
+                }
             }
 
-            info!(module_url = %url, size_bytes = bytes_vec.len(), "CDN module loaded successfully");
+            info!(module_url = %url, size_bytes = bytes.len(), "CDN module loaded successfully");
+
+            let module_specifier = ModuleSpecifier::parse(&url).map_err(|e| {
+                JsErrorBox::generic(format!("Invalid module URL during load: {url}: {e}"))
+            })?;
 
             Ok(ModuleSource::new(
                 ModuleType::JavaScript,
-                ModuleSourceCode::Bytes(bytes_vec.into_boxed_slice().into()),
-                &ModuleSpecifier::parse(&url).unwrap(),
+                ModuleSourceCode::Bytes(bytes.into_boxed_slice().into()),
+                &module_specifier,
                 None,
             ))
         }
@@ -580,53 +624,42 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
 
     #[test]
     fn test_parse_npm_specifier() {
-        // Basic package with version
         assert_eq!(
             CdnModuleLoader::parse_npm_specifier("zod@3.22.4"),
             Some("https://cdn.jsdelivr.net/npm/zod@3.22.4".to_string())
         );
-        // Package with version and file
         assert_eq!(
             CdnModuleLoader::parse_npm_specifier("zod@3.22.4/+esm"),
             Some("https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm".to_string())
         );
-        // Scoped package
         assert_eq!(
             CdnModuleLoader::parse_npm_specifier("@scope/pkg@1.0.0/+esm"),
             Some("https://cdn.jsdelivr.net/npm/@scope/pkg@1.0.0/+esm".to_string())
         );
-        // Scoped package without file
         assert_eq!(
             CdnModuleLoader::parse_npm_specifier("@scope/pkg@2.0.0"),
             Some("https://cdn.jsdelivr.net/npm/@scope/pkg@2.0.0".to_string())
         );
-        // Deep file path
         assert_eq!(
             CdnModuleLoader::parse_npm_specifier("date-fns@3.6.0/esm/index.js"),
             Some("https://cdn.jsdelivr.net/npm/date-fns@3.6.0/esm/index.js".to_string())
         );
-        // With inline hash fragment
         assert_eq!(
             CdnModuleLoader::parse_npm_specifier("zod@3.22.4/+esm#sha384-abc123"),
             Some("https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm#sha384-abc123".to_string())
         );
-        // Scoped with hash
         assert_eq!(
             CdnModuleLoader::parse_npm_specifier("@scope/pkg@1.0.0/+esm#sha384-xyz789"),
             Some("https://cdn.jsdelivr.net/npm/@scope/pkg@1.0.0/+esm#sha384-xyz789".to_string())
         );
-        // Reject bare name without version
         assert_eq!(CdnModuleLoader::parse_npm_specifier("lodash-es"), None);
-        // Reject relative paths
         assert_eq!(CdnModuleLoader::parse_npm_specifier("./local.js"), None);
-        // Reject scoped package without version
         assert_eq!(CdnModuleLoader::parse_npm_specifier("@scope/pkg"), None);
     }
 
     #[test]
     fn test_resolve_npm_specifiers() {
         let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
-        // npm specifier resolves to jsDelivr URL
         let result = loader
             .resolve("zod@3.22.4/+esm", "file:///main.js", ResolutionKind::Import)
             .unwrap();
@@ -639,7 +672,6 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     #[test]
     fn test_resolve_full_cdn_urls() {
         let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
-        // Full URL still works
         let result = loader
             .resolve(
                 "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm",
@@ -654,6 +686,32 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     }
 
     #[test]
+    fn test_resolve_relative_imports() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        let result = loader
+            .resolve(
+                "./utils.js",
+                "https://cdn.jsdelivr.net/npm/zod@3.22.4/lib/index.js",
+                ResolutionKind::Import,
+            )
+            .unwrap();
+        assert_eq!(
+            result.as_str(),
+            "https://cdn.jsdelivr.net/npm/zod@3.22.4/lib/utils.js"
+        );
+    }
+
+    #[test]
+    fn test_resolve_relative_rejects_non_cdn_referrer() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        assert!(
+            loader
+                .resolve("./utils.js", "file:///main.js", ResolutionKind::Import)
+                .is_err()
+        );
+    }
+
+    #[test]
     fn test_resolve_with_inline_hash() {
         let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
         let result = loader
@@ -663,12 +721,10 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
                 ResolutionKind::Import,
             )
             .unwrap();
-        // Fragment is preserved in the resolved URL
         assert_eq!(
             result.as_str(),
             "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm#sha384-abc123def"
         );
-        // Fragment is accessible
         assert_eq!(result.fragment(), Some("sha384-abc123def"));
     }
 
@@ -702,7 +758,6 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
         let specifier =
             ModuleSpecifier::parse("https://cdn.jsdelivr.net/npm/unknown@1.0.0/+esm").unwrap();
         let response = loader.load(&specifier, None, false, RequestedModuleType::None);
-        // Should be a synchronous error in strict mode
         assert!(matches!(response, ModuleLoadResponse::Sync(Err(_))));
     }
 }

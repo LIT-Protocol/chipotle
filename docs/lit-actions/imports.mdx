@@ -281,7 +281,7 @@ Module imports are subject to the same [resource limits](/lit-actions/limits) as
 
 - **Memory** — Imported modules count toward the action's memory limit (default 128 MB).
 - **Timeout** — Module fetch time counts toward the action's execution timeout (default 15 minutes).
-- **Fetch count** — Each module fetch (including TOFU verification fetches) counts toward the per-action fetch limit.
+- **Network** — Module fetches use a separate HTTP client from the action's `fetch()` API and do not count toward the per-action fetch limit. However, they share the same execution timeout.
 - **Module size** — Individual modules are capped at 10 MB.
 
 ---

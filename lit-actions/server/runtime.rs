@@ -60,6 +60,7 @@ fn build_main_worker_and_inject_sdk(
     strict_imports: bool,
     module_cache: ModuleCache,
     lockfile_path: Option<PathBuf>,
+    http_client: Arc<reqwest::Client>,
 ) -> Result<MainWorker> {
     let options = WorkerOptions {
         bootstrap: BootstrapOptions {
@@ -112,6 +113,7 @@ fn build_main_worker_and_inject_sdk(
                 strict_imports,
                 module_cache,
                 lockfile_path,
+                Some(http_client),
             )),
             node_services: Default::default(),
             npm_process_state_provider: Default::default(),
@@ -261,6 +263,7 @@ pub(crate) async fn execute_js(
     strict_imports: bool,
     module_cache: ModuleCache,
     lockfile_path: Option<PathBuf>,
+    http_client: Arc<reqwest::Client>,
 ) -> Result<()> {
     // Fast path to do nothing, allowing us to benchmark with and without Deno involved
     if code.is_empty() || code.bytes().all(|b| b.is_ascii_whitespace()) {
@@ -283,6 +286,7 @@ pub(crate) async fn execute_js(
         strict_imports,
         module_cache,
         lockfile_path,
+        http_client,
     )
     .context("Error building main worker")
     .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 
-use crate::cdn_module_loader::ModuleCache;
+use crate::cdn_module_loader::{CdnModuleLoader, ModuleCache};
 
 use anyhow::Result;
 use deno_core::error::CoreError;
@@ -29,7 +29,6 @@ pub enum ServerType {
     Test,
 }
 
-#[derive(Default)]
 pub struct Server {
     server_type: ServerType,
     /// Parsed integrity manifest (URL → base64-encoded SHA-384 hash).
@@ -40,6 +39,8 @@ pub struct Server {
     module_cache: ModuleCache,
     /// Path to integrity.lock file for TOFU auto-pinning.
     lockfile_path: Option<PathBuf>,
+    /// Shared HTTP client for CDN fetches (connection pooling across executions).
+    http_client: Arc<reqwest::Client>,
 }
 
 impl Server {
@@ -61,13 +62,18 @@ impl Server {
             strict_imports,
             module_cache: Arc::new(RwLock::new(HashMap::new())),
             lockfile_path,
+            http_client: CdnModuleLoader::build_http_client(),
         }
     }
 
     fn new_test_server() -> Self {
         Self {
             server_type: ServerType::Test,
-            ..Default::default()
+            integrity_manifest: Default::default(),
+            strict_imports: false,
+            module_cache: Arc::new(RwLock::new(HashMap::new())),
+            lockfile_path: None,
+            http_client: CdnModuleLoader::build_http_client(),
         }
     }
 }
@@ -91,6 +97,7 @@ impl Action for Server {
         let strict_imports = self.strict_imports;
         let module_cache = self.module_cache.clone();
         let lockfile_path = self.lockfile_path.clone();
+        let http_client = self.http_client.clone();
 
         // Put incoming requests into channel
         let send_exec_req_span = debug_span!("send_exec_req");
@@ -177,6 +184,7 @@ impl Action for Server {
                                     strict_imports,
                                     module_cache.clone(),
                                     lockfile_path.clone(),
+                                    http_client.clone(),
                                 )
                                 .await;
                                 let _ = outbound_tx
