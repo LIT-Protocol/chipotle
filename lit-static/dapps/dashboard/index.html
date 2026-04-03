@@ -98,6 +98,7 @@
             <button type="button" class="btn btn-topbar btn-theme-toggle" id="theme-toggle" aria-label="Switch to dark mode"><span class="theme-icon" aria-hidden="true"></span></button>
             <span id="billing-balance-display" class="billing-balance" style="display:none;"></span>
             <button type="button" class="btn btn-primary btn-sm" id="btn-add-funds" style="display:none;">Add Funds</button>
+            <span id="billing-not-required" class="billing-not-required" style="display:none;">Payment Not Required</span>
             <div class="account-dropdown" id="account-dropdown">
               <button type="button" class="btn btn-topbar account-dropdown-trigger" id="account-dropdown-trigger" aria-expanded="false" aria-haspopup="true" aria-label="Account menu">
                 Account
@@ -121,6 +122,12 @@
               </div>
             </div>
             <button type="button" id="new-account-dismiss-btn" class="new-account-dismiss" aria-label="Dismiss">&#x2715;</button>
+          </div>
+
+          <!-- Billing disabled notice (shown when Stripe is not configured) -->
+          <div id="billing-disabled-banner" class="billing-disabled-banner" style="display:none;">
+            <strong>Payment Not Required</strong>
+            <p>This environment is not configured to accept payments. You should migrate towards using the production system as there are no uptime or state guarantees available for test systems.</p>
           </div>
 
           <!-- Stat cards -->
