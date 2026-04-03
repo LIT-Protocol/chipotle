@@ -3,19 +3,25 @@
 /// @notice Security functions for AccountConfig diamond.
 
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity =0.8.28;
 
 import {
     EnumerableSet
 } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {AppStorage} from "./AppStorage.sol";
-import {LibDiamond} from "../../libraries/LibDiamond.sol";
+import {LibDiamond, NotContractOwner} from "../../libraries/LibDiamond.sol";
 
 library SecurityLib {
     using EnumerableSet for EnumerableSet.UintSet;
     using EnumerableSet for EnumerableSet.AddressSet;
 
     // ----- internal view helpers (revert helpers call view from Views facet conceptually; we duplicate for simplicity) -----
+    function revertIfNotOwner(address caller) internal view {
+        if (caller != LibDiamond.contractOwner()) {
+            revert NotContractOwner(caller, LibDiamond.contractOwner());
+        }
+    }
+
     function revertIfNotMasterAccount(uint256 accountApiKeyHash) internal view {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         if (s.allApiKeyHashesToMaster[accountApiKeyHash] != accountApiKeyHash) {
