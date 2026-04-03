@@ -3,13 +3,29 @@ import { readFileSync } from "fs";
 import path from "path";
 
 // Facet artifacts to verify against (same set deployed by contract_deployer).
-const FACET_ARTIFACTS = [
-  "artifacts/contracts/AccountConfigFacets/APIConfigFacet.sol/APIConfigFacet.json",
-  "artifacts/contracts/AccountConfigFacets/BillingFacet.sol/BillingFacet.json",
-  "artifacts/contracts/AccountConfigFacets/ViewsFacet.sol/ViewsFacet.json",
-  "artifacts/contracts/AccountConfigFacets/WritesFacet.sol/WritesFacet.json",
-  "artifacts/contracts/libraries/diamond/OwnershipFacet.sol/OwnershipFacet.json",
+// Hardhat-compiled facets are resolved via hre.artifacts.readArtifact().
+// OwnershipFacet lives outside contracts/ so Hardhat doesn't compile it;
+// we load its pre-built artifact from the Rust deployer instead.
+const FACET_NAMES = [
+  "APIConfigFacet",
+  "BillingFacet",
+  "ViewsFacet",
+  "WritesFacet",
+  "OwnershipFacet",
+  "DiamondCutFacet",
+  "DiamondLoupeFacet",
 ];
+
+const RUST_DIAMOND_DIR = path.resolve(
+  __dirname,
+  "../../rust_generator_and_deployer/src/diamond"
+);
+
+const EXTERNAL_ARTIFACTS: Record<string, string> = {
+  OwnershipFacet: path.join(RUST_DIAMOND_DIR, "OwnershipFacet.json"),
+  DiamondCutFacet: path.join(RUST_DIAMOND_DIR, "DiamondCutFacet.json"),
+  DiamondLoupeFacet: path.join(RUST_DIAMOND_DIR, "DiamondLoupeFacet.json"),
+};
 
 /**
  * Strip the CBOR-encoded metadata suffix from EVM bytecode so that bytecodes
@@ -53,9 +69,10 @@ task(
     }
 
     const artifacts: ArtifactInfo[] = [];
-    for (const relPath of FACET_ARTIFACTS) {
-      const absPath = path.resolve(relPath);
-      const artifact = JSON.parse(readFileSync(absPath, "utf-8"));
+    for (const name of FACET_NAMES) {
+      const artifact = EXTERNAL_ARTIFACTS[name]
+        ? JSON.parse(readFileSync(EXTERNAL_ARTIFACTS[name], "utf-8"))
+        : await hre.artifacts.readArtifact(name);
       const iface = new hre.ethers.Interface(artifact.abi);
       const selectors = new Set<string>();
       for (const fn of iface.fragments) {
@@ -63,7 +80,6 @@ task(
           selectors.add(iface.getFunction(fn.name)!.selector);
         }
       }
-      const name = path.basename(relPath, ".json");
       artifacts.push({
         name,
         selectors,
