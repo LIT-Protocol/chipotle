@@ -138,12 +138,12 @@ contract WritesFacet {
     ) public returns (uint256) {
         if (cidHashes.length > 10) {
             revert AppStorage.InvalidRequest(
-                "cidHashes must be less than 10 items"
+                "cidHashes must be 10 items or fewer"
             );
         }
         if (pkpIds.length > 10) {
             revert AppStorage.InvalidRequest(
-                "pkpIds must be less than 10 items"
+                "pkpIds must be 10 items or fewer"
             );
         }
         SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
