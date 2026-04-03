@@ -30,7 +30,7 @@ The runtime resolves the import specifier to a jsDelivr URL. You can write eithe
 
 Each module URL is checked against an `integrity.lock` manifest that maps URLs to their expected SHA-384 hash. If the hash of the downloaded content does not match, the import fails and the action does not execute.
 
-For modules not yet in the manifest, the system uses **trust-on-first-use (TOFU)** with three-way verification: it fetches the module twice from jsDelivr, independently computes the SHA-384 of each response, and verifies both against jsDelivr's SRI hash header when available. The module is accepted only if all checks agree. The verified hash is then pinned to the lockfile so all future fetches are verified against it.
+For modules not yet in the manifest, the system uses **trust-on-first-use (TOFU)** with up to four-way verification: it fetches the module twice from jsDelivr, independently computes the SHA-384 of each response, verifies both against jsDelivr's SRI hash header when available, and if the import specifier includes an inline `#sha384-` hash, verifies against that as well. The module is accepted only if all checks agree. The verified hash is then pinned to the lockfile so all future fetches are verified against it.
 
 ### 3. Caching
 
