@@ -18,6 +18,12 @@ contract APIConfigFacet {
 
     event ServerTriggered(uint256 value, address indexed sender);
 
+    function setConfigOperator(address newConfigOperator) public {
+        SecurityLib.revertIfNotConfigOperatorOrOwner(msg.sender);
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        s.configOperator = newConfigOperator;
+    }
+
     function setRequestedApiPayerCount(
         uint256 newRequestedApiPayerCount
     ) public {

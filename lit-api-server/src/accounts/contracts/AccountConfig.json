@@ -82,6 +82,87 @@
           "internalType": "uint256",
           "name": "apiKeyHash",
           "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "groupId",
+          "type": "uint256"
+        }
+      ],
+      "name": "NotAllowedToAddPkpToGroup",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "NotAllowedToCreateGroup",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "NotAllowedToCreatePkp",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "NotAllowedToDeleteGroup",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "groupId",
+          "type": "uint256"
+        }
+      ],
+      "name": "NotAllowedToManageIPFSIdsInGroup",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "groupId",
+          "type": "uint256"
+        }
+      ],
+      "name": "NotAllowedToRemovePkpFromGroup",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
         }
       ],
       "name": "NotMasterAccount",
@@ -167,7 +248,7 @@
       "inputs": [
         {
           "internalType": "uint256",
-          "name": "accountApiKeyHash",
+          "name": "apiKeyHash",
           "type": "uint256"
         },
         {
@@ -190,7 +271,7 @@
       "inputs": [
         {
           "internalType": "uint256",
-          "name": "accountApiKeyHash",
+          "name": "apiKeyHash",
           "type": "uint256"
         },
         {
@@ -229,7 +310,7 @@
       "inputs": [
         {
           "internalType": "uint256",
-          "name": "accountApiKeyHash",
+          "name": "apiKeyHash",
           "type": "uint256"
         },
         {
@@ -285,7 +366,7 @@
       "inputs": [
         {
           "internalType": "uint256",
-          "name": "accountApiKeyHash",
+          "name": "apiKeyHash",
           "type": "uint256"
         },
         {
@@ -336,7 +417,7 @@
       "inputs": [
         {
           "internalType": "uint256",
-          "name": "accountApiKeyHash",
+          "name": "apiKeyHash",
           "type": "uint256"
         },
         {
@@ -359,7 +440,7 @@
       "inputs": [
         {
           "internalType": "uint256",
-          "name": "accountApiKeyHash",
+          "name": "apiKeyHash",
           "type": "uint256"
         },
         {
@@ -377,7 +458,7 @@
       "inputs": [
         {
           "internalType": "uint256",
-          "name": "accountApiKeyHash",
+          "name": "apiKeyHash",
           "type": "uint256"
         },
         {
@@ -892,6 +973,19 @@
           "internalType": "bool",
           "name": "",
           "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "configOperator",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
         }
       ],
       "stateMutability": "view",
@@ -1568,6 +1662,17 @@
       "type": "error"
     },
     {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        }
+      ],
+      "name": "OnlyConfigOperatorOrOwner",
+      "type": "error"
+    },
+    {
       "anonymous": false,
       "inputs": [
         {
@@ -1621,6 +1726,19 @@
         }
       ],
       "name": "setApiPayers",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "newConfigOperator",
+          "type": "address"
+        }
+      ],
+      "name": "setConfigOperator",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"

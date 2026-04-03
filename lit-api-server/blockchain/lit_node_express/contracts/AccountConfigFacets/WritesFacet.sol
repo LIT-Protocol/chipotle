@@ -102,16 +102,19 @@ contract WritesFacet {
     }
 
     function addGroup(
-        uint256 accountApiKeyHash,
+        uint256 apiKeyHash,
         string memory name,
         string memory description,
         uint256[] memory cidHashes,
         address[] memory pkpIds
     ) public returns (uint256) {
-        SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
-        SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
+        SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
+        uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
+        if (masterHash != apiKeyHash) {
+            SecurityLib.canCreateGroup(apiKeyHash);
+        }
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        AppStorage.Account storage account = s.accounts[accountApiKeyHash];
+        AppStorage.Account storage account = s.accounts[masterHash];
         account.groupCount++;
         account.groupList.add(account.groupCount);
         AppStorage.Group storage group = account.groups[account.groupCount];
@@ -192,34 +195,34 @@ contract WritesFacet {
     }
 
     function removeGroup(
-        uint256 accountApiKeyHash,
+        uint256 apiKeyHash,
         uint256 groupId
     ) public {
-        SecurityLib.revertIfGroupDoesNotExist(
-            accountApiKeyHash,
-            groupId,
-            msg.sender
-        );
-        SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
+        SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
+        uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
+        if (masterHash != apiKeyHash) {
+            SecurityLib.canDeleteGroup(apiKeyHash);
+        }
+        AppStorage.revertIfGroupDoesNotExist(masterHash, groupId);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        AppStorage.Account storage account = s.accounts[accountApiKeyHash];
+        AppStorage.Account storage account = s.accounts[masterHash];
         account.groupList.remove(groupId);
         delete account.groups[groupId];
     }
 
     function addPkpToGroup(
-        uint256 accountApiKeyHash,
+        uint256 apiKeyHash,
         uint256 groupId,
         address pkpId
     ) public {
-        SecurityLib.revertIfGroupDoesNotExist(
-            accountApiKeyHash,
-            groupId,
-            msg.sender
-        );
-        SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
+        SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
+        uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
+        if (masterHash != apiKeyHash) {
+            SecurityLib.canAccountAddPkpToGroup(apiKeyHash, groupId);
+        }
+        AppStorage.revertIfGroupDoesNotExist(masterHash, groupId);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        s.accounts[accountApiKeyHash].groups[groupId].pkpId.add(pkpId);
+        s.accounts[masterHash].groups[groupId].pkpId.add(pkpId);
     }
 
     function addAction(
@@ -268,18 +271,18 @@ contract WritesFacet {
     }
 
     function addActionToGroup(
-        uint256 accountApiKeyHash,
+        uint256 apiKeyHash,
         uint256 groupId,
         uint256 action
     ) public {
-        SecurityLib.revertIfGroupDoesNotExist(
-            accountApiKeyHash,
-            groupId,
-            msg.sender
-        );
-        SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
+        SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
+        uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
+        if (masterHash != apiKeyHash) {
+            SecurityLib.canAccountManageIPFSIdsInGroup(apiKeyHash, groupId);
+        }
+        AppStorage.revertIfGroupDoesNotExist(masterHash, groupId);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        s.accounts[accountApiKeyHash].groups[groupId].cidHash.add(action);
+        s.accounts[masterHash].groups[groupId].cidHash.add(action);
     }
 
     function updateActionMetadata(
@@ -301,40 +304,40 @@ contract WritesFacet {
     }
 
     function removeActionFromGroup(
-        uint256 accountApiKeyHash,
+        uint256 apiKeyHash,
         uint256 groupId,
         uint256 action
     ) public {
-        SecurityLib.revertIfActionDoesNotExist(
-            accountApiKeyHash,
-            groupId,
-            action,
-            msg.sender
-        );
-        SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
-        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        AppStorage.Account storage account = s.accounts[accountApiKeyHash];
-        account.groups[groupId].cidHash.remove(action);
-        if (account.actionCount > 0) {
-            account.actionCount--;
+        SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
+        uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
+        if (masterHash != apiKeyHash) {
+            SecurityLib.canAccountManageIPFSIdsInGroup(apiKeyHash, groupId);
         }
+        AppStorage.revertIfGroupDoesNotExist(masterHash, groupId);
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        AppStorage.Account storage account = s.accounts[masterHash];
+        if (!account.groups[groupId].cidHash.contains(action)) {
+            revert AppStorage.ActionDoesNotExist(masterHash, groupId, action);
+        }
+        account.groups[groupId].cidHash.remove(action);
     }
 
     function removePkpFromGroup(
-        uint256 accountApiKeyHash,
+        uint256 apiKeyHash,
         uint256 groupId,
         address pkpId
     ) public {
-        SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
-        SecurityLib.revertIfPkpDoesNotExist(
-            accountApiKeyHash,
-            groupId,
-            pkpId,
-            msg.sender
-        );
-        SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
+        SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
+        uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
+        if (masterHash != apiKeyHash) {
+            SecurityLib.canAccountRemovePkpFromGroup(apiKeyHash, groupId);
+        }
+        AppStorage.revertIfGroupDoesNotExist(masterHash, groupId);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        s.accounts[accountApiKeyHash].groups[groupId].pkpId.remove(pkpId);
+        if (!s.accounts[masterHash].groups[groupId].pkpId.contains(pkpId)) {
+            revert AppStorage.PkpDoesNotExist(masterHash, groupId, pkpId);
+        }
+        s.accounts[masterHash].groups[groupId].pkpId.remove(pkpId);
     }
 
     function updateUsageApiKeyMetadata(
@@ -380,16 +383,19 @@ contract WritesFacet {
     }
 
     function registerWalletDerivation(
-        uint256 accountApiKeyHash,
+        uint256 apiKeyHash,
         address pkpId,
         uint256 derivationPath,
         string memory name,
         string memory description
     ) public {
-        SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
-        SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
+        SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
+        uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
+        if (masterHash != apiKeyHash) {
+            SecurityLib.canCreatePkp(apiKeyHash);
+        }
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        AppStorage.Account storage account = s.accounts[accountApiKeyHash];
+        AppStorage.Account storage account = s.accounts[masterHash];
         account.pkpData[pkpId].id = derivationPath;
         account.pkpData[pkpId].name = name;
         account.pkpData[pkpId].description = description;

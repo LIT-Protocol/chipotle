@@ -22,7 +22,7 @@ import {
 interface SeedAccount extends AccountAndUsageKey {}
 
 const ACCOUNTS_COUNT = parseInt(__ENV.ACCOUNTS_COUNT || "40", 10);
-const ACCOUNTS_FILE = __ENV.ACCOUNTS_FILE || "./data/accounts.json";
+const ACCOUNTS_FILE = __ENV.K6_ACCOUNTS_FILE || "./data/accounts.json";
 
 // Allow enough time for creating many accounts during setup().
 export const options = {
