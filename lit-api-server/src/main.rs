@@ -17,7 +17,6 @@ use rocket::{State, get, routes, uri};
 use rocket_cors::{AllowedOrigins, Method};
 use rocket_okapi::okapi::openapi3::{OpenApi, Server};
 use rocket_okapi::swagger_ui::{SwaggerUIConfig, make_swagger_ui};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 
@@ -153,8 +152,8 @@ async fn main() -> Result<(), rocket::Error> {
         .max_capacity(1024 * 1024 * 1024) // 1 GB
         .build();
 
-    // Restart metrics: total restart count (shared with RestartHandle for logging).
-    let restart_count = Arc::new(AtomicU64::new(0));
+    // Restart metrics: total restart count for logging.
+    let mut restart_count: u64 = 0;
 
     // Restart loop: each iteration builds and launches a fresh Rocket instance.
     // Long-lived background services (signer pool, chain config, CPU monitor, IPFS cache)
@@ -210,7 +209,8 @@ async fn main() -> Result<(), rocket::Error> {
                     break;
                 }
 
-                let count = restart_count.fetch_add(1, Ordering::Relaxed) + 1;
+                restart_count += 1;
+                let count = restart_count;
                 let now = std::time::Instant::now();
                 restart_timestamps.push(now);
 
@@ -223,7 +223,7 @@ async fn main() -> Result<(), rocket::Error> {
                     "Restart signal received. Shutting down current instance..."
                 );
 
-                if restart_timestamps.len() as u64 > MAX_RESTARTS {
+                if restart_timestamps.len() as u64 >= MAX_RESTARTS {
                     tracing::error!(
                         max = MAX_RESTARTS,
                         window_secs = RESTART_WINDOW.as_secs(),

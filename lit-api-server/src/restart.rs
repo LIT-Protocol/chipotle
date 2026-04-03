@@ -26,8 +26,17 @@ impl RestartHandle {
     }
 
     /// Send a restart signal. Returns `true` if the signal was sent.
-    pub async fn trigger(&self) -> bool {
-        self.tx.send(()).await.is_ok()
+    /// Uses `try_send` so the listener is never blocked waiting for the
+    /// main loop to consume a previous signal.
+    pub fn trigger(&self) -> bool {
+        match self.tx.try_send(()) {
+            Ok(()) => true,
+            Err(mpsc::error::TrySendError::Full(_)) => {
+                // A restart is already queued; no need to queue another.
+                true
+            }
+            Err(mpsc::error::TrySendError::Closed(_)) => false,
+        }
     }
 }
 
@@ -42,15 +51,38 @@ pub struct ServerTriggeredEvent {
     pub sender: ethers::types::Address,
 }
 
+/// Maximum number of consecutive startup failures before giving up.
+const MAX_LISTENER_RETRIES: u32 = 5;
+
 /// Start the on-chain event listener as a background task.
 ///
 /// Polls the AccountConfig contract for `ServerTriggered` events starting from
 /// the current block. When a new event is detected, sends a restart signal
-/// via the provided handle.
+/// via the provided handle. Retries with exponential backoff on failure.
 pub fn start_server_trigger_listener(restart_handle: RestartHandle) {
     tokio::spawn(async move {
-        if let Err(e) = run_event_listener(restart_handle).await {
-            tracing::error!("Server trigger listener exited with error: {e}");
+        let mut attempt = 0u32;
+        loop {
+            match run_event_listener(restart_handle.clone()).await {
+                Ok(()) => break, // listener exited cleanly (channel closed)
+                Err(e) => {
+                    attempt += 1;
+                    if attempt >= MAX_LISTENER_RETRIES {
+                        tracing::error!(
+                            attempts = attempt,
+                            "Server trigger listener failed permanently after {MAX_LISTENER_RETRIES} attempts: {e}"
+                        );
+                        break;
+                    }
+                    let backoff = Duration::from_secs(2u64.pow(attempt.min(5)));
+                    tracing::warn!(
+                        attempt,
+                        backoff_secs = backoff.as_secs(),
+                        "Server trigger listener failed: {e}. Retrying..."
+                    );
+                    tokio::time::sleep(backoff).await;
+                }
+            }
         }
     });
 }
@@ -59,12 +91,13 @@ async fn run_event_listener(restart_handle: RestartHandle) -> anyhow::Result<()>
     let contract = get_read_only_account_config_contract().await?;
     let client = contract.client();
 
-    // Start listening from the current block.
+    // Start listening from the current block. Fail loudly rather than
+    // defaulting to block 0 (which would scan the entire chain history).
     let start_block = client
         .get_block_number()
         .await
-        .map(|b| b.as_u64())
-        .unwrap_or(0);
+        .map_err(|e| anyhow::anyhow!("Failed to get initial block number: {e}"))?
+        .as_u64();
 
     tracing::info!(
         from_block = start_block,
@@ -95,7 +128,7 @@ async fn run_event_listener(restart_handle: RestartHandle) -> anyhow::Result<()>
         let filter = contract
             .event_for_name::<ServerTriggeredEvent>("ServerTriggered")
             .map_err(|e| anyhow::anyhow!("Failed to create event filter: {e}"))?
-            .from_block(BlockNumber::Number((last_checked_block + 1).into()))
+            .from_block(BlockNumber::Number(last_checked_block.saturating_add(1).into()))
             .to_block(BlockNumber::Number(latest_block.into()));
 
         match filter.query().await {
@@ -106,10 +139,10 @@ async fn run_event_listener(restart_handle: RestartHandle) -> anyhow::Result<()>
                         value = %event.value,
                         sender = ?event.sender,
                         event_count = events.len(),
-                        block_range = format!("{}..{}", last_checked_block + 1, latest_block),
+                        block_range = format!("{}..{}", last_checked_block.saturating_add(1), latest_block),
                         "ServerTriggered event detected on-chain. Sending restart signal."
                     );
-                    if !restart_handle.trigger().await {
+                    if !restart_handle.trigger() {
                         tracing::error!("Failed to send restart signal — channel closed");
                         break;
                     }
@@ -117,7 +150,7 @@ async fn run_event_listener(restart_handle: RestartHandle) -> anyhow::Result<()>
             }
             Err(e) => {
                 tracing::warn!(
-                    block_range = format!("{}..{}", last_checked_block + 1, latest_block),
+                    block_range = format!("{}..{}", last_checked_block.saturating_add(1), latest_block),
                     "Failed to query ServerTriggered events: {e}"
                 );
                 // Don't update last_checked_block so we retry this range.
