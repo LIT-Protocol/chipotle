@@ -148,6 +148,12 @@ library SecurityLib {
         }
     }
 
+    /// @notice Resolve any API key hash (master or usage) to the master account hash.
+    function resolveToMaster(uint256 apiKeyHash) internal view returns (uint256) {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        return s.allApiKeyHashesToMaster[apiKeyHash];
+    }
+
     function canAccountAddPkpToGroup(
         uint256 usageApiKeyHash,
         uint256 groupId
@@ -204,7 +210,7 @@ library SecurityLib {
         uint256 accountApiKeyHash = s.allApiKeyHashesToMaster[usageApiKeyHash];
         AppStorage.UsageApiKey storage usageApiKey = s
             .accounts[accountApiKeyHash]
-            .usageApiKeys[accountApiKeyHash];
+            .usageApiKeys[usageApiKeyHash];
         if (!usageApiKey.createGroups) {
             revert AppStorage.NotAllowedToCreateGroup(usageApiKeyHash);
         }

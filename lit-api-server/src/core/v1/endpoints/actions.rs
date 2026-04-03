@@ -10,6 +10,7 @@ use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::LitActionRequest;
 use crate::core::v1::models::response::LitActionResponse;
 use crate::observability::RequestSpan;
+use crate::stripe::StripeState;
 use moka::future::Cache;
 use rocket::State;
 use rocket::post;
@@ -28,6 +29,7 @@ pub(super) async fn lit_action(
     ipfs_cache: &State<Cache<String, String>>,
     http_client: &State<reqwest::Client>,
     chain_config: &State<Arc<ChainConfig>>,
+    stripe_state: &State<Option<Arc<StripeState>>>,
     lit_action_request: Json<LitActionRequest>,
 ) -> OpenApiResponse<LitActionResponse, ErrMessage> {
     OpenApiResponse {
@@ -39,6 +41,7 @@ pub(super) async fn lit_action(
                 ipfs_cache.inner(),
                 http_client.inner(),
                 chain_config.inner().clone(),
+                stripe_state.inner().clone(),
                 lit_action_request,
             )
             .await,

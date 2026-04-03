@@ -13,6 +13,15 @@ on:
         description: "API base URL (e.g. https://example.com/core/v1)"
         required: true
         type: string
+      env:
+        description: "Target environment: 'prod' or 'staging'"
+        required: false
+        type: string
+        default: 'staging'
+    secrets:
+      accounts_json:
+        description: "Raw JSON content for pre-funded accounts file (written to a temp file at runtime)"
+        required: false
   workflow_dispatch:
     inputs:
       api_root_url:
@@ -28,15 +37,32 @@ jobs:
   k6-smoke:
     runs-on: self-hosted
     env:
-      ACCOUNTS_FILE: ${{ inputs.accounts_file || (github.ref_name == 'next' && './data/accounts.next.json' || './data/accounts.dev.json') }}
+      K6_ACCOUNTS_FILE: ${{ inputs.accounts_file || (github.ref_name == 'next' && './data/accounts.next.json' || './data/accounts.dev.json') }}
     steps:
       - uses: actions/checkout@v4
 
       - name: Install k6
         uses: grafana/setup-k6-action@v1
 
+      - name: Write accounts file from secret
+        id: accounts-file
+        env:
+          ACCOUNTS_JSON: ${{ secrets.accounts_json }}
+        run: |
+          if [ -n "$ACCOUNTS_JSON" ]; then
+            TMPFILE=$(mktemp "${RUNNER_TEMP}/k6-accounts-XXXXXX.json")
+            printf '%s' "$ACCOUNTS_JSON" > "$TMPFILE"
+            echo "path=$TMPFILE" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: smoke.spec.ts
         env:
           BASE_URL: ${{ inputs.api_root_url }}
           K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-smoke
+          K6_ACCOUNTS_FILE: ${{ steps.accounts-file.outputs.path || env.K6_ACCOUNTS_FILE }}
+          K6_ENV: ${{ inputs.env }}
         run: k6 run k6/smoke.spec.ts
+
+      - name: Clean up accounts file
+        if: ${{ always() && steps.accounts-file.outputs.path }}
+        run: rm -f "${{ steps.accounts-file.outputs.path }}"

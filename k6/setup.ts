@@ -94,7 +94,7 @@ export function createAccountAndUsageKey(options: {
  * You can override the path with ACCOUNTS_FILE; by default we look for
  * `./data/accounts.json` relative to the k6 project root.
  */
-const ACCOUNTS_FILE = __ENV.ACCOUNTS_FILE || "./data/accounts.json";
+const ACCOUNTS_FILE = __ENV.K6_ACCOUNTS_FILE || "./data/accounts.json";
 
 export const PRECREATED_ACCOUNTS = new SharedArray<PrecreatedAccount>(
   "precreated-accounts",
