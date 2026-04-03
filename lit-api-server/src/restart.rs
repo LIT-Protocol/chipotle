@@ -25,7 +25,9 @@ impl RestartHandle {
         Self { tx }
     }
 
-    /// Send a restart signal. Returns `true` if the signal was sent.
+    /// Send a restart signal. Returns `true` if the signal was sent or
+    /// already queued (a restart is in progress). Returns `false` only
+    /// when the channel is closed.
     /// Uses `try_send` so the listener is never blocked waiting for the
     /// main loop to consume a previous signal.
     pub fn trigger(&self) -> bool {

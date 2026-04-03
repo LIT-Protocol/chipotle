@@ -21,7 +21,7 @@ use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 use tokio::sync::mpsc;
 
 /// Maximum number of restarts allowed within `RESTART_WINDOW`.
-/// If exceeded, the process exits to avoid an infinite restart loop.
+/// Once this limit is reached, the process exits to avoid an infinite restart loop.
 const MAX_RESTARTS: u64 = 3;
 /// Time window (in seconds) for restart loop protection.
 const RESTART_WINDOW: Duration = Duration::from_secs(60);
@@ -172,6 +172,8 @@ async fn main() -> Result<(), rocket::Error> {
     // Restart loop protection: track timestamps of recent restarts.
     let mut restart_timestamps: Vec<std::time::Instant> = Vec::new();
 
+    let mut server_error: Option<rocket::Error> = None;
+
     loop {
         let r = build_rocket(
             signer_pool.clone(),
@@ -185,6 +187,7 @@ async fn main() -> Result<(), rocket::Error> {
             Ok(rocket) => rocket,
             Err(e) => {
                 tracing::error!("Failed to ignite Rocket: {e}. Exiting restart loop.");
+                server_error = Some(e);
                 break;
             }
         };
@@ -195,7 +198,10 @@ async fn main() -> Result<(), rocket::Error> {
             res = &mut server_handle => {
                 match res {
                     Ok(Ok(_)) => tracing::info!("Server exited cleanly."),
-                    Ok(Err(e)) => tracing::error!("Server exited with error: {e}"),
+                    Ok(Err(e)) => {
+                        tracing::error!("Server exited with error: {e}");
+                        server_error = Some(e);
+                    }
                     Err(e) => tracing::error!("Server task panicked: {e}"),
                 }
                 break;
@@ -223,7 +229,7 @@ async fn main() -> Result<(), rocket::Error> {
                     "Restart signal received. Shutting down current instance..."
                 );
 
-                if restart_timestamps.len() as u64 >= MAX_RESTARTS {
+                if restart_timestamps.len() as u64 > MAX_RESTARTS {
                     tracing::error!(
                         max = MAX_RESTARTS,
                         window_secs = RESTART_WINDOW.as_secs(),
@@ -254,7 +260,11 @@ async fn main() -> Result<(), rocket::Error> {
         }
     }
 
-    Ok(())
+    if let Some(e) = server_error {
+        Err(e)
+    } else {
+        Ok(())
+    }
 }
 
 fn build_rocket(
