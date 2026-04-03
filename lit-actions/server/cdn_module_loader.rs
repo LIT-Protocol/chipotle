@@ -165,8 +165,9 @@ impl CdnModuleLoader {
         };
 
         // Must contain @ for version pinning (but not just a leading @ for scoped packages)
-        let version_at = if spec.starts_with('@') {
-            spec[1..].find('@').map(|i| i + 1)
+        let version_at = if let Some(rest) = spec.strip_prefix('@') {
+            // Scoped package: @scope/pkg@version — find the second @
+            rest.find('@').map(|i| i + 1)
         } else {
             spec.find('@')
         };
@@ -234,14 +235,14 @@ impl CdnModuleLoader {
         }
 
         // Pre-check content-length header
-        if let Some(len) = response.content_length() {
-            if len as usize > MAX_MODULE_SIZE_BYTES {
-                error!(module_url = %url, fetch = label, content_length = len, max_bytes = MAX_MODULE_SIZE_BYTES, "CDN module rejected: exceeds size limit");
-                return Err(JsErrorBox::generic(format!(
-                    "Module {url} exceeds maximum size ({len} bytes > {MAX_MODULE_SIZE_BYTES} bytes)"
-                ))
-                .into());
-            }
+        if let Some(len) = response.content_length()
+            && len as usize > MAX_MODULE_SIZE_BYTES
+        {
+            error!(module_url = %url, fetch = label, content_length = len, max_bytes = MAX_MODULE_SIZE_BYTES, "CDN module rejected: exceeds size limit");
+            return Err(JsErrorBox::generic(format!(
+                "Module {url} exceeds maximum size ({len} bytes > {MAX_MODULE_SIZE_BYTES} bytes)"
+            ))
+            .into());
         }
 
         // Stream body with hard size cap to prevent OOM even if content-length is absent/wrong
@@ -391,16 +392,16 @@ impl ModuleLoader for CdnModuleLoader {
         }
 
         // Check cache first
-        if let Ok(cache) = self.cache.read() {
-            if let Some(cached_bytes) = cache.get(&url) {
-                debug!(module_url = %url, size_bytes = cached_bytes.len(), "CDN module loaded from cache");
-                return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
-                    ModuleType::JavaScript,
-                    ModuleSourceCode::Bytes(cached_bytes.clone().into_boxed_slice().into()),
-                    module_specifier,
-                    None,
-                )));
-            }
+        if let Ok(cache) = self.cache.read()
+            && let Some(cached_bytes) = cache.get(&url)
+        {
+            debug!(module_url = %url, size_bytes = cached_bytes.len(), "CDN module loaded from cache");
+            return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
+                ModuleType::JavaScript,
+                ModuleSourceCode::Bytes(cached_bytes.clone().into_boxed_slice().into()),
+                module_specifier,
+                None,
+            )));
         }
 
         let client = self.client.clone();
@@ -418,7 +419,7 @@ impl ModuleLoader for CdnModuleLoader {
             hasher.update(&bytes);
             let actual_digest = hasher.finalize();
 
-            let actual_b64 = base64::engine::general_purpose::STANDARD.encode(&actual_digest);
+            let actual_b64 = base64::engine::general_purpose::STANDARD.encode(actual_digest);
 
             if let Some(expected_b64) = &expected_hash {
                 // Known module: verify against stored hash
@@ -468,7 +469,7 @@ impl ModuleLoader for CdnModuleLoader {
                 hasher2.update(&bytes2);
                 let verify_digest = hasher2.finalize();
                 let verify_b64 =
-                    base64::engine::general_purpose::STANDARD.encode(&verify_digest);
+                    base64::engine::general_purpose::STANDARD.encode(verify_digest);
 
                 if !constant_time_eq(&actual_digest, &verify_digest) {
                     error!(

@@ -50,6 +50,7 @@ fn deno_isolate_init() -> Option<&'static [u8]> {
 }
 
 // using the worker built into deno
+#[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, err)]
 fn build_main_worker_and_inject_sdk(
     globals_to_inject: &Option<serde_json::Value>,
