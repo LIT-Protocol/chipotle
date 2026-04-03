@@ -3,9 +3,9 @@ title: "Encryption & Decryption"
 description: "How encryption and decryption work in Chipotle compared to the official Lit SDK's access-control-conditions approach."
 ---
 
-## The Official SDK Approach
+## The Lit V1 SDK Approach
 
-The [official Lit documentation](https://developer.litprotocol.com/sdk/auth-context-consumption/encrypt-and-decrypt) shows a full encrypt/decrypt flow using the `@lit-protocol/access-control-conditions` package. The steps are:
+The Lit V1 / Naga SDK encrypt/decrypt flow using the `@lit-protocol/access-control-conditions` package was:
 
 1. **Install the package** — `npm install @lit-protocol/access-control-conditions`
 2. **Define access control conditions** — Build an `accs` object that describes *who* can decrypt (e.g. a specific wallet address, a token balance check, an NFT ownership check). These are evaluated at decrypt time across the Lit node network.
