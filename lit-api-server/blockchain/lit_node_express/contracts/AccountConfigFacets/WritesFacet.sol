@@ -179,12 +179,12 @@ contract WritesFacet {
     ) public {
         if (cidHashes.length > 10) {
             revert AppStorage.InvalidRequest(
-                "cidHashes must be less than 10 items to bulk update"
+                "cidHashes must be 10 items or fewer"
             );
         }
         if (pkpIds.length > 10) {
             revert AppStorage.InvalidRequest(
-                "pkpIds must be less than 10 items to bulk update"
+                "pkpIds must be 10 items or fewer"
             );
         }
 
@@ -444,6 +444,9 @@ contract WritesFacet {
         }
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         AppStorage.Account storage account = s.accounts[masterHash];
+        if (derivationPath == 0) {
+            revert AppStorage.InvalidRequest("derivationPath must be non-zero");
+        }
         if (account.pkpData[pkpId].id != 0) {
             revert AppStorage.InvalidRequest("PKP already registered");
         }

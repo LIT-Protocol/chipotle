@@ -16,6 +16,8 @@ import {IDiamondLoupe} from "../interfaces/IDiamondLoupe.sol";
 
 // When no function exists for function called
 error FunctionNotFound(bytes4 _functionSelector);
+// When ETH is sent directly to the contract
+error DirectETHTransferNotAllowed();
 
 contract AccountConfig {
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -39,7 +41,7 @@ contract AccountConfig {
 
     /// @notice Reject any ETH sent directly to the contract.
     receive() external payable {
-        revert();
+        revert DirectETHTransferNotAllowed();
     }
 
     // Find facet for function that is called and execute the
