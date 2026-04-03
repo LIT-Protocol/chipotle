@@ -10,10 +10,13 @@ import {
 } from "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 import {AppStorage} from "./AppStorage.sol";
 import {SecurityLib} from "./SecurityLib.sol";
+import {LibDiamond} from "../../libraries/LibDiamond.sol";
 
 contract APIConfigFacet {
     using EnumerableSet for EnumerableSet.UintSet;
     using EnumerableSet for EnumerableSet.AddressSet;
+
+    event ServerTriggered(uint256 value, address indexed sender);
 
     function setRequestedApiPayerCount(
         uint256 newRequestedApiPayerCount
@@ -46,5 +49,14 @@ contract APIConfigFacet {
         SecurityLib.revertIfNotApiPayerOrOwner(msg.sender);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         s.rebalanceAmount = newRebalanceAmount;
+    }
+
+    /// @notice Trigger a server restart signal. Only callable by the diamond owner.
+    /// @param value Arbitrary uint256 value stored on-chain and emitted in the event.
+    function serverTrigger(uint256 value) public {
+        LibDiamond.enforceIsContractOwner();
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        s.serverTriggerValue = value;
+        emit ServerTriggered(value, msg.sender);
     }
 }

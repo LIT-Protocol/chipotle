@@ -1499,6 +1499,22 @@ pub mod account_config {
                     },],
                 ),
                 (
+                    ::std::borrow::ToOwned::to_owned("serverTrigger"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("serverTrigger"),
+                        inputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::borrow::ToOwned::to_owned("value"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("uint256"),
+                            ),
+                        },],
+                        outputs: ::std::vec![],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                    },],
+                ),
+                (
                     ::std::borrow::ToOwned::to_owned("setAdminApiPayerAccount"),
                     ::std::vec![::ethers::core::abi::ethabi::Function {
                         name: ::std::borrow::ToOwned::to_owned("setAdminApiPayerAccount",),
@@ -1936,7 +1952,25 @@ pub mod account_config {
                     },],
                 ),
             ]),
-            events: ::std::collections::BTreeMap::new(),
+            events: ::core::convert::From::from([(
+                ::std::borrow::ToOwned::to_owned("ServerTriggered"),
+                ::std::vec![::ethers::core::abi::ethabi::Event {
+                    name: ::std::borrow::ToOwned::to_owned("ServerTriggered"),
+                    inputs: ::std::vec![
+                        ::ethers::core::abi::ethabi::EventParam {
+                            name: ::std::borrow::ToOwned::to_owned("value"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                            indexed: false,
+                        },
+                        ::ethers::core::abi::ethabi::EventParam {
+                            name: ::std::borrow::ToOwned::to_owned("sender"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                            indexed: true,
+                        },
+                    ],
+                    anonymous: false,
+                },],
+            )]),
             errors: ::core::convert::From::from([
                 (
                     ::std::borrow::ToOwned::to_owned("AccountAlreadyExists"),
@@ -2064,6 +2098,28 @@ pub mod account_config {
                             },
                             ::ethers::core::abi::ethabi::Param {
                                 name: ::std::borrow::ToOwned::to_owned("sender"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("address"),
+                                ),
+                            },
+                        ],
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("NotContractOwner"),
+                    ::std::vec![::ethers::core::abi::ethabi::AbiError {
+                        name: ::std::borrow::ToOwned::to_owned("NotContractOwner"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("_user"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("address"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("_contractOwner"),
                                 kind: ::ethers::core::abi::ethabi::ParamType::Address,
                                 internal_type: ::core::option::Option::Some(
                                     ::std::borrow::ToOwned::to_owned("address"),
@@ -2730,6 +2786,15 @@ pub mod account_config {
                 .method_hash([52, 183, 248, 122], ())
                 .expect("method not found (this should never happen)")
         }
+        ///Calls the contract's `serverTrigger` (0x286cf9bb) function
+        pub fn server_trigger(
+            &self,
+            value: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([40, 108, 249, 187], value)
+                .expect("method not found (this should never happen)")
+        }
         ///Calls the contract's `setAdminApiPayerAccount` (0xc001bc79) function
         pub fn set_admin_api_payer_account(
             &self,
@@ -2909,6 +2974,21 @@ pub mod account_config {
                 )
                 .expect("method not found (this should never happen)")
         }
+        ///Gets the contract's `ServerTriggered` event
+        pub fn server_triggered_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, ServerTriggeredFilter>
+        {
+            self.0.event()
+        }
+        /// Returns an `Event` builder for all the events of this contract.
+        pub fn events(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, ServerTriggeredFilter>
+        {
+            self.0
+                .event_with_filter(::core::default::Default::default())
+        }
     }
     impl<M: ::ethers::providers::Middleware> From<::ethers::contract::Contract<M>>
         for AccountConfig<M>
@@ -3047,6 +3127,24 @@ pub mod account_config {
         pub api_key_hash: ::ethers::core::types::U256,
         pub sender: ::ethers::core::types::Address,
     }
+    ///Custom Error type `NotContractOwner` with signature `NotContractOwner(address,address)` and selector `0xff4127cb`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthError,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[etherror(name = "NotContractOwner", abi = "NotContractOwner(address,address)")]
+    pub struct NotContractOwner {
+        pub user: ::ethers::core::types::Address,
+        pub contract_owner: ::ethers::core::types::Address,
+    }
     ///Custom Error type `NotMasterAccount` with signature `NotMasterAccount(uint256)` and selector `0x1d0932ee`
     #[derive(
         Clone,
@@ -3163,6 +3261,7 @@ pub mod account_config {
         InsufficientBalance(InsufficientBalance),
         InvalidRequest(InvalidRequest),
         NoAccountAccess(NoAccountAccess),
+        NotContractOwner(NotContractOwner),
         NotMasterAccount(NotMasterAccount),
         OnlyApiPayerOrOwner(OnlyApiPayerOrOwner),
         OnlyApiPayerOrPricingOperator(OnlyApiPayerOrPricingOperator),
@@ -3212,6 +3311,10 @@ pub mod account_config {
             if let Ok(decoded) = <NoAccountAccess as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::NoAccountAccess(decoded));
             }
+            if let Ok(decoded) = <NotContractOwner as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::NotContractOwner(decoded));
+            }
             if let Ok(decoded) = <NotMasterAccount as ::ethers::core::abi::AbiDecode>::decode(data)
             {
                 return Ok(Self::NotMasterAccount(decoded));
@@ -3255,6 +3358,7 @@ pub mod account_config {
                 }
                 Self::InvalidRequest(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::NoAccountAccess(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::NotContractOwner(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::NotMasterAccount(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::OnlyApiPayerOrOwner(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
@@ -3303,6 +3407,10 @@ pub mod account_config {
                     true
                 }
                 _ if selector
+                    == <NotContractOwner as ::ethers::contract::EthError>::selector() => {
+                    true
+                }
+                _ if selector
                     == <NotMasterAccount as ::ethers::contract::EthError>::selector() => {
                     true
                 }
@@ -3336,6 +3444,7 @@ pub mod account_config {
                 Self::InsufficientBalance(element) => ::core::fmt::Display::fmt(element, f),
                 Self::InvalidRequest(element) => ::core::fmt::Display::fmt(element, f),
                 Self::NoAccountAccess(element) => ::core::fmt::Display::fmt(element, f),
+                Self::NotContractOwner(element) => ::core::fmt::Display::fmt(element, f),
                 Self::NotMasterAccount(element) => ::core::fmt::Display::fmt(element, f),
                 Self::OnlyApiPayerOrOwner(element) => ::core::fmt::Display::fmt(element, f),
                 Self::OnlyApiPayerOrPricingOperator(element) => {
@@ -3387,6 +3496,11 @@ pub mod account_config {
             Self::NoAccountAccess(value)
         }
     }
+    impl ::core::convert::From<NotContractOwner> for AccountConfigErrors {
+        fn from(value: NotContractOwner) -> Self {
+            Self::NotContractOwner(value)
+        }
+    }
     impl ::core::convert::From<NotMasterAccount> for AccountConfigErrors {
         fn from(value: NotMasterAccount) -> Self {
             Self::NotMasterAccount(value)
@@ -3411,6 +3525,24 @@ pub mod account_config {
         fn from(value: UsageApiKeyDoesNotExist) -> Self {
             Self::UsageApiKeyDoesNotExist(value)
         }
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(name = "ServerTriggered", abi = "ServerTriggered(uint256,address)")]
+    pub struct ServerTriggeredFilter {
+        pub value: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub sender: ::ethers::core::types::Address,
     }
     ///Container type for all input parameters for the `accountCount` function with signature `accountCount()` and selector `0xe4af29fc`
     #[derive(
@@ -4284,6 +4416,23 @@ pub mod account_config {
     )]
     #[ethcall(name = "requestedApiPayerCount", abi = "requestedApiPayerCount()")]
     pub struct RequestedApiPayerCountCall;
+    ///Container type for all input parameters for the `serverTrigger` function with signature `serverTrigger(uint256)` and selector `0x286cf9bb`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(name = "serverTrigger", abi = "serverTrigger(uint256)")]
+    pub struct ServerTriggerCall {
+        pub value: ::ethers::core::types::U256,
+    }
     ///Container type for all input parameters for the `setAdminApiPayerAccount` function with signature `setAdminApiPayerAccount(address)` and selector `0xc001bc79`
     #[derive(
         Clone,
@@ -4599,6 +4748,7 @@ pub mod account_config {
         RemovePkpFromGroup(RemovePkpFromGroupCall),
         RemoveUsageApiKey(RemoveUsageApiKeyCall),
         RequestedApiPayerCount(RequestedApiPayerCountCall),
+        ServerTrigger(ServerTriggerCall),
         SetAdminApiPayerAccount(SetAdminApiPayerAccountCall),
         SetApiPayers(SetApiPayersCall),
         SetNodeConfiguration(SetNodeConfigurationCall),
@@ -4814,6 +4964,10 @@ pub mod account_config {
             {
                 return Ok(Self::RequestedApiPayerCount(decoded));
             }
+            if let Ok(decoded) = <ServerTriggerCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::ServerTrigger(decoded));
+            }
             if let Ok(decoded) =
                 <SetAdminApiPayerAccountCall as ::ethers::core::abi::AbiDecode>::decode(data)
             {
@@ -4961,6 +5115,7 @@ pub mod account_config {
                 Self::RequestedApiPayerCount(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
+                Self::ServerTrigger(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::SetAdminApiPayerAccount(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
@@ -5043,6 +5198,7 @@ pub mod account_config {
                 Self::RemovePkpFromGroup(element) => ::core::fmt::Display::fmt(element, f),
                 Self::RemoveUsageApiKey(element) => ::core::fmt::Display::fmt(element, f),
                 Self::RequestedApiPayerCount(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ServerTrigger(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetAdminApiPayerAccount(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetApiPayers(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetNodeConfiguration(element) => ::core::fmt::Display::fmt(element, f),
@@ -5286,6 +5442,11 @@ pub mod account_config {
     impl ::core::convert::From<RequestedApiPayerCountCall> for AccountConfigCalls {
         fn from(value: RequestedApiPayerCountCall) -> Self {
             Self::RequestedApiPayerCount(value)
+        }
+    }
+    impl ::core::convert::From<ServerTriggerCall> for AccountConfigCalls {
+        fn from(value: ServerTriggerCall) -> Self {
+            Self::ServerTrigger(value)
         }
     }
     impl ::core::convert::From<SetAdminApiPayerAccountCall> for AccountConfigCalls {

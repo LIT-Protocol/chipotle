@@ -28,6 +28,7 @@ use std::time::Duration;
 /// Monitors system load average + CPU pressure and exposes an overload flag.
 ///
 /// Register as Rocket managed state via `.manage(CpuOverloadMonitor::start())`.
+#[derive(Clone)]
 pub struct CpuOverloadMonitor {
     overloaded: Arc<AtomicBool>,
 }

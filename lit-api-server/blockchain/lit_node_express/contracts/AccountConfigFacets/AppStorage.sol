@@ -116,6 +116,7 @@ library AppStorage {
         uint256 rebalanceAmount; // amount of ether to rebalance the api payers with.  If 0, then don't rebalance.
         EnumerableSet.StringSet nodeConfigurationKeys;
         mapping(string => string) nodeConfigurationValues;
+        uint256 serverTriggerValue;
     }
 
     function getStorage()
