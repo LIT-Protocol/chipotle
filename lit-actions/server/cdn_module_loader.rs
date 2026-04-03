@@ -127,6 +127,54 @@ impl CdnModuleLoader {
     fn is_allowed_cdn(url: &str) -> bool {
         url.starts_with(ALLOWED_CDN_PREFIX)
     }
+
+    /// Parse an npm package specifier into a full jsDelivr URL.
+    ///
+    /// Accepts these formats:
+    /// - `package@version` → `https://cdn.jsdelivr.net/npm/package@version`
+    /// - `package@version/file` → `https://cdn.jsdelivr.net/npm/package@version/file`
+    /// - `@scope/package@version` → `https://cdn.jsdelivr.net/npm/@scope/package@version`
+    /// - `@scope/package@version/file` → `https://cdn.jsdelivr.net/npm/@scope/package@version/file`
+    ///
+    /// An optional `#sha384-<hash>` fragment is preserved on the output URL for
+    /// inline integrity verification.
+    ///
+    /// Returns None if the specifier doesn't match the expected format.
+    fn parse_npm_specifier(specifier: &str) -> Option<String> {
+        // Split off the optional #hash fragment before parsing
+        let (spec, fragment) = match specifier.split_once('#') {
+            Some((s, f)) => (s, Some(f)),
+            None => (specifier, None),
+        };
+
+        // Must contain @ for version pinning (but not just a leading @ for scoped packages)
+        let version_at = if spec.starts_with('@') {
+            // Scoped package: @scope/pkg@version — find the second @
+            spec[1..].find('@').map(|i| i + 1)
+        } else {
+            spec.find('@')
+        };
+
+        let version_at = version_at?;
+
+        // Verify there's actually a version after the @
+        let after_at = &spec[version_at + 1..];
+        if after_at.is_empty() {
+            return None;
+        }
+
+        // Version must start with a digit
+        if !after_at.starts_with(|c: char| c.is_ascii_digit()) {
+            return None;
+        }
+
+        let mut url = format!("{ALLOWED_CDN_PREFIX}npm/{spec}");
+        if let Some(frag) = fragment {
+            url.push('#');
+            url.push_str(frag);
+        }
+        Some(url)
+    }
 }
 
 impl ModuleLoader for CdnModuleLoader {
@@ -136,22 +184,39 @@ impl ModuleLoader for CdnModuleLoader {
         _referrer: &str,
         _kind: ResolutionKind,
     ) -> Result<ModuleSpecifier, deno_core::error::ModuleLoaderError> {
-        // Only allow full CDN URLs — no bare specifiers, no relative imports.
-        if !Self::is_allowed_cdn(specifier) {
-            warn!(
+        // If it's already a full jsDelivr URL, pass through
+        if Self::is_allowed_cdn(specifier) {
+            info!(
                 specifier,
-                referrer = _referrer,
-                "CDN module resolve rejected: specifier is not from allowed CDN"
+                "CDN module resolve: full URL accepted"
             );
-            return Err(JsErrorBox::generic(format!(
-                "Bare specifiers are not allowed: \"{specifier}\". \
-                 Use the full CDN URL (e.g. https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm)"
-            ))
-            .into());
+            return ModuleSpecifier::parse(specifier)
+                .map_err(|e| JsErrorBox::generic(format!("Invalid module URL: {specifier}: {e}")).into());
         }
 
-        ModuleSpecifier::parse(specifier)
-            .map_err(|e| JsErrorBox::generic(format!("Invalid module URL: {specifier}: {e}")).into())
+        // Try parsing as an npm specifier (e.g. "zod@3.22.4/+esm")
+        if let Some(cdn_url) = Self::parse_npm_specifier(specifier) {
+            info!(
+                specifier,
+                resolved_url = %cdn_url,
+                "CDN module resolve: npm specifier resolved to jsDelivr URL"
+            );
+            return ModuleSpecifier::parse(&cdn_url)
+                .map_err(|e| JsErrorBox::generic(format!("Invalid resolved URL: {cdn_url}: {e}")).into());
+        }
+
+        // Reject everything else
+        warn!(
+            specifier,
+            referrer = _referrer,
+            "CDN module resolve rejected: not a valid npm specifier or jsDelivr URL"
+        );
+        Err(JsErrorBox::generic(format!(
+            "Invalid import specifier: \"{specifier}\". \
+             Use an npm specifier with a pinned version (e.g. zod@3.22.4/+esm) \
+             or a full jsDelivr URL (e.g. https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm)"
+        ))
+        .into())
     }
 
     fn load(
@@ -161,14 +226,34 @@ impl ModuleLoader for CdnModuleLoader {
         _is_dyn_import: bool,
         _requested_module_type: RequestedModuleType,
     ) -> ModuleLoadResponse {
-        let url = module_specifier.to_string();
+        // Extract inline hash from URL fragment (e.g. #sha384-abc123...)
+        let inline_hash = module_specifier
+            .fragment()
+            .and_then(|f| f.strip_prefix("sha384-"))
+            .map(|h| h.to_string());
+
+        // Build the fetch URL without the fragment
+        let mut fetch_url = module_specifier.clone();
+        fetch_url.set_fragment(None);
+        let url = fetch_url.to_string();
+
+        if let Some(ref h) = inline_hash {
+            info!(
+                module_url = %url,
+                inline_hash = %format!("sha384-{h}"),
+                "CDN module load: inline integrity hash provided in import specifier"
+            );
+        }
+
         let strict = self.strict;
-        let expected_hash = self
-            .integrity
-            .read()
-            .expect("integrity lock poisoned")
-            .get(&url)
-            .cloned();
+        // Inline hash takes priority, then lockfile manifest
+        let expected_hash = inline_hash.clone().or_else(|| {
+            self.integrity
+                .read()
+                .expect("integrity lock poisoned")
+                .get(&url)
+                .cloned()
+        });
 
         // In strict mode without a lockfile path, reject unknown modules.
         // With a lockfile path, we allow TOFU (trust-on-first-use) instead.
@@ -490,14 +575,97 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     }
 
     #[test]
-    fn test_is_allowed_cdn() {
-        assert!(CdnModuleLoader::is_allowed_cdn(
+    fn test_parse_npm_specifier() {
+        // Basic package with version
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("zod@3.22.4"),
+            Some("https://cdn.jsdelivr.net/npm/zod@3.22.4".to_string())
+        );
+        // Package with version and file
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("zod@3.22.4/+esm"),
+            Some("https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm".to_string())
+        );
+        // Scoped package
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("@scope/pkg@1.0.0/+esm"),
+            Some("https://cdn.jsdelivr.net/npm/@scope/pkg@1.0.0/+esm".to_string())
+        );
+        // Scoped package without file
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("@scope/pkg@2.0.0"),
+            Some("https://cdn.jsdelivr.net/npm/@scope/pkg@2.0.0".to_string())
+        );
+        // Deep file path
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("date-fns@3.6.0/esm/index.js"),
+            Some("https://cdn.jsdelivr.net/npm/date-fns@3.6.0/esm/index.js".to_string())
+        );
+        // With inline hash fragment
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("zod@3.22.4/+esm#sha384-abc123"),
+            Some("https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm#sha384-abc123".to_string())
+        );
+        // Scoped with hash
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("@scope/pkg@1.0.0/+esm#sha384-xyz789"),
+            Some("https://cdn.jsdelivr.net/npm/@scope/pkg@1.0.0/+esm#sha384-xyz789".to_string())
+        );
+        // Reject bare name without version
+        assert_eq!(CdnModuleLoader::parse_npm_specifier("lodash-es"), None);
+        // Reject relative paths
+        assert_eq!(CdnModuleLoader::parse_npm_specifier("./local.js"), None);
+        // Reject scoped package without version
+        assert_eq!(CdnModuleLoader::parse_npm_specifier("@scope/pkg"), None);
+    }
+
+    #[test]
+    fn test_resolve_npm_specifiers() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // npm specifier resolves to jsDelivr URL
+        let result = loader
+            .resolve("zod@3.22.4/+esm", "file:///main.js", ResolutionKind::Import)
+            .unwrap();
+        assert_eq!(
+            result.as_str(),
             "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm"
-        ));
-        assert!(!CdnModuleLoader::is_allowed_cdn("https://esm.sh/lodash-es@4.17.21"));
-        assert!(!CdnModuleLoader::is_allowed_cdn("https://evil.com/malware.js"));
-        assert!(!CdnModuleLoader::is_allowed_cdn("lodash-es"));
-        assert!(!CdnModuleLoader::is_allowed_cdn("./local.js"));
+        );
+    }
+
+    #[test]
+    fn test_resolve_full_cdn_urls() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // Full URL still works
+        let result = loader
+            .resolve(
+                "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm",
+                "file:///main.js",
+                ResolutionKind::Import,
+            )
+            .unwrap();
+        assert_eq!(
+            result.as_str(),
+            "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm"
+        );
+    }
+
+    #[test]
+    fn test_resolve_with_inline_hash() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        let result = loader
+            .resolve(
+                "zod@3.22.4/+esm#sha384-abc123def",
+                "file:///main.js",
+                ResolutionKind::Import,
+            )
+            .unwrap();
+        // Fragment is preserved in the resolved URL
+        assert_eq!(
+            result.as_str(),
+            "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm#sha384-abc123def"
+        );
+        // Fragment is accessible
+        assert_eq!(result.fragment(), Some("sha384-abc123def"));
     }
 
     #[test]
@@ -509,15 +677,11 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     }
 
     #[test]
-    fn test_resolve_allows_cdn_urls() {
+    fn test_resolve_rejects_other_urls() {
         let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
         assert!(loader
-            .resolve(
-                "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm",
-                "file:///main.js",
-                ResolutionKind::Import,
-            )
-            .is_ok());
+            .resolve("https://evil.com/malware.js", "file:///main.js", ResolutionKind::Import)
+            .is_err());
     }
 
     #[test]
