@@ -229,6 +229,18 @@ impl ModuleLoader for CdnModuleLoader {
                 .into());
             }
 
+            // Extract SRI hash from CDN response headers (jsDelivr provides this)
+            let cdn_sri_hash = response
+                .headers()
+                .get("x-sri-hash")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.strip_prefix("sha384-"))
+                .map(|s| s.to_string());
+
+            if let Some(ref sri) = cdn_sri_hash {
+                debug!(module_url = %url, cdn_sri = %format!("sha384-{sri}"), "CDN provided SRI hash in response header");
+            }
+
             // Enforce response size limit
             if let Some(len) = response.content_length() {
                 if len as usize > MAX_MODULE_SIZE_BYTES {
@@ -358,6 +370,37 @@ impl ModuleLoader for CdnModuleLoader {
                     size_bytes = bytes.len(),
                     "TOFU: verification passed — both fetches produced identical hash"
                 );
+
+                // Verify against CDN's SRI hash header if available (three-way check)
+                if let Some(ref sri_b64) = cdn_sri_hash {
+                    let sri_digest = base64::engine::general_purpose::STANDARD
+                        .decode(sri_b64)
+                        .map_err(|e| {
+                            error!(module_url = %url, cdn_sri = %format!("sha384-{sri_b64}"), error = %e, "TOFU: CDN SRI header contains invalid base64");
+                            JsErrorBox::generic(format!(
+                                "CDN SRI header for {url} contains invalid base64: {e}"
+                            ))
+                        })?;
+
+                    if !constant_time_eq(&actual_digest, &sri_digest) {
+                        error!(
+                            module_url = %url,
+                            computed_hash = %format!("sha384-{actual_b64}"),
+                            cdn_sri = %format!("sha384-{sri_b64}"),
+                            "TOFU: REJECTED — computed hash does not match CDN SRI header. Possible tampering."
+                        );
+                        return Err(JsErrorBox::generic(format!(
+                            "TOFU: computed hash does not match CDN SRI header for {url}. \
+                             Computed sha384-{actual_b64}, CDN declared sha384-{sri_b64}."
+                        ))
+                        .into());
+                    }
+                    info!(
+                        module_url = %url,
+                        hash = %format!("sha384-{actual_b64}"),
+                        "TOFU: three-way verification passed (first fetch, second fetch, CDN SRI header)"
+                    );
+                }
 
                 // Pin to lockfile on disk
                 if let Some(ref path) = lockfile_path {

@@ -1,0 +1,266 @@
+---
+title: "Module Imports"
+description: "Lit Actions can now import third-party ESM packages directly from jsDelivr. Every import is pinned to an exact version and verified with SHA-384 integrity hashes before any code reaches the runtime."
+---
+
+## What Changed
+
+Until now, the only JavaScript available inside a Lit Action was what shipped with the runtime: `ethers` (v5) and the `Lit.Actions` SDK. If you needed anything else, you had to inline it or bundle it into your action code before uploading to IPFS.
+
+That limitation is gone. Lit Actions can now **import ES modules at runtime** from [jsDelivr](https://www.jsdelivr.com/), a public CDN that serves npm packages as ready-to-run ESM. You write a standard `import` statement with a full, version-pinned URL and the runtime fetches, verifies, caches, and executes it.
+
+```javascript
+import { z } from "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm";
+import { formatDistance } from "https://cdn.jsdelivr.net/npm/date-fns@3.6.0/+esm";
+```
+
+This opens the door to thousands of npm packages: validation libraries, date/time utilities, encoding tools, math libraries, protocol implementations, and more.
+
+---
+
+## How It Works
+
+Every import goes through three stages before any bytes reach the V8 engine.
+
+### 1. Resolution
+
+The runtime resolves the import specifier. Only full `https://cdn.jsdelivr.net/` URLs are accepted. Bare specifiers (`import { z } from "zod"`) and relative paths (`./util.js`) are rejected. This keeps the dependency source explicit at every call site.
+
+### 2. Integrity Verification
+
+Each module URL is checked against an `integrity.lock` manifest that maps URLs to their expected SHA-384 hash. If the hash of the downloaded content does not match, the import fails and the action does not execute.
+
+For modules not yet in the manifest, the system uses **trust-on-first-use (TOFU)** with three-way verification: it fetches the module twice from jsDelivr, independently computes the SHA-384 of each response, and verifies both against jsDelivr's SRI hash header when available. The module is accepted only if all checks agree. The verified hash is then pinned to the lockfile so all future fetches are verified against it.
+
+### 3. Caching
+
+Once a module is verified, its source is held in an in-memory cache. Subsequent imports of the same URL (from any action execution) are served from cache without a network request.
+
+---
+
+## Import Syntax
+
+Imports use the jsDelivr ESM URL format. Always pin to an exact version.
+
+```javascript
+// Import a specific named export
+import { z } from "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm";
+
+// Import a default export
+import Ajv from "https://cdn.jsdelivr.net/npm/ajv@8.12.0/+esm";
+
+// Import multiple named exports
+import { encode, decode } from "https://cdn.jsdelivr.net/npm/cbor-x@1.5.9/+esm";
+```
+
+The URL pattern is:
+
+```
+https://cdn.jsdelivr.net/npm/<package>@<version>/+esm
+```
+
+The `+esm` suffix tells jsDelivr to serve the package's ESM entry point. The `@<version>` pin ensures you always get the exact same bytes.
+
+<Warning>
+  Always pin to an exact version (`@3.22.4`, not `@^3.22.4` or `@latest`). Unpinned versions can resolve to different code over time, which will cause integrity verification to fail and makes your action's behavior non-deterministic.
+</Warning>
+
+---
+
+## Examples
+
+### Validate Input with Zod
+
+```javascript
+import { z } from "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm";
+
+// js_params: { pkpId, userData }
+async function main({ pkpId, userData }) {
+  const UserSchema = z.object({
+    email: z.string().email(),
+    age: z.number().int().min(0).max(150),
+    name: z.string().min(1).max(100),
+  });
+
+  const result = UserSchema.safeParse(userData);
+  if (!result.success) {
+    return { error: "Validation failed", issues: result.error.issues };
+  }
+
+  const wallet = new ethers.Wallet(
+    await Lit.Actions.getPrivateKey({ pkpId })
+  );
+  const signature = await wallet.signMessage(JSON.stringify(result.data));
+
+  return { validated: result.data, signature };
+}
+```
+
+### Format and Sign a Timestamp Proof
+
+```javascript
+import { format, utcToZonedTime } from "https://cdn.jsdelivr.net/npm/date-fns-tz@2.0.1/+esm";
+
+// js_params: { pkpId, timezone }
+async function main({ pkpId, timezone }) {
+  const now = new Date();
+  const zonedTime = utcToZonedTime(now, timezone);
+  const formatted = format(zonedTime, "yyyy-MM-dd HH:mm:ss zzz", { timeZone: timezone });
+
+  const wallet = new ethers.Wallet(
+    await Lit.Actions.getPrivateKey({ pkpId })
+  );
+  const signature = await wallet.signMessage(formatted);
+
+  return { timestamp: formatted, timezone, signature };
+}
+```
+
+### Encode Data as CBOR Before Signing
+
+```javascript
+import { encode } from "https://cdn.jsdelivr.net/npm/cbor-x@1.5.9/+esm";
+
+// js_params: { pkpId, payload }
+async function main({ pkpId, payload }) {
+  const encoded = encode(payload);
+  const hex = Array.from(new Uint8Array(encoded))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+
+  const wallet = new ethers.Wallet(
+    await Lit.Actions.getPrivateKey({ pkpId })
+  );
+  const signature = await wallet.signMessage(hex);
+
+  return { cbor: hex, signature };
+}
+```
+
+### JSON Schema Validation with AJV
+
+```javascript
+import Ajv from "https://cdn.jsdelivr.net/npm/ajv@8.12.0/+esm";
+
+// js_params: { pkpId, data, schema }
+async function main({ pkpId, data, schema }) {
+  const ajv = new Ajv();
+  const validate = ajv.compile(schema);
+
+  if (!validate(data)) {
+    return { error: "Schema validation failed", errors: validate.errors };
+  }
+
+  const wallet = new ethers.Wallet(
+    await Lit.Actions.getPrivateKey({ pkpId })
+  );
+  const signature = await wallet.signMessage(JSON.stringify(data));
+
+  return { valid: true, data, signature };
+}
+```
+
+---
+
+## Package Compatibility
+
+Not every npm package works. The package must meet these requirements:
+
+| Requirement | Why |
+|---|---|
+| Ships ESM in its npm tarball | jsDelivr serves files as-is from the published package. No transpilation or CJS-to-ESM conversion happens. |
+| No Node.js built-in dependencies | Lit Actions run in Deno/V8, not Node.js. Packages that import `fs`, `path`, `crypto`, or other Node built-ins will fail. |
+| No native/binary addons | The runtime is a sandboxed V8 isolate. Native code cannot execute. |
+| Pinned to an exact version | Required for integrity verification and deterministic behavior. |
+
+Most modern packages ship ESM. Some well-known examples that work:
+
+- **zod** — Schema validation
+- **ajv** — JSON Schema validation
+- **date-fns** / **date-fns-tz** — Date utilities
+- **cbor-x** — CBOR encoding/decoding
+- **uuid** — UUID generation
+- **lodash-es** — Utility functions (ESM build)
+- **preact** — Lightweight UI rendering (for server-side HTML generation)
+- **superstruct** — Structural validation
+
+Packages that will **not** work:
+
+- **axios** — depends on Node.js `http` module
+- **lodash** (non-ESM) — CJS only, use `lodash-es` instead
+- **sharp** — native binary addon
+- **bcrypt** — native binary addon
+
+<Note>
+  If you are unsure whether a package ships ESM, check its `package.json` for an `"exports"` or `"module"` field, or test the jsDelivr URL directly in a browser: `https://cdn.jsdelivr.net/npm/<package>@<version>/+esm`
+</Note>
+
+---
+
+## Why jsDelivr
+
+We evaluated several CDN options for serving npm packages as ESM. The choice came down to a set of non-negotiable requirements for running third-party code inside a cryptographic signing environment.
+
+### The Requirements
+
+1. **Immutability** — The same URL must return the exact same bytes forever. If content can change, integrity hashes become meaningless.
+2. **No server-side transformation** — The CDN must serve the original files from the npm tarball. Any server-side bundling or transpilation introduces a layer we cannot audit or pin.
+3. **Version pinning** — URLs must support exact version locks (`@3.22.4`) so that the resolved content is deterministic.
+4. **SRI hash support** — The CDN should support Subresource Integrity headers so hashes can be computed and verified against the original source.
+
+### How jsDelivr Meets Them
+
+**jsDelivr with pinned versions** serves raw files directly from npm packages at version-pinned URLs that are guaranteed immutable. Once a version is published to npm, the content behind `https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm` never changes. jsDelivr does not perform any transformation, bundling, or minification on the source files. What the package author published to npm is exactly what gets served. Chipotle enforces this immutability guarantee by validating the SHA-384 hash of every module on every fetch, so even if a CDN were to serve altered content, the integrity check would catch it and reject the module before execution.
+
+jsDelivr also provides built-in SRI hash support and is backed by a multi-CDN infrastructure (Cloudflare, Fastly, and others) with high availability and global edge caching.
+
+### Alternatives Considered
+
+| CDN | Verdict | Reason |
+|---|---|---|
+| **esm.sh** | Rejected | Performs server-side CJS-to-ESM conversion. The output is generated, not the original source. We cannot guarantee that two fetches of the same URL produce the same bytes, and we cannot audit the conversion logic. |
+| **unpkg.com** | Rejected | Serves raw npm files (good) but does not guarantee immutability of the `?module` rewriting layer. The redirects it uses also complicate integrity verification. |
+| **Skypack** | Rejected | Performs server-side optimization and conversion. Same concerns as esm.sh. |
+| **Self-hosted** | Deferred | Eliminates third-party trust entirely but requires operating a package mirror. May be considered for enterprise deployments in the future. |
+
+The key constraint is that the package must **already ship ESM** in its published npm tarball. jsDelivr does not convert CJS to ESM. Most modern packages do ship ESM, but older CJS-only packages will not work without a conversion step that happens before publishing.
+
+---
+
+## Security Model
+
+Module imports operate under the same security model as the rest of the Lit Actions runtime. Every module is verified before it reaches V8.
+
+| Layer | Protection |
+|---|---|
+| **URL allowlist** | Only `https://cdn.jsdelivr.net/` is accepted. All other origins are rejected at the resolution stage. |
+| **Version pinning** | Exact versions are required. The URL is the immutable identifier. |
+| **SHA-384 integrity** | Every module is hashed and compared against the `integrity.lock` manifest. Mismatches are fatal. |
+| **Trust-on-first-use** | New modules are double-fetched, hashes compared, and verified against jsDelivr's SRI header before being accepted and pinned. |
+| **No redirects** | HTTP redirects are blocked. The CDN must serve the content directly. |
+| **Size limits** | Responses larger than 10 MB are rejected. |
+| **Timeouts** | Fetch operations time out after 30 seconds. |
+| **Sandboxing** | Imported code runs in the same Deno/V8 sandbox as the rest of the action. No filesystem, no subprocess, no native code. |
+
+<Warning>
+  Imported packages run with the same permissions as your action code, including access to `Lit.Actions.getPrivateKey()` if a PKP is available. Only import packages you trust. The integrity system ensures the code has not been tampered with in transit, but it does not audit what the code does.
+</Warning>
+
+---
+
+## Limits
+
+Module imports are subject to the same [resource limits](/lit-actions/limits) as the rest of your action:
+
+- **Memory** — Imported modules count toward the action's memory limit (default 128 MB).
+- **Timeout** — Module fetch time counts toward the action's execution timeout (default 15 minutes).
+- **Fetch count** — Each module fetch (including TOFU verification fetches) counts toward the per-action fetch limit.
+- **Module size** — Individual modules are capped at 10 MB.
+
+---
+
+## Next Steps
+
+- [Examples](/lit-actions/examples) — More action patterns using the built-in SDK
+- [Patterns](/lit-actions/patterns) — Advanced patterns like gating logic and action-identity signing
+- [Lit Actions SDK](/lit-actions/chipotle) — Full API reference

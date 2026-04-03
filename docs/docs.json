@@ -26,6 +26,7 @@
             "group": "Lit Actions",
             "pages": [
               "lit-actions/index",
+              "lit-actions/imports",
               "lit-actions/examples",
               "lit-actions/patterns",
               "lit-actions/limits",
