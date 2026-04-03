@@ -134,19 +134,16 @@ impl<'r> FromRequest<'r> for BilledLitActionApiKey {
                     .await
                     .map_err(|e| {
                         tracing::warn!("billing guard: wallet resolution failed: {e}");
-                        ()
                     })?;
                 let customer_id = stripe::get_customer_by_wallet(&wallet, stripe)
                     .await
                     .map_err(|e| {
                         tracing::warn!("billing guard: customer lookup failed: {e}");
-                        ()
                     })?;
                 let balance = stripe::get_credit_balance(&customer_id, stripe)
                     .await
                     .map_err(|e| {
                         tracing::warn!("billing guard: balance check failed: {e}");
-                        ()
                     })?;
                 if balance >= 0 {
                     tracing::warn!("billing guard: insufficient credits (balance={balance})");
