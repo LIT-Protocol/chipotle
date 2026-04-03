@@ -56,6 +56,8 @@ async function checkBillingAvailable() {
 function updateAuthUI() {
   const hasKey = !!getApiKey();
   document.body.classList.toggle('has-api-key', hasKey);
+  // Clear any pending billing retry to prevent timer stacking
+  if (_billingRetryTimer) { clearTimeout(_billingRetryTimer); _billingRetryTimer = null; }
   const balanceEl = document.getElementById('billing-balance-display');
   const addFundsBtn = document.getElementById('btn-add-funds');
   const notRequiredEl = document.getElementById('billing-not-required');
@@ -70,24 +72,32 @@ function updateAuthUI() {
     updateStatCards();
     preloadAllTables();
     // Check billing availability then show appropriate UI
-    checkBillingAvailable().then(available => {
-      // Guard: if the user logged out or switched accounts while the
-      // async check was in flight, do not mutate the UI.
-      if (getApiKey() !== capturedKey) return;
-      if (available) {
-        if (balanceEl) balanceEl.style.display = '';
-        if (addFundsBtn) addFundsBtn.style.display = '';
-        loadBillingBalance();
-      } else {
-        if (notRequiredEl) notRequiredEl.style.display = '';
-        if (billingBanner) billingBanner.style.display = '';
-        // Schedule a retry so transient failures recover without a reload.
-        // Clear any existing timer first to prevent accumulation across calls.
-        if (_billingRetryTimer) clearTimeout(_billingRetryTimer);
-        _billingRetryTimer = setTimeout(() => { _billingRetryTimer = null; updateAuthUI(); }, BILLING_RETRY_MS);
-      }
-    }).catch(() => {});
+    refreshBillingUI(capturedKey, balanceEl, addFundsBtn, notRequiredEl, billingBanner);
   }
+}
+
+// Separated from updateAuthUI so the retry timer can re-check billing
+// without re-running preloadAllTables / refreshOverviewAccount every 30s.
+function refreshBillingUI(capturedKey, balanceEl, addFundsBtn, notRequiredEl, billingBanner) {
+  checkBillingAvailable().then(available => {
+    // Guard: if the user logged out or switched accounts while the
+    // async check was in flight, do not mutate the UI.
+    if (getApiKey() !== capturedKey) return;
+    if (available) {
+      if (balanceEl) balanceEl.style.display = '';
+      if (addFundsBtn) addFundsBtn.style.display = '';
+      loadBillingBalance();
+    } else {
+      if (notRequiredEl) notRequiredEl.style.display = '';
+      if (billingBanner) billingBanner.style.display = '';
+      // Schedule a retry so transient failures recover without a reload.
+      if (_billingRetryTimer) clearTimeout(_billingRetryTimer);
+      _billingRetryTimer = setTimeout(() => {
+        _billingRetryTimer = null;
+        refreshBillingUI(capturedKey, balanceEl, addFundsBtn, notRequiredEl, billingBanner);
+      }, BILLING_RETRY_MS);
+    }
+  }).catch(e => console.error('billing check failed', e));
 }
 
 // Preload groups, wallets, usage keys, and actions (for default group) when dashboard is shown
