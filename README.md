@@ -19,9 +19,9 @@
 
 <p align="center">
   <a href="https://github.com/LIT-Protocol/chipotle/stargazers"><img src="https://img.shields.io/github/stars/LIT-Protocol/chipotle?style=social" alt="Stars"></a>&nbsp;
-  <a href="https://api.dev.litprotocol.com/core/v1/swagger-ui"><img src="https://img.shields.io/badge/API-Swagger_UI-85ea2d" alt="Swagger"></a>&nbsp;
-  <a href="https://dashboard.dev.litprotocol.com/dapps/dashboard/"><img src="https://img.shields.io/badge/Try-Dashboard-ff6b35" alt="Dashboard"></a>&nbsp;
-  <a href="https://docs.dev.litprotocol.com/"><img src="https://img.shields.io/badge/Docs-docs.dev.litprotocol.com-blue" alt="Docs"></a>
+  <a href="https://api.chipotle.litprotocol.com/core/v1/swagger-ui"><img src="https://img.shields.io/badge/API-Swagger_UI-85ea2d" alt="Swagger"></a>&nbsp;
+  <a href="https://dashboard.chipotle.litprotocol.com/dapps/dashboard/"><img src="https://img.shields.io/badge/Try-Dashboard-ff6b35" alt="Dashboard"></a>&nbsp;
+  <a href="https://developer.litprotocol.com/"><img src="https://img.shields.io/badge/Docs-developer.litprotocol.com-blue" alt="Docs"></a>
 </p>
 
 ---
@@ -57,12 +57,12 @@ A REST API with a JS SDK. Create an account, get an API key, call one endpoint. 
 
 ## Quickstart
 
-Everything below works right now against the live dev API. No SDK needed — just `curl`.
+Everything below works right now against the live API. No SDK needed — just `curl`.
 
 ### 1. Create an account
 
 ```bash
-curl -s -X POST https://api.dev.litprotocol.com/core/v1/new_account \
+curl -s -X POST https://api.chipotle.litprotocol.com/core/v1/new_account \
   -H "Content-Type: application/json" \
   -d '{"account_name": "my-app", "account_description": "Getting started"}' | jq
 ```
@@ -76,12 +76,41 @@ curl -s -X POST https://api.dev.litprotocol.com/core/v1/new_account \
 
 ### 2. Add funds
 
-Lit Action execution and write/metered management operations require credits. Add funds via credit card in the [Dashboard](https://dashboard.dev.litprotocol.com/dapps/dashboard/) — click **Add Funds** in the top-right corner and select a credit package (minimum $5.00). See [Pricing](https://docs.dev.litprotocol.com/management/pricing) for details.
+Lit Action execution and write/metered management operations require credits. Add funds via credit card in the [Dashboard](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) — click **Add Funds** in the top-right corner and select a credit package (minimum $5.00). See [Pricing](https://developer.litprotocol.com/management/pricing) for details.
 
-### 3. Create a wallet (PKP)
+### 3. Create a usage API key
+
+Your account key is the master credential — don't embed it in apps. Create a scoped usage key instead:
 
 ```bash
-curl -s https://api.dev.litprotocol.com/core/v1/create_wallet \
+curl -s -X POST https://api.chipotle.litprotocol.com/core/v1/add_usage_api_key \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: $API_KEY" \
+  -d '{
+    "name": "My dApp Key",
+    "description": "Getting started",
+    "can_create_groups": false,
+    "can_delete_groups": false,
+    "can_create_pkps": true,
+    "manage_ipfs_ids_in_groups": [],
+    "add_pkp_to_groups": [],
+    "remove_pkp_from_groups": [],
+    "execute_in_groups": [0]
+  }' | jq
+```
+
+```json
+{
+  "usage_api_key": "Xk9m+2CA…"
+}
+```
+
+Save this key — it's shown only once. Use it in place of your account key for the remaining steps. See [API Keys](https://developer.litprotocol.com/management/api_keys) for details on scoping permissions.
+
+### 4. Create a wallet (PKP)
+
+```bash
+curl -s https://api.chipotle.litprotocol.com/core/v1/create_wallet \
   -H "X-Api-Key: $API_KEY" | jq
 ```
 
@@ -91,10 +120,10 @@ curl -s https://api.dev.litprotocol.com/core/v1/create_wallet \
 }
 ```
 
-### 4. Run a Lit Action
+### 5. Run a Lit Action
 
 ```bash
-curl -s -X POST https://api.dev.litprotocol.com/core/v1/lit_action \
+curl -s -X POST https://api.chipotle.litprotocol.com/core/v1/lit_action \
   -H "X-Api-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -110,7 +139,7 @@ curl -s -X POST https://api.dev.litprotocol.com/core/v1/lit_action \
 }
 ```
 
-Or skip the terminal and use the **[Dashboard](https://dashboard.dev.litprotocol.com/dapps/dashboard/)** — a full GUI for account management, wallet creation, and action execution.
+Or skip the terminal and use the **[Dashboard](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/)** — a full GUI for account management, wallet creation, and action execution.
 
 ---
 
@@ -149,7 +178,7 @@ A smart contract can `ecrecover` the signature to confirm the price was attested
 | **Read smart contracts** | Call view functions on any EVM chain and sign the result as a proof |
 | **Send ETH** | Construct, sign, and broadcast transactions from a PKP wallet |
 
-See the full [Examples guide](https://docs.dev.litprotocol.com/lit-actions/examples) for copy-paste code.
+See the full [Examples guide](https://developer.litprotocol.com/lit-actions/examples) for copy-paste code.
 
 </details>
 
@@ -159,7 +188,7 @@ See the full [Examples guide](https://docs.dev.litprotocol.com/lit-actions/examp
 
 Every endpoint accepts `X-Api-Key` or `Authorization: Bearer <key>`. The Core API is mounted at `/core/v1/`.
 
-Full OpenAPI spec: [`/core/v1/swagger-ui`](https://api.dev.litprotocol.com/core/v1/swagger-ui)
+Full OpenAPI spec: [`/core/v1/swagger-ui`](https://api.chipotle.litprotocol.com/core/v1/swagger-ui)
 
 ### Key endpoints
 
@@ -178,7 +207,7 @@ GET    /core/v1/version             Server version and commit hash
 
 ## Architecture
 
-See the [Architecture overview](https://docs.dev.litprotocol.com/architecture/index) and [Authentication model](https://docs.dev.litprotocol.com/architecture/authModel) in the docs.
+See the [Architecture overview](https://developer.litprotocol.com/architecture/index) and [Authentication model](https://developer.litprotocol.com/architecture/authModel) in the docs.
 
 ---
 
@@ -186,13 +215,13 @@ See the [Architecture overview](https://docs.dev.litprotocol.com/architecture/in
 
 | | |
 |---|---|
-| **Programmable Key Pairs (PKPs)** | Network-managed elliptic-curve key pairs. Key material is derived on-demand from the root key inside the TEE — it never exists at rest, so it can't leak from storage. Keys will only resolve correctly when talking to an authentic Chipotle node, which the end user can [verify](https://docs.dev.litprotocol.com/architecture/verification/index). Fully verifiable trust chain. |
+| **Programmable Key Pairs (PKPs)** | Network-managed elliptic-curve key pairs. Key material is derived on-demand from the root key inside the TEE — it never exists at rest, so it can't leak from storage. Keys will only resolve correctly when talking to an authentic Chipotle node, which the end user can [verify](https://developer.litprotocol.com/architecture/verification/index). Fully verifiable trust chain. |
 | **Lit Actions** | Immutable JavaScript programs on IPFS. They can sign, encrypt, decrypt, fetch external data, and call smart contracts. |
 | **Groups** | Permission policies binding PKPs to action CIDs and scoped API keys. Controls both *what* can execute and *who* can trigger it. |
 | **Encrypt / Decrypt** | PKP-derived symmetric encryption. Store ciphertexts anywhere — only permitted actions can decrypt. |
 | **On-Chain Permissions** | Smart contracts on Base control accounts, API key scopes, PKP registrations, and group membership. |
-| **REST + SDK + Dashboard** | Three ways in: raw HTTP, the [Core SDK](https://docs.dev.litprotocol.com/management/api_direct), or the [Dashboard](https://docs.dev.litprotocol.com/management/dashboard). |
-| **Verifiable Deployment** | TEE attestation + on-chain state = cryptographic proof the node is running expected code. [Verification guide](https://docs.dev.litprotocol.com/architecture/verification/index) |
+| **REST + SDK + Dashboard** | Three ways in: raw HTTP, the [Core SDK](https://developer.litprotocol.com/management/api_direct), or the [Dashboard](https://developer.litprotocol.com/management/dashboard). |
+| **Verifiable Deployment** | TEE attestation + on-chain state = cryptographic proof the node is running expected code. [Verification guide](https://developer.litprotocol.com/architecture/verification/index) |
 
 ---
 
@@ -200,14 +229,14 @@ See the [Architecture overview](https://docs.dev.litprotocol.com/architecture/in
 
 | | |
 |---|---|
-| **Documentation** | [docs.dev.litprotocol.com](https://docs.dev.litprotocol.com/) |
-| **Dashboard** | [dashboard.dev.litprotocol.com](https://dashboard.dev.litprotocol.com/dapps/dashboard/) |
-| **API** | [api.dev.litprotocol.com](https://api.dev.litprotocol.com/) |
-| **OpenAPI / Swagger** | [Swagger UI](https://api.dev.litprotocol.com/core/v1/swagger-ui) |
-| **Architecture** | [Architecture overview](https://docs.dev.litprotocol.com/architecture/index) |
-| **Auth model** | [Authentication model](https://docs.dev.litprotocol.com/architecture/authModel) |
-| **Lit Actions** | [Overview](https://docs.dev.litprotocol.com/lit-actions/index) · [Examples](https://docs.dev.litprotocol.com/lit-actions/examples) · [Patterns](https://docs.dev.litprotocol.com/lit-actions/patterns) |
-| **Pricing** | [Credit-based pricing](https://docs.dev.litprotocol.com/management/pricing) |
+| **Documentation** | [developer.litprotocol.com](https://developer.litprotocol.com/) |
+| **Dashboard** | [dashboard.chipotle.litprotocol.com](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) |
+| **API** | [api.chipotle.litprotocol.com](https://api.chipotle.litprotocol.com/) |
+| **OpenAPI / Swagger** | [Swagger UI](https://api.chipotle.litprotocol.com/core/v1/swagger-ui) |
+| **Architecture** | [Architecture overview](https://developer.litprotocol.com/architecture/index) |
+| **Auth model** | [Authentication model](https://developer.litprotocol.com/architecture/authModel) |
+| **Lit Actions** | [Overview](https://developer.litprotocol.com/lit-actions/index) · [Examples](https://developer.litprotocol.com/lit-actions/examples) · [Patterns](https://developer.litprotocol.com/lit-actions/patterns) |
+| **Pricing** | [Credit-based pricing](https://developer.litprotocol.com/management/pricing) |
 | **Lit Protocol** | [litprotocol.com](https://litprotocol.com) |
 
 ---
