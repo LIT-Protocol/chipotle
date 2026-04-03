@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::{Arc, RwLock};
 use std::sync::Once;
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 

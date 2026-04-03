@@ -51,8 +51,7 @@ fn main() -> anyhow::Result<()> {
 
     // Load integrity manifest for CDN module verification
     let integrity_manifest = if let Some(path) = &args.integrity_lock {
-        let contents =
-            std::fs::read_to_string(path).expect("failed to read integrity.lock file");
+        let contents = std::fs::read_to_string(path).expect("failed to read integrity.lock file");
         let manifest = CdnModuleLoader::parse_integrity_lock(&contents);
         info!(
             "Loaded integrity manifest with {} entries from {:?}",

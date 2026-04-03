@@ -59,7 +59,12 @@ impl CdnModuleLoader {
     /// - `integrity`: parsed integrity manifest mapping URL → base64-encoded SHA-384 hash
     /// - `strict`: if true, modules not present in the manifest are rejected (unless lockfile_path is set for TOFU)
     pub fn new(integrity: Arc<RwLock<HashMap<String, String>>>, strict: bool) -> Self {
-        Self::with_options(integrity, strict, Arc::new(RwLock::new(HashMap::new())), None)
+        Self::with_options(
+            integrity,
+            strict,
+            Arc::new(RwLock::new(HashMap::new())),
+            None,
+        )
     }
 
     /// Create a new `CdnModuleLoader` with a shared cache and optional lockfile path.
@@ -186,12 +191,10 @@ impl ModuleLoader for CdnModuleLoader {
     ) -> Result<ModuleSpecifier, deno_core::error::ModuleLoaderError> {
         // If it's already a full jsDelivr URL, pass through
         if Self::is_allowed_cdn(specifier) {
-            info!(
-                specifier,
-                "CDN module resolve: full URL accepted"
-            );
-            return ModuleSpecifier::parse(specifier)
-                .map_err(|e| JsErrorBox::generic(format!("Invalid module URL: {specifier}: {e}")).into());
+            info!(specifier, "CDN module resolve: full URL accepted");
+            return ModuleSpecifier::parse(specifier).map_err(|e| {
+                JsErrorBox::generic(format!("Invalid module URL: {specifier}: {e}")).into()
+            });
         }
 
         // Try parsing as an npm specifier (e.g. "zod@3.22.4/+esm")
@@ -201,8 +204,9 @@ impl ModuleLoader for CdnModuleLoader {
                 resolved_url = %cdn_url,
                 "CDN module resolve: npm specifier resolved to jsDelivr URL"
             );
-            return ModuleSpecifier::parse(&cdn_url)
-                .map_err(|e| JsErrorBox::generic(format!("Invalid resolved URL: {cdn_url}: {e}")).into());
+            return ModuleSpecifier::parse(&cdn_url).map_err(|e| {
+                JsErrorBox::generic(format!("Invalid resolved URL: {cdn_url}: {e}")).into()
+            });
         }
 
         // Reject everything else
@@ -671,17 +675,25 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     #[test]
     fn test_resolve_rejects_bare_specifiers() {
         let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
-        assert!(loader
-            .resolve("lodash-es", "file:///main.js", ResolutionKind::Import)
-            .is_err());
+        assert!(
+            loader
+                .resolve("lodash-es", "file:///main.js", ResolutionKind::Import)
+                .is_err()
+        );
     }
 
     #[test]
     fn test_resolve_rejects_other_urls() {
         let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
-        assert!(loader
-            .resolve("https://evil.com/malware.js", "file:///main.js", ResolutionKind::Import)
-            .is_err());
+        assert!(
+            loader
+                .resolve(
+                    "https://evil.com/malware.js",
+                    "file:///main.js",
+                    ResolutionKind::Import
+                )
+                .is_err()
+        );
     }
 
     #[test]

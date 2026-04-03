@@ -5,7 +5,6 @@ use std::sync::{Arc, RwLock};
 
 use crate::cdn_module_loader::ModuleCache;
 
-
 use anyhow::Result;
 use deno_core::error::CoreError;
 use deno_core::futures::TryFutureExt as _;
