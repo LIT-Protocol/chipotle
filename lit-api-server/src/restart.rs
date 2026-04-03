@@ -128,7 +128,9 @@ async fn run_event_listener(restart_handle: RestartHandle) -> anyhow::Result<()>
         let filter = contract
             .event_for_name::<ServerTriggeredEvent>("ServerTriggered")
             .map_err(|e| anyhow::anyhow!("Failed to create event filter: {e}"))?
-            .from_block(BlockNumber::Number(last_checked_block.saturating_add(1).into()))
+            .from_block(BlockNumber::Number(
+                last_checked_block.saturating_add(1).into(),
+            ))
             .to_block(BlockNumber::Number(latest_block.into()));
 
         match filter.query().await {
@@ -150,7 +152,8 @@ async fn run_event_listener(restart_handle: RestartHandle) -> anyhow::Result<()>
             }
             Err(e) => {
                 tracing::warn!(
-                    block_range = format!("{}..{}", last_checked_block.saturating_add(1), latest_block),
+                    block_range =
+                        format!("{}..{}", last_checked_block.saturating_add(1), latest_block),
                     "Failed to query ServerTriggered events: {e}"
                 );
                 // Don't update last_checked_block so we retry this range.
