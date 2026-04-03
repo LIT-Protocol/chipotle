@@ -1,0 +1,12 @@
+# Integrity manifest for CDN module imports
+# Format: <url> sha384-<base64hash>
+#
+# Each entry maps a CDN URL to its expected SHA-384 hash (base64-encoded).
+# In strict mode (default for production), any import not listed here will be rejected.
+#
+# To generate a hash for a new module:
+#   curl -s https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm | openssl dgst -sha384 -binary | openssl base64 -A
+#
+# Example entries:
+# https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm sha384-<hash>
+# https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-<hash>
