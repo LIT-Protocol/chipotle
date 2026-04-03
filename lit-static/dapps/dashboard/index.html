@@ -105,6 +105,7 @@
                 <span class="account-dropdown-chevron" aria-hidden="true">▾</span>
               </button>
               <div class="account-dropdown-panel" id="account-dropdown-panel" role="menu" aria-hidden="true">
+                <button type="button" class="account-dropdown-item" id="toggle-usage-override-btn" role="menuitem">Usage Key Override</button>
                 <button type="button" class="account-dropdown-item account-dropdown-signout" id="account-signout-btn" role="menuitem">Sign out</button>
               </div>
             </div>
@@ -149,16 +150,16 @@
             <h2 class="section-title">Overview</h2>
             <p class="section-desc">Instructions and account details.</p>
             <div id="overview-status" class="status" style="display: none;"></div>
-            <div class="card" id="usage-key-override-card">
+            <div class="card" id="usage-key-override-card" style="display:none;">
               <div class="card-header">
                 <h3 class="card-title">Usage API Key Override</h3>
               </div>
               <div class="card-body">
                 <p class="form-hint" style="margin-bottom: 0.75rem;">Paste a usage API key below to use it instead of your account API key for all dashboard operations. This lets you test the permissions of a given key.</p>
                 <div style="display:flex;align-items:center;gap:0.5rem;">
-                  <input type="password" id="usage-key-override-input" class="input" style="flex:1;font-family:'JetBrains Mono',monospace;font-size:0.8125rem;" placeholder="Paste a usage API key to override…" aria-label="Usage API key override">
+                  <input type="password" id="usage-key-override-input" class="input" style="flex:1;font-family:'JetBrains Mono',monospace;font-size:0.8125rem;" placeholder="Paste a usage API key to override… " aria-label="Usage API key override">
                   <button type="button" id="usage-key-override-apply" class="btn btn-primary btn-sm">Apply</button>
-                  <button type="button" id="usage-key-override-clear" class="btn btn-outline btn-sm" style="display:none;">Clear</button>
+                  <button type="button" id="usage-key-override-clear" class="btn btn-outline btn-sm">Clear</button>
                 </div>
               </div>
             </div>

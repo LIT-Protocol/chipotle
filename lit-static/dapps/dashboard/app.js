@@ -6,6 +6,7 @@
 const STORAGE_KEY_API = 'accountconfig_api_key';
 const STORAGE_KEY_THEME = 'accountconfig_theme';
 const STORAGE_KEY_USAGE_OVERRIDE = 'accountconfig_usage_key_override';
+const STORAGE_KEY_OVERRIDE_ENABLED = 'accountconfig_usage_override_enabled';
 const LIST_PAGE_SIZE = '20';
 
 function getApiKey() {
@@ -29,19 +30,39 @@ function setUsageKeyOverride(v) {
   updateUsageKeyOverrideUI();
 }
 
+function isOverrideEnabled() {
+  return sessionStorage.getItem(STORAGE_KEY_OVERRIDE_ENABLED) === 'true';
+}
+
+function toggleOverrideEnabled() {
+  const next = !isOverrideEnabled();
+  if (next) {
+    sessionStorage.setItem(STORAGE_KEY_OVERRIDE_ENABLED, 'true');
+  } else {
+    sessionStorage.removeItem(STORAGE_KEY_OVERRIDE_ENABLED);
+    setUsageKeyOverride('');
+  }
+  updateUsageKeyOverrideUI();
+}
+
 function updateUsageKeyOverrideUI() {
+  const card = document.getElementById('usage-key-override-card');
   const badge = document.getElementById('usage-key-override-badge');
   const input = document.getElementById('usage-key-override-input');
   const clearBtn = document.getElementById('usage-key-override-clear');
   const balanceEl = document.getElementById('billing-balance-display');
   const addFundsBtn = document.getElementById('btn-add-funds');
+  const toggleBtn = document.getElementById('toggle-usage-override-btn');
+  const enabled = isOverrideEnabled();
   const hasOverride = !!sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE);
+  if (card) card.style.display = enabled ? '' : 'none';
   if (badge) {
     badge.style.display = hasOverride ? '' : 'none';
     if (hasOverride) badge.textContent = 'Using Key: ' + sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE).substring(0, 6) + '…';
   }
   if (input) input.value = sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE) || '';
   if (clearBtn) clearBtn.style.display = hasOverride ? '' : 'none';
+  if (toggleBtn) toggleBtn.textContent = enabled ? '✓ Usage Key Override' : 'Usage Key Override';
   // Only show billing when authenticated AND no override is active
   const showBilling = !!getApiKey() && !hasOverride;
   if (balanceEl) balanceEl.style.display = showBilling ? '' : 'none';
@@ -1467,11 +1488,21 @@ function initHeader() {
     if (dropdown && !dropdown.contains(e.target)) closeAccountDropdown();
   });
 
+  const toggleOverrideBtn = document.getElementById('toggle-usage-override-btn');
+  if (toggleOverrideBtn) {
+    toggleOverrideBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAccountDropdown();
+      toggleOverrideEnabled();
+    });
+  }
+
   const signoutBtn = document.getElementById('account-signout-btn');
   if (signoutBtn) {
     signoutBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       closeAccountDropdown();
+      sessionStorage.removeItem(STORAGE_KEY_OVERRIDE_ENABLED);
       setUsageKeyOverride('');
       setApiKey('');
     });
