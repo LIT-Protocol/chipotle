@@ -16,6 +16,7 @@ function setApiKey(v) {
   else sessionStorage.removeItem(STORAGE_KEY_API);
   _billingAvailable = null;
   _billingCheckedAt = 0;
+  if (_billingRetryTimer) { clearTimeout(_billingRetryTimer); _billingRetryTimer = null; }
   updateAuthUI();
 }
 
@@ -31,6 +32,7 @@ function getBaseUrl() {
 // Track whether billing (Stripe) is available for this environment
 let _billingAvailable = null; // null = not yet checked, true/false after check
 let _billingCheckedAt = 0;
+let _billingRetryTimer = null; // pending retry timer ID (deduplicates stacked retries)
 const BILLING_RETRY_MS = 30000; // retry failed checks after 30s
 
 async function checkBillingAvailable() {
@@ -79,8 +81,10 @@ function updateAuthUI() {
       } else {
         if (notRequiredEl) notRequiredEl.style.display = '';
         if (billingBanner) billingBanner.style.display = '';
-        // Schedule a retry so transient failures recover without a reload
-        setTimeout(() => updateAuthUI(), BILLING_RETRY_MS);
+        // Schedule a retry so transient failures recover without a reload.
+        // Clear any existing timer first to prevent accumulation across calls.
+        if (_billingRetryTimer) clearTimeout(_billingRetryTimer);
+        _billingRetryTimer = setTimeout(() => { _billingRetryTimer = null; updateAuthUI(); }, BILLING_RETRY_MS);
       }
     }).catch(() => {});
   }
