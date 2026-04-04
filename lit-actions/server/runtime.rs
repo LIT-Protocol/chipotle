@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
-use deno_core::{JsRuntime, v8};
+use deno_core::{JsRuntime, ModuleSpecifier, v8};
 
 use crate::cdn_module_loader::{CdnModuleLoader, ModuleCache};
 use deno_resolver::npm::{DenoInNpmPackageChecker, ManagedNpmResolver};
@@ -248,6 +248,47 @@ pub fn init_v8() {
     JsRuntime::init_platform(None, false);
 }
 
+/// Returns true if the code contains static ES `import` or `export` declarations.
+/// Dynamic `import()` calls are excluded since they work in script mode.
+///
+/// Note: This is a line-based heuristic, not a full JS parser. A string literal or
+/// comment containing `import x from "y"` on its own line could trigger a false positive,
+/// switching the code into module mode (strict mode, no implicit globalThis attachment).
+/// This is acceptable because: (1) Lit Actions are short, purpose-built scripts where
+/// this pattern is extremely unlikely, and (2) module mode is strictly more correct for
+/// code that actually uses imports.
+fn has_static_module_syntax(code: &str) -> bool {
+    for line in code.lines() {
+        let trimmed = line.trim();
+        // Skip single-line comments
+        if trimmed.starts_with("//") {
+            continue;
+        }
+        // Static import: `import ... from "..."`, `import "..."`, or minified `import{...}from`
+        // Exclude dynamic import: `import(` or `await import(`
+        if trimmed.starts_with("import") {
+            let after_import = trimmed[6..].trim_start();
+            // Dynamic import() starts with `(`
+            if after_import.starts_with('(') {
+                continue;
+            }
+            // Must have something after `import` (space, tab, brace, quote, star)
+            let next_char = trimmed.as_bytes().get(6);
+            if matches!(next_char, Some(b' ' | b'\t' | b'{' | b'"' | b'\'' | b'*')) {
+                return true;
+            }
+        }
+        // Top-level export declarations (including minified `export{...}`)
+        if trimmed.starts_with("export") {
+            let next_char = trimmed.as_bytes().get(6);
+            if matches!(next_char, Some(b' ' | b'\t' | b'{') | None) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, err)]
 pub(crate) async fn execute_js(
@@ -333,9 +374,50 @@ pub(crate) async fn execute_js(
     let js_params = js_params.as_ref().unwrap_or_default();
     let js_func_params = js_params.to_string();
 
-    // Add a wrapper function so that we can catch "return" statements and set the response
-    let code = format!(
-        "
+    let uses_modules = has_static_module_syntax(&code);
+
+    // When the user code contains static import/export, we must evaluate it as
+    // an ES module (module mode) instead of a script so the `import` syntax is valid.
+    // Module loading (which fetches CDN imports) happens inside the timeout-governed
+    // select loop so that slow/hanging imports are properly terminated.
+    let maybe_mod_eval = if uses_modules {
+        let module_code = format!(
+            "
+        {code}
+        ;
+        const __lit_mod_params__ = {js_func_params} ;
+        const __lit_mod_result__ = await main(__lit_mod_params__);
+        if (typeof __lit_mod_result__ !== \"undefined\") {{
+          LitActions.setResponse( {{ response: __lit_mod_result__ }} );
+        }}"
+        );
+        let specifier =
+            ModuleSpecifier::parse("lit:user_action").expect("valid specifier");
+
+        // Load the module inside the timeout loop so CDN fetches are bounded
+        let load_fut = worker
+            .js_runtime
+            .load_main_es_module_from_code(&specifier, module_code);
+
+        let mod_id = tokio::select! {
+            biased;
+            execution_result = &mut halt_isolate_rx => {
+                match execution_result {
+                    Ok(ExecutionResult::Timeout) => bail!(Status::deadline_exceeded(format!("Your function exceeded the maximum runtime of {timeout_ms}ms and was terminated."))),
+                    Ok(ExecutionResult::OutOfMemory) => bail!(Status::resource_exhausted(format!("Your function exceeded the maximum memory of {memory_limit_mb} MB and was terminated."))),
+                    _ => bail!("Module loading interrupted"),
+                }
+            }
+            result = load_fut => {
+                result.context("Error loading user action as ES module")?
+            }
+        };
+
+        Some(worker.js_runtime.mod_evaluate(mod_id))
+    } else {
+        // Legacy path: execute as script (no static imports)
+        let code = format!(
+            "
         {code}
         ;
         (async () => {{
@@ -345,17 +427,20 @@ pub(crate) async fn execute_js(
           LitActions.setResponse( {{ response: data }} );
         }}
         }})();"
-    );
+        );
 
-    if let Err(e) = worker
-        .js_runtime
-        .execute_script("<user_provided_script>", code)
-    {
-        // Delay error handling if the controller has terminated the isolate,
-        // in which case halt_isolate_rx will tell the reason.
-        if e.to_string() != EXECUTION_TERMINATED_ERROR {
-            bail!(e);
+        if let Err(e) = worker
+            .js_runtime
+            .execute_script("<user_provided_script>", code)
+        {
+            // Delay error handling if the controller has terminated the isolate,
+            // in which case halt_isolate_rx will tell the reason.
+            if e.to_string() != EXECUTION_TERMINATED_ERROR {
+                bail!(e);
+            }
         }
+
+        None
     };
 
     loop {
@@ -386,6 +471,11 @@ pub(crate) async fn execute_js(
             }
         }
     }?;
+
+    // For module evaluation, check the result after the event loop has driven it to completion
+    if let Some(eval_fut) = maybe_mod_eval {
+        eval_fut.await.context("Error evaluating user action module")?;
+    }
 
     Ok(())
 }
@@ -484,4 +574,92 @@ fn start_controller_thread(
 
         res
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn detects_static_import_from() {
+        assert!(has_static_module_syntax(r#"import { z } from "zod@3.22.4/+esm";"#));
+    }
+
+    #[test]
+    fn detects_static_import_default() {
+        assert!(has_static_module_syntax(r#"import zod from "zod@3.22.4/+esm";"#));
+    }
+
+    #[test]
+    fn detects_static_import_side_effect() {
+        assert!(has_static_module_syntax(r#"import "zod@3.22.4/+esm";"#));
+    }
+
+    #[test]
+    fn detects_static_import_star() {
+        assert!(has_static_module_syntax(r#"import * as z from "zod@3.22.4/+esm";"#));
+    }
+
+    #[test]
+    fn detects_export_declaration() {
+        assert!(has_static_module_syntax("export function main() {}"));
+    }
+
+    #[test]
+    fn ignores_dynamic_import() {
+        assert!(!has_static_module_syntax(r#"const z = await import("zod");"#));
+    }
+
+    #[test]
+    fn ignores_dynamic_import_at_line_start() {
+        assert!(!has_static_module_syntax(r#"import("zod")"#));
+    }
+
+    #[test]
+    fn ignores_commented_import() {
+        assert!(!has_static_module_syntax(r#"// import { z } from "zod";"#));
+    }
+
+    #[test]
+    fn no_imports_returns_false() {
+        assert!(!has_static_module_syntax("async function main() { return 42; }"));
+    }
+
+    #[test]
+    fn mixed_code_with_import() {
+        let code = r#"
+import { z } from "zod@3.22.4/+esm";
+
+async function main(params) {
+    const schema = z.object({ name: z.string() });
+    return schema.parse(params);
+}
+"#;
+        assert!(has_static_module_syntax(code));
+    }
+
+    #[test]
+    fn import_in_middle_of_code() {
+        let code = r#"
+const x = 1;
+import { foo } from "bar@1.0.0/+esm";
+async function main() { return x; }
+"#;
+        assert!(has_static_module_syntax(code));
+    }
+
+    #[test]
+    fn detects_minified_import_braces() {
+        assert!(has_static_module_syntax(r#"import{z}from"zod@3.22.4/+esm";"#));
+    }
+
+    #[test]
+    fn detects_minified_export_braces() {
+        assert!(has_static_module_syntax(r#"export{main}"#));
+    }
+
+    #[test]
+    fn detects_import_with_single_quotes() {
+        assert!(has_static_module_syntax(r#"import'zod@3.22.4/+esm';"#));
+    }
 }
