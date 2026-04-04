@@ -150,12 +150,13 @@ async function main({ pkpAddress }) {
 }
 ```
 
-3. **Signature verification (defense-in-depth).** For additional assurance beyond the ownership model, require the caller to sign a challenge and verify the signature cryptographically inside the action:
+3. **Signature verification (defense-in-depth).** For additional assurance beyond the ownership model, require the caller to sign a challenge and verify the signature cryptographically inside the action. The `message` should include a nonce or timestamp so that a previously captured signature cannot be replayed:
 
 ```javascript
 async function main({ signature, message }) {
-  const ALLOWED_ADDRESS = "0xAbc123..."; // your PKP's wallet address
+  const ALLOWED_ADDRESS = "0xAbc123..."; // the authorized caller's wallet address
 
+  // message should contain a nonce or timestamp for replay protection
   const recovered = ethers.utils.verifyMessage(message, signature);
   if (recovered.toLowerCase() !== ALLOWED_ADDRESS.toLowerCase()) {
     throw new Error("Unauthorized: caller signature does not match allowed address");
