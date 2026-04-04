@@ -44,7 +44,8 @@ pub type ModuleCache = Arc<RwLock<HashMap<String, Vec<u8>>>>;
 pub struct CdnModuleLoader {
     /// Maps CDN URLs to their expected base64-encoded SHA-384 hashes.
     integrity: Arc<RwLock<HashMap<String, String>>>,
-    /// If true (production), reject any module not present in the integrity manifest.
+    /// If true (production), unknown modules require TOFU double-fetch verification.
+    /// If false (test/dev), unknown modules are accepted after a single fetch.
     strict: bool,
     /// Reusable HTTP client with timeouts and redirect policy.
     /// Shared across all loader instances to enable connection pooling.
@@ -61,7 +62,8 @@ impl CdnModuleLoader {
     /// Create a new `CdnModuleLoader`.
     ///
     /// - `integrity`: parsed integrity manifest mapping URL → base64-encoded SHA-384 hash
-    /// - `strict`: if true, modules not present in the manifest are rejected (unless lockfile_path is set for TOFU)
+    /// - `strict`: if true, unknown modules require TOFU double-fetch verification;
+    ///   if false, unknown modules are accepted after a single fetch
     pub fn new(integrity: Arc<RwLock<HashMap<String, String>>>, strict: bool) -> Self {
         Self::with_options(
             integrity,
@@ -367,7 +369,6 @@ impl ModuleLoader for CdnModuleLoader {
             );
         }
 
-        let strict = self.strict;
         // Inline hash takes priority, then lockfile manifest
         let expected_hash = inline_hash.clone().or_else(|| {
             self.integrity
@@ -377,19 +378,11 @@ impl ModuleLoader for CdnModuleLoader {
                 .cloned()
         });
 
-        // In strict mode without a lockfile path, reject unknown modules.
-        // With a lockfile path, we allow TOFU (trust-on-first-use) instead.
-        if strict && expected_hash.is_none() && self.lockfile_path.is_none() {
-            error!(
-                module_url = %url,
-                "CDN module rejected: not in integrity manifest and strict mode is enabled without TOFU lockfile"
-            );
-            return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
-                "Module {url} is not present in the integrity manifest. \
-                 In strict mode, all modules must have an integrity entry."
-            ))
-            .into()));
-        }
+        // In strict mode, unknown modules (not in manifest and no inline hash)
+        // are verified via TOFU (trust-on-first-use): double-fetch + CDN SRI
+        // header check. If a lockfile path is configured, the verified hash is
+        // also persisted to disk; otherwise the pin lives only in memory for
+        // the lifetime of this process.
 
         // Check cache first
         if let Ok(cache) = self.cache.read()
@@ -408,6 +401,7 @@ impl ModuleLoader for CdnModuleLoader {
         let cache = self.cache.clone();
         let integrity = self.integrity.clone();
         let lockfile_path = self.lockfile_path.clone();
+        let strict = self.strict;
 
         let fut = async move {
             info!(module_url = %url, "CDN module fetch: downloading");
@@ -453,8 +447,9 @@ impl ModuleLoader for CdnModuleLoader {
                     size_bytes = bytes.len(),
                     "CDN module integrity check passed"
                 );
-            } else {
-                // Unknown module: trust-on-first-use (TOFU)
+            } else if strict {
+                // Unknown module in strict mode: trust-on-first-use (TOFU)
+                // Double-fetch + CDN SRI header verification.
                 info!(
                     module_url = %url,
                     first_hash = %format!("sha384-{actual_b64}"),
@@ -563,6 +558,19 @@ impl ModuleLoader for CdnModuleLoader {
                 }
 
                 // Update in-memory manifest (re-check for concurrent pin)
+                if let Ok(mut map) = integrity.write() {
+                    map.entry(url.clone()).or_insert(actual_b64.clone());
+                }
+            } else {
+                // Non-strict mode: pin hash from single fetch without TOFU verification.
+                // Used in test/development environments for faster iteration.
+                info!(
+                    module_url = %url,
+                    hash = %format!("sha384-{actual_b64}"),
+                    size_bytes = bytes.len(),
+                    "Non-strict mode: accepting module without TOFU verification"
+                );
+
                 if let Ok(mut map) = integrity.write() {
                     map.entry(url.clone()).or_insert(actual_b64.clone());
                 }
@@ -754,11 +762,41 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     }
 
     #[test]
-    fn test_strict_mode_rejects_unknown_modules() {
+    fn test_strict_mode_allows_tofu_for_unknown_modules() {
+        // Even without a lockfile, strict mode should fall through to async
+        // TOFU verification instead of rejecting synchronously.
         let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), true);
         let specifier =
             ModuleSpecifier::parse("https://cdn.jsdelivr.net/npm/unknown@1.0.0/+esm").unwrap();
         let response = loader.load(&specifier, None, false, RequestedModuleType::None);
-        assert!(matches!(response, ModuleLoadResponse::Sync(Err(_))));
+        assert!(
+            matches!(response, ModuleLoadResponse::Async(_)),
+            "strict mode without lockfile should use async TOFU, not reject synchronously"
+        );
+    }
+
+    #[test]
+    fn test_strict_mode_serves_known_module_from_cache() {
+        // A module already in the manifest + cache should still load synchronously.
+        let mut manifest = HashMap::new();
+        manifest.insert(
+            "https://cdn.jsdelivr.net/npm/known@1.0.0/+esm".to_string(),
+            // any base64 value — the cache path doesn't re-verify
+            "dGVzdA==".to_string(),
+        );
+        let cache: ModuleCache = Arc::new(RwLock::new(HashMap::new()));
+        cache.write().unwrap().insert(
+            "https://cdn.jsdelivr.net/npm/known@1.0.0/+esm".to_string(),
+            b"export default 42;\n".to_vec(),
+        );
+        let loader =
+            CdnModuleLoader::with_options(Arc::new(RwLock::new(manifest)), true, cache, None, None);
+        let specifier =
+            ModuleSpecifier::parse("https://cdn.jsdelivr.net/npm/known@1.0.0/+esm").unwrap();
+        let response = loader.load(&specifier, None, false, RequestedModuleType::None);
+        assert!(
+            matches!(response, ModuleLoadResponse::Sync(Ok(_))),
+            "known cached module should load synchronously"
+        );
     }
 }
