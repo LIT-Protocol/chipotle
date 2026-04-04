@@ -741,3 +741,60 @@ async fn wasm(mut client: TestClient) {
     assert_eq!(client.received::<PrintRequest>().message, "579\n");
     assert!(client.received::<ExecutionResult>().success);
 }
+
+// ---------------------------------------------------------------------------
+// Import rewriting (CPL-209)
+// ---------------------------------------------------------------------------
+
+/// Verify that static `import` statements are rewritten to dynamic `import()`
+/// calls and the imported bindings are available inside `main()`.
+///
+/// Uses a real jsDelivr fetch for a tiny, stable package (zod).
+/// The test is marked `#[ignore]` so it doesn't run in offline CI — run it
+/// explicitly via `cargo test -- --ignored import`.
+#[rstest]
+#[tokio::test]
+#[ignore]
+async fn import_rewrite_cdn(mut client: TestClient) {
+    let code = indoc! {r#"
+        import { z } from "zod@3.22.4/+esm";
+
+        async function main() {
+            const schema = z.string();
+            const result = schema.safeParse("hello");
+            Lit.Actions.setResponse({ response: String(result.success) });
+        }
+    "#};
+
+    client
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    assert_eq!(client.received::<SetResponseRequest>().response, "true");
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+/// Verify that code without imports still works exactly as before.
+#[rstest]
+#[tokio::test]
+async fn import_rewrite_no_imports(mut client: TestClient) {
+    let code = indoc! {r#"
+        async function main() {
+            Lit.Actions.setResponse({ response: "no imports" });
+        }
+    "#};
+
+    client
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        client.received::<SetResponseRequest>().response,
+        "no imports"
+    );
+    assert!(client.received::<ExecutionResult>().success);
+}
