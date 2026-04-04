@@ -39,30 +39,74 @@ pub(crate) struct RewriteResult {
 /// remove them, and return the parsed imports.
 ///
 /// Code after `async function main` (and any non-import code before it) is
-/// preserved unchanged.
+/// preserved unchanged. The scanner is aware of single-line comments (`//`),
+/// block comments (`/* */`), and string/template literals so that import-like
+/// text inside those constructs is never mistakenly rewritten.
 pub(crate) fn rewrite_imports(code: &str) -> RewriteResult {
     let main_pos = code.find("async function main").unwrap_or(code.len());
     let preamble = &code[..main_pos];
+    let bytes = preamble.as_bytes();
 
     let mut imports = Vec::new();
     let mut ranges_to_remove: Vec<(usize, usize)> = Vec::new();
     let mut pos = 0;
 
-    while pos < preamble.len() {
-        pos += count_ws(&preamble[pos..]);
-        if pos >= preamble.len() {
-            break;
+    while pos < bytes.len() {
+        let b = bytes[pos];
+
+        // Skip single-line comments
+        if b == b'/' && bytes.get(pos + 1) == Some(&b'/') {
+            match preamble[pos..].find('\n') {
+                Some(nl) => {
+                    pos += nl + 1;
+                    continue;
+                }
+                None => break,
+            }
         }
 
-        // Check for `import` keyword followed by a non-identifier character
-        let tail = &preamble[pos..];
-        if tail.starts_with("import") && !is_ident_byte(tail.as_bytes().get(6).copied()) {
-            if let Some((imp, consumed)) = parse_import_statement(tail) {
+        // Skip block comments
+        if b == b'/' && bytes.get(pos + 1) == Some(&b'*') {
+            match preamble[pos + 2..].find("*/") {
+                Some(end) => {
+                    pos += end + 4;
+                    continue;
+                }
+                None => break,
+            }
+        }
+
+        // Skip string literals
+        if b == b'"' || b == b'\'' {
+            if let Some(len) = skip_string_literal(&preamble[pos..], b) {
+                pos += len;
+                continue;
+            }
+            pos += 1;
+            continue;
+        }
+
+        // Skip template literals
+        if b == b'`' {
+            if let Some(len) = skip_template_literal(&preamble[pos..]) {
+                pos += len;
+                continue;
+            }
+            pos += 1;
+            continue;
+        }
+
+        // Check for `import` keyword at a statement boundary
+        if b == b'i' && preamble[pos..].starts_with("import") && !is_ident_byte(bytes.get(pos + 6).copied())
+            // Must be at line start (after whitespace) to be a statement-level import
+            && is_line_start(preamble, pos)
+        {
+            if let Some((imp, consumed)) = parse_import_statement(&preamble[pos..]) {
                 let start = pos;
                 let mut end = pos + consumed;
                 // Consume trailing horizontal whitespace + one newline
                 end += count_horizontal_ws(&preamble[end..]);
-                if preamble.as_bytes().get(end) == Some(&b'\n') {
+                if bytes.get(end) == Some(&b'\n') {
                     end += 1;
                 }
                 ranges_to_remove.push((start, end));
@@ -72,11 +116,7 @@ pub(crate) fn rewrite_imports(code: &str) -> RewriteResult {
             }
         }
 
-        // Skip to next line
-        match preamble[pos..].find('\n') {
-            Some(nl) => pos += nl + 1,
-            None => break,
-        }
+        pos += 1;
     }
 
     // Rebuild code with import statements removed
@@ -92,6 +132,23 @@ pub(crate) fn rewrite_imports(code: &str) -> RewriteResult {
         code: result,
         imports,
     }
+}
+
+/// Check if `pos` is at the start of a line (only whitespace between the
+/// previous newline and `pos`).
+fn is_line_start(s: &str, pos: usize) -> bool {
+    if pos == 0 {
+        return true;
+    }
+    let before = &s[..pos];
+    for b in before.bytes().rev() {
+        match b {
+            b'\n' => return true,
+            b' ' | b'\t' | b'\r' => continue,
+            _ => return false,
+        }
+    }
+    true // beginning of string
 }
 
 /// Generate JavaScript code that performs dynamic `import()` calls and
@@ -168,8 +225,22 @@ pub(crate) fn generate_dynamic_imports(imports: &[ParsedImport]) -> String {
 // ---------------------------------------------------------------------------
 
 /// Escape a string for embedding inside a JS double-quoted string literal.
+/// Handles backslashes, double quotes, and JS line terminators.
 fn js_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\0' => out.push_str("\\0"),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 fn is_ident_byte(b: Option<u8>) -> bool {
@@ -182,6 +253,47 @@ fn count_ws(s: &str) -> usize {
 
 fn count_horizontal_ws(s: &str) -> usize {
     s.bytes().take_while(|b| *b == b' ' || *b == b'\t').count()
+}
+
+/// Skip past a string literal starting with the given quote byte.
+/// Returns the number of bytes consumed (including both quotes), or None if unterminated.
+fn skip_string_literal(s: &str, quote: u8) -> Option<usize> {
+    let bytes = s.as_bytes();
+    if bytes.first() != Some(&quote) {
+        return None;
+    }
+    let mut i = 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 2; // skip escaped character
+        } else if bytes[i] == quote {
+            return Some(i + 1);
+        } else {
+            i += 1;
+        }
+    }
+    None // unterminated
+}
+
+/// Skip past a template literal (backtick string).
+/// Handles escaped backticks but does not recurse into `${...}` expressions.
+/// Returns the number of bytes consumed (including both backticks), or None if unterminated.
+fn skip_template_literal(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    if bytes.first() != Some(&b'`') {
+        return None;
+    }
+    let mut i = 1;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            i += 2; // skip escaped character
+        } else if bytes[i] == b'`' {
+            return Some(i + 1);
+        } else {
+            i += 1;
+        }
+    }
+    None // unterminated
 }
 
 /// Parse a single import statement starting at the `import` keyword.
@@ -358,8 +470,9 @@ impl<'a> Cursor<'a> {
             return None;
         }
         self.skip_ws();
-        // Expect "as"
-        if !self.remaining().starts_with("as") {
+        // Expect "as" followed by whitespace (same boundary check as parse_named_imports)
+        let r = self.remaining();
+        if !(r.starts_with("as ") || r.starts_with("as\t") || r.starts_with("as\n")) {
             return None;
         }
         self.advance(2);
@@ -650,5 +763,51 @@ async function main() {}";
             code,
             "const { default: D, a } = await import(\"pkg@1.0.0/+esm\");\n"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // Comment / string / template literal awareness
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn import_in_block_comment_not_rewritten() {
+        let code = "/*\nimport { z } from \"zod@3.22.4/+esm\";\n*/\nasync function main() {}";
+        let result = rewrite_imports(code);
+        assert!(result.imports.is_empty());
+        assert_eq!(result.code, code);
+    }
+
+    #[test]
+    fn import_in_single_line_comment_not_rewritten() {
+        let code = "// import { z } from \"zod@3.22.4/+esm\";\nasync function main() {}";
+        let result = rewrite_imports(code);
+        assert!(result.imports.is_empty());
+        assert_eq!(result.code, code);
+    }
+
+    #[test]
+    fn import_in_template_literal_not_rewritten() {
+        let code =
+            "const s = `\nimport { z } from \"zod@3.22.4/+esm\";\n`;\nasync function main() {}";
+        let result = rewrite_imports(code);
+        assert!(result.imports.is_empty());
+        assert_eq!(result.code, code);
+    }
+
+    #[test]
+    fn import_in_double_quoted_string_not_rewritten() {
+        let code = "const s = \"import { z } from 'zod'\";\nasync function main() {}";
+        let result = rewrite_imports(code);
+        assert!(result.imports.is_empty());
+        assert_eq!(result.code, code);
+    }
+
+    #[test]
+    fn real_import_after_block_comment() {
+        let code =
+            "/* comment */\nimport { z } from \"zod@3.22.4/+esm\";\nasync function main() {}";
+        let result = rewrite_imports(code);
+        assert_eq!(result.imports.len(), 1);
+        assert_eq!(result.imports[0].specifier, "zod@3.22.4/+esm");
     }
 }
