@@ -324,7 +324,7 @@ fn has_static_module_syntax(code: &str) -> bool {
         if at_boundary {
             if bytes[i..].starts_with(b"import")
                 && i + 6 <= bytes.len()
-                && !bytes.get(i + 6).copied().map_or(false, is_js_ident_char)
+                && !bytes.get(i + 6).copied().is_some_and(is_js_ident_char)
             {
                 // Skip whitespace/comments after `import` to check for `(`
                 let next = skip_trivia(bytes, i + 6);
@@ -335,7 +335,7 @@ fn has_static_module_syntax(code: &str) -> bool {
 
             if bytes[i..].starts_with(b"export")
                 && i + 6 <= bytes.len()
-                && !bytes.get(i + 6).copied().map_or(false, is_js_ident_char)
+                && !bytes.get(i + 6).copied().is_some_and(is_js_ident_char)
             {
                 return true;
             }
