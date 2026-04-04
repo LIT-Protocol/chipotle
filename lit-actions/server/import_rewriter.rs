@@ -97,23 +97,23 @@ pub(crate) fn rewrite_imports(code: &str) -> RewriteResult {
         }
 
         // Check for `import` keyword at a statement boundary
-        if b == b'i' && preamble[pos..].starts_with("import") && !is_ident_byte(bytes.get(pos + 6).copied())
-            // Must be at line start (after whitespace) to be a statement-level import
+        if b == b'i'
+            && preamble[pos..].starts_with("import")
+            && !is_ident_byte(bytes.get(pos + 6).copied())
             && is_line_start(preamble, pos)
+            && let Some((imp, consumed)) = parse_import_statement(&preamble[pos..])
         {
-            if let Some((imp, consumed)) = parse_import_statement(&preamble[pos..]) {
-                let start = pos;
-                let mut end = pos + consumed;
-                // Consume trailing horizontal whitespace + one newline
-                end += count_horizontal_ws(&preamble[end..]);
-                if bytes.get(end) == Some(&b'\n') {
-                    end += 1;
-                }
-                ranges_to_remove.push((start, end));
-                imports.push(imp);
-                pos = end;
-                continue;
+            let start = pos;
+            let mut end = pos + consumed;
+            // Consume trailing horizontal whitespace + one newline
+            end += count_horizontal_ws(&preamble[end..]);
+            if bytes.get(end) == Some(&b'\n') {
+                end += 1;
             }
+            ranges_to_remove.push((start, end));
+            imports.push(imp);
+            pos = end;
+            continue;
         }
 
         pos += 1;
@@ -235,11 +235,11 @@ pub(crate) fn generate_dynamic_imports(imports: &[ParsedImport]) -> String {
         }
 
         // Check if there's exactly one namespace binding (no destructuring needed)
-        if imp.bindings.len() == 1 {
-            if let ImportBinding::Namespace(ref name) = imp.bindings[0] {
-                out.push_str(&format!("const {name} = await import(\"{spec}\");\n"));
-                continue;
-            }
+        if imp.bindings.len() == 1
+            && let ImportBinding::Namespace(ref name) = imp.bindings[0]
+        {
+            out.push_str(&format!("const {name} = await import(\"{spec}\");\n"));
+            continue;
         }
 
         // Destructuring: const { ... } = await import("...");
@@ -314,10 +314,6 @@ fn js_escape(s: &str) -> String {
 
 fn is_ident_byte(b: Option<u8>) -> bool {
     matches!(b, Some(c) if c.is_ascii_alphanumeric() || c == b'_' || c == b'$')
-}
-
-fn count_ws(s: &str) -> usize {
-    s.len() - s.trim_start().len()
 }
 
 fn count_horizontal_ws(s: &str) -> usize {
