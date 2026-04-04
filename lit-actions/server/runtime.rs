@@ -10,6 +10,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use deno_core::{JsRuntime, v8};
 
 use crate::cdn_module_loader::{CdnModuleLoader, ModuleCache};
+use crate::import_rewriter;
 use deno_resolver::npm::{DenoInNpmPackageChecker, ManagedNpmResolver};
 use deno_runtime::{
     BootstrapOptions, WorkerLogLevel,
@@ -333,9 +334,19 @@ pub(crate) async fn execute_js(
     let js_params = js_params.as_ref().unwrap_or_default();
     let js_func_params = js_params.to_string();
 
-    // Add a wrapper function so that we can catch "return" statements and set the response
-    let code = format!(
-        "
+    // Rewrite static ES `import` statements into dynamic `import()` calls.
+    // Static imports are not valid in script mode, so we strip them from the
+    // user code and generate equivalent dynamic imports inside the async wrapper
+    // where `await` is available and the imported bindings are in lexical scope.
+    let import_rewriter::RewriteResult {
+        code: rewritten_code,
+        imports,
+    } = import_rewriter::rewrite_imports(&code);
+
+    let code = if imports.is_empty() {
+        // No imports — preserve the existing wrapper layout unchanged.
+        format!(
+            "
         {code}
         ;
         (async () => {{
@@ -345,7 +356,25 @@ pub(crate) async fn execute_js(
           LitActions.setResponse( {{ response: data }} );
         }}
         }})();"
-    );
+        )
+    } else {
+        // Has imports — move user code inside the async IIFE so that the
+        // dynamically imported bindings are in lexical scope for main().
+        let dynamic_imports = import_rewriter::generate_dynamic_imports(&imports);
+        format!(
+            "
+        (async () => {{
+        {dynamic_imports}
+        {rewritten_code}
+        ;
+        const params = {js_func_params} ;
+        const data = await main(params);
+        if (typeof data !== \"undefined\") {{
+          LitActions.setResponse( {{ response: data }} );
+        }}
+        }})();"
+        )
+    };
 
     if let Err(e) = worker
         .js_runtime
