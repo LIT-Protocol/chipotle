@@ -43,7 +43,7 @@ pub(crate) struct RewriteResult {
 /// block comments (`/* */`), and string/template literals so that import-like
 /// text inside those constructs is never mistakenly rewritten.
 pub(crate) fn rewrite_imports(code: &str) -> RewriteResult {
-    let main_pos = code.find("async function main").unwrap_or(code.len());
+    let main_pos = find_main_declaration(code);
     let preamble = &code[..main_pos];
     let bytes = preamble.as_bytes();
 
@@ -151,6 +151,24 @@ fn is_line_start(s: &str, pos: usize) -> bool {
     true // beginning of string
 }
 
+/// Find the byte offset of `async function main` in the source, requiring that
+/// `main` is followed by a non-identifier character (e.g. `(` or whitespace).
+/// This prevents false matches on identifiers like `main2` or `mainHelper`.
+fn find_main_declaration(code: &str) -> usize {
+    const NEEDLE: &str = "async function main";
+    let mut start = 0;
+    while let Some(offset) = code[start..].find(NEEDLE) {
+        let abs = start + offset;
+        let after = abs + NEEDLE.len();
+        // Check that the character after "main" is not an identifier continuation
+        if !is_ident_byte(code.as_bytes().get(after).copied()) {
+            return abs;
+        }
+        start = abs + 1;
+    }
+    code.len()
+}
+
 /// Generate JavaScript code that performs dynamic `import()` calls and
 /// destructures the results into local `const` bindings.
 ///
@@ -178,6 +196,9 @@ pub(crate) fn generate_dynamic_imports(imports: &[ParsedImport]) -> String {
         }
 
         // Destructuring: const { ... } = await import("...");
+        // When both a namespace and named/default bindings exist (e.g.
+        // `import Default, * as NS from "..."`), import once into a temp
+        // variable and assign both from it to avoid a redundant fetch.
         let mut parts = Vec::new();
         let mut has_namespace = false;
         let mut ns_name = String::new();
@@ -199,22 +220,23 @@ pub(crate) fn generate_dynamic_imports(imports: &[ParsedImport]) -> String {
                     }
                 }
                 ImportBinding::Namespace(name) => {
-                    // Can't destructure a namespace — emit a separate statement
                     has_namespace = true;
                     ns_name = name.clone();
                 }
             }
         }
 
-        if !parts.is_empty() {
+        if has_namespace && !parts.is_empty() {
+            // Mixed namespace + named/default: import once, assign both
+            out.push_str(&format!("const {ns_name} = await import(\"{spec}\");\n"));
+            out.push_str(&format!("const {{ {} }} = {ns_name};\n", parts.join(", "),));
+        } else if !parts.is_empty() {
             out.push_str(&format!(
                 "const {{ {} }} = await import(\"{spec}\");\n",
                 parts.join(", "),
             ));
-        }
-
-        if has_namespace {
-            out.push_str(&format!("const {ns_name} = await import(\"{spec}\");\n",));
+        } else if has_namespace {
+            out.push_str(&format!("const {ns_name} = await import(\"{spec}\");\n"));
         }
     }
     out
@@ -401,16 +423,28 @@ impl<'a> Cursor<'a> {
     }
 
     /// Parse a quoted string (single or double) and return its contents.
+    /// Handles escape sequences so that `\"` inside a string does not
+    /// terminate the parse early.
     fn parse_string(&mut self) -> Option<String> {
         let r = self.remaining();
-        let quote = *r.as_bytes().first()?;
+        let bytes = r.as_bytes();
+        let quote = *bytes.first()?;
         if quote != b'"' && quote != b'\'' {
             return None;
         }
-        let end = r[1..].find(quote as char)? + 1;
-        let value = r[1..end].to_string();
-        self.pos += end + 1;
-        Some(value)
+        let mut i = 1;
+        while i < bytes.len() {
+            if bytes[i] == b'\\' {
+                i += 2; // skip escaped character
+            } else if bytes[i] == quote {
+                let value = r[1..i].to_string();
+                self.pos += i + 1;
+                return Some(value);
+            } else {
+                i += 1;
+            }
+        }
+        None // unterminated string
     }
 
     /// Parse a JavaScript identifier.
