@@ -132,11 +132,25 @@ A common concern with Action-Identity Signing is: **what happens if someone copi
 
 **In many cases, it doesn't matter.** Because the action's identity is tied to its IPFS CID, anyone running the same action is executing the exact same immutable code. If your action only does a single thing — like signing a price feed — then someone else running it is simply paying for the execution on your behalf. The output carries the same cryptographic guarantee regardless of who triggered it. This applies to pure, side-effect-free actions. If your action writes to an external database, calls a third-party API, or triggers transactions, unauthorized execution could cause duplicate writes or exhaust rate limits.
 
-**If you need to restrict who can execute the action**, there are two layers of control:
+**If you need to restrict who can execute the action**, there are three layers of control:
 
 1. **API key scoping (primary).** Configure which API keys have `execute` permission on which groups through the [Dashboard](/management/dashboard). This is enforced at the API gateway before the action runs, so unauthorized callers never reach your code.
 
-2. **In-action verification (defense-in-depth).** For additional assurance, verify a cryptographic proof inside the action itself. Because `js_params` are caller-supplied, you cannot trust a plain public key parameter. Instead, require the caller to sign a challenge and verify the signature against the expected address:
+2. **PKP address check.** If the group is configured so that only a specific PKP can be used with the action, you can check the PKP address as a parameter inside the action. Although `js_params` are caller-supplied, the ownership model makes this reliable: the caller can only use PKPs that belong to their account and are permitted within the group. An attacker cannot pass an arbitrary PKP address because the gateway already verified that the PKP is owned by the caller's account.
+
+```javascript
+async function main({ pkpAddress }) {
+  const ALLOWED_PKP = "0xAbc123..."; // your PKP's wallet address
+
+  if (pkpAddress.toLowerCase() !== ALLOWED_PKP.toLowerCase()) {
+    throw new Error("Unauthorized: PKP not allowed to run this action");
+  }
+
+  // ... rest of your action logic
+}
+```
+
+3. **Signature verification (defense-in-depth).** For additional assurance beyond the ownership model, require the caller to sign a challenge and verify the signature cryptographically inside the action:
 
 ```javascript
 async function main({ signature, message }) {
@@ -150,10 +164,6 @@ async function main({ signature, message }) {
   // ... rest of your action logic
 }
 ```
-
-<Note>
-Never gate on a plain `js_params` value like a public key string. Parameters are caller-supplied, so an attacker can pass any value. Always verify a cryptographic proof (a signature, a JWT, or on-chain state) that the caller cannot forge.
-</Note>
 
 ---
 
