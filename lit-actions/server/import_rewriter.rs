@@ -151,21 +151,68 @@ fn is_line_start(s: &str, pos: usize) -> bool {
     true // beginning of string
 }
 
-/// Find the byte offset of `async function main` in the source, requiring that
-/// `main` is followed by a non-identifier character (e.g. `(` or whitespace).
-/// This prevents false matches on identifiers like `main2` or `mainHelper`.
+/// Find the byte offset of the real `async function main` declaration,
+/// skipping occurrences inside comments, strings, and template literals.
+/// Also requires `main` to be followed by a non-identifier character
+/// (rejects `main2`, `mainHelper`, etc.).
 fn find_main_declaration(code: &str) -> usize {
-    const NEEDLE: &str = "async function main";
-    let mut start = 0;
-    while let Some(offset) = code[start..].find(NEEDLE) {
-        let abs = start + offset;
-        let after = abs + NEEDLE.len();
-        // Check that the character after "main" is not an identifier continuation
-        if !is_ident_byte(code.as_bytes().get(after).copied()) {
-            return abs;
+    const NEEDLE: &[u8] = b"async function main";
+    let bytes = code.as_bytes();
+    let mut pos = 0;
+
+    while pos < bytes.len() {
+        // Skip single-line comments
+        if bytes[pos] == b'/' && bytes.get(pos + 1) == Some(&b'/') {
+            match code[pos..].find('\n') {
+                Some(nl) => {
+                    pos += nl + 1;
+                    continue;
+                }
+                None => return code.len(),
+            }
         }
-        start = abs + 1;
+
+        // Skip block comments
+        if bytes[pos] == b'/' && bytes.get(pos + 1) == Some(&b'*') {
+            match code[pos + 2..].find("*/") {
+                Some(end) => {
+                    pos += end + 4;
+                    continue;
+                }
+                None => return code.len(),
+            }
+        }
+
+        // Skip string literals
+        if bytes[pos] == b'"' || bytes[pos] == b'\'' {
+            if let Some(len) = skip_string_literal(&code[pos..], bytes[pos]) {
+                pos += len;
+                continue;
+            }
+            pos += 1;
+            continue;
+        }
+
+        // Skip template literals
+        if bytes[pos] == b'`' {
+            if let Some(len) = skip_template_literal(&code[pos..]) {
+                pos += len;
+                continue;
+            }
+            pos += 1;
+            continue;
+        }
+
+        // Check for the needle at this position
+        if bytes[pos..].starts_with(NEEDLE)
+            && !is_ident_byte(bytes.get(pos + NEEDLE.len()).copied())
+        {
+            return pos;
+        }
+
+        pos += 1;
     }
+
     code.len()
 }
 
@@ -840,6 +887,22 @@ async function main() {}";
     fn real_import_after_block_comment() {
         let code =
             "/* comment */\nimport { z } from \"zod@3.22.4/+esm\";\nasync function main() {}";
+        let result = rewrite_imports(code);
+        assert_eq!(result.imports.len(), 1);
+        assert_eq!(result.imports[0].specifier, "zod@3.22.4/+esm");
+    }
+
+    #[test]
+    fn async_function_main_in_comment_not_matched() {
+        let code = "// async function main\nimport { z } from \"zod@3.22.4/+esm\";\nasync function main() {}";
+        let result = rewrite_imports(code);
+        assert_eq!(result.imports.len(), 1);
+        assert_eq!(result.imports[0].specifier, "zod@3.22.4/+esm");
+    }
+
+    #[test]
+    fn async_function_main_in_string_not_matched() {
+        let code = "const s = \"async function main\";\nimport { z } from \"zod@3.22.4/+esm\";\nasync function main() {}";
         let result = rewrite_imports(code);
         assert_eq!(result.imports.len(), 1);
         assert_eq!(result.imports[0].specifier, "zod@3.22.4/+esm");
