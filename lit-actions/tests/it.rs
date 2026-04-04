@@ -741,3 +741,26 @@ async fn wasm(mut client: TestClient) {
     assert_eq!(client.received::<PrintRequest>().message, "579\n");
     assert!(client.received::<ExecutionResult>().success);
 }
+
+/// Regression test for CPL-208: code with static `export` triggers module-mode execution.
+/// This validates the full module evaluation path end-to-end without requiring CDN access.
+#[rstest]
+#[tokio::test]
+async fn module_mode_with_export(mut client: TestClient) {
+    let code = indoc! {r#"
+        export function helper() { return 42; }
+
+        async function main() {
+            Lit.Actions.setResponse({response: String(helper())})
+        }
+    "#};
+
+    client
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    assert_eq!(client.received::<SetResponseRequest>().response, "42");
+    assert!(client.received::<ExecutionResult>().success);
+}

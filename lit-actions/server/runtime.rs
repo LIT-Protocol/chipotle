@@ -251,42 +251,139 @@ pub fn init_v8() {
 /// Returns true if the code contains static ES `import` or `export` declarations.
 /// Dynamic `import()` calls are excluded since they work in script mode.
 ///
-/// Note: This is a line-based heuristic, not a full JS parser. A string literal or
-/// comment containing `import x from "y"` on its own line could trigger a false positive,
-/// switching the code into module mode (strict mode, no implicit globalThis attachment).
-/// This is acceptable because: (1) Lit Actions are short, purpose-built scripts where
-/// this pattern is extremely unlikely, and (2) module mode is strictly more correct for
-/// code that actually uses imports.
+/// This is a token-based heuristic that scans for `import`/`export` at statement
+/// boundaries (start of source or after `;`), while skipping comments and string
+/// literals. This handles minified single-line ESM like `;import{...}from"x"`.
 fn has_static_module_syntax(code: &str) -> bool {
-    for line in code.lines() {
-        let trimmed = line.trim();
-        // Skip single-line comments
-        if trimmed.starts_with("//") {
+    let bytes = code.as_bytes();
+    let mut i = 0;
+    let mut at_boundary = true; // start of source is a statement boundary
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        // Whitespace preserves boundary state
+        if b.is_ascii_whitespace() {
+            i += 1;
             continue;
         }
-        // Static import: `import ... from "..."`, `import "..."`, or minified `import{...}from`
-        // Exclude dynamic import: `import(` or `await import(`
-        if trimmed.starts_with("import") {
-            let after_import = trimmed[6..].trim_start();
-            // Dynamic import() starts with `(`
-            if after_import.starts_with('(') {
-                continue;
+
+        // Skip comments
+        if b == b'/' && i + 1 < bytes.len() {
+            match bytes[i + 1] {
+                b'/' => {
+                    // Single-line comment: skip to end of line
+                    i += 2;
+                    while i < bytes.len() && bytes[i] != b'\n' {
+                        i += 1;
+                    }
+                    continue;
+                }
+                b'*' => {
+                    // Block comment: skip to */
+                    i += 2;
+                    while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                        i += 1;
+                    }
+                    if i + 1 < bytes.len() {
+                        i += 2;
+                    }
+                    continue;
+                }
+                _ => {}
             }
-            // Must have something after `import` (space, tab, brace, quote, star)
-            let next_char = trimmed.as_bytes().get(6);
-            if matches!(next_char, Some(b' ' | b'\t' | b'{' | b'"' | b'\'' | b'*')) {
+        }
+
+        // Skip string literals (single, double, and template)
+        if matches!(b, b'\'' | b'"' | b'`') {
+            let quote = b;
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' {
+                    i += 2; // skip escaped character
+                    continue;
+                }
+                if bytes[i] == quote {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            at_boundary = false;
+            continue;
+        }
+
+        // Semicolons and braces mark statement boundaries
+        if matches!(b, b';' | b'{' | b'}') {
+            at_boundary = true;
+            i += 1;
+            continue;
+        }
+
+        // Check for `import` or `export` at a statement boundary
+        if at_boundary {
+            if bytes[i..].starts_with(b"import")
+                && i + 6 <= bytes.len()
+                && !bytes.get(i + 6).copied().map_or(false, is_js_ident_char)
+            {
+                // Skip whitespace/comments after `import` to check for `(`
+                let next = skip_trivia(bytes, i + 6);
+                if next >= bytes.len() || bytes[next] != b'(' {
+                    return true;
+                }
+            }
+
+            if bytes[i..].starts_with(b"export")
+                && i + 6 <= bytes.len()
+                && !bytes.get(i + 6).copied().map_or(false, is_js_ident_char)
+            {
                 return true;
             }
         }
-        // Top-level export declarations (including minified `export{...}`)
-        if trimmed.starts_with("export") {
-            let next_char = trimmed.as_bytes().get(6);
-            if matches!(next_char, Some(b' ' | b'\t' | b'{') | None) {
-                return true;
-            }
-        }
+
+        at_boundary = false;
+        i += 1;
     }
     false
+}
+
+/// Returns true if the byte can continue a JS identifier (alphanumeric, _, $).
+fn is_js_ident_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || matches!(b, b'_' | b'$')
+}
+
+/// Skip whitespace and comments, returning the index of the next meaningful byte.
+fn skip_trivia(bytes: &[u8], mut i: usize) -> usize {
+    while i < bytes.len() {
+        if bytes[i].is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        if bytes[i] == b'/' && i + 1 < bytes.len() {
+            match bytes[i + 1] {
+                b'/' => {
+                    i += 2;
+                    while i < bytes.len() && bytes[i] != b'\n' {
+                        i += 1;
+                    }
+                    continue;
+                }
+                b'*' => {
+                    i += 2;
+                    while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                        i += 1;
+                    }
+                    if i + 1 < bytes.len() {
+                        i += 2;
+                    }
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        break;
+    }
+    i
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -408,7 +505,21 @@ pub(crate) async fn execute_js(
                 }
             }
             result = load_fut => {
-                result.context("Error loading user action as ES module")?
+                match result {
+                    Ok(mod_id) => mod_id,
+                    Err(e) => {
+                        // Mirror the script path: if the controller terminated the isolate,
+                        // defer to halt_isolate_rx for the proper timeout/OOM error.
+                        if e.to_string() != EXECUTION_TERMINATED_ERROR {
+                            return Err(e).context("Error loading user action as ES module");
+                        }
+                        match halt_isolate_rx.await {
+                            Ok(ExecutionResult::Timeout) => bail!(Status::deadline_exceeded(format!("Your function exceeded the maximum runtime of {timeout_ms}ms and was terminated."))),
+                            Ok(ExecutionResult::OutOfMemory) => bail!(Status::resource_exhausted(format!("Your function exceeded the maximum memory of {memory_limit_mb} MB and was terminated."))),
+                            _ => bail!("Module loading interrupted"),
+                        }
+                    }
+                }
             }
         };
 
@@ -674,5 +785,40 @@ async function main() { return x; }
     #[test]
     fn detects_import_with_single_quotes() {
         assert!(has_static_module_syntax(r#"import'zod@3.22.4/+esm';"#));
+    }
+
+    #[test]
+    fn detects_import_after_semicolon() {
+        assert!(has_static_module_syntax(
+            r#"var x = 1;import{z}from"zod@3.22.4/+esm";"#
+        ));
+    }
+
+    #[test]
+    fn ignores_block_comment_containing_import() {
+        assert!(!has_static_module_syntax(
+            r#"/* import { z } from "zod"; */ async function main() {}"#
+        ));
+    }
+
+    #[test]
+    fn ignores_string_literal_containing_import() {
+        assert!(!has_static_module_syntax(
+            r#"const s = "import foo from 'bar'"; async function main() {}"#
+        ));
+    }
+
+    #[test]
+    fn ignores_template_literal_containing_import() {
+        assert!(!has_static_module_syntax(
+            r#"const s = `import foo from 'bar'`; async function main() {}"#
+        ));
+    }
+
+    #[test]
+    fn detects_export_after_closing_brace() {
+        assert!(has_static_module_syntax(
+            "function helper() { return 1; } export { helper }"
+        ));
     }
 }

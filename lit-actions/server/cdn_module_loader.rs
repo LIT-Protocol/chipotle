@@ -274,6 +274,13 @@ impl ModuleLoader for CdnModuleLoader {
         referrer: &str,
         _kind: ResolutionKind,
     ) -> Result<ModuleSpecifier, ModuleLoaderError> {
+        // Allow internal lit: scheme specifiers (used for inline user action modules)
+        if specifier.starts_with("lit:") {
+            return ModuleSpecifier::parse(specifier).map_err(|e| {
+                JsErrorBox::generic(format!("Invalid internal specifier: {specifier}: {e}")).into()
+            });
+        }
+
         // Resolve relative imports against the referrer when the referrer is a jsDelivr URL.
         // ESM modules on jsDelivr can have relative imports between files in the same package.
         if (specifier.starts_with("./") || specifier.starts_with("../"))
