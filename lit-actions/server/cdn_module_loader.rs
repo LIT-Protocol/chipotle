@@ -773,13 +773,8 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
             "https://cdn.jsdelivr.net/npm/known@1.0.0/+esm".to_string(),
             b"export default 42;\n".to_vec(),
         );
-        let loader = CdnModuleLoader::with_options(
-            Arc::new(RwLock::new(manifest)),
-            true,
-            cache,
-            None,
-            None,
-        );
+        let loader =
+            CdnModuleLoader::with_options(Arc::new(RwLock::new(manifest)), true, cache, None, None);
         let specifier =
             ModuleSpecifier::parse("https://cdn.jsdelivr.net/npm/known@1.0.0/+esm").unwrap();
         let response = loader.load(&specifier, None, false, RequestedModuleType::None);
