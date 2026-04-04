@@ -391,8 +391,7 @@ pub(crate) async fn execute_js(
           LitActions.setResponse( {{ response: __lit_mod_result__ }} );
         }}"
         );
-        let specifier =
-            ModuleSpecifier::parse("lit:user_action").expect("valid specifier");
+        let specifier = ModuleSpecifier::parse("lit:user_action").expect("valid specifier");
 
         // Load the module inside the timeout loop so CDN fetches are bounded
         let load_fut = worker
@@ -474,7 +473,9 @@ pub(crate) async fn execute_js(
 
     // For module evaluation, check the result after the event loop has driven it to completion
     if let Some(eval_fut) = maybe_mod_eval {
-        eval_fut.await.context("Error evaluating user action module")?;
+        eval_fut
+            .await
+            .context("Error evaluating user action module")?;
     }
 
     Ok(())
@@ -582,12 +583,16 @@ mod tests {
 
     #[test]
     fn detects_static_import_from() {
-        assert!(has_static_module_syntax(r#"import { z } from "zod@3.22.4/+esm";"#));
+        assert!(has_static_module_syntax(
+            r#"import { z } from "zod@3.22.4/+esm";"#
+        ));
     }
 
     #[test]
     fn detects_static_import_default() {
-        assert!(has_static_module_syntax(r#"import zod from "zod@3.22.4/+esm";"#));
+        assert!(has_static_module_syntax(
+            r#"import zod from "zod@3.22.4/+esm";"#
+        ));
     }
 
     #[test]
@@ -597,7 +602,9 @@ mod tests {
 
     #[test]
     fn detects_static_import_star() {
-        assert!(has_static_module_syntax(r#"import * as z from "zod@3.22.4/+esm";"#));
+        assert!(has_static_module_syntax(
+            r#"import * as z from "zod@3.22.4/+esm";"#
+        ));
     }
 
     #[test]
@@ -607,7 +614,9 @@ mod tests {
 
     #[test]
     fn ignores_dynamic_import() {
-        assert!(!has_static_module_syntax(r#"const z = await import("zod");"#));
+        assert!(!has_static_module_syntax(
+            r#"const z = await import("zod");"#
+        ));
     }
 
     #[test]
@@ -622,7 +631,9 @@ mod tests {
 
     #[test]
     fn no_imports_returns_false() {
-        assert!(!has_static_module_syntax("async function main() { return 42; }"));
+        assert!(!has_static_module_syntax(
+            "async function main() { return 42; }"
+        ));
     }
 
     #[test]
@@ -650,7 +661,9 @@ async function main() { return x; }
 
     #[test]
     fn detects_minified_import_braces() {
-        assert!(has_static_module_syntax(r#"import{z}from"zod@3.22.4/+esm";"#));
+        assert!(has_static_module_syntax(
+            r#"import{z}from"zod@3.22.4/+esm";"#
+        ));
     }
 
     #[test]
