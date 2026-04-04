@@ -39,18 +39,26 @@ where
         Fut: Future<Output = anyhow::Result<C>> + Send,
         F: FnOnce() -> Fut + Send,
     {
+        let span = tracing::debug_span!(
+            "grpc_pool::create_or_get_connection",
+            addr,
+            reused = tracing::field::Empty
+        );
+        let _guard = span.enter();
+        let mut wait_count: u32 = 0;
         loop {
-            tracing::info!("Connecting to address: {}", addr);
             let conn = self.get_connection(addr).await;
             match conn {
                 Some(client) => {
+                    tracing::Span::current().record("reused", true);
                     tracing::trace!("Reusing existing grpc client connection at {}", addr);
                     return Ok(client);
                 }
                 None => {
                     match self.create_connection_semaphore.try_acquire() {
                         Ok(_permit) => {
-                            tracing::trace!("Creating a new grpc client connection at {}", addr);
+                            tracing::Span::current().record("reused", false);
+                            tracing::debug!("Creating a new grpc client connection at {}", addr);
                             let c = match create().await {
                                 Ok(c) => c,
                                 Err(e) => {
@@ -66,6 +74,12 @@ where
                             ));
                         }
                         Err(tokio::sync::TryAcquireError::NoPermits) => {
+                            if wait_count == 0 {
+                                tracing::debug!(
+                                    "grpc_pool: no permits available, waiting for connection"
+                                );
+                            }
+                            wait_count += 1;
                             // Wait a bit before retrying to avoid busy waiting
                             // There's new connections being created so we don't need to try
                             // to create one, just wait for it one to be done and reuse it
