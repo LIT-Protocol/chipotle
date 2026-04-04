@@ -44,7 +44,8 @@ pub type ModuleCache = Arc<RwLock<HashMap<String, Vec<u8>>>>;
 pub struct CdnModuleLoader {
     /// Maps CDN URLs to their expected base64-encoded SHA-384 hashes.
     integrity: Arc<RwLock<HashMap<String, String>>>,
-    /// If true (production), unknown modules are verified via TOFU before use.
+    /// If true (production), unknown modules require TOFU double-fetch verification.
+    /// If false (test/dev), unknown modules are accepted after a single fetch.
     strict: bool,
     /// Reusable HTTP client with timeouts and redirect policy.
     /// Shared across all loader instances to enable connection pooling.
@@ -61,7 +62,8 @@ impl CdnModuleLoader {
     /// Create a new `CdnModuleLoader`.
     ///
     /// - `integrity`: parsed integrity manifest mapping URL → base64-encoded SHA-384 hash
-    /// - `strict`: if true, unknown modules are verified via TOFU before use
+    /// - `strict`: if true, unknown modules require TOFU double-fetch verification;
+    ///   if false, unknown modules are accepted after a single fetch
     pub fn new(integrity: Arc<RwLock<HashMap<String, String>>>, strict: bool) -> Self {
         Self::with_options(
             integrity,
@@ -367,7 +369,6 @@ impl ModuleLoader for CdnModuleLoader {
             );
         }
 
-        let strict = self.strict;
         // Inline hash takes priority, then lockfile manifest
         let expected_hash = inline_hash.clone().or_else(|| {
             self.integrity
@@ -400,6 +401,7 @@ impl ModuleLoader for CdnModuleLoader {
         let cache = self.cache.clone();
         let integrity = self.integrity.clone();
         let lockfile_path = self.lockfile_path.clone();
+        let strict = self.strict;
 
         let fut = async move {
             info!(module_url = %url, "CDN module fetch: downloading");
@@ -445,8 +447,9 @@ impl ModuleLoader for CdnModuleLoader {
                     size_bytes = bytes.len(),
                     "CDN module integrity check passed"
                 );
-            } else {
-                // Unknown module: trust-on-first-use (TOFU)
+            } else if strict {
+                // Unknown module in strict mode: trust-on-first-use (TOFU)
+                // Double-fetch + CDN SRI header verification.
                 info!(
                     module_url = %url,
                     first_hash = %format!("sha384-{actual_b64}"),
@@ -555,6 +558,19 @@ impl ModuleLoader for CdnModuleLoader {
                 }
 
                 // Update in-memory manifest (re-check for concurrent pin)
+                if let Ok(mut map) = integrity.write() {
+                    map.entry(url.clone()).or_insert(actual_b64.clone());
+                }
+            } else {
+                // Non-strict mode: pin hash from single fetch without TOFU verification.
+                // Used in test/development environments for faster iteration.
+                info!(
+                    module_url = %url,
+                    hash = %format!("sha384-{actual_b64}"),
+                    size_bytes = bytes.len(),
+                    "Non-strict mode: accepting module without TOFU verification"
+                );
+
                 if let Ok(mut map) = integrity.write() {
                     map.entry(url.clone()).or_insert(actual_b64.clone());
                 }
