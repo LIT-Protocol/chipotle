@@ -165,6 +165,8 @@ async function main({ signature, message }) {
 }
 ```
 
+Note that someone could always copy your publicly available Lit Action source code, strip out the gating logic, and deploy it as a new action. This is completely safe from the original creator's perspective — the modified action produces a different IPFS CID, which means a different key pair and a different identity. It cannot produce signatures that appear to come from your original action.
+
 ---
 
 ## Encrypt / Decrypt — PKP Wallets as Data Vaults
