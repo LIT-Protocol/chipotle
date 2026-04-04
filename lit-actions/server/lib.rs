@@ -1,3 +1,4 @@
+pub mod cdn_module_loader;
 mod runtime;
 
 pub mod server;

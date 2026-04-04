@@ -12,17 +12,22 @@ doctest = false
 
 [dependencies]
 anyhow = { workspace = true }
+base64 = "0.22"
 deno_core = { workspace = true }
+deno_error = { workspace = true }
 deno_lib = { workspace = true }
 deno_resolver = { workspace = true }
 deno_runtime = { workspace = true }
 flume = { workspace = true }
+futures = "0.3"
 indoc = { workspace = true }
 lit-actions-ext = { workspace = true }
 lit-actions-grpc = { workspace = true }
 lit-api-core = { workspace = true }
 lit-observability = { workspace = true, features = ["channels"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 serde_json = { workspace = true }
+sha2 = "0.10"
 sys_traits = { workspace = true }
 temp-file = "0.1"
 tokio = { workspace = true }

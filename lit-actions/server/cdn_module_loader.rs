@@ -1,0 +1,764 @@
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
+use std::time::Duration;
+
+use base64::Engine;
+use deno_core::error::ModuleLoaderError;
+use deno_core::{
+    ModuleLoadResponse, ModuleLoader, ModuleSource, ModuleSourceCode, ModuleSpecifier, ModuleType,
+    RequestedModuleType, ResolutionKind,
+};
+use deno_error::JsErrorBox;
+use futures::FutureExt;
+use sha2::{Digest, Sha384};
+use tracing::{debug, error, info, warn};
+
+/// Constant-time byte comparison to prevent timing side-channels on integrity hashes.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+/// Allowed CDN URL prefix for module imports.
+const ALLOWED_CDN_PREFIX: &str = "https://cdn.jsdelivr.net/";
+
+/// Maximum response body size (10 MB).
+const MAX_MODULE_SIZE_BYTES: usize = 10 * 1024 * 1024;
+
+/// Maximum total cached bytes before evicting oldest entries (100 MB).
+const MAX_CACHE_BYTES: usize = 100 * 1024 * 1024;
+
+/// HTTP request timeout.
+const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Thread-safe cache for fetched and integrity-verified module sources.
+pub type ModuleCache = Arc<RwLock<HashMap<String, Vec<u8>>>>;
+
+pub struct CdnModuleLoader {
+    /// Maps CDN URLs to their expected base64-encoded SHA-384 hashes.
+    integrity: Arc<RwLock<HashMap<String, String>>>,
+    /// If true (production), reject any module not present in the integrity manifest.
+    strict: bool,
+    /// Reusable HTTP client with timeouts and redirect policy.
+    /// Shared across all loader instances to enable connection pooling.
+    client: Arc<reqwest::Client>,
+    /// Cache of fetched module sources, shared across loader instances.
+    /// Bounded by MAX_CACHE_BYTES; oldest entries evicted when full.
+    cache: ModuleCache,
+    /// Path to integrity.lock file on disk. When set, enables trust-on-first-use:
+    /// new modules are double-fetched, verified, and pinned to the lockfile.
+    lockfile_path: Option<PathBuf>,
+}
+
+impl CdnModuleLoader {
+    /// Create a new `CdnModuleLoader`.
+    ///
+    /// - `integrity`: parsed integrity manifest mapping URL → base64-encoded SHA-384 hash
+    /// - `strict`: if true, modules not present in the manifest are rejected (unless lockfile_path is set for TOFU)
+    pub fn new(integrity: Arc<RwLock<HashMap<String, String>>>, strict: bool) -> Self {
+        Self::with_options(
+            integrity,
+            strict,
+            Arc::new(RwLock::new(HashMap::new())),
+            None,
+            None,
+        )
+    }
+
+    /// Build the default HTTP client with security-hardened settings.
+    pub fn build_http_client() -> Arc<reqwest::Client> {
+        Arc::new(
+            reqwest::Client::builder()
+                .timeout(FETCH_TIMEOUT)
+                .connect_timeout(Duration::from_secs(10))
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .expect("failed to build HTTP client"),
+        )
+    }
+
+    /// Create a new `CdnModuleLoader` with a shared cache, optional lockfile path,
+    /// and optional shared HTTP client.
+    pub fn with_options(
+        integrity: Arc<RwLock<HashMap<String, String>>>,
+        strict: bool,
+        cache: ModuleCache,
+        lockfile_path: Option<PathBuf>,
+        client: Option<Arc<reqwest::Client>>,
+    ) -> Self {
+        Self {
+            integrity,
+            strict,
+            client: client.unwrap_or_else(Self::build_http_client),
+            cache,
+            lockfile_path,
+        }
+    }
+
+    /// Parse an `integrity.lock` file into a URL → hash map.
+    ///
+    /// Format: one entry per line, `<url> sha384-<base64hash>`
+    /// Empty lines and lines starting with `#` are ignored.
+    pub fn parse_integrity_lock(contents: &str) -> HashMap<String, String> {
+        let mut map = HashMap::new();
+        for (line_no, line) in contents.lines().enumerate() {
+            let line = line.trim();
+            if line.is_empty() || line.starts_with('#') {
+                continue;
+            }
+            // Expected format: <url> sha384-<base64hash>
+            if let Some((url, hash)) = line.split_once(' ') {
+                let hash = hash.trim();
+                if let Some(digest) = hash.strip_prefix("sha384-") {
+                    if map.contains_key(url) {
+                        warn!(
+                            "integrity.lock:{}: duplicate entry for URL {url}, overwriting",
+                            line_no + 1
+                        );
+                    }
+                    map.insert(url.to_string(), digest.to_string());
+                } else {
+                    warn!(
+                        "integrity.lock:{}: unsupported hash algorithm (expected sha384-), skipping: {line}",
+                        line_no + 1
+                    );
+                }
+            } else {
+                warn!(
+                    "integrity.lock:{}: malformed line (expected '<url> sha384-<hash>'), skipping: {line}",
+                    line_no + 1
+                );
+            }
+        }
+        map
+    }
+
+    /// Check whether a URL is from the allowed CDN.
+    fn is_allowed_cdn(url: &str) -> bool {
+        url.starts_with(ALLOWED_CDN_PREFIX)
+    }
+
+    /// Parse an npm package specifier into a full jsDelivr URL.
+    ///
+    /// Accepts these formats:
+    /// - `package@version` → `https://cdn.jsdelivr.net/npm/package@version`
+    /// - `package@version/file` → `https://cdn.jsdelivr.net/npm/package@version/file`
+    /// - `@scope/package@version` → `https://cdn.jsdelivr.net/npm/@scope/package@version`
+    /// - `@scope/package@version/file` → `https://cdn.jsdelivr.net/npm/@scope/package@version/file`
+    ///
+    /// An optional `#sha384-<hash>` fragment is preserved on the output URL for
+    /// inline integrity verification.
+    ///
+    /// Returns None if the specifier doesn't match the expected format.
+    fn parse_npm_specifier(specifier: &str) -> Option<String> {
+        // Split off the optional #hash fragment before parsing
+        let (spec, fragment) = match specifier.split_once('#') {
+            Some((s, f)) => (s, Some(f)),
+            None => (specifier, None),
+        };
+
+        // Must contain @ for version pinning (but not just a leading @ for scoped packages)
+        let version_at = if let Some(rest) = spec.strip_prefix('@') {
+            // Scoped package: @scope/pkg@version — find the second @
+            rest.find('@').map(|i| i + 1)
+        } else {
+            spec.find('@')
+        };
+
+        let version_at = version_at?;
+
+        let after_at = &spec[version_at + 1..];
+        if after_at.is_empty() {
+            return None;
+        }
+
+        // Version must start with a digit
+        if !after_at.starts_with(|c: char| c.is_ascii_digit()) {
+            return None;
+        }
+
+        let mut url = format!("{ALLOWED_CDN_PREFIX}npm/{spec}");
+        if let Some(frag) = fragment {
+            url.push('#');
+            url.push_str(frag);
+        }
+        Some(url)
+    }
+
+    /// Fetch a URL with streaming body read, enforcing size limits during download.
+    /// Returns the response bytes and optionally the SRI hash from CDN headers.
+    async fn fetch_with_size_limit(
+        client: &reqwest::Client,
+        url: &str,
+        label: &str,
+    ) -> Result<(Vec<u8>, Option<String>), ModuleLoaderError> {
+        let response = client.get(url).send().await.map_err(|e| {
+            error!(module_url = %url, fetch = label, error = %e, "CDN module fetch failed");
+            JsErrorBox::generic(format!("{label} fetch failed for {url}: {e}"))
+        })?;
+
+        let status = response.status();
+        if status.is_redirection() {
+            error!(module_url = %url, fetch = label, http_status = %status, "CDN module fetch rejected: redirect");
+            return Err(JsErrorBox::generic(format!(
+                "Module {url} returned a redirect (HTTP {status}). \
+                 Redirects are not allowed for CDN module imports."
+            ))
+            .into());
+        }
+
+        if !status.is_success() {
+            error!(module_url = %url, fetch = label, http_status = %status, "CDN module fetch failed: non-success status");
+            return Err(JsErrorBox::generic(format!(
+                "{label} fetch failed for {url}: HTTP {status}"
+            ))
+            .into());
+        }
+
+        // Extract SRI hash from CDN response headers (jsDelivr provides this)
+        let cdn_sri_hash = response
+            .headers()
+            .get("x-sri-hash")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.strip_prefix("sha384-"))
+            .map(|s| s.to_string());
+
+        if let Some(ref sri) = cdn_sri_hash {
+            debug!(module_url = %url, fetch = label, cdn_sri = %format!("sha384-{sri}"), "CDN provided SRI hash");
+        }
+
+        // Pre-check content-length header
+        if let Some(len) = response.content_length()
+            && len as usize > MAX_MODULE_SIZE_BYTES
+        {
+            error!(module_url = %url, fetch = label, content_length = len, max_bytes = MAX_MODULE_SIZE_BYTES, "CDN module rejected: exceeds size limit");
+            return Err(JsErrorBox::generic(format!(
+                "Module {url} exceeds maximum size ({len} bytes > {MAX_MODULE_SIZE_BYTES} bytes)"
+            ))
+            .into());
+        }
+
+        // Stream body with hard size cap to prevent OOM even if content-length is absent/wrong
+        let mut bytes = Vec::new();
+        let mut response = response;
+        while let Some(chunk) = response.chunk().await.map_err(|e| {
+            error!(module_url = %url, fetch = label, error = %e, "CDN module fetch: failed to read chunk");
+            JsErrorBox::generic(format!("Failed to read response body for {url}: {e}"))
+        })? {
+            if bytes.len() + chunk.len() > MAX_MODULE_SIZE_BYTES {
+                error!(module_url = %url, fetch = label, body_size = bytes.len() + chunk.len(), max_bytes = MAX_MODULE_SIZE_BYTES, "CDN module rejected: body exceeds size limit during streaming");
+                return Err(JsErrorBox::generic(format!(
+                    "Module {url} exceeds maximum size (> {MAX_MODULE_SIZE_BYTES} bytes)"
+                ))
+                .into());
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+
+        info!(module_url = %url, fetch = label, size_bytes = bytes.len(), "CDN module fetch: download complete");
+        Ok((bytes, cdn_sri_hash))
+    }
+}
+
+impl ModuleLoader for CdnModuleLoader {
+    fn resolve(
+        &self,
+        specifier: &str,
+        referrer: &str,
+        _kind: ResolutionKind,
+    ) -> Result<ModuleSpecifier, ModuleLoaderError> {
+        // Resolve relative imports against the referrer when the referrer is a jsDelivr URL.
+        // ESM modules on jsDelivr can have relative imports between files in the same package.
+        if (specifier.starts_with("./") || specifier.starts_with("../"))
+            && Self::is_allowed_cdn(referrer)
+        {
+            let base = ModuleSpecifier::parse(referrer).map_err(|e| {
+                JsErrorBox::generic(format!("Invalid referrer URL: {referrer}: {e}"))
+            })?;
+            let resolved = base.join(specifier).map_err(|e| {
+                JsErrorBox::generic(format!(
+                    "Failed to resolve relative import \"{specifier}\" against {referrer}: {e}"
+                ))
+            })?;
+            if Self::is_allowed_cdn(resolved.as_str()) {
+                info!(
+                    specifier,
+                    referrer,
+                    resolved_url = %resolved,
+                    "CDN module resolve: relative import resolved against jsDelivr referrer"
+                );
+                return Ok(resolved);
+            }
+            warn!(
+                specifier,
+                referrer,
+                resolved_url = %resolved,
+                "CDN module resolve rejected: relative import resolved to non-jsDelivr URL"
+            );
+            return Err(JsErrorBox::generic(format!(
+                "Relative import \"{specifier}\" resolved to {resolved}, which is not on the allowed CDN"
+            ))
+            .into());
+        }
+
+        // If it's already a full jsDelivr URL, pass through
+        if Self::is_allowed_cdn(specifier) {
+            info!(specifier, "CDN module resolve: full URL accepted");
+            return ModuleSpecifier::parse(specifier).map_err(|e| {
+                JsErrorBox::generic(format!("Invalid module URL: {specifier}: {e}")).into()
+            });
+        }
+
+        // Try parsing as an npm specifier (e.g. "zod@3.22.4/+esm")
+        if let Some(cdn_url) = Self::parse_npm_specifier(specifier) {
+            info!(
+                specifier,
+                resolved_url = %cdn_url,
+                "CDN module resolve: npm specifier resolved to jsDelivr URL"
+            );
+            return ModuleSpecifier::parse(&cdn_url).map_err(|e| {
+                JsErrorBox::generic(format!("Invalid resolved URL: {cdn_url}: {e}")).into()
+            });
+        }
+
+        // Reject everything else
+        warn!(
+            specifier,
+            referrer, "CDN module resolve rejected: not a valid npm specifier or jsDelivr URL"
+        );
+        Err(JsErrorBox::generic(format!(
+            "Invalid import specifier: \"{specifier}\". \
+             Use an npm specifier with a pinned version (e.g. zod@3.22.4/+esm) \
+             or a full jsDelivr URL (e.g. https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm)"
+        ))
+        .into())
+    }
+
+    fn load(
+        &self,
+        module_specifier: &ModuleSpecifier,
+        _maybe_referrer: Option<&ModuleSpecifier>,
+        _is_dyn_import: bool,
+        _requested_module_type: RequestedModuleType,
+    ) -> ModuleLoadResponse {
+        // Extract inline hash from URL fragment (e.g. #sha384-abc123...)
+        let inline_hash = module_specifier
+            .fragment()
+            .and_then(|f| f.strip_prefix("sha384-"))
+            .map(|h| h.to_string());
+
+        // Build the fetch URL without the fragment
+        let mut fetch_url = module_specifier.clone();
+        fetch_url.set_fragment(None);
+        let url = fetch_url.to_string();
+
+        if let Some(ref h) = inline_hash {
+            info!(
+                module_url = %url,
+                inline_hash = %format!("sha384-{h}"),
+                "CDN module load: inline integrity hash provided in import specifier"
+            );
+        }
+
+        let strict = self.strict;
+        // Inline hash takes priority, then lockfile manifest
+        let expected_hash = inline_hash.clone().or_else(|| {
+            self.integrity
+                .read()
+                .expect("integrity lock poisoned")
+                .get(&url)
+                .cloned()
+        });
+
+        // In strict mode without a lockfile path, reject unknown modules.
+        // With a lockfile path, we allow TOFU (trust-on-first-use) instead.
+        if strict && expected_hash.is_none() && self.lockfile_path.is_none() {
+            error!(
+                module_url = %url,
+                "CDN module rejected: not in integrity manifest and strict mode is enabled without TOFU lockfile"
+            );
+            return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
+                "Module {url} is not present in the integrity manifest. \
+                 In strict mode, all modules must have an integrity entry."
+            ))
+            .into()));
+        }
+
+        // Check cache first
+        if let Ok(cache) = self.cache.read()
+            && let Some(cached_bytes) = cache.get(&url)
+        {
+            debug!(module_url = %url, size_bytes = cached_bytes.len(), "CDN module loaded from cache");
+            return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
+                ModuleType::JavaScript,
+                ModuleSourceCode::Bytes(cached_bytes.clone().into_boxed_slice().into()),
+                module_specifier,
+                None,
+            )));
+        }
+
+        let client = self.client.clone();
+        let cache = self.cache.clone();
+        let integrity = self.integrity.clone();
+        let lockfile_path = self.lockfile_path.clone();
+
+        let fut = async move {
+            info!(module_url = %url, "CDN module fetch: downloading");
+
+            let (bytes, cdn_sri_hash) =
+                Self::fetch_with_size_limit(&client, &url, "Primary").await?;
+
+            let mut hasher = Sha384::new();
+            hasher.update(&bytes);
+            let actual_digest = hasher.finalize();
+
+            let actual_b64 = base64::engine::general_purpose::STANDARD.encode(actual_digest);
+
+            if let Some(expected_b64) = &expected_hash {
+                // Known module: verify against stored hash
+                let expected_digest = base64::engine::general_purpose::STANDARD
+                    .decode(expected_b64)
+                    .map_err(|e| {
+                        error!(module_url = %url, error = %e, "CDN module integrity: invalid base64 in manifest");
+                        JsErrorBox::generic(format!(
+                            "Invalid base64 in integrity manifest for {url}: {e}"
+                        ))
+                    })?;
+
+                if actual_digest.len() != expected_digest.len()
+                    || !constant_time_eq(&actual_digest, &expected_digest)
+                {
+                    error!(
+                        module_url = %url,
+                        expected_hash = %format!("sha384-{expected_b64}"),
+                        actual_hash = %format!("sha384-{actual_b64}"),
+                        "CDN module integrity check FAILED: hash mismatch"
+                    );
+                    return Err(JsErrorBox::generic(format!(
+                        "Integrity check failed for {url}: \
+                         expected sha384-{expected_b64}, got sha384-{actual_b64}"
+                    ))
+                    .into());
+                }
+                info!(
+                    module_url = %url,
+                    hash = %format!("sha384-{actual_b64}"),
+                    size_bytes = bytes.len(),
+                    "CDN module integrity check passed"
+                );
+            } else {
+                // Unknown module: trust-on-first-use (TOFU)
+                info!(
+                    module_url = %url,
+                    first_hash = %format!("sha384-{actual_b64}"),
+                    "TOFU: new module detected, starting verification fetch"
+                );
+
+                // Second fetch with identical protections (redirect/status/size checks)
+                let (bytes2, _) =
+                    Self::fetch_with_size_limit(&client, &url, "TOFU verification").await?;
+
+                let mut hasher2 = Sha384::new();
+                hasher2.update(&bytes2);
+                let verify_digest = hasher2.finalize();
+                let verify_b64 =
+                    base64::engine::general_purpose::STANDARD.encode(verify_digest);
+
+                if !constant_time_eq(&actual_digest, &verify_digest) {
+                    error!(
+                        module_url = %url,
+                        first_hash = %format!("sha384-{actual_b64}"),
+                        second_hash = %format!("sha384-{verify_b64}"),
+                        first_size = bytes.len(),
+                        second_size = bytes2.len(),
+                        "TOFU: REJECTED — CDN returned inconsistent content between fetches. Possible tampering."
+                    );
+                    return Err(JsErrorBox::generic(format!(
+                        "TOFU: CDN returned inconsistent content for {url}. \
+                         Hash mismatch between first and second fetch. Possible tampering."
+                    ))
+                    .into());
+                }
+
+                info!(
+                    module_url = %url,
+                    hash = %format!("sha384-{actual_b64}"),
+                    size_bytes = bytes.len(),
+                    "TOFU: verification passed — both fetches produced identical hash"
+                );
+
+                // Verify against CDN's SRI hash header if available
+                if let Some(ref sri_b64) = cdn_sri_hash {
+                    let sri_digest = base64::engine::general_purpose::STANDARD
+                        .decode(sri_b64)
+                        .map_err(|e| {
+                            error!(module_url = %url, cdn_sri = %format!("sha384-{sri_b64}"), error = %e, "TOFU: CDN SRI header contains invalid base64");
+                            JsErrorBox::generic(format!(
+                                "CDN SRI header for {url} contains invalid base64: {e}"
+                            ))
+                        })?;
+
+                    if !constant_time_eq(&actual_digest, &sri_digest) {
+                        error!(
+                            module_url = %url,
+                            computed_hash = %format!("sha384-{actual_b64}"),
+                            cdn_sri = %format!("sha384-{sri_b64}"),
+                            "TOFU: REJECTED — computed hash does not match CDN SRI header. Possible tampering."
+                        );
+                        return Err(JsErrorBox::generic(format!(
+                            "TOFU: computed hash does not match CDN SRI header for {url}. \
+                             Computed sha384-{actual_b64}, CDN declared sha384-{sri_b64}."
+                        ))
+                        .into());
+                    }
+                    info!(
+                        module_url = %url,
+                        hash = %format!("sha384-{actual_b64}"),
+                        "TOFU: three-way verification passed (first fetch, second fetch, CDN SRI header)"
+                    );
+                }
+
+                // Pin to lockfile on disk.
+                // Note: each JS execution runs on its own dedicated thread via
+                // create_and_run_current_thread, so blocking I/O here does not starve
+                // other async work. Concurrent appends are safe because we re-check
+                // the in-memory map under write lock before writing.
+                if let Some(ref path) = lockfile_path {
+                    use std::io::Write;
+                    let mut file = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                        .map_err(|e| {
+                            error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to open integrity lockfile");
+                            JsErrorBox::generic(format!(
+                                "Failed to open integrity lockfile: {e}"
+                            ))
+                        })?;
+                    writeln!(file, "{url} sha384-{actual_b64}").map_err(|e| {
+                        error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to write integrity lockfile");
+                        JsErrorBox::generic(format!(
+                            "Failed to write integrity lockfile: {e}"
+                        ))
+                    })?;
+                    file.flush().map_err(|e| {
+                        error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to flush integrity lockfile");
+                        JsErrorBox::generic(format!(
+                            "Failed to flush integrity lockfile: {e}"
+                        ))
+                    })?;
+                    info!(
+                        module_url = %url,
+                        hash = %format!("sha384-{actual_b64}"),
+                        lockfile = ?path,
+                        "TOFU: pinned new module to integrity lockfile"
+                    );
+                }
+
+                // Update in-memory manifest (re-check for concurrent pin)
+                if let Ok(mut map) = integrity.write() {
+                    map.entry(url.clone()).or_insert(actual_b64.clone());
+                }
+            }
+
+            // Cache the verified module source (bounded by MAX_CACHE_BYTES)
+            if let Ok(mut cache_w) = cache.write() {
+                let total: usize = cache_w.values().map(|v| v.len()).sum();
+                if total + bytes.len() <= MAX_CACHE_BYTES {
+                    cache_w.insert(url.clone(), bytes.clone());
+                    debug!(module_url = %url, "CDN module cached for future requests");
+                } else {
+                    warn!(module_url = %url, cache_bytes = total, module_bytes = bytes.len(), max_cache = MAX_CACHE_BYTES, "CDN module cache full, skipping cache insertion");
+                }
+            }
+
+            info!(module_url = %url, size_bytes = bytes.len(), "CDN module loaded successfully");
+
+            let module_specifier = ModuleSpecifier::parse(&url).map_err(|e| {
+                JsErrorBox::generic(format!("Invalid module URL during load: {url}: {e}"))
+            })?;
+
+            Ok(ModuleSource::new(
+                ModuleType::JavaScript,
+                ModuleSourceCode::Bytes(bytes.into_boxed_slice().into()),
+                &module_specifier,
+                None,
+            ))
+        }
+        .boxed_local();
+
+        ModuleLoadResponse::Async(fut)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_integrity_lock() {
+        let contents = r#"
+# This is a comment
+https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm sha384-abc123def456
+https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
+
+# Another comment
+"#;
+        let map = CdnModuleLoader::parse_integrity_lock(contents);
+        assert_eq!(map.len(), 2);
+        assert_eq!(
+            map.get("https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm"),
+            Some(&"abc123def456".to_string())
+        );
+        assert_eq!(
+            map.get("https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm"),
+            Some(&"xyz789".to_string())
+        );
+    }
+
+    #[test]
+    fn test_parse_npm_specifier() {
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("zod@3.22.4"),
+            Some("https://cdn.jsdelivr.net/npm/zod@3.22.4".to_string())
+        );
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("zod@3.22.4/+esm"),
+            Some("https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm".to_string())
+        );
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("@scope/pkg@1.0.0/+esm"),
+            Some("https://cdn.jsdelivr.net/npm/@scope/pkg@1.0.0/+esm".to_string())
+        );
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("@scope/pkg@2.0.0"),
+            Some("https://cdn.jsdelivr.net/npm/@scope/pkg@2.0.0".to_string())
+        );
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("date-fns@3.6.0/esm/index.js"),
+            Some("https://cdn.jsdelivr.net/npm/date-fns@3.6.0/esm/index.js".to_string())
+        );
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("zod@3.22.4/+esm#sha384-abc123"),
+            Some("https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm#sha384-abc123".to_string())
+        );
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("@scope/pkg@1.0.0/+esm#sha384-xyz789"),
+            Some("https://cdn.jsdelivr.net/npm/@scope/pkg@1.0.0/+esm#sha384-xyz789".to_string())
+        );
+        assert_eq!(CdnModuleLoader::parse_npm_specifier("lodash-es"), None);
+        assert_eq!(CdnModuleLoader::parse_npm_specifier("./local.js"), None);
+        assert_eq!(CdnModuleLoader::parse_npm_specifier("@scope/pkg"), None);
+    }
+
+    #[test]
+    fn test_resolve_npm_specifiers() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        let result = loader
+            .resolve("zod@3.22.4/+esm", "file:///main.js", ResolutionKind::Import)
+            .unwrap();
+        assert_eq!(
+            result.as_str(),
+            "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm"
+        );
+    }
+
+    #[test]
+    fn test_resolve_full_cdn_urls() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        let result = loader
+            .resolve(
+                "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm",
+                "file:///main.js",
+                ResolutionKind::Import,
+            )
+            .unwrap();
+        assert_eq!(
+            result.as_str(),
+            "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm"
+        );
+    }
+
+    #[test]
+    fn test_resolve_relative_imports() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        let result = loader
+            .resolve(
+                "./utils.js",
+                "https://cdn.jsdelivr.net/npm/zod@3.22.4/lib/index.js",
+                ResolutionKind::Import,
+            )
+            .unwrap();
+        assert_eq!(
+            result.as_str(),
+            "https://cdn.jsdelivr.net/npm/zod@3.22.4/lib/utils.js"
+        );
+    }
+
+    #[test]
+    fn test_resolve_relative_rejects_non_cdn_referrer() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        assert!(
+            loader
+                .resolve("./utils.js", "file:///main.js", ResolutionKind::Import)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_resolve_with_inline_hash() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        let result = loader
+            .resolve(
+                "zod@3.22.4/+esm#sha384-abc123def",
+                "file:///main.js",
+                ResolutionKind::Import,
+            )
+            .unwrap();
+        assert_eq!(
+            result.as_str(),
+            "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm#sha384-abc123def"
+        );
+        assert_eq!(result.fragment(), Some("sha384-abc123def"));
+    }
+
+    #[test]
+    fn test_resolve_rejects_bare_specifiers() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        assert!(
+            loader
+                .resolve("lodash-es", "file:///main.js", ResolutionKind::Import)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_resolve_rejects_other_urls() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        assert!(
+            loader
+                .resolve(
+                    "https://evil.com/malware.js",
+                    "file:///main.js",
+                    ResolutionKind::Import
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_strict_mode_rejects_unknown_modules() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), true);
+        let specifier =
+            ModuleSpecifier::parse("https://cdn.jsdelivr.net/npm/unknown@1.0.0/+esm").unwrap();
+        let response = loader.load(&specifier, None, false, RequestedModuleType::None);
+        assert!(matches!(response, ModuleLoadResponse::Sync(Err(_))));
+    }
+}

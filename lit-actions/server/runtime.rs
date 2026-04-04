@@ -1,13 +1,15 @@
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::Once;
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
-use deno_core::{JsRuntime, NoopModuleLoader, v8};
+use deno_core::{JsRuntime, v8};
+
+use crate::cdn_module_loader::{CdnModuleLoader, ModuleCache};
 use deno_resolver::npm::{DenoInNpmPackageChecker, ManagedNpmResolver};
 use deno_runtime::{
     BootstrapOptions, WorkerLogLevel,
@@ -48,12 +50,18 @@ fn deno_isolate_init() -> Option<&'static [u8]> {
 }
 
 // using the worker built into deno
+#[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, err)]
 fn build_main_worker_and_inject_sdk(
     globals_to_inject: &Option<serde_json::Value>,
     auth_context: &Option<serde_json::Value>,
     http_headers: BTreeMap<String, String>,
     memory_limit_mb: Option<usize>,
+    integrity_manifest: Arc<RwLock<HashMap<String, String>>>,
+    strict_imports: bool,
+    module_cache: ModuleCache,
+    lockfile_path: Option<PathBuf>,
+    http_client: Arc<reqwest::Client>,
 ) -> Result<MainWorker> {
     let options = WorkerOptions {
         bootstrap: BootstrapOptions {
@@ -101,7 +109,13 @@ fn build_main_worker_and_inject_sdk(
             broadcast_channel: Default::default(),
             feature_checker: Default::default(),
             fs: Arc::new(RealFs),
-            module_loader: Rc::new(NoopModuleLoader),
+            module_loader: Rc::new(CdnModuleLoader::with_options(
+                integrity_manifest,
+                strict_imports,
+                module_cache,
+                lockfile_path,
+                Some(http_client),
+            )),
             node_services: Default::default(),
             npm_process_state_provider: Default::default(),
             permissions: PermissionsContainer::new(desc_parser, perms),
@@ -246,6 +260,11 @@ pub(crate) async fn execute_js(
     outbound_tx: flume::Sender<tonic::Result<ExecuteJsResponse>>,
     inbound_rx: TracedReceiver<ExecuteJsRequest>,
     is_test_server: bool,
+    integrity_manifest: Arc<RwLock<HashMap<String, String>>>,
+    strict_imports: bool,
+    module_cache: ModuleCache,
+    lockfile_path: Option<PathBuf>,
+    http_client: Arc<reqwest::Client>,
 ) -> Result<()> {
     // Fast path to do nothing, allowing us to benchmark with and without Deno involved
     if code.is_empty() || code.bytes().all(|b| b.is_ascii_whitespace()) {
@@ -259,10 +278,19 @@ pub(crate) async fn execute_js(
     let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
     let memory_limit_mb = memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB);
 
-    let mut worker =
-        build_main_worker_and_inject_sdk(&None, &auth_context, http_headers, Some(memory_limit_mb))
-            .context("Error building main worker")
-            .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
+    let mut worker = build_main_worker_and_inject_sdk(
+        &None,
+        &auth_context,
+        http_headers,
+        Some(memory_limit_mb),
+        integrity_manifest,
+        strict_imports,
+        module_cache,
+        lockfile_path,
+        http_client,
+    )
+    .context("Error building main worker")
+    .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
 
     let op_state = worker.js_runtime.op_state();
     {
