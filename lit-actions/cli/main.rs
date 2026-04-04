@@ -32,7 +32,7 @@ struct Args {
         long,
         env = "LIT_STRICT_IMPORTS",
         default_value = "true",
-        help = "Require CDN modules to be in the integrity manifest. Without --integrity-lock, unknown modules are rejected. With --integrity-lock, unknown modules are verified via TOFU and auto-pinned."
+        help = "Verify unknown CDN modules via TOFU (trust-on-first-use) before execution. With --integrity-lock, verified hashes are also persisted to the lockfile."
     )]
     strict_imports: bool,
 }
