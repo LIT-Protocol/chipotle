@@ -45,8 +45,9 @@ contract APIConfigFacet {
     }
 
     // setApiPayers is used to add new signers (accounts that pay for state mutation made by api calls) to the list of api payers.
+    // Restricted to owner + admin API payer (not regular API payers) to prevent hostile payer takeover.
     function setApiPayers(address[] memory newApiPayers) public {
-        SecurityLib.revertIfNotOwner(msg.sender);
+        SecurityLib.revertIfNotOwnerOrAdminApiPayer(msg.sender);
 
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
 

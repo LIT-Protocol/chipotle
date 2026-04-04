@@ -22,6 +22,16 @@ library SecurityLib {
         }
     }
 
+    function revertIfNotOwnerOrAdminApiPayer(address caller) internal view {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        if (
+            caller != LibDiamond.contractOwner() &&
+            caller != s.adminApiPayerAccount
+        ) {
+            revert AppStorage.OnlyApiPayerOrOwner(caller);
+        }
+    }
+
     function revertIfNotMasterAccount(uint256 accountApiKeyHash) internal view {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         if (s.allApiKeyHashesToMaster[accountApiKeyHash] != accountApiKeyHash) {
