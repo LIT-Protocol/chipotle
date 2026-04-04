@@ -157,9 +157,7 @@ pub(crate) fn generate_dynamic_imports(imports: &[ParsedImport]) -> String {
         }
 
         if has_namespace {
-            out.push_str(&format!(
-                "const {ns_name} = await import(\"{spec}\");\n",
-            ));
+            out.push_str(&format!("const {ns_name} = await import(\"{spec}\");\n",));
         }
     }
     out
@@ -248,7 +246,13 @@ fn parse_import_statement(s: &str) -> Option<(ParsedImport, usize)> {
     cur.skip_ws();
     cur.eat(b';');
 
-    Some((ParsedImport { specifier, bindings }, cur.pos))
+    Some((
+        ParsedImport {
+            specifier,
+            bindings,
+        },
+        cur.pos,
+    ))
 }
 
 /// Simple cursor for parsing import statement text.
@@ -386,7 +390,8 @@ mod tests {
 
     #[test]
     fn multiple_named_imports() {
-        let code = "import { encode, decode } from \"cbor-x@1.5.9/+esm\";\n\nasync function main() {}";
+        let code =
+            "import { encode, decode } from \"cbor-x@1.5.9/+esm\";\n\nasync function main() {}";
         let result = rewrite_imports(code);
         assert_eq!(result.imports.len(), 1);
         assert_eq!(result.imports[0].specifier, "cbor-x@1.5.9/+esm");
@@ -480,7 +485,8 @@ mod tests {
 
     #[test]
     fn multi_line_named_imports() {
-        let code = "import {\n  a,\n  b,\n  c\n} from \"pkg@1.0.0/+esm\";\nasync function main() {}";
+        let code =
+            "import {\n  a,\n  b,\n  c\n} from \"pkg@1.0.0/+esm\";\nasync function main() {}";
         let result = rewrite_imports(code);
         assert_eq!(result.imports.len(), 1);
         assert_eq!(
@@ -520,10 +526,7 @@ async function main() {}";
     fn inline_integrity_hash() {
         let code = "import { z } from \"zod@3.22.4/+esm#sha384-abc123\";\nasync function main() {}";
         let result = rewrite_imports(code);
-        assert_eq!(
-            result.imports[0].specifier,
-            "zod@3.22.4/+esm#sha384-abc123"
-        );
+        assert_eq!(result.imports[0].specifier, "zod@3.22.4/+esm#sha384-abc123");
     }
 
     #[test]
@@ -601,10 +604,7 @@ async function main() {}";
             bindings: vec![ImportBinding::Namespace("Mod".into())],
         }];
         let code = generate_dynamic_imports(&imports);
-        assert_eq!(
-            code,
-            "const Mod = await import(\"pkg@1.0.0/+esm\");\n"
-        );
+        assert_eq!(code, "const Mod = await import(\"pkg@1.0.0/+esm\");\n");
     }
 
     #[test]
@@ -614,10 +614,7 @@ async function main() {}";
             bindings: vec![],
         }];
         let code = generate_dynamic_imports(&imports);
-        assert_eq!(
-            code,
-            "await import(\"side-effect@1.0.0/+esm\");\n"
-        );
+        assert_eq!(code, "await import(\"side-effect@1.0.0/+esm\");\n");
     }
 
     #[test]
