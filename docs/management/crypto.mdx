@@ -1,0 +1,195 @@
+---
+title: "Crypto Payments"
+description: "How to add funds to your Lit Chipotle account using cryptocurrency via Stripe."
+---
+
+## Overview
+
+Lit Chipotle supports purchasing credits with cryptocurrency through Stripe's crypto payment integration. You can pay with **ETH**, **USDC**, **SOL**, and other supported tokens directly from your wallet — no fiat currency or credit card required.
+
+Under the hood, Stripe converts the crypto payment into credits on your account using the same billing endpoints as card payments.
+
+---
+
+## Paying with Crypto via the Dashboard
+
+The simplest way to add funds with crypto:
+
+1. Log in to the [Dashboard](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/).
+2. Click **Add Funds** in the top-right corner.
+3. Select a credit package (see [Credit Packages](/management/pricing#credit-packages)).
+4. On the Stripe checkout page, choose **Crypto** as the payment method.
+5. Connect your wallet (MetaMask, Coinbase Wallet, or WalletConnect) and approve the transaction.
+
+Credits are applied to your account once the transaction is confirmed on-chain.
+
+<Info>
+Crypto payments are processed by Stripe and are subject to Stripe's supported tokens and networks. Check [Stripe's crypto documentation](https://docs.stripe.com/crypto/pay-with-crypto) for the latest supported assets.
+</Info>
+
+---
+
+## Paying with Crypto via the API
+
+You can also initiate crypto payments programmatically using the billing API. The flow mirrors the standard Stripe card payment flow, but you pass crypto-specific parameters when confirming on the client side.
+
+### Step 1: Get the Stripe publishable key
+
+<Tabs>
+  <Tab title="JavaScript">
+    ```javascript
+    const res = await fetch(`${BASE}/core/v1/billing/stripe_config`);
+    const { publishable_key } = await res.json();
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s "https://api.chipotle.litprotocol.com/core/v1/billing/stripe_config"
+    ```
+  </Tab>
+</Tabs>
+
+### Step 2: Create a PaymentIntent
+
+Create a PaymentIntent for the desired amount (minimum 500 cents = $5.00).
+
+<Tabs>
+  <Tab title="JavaScript">
+    ```javascript
+    const res = await fetch(`${BASE}/core/v1/billing/create_payment_intent`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Api-Key': accountApiKey,
+      },
+      body: JSON.stringify({ amount_cents: 2500 }), // $25.00
+    });
+    const { client_secret } = await res.json();
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/billing/create_payment_intent" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: $KEY" \
+      -d '{"amount_cents": 2500}'
+    ```
+  </Tab>
+</Tabs>
+
+### Step 3: Confirm the payment with Stripe.js (crypto)
+
+Use the `client_secret` returned from Step 2 with [Stripe.js](https://docs.stripe.com/js) to present the crypto payment option. Stripe handles wallet connection and on-chain transaction signing.
+
+```javascript
+import { loadStripe } from '@stripe/stripe-js';
+
+const stripe = await loadStripe(publishable_key);
+
+// Mount the Payment Element — it automatically shows crypto options
+// when available for your Stripe account.
+const elements = stripe.elements({ clientSecret: client_secret });
+const paymentElement = elements.create('payment');
+paymentElement.mount('#payment-element');
+
+// When the user submits the form:
+const { error } = await stripe.confirmPayment({
+  elements,
+  confirmParams: {
+    return_url: 'https://dashboard.chipotle.litprotocol.com/dapps/dashboard/',
+  },
+});
+
+if (error) {
+  console.error('Payment failed:', error.message);
+}
+```
+
+<Warning>
+The `return_url` is where Stripe redirects after the on-chain transaction completes. Make sure it points to a page that calls the confirm endpoint (Step 4) to finalize the credit top-up.
+</Warning>
+
+### Step 4: Confirm payment and credit the account
+
+After Stripe confirms the crypto payment has settled, call the confirm endpoint to apply credits.
+
+<Tabs>
+  <Tab title="JavaScript">
+    ```javascript
+    const res = await fetch(`${BASE}/core/v1/billing/confirm_payment`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Api-Key': accountApiKey,
+      },
+      body: JSON.stringify({ payment_intent_id: 'pi_...' }),
+    });
+    const result = await res.json();
+    console.log('Credits applied:', result);
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/billing/confirm_payment" \
+      -H "Content-Type: application/json" \
+      -H "X-Api-Key: $KEY" \
+      -d '{"payment_intent_id": "pi_..."}'
+    ```
+  </Tab>
+</Tabs>
+
+### Step 5: Verify your balance
+
+<Tabs>
+  <Tab title="JavaScript">
+    ```javascript
+    const res = await fetch(`${BASE}/core/v1/billing/balance`, {
+      headers: { 'X-Api-Key': accountApiKey },
+    });
+    const { balance } = await res.json();
+    console.log('Current balance:', balance);
+    ```
+  </Tab>
+  <Tab title="cURL">
+    ```bash
+    curl -s "https://api.chipotle.litprotocol.com/core/v1/billing/balance" \
+      -H "X-Api-Key: $KEY"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Supported Tokens and Networks
+
+Stripe's crypto payment support includes the following (subject to change):
+
+| Token | Networks |
+|---|---|
+| **USDC** | Ethereum, Solana, Polygon |
+| **USDP** | Ethereum |
+| **ETH** | Ethereum |
+| **SOL** | Solana |
+
+<Info>
+Stripe automatically handles the conversion from crypto to USD at the current exchange rate. The credit amount you receive matches the USD value of the package you selected — there are no additional conversion fees from Lit.
+</Info>
+
+---
+
+## Frequently Asked Questions
+
+**How long does it take for credits to appear?**\
+Credits are applied after the on-chain transaction reaches sufficient confirmations. For most networks this takes 1-5 minutes. Stripe handles the confirmation monitoring automatically.
+
+**Is there a minimum payment?**\
+Yes, the same $5.00 minimum (500 cents) applies to crypto payments, matching the Starter package.
+
+**What wallets are supported?**\
+Any wallet compatible with Stripe's crypto on-ramp, including MetaMask, Coinbase Wallet, and WalletConnect-compatible wallets.
+
+**What if my transaction fails or reverts?**\
+If the on-chain transaction fails, no credits are deducted and no charge is applied. You can retry the payment.
+
+**Can I get a refund in crypto?**\
+Refund policies follow the same terms as card payments. Contact the Lit Protocol team via [Discord](https://litgateway.com/discord) for refund requests.
