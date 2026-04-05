@@ -28,5 +28,6 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 COPY --from=builder /build/lit-actions/target/release/lit_actions /usr/local/bin/
+COPY lit-actions/integrity.lock /app/integrity.lock
 
-CMD ["lit_actions", "--socket", "/tmp/lit_actions.sock"]
+CMD ["lit_actions", "--socket", "/tmp/lit_actions.sock", "--integrity-lock", "/app/integrity.lock"]

@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 
 use deno_core::{OpState, extension, op2};
 use deno_error::JsErrorBox;
@@ -7,6 +8,22 @@ use lit_actions_grpc::proto::*;
 use tracing::instrument;
 
 use crate::macros::*;
+
+/// Per-execution tracker that records every module loaded during a single
+/// Lit Action run, including its resolved CDN URL and SHA-384 hash.
+/// Shared between the module loader and OpState so that `showImportDetails()`
+/// can read it from user code.
+#[derive(Clone, Default)]
+pub struct LoadedModules(pub Arc<RwLock<Vec<LoadedModuleInfo>>>);
+
+/// Metadata for a single loaded CDN module.
+#[derive(Clone, Debug)]
+pub struct LoadedModuleInfo {
+    /// The resolved CDN URL (without fragment).
+    pub url: String,
+    /// The base64-encoded SHA-384 hash of the module content.
+    pub hash: String,
+}
 
 #[instrument(skip_all, ret)]
 #[op2(fast)]
@@ -194,6 +211,46 @@ async fn op_update_resource_usage(
 }
 
 #[instrument(skip_all, ret)]
+#[op2]
+#[string]
+fn op_show_import_details(state: &mut OpState) -> Result<String, JsErrorBox> {
+    // Clone the Arc to release the borrow on OpState before calling remote_op!
+    let loaded_modules: LoadedModules = state
+        .try_borrow::<LoadedModules>()
+        .cloned()
+        .ok_or_else(|| JsErrorBox::generic("Import tracking not available"))?;
+
+    let modules = loaded_modules
+        .0
+        .read()
+        .map_err(|e| JsErrorBox::generic(format!("Failed to read import details: {e}")))?;
+
+    // Build JSON array of {url, hash} objects
+    let details: Vec<serde_json::Value> = modules
+        .iter()
+        .map(|m| {
+            serde_json::json!({
+                "url": m.url,
+                "hash": format!("sha384-{}", m.hash),
+            })
+        })
+        .collect();
+
+    let json = serde_json::to_string_pretty(&details)
+        .map_err(|e| JsErrorBox::generic(format!("Failed to serialize import details: {e}")))?;
+
+    // Log via the existing print opCode
+    remote_op!(
+        op_show_import_details,
+        state,
+        PrintRequest {
+            message: format!("[Import Details]\n{json}\n")
+        },
+        UnionRequest::Print(_) => Ok(json)
+    )
+}
+
+#[instrument(skip_all, ret)]
 pub async fn op_update_resource_usage_external(
     state: Rc<RefCell<OpState>>,
     tick: u32,
@@ -219,6 +276,7 @@ extension!(
         op_get_private_key,
         op_increment_fetch_count,
         op_set_response,
+        op_show_import_details,
         op_update_resource_usage,
     ],
     esm_entry_point = "ext:lit_actions/99_patches.js",
