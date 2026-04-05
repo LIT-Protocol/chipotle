@@ -396,13 +396,11 @@ impl ModuleLoader for CdnModuleLoader {
                     max = MAX_MODULE_COUNT,
                     "CDN module load rejected: maximum module count exceeded"
                 );
-                return ModuleLoadResponse::Sync(Err(
-                    JsErrorBox::generic(format!(
-                        "Maximum module count ({MAX_MODULE_COUNT}) exceeded. \
+                return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
+                    "Maximum module count ({MAX_MODULE_COUNT}) exceeded. \
                          Reduce the number of imported modules."
-                    ))
-                    .into(),
-                ));
+                ))
+                .into()));
             }
         }
 
@@ -462,14 +460,12 @@ impl ModuleLoader for CdnModuleLoader {
                             manifest_hash = %format!("sha384-{stored}"),
                             "CDN module cache: inline hash does not match manifest hash"
                         );
-                        return ModuleLoadResponse::Sync(Err(
-                            JsErrorBox::generic(format!(
-                                "Integrity check failed for cached {url}: \
+                        return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
+                            "Integrity check failed for cached {url}: \
                                  inline hash sha384-{declared} does not match \
                                  manifest hash sha384-{stored}"
-                            ))
-                            .into(),
-                        ));
+                        ))
+                        .into()));
                     }
                 }
             }
