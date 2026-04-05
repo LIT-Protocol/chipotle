@@ -176,6 +176,45 @@ GET    /core/v1/version             Server version and commit hash
 
 ---
 
+## Local development
+
+`local_test.sh` spins up the full stack locally against a throwaway Anvil chain. It starts six services and tears them all down on Ctrl+C.
+
+### Prerequisites
+
+| Tool | Install |
+|------|---------|
+| [Foundry](https://getfoundry.sh/) (anvil, forge) | `curl -L https://foundry.paradigm.xyz \| bash && foundryup` |
+| [dstack simulator](https://github.com/Dstack-TEE/dstack) | `git clone https://github.com/Dstack-TEE/dstack.git ~/GitHub/dstack && cd ~/GitHub/dstack/sdk/simulator && bash build.sh` |
+| [static-web-server](https://static-web-server.net/) | `brew install static-web-server` |
+| Rust toolchain | [rustup.rs](https://rustup.rs/) |
+
+### Run
+
+```bash
+./local_test.sh
+```
+
+The script will:
+
+1. Start **Anvil** (local Ethereum node on `http://127.0.0.1:8545`)
+2. Start the **dstack simulator** (creates a temp dir under `/tmp/dstack-sim-*`)
+3. **Deploy contracts** to Anvil and write `lit-api-server/NodeConfig.toml`
+4. `cargo run` **lit-api-server** (`http://localhost:8000`)
+5. `cargo run` **lit-actions** (Unix socket at `/tmp/lit_actions.sock`)
+6. Serve **lit-static** via static-web-server (`http://localhost:8080`)
+
+Press **Ctrl+C** to stop all services.
+
+### Configuration
+
+| Environment variable | Default | Description |
+|---------------------|---------|-------------|
+| `SIMULATOR_DIR` | `~/GitHub/dstack/sdk/simulator` | Path to the dstack simulator directory |
+| `DSTACK_SOCKET` | Auto-detected | Override the simulator socket path |
+
+---
+
 ## Architecture
 
 See the [Architecture overview](https://docs.dev.litprotocol.com/architecture/index) and [Authentication model](https://docs.dev.litprotocol.com/architecture/authModel) in the docs.
