@@ -389,19 +389,19 @@ impl ModuleLoader for CdnModuleLoader {
     ) -> ModuleLoadResponse {
         // Enforce per-execution module count limit to prevent DoS via
         // dependency graphs with thousands of tiny files.
-        if let Ok(modules) = self.loaded_modules.0.read() {
-            if modules.len() >= MAX_MODULE_COUNT {
-                error!(
-                    module_count = modules.len(),
-                    max = MAX_MODULE_COUNT,
-                    "CDN module load rejected: maximum module count exceeded"
-                );
-                return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
-                    "Maximum module count ({MAX_MODULE_COUNT}) exceeded. \
-                         Reduce the number of imported modules."
-                ))
-                .into()));
-            }
+        if let Ok(modules) = self.loaded_modules.0.read()
+            && modules.len() >= MAX_MODULE_COUNT
+        {
+            error!(
+                module_count = modules.len(),
+                max = MAX_MODULE_COUNT,
+                "CDN module load rejected: maximum module count exceeded"
+            );
+            return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
+                "Maximum module count ({MAX_MODULE_COUNT}) exceeded. \
+                     Reduce the number of imported modules."
+            ))
+            .into()));
         }
 
         // Extract inline hash from URL fragment (e.g. #sha384-abc123...)
@@ -478,13 +478,13 @@ impl ModuleLoader for CdnModuleLoader {
                         .cloned()
                 })
                 .unwrap_or_default();
-            if let Ok(mut modules) = self.loaded_modules.0.write() {
-                if !modules.iter().any(|m| m.url == url) {
-                    modules.push(LoadedModuleInfo {
-                        url: url.clone(),
-                        hash,
-                    });
-                }
+            if let Ok(mut modules) = self.loaded_modules.0.write()
+                && !modules.iter().any(|m| m.url == url)
+            {
+                modules.push(LoadedModuleInfo {
+                    url: url.clone(),
+                    hash,
+                });
             }
             debug!(module_url = %url, size_bytes = cached_bytes.len(), "CDN module loaded from cache");
             return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
@@ -676,13 +676,13 @@ impl ModuleLoader for CdnModuleLoader {
             }
 
             // Record the loaded module for showImportDetails() (dedup by URL)
-            if let Ok(mut modules) = loaded_modules.0.write() {
-                if !modules.iter().any(|m| m.url == url) {
-                    modules.push(LoadedModuleInfo {
-                        url: url.clone(),
-                        hash: actual_b64.clone(),
-                    });
-                }
+            if let Ok(mut modules) = loaded_modules.0.write()
+                && !modules.iter().any(|m| m.url == url)
+            {
+                modules.push(LoadedModuleInfo {
+                    url: url.clone(),
+                    hash: actual_b64.clone(),
+                });
             }
 
             // Cache the verified module source (bounded by MAX_CACHE_BYTES)
