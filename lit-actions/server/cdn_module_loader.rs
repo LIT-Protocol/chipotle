@@ -442,47 +442,49 @@ impl ModuleLoader for CdnModuleLoader {
         if let Ok(cache) = self.cache.read()
             && let Some(cached_bytes) = cache.get(&url)
         {
-            // If an inline hash was provided, verify it matches the manifest hash
-            // for this URL. This prevents a cached module from being served when the
-            // caller declared a different expected hash in their import specifier.
-            if let Some(ref declared) = inline_hash {
-                let manifest_hash = self
-                    .integrity
-                    .read()
-                    .expect("integrity lock poisoned")
-                    .get(&url)
-                    .cloned();
-                if let Some(ref stored) = manifest_hash {
-                    if declared != stored {
-                        error!(
-                            module_url = %url,
-                            inline_hash = %format!("sha384-{declared}"),
-                            manifest_hash = %format!("sha384-{stored}"),
-                            "CDN module cache: inline hash does not match manifest hash"
-                        );
-                        return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
-                            "Integrity check failed for cached {url}: \
-                                 inline hash sha384-{declared} does not match \
-                                 manifest hash sha384-{stored}"
-                        ))
-                        .into()));
-                    }
+            // If an expected hash exists (inline or manifest), verify it against
+            // the actual cached bytes. This catches both stale manifest entries and
+            // inline hash mismatches, even when the URL has no manifest entry.
+            if let Some(ref expected_b64) = expected_hash {
+                let mut hasher = Sha384::new();
+                hasher.update(cached_bytes);
+                let cached_digest = hasher.finalize();
+                let cached_b64 = base64::engine::general_purpose::STANDARD.encode(cached_digest);
+                if !constant_time_eq(cached_b64.as_bytes(), expected_b64.as_bytes()) {
+                    error!(
+                        module_url = %url,
+                        expected_hash = %format!("sha384-{expected_b64}"),
+                        cached_hash = %format!("sha384-{cached_b64}"),
+                        "CDN module cache: integrity check failed for cached bytes"
+                    );
+                    return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
+                        "Integrity check failed for cached {url}: \
+                             expected sha384-{expected_b64}, got sha384-{cached_b64}"
+                    ))
+                    .into()));
                 }
             }
 
-            // Record the loaded module for showImportDetails()
-            let hash = self
-                .integrity
-                .read()
-                .expect("integrity lock poisoned")
-                .get(&url)
-                .cloned()
+            // Record the loaded module for showImportDetails().
+            // Use expected_hash (inline or manifest) when available, so inline-hash-only
+            // imports don't lose the declared hash.
+            let hash = expected_hash
+                .clone()
+                .or_else(|| {
+                    self.integrity
+                        .read()
+                        .expect("integrity lock poisoned")
+                        .get(&url)
+                        .cloned()
+                })
                 .unwrap_or_default();
             if let Ok(mut modules) = self.loaded_modules.0.write() {
-                modules.push(LoadedModuleInfo {
-                    url: url.clone(),
-                    hash,
-                });
+                if !modules.iter().any(|m| m.url == url) {
+                    modules.push(LoadedModuleInfo {
+                        url: url.clone(),
+                        hash,
+                    });
+                }
             }
             debug!(module_url = %url, size_bytes = cached_bytes.len(), "CDN module loaded from cache");
             return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
@@ -673,12 +675,14 @@ impl ModuleLoader for CdnModuleLoader {
                 }
             }
 
-            // Record the loaded module for showImportDetails()
+            // Record the loaded module for showImportDetails() (dedup by URL)
             if let Ok(mut modules) = loaded_modules.0.write() {
-                modules.push(LoadedModuleInfo {
-                    url: url.clone(),
-                    hash: actual_b64.clone(),
-                });
+                if !modules.iter().any(|m| m.url == url) {
+                    modules.push(LoadedModuleInfo {
+                        url: url.clone(),
+                        hash: actual_b64.clone(),
+                    });
+                }
             }
 
             // Cache the verified module source (bounded by MAX_CACHE_BYTES)

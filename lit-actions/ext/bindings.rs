@@ -230,8 +230,8 @@ fn op_show_import_details(state: &mut OpState) -> Result<String, JsErrorBox> {
         .iter()
         .map(|m| {
             serde_json::json!({
-                "url": m.url,
-                "hash": format!("sha384-{}", m.hash),
+                "url": &m.url,
+                "hash": format!("sha384-{}", &m.hash),
             })
         })
         .collect();
