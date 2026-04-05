@@ -10,8 +10,8 @@ Until now, the only JavaScript available inside a Lit Action was what shipped wi
 That limitation is gone. Lit Actions can now **import ES modules at runtime** from [jsDelivr](https://www.jsdelivr.com/), a public CDN that serves npm packages as ready-to-run ESM. You write a standard `import` statement with a version-pinned package specifier and the runtime resolves it to jsDelivr, fetches, verifies, caches, and executes it.
 
 ```javascript
-import { z } from "zod@3.22.4/+esm";
-import { formatDistance } from "date-fns@3.6.0/+esm";
+import { z } from "zod@3.22.4";
+import { formatDistance } from "date-fns@3.6.0";
 ```
 
 This opens the door to thousands of npm packages: validation libraries, date/time utilities, encoding tools, math libraries, protocol implementations, and more.
@@ -24,7 +24,7 @@ Every import goes through three stages before any bytes reach the V8 engine.
 
 ### 1. Resolution
 
-The runtime resolves the import specifier to a jsDelivr URL. You can write either a short npm specifier (`zod@3.22.4/+esm`) or a full URL (`https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm`). The runtime converts npm specifiers to their full jsDelivr URL automatically. Bare package names without a version (`import { z } from "zod"`) and relative paths (`./util.js`) are rejected. Every import must include a pinned version.
+The runtime resolves the import specifier to a jsDelivr URL. You can write a short npm specifier (`zod@3.22.4`), an explicit ESM specifier (`zod@3.22.4/+esm`), or a full URL (`https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm`). When no file path is specified after the version, the runtime automatically appends `/+esm` to request the ESM entry point from jsDelivr. Bare package names without a version (`import { z } from "zod"`) and relative paths (`./util.js`) are rejected. Every import must include a pinned version.
 
 ### 2. Integrity Verification
 
@@ -40,23 +40,26 @@ Once a module is verified, its source is held in an in-memory cache. Subsequent 
 
 ## Import Syntax
 
-Imports use an npm-style specifier with a pinned version. The runtime automatically resolves these to jsDelivr URLs.
+Imports use an npm-style specifier with a pinned version. The runtime automatically resolves these to jsDelivr URLs and appends `/+esm` when no file path is specified.
 
 ```javascript
 // Import a specific named export
-import { z } from "zod@3.22.4/+esm";
+import { z } from "zod@3.22.4";
 
 // Import a default export
-import Ajv from "ajv@8.12.0/+esm";
+import Ajv from "ajv@8.12.0";
 
 // Import multiple named exports
-import { encode, decode } from "cbor-x@1.5.9/+esm";
+import { encode, decode } from "cbor-x@1.5.9";
 
 // Scoped packages
-import { render } from "@preact/render-to-string@6.4.1/+esm";
+import { render } from "@preact/render-to-string@6.4.1";
 
-// Specific file path
+// Specific file path (no /+esm auto-appended)
 import { format } from "date-fns@3.6.0/esm/index.js";
+
+// Explicit /+esm still works (backward compatible)
+import { z } from "zod@3.22.4/+esm";
 ```
 
 The specifier format is:
@@ -65,17 +68,17 @@ The specifier format is:
 <package>@<version>[/<file>]
 ```
 
-The `@<version>` pin is required and ensures you always get the exact same bytes. The `/<file>` part is optional. Use `/+esm` to get the package's ESM entry point, or specify a path to a specific file in the package.
+The `@<version>` pin is required and ensures you always get the exact same bytes. The `/<file>` part is optional. When omitted, `/+esm` is automatically appended to request the package's ESM entry point from jsDelivr. You can also specify a path to a specific file in the package.
 
 ### Inline Integrity Hash
 
 You can append a `#sha384-<hash>` fragment to any import specifier to declare the expected integrity hash directly in your code. The runtime will verify the fetched content against this hash before execution.
 
 ```javascript
-import { z } from "zod@3.22.4/+esm#sha384-oKhMb3mCbOey4gFjFHm1YmKJF/WuNdbiLPSLHMwbkPE1mEpMJOoDQMHTcIltUJQ+";
+import { z } from "zod@3.22.4#sha384-oKhMb3mCbOey4gFjFHm1YmKJF/WuNdbiLPSLHMwbkPE1mEpMJOoDQMHTcIltUJQ+";
 ```
 
-This makes integrity verification self-contained in the action code, with no dependency on an external lockfile. When an inline hash is provided, it takes priority over any entry in `integrity.lock`.
+This makes integrity verification self-contained in the action code, with no dependency on an external lockfile. When an inline hash is provided, it takes priority over any entry in `integrity.lock`. The `/+esm` suffix is still auto-appended when no file path precedes the `#` fragment.
 
 The fragment is never sent over the network (per the URL specification). It is stripped before fetching and used only for local verification.
 
@@ -99,7 +102,7 @@ import { z } from "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm#sha384-oKhMb3m..
 ### Validate Input with Zod
 
 ```javascript
-import { z } from "zod@3.22.4/+esm";
+import { z } from "zod@3.22.4";
 
 // js_params: { pkpId, userData }
 async function main({ pkpId, userData }) {
@@ -126,7 +129,7 @@ async function main({ pkpId, userData }) {
 ### Format and Sign a Timestamp Proof
 
 ```javascript
-import { format, utcToZonedTime } from "date-fns-tz@2.0.1/+esm";
+import { format, utcToZonedTime } from "date-fns-tz@2.0.1";
 
 // js_params: { pkpId, timezone }
 async function main({ pkpId, timezone }) {
@@ -146,7 +149,7 @@ async function main({ pkpId, timezone }) {
 ### Encode Data as CBOR Before Signing
 
 ```javascript
-import { encode } from "cbor-x@1.5.9/+esm";
+import { encode } from "cbor-x@1.5.9";
 
 // js_params: { pkpId, payload }
 async function main({ pkpId, payload }) {
@@ -167,7 +170,7 @@ async function main({ pkpId, payload }) {
 ### JSON Schema Validation with AJV
 
 ```javascript
-import Ajv from "ajv@8.12.0/+esm";
+import Ajv from "ajv@8.12.0";
 
 // js_params: { pkpId, data, schema }
 async function main({ pkpId, data, schema }) {
@@ -283,6 +286,30 @@ Module imports are subject to the same [resource limits](/lit-actions/limits) as
 - **Timeout** — Module fetch time counts toward the action's execution timeout (default 15 minutes).
 - **Network** — Module fetches use a separate HTTP client from the action's `fetch()` API and do not count toward the per-action fetch limit. However, they share the same execution timeout.
 - **Module size** — Individual modules are capped at 10 MB.
+
+---
+
+## Debugging Imports
+
+Use `Lit.Actions.showImportDetails()` to inspect which modules were loaded and their integrity hashes. This is useful for debugging import resolution, verifying that the expected modules were fetched, and auditing the integrity of imported code.
+
+```javascript
+import { z } from "zod@3.22.4";
+
+async function main() {
+  const details = Lit.Actions.showImportDetails();
+  // details is an array of { url, hash } objects:
+  // [
+  //   {
+  //     "url": "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm",
+  //     "hash": "sha384-oKhMb3mCbOey4gFjFHm1..."
+  //   }
+  // ]
+  return details;
+}
+```
+
+The import details are also written to the action's console log, so they appear alongside other `console.log` output in the response logs.
 
 ---
 

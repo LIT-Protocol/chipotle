@@ -9,7 +9,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, anyhow, bail};
 use deno_core::{JsRuntime, v8};
 
-use crate::cdn_module_loader::{CdnModuleLoader, ModuleCache};
+use crate::cdn_module_loader::{CdnModuleLoader, LoadedModules, ModuleCache};
 use crate::import_rewriter;
 use deno_resolver::npm::{DenoInNpmPackageChecker, ManagedNpmResolver};
 use deno_runtime::{
@@ -63,6 +63,7 @@ fn build_main_worker_and_inject_sdk(
     module_cache: ModuleCache,
     lockfile_path: Option<PathBuf>,
     http_client: Arc<reqwest::Client>,
+    loaded_modules: LoadedModules,
 ) -> Result<MainWorker> {
     let options = WorkerOptions {
         bootstrap: BootstrapOptions {
@@ -116,6 +117,7 @@ fn build_main_worker_and_inject_sdk(
                 module_cache,
                 lockfile_path,
                 Some(http_client),
+                loaded_modules,
             )),
             node_services: Default::default(),
             npm_process_state_provider: Default::default(),
@@ -279,6 +281,8 @@ pub(crate) async fn execute_js(
     let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
     let memory_limit_mb = memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB);
 
+    let loaded_modules = LoadedModules::default();
+
     let mut worker = build_main_worker_and_inject_sdk(
         &None,
         &auth_context,
@@ -289,6 +293,7 @@ pub(crate) async fn execute_js(
         module_cache,
         lockfile_path,
         http_client,
+        loaded_modules.clone(),
     )
     .context("Error building main worker")
     .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
@@ -299,6 +304,7 @@ pub(crate) async fn execute_js(
         let mut state = op_state.borrow_mut();
         state.put(outbound_tx);
         state.put(inbound_rx);
+        state.put(loaded_modules);
         drop(state);
     }
 

@@ -26,8 +26,13 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
-/// Allowed CDN URL prefix for module imports.
+/// Allowed CDN URL prefix for module imports (origin only, used for URL construction).
 const ALLOWED_CDN_PREFIX: &str = "https://cdn.jsdelivr.net/";
+
+/// Allowed CDN URL prefix restricted to the npm backend.
+/// Only npm packages are permitted; other jsDelivr backends (/gh/, /wp/, etc.)
+/// serve mutable content and are rejected.
+const ALLOWED_NPM_PREFIX: &str = "https://cdn.jsdelivr.net/npm/";
 
 /// Maximum response body size (10 MB).
 const MAX_MODULE_SIZE_BYTES: usize = 10 * 1024 * 1024;
@@ -38,8 +43,15 @@ const MAX_CACHE_BYTES: usize = 100 * 1024 * 1024;
 /// HTTP request timeout.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Maximum number of distinct modules that can be loaded per action execution.
+/// Prevents DoS via dependency graphs with thousands of tiny files.
+const MAX_MODULE_COUNT: usize = 100;
+
 /// Thread-safe cache for fetched and integrity-verified module sources.
 pub type ModuleCache = Arc<RwLock<HashMap<String, Vec<u8>>>>;
+
+// Re-export from ext crate for convenience.
+pub use lit_actions_ext::bindings::{LoadedModuleInfo, LoadedModules};
 
 pub struct CdnModuleLoader {
     /// Maps CDN URLs to their expected base64-encoded SHA-384 hashes.
@@ -56,6 +68,8 @@ pub struct CdnModuleLoader {
     /// Path to integrity.lock file on disk. When set, enables trust-on-first-use:
     /// new modules are double-fetched, verified, and pinned to the lockfile.
     lockfile_path: Option<PathBuf>,
+    /// Per-execution tracker of all loaded modules and their hashes.
+    loaded_modules: LoadedModules,
 }
 
 impl CdnModuleLoader {
@@ -71,6 +85,7 @@ impl CdnModuleLoader {
             Arc::new(RwLock::new(HashMap::new())),
             None,
             None,
+            LoadedModules::default(),
         )
     }
 
@@ -87,13 +102,14 @@ impl CdnModuleLoader {
     }
 
     /// Create a new `CdnModuleLoader` with a shared cache, optional lockfile path,
-    /// and optional shared HTTP client.
+    /// optional shared HTTP client, and per-execution module tracker.
     pub fn with_options(
         integrity: Arc<RwLock<HashMap<String, String>>>,
         strict: bool,
         cache: ModuleCache,
         lockfile_path: Option<PathBuf>,
         client: Option<Arc<reqwest::Client>>,
+        loaded_modules: LoadedModules,
     ) -> Self {
         Self {
             integrity,
@@ -101,7 +117,13 @@ impl CdnModuleLoader {
             client: client.unwrap_or_else(Self::build_http_client),
             cache,
             lockfile_path,
+            loaded_modules,
         }
+    }
+
+    /// Returns the per-execution loaded modules tracker, for sharing with OpState.
+    pub fn loaded_modules(&self) -> LoadedModules {
+        self.loaded_modules.clone()
     }
 
     /// Parse an `integrity.lock` file into a URL → hash map.
@@ -142,18 +164,24 @@ impl CdnModuleLoader {
         map
     }
 
-    /// Check whether a URL is from the allowed CDN.
+    /// Check whether a URL is from the allowed CDN npm backend.
+    /// Only `https://cdn.jsdelivr.net/npm/` URLs are accepted; other jsDelivr
+    /// backends (`/gh/`, `/wp/`, etc.) serve mutable content and are rejected.
     fn is_allowed_cdn(url: &str) -> bool {
-        url.starts_with(ALLOWED_CDN_PREFIX)
+        url.starts_with(ALLOWED_NPM_PREFIX)
     }
 
     /// Parse an npm package specifier into a full jsDelivr URL.
     ///
     /// Accepts these formats:
-    /// - `package@version` → `https://cdn.jsdelivr.net/npm/package@version`
+    /// - `package@version` → `https://cdn.jsdelivr.net/npm/package@version/+esm`
+    /// - `package@version/+esm` → `https://cdn.jsdelivr.net/npm/package@version/+esm`
     /// - `package@version/file` → `https://cdn.jsdelivr.net/npm/package@version/file`
-    /// - `@scope/package@version` → `https://cdn.jsdelivr.net/npm/@scope/package@version`
+    /// - `@scope/package@version` → `https://cdn.jsdelivr.net/npm/@scope/package@version/+esm`
     /// - `@scope/package@version/file` → `https://cdn.jsdelivr.net/npm/@scope/package@version/file`
+    ///
+    /// When no file path is specified after the version, `/+esm` is automatically
+    /// appended to request the ESM entry point from jsDelivr.
     ///
     /// An optional `#sha384-<hash>` fragment is preserved on the output URL for
     /// inline integrity verification.
@@ -186,7 +214,14 @@ impl CdnModuleLoader {
             return None;
         }
 
-        let mut url = format!("{ALLOWED_CDN_PREFIX}npm/{spec}");
+        // Auto-append /+esm when no file path is specified after the version.
+        // This ensures jsDelivr serves the ESM entry point by default.
+        let has_path = after_at.contains('/');
+        let mut url = if has_path {
+            format!("{ALLOWED_CDN_PREFIX}npm/{spec}")
+        } else {
+            format!("{ALLOWED_CDN_PREFIX}npm/{spec}/+esm")
+        };
         if let Some(frag) = fragment {
             url.push('#');
             url.push_str(frag);
@@ -276,7 +311,7 @@ impl ModuleLoader for CdnModuleLoader {
         referrer: &str,
         _kind: ResolutionKind,
     ) -> Result<ModuleSpecifier, ModuleLoaderError> {
-        // Resolve relative imports against the referrer when the referrer is a jsDelivr URL.
+        // Resolve relative imports against the referrer when the referrer is a jsDelivr npm URL.
         // ESM modules on jsDelivr can have relative imports between files in the same package.
         if (specifier.starts_with("./") || specifier.starts_with("../"))
             && Self::is_allowed_cdn(referrer)
@@ -289,6 +324,8 @@ impl ModuleLoader for CdnModuleLoader {
                     "Failed to resolve relative import \"{specifier}\" against {referrer}: {e}"
                 ))
             })?;
+            // Verify the resolved URL stays within the /npm/ backend.
+            // Relative traversal (../../) could escape to /gh/ or other backends.
             if Self::is_allowed_cdn(resolved.as_str()) {
                 info!(
                     specifier,
@@ -302,10 +339,10 @@ impl ModuleLoader for CdnModuleLoader {
                 specifier,
                 referrer,
                 resolved_url = %resolved,
-                "CDN module resolve rejected: relative import resolved to non-jsDelivr URL"
+                "CDN module resolve rejected: relative import resolved outside /npm/ boundary"
             );
             return Err(JsErrorBox::generic(format!(
-                "Relative import \"{specifier}\" resolved to {resolved}, which is not on the allowed CDN"
+                "Relative import \"{specifier}\" resolved to {resolved}, which is outside the allowed /npm/ CDN path"
             ))
             .into());
         }
@@ -337,7 +374,7 @@ impl ModuleLoader for CdnModuleLoader {
         );
         Err(JsErrorBox::generic(format!(
             "Invalid import specifier: \"{specifier}\". \
-             Use an npm specifier with a pinned version (e.g. zod@3.22.4/+esm) \
+             Use an npm specifier with a pinned version (e.g. zod@3.22.4) \
              or a full jsDelivr URL (e.g. https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm)"
         ))
         .into())
@@ -350,6 +387,23 @@ impl ModuleLoader for CdnModuleLoader {
         _is_dyn_import: bool,
         _requested_module_type: RequestedModuleType,
     ) -> ModuleLoadResponse {
+        // Enforce per-execution module count limit to prevent DoS via
+        // dependency graphs with thousands of tiny files.
+        if let Ok(modules) = self.loaded_modules.0.read()
+            && modules.len() >= MAX_MODULE_COUNT
+        {
+            error!(
+                module_count = modules.len(),
+                max = MAX_MODULE_COUNT,
+                "CDN module load rejected: maximum module count exceeded"
+            );
+            return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
+                "Maximum module count ({MAX_MODULE_COUNT}) exceeded. \
+                     Reduce the number of imported modules."
+            ))
+            .into()));
+        }
+
         // Extract inline hash from URL fragment (e.g. #sha384-abc123...)
         let inline_hash = module_specifier
             .fragment()
@@ -388,6 +442,50 @@ impl ModuleLoader for CdnModuleLoader {
         if let Ok(cache) = self.cache.read()
             && let Some(cached_bytes) = cache.get(&url)
         {
+            // If an expected hash exists (inline or manifest), verify it against
+            // the actual cached bytes. This catches both stale manifest entries and
+            // inline hash mismatches, even when the URL has no manifest entry.
+            if let Some(ref expected_b64) = expected_hash {
+                let mut hasher = Sha384::new();
+                hasher.update(cached_bytes);
+                let cached_digest = hasher.finalize();
+                let cached_b64 = base64::engine::general_purpose::STANDARD.encode(cached_digest);
+                if !constant_time_eq(cached_b64.as_bytes(), expected_b64.as_bytes()) {
+                    error!(
+                        module_url = %url,
+                        expected_hash = %format!("sha384-{expected_b64}"),
+                        cached_hash = %format!("sha384-{cached_b64}"),
+                        "CDN module cache: integrity check failed for cached bytes"
+                    );
+                    return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
+                        "Integrity check failed for cached {url}: \
+                             expected sha384-{expected_b64}, got sha384-{cached_b64}"
+                    ))
+                    .into()));
+                }
+            }
+
+            // Record the loaded module for showImportDetails().
+            // Use expected_hash (inline or manifest) when available, so inline-hash-only
+            // imports don't lose the declared hash.
+            let hash = expected_hash
+                .clone()
+                .or_else(|| {
+                    self.integrity
+                        .read()
+                        .expect("integrity lock poisoned")
+                        .get(&url)
+                        .cloned()
+                })
+                .unwrap_or_default();
+            if let Ok(mut modules) = self.loaded_modules.0.write()
+                && !modules.iter().any(|m| m.url == url)
+            {
+                modules.push(LoadedModuleInfo {
+                    url: url.clone(),
+                    hash,
+                });
+            }
             debug!(module_url = %url, size_bytes = cached_bytes.len(), "CDN module loaded from cache");
             return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
                 ModuleType::JavaScript,
@@ -402,6 +500,7 @@ impl ModuleLoader for CdnModuleLoader {
         let integrity = self.integrity.clone();
         let lockfile_path = self.lockfile_path.clone();
         let strict = self.strict;
+        let loaded_modules = self.loaded_modules.clone();
 
         let fut = async move {
             info!(module_url = %url, "CDN module fetch: downloading");
@@ -576,6 +675,16 @@ impl ModuleLoader for CdnModuleLoader {
                 }
             }
 
+            // Record the loaded module for showImportDetails() (dedup by URL)
+            if let Ok(mut modules) = loaded_modules.0.write()
+                && !modules.iter().any(|m| m.url == url)
+            {
+                modules.push(LoadedModuleInfo {
+                    url: url.clone(),
+                    hash: actual_b64.clone(),
+                });
+            }
+
             // Cache the verified module source (bounded by MAX_CACHE_BYTES)
             if let Ok(mut cache_w) = cache.write() {
                 let total: usize = cache_w.values().map(|v| v.len()).sum();
@@ -633,10 +742,12 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
 
     #[test]
     fn test_parse_npm_specifier() {
+        // Bare specifiers without a path get /+esm auto-appended
         assert_eq!(
             CdnModuleLoader::parse_npm_specifier("zod@3.22.4"),
-            Some("https://cdn.jsdelivr.net/npm/zod@3.22.4".to_string())
+            Some("https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm".to_string())
         );
+        // Explicit /+esm is preserved as-is
         assert_eq!(
             CdnModuleLoader::parse_npm_specifier("zod@3.22.4/+esm"),
             Some("https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm".to_string())
@@ -645,10 +756,12 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
             CdnModuleLoader::parse_npm_specifier("@scope/pkg@1.0.0/+esm"),
             Some("https://cdn.jsdelivr.net/npm/@scope/pkg@1.0.0/+esm".to_string())
         );
+        // Scoped package without path gets /+esm auto-appended
         assert_eq!(
             CdnModuleLoader::parse_npm_specifier("@scope/pkg@2.0.0"),
-            Some("https://cdn.jsdelivr.net/npm/@scope/pkg@2.0.0".to_string())
+            Some("https://cdn.jsdelivr.net/npm/@scope/pkg@2.0.0/+esm".to_string())
         );
+        // Explicit file path is preserved (no /+esm appended)
         assert_eq!(
             CdnModuleLoader::parse_npm_specifier("date-fns@3.6.0/esm/index.js"),
             Some("https://cdn.jsdelivr.net/npm/date-fns@3.6.0/esm/index.js".to_string())
@@ -661,6 +774,11 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
             CdnModuleLoader::parse_npm_specifier("@scope/pkg@1.0.0/+esm#sha384-xyz789"),
             Some("https://cdn.jsdelivr.net/npm/@scope/pkg@1.0.0/+esm#sha384-xyz789".to_string())
         );
+        // Bare specifier with hash fragment gets /+esm auto-appended
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("zod@3.22.4#sha384-abc123"),
+            Some("https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm#sha384-abc123".to_string())
+        );
         assert_eq!(CdnModuleLoader::parse_npm_specifier("lodash-es"), None);
         assert_eq!(CdnModuleLoader::parse_npm_specifier("./local.js"), None);
         assert_eq!(CdnModuleLoader::parse_npm_specifier("@scope/pkg"), None);
@@ -669,8 +787,17 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     #[test]
     fn test_resolve_npm_specifiers() {
         let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // Explicit /+esm
         let result = loader
             .resolve("zod@3.22.4/+esm", "file:///main.js", ResolutionKind::Import)
+            .unwrap();
+        assert_eq!(
+            result.as_str(),
+            "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm"
+        );
+        // Bare specifier — /+esm auto-appended
+        let result = loader
+            .resolve("zod@3.22.4", "file:///main.js", ResolutionKind::Import)
             .unwrap();
         assert_eq!(
             result.as_str(),
@@ -762,6 +889,36 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     }
 
     #[test]
+    fn test_resolve_rejects_jsdelivr_gh_backend() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // Direct /gh/ URL should be rejected even though it's on jsdelivr
+        assert!(
+            loader
+                .resolve(
+                    "https://cdn.jsdelivr.net/gh/user/repo@main/file.js",
+                    "file:///main.js",
+                    ResolutionKind::Import
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_resolve_relative_rejects_npm_escape_to_gh() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // Relative traversal that escapes from /npm/ into /gh/ should be rejected
+        assert!(
+            loader
+                .resolve(
+                    "../../../gh/user/repo@main/file.js",
+                    "https://cdn.jsdelivr.net/npm/pkg@1.0.0/lib/index.js",
+                    ResolutionKind::Import
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
     fn test_strict_mode_allows_tofu_for_unknown_modules() {
         // Even without a lockfile, strict mode should fall through to async
         // TOFU verification instead of rejecting synchronously.
@@ -789,8 +946,14 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
             "https://cdn.jsdelivr.net/npm/known@1.0.0/+esm".to_string(),
             b"export default 42;\n".to_vec(),
         );
-        let loader =
-            CdnModuleLoader::with_options(Arc::new(RwLock::new(manifest)), true, cache, None, None);
+        let loader = CdnModuleLoader::with_options(
+            Arc::new(RwLock::new(manifest)),
+            true,
+            cache,
+            None,
+            None,
+            LoadedModules::default(),
+        );
         let specifier =
             ModuleSpecifier::parse("https://cdn.jsdelivr.net/npm/known@1.0.0/+esm").unwrap();
         let response = loader.load(&specifier, None, false, RequestedModuleType::None);
