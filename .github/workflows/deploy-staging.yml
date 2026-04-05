@@ -207,8 +207,14 @@ jobs:
           - service: otel-collector
             dockerfile: Dockerfile.otel-collector
     steps:
+      # Check out by commit SHA, not by tag ref. actions/checkout@v4 does a
+      # "ref fixup" fetch that overwrites annotated tag refs with raw commit
+      # pointers (git fetch origin +<sha>:refs/tags/<tag>), which causes
+      # git describe --always to skip the tag. Checking out by SHA avoids the
+      # fixup entirely, keeping annotated tags intact for git_version!().
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Install cosign
@@ -322,7 +328,7 @@ jobs:
     needs: [wait-for-api-available, determine-target]
     uses: ./.github/workflows/verify-attestation.yml
     with:
-      attestation_url: ${{ needs.determine-target.outputs.base_url }}
+      base_url: ${{ needs.determine-target.outputs.base_url }}
       runner: '["self-hosted"]'
 
   openapi-spec-check:

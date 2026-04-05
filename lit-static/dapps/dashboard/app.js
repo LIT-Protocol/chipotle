@@ -14,6 +14,9 @@ function getApiKey() {
 function setApiKey(v) {
   if (v) sessionStorage.setItem(STORAGE_KEY_API, v);
   else sessionStorage.removeItem(STORAGE_KEY_API);
+  _billingAvailable = null;
+  _billingCheckedAt = 0;
+  if (_billingRetryTimer) { clearTimeout(_billingRetryTimer); _billingRetryTimer = null; }
   updateAuthUI();
 }
 
@@ -26,19 +29,75 @@ function getBaseUrl() {
   return '__LIT_API_BASE_URL__';
 }
 
+// Track whether billing (Stripe) is available for this environment
+let _billingAvailable = null; // null = not yet checked, true/false after check
+let _billingCheckedAt = 0;
+let _billingRetryTimer = null; // pending retry timer ID (deduplicates stacked retries)
+const BILLING_RETRY_MS = 30000; // retry failed checks after 30s
+
+async function checkBillingAvailable() {
+  // If billing is confirmed available, return immediately (permanent cache)
+  if (_billingAvailable === true) return true;
+  // If a previous check failed, retry after the TTL expires
+  if (_billingAvailable === false && (Date.now() - _billingCheckedAt) < BILLING_RETRY_MS) {
+    return false;
+  }
+  try {
+    const client = await getClient();
+    await client.getStripeConfig();
+    _billingAvailable = true;
+  } catch (_) {
+    _billingAvailable = false;
+  }
+  _billingCheckedAt = Date.now();
+  return _billingAvailable;
+}
+
 function updateAuthUI() {
   const hasKey = !!getApiKey();
   document.body.classList.toggle('has-api-key', hasKey);
+  // Clear any pending billing retry to prevent timer stacking
+  if (_billingRetryTimer) { clearTimeout(_billingRetryTimer); _billingRetryTimer = null; }
   const balanceEl = document.getElementById('billing-balance-display');
   const addFundsBtn = document.getElementById('btn-add-funds');
-  if (balanceEl) balanceEl.style.display = hasKey ? '' : 'none';
-  if (addFundsBtn) addFundsBtn.style.display = hasKey ? '' : 'none';
+  const notRequiredEl = document.getElementById('billing-not-required');
+  const billingBanner = document.getElementById('billing-disabled-banner');
+  if (balanceEl) balanceEl.style.display = 'none';
+  if (addFundsBtn) addFundsBtn.style.display = 'none';
+  if (notRequiredEl) notRequiredEl.style.display = 'none';
+  if (billingBanner) billingBanner.style.display = 'none';
   if (hasKey) {
+    const capturedKey = getApiKey();
     refreshOverviewAccount();
     updateStatCards();
     preloadAllTables();
-    loadBillingBalance();
+    // Check billing availability then show appropriate UI
+    refreshBillingUI(capturedKey, balanceEl, addFundsBtn, notRequiredEl, billingBanner);
   }
+}
+
+// Separated from updateAuthUI so the retry timer can re-check billing
+// without re-running preloadAllTables / refreshOverviewAccount every 30s.
+function refreshBillingUI(capturedKey, balanceEl, addFundsBtn, notRequiredEl, billingBanner) {
+  checkBillingAvailable().then(available => {
+    // Guard: if the user logged out or switched accounts while the
+    // async check was in flight, do not mutate the UI.
+    if (getApiKey() !== capturedKey) return;
+    if (available) {
+      if (balanceEl) balanceEl.style.display = '';
+      if (addFundsBtn) addFundsBtn.style.display = '';
+      loadBillingBalance();
+    } else {
+      if (notRequiredEl) notRequiredEl.style.display = '';
+      if (billingBanner) billingBanner.style.display = '';
+      // Schedule a retry so transient failures recover without a reload.
+      if (_billingRetryTimer) clearTimeout(_billingRetryTimer);
+      _billingRetryTimer = setTimeout(() => {
+        _billingRetryTimer = null;
+        refreshBillingUI(capturedKey, balanceEl, addFundsBtn, notRequiredEl, billingBanner);
+      }, BILLING_RETRY_MS);
+    }
+  }).catch(e => console.error('billing check failed', e));
 }
 
 // Preload groups, wallets, usage keys, and actions (for default group) when dashboard is shown
@@ -223,6 +282,7 @@ let _stripe = null;
 let _stripeCard = null;
 
 async function openAddFundsModal() {
+  if (_billingAvailable === false) return;
   const overlay = document.getElementById('billing-modal-overlay');
   if (!overlay) return;
   overlay.classList.add('is-open');

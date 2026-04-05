@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use moka::future::Cache;
 use serde::{Deserialize, Serialize};
+use tokio::time::Instant;
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub struct SignedData {
@@ -61,6 +62,17 @@ pub struct ExecutionState {
     pub broadcast_and_collect_count: u32,
     #[serde(skip)]
     pub ops_count: u32,
+    /// Wall-clock start of execution, set before the gRPC execution request is sent.
+    /// Used to derive elapsed seconds for billing instead of the unreliable gRPC `tick` field.
+    #[serde(skip)]
+    pub execution_start: Option<Instant>,
+    /// Tracks the last second of execution that was accounted for, for per-second charging.
+    #[serde(skip)]
+    pub last_billed_second: u64,
+    /// Seconds of execution accumulated but not yet charged to Stripe.
+    /// Flushed to Stripe every 5 seconds and at the end of execution.
+    #[serde(skip)]
+    pub unbilled_seconds: u64,
     #[serde(skip)]
     pub wallet_permission_cache: HashMap<String, bool>,
 }

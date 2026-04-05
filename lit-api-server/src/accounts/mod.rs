@@ -1,5 +1,6 @@
 pub mod chain_config;
 pub mod contracts;
+pub mod decode_revert;
 use std::sync::Arc;
 
 pub use contracts::account_config_contract::{AccountConfig, Metadata};
@@ -10,6 +11,7 @@ pub use anyhow::Result;
 use crate::accounts::contracts::account_config_contract::{
     KeyValueReturn, PkpData, UsageApiKeyReturn,
 };
+use crate::accounts::decode_revert::decode_contract_revert;
 use crate::accounts::signable_contract::{
     get_read_only_account_config_contract, get_signable_account_config_contract, send_transaction,
 };
@@ -89,9 +91,10 @@ pub async fn add_group(
     let group_id = match sim_call.call().await {
         Ok(id) => id,
         Err(e) => {
+            let decoded = decode_contract_revert(&e);
             // Release the signer back to the pool before propagating.
             signer_pool.release(signer_address).await?;
-            return Err(e.into());
+            return Err(anyhow::anyhow!("Simulation failed: {decoded}"));
         }
     };
 
