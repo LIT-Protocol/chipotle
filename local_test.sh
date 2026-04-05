@@ -43,9 +43,12 @@ trap cleanup EXIT INT TERM
 #   If PID is set and the process dies, exits immediately.
 wait_for() {
     local name="$1" timeout="$2" pid="${3:-}" check_cmd="$4"
-    local interval=1
-    [ "$timeout" -gt 20 ] && interval=2
-    for i in $(seq 1 "$timeout"); do
+    local interval=1 iterations="$timeout"
+    if [ "$timeout" -gt 20 ]; then
+        interval=2
+        iterations=$((timeout / interval))
+    fi
+    for i in $(seq 1 "$iterations"); do
         if eval "$check_cmd" >/dev/null 2>&1; then
             return 0
         fi
@@ -258,23 +261,28 @@ echo ""
 echo "Press Ctrl+C to stop all services."
 echo ""
 
-# Wait for background processes; report which one exits first
-set +e  # wait -n returns the child's exit code; we handle it ourselves
+# Wait for background processes and report failures.
+# Uses a polling loop compatible with Bash 3.2+ (macOS default).
+set +e
 while true; do
-    if wait -n -p EXITED_PID 2>/dev/null; then
-        # A process exited cleanly (exit 0) — unexpected for long-running services
-        echo "WARNING: Process $EXITED_PID exited cleanly. Shutting down."
-        exit 0
-    else
-        EXIT_CODE=$?
-        # Identify which service died
-        EXITED_NAME="unknown"
-        [ "${EXITED_PID:-}" = "${ANVIL_PID:-}" ] && EXITED_NAME="anvil"
-        [ "${EXITED_PID:-}" = "${SIM_PID:-}" ] && EXITED_NAME="dstack-simulator"
-        [ "${EXITED_PID:-}" = "${API_PID:-}" ] && EXITED_NAME="lit-api-server"
-        [ "${EXITED_PID:-}" = "${ACTIONS_PID:-}" ] && EXITED_NAME="lit-actions"
-        [ "${EXITED_PID:-}" = "${STATIC_PID:-}" ] && EXITED_NAME="static-web-server"
-        echo "ERROR: $EXITED_NAME (PID ${EXITED_PID:-?}) exited with code $EXIT_CODE"
-        exit "$EXIT_CODE"
-    fi
+    for pid in "${PIDS[@]}"; do
+        if ! kill -0 "$pid" 2>/dev/null; then
+            wait "$pid" 2>/dev/null
+            EXIT_CODE=$?
+            # Identify which service died
+            EXITED_NAME="unknown"
+            [ "$pid" = "${ANVIL_PID:-}" ] && EXITED_NAME="anvil"
+            [ "$pid" = "${SIM_PID:-}" ] && EXITED_NAME="dstack-simulator"
+            [ "$pid" = "${API_PID:-}" ] && EXITED_NAME="lit-api-server"
+            [ "$pid" = "${ACTIONS_PID:-}" ] && EXITED_NAME="lit-actions"
+            [ "$pid" = "${STATIC_PID:-}" ] && EXITED_NAME="static-web-server"
+            if [ "$EXIT_CODE" -eq 0 ]; then
+                echo "WARNING: $EXITED_NAME (PID $pid) exited cleanly. Shutting down."
+            else
+                echo "ERROR: $EXITED_NAME (PID $pid) exited with code $EXIT_CODE"
+            fi
+            exit "$EXIT_CODE"
+        fi
+    done
+    sleep 2
 done
