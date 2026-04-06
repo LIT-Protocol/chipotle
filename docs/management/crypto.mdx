@@ -33,6 +33,15 @@ Crypto payments are processed by Stripe and are subject to Stripe's supported to
 
 You can also initiate crypto payments programmatically using the billing API. The flow mirrors the standard Stripe card payment flow, but you pass crypto-specific parameters when confirming on the client side.
 
+Examples below assume the following setup:
+
+```javascript
+const BASE = 'https://api.chipotle.litprotocol.com'; // or https://api.dev.litprotocol.com for dev
+const accountApiKey = 'your-account-api-key';         // from /new_account
+```
+
+cURL snippets use `$KEY` for your API key.
+
 ### Step 1: Get the Stripe publishable key
 
 <Tabs>
@@ -64,7 +73,8 @@ Create a PaymentIntent for the desired amount (minimum 500 cents = $5.00).
       },
       body: JSON.stringify({ amount_cents: 2500 }), // $25.00
     });
-    const { client_secret } = await res.json();
+    const { client_secret, payment_intent_id } = await res.json();
+    // Use `client_secret` in Step 3 and `payment_intent_id` in Step 4.
     ```
   </Tab>
   <Tab title="cURL">
@@ -73,6 +83,7 @@ Create a PaymentIntent for the desired amount (minimum 500 cents = $5.00).
       -H "Content-Type: application/json" \
       -H "X-Api-Key: $KEY" \
       -d '{"amount_cents": 2500}'
+    # Response: {"client_secret":"pi_...","payment_intent_id":"pi_..."}
     ```
   </Tab>
 </Tabs>
@@ -122,7 +133,7 @@ After Stripe confirms the crypto payment has settled, call the confirm endpoint 
         'Content-Type': 'application/json',
         'X-Api-Key': accountApiKey,
       },
-      body: JSON.stringify({ payment_intent_id: 'pi_...' }),
+      body: JSON.stringify({ payment_intent_id }),
     });
     const result = await res.json();
     console.log('Credits applied:', result);
@@ -146,8 +157,8 @@ After Stripe confirms the crypto payment has settled, call the confirm endpoint 
     const res = await fetch(`${BASE}/core/v1/billing/balance`, {
       headers: { 'X-Api-Key': accountApiKey },
     });
-    const { balance } = await res.json();
-    console.log('Current balance:', balance);
+    const { balance_cents, balance_display } = await res.json();
+    console.log('Current balance:', balance_display, `(${balance_cents} cents)`);
     ```
   </Tab>
   <Tab title="cURL">
