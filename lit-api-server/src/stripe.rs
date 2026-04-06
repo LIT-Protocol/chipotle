@@ -530,4 +530,40 @@ mod tests {
         let resp = parse_stripe_response(StatusCode::OK, body).unwrap();
         assert_eq!(resp.body["balance"], -500);
     }
+
+    #[test]
+    fn cents_to_display_whole_dollars() {
+        assert_eq!(cents_to_display(500), "$5.00");
+        assert_eq!(cents_to_display(100), "$1.00");
+        assert_eq!(cents_to_display(0), "$0.00");
+    }
+
+    #[test]
+    fn cents_to_display_with_cents() {
+        assert_eq!(cents_to_display(199), "$1.99");
+        assert_eq!(cents_to_display(1), "$0.01");
+        assert_eq!(cents_to_display(50), "$0.50");
+    }
+
+    #[test]
+    fn cents_to_display_negative() {
+        // NOTE: cents_to_display has a known sign-loss bug for values in -99..=-1:
+        // integer division truncates toward zero, so -1/100 = 0, losing the minus sign.
+        // Also, the format "$-5.00" is non-standard (convention is "-$5.00").
+        // These assertions document the CURRENT behavior, not the ideal behavior.
+        assert_eq!(cents_to_display(-500), "$-5.00");
+        assert_eq!(cents_to_display(-1), "$0.01"); // BUG: should indicate negative
+    }
+
+    #[test]
+    fn cache_key_deterministic() {
+        let k1 = cache_key("test-api-key");
+        let k2 = cache_key("test-api-key");
+        assert_eq!(k1, k2);
+    }
+
+    #[test]
+    fn cache_key_different_inputs() {
+        assert_ne!(cache_key("key-a"), cache_key("key-b"));
+    }
 }

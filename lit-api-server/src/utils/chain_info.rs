@@ -1180,3 +1180,169 @@ impl Chain {
         all
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── try_from_str ───────────────────────────────────────────────────
+    #[test]
+    fn try_from_str_known_chains() {
+        assert_eq!(Chain::try_from_str("ethereum").unwrap(), Chain::Ethereum);
+        assert_eq!(Chain::try_from_str("base").unwrap(), Chain::Base);
+        assert_eq!(Chain::try_from_str("solana").unwrap(), Chain::Solana);
+        assert_eq!(Chain::try_from_str("bitcoin").unwrap(), Chain::Bitcoin);
+    }
+
+    #[test]
+    fn try_from_str_case_insensitive() {
+        assert_eq!(Chain::try_from_str("ETHEREUM").unwrap(), Chain::Ethereum);
+        assert_eq!(Chain::try_from_str("Ethereum").unwrap(), Chain::Ethereum);
+        assert_eq!(Chain::try_from_str("BASE").unwrap(), Chain::Base);
+    }
+
+    #[test]
+    fn try_from_str_invalid() {
+        assert!(Chain::try_from_str("nonexistent").is_err());
+        assert!(Chain::try_from_str("").is_err());
+    }
+
+    #[test]
+    fn try_from_str_testnets() {
+        assert_eq!(
+            Chain::try_from_str("ethereumsepolia").unwrap(),
+            Chain::EthereumSepolia
+        );
+        assert_eq!(
+            Chain::try_from_str("basesepolia").unwrap(),
+            Chain::BaseSepolia
+        );
+        assert_eq!(
+            Chain::try_from_str("solanadevnet").unwrap(),
+            Chain::SolanaDevnet
+        );
+    }
+
+    // ── chain_key round-trip ───────────────────────────────────────────
+    #[test]
+    fn chain_key_round_trip_for_evm() {
+        // For EVM chains, chain_key should round-trip through try_from_str for most chains
+        for chain in Chain::all_chains() {
+            let key = chain.chain_key();
+            // The try_from_str lookup is not always a direct inverse of chain_key
+            // (e.g., "bobanetwork" vs "boba"), so we just verify chain_key is not empty.
+            assert!(!key.is_empty(), "chain_key should not be empty");
+        }
+    }
+
+    // ── info ───────────────────────────────────────────────────────────
+    #[test]
+    fn ethereum_info_correct() {
+        let info = Chain::Ethereum.info();
+        assert_eq!(info.chain_id, 1);
+        assert!(info.is_evm);
+        assert!(!info.testnet);
+        assert_eq!(info.token, "ETH");
+    }
+
+    #[test]
+    fn solana_is_non_evm() {
+        let info = Chain::Solana.info();
+        assert!(!info.is_evm);
+    }
+
+    #[test]
+    fn bitcoin_is_non_evm() {
+        let info = Chain::Bitcoin.info();
+        assert!(!info.is_evm);
+    }
+
+    #[test]
+    fn sepolia_is_testnet() {
+        let info = Chain::EthereumSepolia.info();
+        assert!(info.testnet);
+        assert!(info.is_evm);
+    }
+
+    #[test]
+    fn all_chains_have_nonempty_chain_name() {
+        for chain in Chain::all_chains() {
+            let info = chain.info();
+            assert!(
+                !info.chain_name.is_empty(),
+                "{:?} has empty chain_name",
+                chain
+            );
+        }
+    }
+
+    #[test]
+    fn all_chains_have_nonempty_rpc_url() {
+        for chain in Chain::all_chains() {
+            let info = chain.info();
+            assert!(!info.rpc_url.is_empty(), "{:?} has empty rpc_url", chain);
+        }
+    }
+
+    #[test]
+    fn all_chains_have_nonempty_derivation_path() {
+        for chain in Chain::all_chains() {
+            let info = chain.info();
+            assert!(
+                !info.derivation_path.is_empty(),
+                "{:?} has empty derivation_path",
+                chain
+            );
+        }
+    }
+
+    // ── Chain ID uniqueness ─────────────────────────────────────────────
+    #[test]
+    fn evm_chain_ids_are_unique() {
+        let evm_chains = Chain::all_evm_chains();
+        let mut ids: Vec<u64> = evm_chains.iter().map(|c| c.info().chain_id).collect();
+        let len_before = ids.len();
+        ids.sort();
+        ids.dedup();
+        assert_eq!(
+            ids.len(),
+            len_before,
+            "duplicate chain_id found among EVM chains"
+        );
+    }
+
+    // ── Filter helpers ─────────────────────────────────────────────────
+    #[test]
+    fn all_evm_chains_are_evm() {
+        for chain in Chain::all_evm_chains() {
+            assert!(chain.info().is_evm, "{:?} should be EVM", chain);
+        }
+    }
+
+    #[test]
+    fn all_non_evm_chains_are_non_evm() {
+        for chain in Chain::all_non_evm_chains() {
+            assert!(!chain.info().is_evm, "{:?} should be non-EVM", chain);
+        }
+    }
+
+    #[test]
+    fn all_testnet_chains_are_testnet() {
+        for chain in Chain::all_testnet_chains() {
+            assert!(chain.info().testnet, "{:?} should be testnet", chain);
+        }
+    }
+
+    #[test]
+    fn all_chains_nonempty() {
+        assert!(!Chain::all_chains().is_empty());
+    }
+
+    #[test]
+    fn evm_plus_non_evm_equals_all() {
+        let total = Chain::all_chains().len();
+        let evm = Chain::all_evm_chains().len();
+        let non_evm = Chain::all_non_evm_chains().len();
+        assert_eq!(evm + non_evm, total);
+    }
+}

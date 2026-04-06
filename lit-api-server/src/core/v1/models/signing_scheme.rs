@@ -361,3 +361,232 @@ impl SigningScheme {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const ALL_SCHEMES: [SigningScheme; 16] = [
+        SigningScheme::Bls12381,
+        SigningScheme::EcdsaK256Sha256,
+        SigningScheme::EcdsaP256Sha256,
+        SigningScheme::EcdsaP384Sha384,
+        SigningScheme::SchnorrEd25519Sha512,
+        SigningScheme::SchnorrK256Sha256,
+        SigningScheme::SchnorrP256Sha256,
+        SigningScheme::SchnorrP384Sha384,
+        SigningScheme::SchnorrRistretto25519Sha512,
+        SigningScheme::SchnorrEd448Shake256,
+        SigningScheme::SchnorrRedJubjubBlake2b512,
+        SigningScheme::SchnorrK256Taproot,
+        SigningScheme::SchnorrRedDecaf377Blake2b512,
+        SigningScheme::SchnorrkelSubstrate,
+        SigningScheme::Bls12381G1ProofOfPossession,
+        SigningScheme::SchnorrRedPallasBlake2b512,
+    ];
+
+    // ── ALL_SCHEMES exhaustiveness ──────────────────────────────────────
+    #[test]
+    fn all_schemes_covers_all_u8_variants() {
+        // Verify ALL_SCHEMES is exhaustive: every valid u8 value (1..=16) must
+        // appear in ALL_SCHEMES. If a new variant is added, this test fails.
+        let scheme_bytes: Vec<u8> = ALL_SCHEMES.iter().map(|s| (*s).into()).collect();
+        for i in 1u8..=16 {
+            assert!(
+                scheme_bytes.contains(&i),
+                "ALL_SCHEMES missing variant with u8 value {i}"
+            );
+        }
+        assert_eq!(
+            ALL_SCHEMES.len(),
+            16,
+            "ALL_SCHEMES count mismatch; update if variants were added"
+        );
+    }
+
+    // ── FromStr round-trip ──────────────────────────────────────────────
+    #[test]
+    fn from_str_round_trip_all() {
+        for scheme in ALL_SCHEMES {
+            let s = scheme.to_string();
+            let parsed = SigningScheme::from_str(&s).unwrap();
+            assert_eq!(scheme, parsed, "round-trip failed for {s}");
+        }
+    }
+
+    #[test]
+    fn from_str_invalid() {
+        assert!(SigningScheme::from_str("NonexistentScheme").is_err());
+    }
+
+    // ── u8 round-trip ──────────────────────────────────────────────────
+    #[test]
+    fn u8_round_trip_all() {
+        for scheme in ALL_SCHEMES {
+            let byte: u8 = scheme.into();
+            let back = SigningScheme::try_from(byte).unwrap();
+            assert_eq!(scheme, back, "u8 round-trip failed for {scheme}");
+        }
+    }
+
+    #[test]
+    fn try_from_u8_invalid() {
+        assert!(SigningScheme::try_from(0u8).is_err());
+        assert!(SigningScheme::try_from(17u8).is_err());
+        assert!(SigningScheme::try_from(255u8).is_err());
+    }
+
+    #[test]
+    fn u8_values_are_contiguous_1_through_16() {
+        let mut bytes: Vec<u8> = ALL_SCHEMES.iter().map(|s| (*s).into()).collect();
+        bytes.sort();
+        assert_eq!(bytes, (1u8..=16).collect::<Vec<_>>());
+    }
+
+    // ── Serde JSON (human-readable) ─────────────────────────────────────
+    #[test]
+    fn serde_json_round_trip() {
+        for scheme in ALL_SCHEMES {
+            let json = serde_json::to_string(&scheme).unwrap();
+            // Should serialize as a quoted string, not a number.
+            assert!(json.starts_with('"'), "expected string for {scheme}");
+            let back: SigningScheme = serde_json::from_str(&json).unwrap();
+            assert_eq!(scheme, back);
+        }
+    }
+
+    // ── Serde binary (non-human-readable) ──────────────────────────────
+    #[test]
+    fn serde_bare_round_trip() {
+        for scheme in ALL_SCHEMES {
+            let bytes = serde_bare::to_vec(&scheme).unwrap();
+            let back: SigningScheme = serde_bare::from_slice(&bytes).unwrap();
+            assert_eq!(scheme, back);
+        }
+    }
+
+    // ── supports_algorithm ─────────────────────────────────────────────
+    #[test]
+    fn bls_supports_pairing() {
+        assert!(SigningScheme::Bls12381.supports_algorithm(SigningAlgorithm::Pairing));
+        assert!(!SigningScheme::Bls12381.supports_algorithm(SigningAlgorithm::Ecdsa));
+        assert!(
+            SigningScheme::Bls12381G1ProofOfPossession
+                .supports_algorithm(SigningAlgorithm::Pairing)
+        );
+    }
+
+    #[test]
+    fn ecdsa_k256_supports_ecdsa() {
+        assert!(SigningScheme::EcdsaK256Sha256.supports_algorithm(SigningAlgorithm::Ecdsa));
+        assert!(!SigningScheme::EcdsaK256Sha256.supports_algorithm(SigningAlgorithm::Schnorr));
+    }
+
+    #[test]
+    fn schnorr_supports_schnorr() {
+        assert!(SigningScheme::SchnorrEd25519Sha512.supports_algorithm(SigningAlgorithm::Schnorr));
+        assert!(!SigningScheme::SchnorrEd25519Sha512.supports_algorithm(SigningAlgorithm::Pairing));
+    }
+
+    // ── supports_curve ─────────────────────────────────────────────────
+    #[test]
+    fn supports_own_curve() {
+        for scheme in ALL_SCHEMES {
+            assert!(
+                scheme.supports_curve(scheme.curve_type()),
+                "{scheme} does not support its own curve"
+            );
+        }
+    }
+
+    // ── preferred_format ───────────────────────────────────────────────
+    #[test]
+    fn ecdsa_prefers_uncompressed() {
+        assert_eq!(
+            SigningScheme::EcdsaK256Sha256.preferred_format(),
+            KeyFormatPreference::Uncompressed
+        );
+        assert_eq!(
+            SigningScheme::EcdsaP256Sha256.preferred_format(),
+            KeyFormatPreference::Uncompressed
+        );
+        assert_eq!(
+            SigningScheme::EcdsaP384Sha384.preferred_format(),
+            KeyFormatPreference::Uncompressed
+        );
+    }
+
+    #[test]
+    fn non_ecdsa_prefers_compressed() {
+        let ecdsa_schemes = [
+            SigningScheme::EcdsaK256Sha256,
+            SigningScheme::EcdsaP256Sha256,
+            SigningScheme::EcdsaP384Sha384,
+        ];
+        for scheme in ALL_SCHEMES {
+            if !ecdsa_schemes.contains(&scheme) {
+                assert_eq!(
+                    scheme.preferred_format(),
+                    KeyFormatPreference::Compressed,
+                    "{scheme} should prefer compressed"
+                );
+            }
+        }
+    }
+
+    // ── ecdsa_message_len ──────────────────────────────────────────────
+    #[test]
+    fn ecdsa_message_len_nonzero_for_ecdsa() {
+        assert_eq!(SigningScheme::EcdsaK256Sha256.ecdsa_message_len(), 32);
+        assert_eq!(SigningScheme::EcdsaP256Sha256.ecdsa_message_len(), 32);
+        assert_eq!(SigningScheme::EcdsaP384Sha384.ecdsa_message_len(), 48);
+    }
+
+    #[test]
+    fn ecdsa_message_len_zero_for_non_ecdsa() {
+        assert_eq!(SigningScheme::Bls12381.ecdsa_message_len(), 0);
+        assert_eq!(SigningScheme::SchnorrEd25519Sha512.ecdsa_message_len(), 0);
+    }
+
+    // ── hash_prior_to_sending ──────────────────────────────────────────
+    #[test]
+    fn hash_prior_true_for_ecdsa_and_taproot() {
+        assert!(SigningScheme::EcdsaK256Sha256.hash_prior_to_sending());
+        assert!(SigningScheme::EcdsaP256Sha256.hash_prior_to_sending());
+        assert!(SigningScheme::EcdsaP384Sha384.hash_prior_to_sending());
+        assert!(SigningScheme::SchnorrK256Taproot.hash_prior_to_sending());
+    }
+
+    #[test]
+    fn hash_prior_false_for_schnorr_and_bls() {
+        assert!(!SigningScheme::Bls12381.hash_prior_to_sending());
+        assert!(!SigningScheme::SchnorrEd25519Sha512.hash_prior_to_sending());
+        assert!(!SigningScheme::SchnorrK256Sha256.hash_prior_to_sending());
+    }
+
+    // ── id_sign_ctx ────────────────────────────────────────────────────
+    #[test]
+    fn id_sign_ctx_starts_with_lit_hd_key() {
+        for scheme in ALL_SCHEMES {
+            let ctx = scheme.id_sign_ctx();
+            assert!(
+                ctx.starts_with(b"LIT_HD_KEY_ID_"),
+                "{scheme}: id_sign_ctx does not start with LIT_HD_KEY_ID_"
+            );
+        }
+    }
+
+    // ── as_str / Display ───────────────────────────────────────────────
+    #[test]
+    fn as_str_matches_display() {
+        for scheme in ALL_SCHEMES {
+            assert_eq!(scheme.as_str(), &scheme.to_string());
+        }
+    }
+
+    // ── Default ────────────────────────────────────────────────────────
+    #[test]
+    fn default_is_bls12381() {
+        assert_eq!(SigningScheme::default(), SigningScheme::Bls12381);
+    }
+}

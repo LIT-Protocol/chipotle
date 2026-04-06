@@ -206,3 +206,121 @@ impl OpenApiResponderInner for ApiStatus {
         Ok(responses)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── Status code constructors ────────────────────────────────────────
+    #[test]
+    fn bad_request_has_400() {
+        let status = ApiStatus::bad_request(anyhow::anyhow!("test"), "msg");
+        assert_eq!(status.status, Status::BadRequest);
+        assert!(status.message.contains("msg"));
+    }
+
+    #[test]
+    fn internal_server_error_has_500() {
+        let status = ApiStatus::internal_server_error(anyhow::anyhow!("boom"), "msg");
+        assert_eq!(status.status, Status::InternalServerError);
+    }
+
+    #[test]
+    fn not_found_has_404() {
+        let status = ApiStatus::not_found("gone");
+        assert_eq!(status.status, Status::NotFound);
+        assert_eq!(status.message, "gone");
+    }
+
+    #[test]
+    fn unauthorized_has_401() {
+        let status = ApiStatus::unauthorized("denied");
+        assert_eq!(status.status, Status::Unauthorized);
+        assert_eq!(status.message, "denied");
+    }
+
+    #[test]
+    fn forbidden_has_403() {
+        let status = ApiStatus::forbidden("nope");
+        assert_eq!(status.status, Status::Forbidden);
+        assert_eq!(status.message, "nope");
+    }
+
+    #[test]
+    fn payment_required_has_402() {
+        let status = ApiStatus::payment_required("pay up");
+        assert_eq!(status.status, Status::PaymentRequired);
+        assert_eq!(status.message, "pay up");
+    }
+
+    #[test]
+    fn option_not_found_uses_500() {
+        let status = ApiStatus::option_not_found("missing");
+        assert_eq!(status.status, Status::InternalServerError);
+        assert_eq!(status.message, "missing");
+    }
+
+    // ── add_message ────────────────────────────────────────────────────
+    #[test]
+    fn add_message_appends() {
+        let mut status = ApiStatus::not_found("base");
+        status.add_message("extra");
+        assert_eq!(status.message, "base: extra");
+    }
+
+    // ── Display ────────────────────────────────────────────────────────
+    #[test]
+    fn display_shows_message() {
+        let status = ApiStatus::not_found("hello");
+        assert_eq!(format!("{}", status), "hello");
+    }
+
+    // ── From<Status> ───────────────────────────────────────────────────
+    #[test]
+    fn from_rocket_status() {
+        let api_status: ApiStatus = Status::NotFound.into();
+        assert_eq!(api_status.status, Status::NotFound);
+        assert!(!api_status.message.is_empty());
+    }
+
+    // ── From<hex::FromHexError> ─────────────────────────────────────────
+    #[test]
+    fn from_hex_error() {
+        let hex_err = hex::decode("zz").unwrap_err();
+        let api_status: ApiStatus = hex_err.into();
+        assert_eq!(api_status.status, Status::BadRequest);
+    }
+
+    // ── From<anyhow::Error> ─────────────────────────────────────────────
+    #[test]
+    fn from_anyhow_error() {
+        let err = anyhow::anyhow!("something broke");
+        let api_status: ApiStatus = err.into();
+        assert_eq!(api_status.status, Status::InternalServerError);
+    }
+
+    // ── From<ParseFloatError> ──────────────────────────────────────────
+    #[test]
+    fn from_parse_float_error() {
+        let err = "abc".parse::<f64>().unwrap_err();
+        let api_status: ApiStatus = err.into();
+        assert_eq!(api_status.status, Status::BadRequest);
+    }
+
+    // ── ErrMessage conversion ──────────────────────────────────────────
+    #[test]
+    fn into_err_message() {
+        let status = ApiStatus::not_found("test message");
+        let err_msg: ErrMessage = status.into();
+        assert_eq!(err_msg.0, "test message");
+    }
+
+    // ── Serde round-trip ───────────────────────────────────────────────
+    #[test]
+    fn serde_round_trip() {
+        let status = ApiStatus::not_found("test");
+        let json = serde_json::to_string(&status).unwrap();
+        let back: ApiStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.message, "test");
+    }
+}

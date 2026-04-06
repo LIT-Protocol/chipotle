@@ -154,3 +154,168 @@ fn parse_h160_hex_list(strings: &[String]) -> Result<Vec<H160>, ApiStatus> {
         })
         .collect::<Result<Vec<_>, _>>()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── api_key_hash ────────────────────────────────────────────────────
+    #[test]
+    fn api_key_hash_deterministic() {
+        let h1 = api_key_hash("my-secret-key");
+        let h2 = api_key_hash("my-secret-key");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn api_key_hash_different_inputs() {
+        assert_ne!(api_key_hash("key-a"), api_key_hash("key-b"));
+    }
+
+    // ── usage_api_key_to_hash ───────────────────────────────────────────
+    #[test]
+    fn usage_api_key_to_hash_plain_key_hashes() {
+        let hash = usage_api_key_to_hash("my-api-key");
+        assert_eq!(hash, api_key_hash("my-api-key"));
+    }
+
+    #[test]
+    fn usage_api_key_to_hash_precomputed_hex_passthrough() {
+        // A valid 0x-prefixed 32-byte hex string should be parsed directly, not re-hashed.
+        let hex_str = "0x0000000000000000000000000000000000000000000000000000000000000001";
+        let result = usage_api_key_to_hash(hex_str);
+        assert_eq!(result, U256::from(1));
+    }
+
+    #[test]
+    fn usage_api_key_to_hash_trims_whitespace() {
+        let hex_str = "  0x0000000000000000000000000000000000000000000000000000000000000002  ";
+        assert_eq!(usage_api_key_to_hash(hex_str), U256::from(2));
+    }
+
+    #[test]
+    fn usage_api_key_to_hash_short_hex_hashes_instead() {
+        // A short 0x string is not a precomputed hash; it should be keccak256-hashed.
+        let result = usage_api_key_to_hash("0xabcd");
+        assert_eq!(result, api_key_hash("0xabcd"));
+    }
+
+    // ── parse_u256 (via string_to_hashed_u256 / hashed_cid_to_u256) ────
+    #[test]
+    fn parse_u256_decimal() {
+        let result = hashed_cid_to_u256("42").unwrap();
+        assert_eq!(result, U256::from(42));
+    }
+
+    #[test]
+    fn parse_u256_hex() {
+        let result = hashed_cid_to_u256("0xff").unwrap();
+        assert_eq!(result, U256::from(255));
+    }
+
+    #[test]
+    fn parse_u256_invalid_decimal() {
+        assert!(hashed_cid_to_u256("not_a_number").is_err());
+    }
+
+    #[test]
+    fn parse_u256_invalid_hex() {
+        assert!(hashed_cid_to_u256("0xZZZZ").is_err());
+    }
+
+    // ── wallet_string_to_h160 / pkp_id_to_h160 ─────────────────────────
+    #[test]
+    fn wallet_string_valid_address() {
+        let addr = wallet_string_to_h160("0x0000000000000000000000000000000000000001").unwrap();
+        assert_eq!(addr, H160::from_low_u64_be(1));
+    }
+
+    #[test]
+    fn wallet_string_missing_0x_prefix() {
+        let err = wallet_string_to_h160("0000000000000000000000000000000000000001");
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn wallet_string_wrong_length() {
+        // Too short (only 19 bytes)
+        let err = wallet_string_to_h160("0x00000000000000000000000000000000000001");
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn pkp_id_valid() {
+        let addr = pkp_id_to_h160("0x0000000000000000000000000000000000000042").unwrap();
+        assert_eq!(addr, H160::from_low_u64_be(0x42));
+    }
+
+    // ── ipfs_cid_to_u256 ───────────────────────────────────────────────
+    #[test]
+    fn ipfs_cid_deterministic() {
+        let a = ipfs_cid_to_u256("QmTest123").unwrap();
+        let b = ipfs_cid_to_u256("QmTest123").unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn ipfs_cid_different_inputs() {
+        let a = ipfs_cid_to_u256("QmTestA").unwrap();
+        let b = ipfs_cid_to_u256("QmTestB").unwrap();
+        assert_ne!(a, b);
+    }
+
+    // ── hex_array_to_u256_array ─────────────────────────────────────────
+    #[test]
+    fn hex_array_to_u256_valid() {
+        let input = vec![
+            "0x0000000000000000000000000000000000000000000000000000000000000001".to_string(),
+            "0x00000000000000000000000000000000000000000000000000000000000000ff".to_string(),
+        ];
+        let result = hex_array_to_u256_array(&input).unwrap();
+        assert_eq!(result, vec![U256::from(1), U256::from(255)]);
+    }
+
+    #[test]
+    fn hex_array_to_u256_invalid_entry() {
+        let input = vec!["not_hex".to_string()];
+        assert!(hex_array_to_u256_array(&input).is_err());
+    }
+
+    #[test]
+    fn hex_array_to_u256_empty() {
+        let result = hex_array_to_u256_array(&[]).unwrap();
+        assert!(result.is_empty());
+    }
+
+    // ── hex_array_to_h160_array ─────────────────────────────────────────
+    #[test]
+    fn hex_array_to_h160_valid() {
+        let input = vec!["0x0000000000000000000000000000000000000001".to_string()];
+        let result = hex_array_to_h160_array(&input).unwrap();
+        assert_eq!(result, vec![H160::from_low_u64_be(1)]);
+    }
+
+    #[test]
+    fn hex_array_to_h160_wrong_length() {
+        let input = vec!["0xff".to_string()];
+        assert!(hex_array_to_h160_array(&input).is_err());
+    }
+
+    // ── string_group_id_to_u256 ─────────────────────────────────────────
+    #[test]
+    fn string_group_id_valid_decimal() {
+        let result = string_group_id_to_u256("100").unwrap();
+        assert_eq!(result, U256::from(100));
+    }
+
+    #[test]
+    fn string_group_id_valid_hex() {
+        let result = string_group_id_to_u256("0x64").unwrap();
+        assert_eq!(result, U256::from(100));
+    }
+
+    #[test]
+    fn string_group_id_invalid() {
+        assert!(string_group_id_to_u256("abc_not_valid").is_err());
+    }
+}
