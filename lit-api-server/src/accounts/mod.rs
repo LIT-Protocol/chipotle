@@ -1,3 +1,4 @@
+pub mod blockchain_cache;
 pub mod chain_config;
 pub mod contracts;
 pub mod decode_revert;
@@ -106,6 +107,7 @@ pub async fn add_group(
         pkp_ids,
     );
     send_transaction(function_call, signer_pool, signer_address, client).await?;
+    blockchain_cache::invalidate_for_account(api_key).await;
     Ok(group_id)
 }
 
@@ -121,7 +123,9 @@ pub async fn add_action(
     let account_api_key_hash = api_key_hash(api_key);
     let function_call =
         contract.add_action(account_api_key_hash, req.name, req.description, action_hash);
-    send_transaction(function_call, signer_pool, signer_address, client).await
+    let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
+    blockchain_cache::invalidate_for_account(api_key).await;
+    Ok(result)
 }
 
 /// Remove an action from the account by its hash (AccountConfig.removeAction).
@@ -134,7 +138,9 @@ pub async fn remove_action(
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.remove_action(account_api_key_hash, action_hash);
-    send_transaction(function_call, signer_pool, signer_address, client).await
+    let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
+    blockchain_cache::invalidate_for_account(api_key).await;
+    Ok(result)
 }
 
 /// Add an action to a group by its IPFS CID. Metadata must be set separately via add_action / update_action_metadata.
@@ -150,7 +156,9 @@ pub async fn add_action_to_group(
     let action_hash = ipfs_cid_to_u256(action_ipfs_cid)
         .map_err(|e| anyhow::anyhow!("Unable to parse action IPFS CID: {}", e))?;
     let function_call = contract.add_action_to_group(account_api_key_hash, group_id, action_hash);
-    send_transaction(function_call, signer_pool, signer_address, client).await
+    let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
+    blockchain_cache::invalidate_for_account(api_key).await;
+    Ok(result)
 }
 
 /// Add a PKP to a group by its address (AccountConfig.addPkpToGroup).
@@ -164,7 +172,9 @@ pub async fn add_pkp_to_group(
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.add_pkp_to_group(account_api_key_hash, group_id, pkp_id);
-    send_transaction(function_call, signer_pool, signer_address, client).await
+    let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
+    blockchain_cache::invalidate_for_account(api_key).await;
+    Ok(result)
 }
 
 /// Update group metadata (AccountConfig.updateGroup).
@@ -188,7 +198,9 @@ pub async fn update_group(
         cid_hashes,
         pkp_ids,
     );
-    send_transaction(function_call, signer_pool, signer_address, client).await
+    let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
+    blockchain_cache::invalidate_for_account(api_key).await;
+    Ok(result)
 }
 
 /// Remove an action from a group by action hash (AccountConfig.removeActionFromGroup). `action_hash` is keccak256 of the action (e.g. IPFS CID).
@@ -203,7 +215,9 @@ pub async fn remove_action_from_group(
     let account_api_key_hash = api_key_hash(api_key);
     let function_call =
         contract.remove_action_from_group(account_api_key_hash, group_id, action_hash);
-    send_transaction(function_call, signer_pool, signer_address, client).await
+    let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
+    blockchain_cache::invalidate_for_account(api_key).await;
+    Ok(result)
 }
 
 /// Remove an action from a group by IPFS CID string (hashed with keccak256). Convenience wrapper for remove_action_from_group.
@@ -272,7 +286,9 @@ pub async fn remove_pkp_from_group(
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.remove_pkp_from_group(account_api_key_hash, group_id, pkp_id);
-    send_transaction(function_call, signer_pool, signer_address, client).await
+    let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
+    blockchain_cache::invalidate_for_account(api_key).await;
+    Ok(result)
 }
 
 /// Add a usage API key to an account (usageApiKey in AccountConfig.sol).
@@ -317,7 +333,9 @@ pub async fn add_usage_api_key(
             .collect(),
         req.execute_in_groups.into_iter().map(U256::from).collect(),
     );
-    send_transaction(function_call, signer_pool, signer_address, client).await
+    let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
+    blockchain_cache::invalidate_for_keys(api_key, usage_api_key);
+    Ok(result)
 }
 
 /// Update all metadata and permissions on an existing usage API key (AccountConfig.setUsageApiKey).
@@ -355,7 +373,10 @@ pub async fn update_usage_api_key(
             .collect(),
         req.execute_in_groups.into_iter().map(U256::from).collect(),
     );
-    send_transaction(function_call, signer_pool, signer_address, client.clone()).await
+    let result =
+        send_transaction(function_call, signer_pool, signer_address, client.clone()).await?;
+    blockchain_cache::invalidate_for_keys(api_key, usage_api_key);
+    Ok(result)
 }
 
 /// Remove a usage API key from an account.
@@ -370,7 +391,9 @@ pub async fn remove_usage_api_key(
     let usage_api_key_hash = usage_api_key_to_hash(usage_api_key);
 
     let function_call = contract.remove_usage_api_key(account_api_key_hash, usage_api_key_hash);
-    send_transaction(function_call, signer_pool, signer_address, client).await
+    let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
+    blockchain_cache::invalidate_for_keys(api_key, usage_api_key);
+    Ok(result)
 }
 
 /// Remove a group from an account (AccountConfig.removeGroup).
@@ -383,7 +406,9 @@ pub async fn remove_group(
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.remove_group(account_api_key_hash, group_id);
-    send_transaction(function_call, signer_pool, signer_address, client).await
+    let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
+    blockchain_cache::invalidate_for_account(api_key).await;
+    Ok(result)
 }
 
 /// Register the derivation path for a wallet address under an account (AccountConfig.wallet_derivation).
@@ -573,8 +598,25 @@ pub async fn get_rebalance_amount() -> Result<U256> {
 
 #[instrument(name = "accounts::can_execute_action", level = "debug", skip_all, err)]
 pub async fn can_execute_action(api_key: &str, cid_hash: U256) -> Result<bool> {
-    let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
+
+    if let Some(cache) = blockchain_cache::get() {
+        let key = cache.execute_action_key(account_api_key_hash, cid_hash);
+        return cache
+            .execute_action_cache()
+            .try_get_with(key, async {
+                let contract = get_read_only_account_config_contract().await?;
+                let can_execute = contract
+                    .can_execute_action(account_api_key_hash, cid_hash)
+                    .call()
+                    .await?;
+                Ok(can_execute)
+            })
+            .await
+            .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+    }
+
+    let contract = get_read_only_account_config_contract().await?;
     let can_execute = contract
         .can_execute_action(account_api_key_hash, cid_hash)
         .call()
@@ -593,8 +635,25 @@ pub async fn can_use_wallet_in_action(
     cid_hash: U256,
     wallet_address: H160,
 ) -> Result<bool> {
-    let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
+
+    if let Some(cache) = blockchain_cache::get() {
+        let key = cache.use_wallet_key(account_api_key_hash, cid_hash, wallet_address);
+        return cache
+            .use_wallet_cache()
+            .try_get_with(key, async {
+                let contract = get_read_only_account_config_contract().await?;
+                let can_use = contract
+                    .can_use_wallet_in_action(account_api_key_hash, cid_hash, wallet_address)
+                    .call()
+                    .await?;
+                Ok(can_use)
+            })
+            .await
+            .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+    }
+
+    let contract = get_read_only_account_config_contract().await?;
     let can_use = contract
         .can_use_wallet_in_action(account_api_key_hash, cid_hash, wallet_address)
         .call()
@@ -607,8 +666,30 @@ pub async fn can_execute_action_and_use_wallet(
     cid_hash: U256,
     wallet_address: H160,
 ) -> Result<(bool, bool)> {
-    let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
+
+    if let Some(cache) = blockchain_cache::get() {
+        let key =
+            cache.execute_and_wallet_key(account_api_key_hash, cid_hash, wallet_address);
+        return cache
+            .execute_and_wallet_cache()
+            .try_get_with(key, async {
+                let contract = get_read_only_account_config_contract().await?;
+                let result = contract
+                    .can_execute_action_and_use_wallet(
+                        account_api_key_hash,
+                        cid_hash,
+                        wallet_address,
+                    )
+                    .call()
+                    .await?;
+                Ok(result)
+            })
+            .await
+            .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+    }
+
+    let contract = get_read_only_account_config_contract().await?;
     let result = contract
         .can_execute_action_and_use_wallet(account_api_key_hash, cid_hash, wallet_address)
         .call()

@@ -157,6 +157,8 @@ async fn main() -> Result<(), rocket::Error> {
         .max_capacity(1024 * 1024 * 1024)
         .build();
 
+    accounts::blockchain_cache::init();
+
     let stripe_state = stripe::init();
 
     let (core_routes, openapi_spec) = core::v1::endpoints::routes_with_spec();
