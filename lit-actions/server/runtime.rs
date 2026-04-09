@@ -233,6 +233,7 @@ fn build_main_worker_and_inject_sdk(
 // NB: Due to the new PKU feature introduced in V8 11.6, we need to init the V8
 // platform on the parent thread that will spawn V8 isolates (in main.rs).
 // See https://github.com/denoland/deno/blob/v1.43/cli/main.rs
+#[instrument(skip_all)]
 pub fn init_v8() {
     // Tigthen up V8 security while sacrificing performance
     // To get a list of supported flags: deno run --v8-flags=-help
@@ -425,6 +426,7 @@ pub(crate) async fn execute_js(
     Ok(())
 }
 
+#[instrument(skip_all, err)]
 async fn update_resource_usage(
     js_runtime: &mut JsRuntime,
     heap_stats: &mut v8::HeapStatistics,
@@ -475,6 +477,7 @@ async fn update_resource_usage(
     Ok(())
 }
 
+#[instrument(skip_all)]
 fn start_controller_thread(
     js_runtime: &mut JsRuntime,
     worker_timeout_ms: u64,

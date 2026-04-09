@@ -14,6 +14,7 @@ use std::time::Duration;
 use anyhow::Result;
 use moka::future::Cache;
 use reqwest::StatusCode;
+use tracing::instrument;
 
 /// Cost constants in US cents.
 pub const COST_MANAGEMENT_CENTS: i64 = 1; // $0.01
@@ -246,6 +247,7 @@ pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -
 
 /// Return the current credit balance in cents (≤ 0 means credits available; the Stripe
 /// balance field is negative when the customer has a credit).
+#[instrument(skip_all, err)]
 pub async fn get_credit_balance(customer_id: &str, state: &StripeState) -> Result<i64> {
     tracing::debug!(customer_id, "stripe::get_credit_balance: fetching balance");
     let resp = stripe_get(state, &format!("customers/{customer_id}"), &[]).await?;
@@ -260,6 +262,7 @@ pub async fn get_credit_balance(customer_id: &str, state: &StripeState) -> Resul
 
 /// Charge `cost_cents` against the customer's credit balance.
 /// Returns `Err` if the balance would go positive (insufficient credits).
+#[instrument(skip_all, err)]
 async fn charge(api_key: &str, cost_cents: i64, state: &StripeState) -> Result<()> {
     tracing::debug!(cost_cents, "stripe::charge: starting");
     let wallet = resolve_wallet_address(api_key, state).await?;

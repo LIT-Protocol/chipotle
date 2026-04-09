@@ -12,7 +12,7 @@ use deno_core::{
 use deno_error::JsErrorBox;
 use futures::FutureExt;
 use sha2::{Digest, Sha384};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 /// Constant-time byte comparison to prevent timing side-channels on integrity hashes.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -231,6 +231,7 @@ impl CdnModuleLoader {
 
     /// Fetch a URL with streaming body read, enforcing size limits during download.
     /// Returns the response bytes and optionally the SRI hash from CDN headers.
+    #[instrument(skip_all, err)]
     async fn fetch_with_size_limit(
         client: &reqwest::Client,
         url: &str,
@@ -305,6 +306,7 @@ impl CdnModuleLoader {
 }
 
 impl ModuleLoader for CdnModuleLoader {
+    #[instrument(skip_all, err)]
     fn resolve(
         &self,
         specifier: &str,

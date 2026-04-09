@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use tracing::instrument;
 use tokio::sync::{RwLock, Semaphore};
 
 #[derive(Clone, Debug)]
@@ -34,6 +35,7 @@ where
         }
     }
 
+    #[instrument(skip_all)]
     pub async fn create_or_get_connection<F, Fut>(&self, addr: &str, create: F) -> anyhow::Result<C>
     where
         Fut: Future<Output = anyhow::Result<C>> + Send,

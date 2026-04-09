@@ -5,7 +5,9 @@ use crate::{
 use anyhow::Result;
 use ethers::signers::{LocalWallet, Signer};
 use lit_core::utils::binary::bytes_to_0x_hex;
+use tracing::instrument;
 
+#[instrument(skip_all, err)]
 pub async fn get_private_key(api_key: &str, pkp_id: &str) -> Result<String> {
     let derivation_path = pkp_id_to_derviation_path(api_key, pkp_id)
         .await
@@ -17,6 +19,7 @@ pub async fn get_private_key(api_key: &str, pkp_id: &str) -> Result<String> {
     Ok(secret)
 }
 
+#[instrument(skip_all, err)]
 pub async fn get_lit_action_private_key(ipfs_id: &str) -> Result<String> {
     let secret_bytes = get_lit_action_key(ipfs_id)
         .await
@@ -25,6 +28,7 @@ pub async fn get_lit_action_private_key(ipfs_id: &str) -> Result<String> {
     Ok(secret)
 }
 
+#[instrument(skip_all, err)]
 pub async fn get_lit_action_public_key(ipfs_id: &str) -> Result<String> {
     let secret_bytes = get_lit_action_key(ipfs_id)
         .await
@@ -36,6 +40,7 @@ pub async fn get_lit_action_public_key(ipfs_id: &str) -> Result<String> {
     Ok(public_key)
 }
 
+#[instrument(skip_all, err)]
 pub async fn get_lit_action_wallet_address(ipfs_id: &str) -> Result<String> {
     let secret_bytes = get_lit_action_key(ipfs_id)
         .await
