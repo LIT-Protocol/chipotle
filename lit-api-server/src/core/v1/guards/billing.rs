@@ -16,7 +16,7 @@ use rocket_okapi::okapi::openapi3::{Object, Parameter, ParameterValue};
 use rocket_okapi::request::{OpenApiFromRequest, RequestHeaderInput};
 
 use crate::stripe::{self, StripeState};
-use tracing::{instrument, Instrument};
+use tracing::{Instrument, instrument};
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::instrument;
 use tokio::sync::{RwLock, Semaphore};
+use tracing::instrument;
 
 #[derive(Clone, Debug)]
 pub struct GrpcClientPool<C: Clone + std::fmt::Debug> {
