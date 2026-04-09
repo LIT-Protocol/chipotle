@@ -162,22 +162,32 @@ pub fn invalidate_for_key(api_key: &str) {
     }
 }
 
-/// Invalidate cached permission entries for an entire account: the master key
-/// and all usage keys.
+/// Invalidate cached permission entries for an entire account: the calling key
+/// and all usage keys returned by `list_api_keys`.
 ///
 /// Fetches usage key hashes via a chain call to `list_api_keys`. Call after
 /// group/action/PKP mutations where any key under the account could be affected.
+///
+/// **Limitation:** If the caller authenticates with a usage key (not the master
+/// key), the master key's cached entries are NOT invalidated here because the
+/// contract does not expose a `resolveToMaster` view. In that case the master
+/// key's entries expire naturally via the 60-minute `time_to_live`. This is
+/// acceptable because usage-key-driven management mutations are uncommon in
+/// practice.
 pub async fn invalidate_for_account(api_key: &str) {
     let Some(cache) = get() else { return };
 
-    let master_hash = crate::utils::parse_with_hash::api_key_hash(api_key).to_string();
-    cache.bump_generation(&master_hash);
+    // Always bump the calling key (master or usage).
+    let caller_hash = crate::utils::parse_with_hash::api_key_hash(api_key).to_string();
+    cache.bump_generation(&caller_hash);
 
+    // Fetch all usage keys under this account and bump each one.
+    // list_api_keys resolves both master and usage keys to the correct account.
     match super::list_api_keys(api_key, U256::zero(), U256::from(1000)).await {
         Ok(usage_keys) => {
             for uk in &usage_keys {
                 let hash = uk.api_key_hash.to_string();
-                if hash != master_hash {
+                if hash != caller_hash {
                     cache.bump_generation(&hash);
                 }
             }
