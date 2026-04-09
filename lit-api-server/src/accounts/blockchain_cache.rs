@@ -290,7 +290,10 @@ mod tests {
         let cid = U256::from(2);
         let wallet = H160::zero();
         let key = cache.execute_and_wallet_key(hash, cid, wallet);
-        assert!(key.contains(":ew:"), "key should contain :ew: discriminator, got: {key}");
+        assert!(
+            key.contains(":ew:"),
+            "key should contain :ew: discriminator, got: {key}"
+        );
     }
 
     #[test]
@@ -402,8 +405,14 @@ mod tests {
         let wallet = H160::from_low_u64_be(0xcafe);
 
         let key = cache.execute_and_wallet_key(hash, cid, wallet);
-        cache.execute_and_wallet.insert(key.clone(), (true, false)).await;
-        assert_eq!(cache.execute_and_wallet.get(&key).await, Some((true, false)));
+        cache
+            .execute_and_wallet
+            .insert(key.clone(), (true, false))
+            .await;
+        assert_eq!(
+            cache.execute_and_wallet.get(&key).await,
+            Some((true, false))
+        );
 
         cache.bump_generation(&hash.to_string());
         let new_key = cache.execute_and_wallet_key(hash, cid, wallet);
@@ -466,7 +475,10 @@ mod tests {
             })
             .await
             .unwrap();
-        assert!(closure_called, "closure should run on cache miss after bump");
+        assert!(
+            closure_called,
+            "closure should run on cache miss after bump"
+        );
         assert!(!result, "should return the newly fetched value");
     }
 

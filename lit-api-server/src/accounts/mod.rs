@@ -669,8 +669,7 @@ pub async fn can_execute_action_and_use_wallet(
     let account_api_key_hash = api_key_hash(api_key);
 
     if let Some(cache) = blockchain_cache::get() {
-        let key =
-            cache.execute_and_wallet_key(account_api_key_hash, cid_hash, wallet_address);
+        let key = cache.execute_and_wallet_key(account_api_key_hash, cid_hash, wallet_address);
         return cache
             .execute_and_wallet_cache()
             .try_get_with(key, async {
