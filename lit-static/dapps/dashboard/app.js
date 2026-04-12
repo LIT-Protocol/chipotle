@@ -803,14 +803,12 @@ function renderUsageKeysTable() {
       if (!ts) return '—';
       return new Date(ts * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
     })();
-    const balance = item.balance != null ? String(item.balance) : '—';
     const tr = document.createElement('tr');
     tr.innerHTML =
       '<td>' + escapeHtml(item.name || '') + '</td>' +
       '<td class="mono">' + escapeHtml(item.description || '') + '</td>' +
       '<td class="mono" style="font-size:0.82em;">' + escapeHtml(renderPermissionSummary(item)) + '</td>' +
       '<td class="mono">' + escapeHtml(expiration) + '</td>' +
-      '<td class="mono">' + escapeHtml(balance) + '</td>' +
       '<td class="cell-actions"></td>';
     const actionsCell = tr.querySelector('.cell-actions');
     const fullKey = item.api_key || (!item.api_key_hash ? item.usage_api_key : null);
@@ -867,7 +865,6 @@ function normalizeUsageKeyItem(item) {
     name: item.name,
     description: item.description,
     expiration: item.expiration,
-    balance: item.balance,
     can_create_groups: item.can_create_groups ?? false,
     can_delete_groups: item.can_delete_groups ?? false,
     can_create_pkps: item.can_create_pkps ?? false,
@@ -911,7 +908,6 @@ async function loadUsageKeys() {
       name: it.name ?? '',
       description: it.description ?? '',
       expiration: it.expiration,
-      balance: it.balance,
       can_create_groups: it.can_create_groups ?? false,
       can_delete_groups: it.can_delete_groups ?? false,
       can_create_pkps: it.can_create_pkps ?? false,
@@ -1397,7 +1393,6 @@ function openUsageKeyModal(item = null) {
             name: name || '',
             description: description || '',
             expiration: '',
-            balance: 0,
           });
           window._statUsageKeys = getUsageKeysStore().length;
           renderUsageKeysTable();
