@@ -756,6 +756,7 @@ mod tests {
     #[test]
     fn cache_key_different_inputs() {
         assert_ne!(cache_key("key-a"), cache_key("key-b"));
+    }
     // ── Balance cache merge logic ────────────────────────────────────────────
 
     #[test]
