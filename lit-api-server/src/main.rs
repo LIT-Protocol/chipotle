@@ -290,6 +290,16 @@ fn build_rocket(
     .to_cors()
     .expect("CORS failed to build");
 
+    // 1gb max capacity
+    let ipfs_cache: Cache<String, String> = Cache::builder()
+        .weigher(|_key, value: &String| -> u32 { value.len().try_into().unwrap_or(u32::MAX) })
+        .max_capacity(1024 * 1024 * 1024)
+        .build();
+
+    accounts::blockchain_cache::init();
+
+    let stripe_state = stripe::init();
+
     let (core_routes, openapi_spec) = core::v1::endpoints::routes_with_spec();
 
     let mut mounted_core_routes = core_routes.clone();
