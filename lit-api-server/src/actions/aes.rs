@@ -2,7 +2,9 @@ use crate::error::{Result, validation_err};
 use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::Aead};
 use lit_core::utils::binary::{bytes_to_hex, hex_to_bytes};
 use rand::Rng;
+use tracing::instrument;
 
+#[instrument(skip_all, err)]
 pub async fn aes_decrypt(symmetric_key: &[u8], ciphertext_with_nonce: &str) -> Result<String> {
     // Create a new 256-bit cipher
 
@@ -34,6 +36,7 @@ pub async fn aes_decrypt(symmetric_key: &[u8], ciphertext_with_nonce: &str) -> R
     Ok(plaintext)
 }
 
+#[instrument(skip_all, err)]
 pub async fn aes_encrypt(symmetric_key: &[u8], plaintext: String) -> Result<String> {
     let cipher = Aes256Gcm::new_from_slice(symmetric_key)
         .map_err(|e| validation_err("Could not create cipher", Some(format!("{}", e))))?;

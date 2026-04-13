@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{RwLock, Semaphore};
+use tracing::instrument;
 
 #[derive(Clone, Debug)]
 pub struct GrpcClientPool<C: Clone + std::fmt::Debug> {
@@ -34,6 +35,7 @@ where
         }
     }
 
+    #[instrument(skip_all)]
     pub async fn create_or_get_connection<F, Fut>(&self, addr: &str, create: F) -> anyhow::Result<C>
     where
         Fut: Future<Output = anyhow::Result<C>> + Send,

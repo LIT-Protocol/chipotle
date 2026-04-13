@@ -118,6 +118,8 @@ function updateAuthUI() {
   if (addFundsBtn) addFundsBtn.style.display = 'none';
   if (notRequiredEl) notRequiredEl.style.display = 'none';
   if (billingBanner) billingBanner.style.display = 'none';
+  const noFundsWarning = document.getElementById('no-funds-warning');
+  if (noFundsWarning) noFundsWarning.style.display = 'none';
   if (hasKey) {
     const capturedKey = getApiKey();
     refreshOverviewAccount();
@@ -142,6 +144,9 @@ function refreshBillingUI(capturedKey, balanceEl, addFundsBtn, notRequiredEl, bi
     } else {
       if (notRequiredEl) notRequiredEl.style.display = '';
       if (billingBanner) billingBanner.style.display = '';
+      // Hide no-funds warning when billing is unavailable (contradicts "Payment Not Required")
+      const nfw = document.getElementById('no-funds-warning');
+      if (nfw) nfw.style.display = 'none';
       // Schedule a retry so transient failures recover without a reload.
       if (_billingRetryTimer) clearTimeout(_billingRetryTimer);
       _billingRetryTimer = setTimeout(() => {
@@ -332,12 +337,19 @@ async function loadBillingBalance() {
   if (!apiKey) return;
   const el = document.getElementById('billing-balance-display');
   if (!el) return;
+  const noFundsWarning = document.getElementById('no-funds-warning');
   try {
     const client = await getClient();
     const data = await client.getBillingBalance(apiKey);
     el.textContent = data.balance_display || '';
+    // balance_cents is negative when credits are available; 0 or positive means no funds
+    if (noFundsWarning) {
+      const hasNoFunds = typeof data.balance_cents === 'number' && data.balance_cents >= 0;
+      noFundsWarning.style.display = hasNoFunds ? '' : 'none';
+    }
   } catch (_) {
     el.textContent = '';
+    if (noFundsWarning) noFundsWarning.style.display = 'none';
   }
 }
 
@@ -399,6 +411,8 @@ function initBilling() {
   const payBtn = document.getElementById('billing-pay-btn');
 
   if (addFundsBtn) addFundsBtn.addEventListener('click', openAddFundsModal);
+  const noFundsLink = document.getElementById('no-funds-add-funds');
+  if (noFundsLink) noFundsLink.addEventListener('click', (e) => { e.preventDefault(); openAddFundsModal(); });
   if (closeBtn) closeBtn.addEventListener('click', closeBillingModal);
   if (cancelBtn) cancelBtn.addEventListener('click', closeBillingModal);
 
@@ -803,14 +817,12 @@ function renderUsageKeysTable() {
       if (!ts) return '—';
       return new Date(ts * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
     })();
-    const balance = item.balance != null ? String(item.balance) : '—';
     const tr = document.createElement('tr');
     tr.innerHTML =
       '<td>' + escapeHtml(item.name || '') + '</td>' +
       '<td class="mono">' + escapeHtml(item.description || '') + '</td>' +
       '<td class="mono" style="font-size:0.82em;">' + escapeHtml(renderPermissionSummary(item)) + '</td>' +
       '<td class="mono">' + escapeHtml(expiration) + '</td>' +
-      '<td class="mono">' + escapeHtml(balance) + '</td>' +
       '<td class="cell-actions"></td>';
     const actionsCell = tr.querySelector('.cell-actions');
     const fullKey = item.api_key || (!item.api_key_hash ? item.usage_api_key : null);
@@ -867,7 +879,6 @@ function normalizeUsageKeyItem(item) {
     name: item.name,
     description: item.description,
     expiration: item.expiration,
-    balance: item.balance,
     can_create_groups: item.can_create_groups ?? false,
     can_delete_groups: item.can_delete_groups ?? false,
     can_create_pkps: item.can_create_pkps ?? false,
@@ -911,7 +922,6 @@ async function loadUsageKeys() {
       name: it.name ?? '',
       description: it.description ?? '',
       expiration: it.expiration,
-      balance: it.balance,
       can_create_groups: it.can_create_groups ?? false,
       can_delete_groups: it.can_delete_groups ?? false,
       can_create_pkps: it.can_create_pkps ?? false,
@@ -1397,7 +1407,6 @@ function openUsageKeyModal(item = null) {
             name: name || '',
             description: description || '',
             expiration: '',
-            balance: 0,
           });
           window._statUsageKeys = getUsageKeysStore().length;
           renderUsageKeysTable();
@@ -1698,8 +1707,21 @@ async function initActionRunner() {
 }
 
 // ----- Init -----
+function showDevWarning() {
+  if (location.hostname === 'dashboard.dev.litprotocol.com') {
+    const overlay = document.getElementById('dev-warning-overlay');
+    if (overlay) {
+      overlay.classList.add('is-open');
+      overlay.setAttribute('aria-hidden', 'false');
+    }
+    return true;
+  }
+  return false;
+}
+
 function init() {
   setTheme(getTheme());
+  if (showDevWarning()) return;
   initModalClose();
   initConfirmClose();
   updateAuthUI();

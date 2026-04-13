@@ -19,6 +19,7 @@
               "management/dashboard",
               "management/api_direct",
               "management/pricing",
+              "management/crypto",
               "management/api_keys"
             ]
           },

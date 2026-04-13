@@ -16,10 +16,11 @@ use rocket_okapi::okapi::openapi3::{Object, Parameter, ParameterValue};
 use rocket_okapi::request::{OpenApiFromRequest, RequestHeaderInput};
 
 use crate::stripe::{self, StripeState};
-use tracing::Instrument;
+use tracing::{Instrument, instrument};
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 
+#[instrument(name = "billing::extract_api_key", skip_all)]
 fn extract_api_key(request: &Request<'_>) -> Option<String> {
     // Authorization: Bearer <key>
     if let Some(v) = request.headers().get_one("Authorization") {
@@ -41,6 +42,7 @@ fn extract_api_key(request: &Request<'_>) -> Option<String> {
     None
 }
 
+#[instrument(name = "billing::charge_guard", skip_all)]
 async fn charge_guard(
     request: &Request<'_>,
     charge_fn: impl AsyncFn(&str, &StripeState) -> anyhow::Result<()>,
@@ -119,6 +121,7 @@ pub struct BilledLitActionApiKey(pub String);
 impl<'r> FromRequest<'r> for BilledLitActionApiKey {
     type Error = ();
 
+    #[instrument(name = "billing::BilledLitActionApiKey::from_request", skip_all)]
     async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
         let Some(key) = extract_api_key(request) else {
             return Outcome::Error((Status::Unauthorized, ()));
@@ -164,6 +167,7 @@ impl<'r> FromRequest<'r> for BilledLitActionApiKey {
 }
 
 impl<'r> OpenApiFromRequest<'r> for BilledLitActionApiKey {
+    #[instrument(name = "billing::BilledLitActionApiKey::from_request_input", skip_all)]
     fn from_request_input(
         generator: &mut OpenApiGenerator,
         _name: String,
