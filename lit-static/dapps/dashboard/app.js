@@ -1693,8 +1693,21 @@ async function initActionRunner() {
 }
 
 // ----- Init -----
+function showDevWarning() {
+  if (location.hostname === 'dashboard.dev.litprotocol.com') {
+    const overlay = document.getElementById('dev-warning-overlay');
+    if (overlay) {
+      overlay.classList.add('is-open');
+      overlay.setAttribute('aria-hidden', 'false');
+    }
+    return true;
+  }
+  return false;
+}
+
 function init() {
   setTheme(getTheme());
+  if (showDevWarning()) return;
   initModalClose();
   initConfirmClose();
   updateAuthUI();
