@@ -167,6 +167,7 @@ impl<'r> FromRequest<'r> for BilledLitActionApiKey {
 }
 
 impl<'r> OpenApiFromRequest<'r> for BilledLitActionApiKey {
+    #[instrument(name = "billing::BilledLitActionApiKey::from_request_input", skip_all)]
     fn from_request_input(
         generator: &mut OpenApiGenerator,
         _name: String,

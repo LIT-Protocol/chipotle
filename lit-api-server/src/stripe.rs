@@ -175,6 +175,7 @@ pub async fn invalidate_wallet_cache(api_key: &str, state: &StripeState) {
 ///
 /// The cache is keyed by the keccak256 hash of the API key (not the raw key)
 /// to avoid holding secret material in memory.
+#[instrument(name = "stripe::resolve_wallet_address", skip_all, err)]
 pub async fn resolve_wallet_address(api_key: &str, state: &StripeState) -> Result<String> {
     let key = cache_key(api_key);
     tracing::debug!("stripe::resolve_wallet_address: looking up wallet");
@@ -201,6 +202,7 @@ pub async fn resolve_wallet_address(api_key: &str, state: &StripeState) -> Resul
 ///
 /// Uses `try_get_with` to coalesce concurrent requests for the same wallet,
 /// preventing duplicate Stripe customer creation under concurrent load.
+#[instrument(name = "stripe::get_customer_by_wallet", skip_all, err)]
 pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -> Result<String> {
     tracing::debug!(
         wallet_address,
@@ -247,7 +249,7 @@ pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -
 
 /// Return the current credit balance in cents (≤ 0 means credits available; the Stripe
 /// balance field is negative when the customer has a credit).
-#[instrument(skip_all, err)]
+#[instrument(name = "stripe::get_credit_balance", skip_all, err)]
 pub async fn get_credit_balance(customer_id: &str, state: &StripeState) -> Result<i64> {
     tracing::debug!(customer_id, "stripe::get_credit_balance: fetching balance");
     let resp = stripe_get(state, &format!("customers/{customer_id}"), &[]).await?;
@@ -262,7 +264,7 @@ pub async fn get_credit_balance(customer_id: &str, state: &StripeState) -> Resul
 
 /// Charge `cost_cents` against the customer's credit balance.
 /// Returns `Err` if the balance would go positive (insufficient credits).
-#[instrument(skip_all, err)]
+#[instrument(name = "stripe::charge", skip_all, err)]
 async fn charge(api_key: &str, cost_cents: i64, state: &StripeState) -> Result<()> {
     tracing::debug!(cost_cents, "stripe::charge: starting");
     let wallet = resolve_wallet_address(api_key, state).await?;
