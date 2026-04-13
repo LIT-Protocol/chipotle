@@ -92,6 +92,9 @@ function refreshBillingUI(capturedKey, balanceEl, addFundsBtn, notRequiredEl, bi
     } else {
       if (notRequiredEl) notRequiredEl.style.display = '';
       if (billingBanner) billingBanner.style.display = '';
+      // Hide no-funds warning when billing is unavailable (contradicts "Payment Not Required")
+      const nfw = document.getElementById('no-funds-warning');
+      if (nfw) nfw.style.display = 'none';
       // Schedule a retry so transient failures recover without a reload.
       if (_billingRetryTimer) clearTimeout(_billingRetryTimer);
       _billingRetryTimer = setTimeout(() => {
@@ -277,7 +280,8 @@ async function loadBillingBalance() {
     el.textContent = data.balance_display || '';
     // balance_cents is negative when credits are available; 0 or positive means no funds
     if (noFundsWarning) {
-      noFundsWarning.style.display = (data.balance_cents >= 0) ? '' : 'none';
+      const hasNoFunds = typeof data.balance_cents === 'number' && data.balance_cents >= 0;
+      noFundsWarning.style.display = hasNoFunds ? '' : 'none';
     }
   } catch (_) {
     el.textContent = '';
