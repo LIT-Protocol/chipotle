@@ -54,9 +54,7 @@ pub(super) async fn billing_stripe_config(
         }),
         None => Err(billing_disabled_err()),
     };
-    OpenApiResponse {
-        response: ApiResult(result).into(),
-    }
+    OpenApiResponse::new(ApiResult(result).into())
 }
 
 /// GET /billing/balance — returns the current credit balance for the authenticated user.
@@ -67,9 +65,7 @@ pub(super) async fn billing_balance(
     stripe_state: &State<Option<Arc<StripeState>>>,
 ) -> OpenApiResponse<BillingBalanceResponse, ErrMessage> {
     let result = billing_balance_impl(api_key.0.as_str(), stripe_state.inner()).await;
-    OpenApiResponse {
-        response: ApiResult(result).into(),
-    }
+    OpenApiResponse::new(ApiResult(result).into())
 }
 
 async fn billing_balance_impl(
@@ -109,9 +105,7 @@ pub(super) async fn billing_create_payment_intent(
 ) -> OpenApiResponse<CreatePaymentIntentResponse, ErrMessage> {
     let result =
         billing_create_payment_intent_impl(api_key.0.as_str(), stripe_state.inner(), req).await;
-    OpenApiResponse {
-        response: ApiResult(result).into(),
-    }
+    OpenApiResponse::new(ApiResult(result).into())
 }
 
 async fn billing_create_payment_intent_impl(
@@ -142,9 +136,7 @@ pub(super) async fn billing_confirm_payment(
     req: Json<ConfirmPaymentRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
     let result = billing_confirm_payment_impl(api_key.0.as_str(), stripe_state.inner(), req).await;
-    OpenApiResponse {
-        response: ApiResult(result).into(),
-    }
+    OpenApiResponse::new(ApiResult(result).into())
 }
 
 async fn billing_confirm_payment_impl(

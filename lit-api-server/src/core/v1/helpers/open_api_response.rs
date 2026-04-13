@@ -8,6 +8,23 @@ use serde::Serialize;
 
 pub struct OpenApiResponse<T: Serialize + JsonSchema, E: Serialize + JsonSchema> {
     pub response: ApiResponse<T, E>,
+    pub x_request_id: String,
+}
+
+impl<T: Serialize + JsonSchema, E: Serialize + JsonSchema> OpenApiResponse<T, E> {
+    pub fn new(response: ApiResponse<T, E>) -> Self {
+        Self {
+            response,
+            x_request_id: String::new(),
+        }
+    }
+
+    pub fn with_request_id(response: ApiResponse<T, E>, request_id: String) -> Self {
+        Self {
+            response,
+            x_request_id: request_id,
+        }
+    }
 }
 
 impl<T: Serialize + JsonSchema, E: Serialize + JsonSchema> OpenApiResponderInner
@@ -43,6 +60,7 @@ impl<'r, T: Serialize + JsonSchema, E: Serialize + JsonSchema> Responder<'r, 'st
     for OpenApiResponse<T, E>
 {
     fn respond_to(self, request: &'r rocket::Request<'_>) -> rocket::response::Result<'static> {
+        // X-Request-Id header is set by ObservabilityFairing::on_response for all responses.
         self.response.respond_to(request)
     }
 }

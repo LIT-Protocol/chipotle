@@ -114,6 +114,26 @@ pub struct RequestSpan {
     pub correlation_id: Option<String>,
 }
 
+impl Default for RequestSpan {
+    fn default() -> Self {
+        Self {
+            span: tracing::Span::none(),
+            request_id: String::new(),
+            correlation_id: None,
+        }
+    }
+}
+
+/// Extract the request ID from a Rocket request's local cache.
+///
+/// This reads the `RequestTracingContext` that the [`ObservabilityFairing`] stores
+/// during `on_request`. Returns an empty string if the fairing has not run yet.
+pub fn request_id_from_request(req: &rocket::Request<'_>) -> String {
+    req.local_cache(RequestTracingContext::dummy)
+        .request_id
+        .clone()
+}
+
 #[rocket::async_trait]
 impl<'r> rocket::request::FromRequest<'r> for RequestSpan {
     type Error = std::convert::Infallible;

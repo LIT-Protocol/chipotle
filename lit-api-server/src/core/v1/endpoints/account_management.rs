@@ -31,8 +31,8 @@ pub(super) async fn new_account(
     stripe_state: &State<Option<Arc<StripeState>>>,
     new_account_request: Json<NewAccountRequest>,
 ) -> OpenApiResponse<NewAccountResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::new_account(
                 signer_pool.inner().clone(),
                 stripe_state.inner().clone(),
@@ -41,15 +41,15 @@ pub(super) async fn new_account(
             .await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
 #[get("/account_exists")]
 pub(super) async fn account_exists(api_key: ApiKey) -> OpenApiResponse<bool, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(account_management::account_exists(api_key.0.as_str()).await).into(),
-    }
+    OpenApiResponse::new(
+        ApiResult(account_management::account_exists(api_key.0.as_str()).await).into(),
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -57,28 +57,23 @@ pub(super) async fn account_exists(api_key: ApiKey) -> OpenApiResponse<bool, Err
 pub(super) async fn get_lit_action_ipfs_id(
     code: Json<String>,
 ) -> OpenApiResponse<String, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(account_management::get_lit_action_ipfs_id(code.into_inner()).await)
-            .into(),
-    }
+    OpenApiResponse::new(
+        ApiResult(account_management::get_lit_action_ipfs_id(code.into_inner()).await).into(),
+    )
 }
 
 #[openapi(tag = "Account Management")]
 #[get("/get_node_chain_config")]
 pub(super) async fn get_node_chain_config() -> OpenApiResponse<NodeChainConfigResponse, ErrMessage>
 {
-    OpenApiResponse {
-        response: ApiResult(account_management::get_chain_info().await).into(),
-    }
+    OpenApiResponse::new(ApiResult(account_management::get_chain_info().await).into())
 }
 
 #[openapi(tag = "Account Management")]
 #[get("/get_chain_config_keys")]
 pub(super) async fn get_chain_config_keys() -> OpenApiResponse<ChainConfigKeysResponse, ErrMessage>
 {
-    OpenApiResponse {
-        response: ApiResult(Ok(account_management::get_chain_config_keys())).into(),
-    }
+    OpenApiResponse::new(ApiResult(Ok(account_management::get_chain_config_keys())).into())
 }
 
 #[openapi(tag = "Account Management")]
@@ -88,12 +83,12 @@ pub(super) async fn list_api_keys(
     page_number: u64,
     page_size: u64,
 ) -> OpenApiResponse<Vec<ApiKeyItem>, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::list_api_keys(api_key.0.as_str(), page_number, page_size).await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -103,12 +98,12 @@ pub(super) async fn list_groups(
     page_number: u64,
     page_size: u64,
 ) -> OpenApiResponse<Vec<ListMetadataItem>, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::list_groups(api_key.0.as_str(), page_number, page_size).await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -118,12 +113,12 @@ pub(super) async fn list_wallets(
     page_number: u64,
     page_size: u64,
 ) -> OpenApiResponse<Vec<WalletItem>, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::list_wallets(api_key.0.as_str(), page_number, page_size).await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -134,8 +129,8 @@ pub(super) async fn list_wallets_in_group(
     page_number: u64,
     page_size: u64,
 ) -> OpenApiResponse<Vec<WalletItem>, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::list_wallets_in_group(
                 api_key.0.as_str(),
                 group_id,
@@ -145,7 +140,7 @@ pub(super) async fn list_wallets_in_group(
             .await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -156,8 +151,8 @@ pub(super) async fn list_actions(
     page_number: u64,
     page_size: u64,
 ) -> OpenApiResponse<Vec<ListMetadataItem>, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::list_actions(
                 api_key.0.as_str(),
                 group_id.as_deref(),
@@ -167,7 +162,7 @@ pub(super) async fn list_actions(
             .await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -176,13 +171,13 @@ pub(super) async fn create_wallet(
     signer_pool: &State<Arc<SignerPool>>,
     api_key: BilledManagementApiKey,
 ) -> OpenApiResponse<CreateWalletResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::create_wallet(signer_pool.inner().clone(), api_key.0.as_str())
                 .await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -192,13 +187,13 @@ pub(super) async fn add_group(
     api_key: BilledManagementApiKey,
     req: Json<AddGroupRequest>,
 ) -> OpenApiResponse<AddGroupResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::add_group(signer_pool.inner().clone(), api_key.0.as_str(), req)
                 .await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -208,13 +203,13 @@ pub(super) async fn remove_group(
     api_key: BilledManagementApiKey,
     req: Json<RemoveGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::remove_group(signer_pool.inner().clone(), api_key.0.as_str(), req)
                 .await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -224,13 +219,13 @@ pub(super) async fn add_action(
     api_key: BilledManagementApiKey,
     req: Json<AddActionRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::add_action(signer_pool.inner().clone(), api_key.0.as_str(), req)
                 .await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -240,13 +235,13 @@ pub(super) async fn delete_action(
     api_key: BilledManagementApiKey,
     req: Json<DeleteActionRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::delete_action(signer_pool.inner().clone(), api_key.0.as_str(), req)
                 .await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -256,8 +251,8 @@ pub(super) async fn add_action_to_group(
     api_key: BilledManagementApiKey,
     req: Json<AddActionToGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::add_action_to_group(
                 signer_pool.inner().clone(),
                 api_key.0.as_str(),
@@ -266,7 +261,7 @@ pub(super) async fn add_action_to_group(
             .await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -276,8 +271,8 @@ pub(super) async fn add_pkp_to_group(
     api_key: BilledManagementApiKey,
     req: Json<AddPkpToGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::add_pkp_to_group(
                 signer_pool.inner().clone(),
                 api_key.0.as_str(),
@@ -286,7 +281,7 @@ pub(super) async fn add_pkp_to_group(
             .await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -296,8 +291,8 @@ pub(super) async fn remove_pkp_from_group(
     api_key: BilledManagementApiKey,
     req: Json<RemovePkpFromGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::remove_pkp_from_group(
                 signer_pool.inner().clone(),
                 api_key.0.as_str(),
@@ -306,7 +301,7 @@ pub(super) async fn remove_pkp_from_group(
             .await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -316,8 +311,8 @@ pub(super) async fn add_usage_api_key(
     api_key: BilledManagementApiKey,
     req: Json<AddUsageApiKeyRequest>,
 ) -> OpenApiResponse<AddUsageApiKeyResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::add_usage_api_key(
                 signer_pool.inner().clone(),
                 api_key.0.as_str(),
@@ -326,7 +321,7 @@ pub(super) async fn add_usage_api_key(
             .await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -353,9 +348,7 @@ pub(super) async fn remove_usage_api_key(
         crate::stripe::invalidate_wallet_cache(&usage_key, stripe).await;
     }
 
-    OpenApiResponse {
-        response: ApiResult(result).into(),
-    }
+    OpenApiResponse::new(ApiResult(result).into())
 }
 
 #[openapi(tag = "Account Management")]
@@ -365,8 +358,8 @@ pub(super) async fn update_usage_api_key(
     api_key: BilledManagementApiKey,
     req: Json<UpdateUsageApiKeyRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::update_usage_api_key(
                 signer_pool.inner().clone(),
                 api_key.0.as_str(),
@@ -375,7 +368,7 @@ pub(super) async fn update_usage_api_key(
             .await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -385,13 +378,13 @@ pub(super) async fn update_group(
     api_key: BilledManagementApiKey,
     req: Json<UpdateGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::update_group(signer_pool.inner().clone(), api_key.0.as_str(), req)
                 .await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -401,8 +394,8 @@ pub(super) async fn remove_action_from_group(
     api_key: BilledManagementApiKey,
     req: Json<RemoveActionFromGroupRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::remove_action_from_group(
                 signer_pool.inner().clone(),
                 api_key.0.as_str(),
@@ -411,7 +404,7 @@ pub(super) async fn remove_action_from_group(
             .await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -421,8 +414,8 @@ pub(super) async fn update_action_metadata(
     api_key: BilledManagementApiKey,
     req: Json<UpdateActionMetadataRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::update_action_metadata(
                 signer_pool.inner().clone(),
                 api_key.0.as_str(),
@@ -431,7 +424,7 @@ pub(super) async fn update_action_metadata(
             .await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Account Management")]
@@ -441,8 +434,8 @@ pub(super) async fn update_usage_api_key_metadata(
     api_key: BilledManagementApiKey,
     req: Json<UpdateUsageApiKeyMetadataRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             account_management::update_usage_api_key_metadata(
                 signer_pool.inner().clone(),
                 api_key.0.as_str(),
@@ -451,5 +444,5 @@ pub(super) async fn update_usage_api_key_metadata(
             .await,
         )
         .into(),
-    }
+    )
 }

@@ -17,35 +17,31 @@ use rocket_okapi::openapi;
 pub(super) async fn get_lit_action_client_config(
     chain_config: &State<Arc<ChainConfig>>,
 ) -> OpenApiResponse<LitActionClientConfigResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::new(
+        ApiResult(
             core_features::get_lit_action_client_config(chain_config.inner().clone()).await,
         )
         .into(),
-    }
+    )
 }
 
 #[openapi(tag = "Configuration")]
 #[get("/get_api_payers")]
 pub(super) async fn get_api_payers() -> OpenApiResponse<Vec<String>, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(account_management::get_api_payers().await).into(),
-    }
+    OpenApiResponse::new(ApiResult(account_management::get_api_payers().await).into())
 }
 
 #[openapi(tag = "Configuration")]
 #[get("/get_admin_api_payer")]
 pub(super) async fn get_admin_api_payer() -> OpenApiResponse<String, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(account_management::get_admin_api_payer().await).into(),
-    }
+    OpenApiResponse::new(ApiResult(account_management::get_admin_api_payer().await).into())
 }
 
 #[openapi(tag = "Configuration")]
 #[get("/version")]
 pub(super) async fn get_version() -> OpenApiResponse<VersionResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(Ok(VersionResponse {
+    OpenApiResponse::new(
+        ApiResult(Ok(VersionResponse {
             version: crate::version::CARGO_PKG_VERSION.to_string(),
             commit_version: crate::version::GIT_VERSION.to_string(),
             name: crate::version::CARGO_PKG_NAME.to_string(),
@@ -55,5 +51,5 @@ pub(super) async fn get_version() -> OpenApiResponse<VersionResponse, ErrMessage
                 .collect(),
         }))
         .into(),
-    }
+    )
 }

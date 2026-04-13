@@ -32,8 +32,8 @@ pub(super) async fn lit_action(
     stripe_state: &State<Option<Arc<StripeState>>>,
     lit_action_request: Json<LitActionRequest>,
 ) -> OpenApiResponse<LitActionResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    OpenApiResponse::with_request_id(
+        ApiResult(
             core_features::lit_action(
                 &request_span,
                 api_key.0.as_str(),
@@ -47,5 +47,6 @@ pub(super) async fn lit_action(
             .await,
         )
         .into(),
-    }
+        request_span.request_id.clone(),
+    )
 }
