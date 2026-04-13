@@ -29,8 +29,9 @@ pub struct StripeState {
     pub publishable_key: String,
     secret_key: String,
     client: reqwest::Client,
-    /// wallet_address → Stripe customer ID cache (10-min TTL).
+    /// wallet_address → Stripe customer ID cache (10-min idle timeout).
     /// Avoids duplicate customer creation caused by Stripe Search API indexing lag.
+    /// Uses `time_to_idle` so frequently accessed entries stay warm.
     customer_cache: Cache<String, String>,
     /// api_key → wallet_address cache.
     /// Resolves both master and usage API keys to the account's creator wallet address
@@ -40,10 +41,10 @@ pub struct StripeState {
     /// Avoids a Stripe API call on every charge; stale reads may allow some
     /// overcharging which is acceptable per CPL-246.
     balance_cache: Cache<String, i64>,
-    /// Guards against thundering-herd background refreshes.  When a refresh is
-    /// in flight for a given customer_id the key is present; subsequent calls
-    /// skip spawning a duplicate.  Entries expire after 30 seconds so a stuck
-    /// refresh does not block future ones forever.
+    /// Guards against thundering-herd background refreshes and acts as a cooldown.
+    /// When present for a customer_id, no new refresh is spawned.  Entries live
+    /// for 60 seconds, so each customer triggers at most one Stripe GET per minute
+    /// regardless of request rate.
     balance_refresh_in_flight: Cache<String, ()>,
 }
 
@@ -83,7 +84,7 @@ pub fn init() -> Option<Arc<StripeState>> {
         .build();
     let balance_refresh_in_flight = Cache::builder()
         .max_capacity(10_000)
-        .time_to_live(Duration::from_secs(30))
+        .time_to_live(Duration::from_secs(60)) // cooldown: max 1 refresh per customer per minute
         .build();
     tracing::info!("stripe: billing enabled");
     Some(Arc::new(StripeState {
@@ -296,35 +297,49 @@ pub async fn get_credit_balance(customer_id: &str, state: &StripeState) -> Resul
             tokio::spawn(async move {
                 match fetch_balance(&state, &cid2).await {
                     Ok(fetched) => {
-                        // Only update the cache if the fetched balance shows MORE
-                        // credit (more negative) than the current cached value.
-                        // This preserves optimistic decrements made by charge():
-                        // if charge() wrote -999 but Stripe still shows -1000
-                        // (charge hasn't landed yet), we keep -999 so the next
-                        // charge sees the decremented value.
                         let current = state.balance_cache.get(&cid2).await;
-                        match current {
-                            Some(cached) if fetched < cached => {
-                                state.balance_cache.insert(cid2.clone(), fetched).await;
-                            }
-                            None => {
-                                state.balance_cache.insert(cid2.clone(), fetched).await;
-                            }
-                            _ => {} // keep the optimistic decrement
+                        if should_update_balance_cache(current, fetched) {
+                            state.balance_cache.insert(cid2.clone(), fetched).await;
                         }
                     }
                     Err(e) => tracing::warn!("stripe: background balance refresh failed for {cid2}: {e}"),
                 }
-                state.balance_refresh_in_flight.invalidate(&cid2).await;
+                // Do NOT invalidate balance_refresh_in_flight here.  The 60-second
+                // TTL acts as a cooldown so each customer triggers at most one
+                // Stripe GET per minute, even under sustained traffic.
             });
         }
         return Ok(cached);
     }
 
-    // Cache miss — fetch inline so the caller gets a real value.
-    let balance = fetch_balance(state, &cid).await?;
-    state.balance_cache.insert(cid, balance).await;
-    Ok(balance)
+    // Cache miss — fetch inline with request coalescing so concurrent misses
+    // for the same customer produce only a single Stripe GET.
+    let state2 = state.clone();
+    let cid2 = cid.clone();
+    state
+        .balance_cache
+        .try_get_with(cid, async move { fetch_balance(&state2, &cid2).await })
+        .await
+        .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e}"))
+}
+
+/// Decide whether a background-refreshed balance should replace the cached value.
+///
+/// Returns `true` when:
+/// - There is no cached value (cache was evicted or invalidated).
+/// - The fetched balance is less negative (higher) than the cached value, meaning
+///   Stripe processed additional charges we didn't know about.
+///
+/// Returns `false` when the fetched balance is more negative (lower) than the
+/// cached value.  This preserves optimistic decrements made by `charge()`: if
+/// we wrote -999 but Stripe still shows -1000 (the fire-and-forget hasn't landed),
+/// we keep -999.  Top-ups are handled by explicit `balance_cache.invalidate()` in
+/// `confirm_payment_and_credit`, not by this refresh.
+fn should_update_balance_cache(cached: Option<i64>, fetched: i64) -> bool {
+    match cached {
+        Some(c) => fetched > c,
+        None => true,
+    }
 }
 
 /// Fetch the raw balance from Stripe for a given customer ID.
@@ -683,5 +698,39 @@ mod tests {
         let body = r#"{"balance": -500, "currency": "usd"}"#;
         let resp = parse_stripe_response(StatusCode::OK, body).unwrap();
         assert_eq!(resp.body["balance"], -500);
+    }
+
+    // ── Balance cache merge logic ────────────────────────────────────────────
+
+    #[test]
+    fn balance_refresh_preserves_optimistic_decrement() {
+        // charge() wrote -999, Stripe still shows -1000 (charge not landed yet).
+        // Refresh should NOT overwrite.
+        assert!(!should_update_balance_cache(Some(-999), -1000));
+    }
+
+    #[test]
+    fn balance_refresh_updates_when_stripe_shows_less_credit() {
+        // Cache says -1000, but Stripe says -900 (other charges landed).
+        // Refresh should update to be conservative.
+        assert!(should_update_balance_cache(Some(-1000), -900));
+    }
+
+    #[test]
+    fn balance_refresh_updates_on_cache_miss() {
+        // No cached value, always populate.
+        assert!(should_update_balance_cache(None, -500));
+    }
+
+    #[test]
+    fn balance_refresh_skips_when_equal() {
+        // Same value, no need to write.
+        assert!(!should_update_balance_cache(Some(-1000), -1000));
+    }
+
+    #[test]
+    fn balance_refresh_preserves_multiple_decrements() {
+        // Multiple charges: cache decremented to -950, Stripe still at -1000.
+        assert!(!should_update_balance_cache(Some(-950), -1000));
     }
 }
