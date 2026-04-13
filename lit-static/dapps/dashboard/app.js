@@ -118,6 +118,8 @@ function updateAuthUI() {
   if (addFundsBtn) addFundsBtn.style.display = 'none';
   if (notRequiredEl) notRequiredEl.style.display = 'none';
   if (billingBanner) billingBanner.style.display = 'none';
+  const noFundsWarning = document.getElementById('no-funds-warning');
+  if (noFundsWarning) noFundsWarning.style.display = 'none';
   if (hasKey) {
     const capturedKey = getApiKey();
     refreshOverviewAccount();
@@ -142,6 +144,9 @@ function refreshBillingUI(capturedKey, balanceEl, addFundsBtn, notRequiredEl, bi
     } else {
       if (notRequiredEl) notRequiredEl.style.display = '';
       if (billingBanner) billingBanner.style.display = '';
+      // Hide no-funds warning when billing is unavailable (contradicts "Payment Not Required")
+      const nfw = document.getElementById('no-funds-warning');
+      if (nfw) nfw.style.display = 'none';
       // Schedule a retry so transient failures recover without a reload.
       if (_billingRetryTimer) clearTimeout(_billingRetryTimer);
       _billingRetryTimer = setTimeout(() => {
@@ -332,12 +337,19 @@ async function loadBillingBalance() {
   if (!apiKey) return;
   const el = document.getElementById('billing-balance-display');
   if (!el) return;
+  const noFundsWarning = document.getElementById('no-funds-warning');
   try {
     const client = await getClient();
     const data = await client.getBillingBalance(apiKey);
     el.textContent = data.balance_display || '';
+    // balance_cents is negative when credits are available; 0 or positive means no funds
+    if (noFundsWarning) {
+      const hasNoFunds = typeof data.balance_cents === 'number' && data.balance_cents >= 0;
+      noFundsWarning.style.display = hasNoFunds ? '' : 'none';
+    }
   } catch (_) {
     el.textContent = '';
+    if (noFundsWarning) noFundsWarning.style.display = 'none';
   }
 }
 
@@ -399,6 +411,8 @@ function initBilling() {
   const payBtn = document.getElementById('billing-pay-btn');
 
   if (addFundsBtn) addFundsBtn.addEventListener('click', openAddFundsModal);
+  const noFundsLink = document.getElementById('no-funds-add-funds');
+  if (noFundsLink) noFundsLink.addEventListener('click', (e) => { e.preventDefault(); openAddFundsModal(); });
   if (closeBtn) closeBtn.addEventListener('click', closeBillingModal);
   if (cancelBtn) cancelBtn.addEventListener('click', closeBillingModal);
 
