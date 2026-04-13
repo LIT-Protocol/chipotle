@@ -66,6 +66,8 @@ function updateAuthUI() {
   if (addFundsBtn) addFundsBtn.style.display = 'none';
   if (notRequiredEl) notRequiredEl.style.display = 'none';
   if (billingBanner) billingBanner.style.display = 'none';
+  const noFundsWarning = document.getElementById('no-funds-warning');
+  if (noFundsWarning) noFundsWarning.style.display = 'none';
   if (hasKey) {
     const capturedKey = getApiKey();
     refreshOverviewAccount();
@@ -268,12 +270,18 @@ async function loadBillingBalance() {
   if (!apiKey) return;
   const el = document.getElementById('billing-balance-display');
   if (!el) return;
+  const noFundsWarning = document.getElementById('no-funds-warning');
   try {
     const client = await getClient();
     const data = await client.getBillingBalance(apiKey);
     el.textContent = data.balance_display || '';
+    // balance_cents is negative when credits are available; 0 or positive means no funds
+    if (noFundsWarning) {
+      noFundsWarning.style.display = (data.balance_cents >= 0) ? '' : 'none';
+    }
   } catch (_) {
     el.textContent = '';
+    if (noFundsWarning) noFundsWarning.style.display = 'none';
   }
 }
 
@@ -335,6 +343,8 @@ function initBilling() {
   const payBtn = document.getElementById('billing-pay-btn');
 
   if (addFundsBtn) addFundsBtn.addEventListener('click', openAddFundsModal);
+  const noFundsLink = document.getElementById('no-funds-add-funds');
+  if (noFundsLink) noFundsLink.addEventListener('click', (e) => { e.preventDefault(); openAddFundsModal(); });
   if (closeBtn) closeBtn.addEventListener('click', closeBillingModal);
   if (cancelBtn) cancelBtn.addEventListener('click', closeBillingModal);
 
