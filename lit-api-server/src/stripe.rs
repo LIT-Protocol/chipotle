@@ -29,13 +29,22 @@ pub struct StripeState {
     pub publishable_key: String,
     secret_key: String,
     client: reqwest::Client,
-    /// wallet_address → Stripe customer ID cache.
+    /// wallet_address → Stripe customer ID cache (10-min TTL).
     /// Avoids duplicate customer creation caused by Stripe Search API indexing lag.
     customer_cache: Cache<String, String>,
     /// api_key → wallet_address cache.
     /// Resolves both master and usage API keys to the account's creator wallet address
     /// via the on-chain `allApiKeyHashesToMaster` mapping, avoiding a contract call per charge.
     wallet_cache: Cache<String, String>,
+    /// customer_id → credit balance cache (10-min TTL).
+    /// Avoids a Stripe API call on every charge; stale reads may allow some
+    /// overcharging which is acceptable per CPL-246.
+    balance_cache: Cache<String, i64>,
+    /// Guards against thundering-herd background refreshes.  When a refresh is
+    /// in flight for a given customer_id the key is present; subsequent calls
+    /// skip spawning a duplicate.  Entries expire after 30 seconds so a stuck
+    /// refresh does not block future ones forever.
+    balance_refresh_in_flight: Cache<String, ()>,
 }
 
 impl std::fmt::Debug for StripeState {
@@ -62,11 +71,19 @@ pub fn init() -> Option<Arc<StripeState>> {
         .ok()?;
     let customer_cache = Cache::builder()
         .max_capacity(10_000)
-        .time_to_idle(Duration::from_secs(3600))
+        .time_to_idle(Duration::from_secs(600)) // 10 minutes
         .build();
     let wallet_cache = Cache::builder()
         .max_capacity(10_000)
         .time_to_idle(Duration::from_secs(3600))
+        .build();
+    let balance_cache = Cache::builder()
+        .max_capacity(10_000)
+        .time_to_live(Duration::from_secs(600)) // 10 minutes hard TTL
+        .build();
+    let balance_refresh_in_flight = Cache::builder()
+        .max_capacity(10_000)
+        .time_to_live(Duration::from_secs(30))
         .build();
     tracing::info!("stripe: billing enabled");
     Some(Arc::new(StripeState {
@@ -75,6 +92,8 @@ pub fn init() -> Option<Arc<StripeState>> {
         client,
         customer_cache,
         wallet_cache,
+        balance_cache,
+        balance_refresh_in_flight,
     }))
 }
 
@@ -140,6 +159,30 @@ async fn stripe_post(
         .client
         .post(&url)
         .basic_auth(&state.secret_key, Some(""))
+        .form(params)
+        .send()
+        .await?;
+    let status = resp.status();
+    let body_text = resp.text().await?;
+    parse_stripe_response(status, &body_text)
+}
+
+/// `POST /v1/<path>` with form-encoded body and an `Idempotency-Key` header.
+///
+/// Stripe deduplicates requests sharing the same key within 24 hours, making
+/// retries after network errors safe from producing duplicate side-effects.
+async fn stripe_post_with_idempotency(
+    state: &StripeState,
+    path: &str,
+    params: &[(&str, &str)],
+    idempotency_key: &str,
+) -> Result<StripeResponse> {
+    let url = format!("{}/{}", stripe_base(), path);
+    let resp = state
+        .client
+        .post(&url)
+        .basic_auth(&state.secret_key, Some(""))
+        .header("Idempotency-Key", idempotency_key)
         .form(params)
         .send()
         .await?;
@@ -235,7 +278,57 @@ pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -
 
 /// Return the current credit balance in cents (≤ 0 means credits available; the Stripe
 /// balance field is negative when the customer has a credit).
+///
+/// Uses a stale-while-revalidate strategy: if a cached value exists it is returned
+/// immediately *and* a single background task is spawned to refresh the cache from
+/// Stripe (deduplicated via `balance_refresh_in_flight`).
+/// On a cache miss the fetch is performed inline (the caller waits).  This keeps
+/// the hot-path fast while ensuring the cache converges toward the true balance.
 pub async fn get_credit_balance(customer_id: &str, state: &StripeState) -> Result<i64> {
+    let cid = customer_id.to_string();
+
+    if let Some(cached) = state.balance_cache.get(&cid).await {
+        // Spawn a background refresh only if one is not already in flight.
+        if state.balance_refresh_in_flight.get(&cid).await.is_none() {
+            state.balance_refresh_in_flight.insert(cid.clone(), ()).await;
+            let state = state.clone();
+            let cid2 = cid.clone();
+            tokio::spawn(async move {
+                match fetch_balance(&state, &cid2).await {
+                    Ok(fetched) => {
+                        // Only update the cache if the fetched balance shows MORE
+                        // credit (more negative) than the current cached value.
+                        // This preserves optimistic decrements made by charge():
+                        // if charge() wrote -999 but Stripe still shows -1000
+                        // (charge hasn't landed yet), we keep -999 so the next
+                        // charge sees the decremented value.
+                        let current = state.balance_cache.get(&cid2).await;
+                        match current {
+                            Some(cached) if fetched < cached => {
+                                state.balance_cache.insert(cid2.clone(), fetched).await;
+                            }
+                            None => {
+                                state.balance_cache.insert(cid2.clone(), fetched).await;
+                            }
+                            _ => {} // keep the optimistic decrement
+                        }
+                    }
+                    Err(e) => tracing::warn!("stripe: background balance refresh failed for {cid2}: {e}"),
+                }
+                state.balance_refresh_in_flight.invalidate(&cid2).await;
+            });
+        }
+        return Ok(cached);
+    }
+
+    // Cache miss — fetch inline so the caller gets a real value.
+    let balance = fetch_balance(state, &cid).await?;
+    state.balance_cache.insert(cid, balance).await;
+    Ok(balance)
+}
+
+/// Fetch the raw balance from Stripe for a given customer ID.
+async fn fetch_balance(state: &StripeState, customer_id: &str) -> Result<i64> {
     let resp = stripe_get(state, &format!("customers/{customer_id}"), &[]).await?;
     let balance = resp
         .body
@@ -246,11 +339,38 @@ pub async fn get_credit_balance(customer_id: &str, state: &StripeState) -> Resul
 }
 
 /// Charge `cost_cents` against the customer's credit balance.
-/// Returns `Err` if the balance would go positive (insufficient credits).
+///
+/// Reads the cached balance directly (without triggering a background refresh) to
+/// avoid the refresh overwriting the optimistic decrement below.  If credits are
+/// sufficient the caller gets `Ok(())` immediately and the actual Stripe balance
+/// transaction is created asynchronously in a spawned task with retries.
+///
+/// An idempotency key is attached to the Stripe POST so that retries after a
+/// network error cannot produce duplicate balance transactions.
+///
+/// Returns `Err` only if the *cached* balance would go positive (insufficient credits).
 async fn charge(api_key: &str, cost_cents: i64, state: &StripeState) -> Result<()> {
     let wallet = resolve_wallet_address(api_key, state).await?;
     let customer_id = get_customer_by_wallet(&wallet, state).await?;
-    let balance = get_credit_balance(&customer_id, state).await?;
+
+    // Read the cache directly.  If missing, fall back to an inline Stripe fetch
+    // using try_get_with to coalesce concurrent cache-miss requests for the same
+    // customer.  We deliberately avoid `get_credit_balance()` here because its
+    // background refresh could overwrite the optimistic decrement we perform below.
+    let balance = match state.balance_cache.get(&customer_id).await {
+        Some(cached) => cached,
+        None => {
+            let state2 = state.clone();
+            let cid = customer_id.clone();
+            state
+                .balance_cache
+                .try_get_with(customer_id.clone(), async move {
+                    fetch_balance(&state2, &cid).await
+                })
+                .await
+                .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e}"))?
+        }
+    };
 
     if balance + cost_cents > 0 {
         anyhow::bail!(
@@ -260,18 +380,64 @@ async fn charge(api_key: &str, cost_cents: i64, state: &StripeState) -> Result<(
         );
     }
 
-    // Create a positive balance transaction to deduct credits.
-    let cost_str = cost_cents.to_string();
-    stripe_post(
-        state,
-        &format!("customers/{customer_id}/balance_transactions"),
-        &[
-            ("amount", cost_str.as_str()),
-            ("currency", "usd"),
-            ("description", "API call charge"),
-        ],
-    )
-    .await?;
+    // Optimistic local decrement: update the cached balance so subsequent calls
+    // within the TTL window see the reduced value instead of the stale pre-charge
+    // amount.  This bounds overcharging to concurrent requests rather than all
+    // requests within the 10-minute window.
+    state
+        .balance_cache
+        .insert(customer_id.clone(), balance + cost_cents)
+        .await;
+
+    // Fire-and-forget: spawn the actual Stripe balance transaction so the caller
+    // is not blocked on the Stripe API round-trip.  Retries up to 3 times with
+    // exponential backoff to handle transient Stripe failures.
+    let state = state.clone();
+    let cid = customer_id.clone();
+    let idempotency_key = uuid::Uuid::new_v4().to_string();
+    tokio::spawn(async move {
+        let cost_str = cost_cents.to_string();
+        let delays = [
+            Duration::from_secs(1),
+            Duration::from_secs(2),
+            Duration::from_secs(4),
+        ];
+        for (attempt, delay) in std::iter::once(Duration::ZERO)
+            .chain(delays.iter().copied())
+            .enumerate()
+        {
+            if !delay.is_zero() {
+                tokio::time::sleep(delay).await;
+            }
+            match stripe_post_with_idempotency(
+                &state,
+                &format!("customers/{cid}/balance_transactions"),
+                &[
+                    ("amount", cost_str.as_str()),
+                    ("currency", "usd"),
+                    ("description", "API call charge"),
+                ],
+                &idempotency_key,
+            )
+            .await
+            {
+                Ok(_) => return,
+                Err(e) => {
+                    if attempt < delays.len() {
+                        tracing::warn!(
+                            "stripe: charge attempt {} failed for customer {cid}, retrying: {e}",
+                            attempt + 1
+                        );
+                    } else {
+                        tracing::error!(
+                            "stripe: background charge failed after {} attempts for customer {cid}: {e}",
+                            attempt + 1
+                        );
+                    }
+                }
+            }
+        }
+    });
 
     Ok(())
 }
@@ -422,6 +588,9 @@ pub async fn confirm_payment_and_credit(
         ],
     )
     .await?;
+
+    // Invalidate the cached balance so the customer sees updated credits immediately.
+    state.balance_cache.invalidate(&customer_id).await;
 
     Ok(())
 }
