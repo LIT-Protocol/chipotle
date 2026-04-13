@@ -291,7 +291,10 @@ pub async fn get_credit_balance(customer_id: &str, state: &StripeState) -> Resul
     if let Some(cached) = state.balance_cache.get(&cid).await {
         // Spawn a background refresh only if one is not already in flight.
         if state.balance_refresh_in_flight.get(&cid).await.is_none() {
-            state.balance_refresh_in_flight.insert(cid.clone(), ()).await;
+            state
+                .balance_refresh_in_flight
+                .insert(cid.clone(), ())
+                .await;
             let state = state.clone();
             let cid2 = cid.clone();
             tokio::spawn(async move {
@@ -302,7 +305,9 @@ pub async fn get_credit_balance(customer_id: &str, state: &StripeState) -> Resul
                             state.balance_cache.insert(cid2.clone(), fetched).await;
                         }
                     }
-                    Err(e) => tracing::warn!("stripe: background balance refresh failed for {cid2}: {e}"),
+                    Err(e) => {
+                        tracing::warn!("stripe: background balance refresh failed for {cid2}: {e}")
+                    }
                 }
                 // Do NOT invalidate balance_refresh_in_flight here.  The 60-second
                 // TTL acts as a cooldown so each customer triggers at most one
