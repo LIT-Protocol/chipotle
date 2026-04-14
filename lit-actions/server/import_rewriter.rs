@@ -484,12 +484,12 @@ fn resolve_cdn_specifier(specifier: &str, referrer_url: &str) -> Option<String> 
     if (specifier.starts_with("./") || specifier.starts_with("../"))
         && referrer_url.starts_with(ALLOWED_NPM_PREFIX)
     {
-        if let Ok(base) = url::Url::parse(referrer_url) {
-            if let Ok(resolved) = base.join(specifier) {
-                let s = resolved.to_string();
-                if s.starts_with(ALLOWED_NPM_PREFIX) {
-                    return Some(s);
-                }
+        if let Ok(base) = url::Url::parse(referrer_url)
+            && let Ok(resolved) = base.join(specifier)
+        {
+            let s = resolved.to_string();
+            if s.starts_with(ALLOWED_NPM_PREFIX) {
+                return Some(s);
             }
         }
         return None;
@@ -530,10 +530,10 @@ pub(crate) async fn bundle_imports(
             Some(url) => {
                 let fetch_url = url.split('#').next().unwrap_or(&url).to_string();
                 // Preserve inline integrity hash from URL fragment
-                if let Some(fragment) = url.split_once('#').map(|(_, f)| f) {
-                    if let Some(hash) = fragment.strip_prefix("sha384-") {
-                        inline_hashes.insert(fetch_url.clone(), hash.to_string());
-                    }
+                if let Some(fragment) = url.split_once('#').map(|(_, f)| f)
+                    && let Some(hash) = fragment.strip_prefix("sha384-")
+                {
+                    inline_hashes.insert(fetch_url.clone(), hash.to_string());
                 }
                 root_urls.push(fetch_url.clone());
                 if !visited.contains(&fetch_url) {
@@ -570,7 +570,7 @@ pub(crate) async fn bundle_imports(
         let mut hasher = Sha384::new();
         hasher.update(&bytes);
         let actual_digest = hasher.finalize();
-        let actual_b64 = base64::engine::general_purpose::STANDARD.encode(&actual_digest);
+        let actual_b64 = base64::engine::general_purpose::STANDARD.encode(actual_digest);
 
         // Integrity verification — mirrors CdnModuleLoader::load()
         // Inline hash takes priority, then lockfile manifest (same as load())
@@ -735,8 +735,8 @@ pub(crate) async fn bundle_imports(
 
     // Start with leaf modules (no dependencies within the graph)
     let mut topo_queue: VecDeque<usize> = VecDeque::new();
-    for i in 0..n {
-        if in_degree[i] == 0 {
+    for (i, &deg) in in_degree.iter().enumerate() {
+        if deg == 0 {
             topo_queue.push_back(i);
         }
     }
@@ -811,11 +811,11 @@ pub(crate) async fn bundle_imports(
             continue;
         }
 
-        if imp.bindings.len() == 1 {
-            if let ImportBinding::Namespace(ref name) = imp.bindings[0] {
-                dynamic_imports.push_str(&format!("const {name} = await import(\"{escaped}\");\n"));
-                continue;
-            }
+        if imp.bindings.len() == 1
+            && let ImportBinding::Namespace(ref name) = imp.bindings[0]
+        {
+            dynamic_imports.push_str(&format!("const {name} = await import(\"{escaped}\");\n"));
+            continue;
         }
 
         let mut parts = Vec::new();
