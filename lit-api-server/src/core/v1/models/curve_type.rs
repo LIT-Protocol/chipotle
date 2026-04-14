@@ -204,3 +204,147 @@ impl From<CurveType> for ethers::types::U256 {
         ethers::types::U256::from(curve_type as u32)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ethers::types::U256;
+
+    // ── FromStr ─────────────────────────────────────────────────────────
+    #[test]
+    fn from_str_case_insensitive() {
+        assert_eq!(CurveType::from_str("secp256k1").unwrap(), CurveType::K256);
+        assert_eq!(CurveType::from_str("SECP256K1").unwrap(), CurveType::K256);
+        assert_eq!(CurveType::from_str("Secp256k1").unwrap(), CurveType::K256);
+    }
+
+    #[test]
+    fn from_str_all_variants() {
+        assert_eq!(CurveType::from_str("BLS12381G1").unwrap(), CurveType::BLS);
+        assert_eq!(
+            CurveType::from_str("ECDSA_CAIT_SITH").unwrap(),
+            CurveType::K256
+        );
+        assert_eq!(CurveType::from_str("ED25519").unwrap(), CurveType::Ed25519);
+        assert_eq!(CurveType::from_str("ED448").unwrap(), CurveType::Ed448);
+        assert_eq!(
+            CurveType::from_str("RISTRETTO25519").unwrap(),
+            CurveType::Ristretto25519
+        );
+        assert_eq!(CurveType::from_str("P256").unwrap(), CurveType::P256);
+        assert_eq!(CurveType::from_str("P384").unwrap(), CurveType::P384);
+        assert_eq!(
+            CurveType::from_str("REDJUBJUB").unwrap(),
+            CurveType::RedJubjub
+        );
+        assert_eq!(
+            CurveType::from_str("REDDECAF377").unwrap(),
+            CurveType::RedDecaf377
+        );
+        assert_eq!(
+            CurveType::from_str("BLS12381G1SIGN").unwrap(),
+            CurveType::BLS12381G1
+        );
+        assert_eq!(
+            CurveType::from_str("REDPALLAS").unwrap(),
+            CurveType::RedPallas
+        );
+    }
+
+    #[test]
+    fn from_str_invalid() {
+        assert!(CurveType::from_str("UNKNOWN").is_err());
+    }
+
+    // ── TryFrom<u8> ────────────────────────────────────────────────────
+    #[test]
+    fn try_from_u8_all_valid() {
+        assert_eq!(CurveType::try_from(1u8).unwrap(), CurveType::BLS);
+        assert_eq!(CurveType::try_from(2u8).unwrap(), CurveType::K256);
+        assert_eq!(CurveType::try_from(3u8).unwrap(), CurveType::Ed25519);
+        assert_eq!(CurveType::try_from(4u8).unwrap(), CurveType::Ed448);
+        assert_eq!(CurveType::try_from(5u8).unwrap(), CurveType::Ristretto25519);
+        assert_eq!(CurveType::try_from(6u8).unwrap(), CurveType::P256);
+        assert_eq!(CurveType::try_from(7u8).unwrap(), CurveType::P384);
+        assert_eq!(CurveType::try_from(8u8).unwrap(), CurveType::RedJubjub);
+        assert_eq!(CurveType::try_from(9u8).unwrap(), CurveType::RedDecaf377);
+        assert_eq!(CurveType::try_from(10u8).unwrap(), CurveType::BLS12381G1);
+        assert_eq!(CurveType::try_from(11u8).unwrap(), CurveType::RedPallas);
+    }
+
+    #[test]
+    fn try_from_u8_invalid() {
+        assert!(CurveType::try_from(0u8).is_err());
+        assert!(CurveType::try_from(12u8).is_err());
+        assert!(CurveType::try_from(255u8).is_err());
+    }
+
+    // ── TryFrom<U256> ──────────────────────────────────────────────────
+    #[test]
+    fn try_from_u256_round_trip() {
+        for variant in CurveType::into_iter() {
+            let u256_val: U256 = variant.into();
+            let back = CurveType::try_from(u256_val).unwrap();
+            assert_eq!(variant, back);
+        }
+    }
+
+    // ── Into<U256> ─────────────────────────────────────────────────────
+    #[test]
+    fn into_u256_matches_repr() {
+        assert_eq!(U256::from(CurveType::BLS), U256::from(1));
+        assert_eq!(U256::from(CurveType::K256), U256::from(2));
+        assert_eq!(U256::from(CurveType::RedPallas), U256::from(11));
+    }
+
+    // ── Display / as_str ───────────────────────────────────────────────
+    #[test]
+    fn display_matches_as_str() {
+        for variant in CurveType::into_iter() {
+            assert_eq!(variant.to_string(), variant.as_str());
+        }
+    }
+
+    // ── scalar_len / compressed_point_len ──────────────────────────────
+    #[test]
+    fn scalar_len_positive_for_all() {
+        for variant in CurveType::into_iter() {
+            assert!(variant.scalar_len() > 0);
+        }
+    }
+
+    #[test]
+    fn compressed_point_len_positive_for_all() {
+        for variant in CurveType::into_iter() {
+            assert!(variant.compressed_point_len() > 0);
+        }
+    }
+
+    // ── vrf_ctx ────────────────────────────────────────────────────────
+    #[test]
+    fn vrf_ctx_not_empty() {
+        for variant in CurveType::into_iter() {
+            assert!(!variant.vrf_ctx().is_empty());
+        }
+    }
+
+    // ── backup_prefix ──────────────────────────────────────────────────
+    #[test]
+    fn backup_prefix_not_empty() {
+        for variant in CurveType::into_iter() {
+            assert!(!variant.backup_prefix().is_empty());
+        }
+    }
+
+    // ── into_iter covers all variants ──────────────────────────────────
+    #[test]
+    fn into_iter_count() {
+        assert_eq!(CurveType::into_iter().count(), CurveType::NUM_USED_CURVES);
+    }
+
+    // ── Default ────────────────────────────────────────────────────────
+    #[test]
+    fn default_is_bls() {
+        assert_eq!(CurveType::default(), CurveType::BLS);
+    }
+}
