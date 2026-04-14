@@ -521,15 +521,34 @@ pub(crate) async fn bundle_imports(
     let mut queue: VecDeque<String> = VecDeque::new();
     let mut visited: HashSet<String> = HashSet::new();
 
-    // Seed queue with user's top-level import specifiers
+    // Seed queue with user's top-level import specifiers.
+    // Track inline #sha384-... hashes separately for integrity verification.
     let mut root_urls: Vec<String> = Vec::new();
+    let mut inline_hashes: HashMap<String, String> = HashMap::new();
     for imp in imports {
-        if let Some(url) = resolve_cdn_specifier(&imp.specifier, "") {
-            let fetch_url = url.split('#').next().unwrap_or(&url).to_string();
-            root_urls.push(fetch_url.clone());
-            if !visited.contains(&fetch_url) {
-                queue.push_back(fetch_url.clone());
-                visited.insert(fetch_url);
+        match resolve_cdn_specifier(&imp.specifier, "") {
+            Some(url) => {
+                let fetch_url = url.split('#').next().unwrap_or(&url).to_string();
+                // Preserve inline integrity hash from URL fragment
+                if let Some(fragment) = url.split_once('#').map(|(_, f)| f) {
+                    if let Some(hash) = fragment.strip_prefix("sha384-") {
+                        inline_hashes.insert(fetch_url.clone(), hash.to_string());
+                    }
+                }
+                root_urls.push(fetch_url.clone());
+                if !visited.contains(&fetch_url) {
+                    queue.push_back(fetch_url.clone());
+                    visited.insert(fetch_url);
+                }
+            }
+            None => {
+                return Err(JsErrorBox::generic(format!(
+                    "Unable to resolve import specifier: \"{}\". \
+                     Use an npm specifier with a pinned version (e.g. zod@3.22.4) \
+                     or a full jsDelivr URL.",
+                    imp.specifier
+                ))
+                .into());
             }
         }
     }
@@ -554,11 +573,11 @@ pub(crate) async fn bundle_imports(
         let actual_b64 = base64::engine::general_purpose::STANDARD.encode(&actual_digest);
 
         // Integrity verification — mirrors CdnModuleLoader::load()
-        let expected_hash = integrity
-            .read()
-            .expect("integrity lock poisoned")
+        // Inline hash takes priority, then lockfile manifest (same as load())
+        let expected_hash = inline_hashes
             .get(&url)
-            .cloned();
+            .cloned()
+            .or_else(|| integrity.read().ok().and_then(|map| map.get(&url).cloned()));
 
         if let Some(ref expected_b64) = expected_hash {
             // Known module: verify against stored hash
@@ -659,9 +678,9 @@ pub(crate) async fn bundle_imports(
         let hash = actual_b64;
 
         // Scan for nested imports (ES modules must be valid UTF-8)
-        let source_str = String::from_utf8(bytes.clone())
+        let source_str = std::str::from_utf8(&bytes)
             .map_err(|e| JsErrorBox::generic(format!("Module {url} is not valid UTF-8: {e}")))?;
-        let found_imports = scan_cdn_imports(&source_str);
+        let found_imports = scan_cdn_imports(source_str);
 
         let mut nested = Vec::new();
         for (range, spec) in found_imports {
