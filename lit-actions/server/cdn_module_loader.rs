@@ -315,9 +315,8 @@ impl ModuleLoader for CdnModuleLoader {
     ) -> Result<ModuleSpecifier, ModuleLoaderError> {
         // Pass through data: URLs unchanged (used by the bundling pipeline to inline modules).
         if specifier.starts_with("data:") {
-            return ModuleSpecifier::parse(specifier).map_err(|e| {
-                JsErrorBox::generic(format!("Invalid data URL: {e}")).into()
-            });
+            return ModuleSpecifier::parse(specifier)
+                .map_err(|e| JsErrorBox::generic(format!("Invalid data URL: {e}")).into());
         }
 
         // Resolve relative imports against the referrer when the referrer is a jsDelivr npm URL.

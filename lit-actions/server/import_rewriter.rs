@@ -310,7 +310,7 @@ use tracing::{info, warn};
 use std::path::PathBuf;
 
 use crate::cdn_module_loader::{
-    constant_time_eq, CdnModuleLoader, ALLOWED_NPM_PREFIX, MAX_MODULE_COUNT,
+    ALLOWED_NPM_PREFIX, CdnModuleLoader, MAX_MODULE_COUNT, constant_time_eq,
 };
 
 /// A resolved module in the dependency graph.
@@ -659,9 +659,8 @@ pub(crate) async fn bundle_imports(
         let hash = actual_b64;
 
         // Scan for nested imports (ES modules must be valid UTF-8)
-        let source_str = String::from_utf8(bytes.clone()).map_err(|e| {
-            JsErrorBox::generic(format!("Module {url} is not valid UTF-8: {e}"))
-        })?;
+        let source_str = String::from_utf8(bytes.clone())
+            .map_err(|e| JsErrorBox::generic(format!("Module {url} is not valid UTF-8: {e}")))?;
         let found_imports = scan_cdn_imports(&source_str);
 
         let mut nested = Vec::new();
@@ -695,7 +694,11 @@ pub(crate) async fn bundle_imports(
     // Phase 2: Topological sort (Kahn's algorithm)
     // Build adjacency: module → set of modules it depends on
     let urls: Vec<String> = graph.keys().cloned().collect();
-    let url_to_idx: HashMap<&str, usize> = urls.iter().enumerate().map(|(i, u)| (u.as_str(), i)).collect();
+    let url_to_idx: HashMap<&str, usize> = urls
+        .iter()
+        .enumerate()
+        .map(|(i, u)| (u.as_str(), i))
+        .collect();
     let n = urls.len();
     let mut in_degree = vec![0usize; n];
     let mut dependents: Vec<Vec<usize>> = vec![Vec::new(); n]; // dep → list of modules that import it
@@ -751,7 +754,9 @@ pub(crate) async fn bundle_imports(
             .nested_imports
             .iter()
             .filter_map(|(range, dep_url)| {
-                data_urls.get(dep_url).map(|data_url| (range.clone(), data_url.clone()))
+                data_urls
+                    .get(dep_url)
+                    .map(|data_url| (range.clone(), data_url.clone()))
             })
             .collect();
         // Sort by range start descending so we replace from end to start
@@ -1450,7 +1455,8 @@ async function main() {}";
 
     #[test]
     fn scan_multiple_imports() {
-        let source = r#"import{a}from"/npm/pkg-a@1.0.0/+esm";import{b}from"/npm/pkg-b@2.0.0/+esm";"#;
+        let source =
+            r#"import{a}from"/npm/pkg-a@1.0.0/+esm";import{b}from"/npm/pkg-b@2.0.0/+esm";"#;
         let results = scan_cdn_imports(source);
         assert_eq!(results.len(), 2);
         assert_eq!(results[0].1, "/npm/pkg-a@1.0.0/+esm");
@@ -1552,10 +1558,7 @@ async function main() {}";
 
     #[test]
     fn resolve_full_url_passthrough() {
-        let result = resolve_cdn_specifier(
-            "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm",
-            "",
-        );
+        let result = resolve_cdn_specifier("https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm", "");
         assert_eq!(
             result,
             Some("https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm".to_string())
