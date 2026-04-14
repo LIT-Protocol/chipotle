@@ -15,7 +15,7 @@ use sha2::{Digest, Sha384};
 use tracing::{debug, error, info, instrument, warn};
 
 /// Constant-time byte comparison to prevent timing side-channels on integrity hashes.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
@@ -27,12 +27,12 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 /// Allowed CDN URL prefix for module imports (origin only, used for URL construction).
-const ALLOWED_CDN_PREFIX: &str = "https://cdn.jsdelivr.net/";
+pub(crate) const ALLOWED_CDN_PREFIX: &str = "https://cdn.jsdelivr.net/";
 
 /// Allowed CDN URL prefix restricted to the npm backend.
 /// Only npm packages are permitted; other jsDelivr backends (/gh/, /wp/, etc.)
 /// serve mutable content and are rejected.
-const ALLOWED_NPM_PREFIX: &str = "https://cdn.jsdelivr.net/npm/";
+pub(crate) const ALLOWED_NPM_PREFIX: &str = "https://cdn.jsdelivr.net/npm/";
 
 /// Maximum response body size (10 MB).
 const MAX_MODULE_SIZE_BYTES: usize = 10 * 1024 * 1024;
@@ -45,7 +45,7 @@ const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Maximum number of distinct modules that can be loaded per action execution.
 /// Prevents DoS via dependency graphs with thousands of tiny files.
-const MAX_MODULE_COUNT: usize = 100;
+pub(crate) const MAX_MODULE_COUNT: usize = 100;
 
 /// Thread-safe cache for fetched and integrity-verified module sources.
 pub type ModuleCache = Arc<RwLock<HashMap<String, Vec<u8>>>>;
@@ -187,7 +187,7 @@ impl CdnModuleLoader {
     /// inline integrity verification.
     ///
     /// Returns None if the specifier doesn't match the expected format.
-    fn parse_npm_specifier(specifier: &str) -> Option<String> {
+    pub(crate) fn parse_npm_specifier(specifier: &str) -> Option<String> {
         // Split off the optional #hash fragment before parsing
         let (spec, fragment) = match specifier.split_once('#') {
             Some((s, f)) => (s, Some(f)),
@@ -232,7 +232,7 @@ impl CdnModuleLoader {
     /// Fetch a URL with streaming body read, enforcing size limits during download.
     /// Returns the response bytes and optionally the SRI hash from CDN headers.
     #[instrument(skip_all, err)]
-    async fn fetch_with_size_limit(
+    pub(crate) async fn fetch_with_size_limit(
         client: &reqwest::Client,
         url: &str,
         label: &str,
@@ -313,6 +313,13 @@ impl ModuleLoader for CdnModuleLoader {
         referrer: &str,
         _kind: ResolutionKind,
     ) -> Result<ModuleSpecifier, ModuleLoaderError> {
+        // Pass through data: URLs unchanged (used by the bundling pipeline to inline modules).
+        if specifier.starts_with("data:") {
+            return ModuleSpecifier::parse(specifier).map_err(|e| {
+                JsErrorBox::generic(format!("Invalid data URL: {e}")).into()
+            });
+        }
+
         // Resolve relative imports against the referrer when the referrer is a jsDelivr npm URL.
         // ESM modules on jsDelivr can have relative imports between files in the same package.
         if (specifier.starts_with("./") || specifier.starts_with("../"))
@@ -347,6 +354,24 @@ impl ModuleLoader for CdnModuleLoader {
                 "Relative import \"{specifier}\" resolved to {resolved}, which is outside the allowed /npm/ CDN path"
             ))
             .into());
+        }
+
+        // Handle root-relative /npm/ paths from jsDelivr's ESM output.
+        // jsDelivr's +esm endpoint rewrites nested imports as root-relative paths
+        // (e.g. `from"/npm/@noble/hashes@1.3.2/hmac/+esm"`). Resolve these by
+        // prepending the CDN origin, then validate the result.
+        if specifier.starts_with("/npm/") {
+            let full_url = format!("{ALLOWED_CDN_PREFIX}{}", &specifier[1..]);
+            if Self::is_allowed_cdn(&full_url) {
+                info!(
+                    specifier,
+                    resolved_url = %full_url,
+                    "CDN module resolve: root-relative /npm/ import resolved to full jsDelivr URL"
+                );
+                return ModuleSpecifier::parse(&full_url).map_err(|e| {
+                    JsErrorBox::generic(format!("Invalid resolved URL: {full_url}: {e}")).into()
+                });
+            }
         }
 
         // If it's already a full jsDelivr URL, pass through
@@ -864,6 +889,54 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
             "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm#sha384-abc123def"
         );
         assert_eq!(result.fragment(), Some("sha384-abc123def"));
+    }
+
+    #[test]
+    fn test_resolve_root_relative_npm_imports() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // jsDelivr's +esm output uses root-relative /npm/ paths for nested imports
+        let result = loader
+            .resolve(
+                "/npm/@noble/hashes@1.3.2/hmac/+esm",
+                "https://cdn.jsdelivr.net/npm/ethers@6.13.4/+esm",
+                ResolutionKind::Import,
+            )
+            .unwrap();
+        assert_eq!(
+            result.as_str(),
+            "https://cdn.jsdelivr.net/npm/@noble/hashes@1.3.2/hmac/+esm"
+        );
+    }
+
+    #[test]
+    fn test_resolve_root_relative_npm_unscoped() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        let result = loader
+            .resolve(
+                "/npm/aes-js@4.0.0-beta.5/+esm",
+                "https://cdn.jsdelivr.net/npm/ethers@6.13.4/+esm",
+                ResolutionKind::Import,
+            )
+            .unwrap();
+        assert_eq!(
+            result.as_str(),
+            "https://cdn.jsdelivr.net/npm/aes-js@4.0.0-beta.5/+esm"
+        );
+    }
+
+    #[test]
+    fn test_resolve_root_relative_rejects_non_npm() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // /gh/ root-relative paths should be rejected (mutable content)
+        assert!(
+            loader
+                .resolve(
+                    "/gh/user/repo@main/file.js",
+                    "https://cdn.jsdelivr.net/npm/pkg@1.0.0/+esm",
+                    ResolutionKind::Import
+                )
+                .is_err()
+        );
     }
 
     #[test]
