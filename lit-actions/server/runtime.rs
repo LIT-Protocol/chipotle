@@ -1,13 +1,16 @@
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, HashMap};
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
 use std::sync::Once;
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
-use deno_core::{JsRuntime, NoopModuleLoader, v8};
+use deno_core::{JsRuntime, v8};
+
+use crate::cdn_module_loader::{CdnModuleLoader, LoadedModules, ModuleCache};
+use crate::import_rewriter;
 use deno_resolver::npm::{DenoInNpmPackageChecker, ManagedNpmResolver};
 use deno_runtime::{
     BootstrapOptions, WorkerLogLevel,
@@ -48,12 +51,19 @@ fn deno_isolate_init() -> Option<&'static [u8]> {
 }
 
 // using the worker built into deno
+#[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, err)]
 fn build_main_worker_and_inject_sdk(
     globals_to_inject: &Option<serde_json::Value>,
     auth_context: &Option<serde_json::Value>,
     http_headers: BTreeMap<String, String>,
     memory_limit_mb: Option<usize>,
+    integrity_manifest: Arc<RwLock<HashMap<String, String>>>,
+    strict_imports: bool,
+    module_cache: ModuleCache,
+    lockfile_path: Option<PathBuf>,
+    http_client: Arc<reqwest::Client>,
+    loaded_modules: LoadedModules,
 ) -> Result<MainWorker> {
     let options = WorkerOptions {
         bootstrap: BootstrapOptions {
@@ -101,7 +111,14 @@ fn build_main_worker_and_inject_sdk(
             broadcast_channel: Default::default(),
             feature_checker: Default::default(),
             fs: Arc::new(RealFs),
-            module_loader: Rc::new(NoopModuleLoader),
+            module_loader: Rc::new(CdnModuleLoader::with_options(
+                integrity_manifest,
+                strict_imports,
+                module_cache,
+                lockfile_path,
+                Some(http_client),
+                loaded_modules,
+            )),
             node_services: Default::default(),
             npm_process_state_provider: Default::default(),
             permissions: PermissionsContainer::new(desc_parser, perms),
@@ -216,6 +233,7 @@ fn build_main_worker_and_inject_sdk(
 // NB: Due to the new PKU feature introduced in V8 11.6, we need to init the V8
 // platform on the parent thread that will spawn V8 isolates (in main.rs).
 // See https://github.com/denoland/deno/blob/v1.43/cli/main.rs
+#[instrument(skip_all)]
 pub fn init_v8() {
     // Tigthen up V8 security while sacrificing performance
     // To get a list of supported flags: deno run --v8-flags=-help
@@ -246,6 +264,11 @@ pub(crate) async fn execute_js(
     outbound_tx: flume::Sender<tonic::Result<ExecuteJsResponse>>,
     inbound_rx: TracedReceiver<ExecuteJsRequest>,
     is_test_server: bool,
+    integrity_manifest: Arc<RwLock<HashMap<String, String>>>,
+    strict_imports: bool,
+    module_cache: ModuleCache,
+    lockfile_path: Option<PathBuf>,
+    http_client: Arc<reqwest::Client>,
 ) -> Result<()> {
     // Fast path to do nothing, allowing us to benchmark with and without Deno involved
     if code.is_empty() || code.bytes().all(|b| b.is_ascii_whitespace()) {
@@ -259,10 +282,22 @@ pub(crate) async fn execute_js(
     let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
     let memory_limit_mb = memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB);
 
-    let mut worker =
-        build_main_worker_and_inject_sdk(&None, &auth_context, http_headers, Some(memory_limit_mb))
-            .context("Error building main worker")
-            .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
+    let loaded_modules = LoadedModules::default();
+
+    let mut worker = build_main_worker_and_inject_sdk(
+        &None,
+        &auth_context,
+        http_headers,
+        Some(memory_limit_mb),
+        integrity_manifest,
+        strict_imports,
+        module_cache,
+        lockfile_path,
+        http_client,
+        loaded_modules.clone(),
+    )
+    .context("Error building main worker")
+    .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
 
     let op_state = worker.js_runtime.op_state();
     {
@@ -270,6 +305,7 @@ pub(crate) async fn execute_js(
         let mut state = op_state.borrow_mut();
         state.put(outbound_tx);
         state.put(inbound_rx);
+        state.put(loaded_modules);
         drop(state);
     }
 
@@ -305,9 +341,19 @@ pub(crate) async fn execute_js(
     let js_params = js_params.as_ref().unwrap_or_default();
     let js_func_params = js_params.to_string();
 
-    // Add a wrapper function so that we can catch "return" statements and set the response
-    let code = format!(
-        "
+    // Rewrite static ES `import` statements into dynamic `import()` calls.
+    // Static imports are not valid in script mode, so we strip them from the
+    // user code and generate equivalent dynamic imports inside the async wrapper
+    // where `await` is available and the imported bindings are in lexical scope.
+    let import_rewriter::RewriteResult {
+        code: rewritten_code,
+        imports,
+    } = import_rewriter::rewrite_imports(&code);
+
+    let code = if imports.is_empty() {
+        // No imports — preserve the existing wrapper layout unchanged.
+        format!(
+            "
         {code}
         ;
         (async () => {{
@@ -317,7 +363,25 @@ pub(crate) async fn execute_js(
           LitActions.setResponse( {{ response: data }} );
         }}
         }})();"
-    );
+        )
+    } else {
+        // Has imports — move user code inside the async IIFE so that the
+        // dynamically imported bindings are in lexical scope for main().
+        let dynamic_imports = import_rewriter::generate_dynamic_imports(&imports);
+        format!(
+            "
+        (async () => {{
+        {dynamic_imports}
+        {rewritten_code}
+        ;
+        const params = {js_func_params} ;
+        const data = await main(params);
+        if (typeof data !== \"undefined\") {{
+          LitActions.setResponse( {{ response: data }} );
+        }}
+        }})();"
+        )
+    };
 
     if let Err(e) = worker
         .js_runtime
@@ -362,6 +426,7 @@ pub(crate) async fn execute_js(
     Ok(())
 }
 
+#[instrument(skip_all, err)]
 async fn update_resource_usage(
     js_runtime: &mut JsRuntime,
     heap_stats: &mut v8::HeapStatistics,
@@ -412,6 +477,7 @@ async fn update_resource_usage(
     Ok(())
 }
 
+#[instrument(skip_all)]
 fn start_controller_thread(
     js_runtime: &mut JsRuntime,
     worker_timeout_ms: u64,

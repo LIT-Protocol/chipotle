@@ -1,4 +1,8 @@
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+
 use clap::Parser;
+use lit_actions_server::cdn_module_loader::CdnModuleLoader;
 use lit_core::utils::unix::raise_fd_limit;
 use tracing::{debug, error, info};
 
@@ -16,6 +20,21 @@ struct Args {
         help = "Path to Unix domain socket used by gRPC server"
     )]
     socket: std::path::PathBuf,
+
+    #[arg(
+        long,
+        env = "LIT_INTEGRITY_LOCK",
+        help = "Path to integrity.lock file for CDN module verification"
+    )]
+    integrity_lock: Option<std::path::PathBuf>,
+
+    #[arg(
+        long,
+        env = "LIT_STRICT_IMPORTS",
+        default_value = "true",
+        help = "Verify unknown CDN modules via TOFU (trust-on-first-use) before execution. With --integrity-lock, verified hashes are also persisted to the lockfile."
+    )]
+    strict_imports: bool,
 }
 
 fn main() -> anyhow::Result<()> {
@@ -30,7 +49,25 @@ fn main() -> anyhow::Result<()> {
 
     lit_actions_server::init_v8();
 
+    // Load integrity manifest for CDN module verification
+    let integrity_manifest = if let Some(path) = &args.integrity_lock {
+        let contents = std::fs::read_to_string(path).map_err(|e| {
+            anyhow::anyhow!("Failed to read integrity.lock at {}: {e}", path.display())
+        })?;
+        let manifest = CdnModuleLoader::parse_integrity_lock(&contents);
+        info!(
+            "Loaded integrity manifest with {} entries from {:?}",
+            manifest.len(),
+            path
+        );
+        Arc::new(RwLock::new(manifest))
+    } else {
+        info!("No integrity.lock file specified, CDN imports will use empty manifest");
+        Arc::new(RwLock::new(HashMap::new()))
+    };
+
     info!("Listening on {:?}", args.socket);
+    info!("Strict imports: {}", args.strict_imports);
 
     let main_rt = tokio::runtime::Runtime::new().expect("failed to create runtime");
 
@@ -38,10 +75,16 @@ fn main() -> anyhow::Result<()> {
         let signal = async {
             let _ = tokio::signal::ctrl_c().await;
         };
-        lit_actions_server::start_server(args.socket, Some(signal))
-            .await
-            .inspect_err(|e| error!("Server error: {e:?}"))
-            .expect("failed to start server");
+        lit_actions_server::start_server(
+            args.socket,
+            Some(signal),
+            integrity_manifest,
+            args.strict_imports,
+            args.integrity_lock,
+        )
+        .await
+        .inspect_err(|e| error!("Server error: {e:?}"))
+        .expect("failed to start server");
     });
 
     observability_providers.shutdown();

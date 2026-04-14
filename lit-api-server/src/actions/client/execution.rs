@@ -36,6 +36,7 @@ impl Client {
             if seconds == 0 {
                 return Ok(());
             }
+            tracing::debug!(seconds, "execution::flush_unbilled_seconds: charging");
             crate::stripe::charge_lit_action_time(&self.api_key, seconds, stripe)
                 .await
                 .map_err(|e| {
@@ -178,6 +179,7 @@ impl Client {
 
         // let socket_path = self.socket_path();
         let socket_path = PathBuf::from("/tmp/lit_actions.sock");
+        tracing::debug!("execution::grpc_channel: connecting");
         let channel = self
             .client_grpc_channels
             .create_or_get_connection(&socket_path.display().to_string(), || {
@@ -185,6 +187,7 @@ impl Client {
                     .map_err(|e| anyhow!("Error creating connection to lit-action server: {:?}", e))
             })
             .await?;
+        tracing::debug!("execution::grpc_stream_setup: opening bidirectional stream");
         let mut stream = ActionClient::new(channel)
             .execute_js(Request::from_parts(
                 self.metadata()?,
@@ -197,6 +200,7 @@ impl Client {
             .boxed()
             .await?
             .into_inner();
+        tracing::debug!("execution::grpc_stream_setup: stream established");
 
         // Start the billing clock before execution begins.
         self.state.execution_start = Some(tokio::time::Instant::now());

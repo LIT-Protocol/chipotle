@@ -306,6 +306,30 @@ body.has-api-key .dashboard-wrap {
   white-space: nowrap;
 }
 
+/* No-funds warning (instructions section) */
+.no-funds-warning {
+  background: rgba(234, 179, 8, 0.1);
+  border: 1px solid rgba(234, 179, 8, 0.35);
+  border-radius: var(--radius);
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+  font-size: 0.875rem;
+  color: #92400e;
+}
+.no-funds-warning strong {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+.no-funds-warning p {
+  margin: 0;
+  line-height: 1.5;
+}
+.no-funds-warning a {
+  color: var(--primary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
 /* Billing disabled banner (dashboard body) */
 .billing-disabled-banner {
   background: var(--bg-muted, #f3f4f6);

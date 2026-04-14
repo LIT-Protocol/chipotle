@@ -5,6 +5,8 @@
 
 const STORAGE_KEY_API = 'accountconfig_api_key';
 const STORAGE_KEY_THEME = 'accountconfig_theme';
+const STORAGE_KEY_USAGE_OVERRIDE = 'accountconfig_usage_key_override';
+const STORAGE_KEY_OVERRIDE_ENABLED = 'accountconfig_usage_override_enabled';
 const LIST_PAGE_SIZE = '20';
 
 function getApiKey() {
@@ -18,6 +20,56 @@ function setApiKey(v) {
   _billingCheckedAt = 0;
   if (_billingRetryTimer) { clearTimeout(_billingRetryTimer); _billingRetryTimer = null; }
   updateAuthUI();
+}
+
+/** Returns the usage API key override if set, otherwise the account API key. */
+function getEffectiveApiKey() {
+  return sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE) || getApiKey();
+}
+
+function setUsageKeyOverride(v) {
+  if (v) sessionStorage.setItem(STORAGE_KEY_USAGE_OVERRIDE, v);
+  else sessionStorage.removeItem(STORAGE_KEY_USAGE_OVERRIDE);
+  updateUsageKeyOverrideUI();
+}
+
+function isOverrideEnabled() {
+  return sessionStorage.getItem(STORAGE_KEY_OVERRIDE_ENABLED) === 'true';
+}
+
+function toggleOverrideEnabled() {
+  const next = !isOverrideEnabled();
+  if (next) {
+    sessionStorage.setItem(STORAGE_KEY_OVERRIDE_ENABLED, 'true');
+  } else {
+    sessionStorage.removeItem(STORAGE_KEY_OVERRIDE_ENABLED);
+    setUsageKeyOverride('');
+  }
+  updateUsageKeyOverrideUI();
+}
+
+function updateUsageKeyOverrideUI() {
+  const card = document.getElementById('usage-key-override-card');
+  const badge = document.getElementById('usage-key-override-badge');
+  const input = document.getElementById('usage-key-override-input');
+  const clearBtn = document.getElementById('usage-key-override-clear');
+  const balanceEl = document.getElementById('billing-balance-display');
+  const addFundsBtn = document.getElementById('btn-add-funds');
+  const toggleBtn = document.getElementById('toggle-usage-override-btn');
+  const enabled = isOverrideEnabled();
+  const hasOverride = !!sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE);
+  if (card) card.style.display = enabled ? '' : 'none';
+  if (badge) {
+    badge.style.display = hasOverride ? '' : 'none';
+    if (hasOverride) badge.textContent = 'Using Key: ' + sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE).substring(0, 6) + '…';
+  }
+  if (input) input.value = sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE) || '';
+  if (clearBtn) clearBtn.style.display = hasOverride ? '' : 'none';
+  if (toggleBtn) toggleBtn.textContent = enabled ? '✓ Usage Key Override' : 'Usage Key Override';
+  // Only show billing when authenticated AND no override is active
+  const showBilling = !!getApiKey() && !hasOverride;
+  if (balanceEl) balanceEl.style.display = showBilling ? '' : 'none';
+  if (addFundsBtn) addFundsBtn.style.display = showBilling ? '' : 'none';
 }
 
 function getBaseUrl() {
@@ -66,6 +118,8 @@ function updateAuthUI() {
   if (addFundsBtn) addFundsBtn.style.display = 'none';
   if (notRequiredEl) notRequiredEl.style.display = 'none';
   if (billingBanner) billingBanner.style.display = 'none';
+  const noFundsWarning = document.getElementById('no-funds-warning');
+  if (noFundsWarning) noFundsWarning.style.display = 'none';
   if (hasKey) {
     const capturedKey = getApiKey();
     refreshOverviewAccount();
@@ -90,6 +144,9 @@ function refreshBillingUI(capturedKey, balanceEl, addFundsBtn, notRequiredEl, bi
     } else {
       if (notRequiredEl) notRequiredEl.style.display = '';
       if (billingBanner) billingBanner.style.display = '';
+      // Hide no-funds warning when billing is unavailable (contradicts "Payment Not Required")
+      const nfw = document.getElementById('no-funds-warning');
+      if (nfw) nfw.style.display = 'none';
       // Schedule a retry so transient failures recover without a reload.
       if (_billingRetryTimer) clearTimeout(_billingRetryTimer);
       _billingRetryTimer = setTimeout(() => {
@@ -128,7 +185,19 @@ function hideStatus(elId) {
 async function getClient() {
   const baseUrl = getBaseUrl();
   const { createClient } = await import('../../core_sdk.js');
-  return createClient(baseUrl);
+  const client = createClient(baseUrl);
+  return new Proxy(client, {
+    get(target, prop) {
+      const val = target[prop];
+      if (typeof val !== 'function') return val;
+      return function (...args) {
+        const apiKey = (args[0] && typeof args[0] === 'object' && args[0].apiKey) || args[0];
+        const keyPreview = typeof apiKey === 'string' ? apiKey.substring(0, 6) + '…' : '(none)';
+        console.log(`[dashboard] ${prop} → ${baseUrl} | key: ${keyPreview}`);
+        return val.apply(target, args);
+      };
+    },
+  });
 }
 
 function updateStatCards() {
@@ -268,12 +337,19 @@ async function loadBillingBalance() {
   if (!apiKey) return;
   const el = document.getElementById('billing-balance-display');
   if (!el) return;
+  const noFundsWarning = document.getElementById('no-funds-warning');
   try {
     const client = await getClient();
     const data = await client.getBillingBalance(apiKey);
     el.textContent = data.balance_display || '';
+    // balance_cents is negative when credits are available; 0 or positive means no funds
+    if (noFundsWarning) {
+      const hasNoFunds = typeof data.balance_cents === 'number' && data.balance_cents >= 0;
+      noFundsWarning.style.display = hasNoFunds ? '' : 'none';
+    }
   } catch (_) {
     el.textContent = '';
+    if (noFundsWarning) noFundsWarning.style.display = 'none';
   }
 }
 
@@ -335,6 +411,8 @@ function initBilling() {
   const payBtn = document.getElementById('billing-pay-btn');
 
   if (addFundsBtn) addFundsBtn.addEventListener('click', openAddFundsModal);
+  const noFundsLink = document.getElementById('no-funds-add-funds');
+  if (noFundsLink) noFundsLink.addEventListener('click', (e) => { e.preventDefault(); openAddFundsModal(); });
   if (closeBtn) closeBtn.addEventListener('click', closeBillingModal);
   if (cancelBtn) cancelBtn.addEventListener('click', closeBillingModal);
 
@@ -410,6 +488,33 @@ function initOverview() {
   updateStatCards();
   document.getElementById('btn-load-usage-keys')?.addEventListener('click', () => loadUsageKeys());
   document.getElementById('btn-add-usage-key')?.addEventListener('click', () => openUsageKeyModal());
+
+  // Usage API key override
+  const overrideInput = document.getElementById('usage-key-override-input');
+  const applyBtn = document.getElementById('usage-key-override-apply');
+  const clearBtn = document.getElementById('usage-key-override-clear');
+  if (applyBtn) {
+    applyBtn.addEventListener('click', () => {
+      const val = (overrideInput?.value || '').trim();
+      if (!val) {
+        showStatus('overview-status', 'Enter a usage API key to apply.', 'error');
+        return;
+      }
+      setUsageKeyOverride(val);
+      hideStatus('overview-status');
+      showStatus('overview-status', 'Usage API key override applied. All dashboard operations will now use this key.', 'success');
+      preloadAllTables();
+    });
+  }
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      setUsageKeyOverride('');
+      hideStatus('overview-status');
+      showStatus('overview-status', 'Usage API key override cleared. Using account API key.', 'success');
+      preloadAllTables();
+    });
+  }
+  updateUsageKeyOverrideUI();
 }
 
 // ----- Icons (pencil, trash, copy) -----
@@ -580,7 +685,7 @@ async function confirmAndRemoveGroup(item) {
   const msg = 'Delete group "' + label + '"? This cannot be undone.';
   const confirmed = await confirmDelete(msg);
   if (!confirmed) return;
-  const apiKey = getApiKey();
+  const apiKey = getEffectiveApiKey();
   if (!apiKey) return;
   hideStatus('groups-status');
   try {
@@ -712,14 +817,12 @@ function renderUsageKeysTable() {
       if (!ts) return '—';
       return new Date(ts * 1000).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
     })();
-    const balance = item.balance != null ? String(item.balance) : '—';
     const tr = document.createElement('tr');
     tr.innerHTML =
       '<td>' + escapeHtml(item.name || '') + '</td>' +
       '<td class="mono">' + escapeHtml(item.description || '') + '</td>' +
       '<td class="mono" style="font-size:0.82em;">' + escapeHtml(renderPermissionSummary(item)) + '</td>' +
       '<td class="mono">' + escapeHtml(expiration) + '</td>' +
-      '<td class="mono">' + escapeHtml(balance) + '</td>' +
       '<td class="cell-actions"></td>';
     const actionsCell = tr.querySelector('.cell-actions');
     const fullKey = item.api_key || (!item.api_key_hash ? item.usage_api_key : null);
@@ -776,7 +879,6 @@ function normalizeUsageKeyItem(item) {
     name: item.name,
     description: item.description,
     expiration: item.expiration,
-    balance: item.balance,
     can_create_groups: item.can_create_groups ?? false,
     can_delete_groups: item.can_delete_groups ?? false,
     can_create_pkps: item.can_create_pkps ?? false,
@@ -805,7 +907,7 @@ function renderPermissionSummary(item) {
 }
 
 async function loadUsageKeys() {
-  const apiKey = getApiKey();
+  const apiKey = getEffectiveApiKey();
   if (!apiKey) return [];
   hideStatus('overview-status-usage-keys');
   const btn = document.getElementById('btn-load-usage-keys');
@@ -820,7 +922,6 @@ async function loadUsageKeys() {
       name: it.name ?? '',
       description: it.description ?? '',
       expiration: it.expiration,
-      balance: it.balance,
       can_create_groups: it.can_create_groups ?? false,
       can_delete_groups: it.can_delete_groups ?? false,
       can_create_pkps: it.can_create_pkps ?? false,
@@ -844,7 +945,7 @@ async function loadUsageKeys() {
 // ----- Load table data (used by preload and refresh buttons) -----
 
 async function loadGroups() {
-  const apiKey = getApiKey();
+  const apiKey = getEffectiveApiKey();
   if (!apiKey) return;
   hideStatus('groups-status');
   const btn = document.getElementById('btn-load-groups');
@@ -866,7 +967,7 @@ async function loadGroups() {
 }
 
 async function loadWallets() {
-  const apiKey = getApiKey();
+  const apiKey = getEffectiveApiKey();
   if (!apiKey) return;
   hideStatus('wallets-status');
   const btn = document.getElementById('btn-load-wallets');
@@ -888,7 +989,7 @@ async function loadWallets() {
 }
 
 async function loadActions() {
-  const apiKey = getApiKey();
+  const apiKey = getEffectiveApiKey();
   if (!apiKey) return;
   hideStatus('actions-status');
   const btn = document.getElementById('btn-load-actions');
@@ -966,7 +1067,7 @@ function openGroupModal(item = null) {
     const desc = document.getElementById(descId).value.trim();
     const pkpIdsPermitted = getSelectedStringValues('modal-group-pkp-ids');
     const cidHashesPermitted = getSelectedStringValues('modal-group-cid-hashes');
-    const apiKey = getApiKey();
+    const apiKey = getEffectiveApiKey();
     if (!apiKey) {
       showStatus('groups-status', 'Log in first.', 'error');
       return;
@@ -1013,7 +1114,7 @@ function openAddActionModal() {
     const cid = document.getElementById('modal-action-cid').value.trim();
     const name = document.getElementById('modal-action-name').value.trim() || undefined;
     const desc = document.getElementById('modal-action-desc').value.trim() || undefined;
-    const apiKey = getApiKey();
+    const apiKey = getEffectiveApiKey();
     if (!apiKey || !cid) {
       showStatus('actions-status', 'Fill in the IPFS CID.', 'error');
       return;
@@ -1048,7 +1149,7 @@ function openEditActionModal(item) {
   document.getElementById('modal-save-btn').addEventListener('click', async () => {
     const name = document.getElementById('modal-edit-action-name').value.trim();
     const desc = document.getElementById('modal-edit-action-desc').value.trim();
-    const apiKey = getApiKey();
+    const apiKey = getEffectiveApiKey();
     if (!apiKey || !cid || !name) {
       showStatus('actions-status', 'Fill Name.', 'error');
       return;
@@ -1075,7 +1176,7 @@ async function confirmAndRemoveAction(item) {
   const msg = 'Delete action "' + escapeHtml(name) + '"? This cannot be undone.';
   const confirmed = await confirmDelete(msg);
   if (!confirmed) return;
-  const apiKey = getApiKey();
+  const apiKey = getEffectiveApiKey();
   if (!apiKey) return;
   hideStatus('actions-status');
   try {
@@ -1233,7 +1334,7 @@ function openUsageKeyModal(item = null) {
   document.getElementById('modal-save-btn').addEventListener('click', async () => {
     const name = document.getElementById('modal-usage-name').value.trim() || 'Usage Key';
     const description = document.getElementById('modal-usage-desc').value.trim() || '';
-    const apiKey = getApiKey();
+    const apiKey = getEffectiveApiKey();
     if (!apiKey) {
       showStatus('overview-status-usage-keys', 'Log in first.', 'error');
       return;
@@ -1306,7 +1407,6 @@ function openUsageKeyModal(item = null) {
             name: name || '',
             description: description || '',
             expiration: '',
-            balance: 0,
           });
           window._statUsageKeys = getUsageKeysStore().length;
           renderUsageKeysTable();
@@ -1328,7 +1428,7 @@ async function confirmAndRemoveUsageKey(item) {
   const msg = 'Remove usage API key "' + escapeHtml(masked) + '" from this account? This cannot be undone.';
   const confirmed = await confirmDelete(msg);
   if (!confirmed) return;
-  const apiKey = getApiKey();
+  const apiKey = getEffectiveApiKey();
   if (!apiKey) return;
   hideStatus('overview-status-usage-keys');
   try {
@@ -1358,7 +1458,7 @@ function openAddWalletModal() {
   openModal('Create wallet', body, footer);
   document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
   document.getElementById('modal-add-btn').addEventListener('click', async () => {
-    const apiKey = getApiKey();
+    const apiKey = getEffectiveApiKey();
     if (!apiKey) return;
     closeModal();
     hideStatus('wallets-status');
@@ -1456,11 +1556,22 @@ function initHeader() {
     if (dropdown && !dropdown.contains(e.target)) closeAccountDropdown();
   });
 
+  const toggleOverrideBtn = document.getElementById('toggle-usage-override-btn');
+  if (toggleOverrideBtn) {
+    toggleOverrideBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAccountDropdown();
+      toggleOverrideEnabled();
+    });
+  }
+
   const signoutBtn = document.getElementById('account-signout-btn');
   if (signoutBtn) {
     signoutBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       closeAccountDropdown();
+      sessionStorage.removeItem(STORAGE_KEY_OVERRIDE_ENABLED);
+      setUsageKeyOverride('');
       setApiKey('');
     });
   }
@@ -1513,7 +1624,7 @@ async function initActionRunner() {
     const accountKey = getApiKey();
     const usageKeyEl = document.getElementById('action-runner-usage-key');
     const usageKey = usageKeyEl?.value?.trim() ?? '';
-    const apiKey = usageKey || accountKey;
+    const apiKey = usageKey || getEffectiveApiKey();
     const code = (getCode ? getCode() : (codeEl?.textContent ?? '')).trim();
     const paramsRaw = (getParams ? getParams() : (paramsEl?.textContent ?? '')).trim();
 

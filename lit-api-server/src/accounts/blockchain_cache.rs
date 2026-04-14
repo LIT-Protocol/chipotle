@@ -138,17 +138,17 @@ impl BlockchainCache {
     }
 }
 
-static INSTANCE: OnceLock<BlockchainCache> = OnceLock::new();
+static BLOCKCHAIN_CACHE_INSTANCE: OnceLock<BlockchainCache> = OnceLock::new();
 
 /// Initialize the global blockchain cache. Call once during startup.
 pub fn init() {
-    INSTANCE.get_or_init(BlockchainCache::new);
+    BLOCKCHAIN_CACHE_INSTANCE.get_or_init(BlockchainCache::new);
     tracing::info!("blockchain_cache: initialized (TTL={CACHE_TTL_SECS}s)");
 }
 
 /// Get the global cache instance. Returns `None` if not initialized.
 pub fn get() -> Option<&'static BlockchainCache> {
-    INSTANCE.get()
+    BLOCKCHAIN_CACHE_INSTANCE.get()
 }
 
 /// Invalidate cached permission entries for the given API key.

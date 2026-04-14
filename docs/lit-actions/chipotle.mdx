@@ -23,6 +23,8 @@ title: Lit Actions SDK
 *   [Action Utilities](#action-utilities)
 *   [setResponse](#setresponse)
     *   [Parameters](#parameters-5)
+*   [Debugging](#debugging)
+*   [showImportDetails](#showimportdetails)
 *   [Runtime Globals](#runtime-globals)
 *   [LitActions](#litactions)
 *   [ethers](#ethers)
@@ -118,6 +120,16 @@ Set the response returned to the client
 *   `params` **[Object](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object)**&#x20;
 
     *   `params.response` **any** The response to send to the client. If this is not a string, it will be JSON-encoded before being sent. A value of undefined is encoded as null.
+
+## Debugging
+
+Diagnostic functions for inspecting the runtime state of a Lit Action.
+
+## Lit.Actions.showImportDetails
+
+Log and return details of all modules imported by this Lit Action. Returns an array of objects with the resolved CDN URL and SHA-384 integrity hash for each imported module. The details are also written to the action's console log via the print opCode.
+
+Returns **[Array](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Array)\<{url: [string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String), hash: [string](https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String)}\>** Array of imported module details
 
 ## Runtime Globals
 

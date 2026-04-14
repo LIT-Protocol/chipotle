@@ -126,6 +126,48 @@ If the addresses match, the caller has a cryptographic proof that this specific,
 Use `getLitActionPrivateKey` when the proof must be tied to the action code itself. Use `getPrivateKey({ pkpId })` when the proof must be tied to a specific PKP wallet (e.g. an account or a user's identity). Both patterns produce verifiable signatures; they differ in what identity the signature is bound to.
 </Note>
 
+### What if Someone Else Runs My Action?
+
+A common concern with Action-Identity Signing is: **what happens if someone copies my Lit Action and runs it themselves?**
+
+**In many cases, it doesn't matter.** Because the action's identity is tied to its IPFS CID, anyone running the same action is executing the exact same immutable code. If your action only does a single thing — like signing a price feed — then someone else running it is simply paying for the execution on your behalf. The output carries the same cryptographic guarantee regardless of who triggered it. This applies to pure, side-effect-free actions. If your action writes to an external database, calls a third-party API, or triggers transactions, unauthorized execution could cause duplicate writes or exhaust rate limits.
+
+**If you need to restrict who can execute the action**, there are three layers of control:
+
+1. **API key scoping (primary).** Configure which API keys have `execute` permission on which groups through the [Dashboard](/management/dashboard). This is enforced at the API gateway before the action runs, so unauthorized callers never reach your code.
+
+2. **PKP address check.** If the group is configured so that only a specific PKP can be used with the action, you can check the PKP address as a parameter inside the action. Although `js_params` are caller-supplied, the ownership model makes this reliable: the caller can only use PKPs that belong to their account and are permitted within the group. An attacker cannot pass an arbitrary PKP address because the gateway already verified that the PKP is owned by the caller's account.
+
+```javascript
+async function main({ pkpAddress }) {
+  const ALLOWED_PKP = "0xAbc123..."; // your PKP's wallet address
+
+  if (pkpAddress.toLowerCase() !== ALLOWED_PKP.toLowerCase()) {
+    throw new Error("Unauthorized: PKP not allowed to run this action");
+  }
+
+  // ... rest of your action logic
+}
+```
+
+3. **Signature verification (defense-in-depth).** For additional assurance beyond the ownership model, require the caller to sign a challenge and verify the signature cryptographically inside the action. The `message` should include a nonce or timestamp so that a previously captured signature cannot be replayed:
+
+```javascript
+async function main({ signature, message }) {
+  const ALLOWED_ADDRESS = "0xAbc123..."; // the authorized caller's wallet address
+
+  // message should contain a nonce or timestamp for replay protection
+  const recovered = ethers.utils.verifyMessage(message, signature);
+  if (recovered.toLowerCase() !== ALLOWED_ADDRESS.toLowerCase()) {
+    throw new Error("Unauthorized: caller signature does not match allowed address");
+  }
+
+  // ... rest of your action logic
+}
+```
+
+Note that someone could always copy your publicly available Lit Action source code, strip out the gating logic, and deploy it as a new action. This is completely safe from the original creator's perspective — the modified action produces a different IPFS CID, which means a different key pair and a different identity. It cannot produce signatures that appear to come from your original action.
+
 ---
 
 ## Encrypt / Decrypt — PKP Wallets as Data Vaults

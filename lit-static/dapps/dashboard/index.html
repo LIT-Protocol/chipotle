@@ -95,6 +95,7 @@
             <h1 class="topbar-title"> </h1>
           </div>
           <div class="topbar-right">
+            <span id="usage-key-override-badge" class="usage-key-badge" style="display:none;" title="Using a usage API key override">Using Usage Key</span>
             <button type="button" class="btn btn-topbar btn-theme-toggle" id="theme-toggle" aria-label="Switch to dark mode"><span class="theme-icon" aria-hidden="true"></span></button>
             <span id="billing-balance-display" class="billing-balance" style="display:none;"></span>
             <button type="button" class="btn btn-primary btn-sm" id="btn-add-funds" style="display:none;">Add Funds</button>
@@ -105,6 +106,7 @@
                 <span class="account-dropdown-chevron" aria-hidden="true">▾</span>
               </button>
               <div class="account-dropdown-panel" id="account-dropdown-panel" role="menu" aria-hidden="true">
+                <button type="button" class="account-dropdown-item" id="toggle-usage-override-btn" role="menuitem">Usage Key Override</button>
                 <button type="button" class="account-dropdown-item account-dropdown-signout" id="account-signout-btn" role="menuitem">Sign out</button>
               </div>
             </div>
@@ -155,11 +157,28 @@
             <h2 class="section-title">Overview</h2>
             <p class="section-desc">Instructions and account details.</p>
             <div id="overview-status" class="status" style="display: none;"></div>
+            <div class="card" id="usage-key-override-card" style="display:none;">
+              <div class="card-header">
+                <h3 class="card-title">Usage API Key Override</h3>
+              </div>
+              <div class="card-body">
+                <p class="form-hint" style="margin-bottom: 0.75rem;">Paste a usage API key below to use it instead of your account API key for all dashboard operations. This lets you test the permissions of a given key.</p>
+                <div style="display:flex;align-items:center;gap:0.5rem;">
+                  <input type="password" id="usage-key-override-input" class="input" style="flex:1;font-family:'JetBrains Mono',monospace;font-size:0.8125rem;" placeholder="Paste a usage API key to override… " aria-label="Usage API key override">
+                  <button type="button" id="usage-key-override-apply" class="btn btn-primary btn-sm">Apply</button>
+                  <button type="button" id="usage-key-override-clear" class="btn btn-outline btn-sm">Clear</button>
+                </div>
+              </div>
+            </div>
             <div class="card">
               <div class="card-header">
                 <h3 class="card-title">Instructions</h3>
               </div>
               <div class="card-body">
+                <div id="no-funds-warning" class="no-funds-warning" role="alert" style="display: none;">
+                  <strong>No funds available</strong>
+                  <p>Your account has no credit balance. Please <a href="#" id="no-funds-add-funds">add funds</a> for Lit Actions to work.</p>
+                </div>
                 <div class="instructions-block">
                   <p>You can control access to the Lit Actions run by this node in the following ways:</p>
                   <ul>
@@ -186,7 +205,7 @@
               <div class="card-body">
                 <div class="table-wrap">
                   <table class="data-table" id="usage-keys-table">
-                    <thead><tr><th>Name</th><th>Description</th><th>Permissions</th><th>Expiration</th><th>Balance</th><th class="th-actions"></th></tr></thead>
+                    <thead><tr><th>Name</th><th>Description</th><th>Permissions</th><th>Expiration</th><th class="th-actions"></th></tr></thead>
                     <tbody id="usage-keys-tbody"></tbody>
                   </table>
                   <p id="usage-keys-empty" class="empty-state" style="display: none;">No usage API keys.</p>
@@ -384,7 +403,7 @@
         <button type="button" class="modal-close" id="billing-modal-close-btn" aria-label="Close">&times;</button>
       </div>
       <div class="modal-body">
-        <p style="margin-bottom:1rem;">Add credits to your account (minimum $5.00). Credits are used for API calls ($0.01 for management, $0.01 per Lit Action).</p>
+        <p style="margin-bottom:1rem;">Add credits to your account (minimum $5.00). Credits are used for API calls ($0.01 for management, $0.01 per second for Lit Action execution with a 1-second minimum).</p>
         <div class="form-group">
           <label for="billing-amount">Amount (USD)</label>
           <select id="billing-amount" class="input">
@@ -392,6 +411,8 @@
             <option value="1000">$10.00</option>
             <option value="2500">$25.00</option>
             <option value="5000">$50.00</option>
+            <option value="10000">$100.00</option>
+            <option value="20000">$200.00</option>
           </select>
         </div>
         <div class="form-group">

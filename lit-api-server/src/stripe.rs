@@ -14,6 +14,7 @@ use std::time::Duration;
 use anyhow::Result;
 use moka::future::Cache;
 use reqwest::StatusCode;
+use tracing::instrument;
 
 /// Cost constants in US cents.
 pub const COST_MANAGEMENT_CENTS: i64 = 1; // $0.01
@@ -218,15 +219,23 @@ pub async fn invalidate_wallet_cache(api_key: &str, state: &StripeState) {
 ///
 /// The cache is keyed by the keccak256 hash of the API key (not the raw key)
 /// to avoid holding secret material in memory.
+#[instrument(name = "stripe::resolve_wallet_address", skip_all, err)]
 pub async fn resolve_wallet_address(api_key: &str, state: &StripeState) -> Result<String> {
     let key = cache_key(api_key);
-    state
+    tracing::debug!("stripe::resolve_wallet_address: looking up wallet");
+    let result = state
         .wallet_cache
         .try_get_with(key, async {
+            tracing::debug!("stripe::resolve_wallet_address: cache miss, calling contract");
             crate::accounts::get_account_wallet_address(api_key).await
         })
         .await
-        .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e}"))
+        .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e}"));
+    tracing::debug!(
+        success = result.is_ok(),
+        "stripe::resolve_wallet_address: done"
+    );
+    result
 }
 
 /// Find the Stripe customer for this wallet address, creating one if none exists.
@@ -237,7 +246,12 @@ pub async fn resolve_wallet_address(api_key: &str, state: &StripeState) -> Resul
 ///
 /// Uses `try_get_with` to coalesce concurrent requests for the same wallet,
 /// preventing duplicate Stripe customer creation under concurrent load.
+#[instrument(name = "stripe::get_customer_by_wallet", skip_all, err)]
 pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -> Result<String> {
+    tracing::debug!(
+        wallet_address,
+        "stripe::get_customer_by_wallet: looking up customer"
+    );
     let state = state.clone();
     let wallet = wallet_address.to_string();
     state
@@ -355,6 +369,7 @@ async fn fetch_balance(state: &StripeState, customer_id: &str) -> Result<i64> {
         .get("balance")
         .and_then(|b| b.as_i64())
         .unwrap_or(0);
+    tracing::debug!(customer_id, balance, "stripe::get_credit_balance: done");
     Ok(balance)
 }
 
@@ -370,6 +385,7 @@ async fn fetch_balance(state: &StripeState, customer_id: &str) -> Result<i64> {
 ///
 /// Returns `Err` only if the *cached* balance would go positive (insufficient credits).
 async fn charge(api_key: &str, cost_cents: i64, state: &StripeState) -> Result<()> {
+    tracing::debug!(cost_cents, "stripe::charge: starting");
     let wallet = resolve_wallet_address(api_key, state).await?;
     let customer_id = get_customer_by_wallet(&wallet, state).await?;
 
@@ -474,6 +490,7 @@ pub async fn charge_lit_action_time(
     seconds: u64,
     state: &StripeState,
 ) -> Result<()> {
+    tracing::debug!(seconds, "stripe::charge_lit_action_time: starting");
     let seconds_i64 =
         i64::try_from(seconds).map_err(|_| anyhow::anyhow!("seconds overflow: {seconds}"))?;
     let cost = COST_LIT_ACTION_PER_SECOND_CENTS

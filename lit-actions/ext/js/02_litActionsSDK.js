@@ -89,6 +89,20 @@ function getLitActionWalletAddress({ ipfsId }) {
   return ops.op_get_lit_action_wallet_address(ipfsId);
 }
 
+/**
+ * Log and return details of all modules imported by this Lit Action.
+ * Returns an array of objects with the resolved CDN URL and SHA-384 integrity
+ * hash for each imported module. The details are also written to the action's
+ * console log via the print opCode.
+ * @name Lit.Actions.showImportDetails
+ * @function showImportDetails
+ * @returns {Array<{url: string, hash: string}>} Array of imported module details
+ */
+function showImportDetails() {
+  const json = ops.op_show_import_details();
+  return JSON.parse(json);
+}
+
 globalThis.LitActions = {
   Encrypt,
   Decrypt,
@@ -97,4 +111,5 @@ globalThis.LitActions = {
   getLitActionPublicKey,
   getLitActionWalletAddress,
   setResponse,
+  showImportDetails,
 };

@@ -20,7 +20,7 @@ use rocket::serde::json::Json;
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
-use tracing::instrument;
+use tracing::{Instrument, instrument};
 
 #[allow(clippy::too_many_arguments)]
 #[instrument(name = "core_features::lit_action", level = "debug", skip_all, err)]
@@ -45,7 +45,10 @@ pub async fn lit_action(
     let code_to_run = lit_action_request.code.clone();
     let derived_ipfs_id = get_lit_action_ipfs_id(code_to_run.clone());
     let cid_hash = ipfs_cid_to_u256(&derived_ipfs_id)?;
-    if !can_execute_action(api_key, cid_hash).await? {
+    let can_execute = can_execute_action(api_key, cid_hash)
+        .instrument(tracing::debug_span!("lit_action::can_execute_action"))
+        .await?;
+    if !can_execute {
         let msg = format!(
             "The provided API key is not authorized to execute the specified action ({derived_ipfs_id}/{cid_hash})."
         );
@@ -57,7 +60,9 @@ pub async fn lit_action(
         http_client: Some(reqwest::Client::clone(http_client)),
     };
 
-    let mut builder = get_lit_action_client_builder(chain_config).await;
+    let mut builder = get_lit_action_client_builder(chain_config)
+        .instrument(tracing::debug_span!("lit_action::build_client_config"))
+        .await;
     builder
         .js_env(deno_execution_env)
         .request_id(request_id.clone())
@@ -82,7 +87,11 @@ pub async fn lit_action(
         action_ipfs_id: Some(derived_ipfs_id),
     };
 
-    let result = match client.execute_js(execution_options).await {
+    let result = match client
+        .execute_js(execution_options)
+        .instrument(tracing::debug_span!("lit_action::execute_js"))
+        .await
+    {
         Ok(result) => result,
         Err(e) => return Err(anyhow::anyhow!("Actions failed with : {:?}", e).into()),
     };

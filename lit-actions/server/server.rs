@@ -1,5 +1,9 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::{Arc, RwLock};
+
+use crate::cdn_module_loader::{CdnModuleLoader, ModuleCache};
 
 use anyhow::Result;
 use deno_core::error::CoreError;
@@ -25,9 +29,18 @@ pub enum ServerType {
     Test,
 }
 
-#[derive(Default)]
 pub struct Server {
     server_type: ServerType,
+    /// Parsed integrity manifest (URL → base64-encoded SHA-384 hash).
+    integrity_manifest: Arc<RwLock<HashMap<String, String>>>,
+    /// If true, reject modules not in the integrity manifest.
+    strict_imports: bool,
+    /// Shared cache for fetched CDN modules.
+    module_cache: ModuleCache,
+    /// Path to integrity.lock file for TOFU auto-pinning.
+    lockfile_path: Option<PathBuf>,
+    /// Shared HTTP client for CDN fetches (connection pooling across executions).
+    http_client: Arc<reqwest::Client>,
 }
 
 impl Server {
@@ -37,9 +50,30 @@ impl Server {
             .max_decoding_message_size(usize::MAX)
     }
 
+    /// Create a production server with an integrity manifest.
+    pub fn with_integrity(
+        integrity_manifest: Arc<RwLock<HashMap<String, String>>>,
+        strict_imports: bool,
+        lockfile_path: Option<PathBuf>,
+    ) -> Self {
+        Self {
+            server_type: ServerType::Production,
+            integrity_manifest,
+            strict_imports,
+            module_cache: Arc::new(RwLock::new(HashMap::new())),
+            lockfile_path,
+            http_client: CdnModuleLoader::build_http_client(),
+        }
+    }
+
     fn new_test_server() -> Self {
         Self {
             server_type: ServerType::Test,
+            integrity_manifest: Default::default(),
+            strict_imports: false,
+            module_cache: Arc::new(RwLock::new(HashMap::new())),
+            lockfile_path: None,
+            http_client: CdnModuleLoader::build_http_client(),
         }
     }
 }
@@ -59,6 +93,11 @@ impl Action for Server {
         let (inbound_tx, inbound_rx) = new_traced_bounded_channel(0);
         let (outbound_tx, outbound_rx) = flume::bounded(0);
         let is_test_server = self.server_type == ServerType::Test;
+        let integrity_manifest = self.integrity_manifest.clone();
+        let strict_imports = self.strict_imports;
+        let module_cache = self.module_cache.clone();
+        let lockfile_path = self.lockfile_path.clone();
+        let http_client = self.http_client.clone();
 
         // Put incoming requests into channel
         let send_exec_req_span = debug_span!("send_exec_req");
@@ -141,6 +180,11 @@ impl Action for Server {
                                     outbound_tx.clone(),
                                     inbound_rx.clone(),
                                     is_test_server,
+                                    integrity_manifest.clone(),
+                                    strict_imports,
+                                    module_cache.clone(),
+                                    lockfile_path.clone(),
+                                    http_client.clone(),
                                 )
                                 .await;
                                 let _ = outbound_tx
@@ -190,13 +234,19 @@ fn format_error(err: &anyhow::Error) -> String {
     }
 }
 
-pub async fn start_server<P, S>(socket_path: P, shutdown_signal: Option<S>) -> Result<()>
+pub async fn start_server<P, S>(
+    socket_path: P,
+    shutdown_signal: Option<S>,
+    integrity_manifest: Arc<RwLock<HashMap<String, String>>>,
+    strict_imports: bool,
+    lockfile_path: Option<PathBuf>,
+) -> Result<()>
 where
     P: Into<PathBuf>,
     S: std::future::Future<Output = ()>,
 {
     unix::start_server(
-        Server::default().into_service(),
+        Server::with_integrity(integrity_manifest, strict_imports, lockfile_path).into_service(),
         socket_path,
         shutdown_signal,
     )
