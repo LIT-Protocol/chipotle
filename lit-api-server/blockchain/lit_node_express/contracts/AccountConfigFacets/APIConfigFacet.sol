@@ -77,13 +77,4 @@ contract APIConfigFacet {
         s.serverTriggerValue = value;
         emit ServerTriggered(value, msg.sender);
     }
-
-    /// @notice Trigger a server restart signal. Only callable by the diamond owner.
-    /// @param value Arbitrary uint256 value stored on-chain and emitted in the event.
-    function serverTrigger(uint256 value) public {
-        LibDiamond.enforceIsContractOwner();
-        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        s.serverTriggerValue = value;
-        emit ServerTriggered(value, msg.sender);
-    }
 }

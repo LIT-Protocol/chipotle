@@ -2334,6 +2334,25 @@ pub mod account_config {
                     },],
                 ),
                 (
+                    ::std::borrow::ToOwned::to_owned("ServerTriggered"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("ServerTriggered"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("value"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: false,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("sender"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                indexed: true,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
                     ::std::borrow::ToOwned::to_owned("UsageApiKeyRemoved"),
                     ::std::vec![::ethers::core::abi::ethabi::Event {
                         name: ::std::borrow::ToOwned::to_owned("UsageApiKeyRemoved"),
@@ -3660,6 +3679,13 @@ pub mod account_config {
         > {
             self.0.event()
         }
+        ///Gets the contract's `ServerTriggered` event
+        pub fn server_triggered_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, ServerTriggeredFilter>
+        {
+            self.0.event()
+        }
         ///Gets the contract's `UsageApiKeyRemoved` event
         pub fn usage_api_key_removed_filter(
             &self,
@@ -4887,6 +4913,24 @@ pub mod account_config {
         Eq,
         Hash,
     )]
+    #[ethevent(name = "ServerTriggered", abi = "ServerTriggered(uint256,address)")]
+    pub struct ServerTriggeredFilter {
+        pub value: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub sender: ::ethers::core::types::Address,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
     #[ethevent(
         name = "UsageApiKeyRemoved",
         abi = "UsageApiKeyRemoved(uint256,uint256)"
@@ -4970,6 +5014,7 @@ pub mod account_config {
         PricingUpdatedFilter(PricingUpdatedFilter),
         RebalanceAmountUpdatedFilter(RebalanceAmountUpdatedFilter),
         RequestedApiPayerCountUpdatedFilter(RequestedApiPayerCountUpdatedFilter),
+        ServerTriggeredFilter(ServerTriggeredFilter),
         UsageApiKeyRemovedFilter(UsageApiKeyRemovedFilter),
         UsageApiKeySetFilter(UsageApiKeySetFilter),
         WalletDerivationRegisteredFilter(WalletDerivationRegisteredFilter),
@@ -5037,6 +5082,9 @@ pub mod account_config {
                     decoded,
                 ));
             }
+            if let Ok(decoded) = ServerTriggeredFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::ServerTriggeredFilter(decoded));
+            }
             if let Ok(decoded) = UsageApiKeyRemovedFilter::decode_log(log) {
                 return Ok(AccountConfigEvents::UsageApiKeyRemovedFilter(decoded));
             }
@@ -5081,6 +5129,7 @@ pub mod account_config {
                 Self::RequestedApiPayerCountUpdatedFilter(element) => {
                     ::core::fmt::Display::fmt(element, f)
                 }
+                Self::ServerTriggeredFilter(element) => ::core::fmt::Display::fmt(element, f),
                 Self::UsageApiKeyRemovedFilter(element) => ::core::fmt::Display::fmt(element, f),
                 Self::UsageApiKeySetFilter(element) => ::core::fmt::Display::fmt(element, f),
                 Self::WalletDerivationRegisteredFilter(element) => {
@@ -5182,6 +5231,11 @@ pub mod account_config {
     impl ::core::convert::From<RequestedApiPayerCountUpdatedFilter> for AccountConfigEvents {
         fn from(value: RequestedApiPayerCountUpdatedFilter) -> Self {
             Self::RequestedApiPayerCountUpdatedFilter(value)
+        }
+    }
+    impl ::core::convert::From<ServerTriggeredFilter> for AccountConfigEvents {
+        fn from(value: ServerTriggeredFilter) -> Self {
+            Self::ServerTriggeredFilter(value)
         }
     }
     impl ::core::convert::From<UsageApiKeyRemovedFilter> for AccountConfigEvents {
