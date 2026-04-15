@@ -31,9 +31,9 @@ cleanup() {
         kill "$pid" 2>/dev/null || true
     done
     # Only clean up simulator temp dir if we created it
-    if [ "$SIM_TMP_OWNED" = true ] && [ -n "${SIM_TMP:-}" ] && [ -d "${SIM_TMP:-}" ]; then
-        rm -rf "$SIM_TMP"
-    fi
+    # if [ "$SIM_TMP_OWNED" = true ] && [ -n "${SIM_TMP:-}" ] && [ -d "${SIM_TMP:-}" ]; then
+    #     rm -rf "$SIM_TMP"
+    # fi
     echo "==> All processes stopped."
 }
 trap cleanup EXIT INT TERM
@@ -75,6 +75,40 @@ for i in $(seq 1 10); do
 done
 
 # --------------------------------------------------------------------------
+# 2. Deploy contracts and create NodeConfig.toml
+# --------------------------------------------------------------------------
+echo "==> Step 2: Deploying contracts to Anvil..."
+
+CONTRACTS_DIR="$SCRIPT_DIR/lit-api-server/blockchain/lit_node_express"
+
+# Run the deploy and capture output to extract the AccountConfig address
+DEPLOY_OUTPUT=$(make -C "$CONTRACTS_DIR" deploy_anvil 2>&1) || {
+    echo "ERROR: Contract deployment failed."
+    echo "$DEPLOY_OUTPUT"
+    exit 1
+}
+echo "$DEPLOY_OUTPUT"
+
+# Extract the last "deployed to 0x..." address — this is the AccountConfig (diamond proxy)
+CONTRACT_ADDRESS=$(echo "$DEPLOY_OUTPUT" | grep -oE 'deployed to 0x[0-9a-fA-F]+' | tail -1 | sed 's/deployed to //')
+
+if [ -z "$CONTRACT_ADDRESS" ] || [ ${#CONTRACT_ADDRESS} -ne 42 ]; then
+    echo "ERROR: Could not extract a valid contract address from deploy output."
+    echo "       Got: '${CONTRACT_ADDRESS:-<empty>}' (expected 0x + 40 hex chars)"
+    exit 1
+fi
+
+echo "    Diamond proxy deployed at: $CONTRACT_ADDRESS"
+
+# Write NodeConfig.toml for lit-api-server
+cat > "$SCRIPT_DIR/lit-api-server/NodeConfig.toml" <<EOF
+[chain]
+name = "anvil"
+contract_address = "$CONTRACT_ADDRESS"
+EOF
+echo "    NodeConfig.toml written."
+
+# --------------------------------------------------------------------------
 # 3. Start dstack simulator
 # --------------------------------------------------------------------------
 echo "==> Step 3: Starting dstack simulator..."
@@ -112,9 +146,14 @@ else
     SIM_TMP_OWNED=true
     DSTACK_SOCKET="$SIM_TMP/dstack.sock"
 
+    echo "Copying simulator data files to $SIM_TMP ..."
+
     cp "$SIMULATOR_DIR/appkeys.json" "$SIMULATOR_DIR/app-compose.json" \
        "$SIMULATOR_DIR/sys-config.json" "$SIMULATOR_DIR/attestation.bin" \
        "$SIMULATOR_DIR/dstack.toml" "$SIM_TMP/"
+
+    # we need to open dstack.toml and replace address = "unix:/var/run/dstack.sock" with address = "unix:$DSTACK_SOCKET"
+    sed -i '' "s|address = \"unix:/var/run/dstack.sock\"|address = \"unix:$DSTACK_SOCKET\"|" "$SIM_TMP/dstack.toml"
 
     (cd "$SIM_TMP" && exec "$SIMULATOR_BIN") >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
     SIM_PID=$!
@@ -140,40 +179,6 @@ fi
 
 export DSTACK_SOCKET
 
-
-# --------------------------------------------------------------------------
-# 2. Deploy contracts and create NodeConfig.toml
-# --------------------------------------------------------------------------
-echo "==> Step 2: Deploying contracts to Anvil..."
-
-CONTRACTS_DIR="$SCRIPT_DIR/lit-api-server/blockchain/lit_node_express"
-
-# Run the deploy and capture output to extract the AccountConfig address
-DEPLOY_OUTPUT=$(make -C "$CONTRACTS_DIR" deploy_anvil 2>&1) || {
-    echo "ERROR: Contract deployment failed."
-    echo "$DEPLOY_OUTPUT"
-    exit 1
-}
-echo "$DEPLOY_OUTPUT"
-
-# Extract the last "deployed to 0x..." address — this is the AccountConfig (diamond proxy)
-CONTRACT_ADDRESS=$(echo "$DEPLOY_OUTPUT" | grep -oE 'deployed to 0x[0-9a-fA-F]+' | tail -1 | sed 's/deployed to //')
-
-if [ -z "$CONTRACT_ADDRESS" ] || [ ${#CONTRACT_ADDRESS} -ne 42 ]; then
-    echo "ERROR: Could not extract a valid contract address from deploy output."
-    echo "       Got: '${CONTRACT_ADDRESS:-<empty>}' (expected 0x + 40 hex chars)"
-    exit 1
-fi
-
-echo "    Diamond proxy deployed at: $CONTRACT_ADDRESS"
-
-# Write NodeConfig.toml for lit-api-server
-cat > "$SCRIPT_DIR/lit-api-server/NodeConfig.toml" <<EOF
-[chain]
-name = "anvil"
-contract_address = "$CONTRACT_ADDRESS"
-EOF
-echo "    NodeConfig.toml written."
 
 # --------------------------------------------------------------------------
 # 4. cargo run lit-api-server
