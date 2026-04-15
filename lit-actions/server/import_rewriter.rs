@@ -708,9 +708,7 @@ pub(crate) async fn bundle_imports(
         let hash = base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
 
         // Store verified module in shared cache (bounded by MAX_CACHE_BYTES)
-        if !from_cache
-            && let Ok(mut cache_w) = module_cache.write()
-        {
+        if !from_cache && let Ok(mut cache_w) = module_cache.write() {
             let total: usize = cache_w.values().map(|v| v.len()).sum();
             if total + bytes.len() <= MAX_CACHE_BYTES {
                 cache_w.insert(url.clone(), bytes.clone());
