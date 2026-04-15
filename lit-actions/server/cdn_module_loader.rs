@@ -326,10 +326,19 @@ impl ModuleLoader for CdnModuleLoader {
         referrer: &str,
         _kind: ResolutionKind,
     ) -> Result<ModuleSpecifier, ModuleLoaderError> {
-        // Pass through data: URLs unchanged (used by the bundling pipeline to inline modules).
-        if specifier.starts_with("data:") {
+        // Pass through data:text/javascript URIs unchanged. These are produced by the bundling
+        // pipeline (import_rewriter) which inlines transitive dependencies as base64 data URIs,
+        // and by jsDelivr ESM bundles that inline small dependencies. Only JavaScript MIME types
+        // are accepted to prevent arbitrary content injection.
+        if specifier.starts_with("data:text/javascript;") || specifier.starts_with("data:text/javascript,")
+        {
+            info!(
+                specifier = %truncate_for_log(specifier, 80),
+                referrer,
+                "CDN module resolve: data: URI accepted (inlined dependency)"
+            );
             return ModuleSpecifier::parse(specifier)
-                .map_err(|e| JsErrorBox::generic(format!("Invalid data URL: {e}")).into());
+                .map_err(|e| JsErrorBox::generic(format!("Invalid data: URI: {e}")).into());
         }
 
         // Resolve relative imports against the referrer when the referrer is a jsDelivr npm URL.
@@ -391,21 +400,6 @@ impl ModuleLoader for CdnModuleLoader {
             info!(specifier, "CDN module resolve: full URL accepted");
             return ModuleSpecifier::parse(specifier).map_err(|e| {
                 JsErrorBox::generic(format!("Invalid module URL: {specifier}: {e}")).into()
-            });
-        }
-
-        // Allow data: URIs with JavaScript MIME type when the referrer is a CDN module.
-        // jsDelivr ESM bundles inline small dependencies as data:text/javascript;base64,... imports.
-        if (specifier.starts_with("data:text/javascript;") || specifier.starts_with("data:text/javascript,"))
-            && Self::is_allowed_cdn(referrer)
-        {
-            info!(
-                specifier = %truncate_for_log(specifier, 80),
-                referrer,
-                "CDN module resolve: data: URI accepted (inlined dependency from CDN module)"
-            );
-            return ModuleSpecifier::parse(specifier).map_err(|e| {
-                JsErrorBox::generic(format!("Invalid data: URI: {e}")).into()
             });
         }
 
@@ -1108,15 +1102,15 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     }
 
     #[test]
-    fn test_resolve_data_uri_rejected_from_non_cdn_referrer() {
+    fn test_resolve_data_uri_from_non_cdn_referrer() {
+        // data:text/javascript URIs are accepted from any referrer because the bundling
+        // pipeline (import_rewriter) generates them from file:// context
         let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
-        assert!(loader
-            .resolve(
-                "data:text/javascript;base64,ZXhwb3J0IGRlZmF1bHQgNDI7",
-                "file:///main.js",
-                ResolutionKind::Import,
-            )
-            .is_err());
+        let data_uri = "data:text/javascript;base64,ZXhwb3J0IGRlZmF1bHQgNDI7";
+        let result = loader
+            .resolve(data_uri, "file:///main.js", ResolutionKind::Import)
+            .unwrap();
+        assert_eq!(result.as_str(), data_uri);
     }
 
     #[test]
