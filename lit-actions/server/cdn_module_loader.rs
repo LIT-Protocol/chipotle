@@ -50,7 +50,7 @@ pub(crate) const ALLOWED_NPM_PREFIX: &str = "https://cdn.jsdelivr.net/npm/";
 /// Maximum response body size (10 MB).
 const MAX_MODULE_SIZE_BYTES: usize = 10 * 1024 * 1024;
 
-/// Maximum total cached bytes before evicting oldest entries (100 MB).
+/// Maximum total cached bytes (100 MB). When full, new entries are skipped (no eviction).
 pub(crate) const MAX_CACHE_BYTES: usize = 100 * 1024 * 1024;
 
 /// HTTP request timeout.

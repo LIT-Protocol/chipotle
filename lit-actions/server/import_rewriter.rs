@@ -581,7 +581,7 @@ pub(crate) async fn bundle_imports(
                 hasher.update(&cached);
                 let cached_b64 =
                     base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
-                if cached_b64 != *expected_b64 {
+                if !constant_time_eq(cached_b64.as_bytes(), expected_b64.as_bytes()) {
                     return Err(JsErrorBox::generic(format!(
                         "Integrity check failed for cached {url}: \
                          expected sha384-{expected_b64}, got sha384-{cached_b64}"
@@ -731,6 +731,12 @@ pub(crate) async fn bundle_imports(
                     visited.insert(fetch_resolved.clone());
                     queue.push_back(fetch_resolved);
                 }
+            } else if strict {
+                return Err(JsErrorBox::generic(format!(
+                    "Bundler: unresolvable nested import \"{spec}\" in module {url}. \
+                     All transitive dependencies must resolve to jsDelivr npm URLs."
+                ))
+                .into());
             } else {
                 warn!(
                     module_url = %url,
