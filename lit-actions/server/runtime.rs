@@ -287,6 +287,7 @@ pub(crate) async fn execute_js(
     let bundler_loaded_modules = loaded_modules.clone();
     let bundler_integrity = integrity_manifest.clone();
     let bundler_lockfile = lockfile_path.clone();
+    let bundler_cache = module_cache.clone();
 
     let mut worker = build_main_worker_and_inject_sdk(
         &None,
@@ -377,6 +378,7 @@ pub(crate) async fn execute_js(
             &bundler_integrity,
             strict_imports,
             &bundler_lockfile,
+            &bundler_cache,
         )
         .await
         .map_err(|e| anyhow!("Failed to bundle CDN imports: {e}"))?;

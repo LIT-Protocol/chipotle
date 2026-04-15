@@ -51,7 +51,7 @@ pub(crate) const ALLOWED_NPM_PREFIX: &str = "https://cdn.jsdelivr.net/npm/";
 const MAX_MODULE_SIZE_BYTES: usize = 10 * 1024 * 1024;
 
 /// Maximum total cached bytes before evicting oldest entries (100 MB).
-const MAX_CACHE_BYTES: usize = 100 * 1024 * 1024;
+pub(crate) const MAX_CACHE_BYTES: usize = 100 * 1024 * 1024;
 
 /// HTTP request timeout.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
