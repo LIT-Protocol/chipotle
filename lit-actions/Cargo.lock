@@ -5320,6 +5320,7 @@ dependencies = [
  "lit-actions-snapshot",
  "lit-api-core",
  "lit-observability",
+ "percent-encoding",
  "reqwest 0.12.24",
  "serde_json",
  "sha2 0.10.9",
@@ -5329,6 +5330,7 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tracing",
+ "url",
 ]
 
 [[package]]

@@ -121,13 +121,23 @@ impl ActionCodeCacheState {
 }
 
 fn action_code_cache_entry_size(action_ipfs_id: &str, code: &CachedActionCode) -> usize {
-    size_of::<ActionCodeCacheEntry>() + size_of::<String>() + action_ipfs_id.len() + code.len()
+    size_of::<ActionCodeCacheEntry>()
+        + size_of::<String>()
+        + action_ipfs_id.len()
+        + code.len()
+        + size_of::<Vec<(String, String)>>()
+        + code
+            .loaded_modules
+            .iter()
+            .map(|(url, hash)| size_of::<(String, String)>() + url.len() + hash.len())
+            .sum::<usize>()
 }
 
 #[derive(Clone, Debug)]
 pub(crate) struct CachedActionCode {
     code: String,
     dynamic_imports: Option<String>,
+    loaded_modules: Vec<(String, String)>,
 }
 
 impl CachedActionCode {
@@ -196,7 +206,27 @@ fn get_lit_action_ipfs_id(code: &str) -> String {
     ipfs_hasher.compute(code.as_bytes())
 }
 
-fn prepare_action_code(code: &str) -> CachedActionCode {
+fn record_loaded_modules(loaded_modules: &LoadedModules, cached_code: &CachedActionCode) {
+    if let Ok(mut modules) = loaded_modules.0.write() {
+        for (url, hash) in &cached_code.loaded_modules {
+            if !modules.iter().any(|m| &m.url == url) {
+                modules.push(crate::cdn_module_loader::LoadedModuleInfo {
+                    url: url.clone(),
+                    hash: hash.clone(),
+                });
+            }
+        }
+    }
+}
+
+async fn prepare_action_code(
+    code: &str,
+    client: &reqwest::Client,
+    integrity: &Arc<RwLock<HashMap<String, String>>>,
+    strict_imports: bool,
+    lockfile_path: &Option<PathBuf>,
+    module_cache: &ModuleCache,
+) -> Result<CachedActionCode> {
     // Rewrite static ES `import` statements into dynamic `import()` calls.
     // Static imports are not valid in script mode, so we strip them from the
     // user code and generate equivalent dynamic imports inside the async wrapper
@@ -206,38 +236,65 @@ fn prepare_action_code(code: &str) -> CachedActionCode {
         imports,
     } = import_rewriter::rewrite_imports(code);
 
-    CachedActionCode {
-        code: if imports.is_empty() {
-            code.to_string()
-        } else {
-            rewritten_code
-        },
-        dynamic_imports: if imports.is_empty() {
-            None
-        } else {
-            Some(import_rewriter::generate_dynamic_imports(&imports))
-        },
+    if imports.is_empty() {
+        return Ok(CachedActionCode {
+            code: code.to_string(),
+            dynamic_imports: None,
+            loaded_modules: Vec::new(),
+        });
     }
+
+    // Has imports - bundle all transitive dependencies from jsDelivr as
+    // data: URLs so the module loader needs no network I/O at runtime.
+    let bundle_result = import_rewriter::bundle_imports(
+        &imports,
+        client,
+        integrity,
+        strict_imports,
+        lockfile_path,
+        module_cache,
+    )
+    .await
+    .map_err(|e| anyhow!("Failed to bundle CDN imports: {e}"))?;
+
+    Ok(CachedActionCode {
+        code: rewritten_code,
+        dynamic_imports: Some(bundle_result.dynamic_imports),
+        loaded_modules: bundle_result.loaded_modules,
+    })
 }
 
-fn get_or_prepare_action_code(
+async fn get_or_prepare_action_code(
     code: &str,
     action_ipfs_id: &str,
     action_code_cache: &ActionCodeCache,
-) -> CachedActionCode {
+    client: &reqwest::Client,
+    integrity: &Arc<RwLock<HashMap<String, String>>>,
+    strict_imports: bool,
+    lockfile_path: &Option<PathBuf>,
+    module_cache: &ModuleCache,
+) -> Result<CachedActionCode> {
     let now = Instant::now();
     if let Ok(cache) = action_code_cache.read()
         && let Some(cached_code) = cache.get(action_ipfs_id, now)
     {
         debug!(action_ipfs_id, "action code loaded from cache");
-        return cached_code.clone();
+        return Ok(cached_code.clone());
     }
 
-    let prepared_code = prepare_action_code(code);
+    let prepared_code = prepare_action_code(
+        code,
+        client,
+        integrity,
+        strict_imports,
+        lockfile_path,
+        module_cache,
+    )
+    .await?;
 
     if let Ok(mut cache) = action_code_cache.write() {
         if let Some(cached_code) = cache.get(action_ipfs_id, now) {
-            return cached_code.clone();
+            return Ok(cached_code.clone());
         }
 
         if cache.insert(action_ipfs_id.to_string(), prepared_code.clone(), now) {
@@ -258,7 +315,7 @@ fn get_or_prepare_action_code(
         }
     }
 
-    prepared_code
+    Ok(prepared_code)
 }
 
 // using the worker built into deno
@@ -495,6 +552,10 @@ pub(crate) async fn execute_js(
     let memory_limit_mb = memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB);
 
     let loaded_modules = LoadedModules::default();
+    let bundler_client = http_client.clone();
+    let bundler_integrity = integrity_manifest.clone();
+    let bundler_lockfile = lockfile_path.clone();
+    let bundler_cache = module_cache.clone();
 
     let mut worker = build_main_worker_and_inject_sdk(
         &None,
@@ -517,7 +578,7 @@ pub(crate) async fn execute_js(
         let mut state = op_state.borrow_mut();
         state.put(outbound_tx);
         state.put(inbound_rx);
-        state.put(loaded_modules);
+        state.put(loaded_modules.clone());
         drop(state);
     }
 
@@ -556,8 +617,19 @@ pub(crate) async fn execute_js(
     // The action CID is derived only from the incoming user code. Params vary
     // per invocation, so cache the reusable prepared code and add params here.
     let action_ipfs_id = get_lit_action_ipfs_id(&code);
-    let code = get_or_prepare_action_code(&code, &action_ipfs_id, &action_code_cache)
-        .to_executable_code(&js_func_params);
+    let cached_code = get_or_prepare_action_code(
+        &code,
+        &action_ipfs_id,
+        &action_code_cache,
+        &bundler_client,
+        &bundler_integrity,
+        strict_imports,
+        &bundler_lockfile,
+        &bundler_cache,
+    )
+    .await?;
+    record_loaded_modules(&loaded_modules, &cached_code);
+    let code = cached_code.to_executable_code(&js_func_params);
 
     if let Err(e) = worker
         .js_runtime
@@ -708,6 +780,7 @@ mod tests {
         CachedActionCode {
             code: code.to_string(),
             dynamic_imports: None,
+            loaded_modules: Vec::new(),
         }
     }
 
