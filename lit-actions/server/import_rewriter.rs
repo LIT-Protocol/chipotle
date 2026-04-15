@@ -310,7 +310,8 @@ use tracing::{info, warn};
 use std::path::PathBuf;
 
 use crate::cdn_module_loader::{
-    ALLOWED_NPM_PREFIX, CdnModuleLoader, MAX_MODULE_COUNT, constant_time_eq,
+    ALLOWED_NPM_PREFIX, CdnModuleLoader, MAX_CACHE_BYTES, MAX_MODULE_COUNT, ModuleCache,
+    constant_time_eq,
 };
 
 /// A resolved module in the dependency graph.
@@ -515,6 +516,7 @@ pub(crate) async fn bundle_imports(
     integrity: &Arc<RwLock<HashMap<String, String>>>,
     strict: bool,
     lockfile_path: &Option<PathBuf>,
+    module_cache: &ModuleCache,
 ) -> Result<BundleResult, ModuleLoaderError> {
     // Phase 1: Build dependency graph via BFS
     let mut graph: HashMap<String, ResolvedModule> = HashMap::new();
@@ -561,121 +563,157 @@ pub(crate) async fn bundle_imports(
             .into());
         }
 
-        info!(module_url = %url, "Bundler: fetching module");
-        let (bytes, cdn_sri_hash) =
-            CdnModuleLoader::fetch_with_size_limit(client, &url, "Bundler").await?;
-
-        // Compute SHA-384 hash
+        // Check shared module cache first — avoids re-fetching modules already
+        // downloaded by a previous Lit Action execution on this node.
         use sha2::{Digest, Sha384};
-        let mut hasher = Sha384::new();
-        hasher.update(&bytes);
-        let actual_digest = hasher.finalize();
-        let actual_b64 = base64::engine::general_purpose::STANDARD.encode(actual_digest);
 
-        // Integrity verification — mirrors CdnModuleLoader::load()
-        // Inline hash takes priority, then lockfile manifest (same as load())
         let expected_hash = inline_hashes
             .get(&url)
             .cloned()
             .or_else(|| integrity.read().ok().and_then(|map| map.get(&url).cloned()));
 
-        if let Some(ref expected_b64) = expected_hash {
-            // Known module: verify against stored hash
-            let expected_digest = base64::engine::general_purpose::STANDARD
-                .decode(expected_b64)
-                .map_err(|e| {
-                    JsErrorBox::generic(format!(
-                        "Invalid base64 in integrity manifest for {url}: {e}"
-                    ))
-                })?;
-            if actual_digest.len() != expected_digest.len()
-                || !constant_time_eq(&actual_digest, &expected_digest)
-            {
-                return Err(JsErrorBox::generic(format!(
-                    "Integrity check failed for {url}: \
-                     expected sha384-{expected_b64}, got sha384-{actual_b64}"
-                ))
-                .into());
-            }
-            info!(
-                module_url = %url,
-                hash = %format!("sha384-{actual_b64}"),
-                "Bundler: integrity check passed"
-            );
-        } else if strict {
-            // Unknown module in strict mode: TOFU double-fetch verification
-            info!(
-                module_url = %url,
-                first_hash = %format!("sha384-{actual_b64}"),
-                "Bundler TOFU: new module detected, starting verification fetch"
-            );
+        let cached_bytes = module_cache.read().ok().and_then(|c| c.get(&url).cloned());
 
-            let (bytes2, _) =
-                CdnModuleLoader::fetch_with_size_limit(client, &url, "Bundler TOFU").await?;
-            let mut hasher2 = Sha384::new();
-            hasher2.update(&bytes2);
-            let verify_digest = hasher2.finalize();
-
-            if !constant_time_eq(&actual_digest, &verify_digest) {
-                return Err(JsErrorBox::generic(format!(
-                    "Bundler TOFU: CDN returned inconsistent content for {url}. \
-                     Hash mismatch between first and second fetch. Possible tampering."
-                ))
-                .into());
-            }
-
-            // Verify against CDN's SRI hash header if available
-            if let Some(ref sri_b64) = cdn_sri_hash {
-                let sri_digest = base64::engine::general_purpose::STANDARD
-                    .decode(sri_b64)
-                    .map_err(|e| {
-                        JsErrorBox::generic(format!(
-                            "CDN SRI header for {url} contains invalid base64: {e}"
-                        ))
-                    })?;
-                if !constant_time_eq(&actual_digest, &sri_digest) {
+        let (bytes, from_cache) = if let Some(cached) = cached_bytes {
+            // Verify cached bytes against expected hash if one exists
+            if let Some(ref expected_b64) = expected_hash {
+                let mut hasher = Sha384::new();
+                hasher.update(&cached);
+                let cached_b64 =
+                    base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
+                if !constant_time_eq(cached_b64.as_bytes(), expected_b64.as_bytes()) {
                     return Err(JsErrorBox::generic(format!(
-                        "Bundler TOFU: computed hash does not match CDN SRI header for {url}."
+                        "Integrity check failed for cached {url}: \
+                         expected sha384-{expected_b64}, got sha384-{cached_b64}"
                     ))
                     .into());
                 }
             }
+            info!(module_url = %url, "Bundler: serving module from cache");
+            (cached, true)
+        } else {
+            info!(module_url = %url, "Bundler: fetching module");
+            let (fetched, cdn_sri_hash) =
+                CdnModuleLoader::fetch_with_size_limit(client, &url, "Bundler").await?;
 
-            // Pin to lockfile on disk
-            if let Some(path) = lockfile_path {
-                use std::io::Write;
-                let mut file = std::fs::OpenOptions::new()
-                    .create(true)
-                    .append(true)
-                    .open(path)
+            // Compute SHA-384 hash
+            let mut hasher = Sha384::new();
+            hasher.update(&fetched);
+            let actual_digest = hasher.finalize();
+            let actual_b64 = base64::engine::general_purpose::STANDARD.encode(actual_digest);
+
+            // Integrity verification — mirrors CdnModuleLoader::load()
+            if let Some(ref expected_b64) = expected_hash {
+                // Known module: verify against stored hash
+                let expected_digest = base64::engine::general_purpose::STANDARD
+                    .decode(expected_b64)
                     .map_err(|e| {
-                        JsErrorBox::generic(format!("Failed to open integrity lockfile: {e}"))
+                        JsErrorBox::generic(format!(
+                            "Invalid base64 in integrity manifest for {url}: {e}"
+                        ))
                     })?;
-                writeln!(file, "{url} sha384-{actual_b64}").map_err(|e| {
-                    JsErrorBox::generic(format!("Failed to write integrity lockfile: {e}"))
-                })?;
-                file.flush().map_err(|e| {
-                    JsErrorBox::generic(format!("Failed to flush integrity lockfile: {e}"))
-                })?;
+                if actual_digest.len() != expected_digest.len()
+                    || !constant_time_eq(&actual_digest, &expected_digest)
+                {
+                    return Err(JsErrorBox::generic(format!(
+                        "Integrity check failed for {url}: \
+                         expected sha384-{expected_b64}, got sha384-{actual_b64}"
+                    ))
+                    .into());
+                }
                 info!(
                     module_url = %url,
                     hash = %format!("sha384-{actual_b64}"),
-                    "Bundler TOFU: pinned new module to integrity lockfile"
+                    "Bundler: integrity check passed"
                 );
+            } else if strict {
+                // Unknown module in strict mode: TOFU double-fetch verification
+                info!(
+                    module_url = %url,
+                    first_hash = %format!("sha384-{actual_b64}"),
+                    "Bundler TOFU: new module detected, starting verification fetch"
+                );
+
+                let (bytes2, _) =
+                    CdnModuleLoader::fetch_with_size_limit(client, &url, "Bundler TOFU").await?;
+                let mut hasher2 = Sha384::new();
+                hasher2.update(&bytes2);
+                let verify_digest = hasher2.finalize();
+
+                if !constant_time_eq(&actual_digest, &verify_digest) {
+                    return Err(JsErrorBox::generic(format!(
+                        "Bundler TOFU: CDN returned inconsistent content for {url}. \
+                         Hash mismatch between first and second fetch. Possible tampering."
+                    ))
+                    .into());
+                }
+
+                // Verify against CDN's SRI hash header if available
+                if let Some(ref sri_b64) = cdn_sri_hash {
+                    let sri_digest = base64::engine::general_purpose::STANDARD
+                        .decode(sri_b64)
+                        .map_err(|e| {
+                            JsErrorBox::generic(format!(
+                                "CDN SRI header for {url} contains invalid base64: {e}"
+                            ))
+                        })?;
+                    if !constant_time_eq(&actual_digest, &sri_digest) {
+                        return Err(JsErrorBox::generic(format!(
+                            "Bundler TOFU: computed hash does not match CDN SRI header for {url}."
+                        ))
+                        .into());
+                    }
+                }
+
+                // Pin to lockfile on disk
+                if let Some(path) = lockfile_path {
+                    use std::io::Write;
+                    let mut file = std::fs::OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(path)
+                        .map_err(|e| {
+                            JsErrorBox::generic(format!("Failed to open integrity lockfile: {e}"))
+                        })?;
+                    writeln!(file, "{url} sha384-{actual_b64}").map_err(|e| {
+                        JsErrorBox::generic(format!("Failed to write integrity lockfile: {e}"))
+                    })?;
+                    file.flush().map_err(|e| {
+                        JsErrorBox::generic(format!("Failed to flush integrity lockfile: {e}"))
+                    })?;
+                    info!(
+                        module_url = %url,
+                        hash = %format!("sha384-{actual_b64}"),
+                        "Bundler TOFU: pinned new module to integrity lockfile"
+                    );
+                }
+
+                // Update in-memory manifest
+                if let Ok(mut map) = integrity.write() {
+                    map.entry(url.clone()).or_insert(actual_b64.clone());
+                }
+            } else {
+                // Non-strict mode: accept without TOFU, pin hash in memory
+                if let Ok(mut map) = integrity.write() {
+                    map.entry(url.clone()).or_insert(actual_b64.clone());
+                }
             }
 
-            // Update in-memory manifest
-            if let Ok(mut map) = integrity.write() {
-                map.entry(url.clone()).or_insert(actual_b64.clone());
-            }
-        } else {
-            // Non-strict mode: accept without TOFU, pin hash in memory
-            if let Ok(mut map) = integrity.write() {
-                map.entry(url.clone()).or_insert(actual_b64.clone());
+            (fetched, false)
+        };
+
+        // Compute hash for the graph entry (needed for loaded_modules tracking)
+        let mut hasher = Sha384::new();
+        hasher.update(&bytes);
+        let hash = base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
+
+        // Store verified module in shared cache (bounded by MAX_CACHE_BYTES)
+        if !from_cache && let Ok(mut cache_w) = module_cache.write() {
+            let total: usize = cache_w.values().map(|v| v.len()).sum();
+            if total + bytes.len() <= MAX_CACHE_BYTES {
+                cache_w.insert(url.clone(), bytes.clone());
             }
         }
-
-        let hash = actual_b64;
 
         // Scan for nested imports (ES modules must be valid UTF-8)
         let source_str = std::str::from_utf8(&bytes)
@@ -691,6 +729,12 @@ pub(crate) async fn bundle_imports(
                     visited.insert(fetch_resolved.clone());
                     queue.push_back(fetch_resolved);
                 }
+            } else if strict {
+                return Err(JsErrorBox::generic(format!(
+                    "Bundler: unresolvable nested import \"{spec}\" in module {url}. \
+                     All transitive dependencies must resolve to jsDelivr npm URLs."
+                ))
+                .into());
             } else {
                 warn!(
                     module_url = %url,

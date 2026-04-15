@@ -26,6 +26,19 @@ pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
+/// Truncate a string for log output without panicking on UTF-8 boundaries.
+fn truncate_for_log(s: &str, max_bytes: usize) -> &str {
+    if s.len() <= max_bytes {
+        return s;
+    }
+    // Find the last char boundary at or before max_bytes
+    let mut end = max_bytes;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// Allowed CDN URL prefix for module imports (origin only, used for URL construction).
 pub(crate) const ALLOWED_CDN_PREFIX: &str = "https://cdn.jsdelivr.net/";
 
@@ -37,8 +50,8 @@ pub(crate) const ALLOWED_NPM_PREFIX: &str = "https://cdn.jsdelivr.net/npm/";
 /// Maximum response body size (10 MB).
 const MAX_MODULE_SIZE_BYTES: usize = 10 * 1024 * 1024;
 
-/// Maximum total cached bytes before evicting oldest entries (100 MB).
-const MAX_CACHE_BYTES: usize = 100 * 1024 * 1024;
+/// Maximum total cached bytes (100 MB). When full, new entries are skipped (no eviction).
+pub(crate) const MAX_CACHE_BYTES: usize = 100 * 1024 * 1024;
 
 /// HTTP request timeout.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -313,10 +326,20 @@ impl ModuleLoader for CdnModuleLoader {
         referrer: &str,
         _kind: ResolutionKind,
     ) -> Result<ModuleSpecifier, ModuleLoaderError> {
-        // Pass through data: URLs unchanged (used by the bundling pipeline to inline modules).
-        if specifier.starts_with("data:") {
+        // Pass through data:text/javascript URIs unchanged. These are produced by the bundling
+        // pipeline (import_rewriter) which inlines transitive dependencies as base64 data URIs,
+        // and by jsDelivr ESM bundles that inline small dependencies. Only JavaScript MIME types
+        // are accepted to prevent arbitrary content injection.
+        if specifier.starts_with("data:text/javascript;")
+            || specifier.starts_with("data:text/javascript,")
+        {
+            info!(
+                specifier = %truncate_for_log(specifier, 80),
+                referrer,
+                "CDN module resolve: data: URI accepted (inlined dependency)"
+            );
             return ModuleSpecifier::parse(specifier)
-                .map_err(|e| JsErrorBox::generic(format!("Invalid data URL: {e}")).into());
+                .map_err(|e| JsErrorBox::generic(format!("Invalid data: URI: {e}")).into());
         }
 
         // Resolve relative imports against the referrer when the referrer is a jsDelivr npm URL.
@@ -428,6 +451,80 @@ impl ModuleLoader for CdnModuleLoader {
                      Reduce the number of imported modules."
             ))
             .into()));
+        }
+
+        // Handle data: URIs inline — these are inlined dependencies from CDN ESM bundles.
+        // Decode the base64 content directly instead of attempting an HTTP fetch.
+        let url_str = module_specifier.as_str();
+        if url_str.starts_with("data:text/javascript;")
+            || url_str.starts_with("data:text/javascript,")
+        {
+            // Pre-check raw URI body length to avoid large transient allocations during decode.
+            // Base64 expands ~33%, so the raw body can be up to 4/3 of the decoded size limit.
+            let max_raw_len = MAX_MODULE_SIZE_BYTES * 4 / 3 + 4;
+            let body_start = url_str.find(',').map(|i| i + 1).unwrap_or(url_str.len());
+            if url_str.len() - body_start > max_raw_len {
+                return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
+                    "data: URI body exceeds maximum size ({} bytes > {max_raw_len} bytes)",
+                    url_str.len() - body_start
+                ))
+                .into()));
+            }
+
+            let data_body = if let Some(rest) = url_str.strip_prefix("data:text/javascript;base64,")
+            {
+                base64::engine::general_purpose::STANDARD
+                    .decode(rest)
+                    .map_err(|e| JsErrorBox::generic(format!("Invalid base64 in data: URI: {e}")))
+            } else if let Some(rest) = url_str.strip_prefix("data:text/javascript,") {
+                // Plain (non-base64) data URI — percent-decode the body
+                Ok(percent_encoding::percent_decode_str(rest).collect::<Vec<u8>>())
+            } else {
+                Err(JsErrorBox::generic(format!(
+                    "Unsupported data: URI encoding: {}",
+                    truncate_for_log(url_str, 80)
+                )))
+            };
+
+            return match data_body {
+                Ok(bytes) => {
+                    if bytes.len() > MAX_MODULE_SIZE_BYTES {
+                        ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
+                            "data: URI exceeds maximum module size ({} bytes > {MAX_MODULE_SIZE_BYTES} bytes)",
+                            bytes.len()
+                        )).into()))
+                    } else {
+                        // Track data URI in loaded_modules so it counts toward MAX_MODULE_COUNT
+                        // and appears in showImportDetails(). Use a hash of the content as the
+                        // dedup key to prevent same-length data URIs from collapsing into one entry.
+                        if let Ok(mut modules) = self.loaded_modules.0.write() {
+                            let mut hasher = Sha384::new();
+                            hasher.update(&bytes);
+                            let hash =
+                                base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
+                            let data_key = format!("data:text/javascript;sha384-{}", &hash[..16]);
+                            if !modules.iter().any(|m| m.url == data_key) {
+                                modules.push(LoadedModuleInfo {
+                                    url: data_key,
+                                    hash,
+                                });
+                            }
+                        }
+                        info!(
+                            module_url = %truncate_for_log(url_str, 80),
+                            size_bytes = bytes.len(),
+                            "CDN module loaded from data: URI"
+                        );
+                        ModuleLoadResponse::Sync(Ok(ModuleSource::new(
+                            ModuleType::JavaScript,
+                            ModuleSourceCode::Bytes(bytes.into_boxed_slice().into()),
+                            module_specifier,
+                            None,
+                        )))
+                    }
+                }
+                Err(e) => ModuleLoadResponse::Sync(Err(e.into())),
+            };
         }
 
         // Extract inline hash from URL fragment (e.g. #sha384-abc123...)
@@ -993,6 +1090,127 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     }
 
     #[test]
+    fn test_resolve_data_uri_from_cdn_referrer() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        let data_uri = "data:text/javascript;base64,ZXhwb3J0IGRlZmF1bHQgNDI7";
+        let result = loader
+            .resolve(
+                data_uri,
+                "https://cdn.jsdelivr.net/npm/micro-eth-signer@0.18.1/+esm",
+                ResolutionKind::Import,
+            )
+            .unwrap();
+        assert_eq!(result.as_str(), data_uri);
+    }
+
+    #[test]
+    fn test_resolve_data_uri_from_non_cdn_referrer() {
+        // data:text/javascript URIs are accepted from any referrer because the bundling
+        // pipeline (import_rewriter) generates them from file:// context
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        let data_uri = "data:text/javascript;base64,ZXhwb3J0IGRlZmF1bHQgNDI7";
+        let result = loader
+            .resolve(data_uri, "file:///main.js", ResolutionKind::Import)
+            .unwrap();
+        assert_eq!(result.as_str(), data_uri);
+    }
+
+    #[test]
+    fn test_resolve_data_uri_rejected_non_javascript() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // data:text/html should be rejected even with CDN referrer
+        assert!(
+            loader
+                .resolve(
+                    "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
+                    "https://cdn.jsdelivr.net/npm/pkg@1.0.0/+esm",
+                    ResolutionKind::Import,
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_load_data_uri_base64() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // "export default 42;" base64-encoded
+        let specifier =
+            ModuleSpecifier::parse("data:text/javascript;base64,ZXhwb3J0IGRlZmF1bHQgNDI7").unwrap();
+        let response = loader.load(&specifier, None, false, RequestedModuleType::None);
+        match response {
+            ModuleLoadResponse::Sync(Ok(source)) => {
+                let code = match &source.code {
+                    ModuleSourceCode::Bytes(b) => String::from_utf8_lossy(b.as_bytes()).to_string(),
+                    _ => panic!("expected Bytes"),
+                };
+                assert_eq!(code, "export default 42;");
+            }
+            ModuleLoadResponse::Sync(Err(e)) => panic!("expected Ok, got Err: {e:?}"),
+            ModuleLoadResponse::Async(_) => panic!("expected Sync response for data: URI"),
+        }
+    }
+
+    #[test]
+    fn test_load_data_uri_plain() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        let specifier =
+            ModuleSpecifier::parse("data:text/javascript,export%20default%2042%3B").unwrap();
+        let response = loader.load(&specifier, None, false, RequestedModuleType::None);
+        match response {
+            ModuleLoadResponse::Sync(Ok(source)) => {
+                let code = match &source.code {
+                    ModuleSourceCode::Bytes(b) => String::from_utf8_lossy(b.as_bytes()).to_string(),
+                    _ => panic!("expected Bytes"),
+                };
+                assert_eq!(code, "export default 42;");
+            }
+            ModuleLoadResponse::Sync(Err(e)) => panic!("expected Ok, got Err: {e:?}"),
+            ModuleLoadResponse::Async(_) => panic!("expected Sync response for data: URI"),
+        }
+    }
+
+    #[test]
+    fn test_load_data_uri_invalid_base64() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        let specifier = ModuleSpecifier::parse("data:text/javascript;base64,NOT_VALID!!!").unwrap();
+        let response = loader.load(&specifier, None, false, RequestedModuleType::None);
+        assert!(
+            matches!(response, ModuleLoadResponse::Sync(Err(_))),
+            "invalid base64 should return an error"
+        );
+    }
+
+    #[test]
+    fn test_load_data_uri_unsupported_encoding() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // charset parameter before base64 is a valid data URI format but unsupported
+        let specifier = ModuleSpecifier::parse(
+            "data:text/javascript;charset=utf-8;base64,ZXhwb3J0IGRlZmF1bHQgNDI7",
+        )
+        .unwrap();
+        let response = loader.load(&specifier, None, false, RequestedModuleType::None);
+        assert!(
+            matches!(response, ModuleLoadResponse::Sync(Err(_))),
+            "unsupported data URI encoding should return an error"
+        );
+    }
+
+    #[test]
+    fn test_resolve_data_uri_prefix_boundary() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // "data:text/javascript-evil" should NOT match — only data:text/javascript; or data:text/javascript,
+        assert!(
+            loader
+                .resolve(
+                    "data:text/javascript-evil;base64,ZXhwb3J0IGRlZmF1bHQgNDI7",
+                    "https://cdn.jsdelivr.net/npm/pkg@1.0.0/+esm",
+                    ResolutionKind::Import,
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
     fn test_strict_mode_allows_tofu_for_unknown_modules() {
         // Even without a lockfile, strict mode should fall through to async
         // TOFU verification instead of rejecting synchronously.
@@ -1012,8 +1230,8 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
         let mut manifest = HashMap::new();
         manifest.insert(
             "https://cdn.jsdelivr.net/npm/known@1.0.0/+esm".to_string(),
-            // any base64 value — the cache path doesn't re-verify
-            "dGVzdA==".to_string(),
+            // SHA-384 of b"export default 42;\n"
+            "QgPNAKp0t4YJhHqUicStPFXVxqvr39RgTDy1l+4dm0U712X8pePGvAI6/42P5ow3".to_string(),
         );
         let cache: ModuleCache = Arc::new(RwLock::new(HashMap::new()));
         cache.write().unwrap().insert(
