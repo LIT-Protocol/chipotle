@@ -572,10 +572,7 @@ pub(crate) async fn bundle_imports(
             .cloned()
             .or_else(|| integrity.read().ok().and_then(|map| map.get(&url).cloned()));
 
-        let cached_bytes = module_cache
-            .read()
-            .ok()
-            .and_then(|c| c.get(&url).cloned());
+        let cached_bytes = module_cache.read().ok().and_then(|c| c.get(&url).cloned());
 
         let (bytes, from_cache) = if let Some(cached) = cached_bytes {
             // Verify cached bytes against expected hash if one exists
@@ -603,8 +600,7 @@ pub(crate) async fn bundle_imports(
             let mut hasher = Sha384::new();
             hasher.update(&fetched);
             let actual_digest = hasher.finalize();
-            let actual_b64 =
-                base64::engine::general_purpose::STANDARD.encode(&actual_digest);
+            let actual_b64 = base64::engine::general_purpose::STANDARD.encode(&actual_digest);
 
             // Integrity verification — mirrors CdnModuleLoader::load()
             if let Some(ref expected_b64) = expected_hash {
@@ -639,8 +635,7 @@ pub(crate) async fn bundle_imports(
                 );
 
                 let (bytes2, _) =
-                    CdnModuleLoader::fetch_with_size_limit(client, &url, "Bundler TOFU")
-                        .await?;
+                    CdnModuleLoader::fetch_with_size_limit(client, &url, "Bundler TOFU").await?;
                 let mut hasher2 = Sha384::new();
                 hasher2.update(&bytes2);
                 let verify_digest = hasher2.finalize();
@@ -678,9 +673,7 @@ pub(crate) async fn bundle_imports(
                         .append(true)
                         .open(path)
                         .map_err(|e| {
-                            JsErrorBox::generic(format!(
-                                "Failed to open integrity lockfile: {e}"
-                            ))
+                            JsErrorBox::generic(format!("Failed to open integrity lockfile: {e}"))
                         })?;
                     writeln!(file, "{url} sha384-{actual_b64}").map_err(|e| {
                         JsErrorBox::generic(format!("Failed to write integrity lockfile: {e}"))

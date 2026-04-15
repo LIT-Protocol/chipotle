@@ -330,7 +330,8 @@ impl ModuleLoader for CdnModuleLoader {
         // pipeline (import_rewriter) which inlines transitive dependencies as base64 data URIs,
         // and by jsDelivr ESM bundles that inline small dependencies. Only JavaScript MIME types
         // are accepted to prevent arbitrary content injection.
-        if specifier.starts_with("data:text/javascript;") || specifier.starts_with("data:text/javascript,")
+        if specifier.starts_with("data:text/javascript;")
+            || specifier.starts_with("data:text/javascript,")
         {
             info!(
                 specifier = %truncate_for_log(specifier, 80),
@@ -455,7 +456,9 @@ impl ModuleLoader for CdnModuleLoader {
         // Handle data: URIs inline — these are inlined dependencies from CDN ESM bundles.
         // Decode the base64 content directly instead of attempting an HTTP fetch.
         let url_str = module_specifier.as_str();
-        if url_str.starts_with("data:text/javascript;") || url_str.starts_with("data:text/javascript,") {
+        if url_str.starts_with("data:text/javascript;")
+            || url_str.starts_with("data:text/javascript,")
+        {
             // Pre-check raw URI body length to avoid large transient allocations during decode.
             // Base64 expands ~33%, so the raw body can be up to 4/3 of the decoded size limit.
             let max_raw_len = MAX_MODULE_SIZE_BYTES * 4 / 3 + 4;
@@ -472,9 +475,7 @@ impl ModuleLoader for CdnModuleLoader {
             {
                 base64::engine::general_purpose::STANDARD
                     .decode(rest)
-                    .map_err(|e| {
-                        JsErrorBox::generic(format!("Invalid base64 in data: URI: {e}"))
-                    })
+                    .map_err(|e| JsErrorBox::generic(format!("Invalid base64 in data: URI: {e}")))
             } else if let Some(rest) = url_str.strip_prefix("data:text/javascript,") {
                 // Plain (non-base64) data URI — percent-decode the body
                 Ok(percent_encoding::percent_decode_str(rest).collect::<Vec<u8>>())
@@ -499,7 +500,8 @@ impl ModuleLoader for CdnModuleLoader {
                         if let Ok(mut modules) = self.loaded_modules.0.write() {
                             let mut hasher = Sha384::new();
                             hasher.update(&bytes);
-                            let hash = base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
+                            let hash =
+                                base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
                             let data_key = format!("data:text/javascript;sha384-{}", &hash[..16]);
                             if !modules.iter().any(|m| m.url == data_key) {
                                 modules.push(LoadedModuleInfo {
@@ -1117,23 +1119,23 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     fn test_resolve_data_uri_rejected_non_javascript() {
         let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
         // data:text/html should be rejected even with CDN referrer
-        assert!(loader
-            .resolve(
-                "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
-                "https://cdn.jsdelivr.net/npm/pkg@1.0.0/+esm",
-                ResolutionKind::Import,
-            )
-            .is_err());
+        assert!(
+            loader
+                .resolve(
+                    "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
+                    "https://cdn.jsdelivr.net/npm/pkg@1.0.0/+esm",
+                    ResolutionKind::Import,
+                )
+                .is_err()
+        );
     }
 
     #[test]
     fn test_load_data_uri_base64() {
         let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
         // "export default 42;" base64-encoded
-        let specifier = ModuleSpecifier::parse(
-            "data:text/javascript;base64,ZXhwb3J0IGRlZmF1bHQgNDI7",
-        )
-        .unwrap();
+        let specifier =
+            ModuleSpecifier::parse("data:text/javascript;base64,ZXhwb3J0IGRlZmF1bHQgNDI7").unwrap();
         let response = loader.load(&specifier, None, false, RequestedModuleType::None);
         match response {
             ModuleLoadResponse::Sync(Ok(source)) => {
@@ -1170,8 +1172,7 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     #[test]
     fn test_load_data_uri_invalid_base64() {
         let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
-        let specifier =
-            ModuleSpecifier::parse("data:text/javascript;base64,NOT_VALID!!!").unwrap();
+        let specifier = ModuleSpecifier::parse("data:text/javascript;base64,NOT_VALID!!!").unwrap();
         let response = loader.load(&specifier, None, false, RequestedModuleType::None);
         assert!(
             matches!(response, ModuleLoadResponse::Sync(Err(_))),
@@ -1183,8 +1184,10 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     fn test_load_data_uri_unsupported_encoding() {
         let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
         // charset parameter before base64 is a valid data URI format but unsupported
-        let specifier =
-            ModuleSpecifier::parse("data:text/javascript;charset=utf-8;base64,ZXhwb3J0IGRlZmF1bHQgNDI7").unwrap();
+        let specifier = ModuleSpecifier::parse(
+            "data:text/javascript;charset=utf-8;base64,ZXhwb3J0IGRlZmF1bHQgNDI7",
+        )
+        .unwrap();
         let response = loader.load(&specifier, None, false, RequestedModuleType::None);
         assert!(
             matches!(response, ModuleLoadResponse::Sync(Err(_))),
@@ -1196,13 +1199,15 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     fn test_resolve_data_uri_prefix_boundary() {
         let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
         // "data:text/javascript-evil" should NOT match — only data:text/javascript; or data:text/javascript,
-        assert!(loader
-            .resolve(
-                "data:text/javascript-evil;base64,ZXhwb3J0IGRlZmF1bHQgNDI7",
-                "https://cdn.jsdelivr.net/npm/pkg@1.0.0/+esm",
-                ResolutionKind::Import,
-            )
-            .is_err());
+        assert!(
+            loader
+                .resolve(
+                    "data:text/javascript-evil;base64,ZXhwb3J0IGRlZmF1bHQgNDI7",
+                    "https://cdn.jsdelivr.net/npm/pkg@1.0.0/+esm",
+                    ResolutionKind::Import,
+                )
+                .is_err()
+        );
     }
 
     #[test]
