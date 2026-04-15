@@ -283,6 +283,10 @@ pub(crate) async fn execute_js(
     let memory_limit_mb = memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB);
 
     let loaded_modules = LoadedModules::default();
+    let bundler_client = http_client.clone();
+    let bundler_loaded_modules = loaded_modules.clone();
+    let bundler_integrity = integrity_manifest.clone();
+    let bundler_lockfile = lockfile_path.clone();
 
     let mut worker = build_main_worker_and_inject_sdk(
         &None,
@@ -365,9 +369,31 @@ pub(crate) async fn execute_js(
         }})();"
         )
     } else {
-        // Has imports — move user code inside the async IIFE so that the
-        // dynamically imported bindings are in lexical scope for main().
-        let dynamic_imports = import_rewriter::generate_dynamic_imports(&imports);
+        // Has imports — bundle all transitive dependencies from jsDelivr as
+        // data: URLs so the module loader needs no network I/O at runtime.
+        let bundle_result = import_rewriter::bundle_imports(
+            &imports,
+            &bundler_client,
+            &bundler_integrity,
+            strict_imports,
+            &bundler_lockfile,
+        )
+        .await
+        .map_err(|e| anyhow!("Failed to bundle CDN imports: {e}"))?;
+
+        // Record loaded modules for showImportDetails()
+        if let Ok(mut modules) = bundler_loaded_modules.0.write() {
+            for (url, hash) in &bundle_result.loaded_modules {
+                if !modules.iter().any(|m| &m.url == url) {
+                    modules.push(crate::cdn_module_loader::LoadedModuleInfo {
+                        url: url.clone(),
+                        hash: hash.clone(),
+                    });
+                }
+            }
+        }
+
+        let dynamic_imports = &bundle_result.dynamic_imports;
         format!(
             "
         (async () => {{
