@@ -58,6 +58,14 @@ struct ActionCodeCacheEntry {
     expires_at: Instant,
 }
 
+struct ActionCodePrepareContext<'a> {
+    client: &'a reqwest::Client,
+    integrity: &'a Arc<RwLock<HashMap<String, String>>>,
+    strict_imports: bool,
+    lockfile_path: &'a Option<PathBuf>,
+    module_cache: &'a ModuleCache,
+}
+
 impl ActionCodeCacheState {
     fn get(&self, action_ipfs_id: &str, now: Instant) -> Option<CachedActionCode> {
         let entry = self.entries.get(action_ipfs_id)?;
@@ -70,7 +78,8 @@ impl ActionCodeCacheState {
     fn insert(&mut self, action_ipfs_id: String, code: CachedActionCode, now: Instant) -> bool {
         self.purge_expired(now);
 
-        let size_bytes = action_code_cache_entry_size(&action_ipfs_id, &code);
+        let size_bytes =
+            action_code_cache_entry_size(&action_ipfs_id, action_ipfs_id.capacity(), &code);
         if size_bytes > MAX_ACTION_CODE_CACHE_BYTES {
             return false;
         }
@@ -120,17 +129,15 @@ impl ActionCodeCacheState {
     }
 }
 
-fn action_code_cache_entry_size(action_ipfs_id: &str, code: &CachedActionCode) -> usize {
+fn action_code_cache_entry_size(
+    action_ipfs_id: &str,
+    action_ipfs_id_capacity: usize,
+    code: &CachedActionCode,
+) -> usize {
     size_of::<ActionCodeCacheEntry>()
         + size_of::<String>()
-        + action_ipfs_id.len()
-        + code.len()
-        + size_of::<Vec<(String, String)>>()
-        + code
-            .loaded_modules
-            .iter()
-            .map(|(url, hash)| size_of::<(String, String)>() + url.len() + hash.len())
-            .sum::<usize>()
+        + action_ipfs_id_capacity.max(action_ipfs_id.len())
+        + code.allocated_bytes()
 }
 
 #[derive(Clone, Debug)]
@@ -141,13 +148,15 @@ pub(crate) struct CachedActionCode {
 }
 
 impl CachedActionCode {
-    fn len(&self) -> usize {
-        self.code.len()
+    fn allocated_bytes(&self) -> usize {
+        self.code.capacity()
+            + self.dynamic_imports.as_ref().map_or(0, String::capacity)
+            + self.loaded_modules.capacity() * size_of::<(String, String)>()
             + self
-                .dynamic_imports
-                .as_ref()
-                .map(|imports| imports.len())
-                .unwrap_or_default()
+                .loaded_modules
+                .iter()
+                .map(|(url, hash)| url.capacity() + hash.capacity())
+                .sum::<usize>()
     }
 
     fn to_executable_code(&self, js_func_params: &str) -> String {
@@ -221,11 +230,7 @@ fn record_loaded_modules(loaded_modules: &LoadedModules, cached_code: &CachedAct
 
 async fn prepare_action_code(
     code: &str,
-    client: &reqwest::Client,
-    integrity: &Arc<RwLock<HashMap<String, String>>>,
-    strict_imports: bool,
-    lockfile_path: &Option<PathBuf>,
-    module_cache: &ModuleCache,
+    context: &ActionCodePrepareContext<'_>,
 ) -> Result<CachedActionCode> {
     // Rewrite static ES `import` statements into dynamic `import()` calls.
     // Static imports are not valid in script mode, so we strip them from the
@@ -248,11 +253,11 @@ async fn prepare_action_code(
     // data: URLs so the module loader needs no network I/O at runtime.
     let bundle_result = import_rewriter::bundle_imports(
         &imports,
-        client,
-        integrity,
-        strict_imports,
-        lockfile_path,
-        module_cache,
+        context.client,
+        context.integrity,
+        context.strict_imports,
+        context.lockfile_path,
+        context.module_cache,
     )
     .await
     .map_err(|e| anyhow!("Failed to bundle CDN imports: {e}"))?;
@@ -268,11 +273,7 @@ async fn get_or_prepare_action_code(
     code: &str,
     action_ipfs_id: &str,
     action_code_cache: &ActionCodeCache,
-    client: &reqwest::Client,
-    integrity: &Arc<RwLock<HashMap<String, String>>>,
-    strict_imports: bool,
-    lockfile_path: &Option<PathBuf>,
-    module_cache: &ModuleCache,
+    prepare_context: &ActionCodePrepareContext<'_>,
 ) -> Result<CachedActionCode> {
     let now = Instant::now();
     if let Ok(cache) = action_code_cache.read()
@@ -282,15 +283,7 @@ async fn get_or_prepare_action_code(
         return Ok(cached_code.clone());
     }
 
-    let prepared_code = prepare_action_code(
-        code,
-        client,
-        integrity,
-        strict_imports,
-        lockfile_path,
-        module_cache,
-    )
-    .await?;
+    let prepared_code = prepare_action_code(code, prepare_context).await?;
 
     if let Ok(mut cache) = action_code_cache.write() {
         if let Some(cached_code) = cache.get(action_ipfs_id, now) {
@@ -300,7 +293,7 @@ async fn get_or_prepare_action_code(
         if cache.insert(action_ipfs_id.to_string(), prepared_code.clone(), now) {
             debug!(
                 action_ipfs_id,
-                size_bytes = prepared_code.len(),
+                allocated_bytes = prepared_code.allocated_bytes(),
                 ttl_seconds = ACTION_CODE_CACHE_TTL.as_secs(),
                 "action code cached for future requests",
             );
@@ -308,7 +301,7 @@ async fn get_or_prepare_action_code(
             debug!(
                 action_ipfs_id,
                 cache_bytes = cache.total_bytes(),
-                code_bytes = prepared_code.len(),
+                allocated_bytes = prepared_code.allocated_bytes(),
                 max_cache = MAX_ACTION_CODE_CACHE_BYTES,
                 "action code cache full, skipping cache insertion"
             );
@@ -556,6 +549,13 @@ pub(crate) async fn execute_js(
     let bundler_integrity = integrity_manifest.clone();
     let bundler_lockfile = lockfile_path.clone();
     let bundler_cache = module_cache.clone();
+    let prepare_context = ActionCodePrepareContext {
+        client: &bundler_client,
+        integrity: &bundler_integrity,
+        strict_imports,
+        lockfile_path: &bundler_lockfile,
+        module_cache: &bundler_cache,
+    };
 
     let mut worker = build_main_worker_and_inject_sdk(
         &None,
@@ -617,17 +617,9 @@ pub(crate) async fn execute_js(
     // The action CID is derived only from the incoming user code. Params vary
     // per invocation, so cache the reusable prepared code and add params here.
     let action_ipfs_id = get_lit_action_ipfs_id(&code);
-    let cached_code = get_or_prepare_action_code(
-        &code,
-        &action_ipfs_id,
-        &action_code_cache,
-        &bundler_client,
-        &bundler_integrity,
-        strict_imports,
-        &bundler_lockfile,
-        &bundler_cache,
-    )
-    .await?;
+    let cached_code =
+        get_or_prepare_action_code(&code, &action_ipfs_id, &action_code_cache, &prepare_context)
+            .await?;
     record_loaded_modules(&loaded_modules, &cached_code);
     let code = cached_code.to_executable_code(&js_func_params);
 
@@ -786,17 +778,55 @@ mod tests {
 
     #[test]
     fn action_code_cache_entry_size_counts_entry_overhead() {
+        let action_ipfs_id = "QmTest".to_string();
         let code = cached_code("x");
-        let size = action_code_cache_entry_size("QmTest", &code);
+        let size = action_code_cache_entry_size(&action_ipfs_id, action_ipfs_id.capacity(), &code);
 
-        assert!(size > code.len() + "QmTest".len());
+        assert!(size > code.allocated_bytes() + action_ipfs_id.capacity());
+    }
+
+    #[test]
+    fn action_code_cache_entry_size_uses_allocated_capacity() {
+        let mut action_ipfs_id = String::with_capacity(64);
+        action_ipfs_id.push_str("QmTest");
+
+        let mut code_string = String::with_capacity(128);
+        code_string.push('x');
+
+        let mut dynamic_imports = String::with_capacity(256);
+        dynamic_imports.push_str("await import(\"data:text/javascript,\");");
+
+        let mut loaded_modules = Vec::with_capacity(4);
+        let mut module_url = String::with_capacity(512);
+        module_url.push_str("https://cdn.jsdelivr.net/npm/example@1.0.0/+esm");
+        let mut module_hash = String::with_capacity(128);
+        module_hash.push_str("abc123");
+        loaded_modules.push((module_url, module_hash));
+
+        let code = CachedActionCode {
+            code: code_string,
+            dynamic_imports: Some(dynamic_imports),
+            loaded_modules,
+        };
+
+        let size = action_code_cache_entry_size(&action_ipfs_id, action_ipfs_id.capacity(), &code);
+        let minimum_allocated_bytes = action_ipfs_id.capacity()
+            + code.code.capacity()
+            + code.dynamic_imports.as_ref().unwrap().capacity()
+            + code.loaded_modules.capacity() * size_of::<(String, String)>()
+            + code.loaded_modules[0].0.capacity()
+            + code.loaded_modules[0].1.capacity();
+
+        assert!(size >= minimum_allocated_bytes);
     }
 
     #[test]
     fn action_code_cache_expires_entries() {
         let now = Instant::now();
         let code = cached_code("console.log('old')");
-        let size_bytes = action_code_cache_entry_size("QmOld", &code);
+        let action_ipfs_id = "QmOld".to_string();
+        let size_bytes =
+            action_code_cache_entry_size(&action_ipfs_id, action_ipfs_id.capacity(), &code);
         let mut cache = ActionCodeCacheState {
             entries: HashMap::from([(
                 "QmOld".to_string(),
