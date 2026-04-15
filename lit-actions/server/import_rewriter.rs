@@ -600,7 +600,7 @@ pub(crate) async fn bundle_imports(
             let mut hasher = Sha384::new();
             hasher.update(&fetched);
             let actual_digest = hasher.finalize();
-            let actual_b64 = base64::engine::general_purpose::STANDARD.encode(&actual_digest);
+            let actual_b64 = base64::engine::general_purpose::STANDARD.encode(actual_digest);
 
             // Integrity verification — mirrors CdnModuleLoader::load()
             if let Some(ref expected_b64) = expected_hash {
@@ -708,12 +708,12 @@ pub(crate) async fn bundle_imports(
         let hash = base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
 
         // Store verified module in shared cache (bounded by MAX_CACHE_BYTES)
-        if !from_cache {
-            if let Ok(mut cache_w) = module_cache.write() {
-                let total: usize = cache_w.values().map(|v| v.len()).sum();
-                if total + bytes.len() <= MAX_CACHE_BYTES {
-                    cache_w.insert(url.clone(), bytes.clone());
-                }
+        if !from_cache
+            && let Ok(mut cache_w) = module_cache.write()
+        {
+            let total: usize = cache_w.values().map(|v| v.len()).sum();
+            if total + bytes.len() <= MAX_CACHE_BYTES {
+                cache_w.insert(url.clone(), bytes.clone());
             }
         }
 
