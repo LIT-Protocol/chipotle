@@ -7,7 +7,6 @@ publish = { workspace = true }
 
 [lib]
 path = "lib.rs"
-test = false
 doctest = false
 
 [dependencies]
@@ -21,6 +20,7 @@ deno_runtime = { workspace = true }
 flume = { workspace = true }
 futures = "0.3"
 indoc = { workspace = true }
+ipfs-hasher = "0.13.0"
 lit-actions-ext = { workspace = true }
 lit-actions-grpc = { workspace = true }
 lit-api-core = { workspace = true }
