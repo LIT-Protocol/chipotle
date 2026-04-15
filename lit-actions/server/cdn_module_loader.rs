@@ -1225,8 +1225,8 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
         let mut manifest = HashMap::new();
         manifest.insert(
             "https://cdn.jsdelivr.net/npm/known@1.0.0/+esm".to_string(),
-            // any base64 value — the cache path doesn't re-verify
-            "dGVzdA==".to_string(),
+            // SHA-384 of b"export default 42;\n"
+            "QgPNAKp0t4YJhHqUicStPFXVxqvr39RgTDy1l+4dm0U712X8pePGvAI6/42P5ow3".to_string(),
         );
         let cache: ModuleCache = Arc::new(RwLock::new(HashMap::new()));
         cache.write().unwrap().insert(
