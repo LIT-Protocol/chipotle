@@ -8,7 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
-use deno_core::{JsRuntime, v8};
+use deno_core::{JsRuntime, NoopModuleLoader, v8};
 
 use crate::cdn_module_loader::{CdnModuleLoader, LoadedModules, ModuleCache};
 use crate::import_rewriter;
@@ -319,12 +319,7 @@ fn build_main_worker_and_inject_sdk(
     auth_context: &Option<serde_json::Value>,
     http_headers: BTreeMap<String, String>,
     memory_limit_mb: Option<usize>,
-    integrity_manifest: Arc<RwLock<HashMap<String, String>>>,
-    strict_imports: bool,
-    module_cache: ModuleCache,
-    lockfile_path: Option<PathBuf>,
-    http_client: Arc<reqwest::Client>,
-    loaded_modules: LoadedModules,
+    module_loader: Rc<dyn deno_core::ModuleLoader>,
 ) -> Result<MainWorker> {
     let options = WorkerOptions {
         bootstrap: BootstrapOptions {
@@ -372,14 +367,7 @@ fn build_main_worker_and_inject_sdk(
             broadcast_channel: Default::default(),
             feature_checker: Default::default(),
             fs: Arc::new(RealFs),
-            module_loader: Rc::new(CdnModuleLoader::with_options(
-                integrity_manifest,
-                strict_imports,
-                module_cache,
-                lockfile_path,
-                Some(http_client),
-                loaded_modules,
-            )),
+            module_loader,
             node_services: Default::default(),
             npm_process_state_provider: Default::default(),
             permissions: PermissionsContainer::new(desc_parser, perms),
@@ -544,17 +532,30 @@ pub(crate) async fn execute_js(
     let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
     let memory_limit_mb = memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB);
 
+    // Check the action code cache before building the worker. On cache hit we
+    // already have the prepared code, so no module loading is needed — use a
+    // cheap NoopModuleLoader instead of constructing the full CdnModuleLoader
+    // with its HTTP client, integrity manifest, etc.
+    let action_ipfs_id = get_lit_action_ipfs_id(&code);
+    let now = Instant::now();
+    let cached_code = action_code_cache
+        .read()
+        .ok()
+        .and_then(|cache| cache.get(&action_ipfs_id, now));
+
     let loaded_modules = LoadedModules::default();
-    let bundler_client = http_client.clone();
-    let bundler_integrity = integrity_manifest.clone();
-    let bundler_lockfile = lockfile_path.clone();
-    let bundler_cache = module_cache.clone();
-    let prepare_context = ActionCodePrepareContext {
-        client: &bundler_client,
-        integrity: &bundler_integrity,
-        strict_imports,
-        lockfile_path: &bundler_lockfile,
-        module_cache: &bundler_cache,
+    let module_loader: Rc<dyn deno_core::ModuleLoader> = if cached_code.is_some() {
+        debug!(action_ipfs_id, "cache hit — using NoopModuleLoader");
+        Rc::new(NoopModuleLoader)
+    } else {
+        Rc::new(CdnModuleLoader::with_options(
+            integrity_manifest.clone(),
+            strict_imports,
+            module_cache.clone(),
+            lockfile_path.clone(),
+            Some(http_client.clone()),
+            loaded_modules.clone(),
+        ))
     };
 
     let mut worker = build_main_worker_and_inject_sdk(
@@ -562,12 +563,7 @@ pub(crate) async fn execute_js(
         &auth_context,
         http_headers,
         Some(memory_limit_mb),
-        integrity_manifest,
-        strict_imports,
-        module_cache,
-        lockfile_path,
-        http_client,
-        loaded_modules.clone(),
+        module_loader,
     )
     .context("Error building main worker")
     .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
@@ -614,12 +610,21 @@ pub(crate) async fn execute_js(
     let js_params = js_params.as_ref().unwrap_or_default();
     let js_func_params = js_params.to_string();
 
-    // The action CID is derived only from the incoming user code. Params vary
-    // per invocation, so cache the reusable prepared code and add params here.
-    let action_ipfs_id = get_lit_action_ipfs_id(&code);
-    let cached_code =
+    // On cache hit we already have the prepared code; on miss we need to
+    // prepare it (rewrite imports, bundle dependencies, cache the result).
+    let cached_code = if let Some(cached) = cached_code {
+        cached
+    } else {
+        let prepare_context = ActionCodePrepareContext {
+            client: &http_client,
+            integrity: &integrity_manifest,
+            strict_imports,
+            lockfile_path: &lockfile_path,
+            module_cache: &module_cache,
+        };
         get_or_prepare_action_code(&code, &action_ipfs_id, &action_code_cache, &prepare_context)
-            .await?;
+            .await?
+    };
     record_loaded_modules(&loaded_modules, &cached_code);
     let code = cached_code.to_executable_code(&js_func_params);
 
