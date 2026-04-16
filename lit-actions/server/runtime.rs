@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
-use deno_core::{JsRuntime, v8};
+use deno_core::{JsRuntime, NoopModuleLoader, v8};
 
 use crate::cdn_module_loader::{CdnModuleLoader, LoadedModules, ModuleCache};
 use crate::import_rewriter;
@@ -85,12 +85,7 @@ fn build_main_worker_and_inject_sdk(
     auth_context: &Option<serde_json::Value>,
     http_headers: BTreeMap<String, String>,
     memory_limit_mb: Option<usize>,
-    integrity_manifest: Arc<RwLock<HashMap<String, String>>>,
-    strict_imports: bool,
-    module_cache: ModuleCache,
-    lockfile_path: Option<PathBuf>,
-    http_client: Arc<reqwest::Client>,
-    loaded_modules: LoadedModules,
+    module_loader: Rc<dyn deno_core::ModuleLoader>,
 ) -> Result<MainWorker> {
     let options = WorkerOptions {
         bootstrap: BootstrapOptions {
@@ -138,14 +133,7 @@ fn build_main_worker_and_inject_sdk(
             broadcast_channel: Default::default(),
             feature_checker: Default::default(),
             fs: Arc::new(RealFs),
-            module_loader: Rc::new(CdnModuleLoader::with_options(
-                integrity_manifest,
-                strict_imports,
-                module_cache,
-                lockfile_path,
-                Some(http_client),
-                loaded_modules,
-            )),
+            module_loader,
             node_services: Default::default(),
             npm_process_state_provider: Default::default(),
             permissions: PermissionsContainer::new(desc_parser, perms),
@@ -311,19 +299,43 @@ pub(crate) async fn execute_js(
     let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
     let memory_limit_mb = memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB);
 
+    // Try to use cached rewrite result keyed by IPFS CID to skip import parsing.
+    // On cache hit, verify the code hash to prevent cache poisoning from mismatched CIDs.
+    // Only compute the hash when we have a CID (avoids O(n) hashing on every call).
+    let cached = ipfs_id.as_deref().and_then(|cid| {
+        code_cache
+            .read()
+            .ok()
+            .and_then(|cache| cache.get(cid).cloned())
+            .filter(|entry| entry.code_hash == hash_code(&code))
+    });
+
+    let cache_hit = cached.is_some();
+
+    // On cache hit we already have the rewritten code, so no module loading is
+    // needed — use a cheap NoopModuleLoader instead of constructing the full
+    // CdnModuleLoader with its HTTP client, integrity manifest, etc.
     let loaded_modules = LoadedModules::default();
+    let module_loader: Rc<dyn deno_core::ModuleLoader> = if cache_hit {
+        debug!("Cache hit for IPFS CID — using NoopModuleLoader");
+        Rc::new(NoopModuleLoader)
+    } else {
+        Rc::new(CdnModuleLoader::with_options(
+            integrity_manifest,
+            strict_imports,
+            module_cache,
+            lockfile_path,
+            Some(http_client),
+            loaded_modules.clone(),
+        ))
+    };
 
     let mut worker = build_main_worker_and_inject_sdk(
         &None,
         &auth_context,
         http_headers,
         Some(memory_limit_mb),
-        integrity_manifest,
-        strict_imports,
-        module_cache,
-        lockfile_path,
-        http_client,
-        loaded_modules.clone(),
+        module_loader,
     )
     .context("Error building main worker")
     .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
@@ -369,17 +381,6 @@ pub(crate) async fn execute_js(
 
     let js_params = js_params.as_ref().unwrap_or_default();
     let js_func_params = js_params.to_string();
-
-    // Try to use cached rewrite result keyed by IPFS CID to skip import parsing.
-    // On cache hit, verify the code hash to prevent cache poisoning from mismatched CIDs.
-    // Only compute the hash when we have a CID (avoids O(n) hashing on every call).
-    let cached = ipfs_id.as_deref().and_then(|cid| {
-        code_cache
-            .read()
-            .ok()
-            .and_then(|cache| cache.get(cid).cloned())
-            .filter(|entry| entry.code_hash == hash_code(&code))
-    });
 
     let (rewritten_code, dynamic_imports, has_imports) = if let Some(cached) = cached {
         debug!("Code cache hit for IPFS CID");
