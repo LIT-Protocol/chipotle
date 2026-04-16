@@ -7,6 +7,7 @@ use crate::actions::client::ClientBuilder;
 use crate::core::v1::models::response::LitActionClientConfigResponse;
 use anyhow::{Result, bail};
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use super::Client;
 use lit_actions_grpc::tonic::metadata::MetadataMap;
@@ -38,11 +39,10 @@ impl Client {
     }
 
     #[allow(dead_code)]
-    pub fn ipfs_cache(&self) -> Result<Cache<String, String>> {
-        // if let Some(ipfs_cache) = self.js_env.ipfs_cache.clone() {
-        //     return Ok(ipfs_cache);
-        // }
-
+    pub fn ipfs_cache(&self) -> Result<Cache<String, Arc<String>>> {
+        if let Some(ipfs_cache) = self.js_env.ipfs_cache.clone() {
+            return Ok(ipfs_cache);
+        }
         bail!("No IPFS cache found");
     }
 
