@@ -383,7 +383,11 @@ pub(crate) async fn execute_js(
 
     let (rewritten_code, dynamic_imports, has_imports) = if let Some(cached) = cached {
         debug!("Code cache hit for IPFS CID");
-        (cached.rewritten_code, cached.dynamic_imports, cached.has_imports)
+        (
+            cached.rewritten_code,
+            cached.dynamic_imports,
+            cached.has_imports,
+        )
     } else {
         // Rewrite static ES `import` statements into dynamic `import()` calls.
         // Static imports are not valid in script mode, so we strip them from the
