@@ -432,7 +432,9 @@ pub async fn register_wallet_derivation(
         description.to_string(),
     );
 
-    send_transaction(function_call, signer_pool, signer_address, client).await
+    let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
+    blockchain_cache::invalidate_for_account(api_key).await;
+    Ok(result)
 }
 
 /// Get the derivation path for a wallet address under an account (read-only).
@@ -444,8 +446,25 @@ pub async fn register_wallet_derivation(
     err
 )]
 pub async fn get_wallet_derivation(api_key: &str, wallet_address: H160) -> Result<U256> {
-    let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
+
+    if let Some(cache) = blockchain_cache::get() {
+        let key = cache.wallet_derivation_key(account_api_key_hash, wallet_address);
+        return cache
+            .wallet_derivation_cache()
+            .try_get_with(key, async {
+                let contract = get_read_only_account_config_contract().await?;
+                let derivation = contract
+                    .get_wallet_derivation(account_api_key_hash, wallet_address)
+                    .call()
+                    .await?;
+                Ok(derivation)
+            })
+            .await
+            .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+    }
+
+    let contract = get_read_only_account_config_contract().await?;
     let derivation = contract
         .get_wallet_derivation(account_api_key_hash, wallet_address)
         .call()

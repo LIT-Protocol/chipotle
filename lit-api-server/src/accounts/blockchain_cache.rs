@@ -1,8 +1,9 @@
-//! Global blockchain permission cache.
+//! Global blockchain data cache.
 //!
 //! Caches the results of on-chain permission checks (`canExecuteAction`,
-//! `canUseWalletInAction`) so that repeated checks for the same API key
-//! and action/wallet combination avoid redundant contract calls.
+//! `canUseWalletInAction`) and wallet derivation lookups (`getWalletDerivation`)
+//! so that repeated calls for the same API key and action/wallet combination
+//! avoid redundant contract calls.
 //!
 //! TTL: 60 minutes idle (extending on every access) with a hard upper bound
 //! of 60 minutes from insertion (`time_to_live`), ensuring entries are never
@@ -34,6 +35,8 @@ pub struct BlockchainCache {
     use_wallet: Cache<String, bool>,
     /// `can_execute_action_and_use_wallet` results.
     execute_and_wallet: Cache<String, (bool, bool)>,
+    /// `get_wallet_derivation` results.
+    wallet_derivation: Cache<String, U256>,
     /// Per-account generation counter keyed by the string representation of
     /// the api_key_hash (`U256`). Uses a plain HashMap (no eviction) to
     /// guarantee that a bumped generation is never lost. Each entry is ~100
@@ -59,10 +62,16 @@ impl BlockchainCache {
             .time_to_idle(ttl)
             .time_to_live(ttl)
             .build();
+        let wallet_derivation = Cache::builder()
+            .max_capacity(MAX_CAPACITY)
+            .time_to_idle(ttl)
+            .time_to_live(ttl)
+            .build();
         Self {
             execute_action,
             use_wallet,
             execute_and_wallet,
+            wallet_derivation,
             generations: RwLock::new(HashMap::new()),
         }
     }
@@ -108,6 +117,17 @@ impl BlockchainCache {
         format!("{h}:g{g}:ew:{cid_hash}:{wallet:?}")
     }
 
+    /// Build a cache key for `get_wallet_derivation`.
+    pub fn wallet_derivation_key(
+        &self,
+        api_key_hash: U256,
+        wallet: ethers::types::H160,
+    ) -> String {
+        let h = api_key_hash.to_string();
+        let g = self.generation(&h);
+        format!("{h}:g{g}:wd:{wallet:?}")
+    }
+
     /// Reference to the `can_execute_action` cache.
     pub fn execute_action_cache(&self) -> &Cache<String, bool> {
         &self.execute_action
@@ -121,6 +141,11 @@ impl BlockchainCache {
     /// Reference to the `can_execute_action_and_use_wallet` cache.
     pub fn execute_and_wallet_cache(&self) -> &Cache<String, (bool, bool)> {
         &self.execute_and_wallet
+    }
+
+    /// Reference to the `get_wallet_derivation` cache.
+    pub fn wallet_derivation_cache(&self) -> &Cache<String, U256> {
+        &self.wallet_derivation
     }
 
     /// Bump the generation for a single api_key_hash, invalidating all cached
@@ -427,6 +452,42 @@ mod tests {
         cache.bump_generation(&hash.to_string());
         let new_key = cache.execute_and_wallet_key(hash, cid, wallet);
         assert_eq!(cache.execute_and_wallet.get(&new_key).await, None);
+    }
+
+    // ── wallet_derivation cache ──────────────────────────────────────
+
+    #[test]
+    fn wallet_derivation_key_has_wd_discriminator() {
+        let cache = test_cache();
+        let hash = U256::from(1);
+        let wallet = H160::from_low_u64_be(0xdead);
+        let key = cache.wallet_derivation_key(hash, wallet);
+        assert!(
+            key.contains(":wd:"),
+            "key should contain :wd: discriminator, got: {key}"
+        );
+    }
+
+    #[tokio::test]
+    async fn wallet_derivation_cache_hit_and_invalidation() {
+        let cache = test_cache();
+        let hash = U256::from(5);
+        let wallet = H160::from_low_u64_be(0xbeef);
+
+        let key = cache.wallet_derivation_key(hash, wallet);
+        cache
+            .wallet_derivation
+            .insert(key.clone(), U256::from(42))
+            .await;
+        assert_eq!(
+            cache.wallet_derivation.get(&key).await,
+            Some(U256::from(42))
+        );
+
+        cache.bump_generation(&hash.to_string());
+        let new_key = cache.wallet_derivation_key(hash, wallet);
+        assert_ne!(key, new_key);
+        assert_eq!(cache.wallet_derivation.get(&new_key).await, None);
     }
 
     // ── try_get_with integration ────────────────────────────────────
