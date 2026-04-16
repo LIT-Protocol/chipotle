@@ -315,6 +315,40 @@ async fn js_params(mut client: TestClient) {
         assert!(client.received::<ExecutionResult>().success);
     }
 
+    {
+        let code = indoc! {r#"
+            async function main({ message }) {
+                console.log(message)
+            }
+        "#};
+
+        client
+            .respond_with(PrintResponse {})
+            .execute_js(ExecutionRequest {
+                code: code.into(),
+                js_params: Some(b"{\"message\":\"first\"}".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(client.received::<PrintRequest>().message, "first\n");
+        assert!(client.received::<ExecutionResult>().success);
+
+        client
+            .respond_with(PrintResponse {})
+            .execute_js(ExecutionRequest {
+                code: code.into(),
+                js_params: Some(b"{\"message\":\"second\"}".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(client.received::<PrintRequest>().message, "second\n");
+        assert!(client.received::<ExecutionResult>().success);
+    }
+
     // Reminder - this test is no longer valid as js Params are no longer globals
     // Check that the Lit namespace can't be modified
     // {

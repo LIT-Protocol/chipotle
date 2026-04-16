@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use moka::future::Cache;
 use serde::{Deserialize, Serialize};
@@ -14,7 +15,7 @@ pub struct SignedData {
 
 #[derive(Debug, Clone, Default)]
 pub struct DenoExecutionEnv {
-    pub ipfs_cache: Option<Cache<String, String>>,
+    pub ipfs_cache: Option<Cache<String, Arc<String>>>,
     pub http_client: Option<reqwest::Client>,
 }
 

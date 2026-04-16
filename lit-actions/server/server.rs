@@ -4,7 +4,7 @@ use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 
 use crate::cdn_module_loader::{CdnModuleLoader, ModuleCache};
-use crate::runtime::CodeCache;
+use crate::runtime::{ActionCodeCache, new_action_code_cache};
 
 use anyhow::Result;
 use deno_core::error::CoreError;
@@ -38,12 +38,12 @@ pub struct Server {
     strict_imports: bool,
     /// Shared cache for fetched CDN modules.
     module_cache: ModuleCache,
+    /// Shared cache for action code prepared from the incoming code CID.
+    action_code_cache: ActionCodeCache,
     /// Path to integrity.lock file for TOFU auto-pinning.
     lockfile_path: Option<PathBuf>,
     /// Shared HTTP client for CDN fetches (connection pooling across executions).
     http_client: Arc<reqwest::Client>,
-    /// Shared cache for import-rewritten code keyed by IPFS CID.
-    code_cache: CodeCache,
 }
 
 impl Server {
@@ -64,9 +64,9 @@ impl Server {
             integrity_manifest,
             strict_imports,
             module_cache: Arc::new(RwLock::new(HashMap::new())),
+            action_code_cache: new_action_code_cache(),
             lockfile_path,
             http_client: CdnModuleLoader::build_http_client(),
-            code_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -76,9 +76,9 @@ impl Server {
             integrity_manifest: Default::default(),
             strict_imports: false,
             module_cache: Arc::new(RwLock::new(HashMap::new())),
+            action_code_cache: new_action_code_cache(),
             lockfile_path: None,
             http_client: CdnModuleLoader::build_http_client(),
-            code_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
@@ -101,9 +101,9 @@ impl Action for Server {
         let integrity_manifest = self.integrity_manifest.clone();
         let strict_imports = self.strict_imports;
         let module_cache = self.module_cache.clone();
+        let action_code_cache = self.action_code_cache.clone();
         let lockfile_path = self.lockfile_path.clone();
         let http_client = self.http_client.clone();
-        let code_cache = self.code_cache.clone();
 
         // Put incoming requests into channel
         let send_exec_req_span = debug_span!("send_exec_req");
@@ -189,10 +189,9 @@ impl Action for Server {
                                     integrity_manifest.clone(),
                                     strict_imports,
                                     module_cache.clone(),
+                                    action_code_cache.clone(),
                                     lockfile_path.clone(),
                                     http_client.clone(),
-                                    req.ipfs_id,
-                                    code_cache.clone(),
                                 )
                                 .await;
                                 let _ = outbound_tx

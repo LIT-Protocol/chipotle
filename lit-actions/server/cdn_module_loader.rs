@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -14,8 +15,23 @@ use futures::FutureExt;
 use sha2::{Digest, Sha384};
 use tracing::{debug, error, info, instrument, warn};
 
+/// Truncate a string to approximately the first 100 bytes (on a valid UTF-8
+/// char boundary) if it exceeds 1000 bytes. Used to prevent logging huge
+/// base64 blobs in module specifiers.
+fn truncate_for_log(s: &str) -> Cow<'_, str> {
+    if s.len() > 1000 {
+        let mut end = 100.min(s.len());
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        Cow::Owned(format!("{}…[truncated, len={}]", &s[..end], s.len()))
+    } else {
+        Cow::Borrowed(s)
+    }
+}
+
 /// Constant-time byte comparison to prevent timing side-channels on integrity hashes.
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }
@@ -27,25 +43,25 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 /// Allowed CDN URL prefix for module imports (origin only, used for URL construction).
-const ALLOWED_CDN_PREFIX: &str = "https://cdn.jsdelivr.net/";
+pub(crate) const ALLOWED_CDN_PREFIX: &str = "https://cdn.jsdelivr.net/";
 
 /// Allowed CDN URL prefix restricted to the npm backend.
 /// Only npm packages are permitted; other jsDelivr backends (/gh/, /wp/, etc.)
 /// serve mutable content and are rejected.
-const ALLOWED_NPM_PREFIX: &str = "https://cdn.jsdelivr.net/npm/";
+pub(crate) const ALLOWED_NPM_PREFIX: &str = "https://cdn.jsdelivr.net/npm/";
 
 /// Maximum response body size (10 MB).
 const MAX_MODULE_SIZE_BYTES: usize = 10 * 1024 * 1024;
 
-/// Maximum total cached bytes before evicting oldest entries (100 MB).
-const MAX_CACHE_BYTES: usize = 100 * 1024 * 1024;
+/// Maximum total cached bytes (100 MB). When full, new entries are skipped (no eviction).
+pub(crate) const MAX_CACHE_BYTES: usize = 100 * 1024 * 1024;
 
 /// HTTP request timeout.
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Maximum number of distinct modules that can be loaded per action execution.
 /// Prevents DoS via dependency graphs with thousands of tiny files.
-const MAX_MODULE_COUNT: usize = 100;
+pub(crate) const MAX_MODULE_COUNT: usize = 100;
 
 /// Thread-safe cache for fetched and integrity-verified module sources.
 pub type ModuleCache = Arc<RwLock<HashMap<String, Vec<u8>>>>;
@@ -187,7 +203,7 @@ impl CdnModuleLoader {
     /// inline integrity verification.
     ///
     /// Returns None if the specifier doesn't match the expected format.
-    fn parse_npm_specifier(specifier: &str) -> Option<String> {
+    pub(crate) fn parse_npm_specifier(specifier: &str) -> Option<String> {
         // Split off the optional #hash fragment before parsing
         let (spec, fragment) = match specifier.split_once('#') {
             Some((s, f)) => (s, Some(f)),
@@ -232,7 +248,7 @@ impl CdnModuleLoader {
     /// Fetch a URL with streaming body read, enforcing size limits during download.
     /// Returns the response bytes and optionally the SRI hash from CDN headers.
     #[instrument(skip_all, err)]
-    async fn fetch_with_size_limit(
+    pub(crate) async fn fetch_with_size_limit(
         client: &reqwest::Client,
         url: &str,
         label: &str,
@@ -313,54 +329,98 @@ impl ModuleLoader for CdnModuleLoader {
         referrer: &str,
         _kind: ResolutionKind,
     ) -> Result<ModuleSpecifier, ModuleLoaderError> {
+        // Pass through data:text/javascript URIs unchanged. These are produced by the bundling
+        // pipeline (import_rewriter) which inlines transitive dependencies as base64 data URIs,
+        // and by jsDelivr ESM bundles that inline small dependencies. Only JavaScript MIME types
+        // are accepted to prevent arbitrary content injection.
+        if specifier.starts_with("data:text/javascript;")
+            || specifier.starts_with("data:text/javascript,")
+        {
+            info!(
+                specifier = %truncate_for_log(specifier),
+                referrer,
+                "CDN module resolve: data: URI accepted (inlined dependency)"
+            );
+            return ModuleSpecifier::parse(specifier)
+                .map_err(|e| JsErrorBox::generic(format!("Invalid data: URI: {e}")).into());
+        }
+
         // Resolve relative imports against the referrer when the referrer is a jsDelivr npm URL.
         // ESM modules on jsDelivr can have relative imports between files in the same package.
         if (specifier.starts_with("./") || specifier.starts_with("../"))
             && Self::is_allowed_cdn(referrer)
         {
             let base = ModuleSpecifier::parse(referrer).map_err(|e| {
-                JsErrorBox::generic(format!("Invalid referrer URL: {referrer}: {e}"))
+                JsErrorBox::generic(format!(
+                    "Invalid referrer URL: {}: {e}",
+                    truncate_for_log(referrer)
+                ))
             })?;
             let resolved = base.join(specifier).map_err(|e| {
                 JsErrorBox::generic(format!(
-                    "Failed to resolve relative import \"{specifier}\" against {referrer}: {e}"
+                    "Failed to resolve relative import \"{}\" against {}: {e}",
+                    truncate_for_log(specifier),
+                    truncate_for_log(referrer)
                 ))
             })?;
             // Verify the resolved URL stays within the /npm/ backend.
             // Relative traversal (../../) could escape to /gh/ or other backends.
             if Self::is_allowed_cdn(resolved.as_str()) {
                 info!(
-                    specifier,
-                    referrer,
+                    specifier = %truncate_for_log(specifier),
+                    referrer = %truncate_for_log(referrer),
                     resolved_url = %resolved,
                     "CDN module resolve: relative import resolved against jsDelivr referrer"
                 );
                 return Ok(resolved);
             }
             warn!(
-                specifier,
-                referrer,
+                specifier = %truncate_for_log(specifier),
+                referrer = %truncate_for_log(referrer),
                 resolved_url = %resolved,
                 "CDN module resolve rejected: relative import resolved outside /npm/ boundary"
             );
             return Err(JsErrorBox::generic(format!(
-                "Relative import \"{specifier}\" resolved to {resolved}, which is outside the allowed /npm/ CDN path"
+                "Relative import \"{}\" resolved to {resolved}, which is outside the allowed /npm/ CDN path",
+                truncate_for_log(specifier)
             ))
             .into());
         }
 
+        // Handle root-relative /npm/ paths from jsDelivr's ESM output.
+        // jsDelivr's +esm endpoint rewrites nested imports as root-relative paths
+        // (e.g. `from"/npm/@noble/hashes@1.3.2/hmac/+esm"`). Resolve these by
+        // prepending the CDN origin, then validate the result.
+        if specifier.starts_with("/npm/") {
+            let full_url = format!("{ALLOWED_CDN_PREFIX}{}", &specifier[1..]);
+            if Self::is_allowed_cdn(&full_url) {
+                info!(
+                    specifier,
+                    resolved_url = %full_url,
+                    "CDN module resolve: root-relative /npm/ import resolved to full jsDelivr URL"
+                );
+                return ModuleSpecifier::parse(&full_url).map_err(|e| {
+                    JsErrorBox::generic(format!("Invalid resolved URL: {full_url}: {e}")).into()
+                });
+            }
+        }
+
         // If it's already a full jsDelivr URL, pass through
         if Self::is_allowed_cdn(specifier) {
-            info!(specifier, "CDN module resolve: full URL accepted");
+            info!(specifier = %truncate_for_log(specifier), "CDN module resolve: full URL accepted");
             return ModuleSpecifier::parse(specifier).map_err(|e| {
-                JsErrorBox::generic(format!("Invalid module URL: {specifier}: {e}")).into()
+                JsErrorBox::generic(format!(
+                    "Invalid module URL: {}: {e}",
+                    truncate_for_log(specifier)
+                ))
+                .into()
             });
         }
 
         // Try parsing as an npm specifier (e.g. "zod@3.22.4/+esm")
         if let Some(cdn_url) = Self::parse_npm_specifier(specifier) {
             info!(
-                specifier,
+                specifier = %truncate_for_log(specifier),
                 resolved_url = %cdn_url,
                 "CDN module resolve: npm specifier resolved to jsDelivr URL"
             );
@@ -371,13 +431,15 @@ impl ModuleLoader for CdnModuleLoader {
 
         // Reject everything else
         warn!(
-            specifier,
-            referrer, "CDN module resolve rejected: not a valid npm specifier or jsDelivr URL"
+            specifier = %truncate_for_log(specifier),
+            referrer = %truncate_for_log(referrer),
+            "CDN module resolve rejected: not a valid npm specifier or jsDelivr URL"
         );
         Err(JsErrorBox::generic(format!(
-            "Invalid import specifier: \"{specifier}\". \
+            "Invalid import specifier: \"{}\". \
              Use an npm specifier with a pinned version (e.g. zod@3.22.4) \
-             or a full jsDelivr URL (e.g. https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm)"
+             or a full jsDelivr URL (e.g. https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm)",
+            truncate_for_log(specifier)
         ))
         .into())
     }
@@ -404,6 +466,80 @@ impl ModuleLoader for CdnModuleLoader {
                      Reduce the number of imported modules."
             ))
             .into()));
+        }
+
+        // Handle data: URIs inline — these are inlined dependencies from CDN ESM bundles.
+        // Decode the base64 content directly instead of attempting an HTTP fetch.
+        let url_str = module_specifier.as_str();
+        if url_str.starts_with("data:text/javascript;")
+            || url_str.starts_with("data:text/javascript,")
+        {
+            // Pre-check raw URI body length to avoid large transient allocations during decode.
+            // Base64 expands ~33%, so the raw body can be up to 4/3 of the decoded size limit.
+            let max_raw_len = MAX_MODULE_SIZE_BYTES * 4 / 3 + 4;
+            let body_start = url_str.find(',').map(|i| i + 1).unwrap_or(url_str.len());
+            if url_str.len() - body_start > max_raw_len {
+                return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
+                    "data: URI body exceeds maximum size ({} bytes > {max_raw_len} bytes)",
+                    url_str.len() - body_start
+                ))
+                .into()));
+            }
+
+            let data_body = if let Some(rest) = url_str.strip_prefix("data:text/javascript;base64,")
+            {
+                base64::engine::general_purpose::STANDARD
+                    .decode(rest)
+                    .map_err(|e| JsErrorBox::generic(format!("Invalid base64 in data: URI: {e}")))
+            } else if let Some(rest) = url_str.strip_prefix("data:text/javascript,") {
+                // Plain (non-base64) data URI — percent-decode the body
+                Ok(percent_encoding::percent_decode_str(rest).collect::<Vec<u8>>())
+            } else {
+                Err(JsErrorBox::generic(format!(
+                    "Unsupported data: URI encoding: {}",
+                    truncate_for_log(url_str)
+                )))
+            };
+
+            return match data_body {
+                Ok(bytes) => {
+                    if bytes.len() > MAX_MODULE_SIZE_BYTES {
+                        ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
+                            "data: URI exceeds maximum module size ({} bytes > {MAX_MODULE_SIZE_BYTES} bytes)",
+                            bytes.len()
+                        )).into()))
+                    } else {
+                        // Track data URI in loaded_modules so it counts toward MAX_MODULE_COUNT
+                        // and appears in showImportDetails(). Use a hash of the content as the
+                        // dedup key to prevent same-length data URIs from collapsing into one entry.
+                        if let Ok(mut modules) = self.loaded_modules.0.write() {
+                            let mut hasher = Sha384::new();
+                            hasher.update(&bytes);
+                            let hash =
+                                base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
+                            let data_key = format!("data:text/javascript;sha384-{}", &hash[..16]);
+                            if !modules.iter().any(|m| m.url == data_key) {
+                                modules.push(LoadedModuleInfo {
+                                    url: data_key,
+                                    hash,
+                                });
+                            }
+                        }
+                        info!(
+                            module_url = %truncate_for_log(url_str),
+                            size_bytes = bytes.len(),
+                            "CDN module loaded from data: URI"
+                        );
+                        ModuleLoadResponse::Sync(Ok(ModuleSource::new(
+                            ModuleType::JavaScript,
+                            ModuleSourceCode::Bytes(bytes.into_boxed_slice().into()),
+                            module_specifier,
+                            None,
+                        )))
+                    }
+                }
+                Err(e) => ModuleLoadResponse::Sync(Err(e.into())),
+            };
         }
 
         // Extract inline hash from URL fragment (e.g. #sha384-abc123...)
@@ -867,6 +1003,54 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     }
 
     #[test]
+    fn test_resolve_root_relative_npm_imports() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // jsDelivr's +esm output uses root-relative /npm/ paths for nested imports
+        let result = loader
+            .resolve(
+                "/npm/@noble/hashes@1.3.2/hmac/+esm",
+                "https://cdn.jsdelivr.net/npm/ethers@6.13.4/+esm",
+                ResolutionKind::Import,
+            )
+            .unwrap();
+        assert_eq!(
+            result.as_str(),
+            "https://cdn.jsdelivr.net/npm/@noble/hashes@1.3.2/hmac/+esm"
+        );
+    }
+
+    #[test]
+    fn test_resolve_root_relative_npm_unscoped() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        let result = loader
+            .resolve(
+                "/npm/aes-js@4.0.0-beta.5/+esm",
+                "https://cdn.jsdelivr.net/npm/ethers@6.13.4/+esm",
+                ResolutionKind::Import,
+            )
+            .unwrap();
+        assert_eq!(
+            result.as_str(),
+            "https://cdn.jsdelivr.net/npm/aes-js@4.0.0-beta.5/+esm"
+        );
+    }
+
+    #[test]
+    fn test_resolve_root_relative_rejects_non_npm() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // /gh/ root-relative paths should be rejected (mutable content)
+        assert!(
+            loader
+                .resolve(
+                    "/gh/user/repo@main/file.js",
+                    "https://cdn.jsdelivr.net/npm/pkg@1.0.0/+esm",
+                    ResolutionKind::Import
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
     fn test_resolve_rejects_bare_specifiers() {
         let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
         assert!(
@@ -921,6 +1105,127 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     }
 
     #[test]
+    fn test_resolve_data_uri_from_cdn_referrer() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        let data_uri = "data:text/javascript;base64,ZXhwb3J0IGRlZmF1bHQgNDI7";
+        let result = loader
+            .resolve(
+                data_uri,
+                "https://cdn.jsdelivr.net/npm/micro-eth-signer@0.18.1/+esm",
+                ResolutionKind::Import,
+            )
+            .unwrap();
+        assert_eq!(result.as_str(), data_uri);
+    }
+
+    #[test]
+    fn test_resolve_data_uri_from_non_cdn_referrer() {
+        // data:text/javascript URIs are accepted from any referrer because the bundling
+        // pipeline (import_rewriter) generates them from file:// context
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        let data_uri = "data:text/javascript;base64,ZXhwb3J0IGRlZmF1bHQgNDI7";
+        let result = loader
+            .resolve(data_uri, "file:///main.js", ResolutionKind::Import)
+            .unwrap();
+        assert_eq!(result.as_str(), data_uri);
+    }
+
+    #[test]
+    fn test_resolve_data_uri_rejected_non_javascript() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // data:text/html should be rejected even with CDN referrer
+        assert!(
+            loader
+                .resolve(
+                    "data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==",
+                    "https://cdn.jsdelivr.net/npm/pkg@1.0.0/+esm",
+                    ResolutionKind::Import,
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn test_load_data_uri_base64() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // "export default 42;" base64-encoded
+        let specifier =
+            ModuleSpecifier::parse("data:text/javascript;base64,ZXhwb3J0IGRlZmF1bHQgNDI7").unwrap();
+        let response = loader.load(&specifier, None, false, RequestedModuleType::None);
+        match response {
+            ModuleLoadResponse::Sync(Ok(source)) => {
+                let code = match &source.code {
+                    ModuleSourceCode::Bytes(b) => String::from_utf8_lossy(b.as_bytes()).to_string(),
+                    _ => panic!("expected Bytes"),
+                };
+                assert_eq!(code, "export default 42;");
+            }
+            ModuleLoadResponse::Sync(Err(e)) => panic!("expected Ok, got Err: {e:?}"),
+            ModuleLoadResponse::Async(_) => panic!("expected Sync response for data: URI"),
+        }
+    }
+
+    #[test]
+    fn test_load_data_uri_plain() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        let specifier =
+            ModuleSpecifier::parse("data:text/javascript,export%20default%2042%3B").unwrap();
+        let response = loader.load(&specifier, None, false, RequestedModuleType::None);
+        match response {
+            ModuleLoadResponse::Sync(Ok(source)) => {
+                let code = match &source.code {
+                    ModuleSourceCode::Bytes(b) => String::from_utf8_lossy(b.as_bytes()).to_string(),
+                    _ => panic!("expected Bytes"),
+                };
+                assert_eq!(code, "export default 42;");
+            }
+            ModuleLoadResponse::Sync(Err(e)) => panic!("expected Ok, got Err: {e:?}"),
+            ModuleLoadResponse::Async(_) => panic!("expected Sync response for data: URI"),
+        }
+    }
+
+    #[test]
+    fn test_load_data_uri_invalid_base64() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        let specifier = ModuleSpecifier::parse("data:text/javascript;base64,NOT_VALID!!!").unwrap();
+        let response = loader.load(&specifier, None, false, RequestedModuleType::None);
+        assert!(
+            matches!(response, ModuleLoadResponse::Sync(Err(_))),
+            "invalid base64 should return an error"
+        );
+    }
+
+    #[test]
+    fn test_load_data_uri_unsupported_encoding() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // charset parameter before base64 is a valid data URI format but unsupported
+        let specifier = ModuleSpecifier::parse(
+            "data:text/javascript;charset=utf-8;base64,ZXhwb3J0IGRlZmF1bHQgNDI7",
+        )
+        .unwrap();
+        let response = loader.load(&specifier, None, false, RequestedModuleType::None);
+        assert!(
+            matches!(response, ModuleLoadResponse::Sync(Err(_))),
+            "unsupported data URI encoding should return an error"
+        );
+    }
+
+    #[test]
+    fn test_resolve_data_uri_prefix_boundary() {
+        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
+        // "data:text/javascript-evil" should NOT match — only data:text/javascript; or data:text/javascript,
+        assert!(
+            loader
+                .resolve(
+                    "data:text/javascript-evil;base64,ZXhwb3J0IGRlZmF1bHQgNDI7",
+                    "https://cdn.jsdelivr.net/npm/pkg@1.0.0/+esm",
+                    ResolutionKind::Import,
+                )
+                .is_err()
+        );
+    }
+
+    #[test]
     fn test_strict_mode_allows_tofu_for_unknown_modules() {
         // Even without a lockfile, strict mode should fall through to async
         // TOFU verification instead of rejecting synchronously.
@@ -940,8 +1245,8 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
         let mut manifest = HashMap::new();
         manifest.insert(
             "https://cdn.jsdelivr.net/npm/known@1.0.0/+esm".to_string(),
-            // any base64 value — the cache path doesn't re-verify
-            "dGVzdA==".to_string(),
+            // SHA-384 of b"export default 42;\n"
+            "QgPNAKp0t4YJhHqUicStPFXVxqvr39RgTDy1l+4dm0U712X8pePGvAI6/42P5ow3".to_string(),
         );
         let cache: ModuleCache = Arc::new(RwLock::new(HashMap::new()));
         cache.write().unwrap().insert(
@@ -963,5 +1268,40 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
             matches!(response, ModuleLoadResponse::Sync(Ok(_))),
             "known cached module should load synchronously"
         );
+    }
+
+    #[test]
+    fn test_truncate_for_log_short_string() {
+        let short = "hello world";
+        let result = truncate_for_log(short);
+        assert_eq!(&*result, "hello world");
+        assert!(matches!(result, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_truncate_for_log_exactly_1000_chars() {
+        let s = "a".repeat(1000);
+        let result = truncate_for_log(&s);
+        assert_eq!(&*result, s);
+        assert!(matches!(result, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_truncate_for_log_over_1000_chars() {
+        let s = "b".repeat(1500);
+        let result = truncate_for_log(&s);
+        assert!(result.starts_with(&"b".repeat(100)));
+        assert!(result.contains("[truncated, len=1500]"));
+        assert!(result.len() < 200);
+    }
+
+    #[test]
+    fn test_truncate_for_log_multibyte_utf8() {
+        // 4-byte emoji repeated: byte 100 falls mid-character, must not panic
+        let s = "\u{1F600}".repeat(500); // 2000 bytes, each char is 4 bytes
+        let result = truncate_for_log(&s);
+        assert!(result.contains("[truncated, len=2000]"));
+        // Should truncate to a valid char boundary (100 bytes / 4 bytes per char = 25 chars)
+        assert!(result.starts_with(&"\u{1F600}".repeat(25)));
     }
 }

@@ -26,7 +26,7 @@ pub(super) async fn lit_action(
     request_span: RequestSpan,
     api_key: BilledLitActionApiKey,
     grpc_client_pool: &State<GrpcClientPool<tonic::transport::Channel>>,
-    ipfs_cache: &State<Cache<String, String>>,
+    ipfs_cache: &State<Cache<String, Arc<String>>>,
     http_client: &State<reqwest::Client>,
     chain_config: &State<Arc<ChainConfig>>,
     stripe_state: &State<Option<Arc<StripeState>>>,
