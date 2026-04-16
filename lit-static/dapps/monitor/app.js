@@ -384,8 +384,14 @@ async function getNodeChainConfig(serverUrl) {
     setValue('cc-token',            cfg.token        ?? '—', !cfg.token);
 
     let rpcUrl = cfg.rpc_url ?? '';
-    if (!rpcUrl && cfg.chain_id != null && cfg.is_evm) {
-      rpcUrl = (await resolveRpcUrlFromChainlist(cfg.chain_id)) ?? '';
+    if (!rpcUrl) {
+      const selectedNetwork = el('network')?.value || '';
+      const isLocal = (() => { try { return new URL(selectedNetwork).hostname === 'localhost'; } catch { return false; } })();
+      if (isLocal) {
+        rpcUrl = 'http://localhost:8545';
+      } else if (cfg.chain_id != null && cfg.is_evm) {
+        rpcUrl = (await resolveRpcUrlFromChainlist(cfg.chain_id)) ?? '';
+      }
     }
     const rpcInput = el('cc-rpc-url');
     if (rpcInput) rpcInput.value = rpcUrl;
@@ -881,6 +887,26 @@ el('btn-toggle-settings')?.addEventListener('click', () => {
   if (panel) panel.classList.toggle('open');
 });
 
+/* ═══ Accordion toggles ═════════════════════════════════════════════════════ */
+
+const accordionSections = [
+  'accordion-node-config',
+  'accordion-api-payer',
+  'accordion-lit-action',
+  'accordion-chain-config-keys',
+];
+
+accordionSections.forEach(id => {
+  const header = el(id + '-header');
+  const body = el(id + '-body');
+  if (header && body) {
+    header.addEventListener('click', () => {
+      header.classList.toggle('open');
+      body.classList.toggle('open');
+    });
+  }
+});
+
 el('btn-save-thresholds')?.addEventListener('click', () => {
   const w = parseFloat(el('threshold-warning')?.value);
   const c = parseFloat(el('threshold-critical')?.value);
@@ -1022,7 +1048,8 @@ el('btn-set-node-config')?.addEventListener('click', async () => {
   }
 });
 
-el('btn-refresh-node-config')?.addEventListener('click', async () => {
+el('btn-refresh-node-config')?.addEventListener('click', async (e) => {
+  e.stopPropagation(); // prevent accordion toggle when clicking Refresh inside header
   const btn = el('btn-refresh-node-config');
   btn.disabled = true;
   try { await fetchNodeConfigValues(); } finally { btn.disabled = false; }

@@ -323,6 +323,29 @@
         color: var(--text);
       }
 
+      /* ── Accordion cards ── */
+      .accordion-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: pointer;
+        user-select: none;
+      }
+      .accordion-header .accordion-arrow {
+        transition: transform 0.2s;
+        color: var(--muted);
+        font-size: 0.75rem;
+      }
+      .accordion-header.open .accordion-arrow {
+        transform: rotate(180deg);
+      }
+      .accordion-body {
+        display: none;
+      }
+      .accordion-body.open {
+        display: block;
+      }
+
       /* ── Wallet picker dialog ── */
       dialog::backdrop {
         background: rgba(0, 0, 0, 0.6);
@@ -346,7 +369,6 @@
         <select id="network">
           <option value="http://localhost:8000/core/v1/">Local Development</option>
           <option value="https://test.chipotle.litprotocol.com/core/v1/">Next - Phala</option>
-          <option value="https://api.dev.litprotocol.com/core/v1/">Dev - Phala</option>
           <option value="https://api.chipotle.litprotocol.com/core/v1/">Prod - Phala</option>
         </select>
       </div>
@@ -447,31 +469,27 @@
         </div>
 
         <div class="card">
-          <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Lit Action Client Configuration</h2>
-          <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
-            <code>GET /get_lit_action_client_config</code> — effective builder values, including any chain-config overrides.
-          </p>
-          <div id="lit-action-config-results" style="display: none;">
-            <div class="result-row"><span class="result-label">timeout_ms</span><span class="result-value" id="lac-timeout-ms">—</span></div>
-            <div class="result-row"><span class="result-label">async_timeout_ms</span><span class="result-value" id="lac-async-timeout-ms">—</span></div>
-            <div class="result-row"><span class="result-label">memory_limit_mb</span><span class="result-value" id="lac-memory-limit-mb">—</span></div>
-            <div class="result-row"><span class="result-label">max_code_length</span><span class="result-value" id="lac-max-code-length">—</span></div>
-            <div class="result-row"><span class="result-label">max_response_length</span><span class="result-value" id="lac-max-response-length">—</span></div>
-            <div class="result-row"><span class="result-label">max_console_log_length</span><span class="result-value" id="lac-max-console-log-length">—</span></div>
-            <div class="result-row"><span class="result-label">max_fetch_count</span><span class="result-value" id="lac-max-fetch-count">—</span></div>
-            <div class="result-row"><span class="result-label">max_get_keys_count</span><span class="result-value" id="lac-max-get-keys-count">—</span></div>
-            <div class="result-row"><span class="result-label">max_retries</span><span class="result-value" id="lac-max-retries">—</span></div>
+          <div class="accordion-header" id="accordion-lit-action-header">
+            <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Lit Action Client Configuration</h2>
+            <span class="accordion-arrow">&#9660;</span>
           </div>
-          <div id="lit-action-config-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
-        </div>
-
-        <div class="card">
-          <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Supported Chain Config Keys</h2>
-          <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
-            <code>GET /get_chain_config_keys</code> — all recognised <code>ConfigKeys</code> variants that the node reads from chain.
-          </p>
-          <div id="chain-config-keys-list"></div>
-          <div id="chain-config-keys-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+          <div class="accordion-body" id="accordion-lit-action-body">
+            <p style="color: var(--muted); font-size: 0.85rem; margin: 0.5rem 0 1rem">
+              <code>GET /get_lit_action_client_config</code> — effective builder values, including any chain-config overrides.
+            </p>
+            <div id="lit-action-config-results" style="display: none;">
+              <div class="result-row"><span class="result-label">timeout_ms</span><span class="result-value" id="lac-timeout-ms">—</span></div>
+              <div class="result-row"><span class="result-label">async_timeout_ms</span><span class="result-value" id="lac-async-timeout-ms">—</span></div>
+              <div class="result-row"><span class="result-label">memory_limit_mb</span><span class="result-value" id="lac-memory-limit-mb">—</span></div>
+              <div class="result-row"><span class="result-label">max_code_length</span><span class="result-value" id="lac-max-code-length">—</span></div>
+              <div class="result-row"><span class="result-label">max_response_length</span><span class="result-value" id="lac-max-response-length">—</span></div>
+              <div class="result-row"><span class="result-label">max_console_log_length</span><span class="result-value" id="lac-max-console-log-length">—</span></div>
+              <div class="result-row"><span class="result-label">max_fetch_count</span><span class="result-value" id="lac-max-fetch-count">—</span></div>
+              <div class="result-row"><span class="result-label">max_get_keys_count</span><span class="result-value" id="lac-max-get-keys-count">—</span></div>
+              <div class="result-row"><span class="result-label">max_retries</span><span class="result-value" id="lac-max-retries">—</span></div>
+            </div>
+            <div id="lit-action-config-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+          </div>
         </div>
 
         <div class="card">
@@ -519,64 +537,88 @@
       <div class="col">
 
         <div class="card">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.25rem">
-            <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Node Configuration</h2>
-            <button type="button" id="btn-refresh-node-config" style="margin-top:0;padding:0.3rem 0.75rem;font-size:0.8rem;">Refresh</button>
+          <div class="accordion-header" id="accordion-node-config-header">
+            <div style="display:flex;align-items:center;gap:0.5rem">
+              <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Node Configuration</h2>
+              <button type="button" id="btn-refresh-node-config" style="margin-top:0;padding:0.3rem 0.75rem;font-size:0.8rem;">Refresh</button>
+            </div>
+            <span class="accordion-arrow">&#9660;</span>
           </div>
-          <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
-            Key-value pairs stored on-chain via <code>setNodeConfiguration</code>. Read by the node every 30 seconds.
-          </p>
+          <div class="accordion-body" id="accordion-node-config-body">
+            <p style="color: var(--muted); font-size: 0.85rem; margin: 0.5rem 0 1rem">
+              Key-value pairs stored on-chain via <code>setNodeConfiguration</code>. Read by the node every 30 seconds.
+            </p>
 
-          <table>
-            <thead>
-              <tr><th>Key</th><th>Value</th></tr>
-            </thead>
-            <tbody id="node-config-table">
-              <tr><td colspan="2" style="color:var(--muted)">Loading…</td></tr>
-            </tbody>
-          </table>
-          <div id="node-config-fetch-error" style="display:none;color:#f87171;font-size:0.85rem;margin-top:0.5rem;"></div>
+            <table>
+              <thead>
+                <tr><th>Key</th><th>Value</th></tr>
+              </thead>
+              <tbody id="node-config-table">
+                <tr><td colspan="2" style="color:var(--muted)">Loading…</td></tr>
+              </tbody>
+            </table>
+            <div id="node-config-fetch-error" style="display:none;color:#f87171;font-size:0.85rem;margin-top:0.5rem;"></div>
 
-          <div class="form-group" style="margin-top:1.5rem">
-            <label for="node-config-key">Key</label>
-            <input type="text" id="node-config-key" placeholder="e.g. LIT_ACTION_DEFAULT_TIMEOUT_MS" />
+            <div class="form-group" style="margin-top:1.5rem">
+              <label for="node-config-key">Key</label>
+              <input type="text" id="node-config-key" placeholder="e.g. LIT_ACTION_DEFAULT_TIMEOUT_MS" />
+            </div>
+            <div class="form-group">
+              <label for="node-config-value">Value</label>
+              <input type="text" id="node-config-value" placeholder="e.g. 60000" />
+            </div>
+            <button type="button" id="btn-set-node-config">Set Configuration</button>
+            <div id="node-config-status" style="display:none;font-size:0.85rem;margin-top:0.5rem;font-family:'JetBrains Mono',monospace;word-break:break-all;"></div>
           </div>
-          <div class="form-group">
-            <label for="node-config-value">Value</label>
-            <input type="text" id="node-config-value" placeholder="e.g. 60000" />
-          </div>
-          <button type="button" id="btn-set-node-config">Set Configuration</button>
-          <div id="node-config-status" style="display:none;font-size:0.85rem;margin-top:0.5rem;font-family:'JetBrains Mono',monospace;word-break:break-all;"></div>
         </div>
 
         <div class="card">
-          <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Api Payer Accounts</h2>
-          <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
-            Sets the default API payer account. and sets number of payers the node will use to process mutable API calls.  If rebalance is enabled, the node will rebalance the payers to ensure each payer has equal funds, using funds that exist in the admin API payer account.
-          </p>
-
-          <div class="form-group" style="margin-top: 1.25rem">
-            <label for="default-api-payer">Admin API payer address</label>
-            <input type="text" id="default-api-payer" placeholder="0x…" />
+          <div class="accordion-header" id="accordion-api-payer-header">
+            <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Api Payer Accounts</h2>
+            <span class="accordion-arrow">&#9660;</span>
           </div>
-          <button type="button" id="btn-set-default-api-payer">Set Default</button>
-          <div id="default-api-payer-status" style="display: none; font-size: 0.85rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
+          <div class="accordion-body" id="accordion-api-payer-body">
+            <p style="color: var(--muted); font-size: 0.85rem; margin: 0.5rem 0 1rem">
+              Sets the default API payer account. and sets number of payers the node will use to process mutable API calls.  If rebalance is enabled, the node will rebalance the payers to ensure each payer has equal funds, using funds that exist in the admin API payer account.
+            </p>
 
-          <div class="form-group">
-            <label for="payer-count">Requested payer count</label>
-            <select id="payer-count">
-              <option value="" disabled selected>loading…</option>
-            </select>
-          </div>
-          <button type="button" id="btn-set-payer-count">Confirm</button>
-          <div id="payer-count-status" style="display: none; font-size: 0.85rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
+            <div class="form-group" style="margin-top: 1.25rem">
+              <label for="default-api-payer">Admin API payer address</label>
+              <input type="text" id="default-api-payer" placeholder="0x…" />
+            </div>
+            <button type="button" id="btn-set-default-api-payer">Set Default</button>
+            <div id="default-api-payer-status" style="display: none; font-size: 0.85rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
 
-          <div class="form-group" style="margin-top: 1.25rem">
-            <label for="rebalance-amount">Rebalance amount (ETH)</label>
-            <input type="text" id="rebalance-amount" placeholder="e.g. 0.05" />
+            <div class="form-group">
+              <label for="payer-count">Requested payer count</label>
+              <select id="payer-count">
+                <option value="" disabled selected>loading…</option>
+              </select>
+            </div>
+            <button type="button" id="btn-set-payer-count">Confirm</button>
+            <div id="payer-count-status" style="display: none; font-size: 0.85rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
+
+            <div class="form-group" style="margin-top: 1.25rem">
+              <label for="rebalance-amount">Rebalance amount (ETH)</label>
+              <input type="text" id="rebalance-amount" placeholder="e.g. 0.05" />
+            </div>
+            <button type="button" id="btn-set-rebalance-amount">Set Rebalance Amount</button>
+            <div id="rebalance-amount-status" style="display: none; font-size: 0.85rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
           </div>
-          <button type="button" id="btn-set-rebalance-amount">Set Rebalance Amount</button>
-          <div id="rebalance-amount-status" style="display: none; font-size: 0.85rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
+        </div>
+
+        <div class="card">
+          <div class="accordion-header" id="accordion-chain-config-keys-header">
+            <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Supported Chain Config Keys</h2>
+            <span class="accordion-arrow">&#9660;</span>
+          </div>
+          <div class="accordion-body" id="accordion-chain-config-keys-body">
+            <p style="color: var(--muted); font-size: 0.85rem; margin: 0.5rem 0 1rem">
+              <code>GET /get_chain_config_keys</code> — all recognised <code>ConfigKeys</code> variants that the node reads from chain.
+            </p>
+            <div id="chain-config-keys-list"></div>
+            <div id="chain-config-keys-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+          </div>
         </div>
 
       </div>
