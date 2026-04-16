@@ -42,19 +42,6 @@ pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     diff == 0
 }
 
-/// Truncate a string for log output without panicking on UTF-8 boundaries.
-fn truncate_for_log(s: &str, max_bytes: usize) -> &str {
-    if s.len() <= max_bytes {
-        return s;
-    }
-    // Find the last char boundary at or before max_bytes
-    let mut end = max_bytes;
-    while end > 0 && !s.is_char_boundary(end) {
-        end -= 1;
-    }
-    &s[..end]
-}
-
 /// Allowed CDN URL prefix for module imports (origin only, used for URL construction).
 pub(crate) const ALLOWED_CDN_PREFIX: &str = "https://cdn.jsdelivr.net/";
 
@@ -350,7 +337,7 @@ impl ModuleLoader for CdnModuleLoader {
             || specifier.starts_with("data:text/javascript,")
         {
             info!(
-                specifier = %truncate_for_log(specifier, 80),
+                specifier = %truncate_for_log(specifier),
                 referrer,
                 "CDN module resolve: data: URI accepted (inlined dependency)"
             );
@@ -510,7 +497,7 @@ impl ModuleLoader for CdnModuleLoader {
             } else {
                 Err(JsErrorBox::generic(format!(
                     "Unsupported data: URI encoding: {}",
-                    truncate_for_log(url_str, 80)
+                    truncate_for_log(url_str)
                 )))
             };
 
@@ -539,7 +526,7 @@ impl ModuleLoader for CdnModuleLoader {
                             }
                         }
                         info!(
-                            module_url = %truncate_for_log(url_str, 80),
+                            module_url = %truncate_for_log(url_str),
                             size_bytes = bytes.len(),
                             "CDN module loaded from data: URI"
                         );
