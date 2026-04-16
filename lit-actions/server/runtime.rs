@@ -8,7 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
-use deno_core::{JsRuntime, NoopModuleLoader, v8};
+use deno_core::{JsRuntime, v8};
 
 use crate::cdn_module_loader::{CdnModuleLoader, LoadedModules, ModuleCache};
 use crate::import_rewriter;
@@ -532,10 +532,10 @@ pub(crate) async fn execute_js(
     let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
     let memory_limit_mb = memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB);
 
-    // Check the action code cache before building the worker. On cache hit we
-    // already have the prepared code, so no module loading is needed — use a
-    // cheap NoopModuleLoader instead of constructing the full CdnModuleLoader
-    // with its HTTP client, integrity manifest, etc.
+    // Check the action code cache early so we can skip prepare_action_code
+    // on cache hit (the real performance win). We always use CdnModuleLoader
+    // regardless of cache hit/miss so that runtime dynamic imports (e.g.
+    // `await import("zod@3.22.4")`) continue to work even for cached actions.
     let action_ipfs_id = get_lit_action_ipfs_id(&code);
     let now = Instant::now();
     let cached_code = action_code_cache
@@ -543,20 +543,19 @@ pub(crate) async fn execute_js(
         .ok()
         .and_then(|cache| cache.get(&action_ipfs_id, now));
 
+    if cached_code.is_some() {
+        debug!(action_ipfs_id, "action code cache hit");
+    }
+
     let loaded_modules = LoadedModules::default();
-    let module_loader: Rc<dyn deno_core::ModuleLoader> = if cached_code.is_some() {
-        debug!(action_ipfs_id, "cache hit — using NoopModuleLoader");
-        Rc::new(NoopModuleLoader)
-    } else {
-        Rc::new(CdnModuleLoader::with_options(
-            integrity_manifest.clone(),
-            strict_imports,
-            module_cache.clone(),
-            lockfile_path.clone(),
-            Some(http_client.clone()),
-            loaded_modules.clone(),
-        ))
-    };
+    let module_loader: Rc<dyn deno_core::ModuleLoader> = Rc::new(CdnModuleLoader::with_options(
+        integrity_manifest.clone(),
+        strict_imports,
+        module_cache.clone(),
+        lockfile_path.clone(),
+        Some(http_client.clone()),
+        loaded_modules.clone(),
+    ));
 
     let mut worker = build_main_worker_and_inject_sdk(
         &None,
