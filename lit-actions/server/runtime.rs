@@ -548,16 +548,14 @@ pub(crate) async fn execute_js(
     }
 
     let loaded_modules = LoadedModules::default();
-    let module_loader: Rc<dyn deno_core::ModuleLoader> = Rc::new(
-        CdnModuleLoader::with_options(
-            integrity_manifest.clone(),
-            strict_imports,
-            module_cache.clone(),
-            lockfile_path.clone(),
-            Some(http_client.clone()),
-            loaded_modules.clone(),
-        ),
-    );
+    let module_loader: Rc<dyn deno_core::ModuleLoader> = Rc::new(CdnModuleLoader::with_options(
+        integrity_manifest.clone(),
+        strict_imports,
+        module_cache.clone(),
+        lockfile_path.clone(),
+        Some(http_client.clone()),
+        loaded_modules.clone(),
+    ));
 
     let mut worker = build_main_worker_and_inject_sdk(
         &None,
