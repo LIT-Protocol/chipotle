@@ -8,9 +8,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
-use deno_core::{JsRuntime, NoopModuleLoader, v8};
+use deno_core::{JsRuntime, v8};
 
-use crate::cdn_module_loader::{CdnModuleLoader, LoadedModules, ModuleCache};
+use crate::cdn_module_loader::{CdnModuleLoader, DataUrlModuleLoader, LoadedModules, ModuleCache};
 use crate::import_rewriter;
 use deno_resolver::npm::{DenoInNpmPackageChecker, ManagedNpmResolver};
 use deno_runtime::{
@@ -532,10 +532,10 @@ pub(crate) async fn execute_js(
     let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
     let memory_limit_mb = memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB);
 
-    // Check the action code cache before building the worker. On cache hit we
-    // already have the prepared code, so no module loading is needed — use a
-    // cheap NoopModuleLoader instead of constructing the full CdnModuleLoader
-    // with its HTTP client, integrity manifest, etc.
+    // Check the action code cache before building the worker. On cache hit
+    // we use a lightweight DataUrlModuleLoader that only handles the bundled
+    // data:text/javascript URIs — no HTTP client, integrity manifest, or CDN
+    // logic needed. On cache miss we need the full CdnModuleLoader.
     let action_ipfs_id = get_lit_action_ipfs_id(&code);
     let now = Instant::now();
     let cached_code = action_code_cache
@@ -545,8 +545,8 @@ pub(crate) async fn execute_js(
 
     let loaded_modules = LoadedModules::default();
     let module_loader: Rc<dyn deno_core::ModuleLoader> = if cached_code.is_some() {
-        debug!(action_ipfs_id, "cache hit — using NoopModuleLoader");
-        Rc::new(NoopModuleLoader)
+        debug!(action_ipfs_id, "cache hit — using DataUrlModuleLoader");
+        Rc::new(DataUrlModuleLoader)
     } else {
         Rc::new(CdnModuleLoader::with_options(
             integrity_manifest.clone(),

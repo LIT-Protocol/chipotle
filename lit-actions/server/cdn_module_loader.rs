@@ -66,6 +66,75 @@ pub(crate) const MAX_MODULE_COUNT: usize = 100;
 /// Thread-safe cache for fetched and integrity-verified module sources.
 pub type ModuleCache = Arc<RwLock<HashMap<String, Vec<u8>>>>;
 
+/// Lightweight module loader that handles only `data:text/javascript` URIs.
+///
+/// Used on cache hits where all CDN modules have already been bundled into
+/// base64 data URIs. No HTTP client, integrity manifest, or CDN logic needed.
+pub struct DataUrlModuleLoader;
+
+impl ModuleLoader for DataUrlModuleLoader {
+    fn resolve(
+        &self,
+        specifier: &str,
+        _referrer: &str,
+        _kind: ResolutionKind,
+    ) -> Result<ModuleSpecifier, ModuleLoaderError> {
+        if specifier.starts_with("data:text/javascript;")
+            || specifier.starts_with("data:text/javascript,")
+        {
+            ModuleSpecifier::parse(specifier)
+                .map_err(|e| JsErrorBox::generic(format!("Invalid data: URI: {e}")).into())
+        } else {
+            Err(JsErrorBox::generic(format!(
+                "Module loading not supported on cache hit; attempted to load: {}",
+                truncate_for_log(specifier)
+            ))
+            .into())
+        }
+    }
+
+    fn load(
+        &self,
+        module_specifier: &ModuleSpecifier,
+        _maybe_referrer: Option<&ModuleSpecifier>,
+        _is_dynamic: bool,
+        _requested_module_type: RequestedModuleType,
+    ) -> ModuleLoadResponse {
+        let url_str = module_specifier.as_str();
+
+        let data_body =
+            if let Some(rest) = url_str.strip_prefix("data:text/javascript;base64,") {
+                base64::engine::general_purpose::STANDARD
+                    .decode(rest)
+                    .map_err(|e| JsErrorBox::generic(format!("Invalid base64 in data: URI: {e}")))
+            } else if let Some(rest) = url_str.strip_prefix("data:text/javascript,") {
+                Ok(percent_encoding::percent_decode_str(rest).collect::<Vec<u8>>())
+            } else {
+                Err(JsErrorBox::generic(format!(
+                    "Unsupported data: URI encoding: {}",
+                    truncate_for_log(url_str)
+                )))
+            };
+
+        match data_body {
+            Ok(bytes) if bytes.len() > MAX_MODULE_SIZE_BYTES => {
+                ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
+                    "data: URI exceeds maximum module size ({} bytes > {MAX_MODULE_SIZE_BYTES} bytes)",
+                    bytes.len()
+                ))
+                .into()))
+            }
+            Ok(bytes) => ModuleLoadResponse::Sync(Ok(ModuleSource::new(
+                ModuleType::JavaScript,
+                ModuleSourceCode::Bytes(bytes.into_boxed_slice().into()),
+                module_specifier,
+                None,
+            ))),
+            Err(e) => ModuleLoadResponse::Sync(Err(e.into())),
+        }
+    }
+}
+
 // Re-export from ext crate for convenience.
 pub use lit_actions_ext::bindings::{LoadedModuleInfo, LoadedModules};
 
