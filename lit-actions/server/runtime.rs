@@ -372,13 +372,13 @@ pub(crate) async fn execute_js(
 
     // Try to use cached rewrite result keyed by IPFS CID to skip import parsing.
     // On cache hit, verify the code hash to prevent cache poisoning from mismatched CIDs.
-    let code_digest = hash_code(&code);
+    // Only compute the hash when we have a CID (avoids O(n) hashing on every call).
     let cached = ipfs_id.as_deref().and_then(|cid| {
         code_cache
             .read()
             .ok()
             .and_then(|cache| cache.get(cid).cloned())
-            .filter(|entry| entry.code_hash == code_digest)
+            .filter(|entry| entry.code_hash == hash_code(&code))
     });
 
     let (rewritten_code, dynamic_imports, has_imports) = if let Some(cached) = cached {
@@ -406,20 +406,33 @@ pub(crate) async fn execute_js(
         };
 
         // Cache the rewrite result for future calls with the same IPFS CID.
+        // Use the entry API so existing CIDs can always be updated (e.g. code changed),
+        // while new inserts are blocked once the cache is at capacity.
         if let Some(cid) = ipfs_id.as_deref() {
             if let Ok(mut cache) = code_cache.write() {
-                if cache.len() < CODE_CACHE_MAX_ENTRIES {
-                    cache.insert(
-                        cid.to_string(),
-                        CachedRewrite {
-                            code_hash: code_digest,
-                            rewritten_code: rewritten_code.clone(),
-                            dynamic_imports: dynamic_imports.clone(),
-                            has_imports,
-                        },
-                    );
-                } else {
-                    debug!("Code cache full ({CODE_CACHE_MAX_ENTRIES} entries), skipping insert");
+                let cached_rewrite = CachedRewrite {
+                    code_hash: hash_code(&code),
+                    rewritten_code: rewritten_code.clone(),
+                    dynamic_imports: dynamic_imports.clone(),
+                    has_imports,
+                };
+
+                // Check capacity before borrowing via entry() to avoid
+                // simultaneous mutable + immutable borrow of the HashMap.
+                let at_capacity = cache.len() >= CODE_CACHE_MAX_ENTRIES;
+                match cache.entry(cid.to_string()) {
+                    std::collections::hash_map::Entry::Occupied(mut entry) => {
+                        entry.insert(cached_rewrite);
+                    }
+                    std::collections::hash_map::Entry::Vacant(entry) => {
+                        if !at_capacity {
+                            entry.insert(cached_rewrite);
+                        } else {
+                            debug!(
+                                "Code cache full ({CODE_CACHE_MAX_ENTRIES} entries), skipping insert"
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -670,6 +683,29 @@ mod tests {
         assert!(result.is_none());
     }
 
+    /// Helper that mirrors the entry-based insert logic used in execute_js.
+    fn cache_insert(cache: &CodeCache, cid: &str, entry: CachedRewrite) -> bool {
+        if let Ok(mut c) = cache.write() {
+            let at_capacity = c.len() >= CODE_CACHE_MAX_ENTRIES;
+            match c.entry(cid.to_string()) {
+                std::collections::hash_map::Entry::Occupied(mut slot) => {
+                    slot.insert(entry);
+                    true
+                }
+                std::collections::hash_map::Entry::Vacant(slot) => {
+                    if !at_capacity {
+                        slot.insert(entry);
+                        true
+                    } else {
+                        false
+                    }
+                }
+            }
+        } else {
+            false
+        }
+    }
+
     #[test]
     fn code_cache_respects_max_entries() {
         let cache: CodeCache = Arc::new(RwLock::new(HashMap::new()));
@@ -692,12 +728,42 @@ mod tests {
 
         assert_eq!(cache.read().unwrap().len(), CODE_CACHE_MAX_ENTRIES);
 
-        // Attempting to insert when full should not increase size
+        // New CID insert should be rejected when full
+        let inserted = cache_insert(
+            &cache,
+            "QmOverflow",
+            CachedRewrite {
+                code_hash: [0u8; 32],
+                rewritten_code: String::new(),
+                dynamic_imports: String::new(),
+                has_imports: false,
+            },
+        );
+
+        assert!(!inserted);
+        assert_eq!(cache.read().unwrap().len(), CODE_CACHE_MAX_ENTRIES);
+        assert!(!cache.read().unwrap().contains_key("QmOverflow"));
+    }
+
+    #[test]
+    fn code_cache_allows_update_when_full() {
+        let cache: CodeCache = Arc::new(RwLock::new(HashMap::new()));
+
+        // Fill the cache to capacity, including a known CID "QmExisting"
         {
             let mut c = cache.write().unwrap();
-            if c.len() < CODE_CACHE_MAX_ENTRIES {
+            c.insert(
+                "QmExisting".to_string(),
+                CachedRewrite {
+                    code_hash: [1u8; 32],
+                    rewritten_code: "old".to_string(),
+                    dynamic_imports: String::new(),
+                    has_imports: false,
+                },
+            );
+            for i in 1..CODE_CACHE_MAX_ENTRIES {
                 c.insert(
-                    "QmOverflow".to_string(),
+                    format!("Qm{i}"),
                     CachedRewrite {
                         code_hash: [0u8; 32],
                         rewritten_code: String::new(),
@@ -709,7 +775,24 @@ mod tests {
         }
 
         assert_eq!(cache.read().unwrap().len(), CODE_CACHE_MAX_ENTRIES);
-        assert!(!cache.read().unwrap().contains_key("QmOverflow"));
+
+        // Updating an existing CID should succeed even when full
+        let updated = cache_insert(
+            &cache,
+            "QmExisting",
+            CachedRewrite {
+                code_hash: [2u8; 32],
+                rewritten_code: "new".to_string(),
+                dynamic_imports: String::new(),
+                has_imports: false,
+            },
+        );
+
+        assert!(updated);
+        assert_eq!(cache.read().unwrap().len(), CODE_CACHE_MAX_ENTRIES);
+        let entry = cache.read().unwrap().get("QmExisting").cloned().unwrap();
+        assert_eq!(entry.rewritten_code, "new");
+        assert_eq!(entry.code_hash, [2u8; 32]);
     }
 
     #[test]
