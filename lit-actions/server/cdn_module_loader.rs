@@ -975,4 +975,25 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
             "known cached module should load synchronously"
         );
     }
+
+    #[test]
+    fn test_truncate_for_log_short_string() {
+        let short = "hello world";
+        assert_eq!(truncate_for_log(short), "hello world");
+    }
+
+    #[test]
+    fn test_truncate_for_log_exactly_1000_chars() {
+        let s = "a".repeat(1000);
+        assert_eq!(truncate_for_log(&s), s);
+    }
+
+    #[test]
+    fn test_truncate_for_log_over_1000_chars() {
+        let s = "b".repeat(1500);
+        let result = truncate_for_log(&s);
+        assert!(result.starts_with(&"b".repeat(100)));
+        assert!(result.contains("[truncated, len=1500]"));
+        assert!(result.len() < 200);
+    }
 }
