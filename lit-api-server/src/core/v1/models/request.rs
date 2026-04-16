@@ -145,9 +145,17 @@ pub struct RemoveGroupRequest {
 }
 
 /// API key via header.
+///
+/// Provide either `code` (inline JS) or `ipfs_id` (IPFS CID of a previously-cached action).
+/// When `code` is provided it is cached by its IPFS hash so subsequent calls can use `ipfs_id`.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LitActionRequest {
-    pub code: String,
+    /// Inline JS source. Optional when `ipfs_id` is supplied.
+    #[serde(default)]
+    pub code: Option<String>,
+    /// IPFS CID of a previously-submitted action. Looked up in the in-memory cache.
+    #[serde(default)]
+    pub ipfs_id: Option<String>,
     pub js_params: Option<serde_json::Value>,
 }
 
@@ -175,4 +183,50 @@ pub struct DecryptRequest {
     pub api_key: String,
     pub ciphertext: String,
     pub data_to_encrypt_hash: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserialize_lit_action_request_with_code_only() {
+        let json = r#"{"code": "console.log('hi')"}"#;
+        let req: LitActionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.code, Some("console.log('hi')".to_string()));
+        assert_eq!(req.ipfs_id, None);
+        assert_eq!(req.js_params, None);
+    }
+
+    #[test]
+    fn deserialize_lit_action_request_with_ipfs_id_only() {
+        let json = r#"{"ipfs_id": "QmTest123"}"#;
+        let req: LitActionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.code, None);
+        assert_eq!(req.ipfs_id, Some("QmTest123".to_string()));
+    }
+
+    #[test]
+    fn deserialize_lit_action_request_with_both() {
+        let json = r#"{"code": "1+1", "ipfs_id": "QmTest", "js_params": {"a": 1}}"#;
+        let req: LitActionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.code, Some("1+1".to_string()));
+        assert_eq!(req.ipfs_id, Some("QmTest".to_string()));
+        assert!(req.js_params.is_some());
+    }
+
+    #[test]
+    fn deserialize_lit_action_request_with_neither() {
+        let json = r#"{}"#;
+        let req: LitActionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.code, None);
+        assert_eq!(req.ipfs_id, None);
+    }
+
+    #[test]
+    fn deserialize_lit_action_request_null_code_is_none() {
+        let json = r#"{"code": null}"#;
+        let req: LitActionRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.code, None);
+    }
 }
