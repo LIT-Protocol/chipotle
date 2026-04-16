@@ -889,17 +889,10 @@ el('btn-toggle-settings')?.addEventListener('click', () => {
 
 /* ═══ Accordion toggles ═════════════════════════════════════════════════════ */
 
-const accordionSections = [
-  'accordion-node-config',
-  'accordion-api-payer',
-  'accordion-lit-action',
-  'accordion-chain-config-keys',
-];
-
-accordionSections.forEach(id => {
-  const header = el(id + '-header');
-  const body = el(id + '-body');
-  if (header && body) {
+document.querySelectorAll('[id^="accordion-"][id$="-header"]').forEach(header => {
+  const bodyId = header.id.replace(/-header$/, '-body');
+  const body = el(bodyId);
+  if (body) {
     header.addEventListener('click', () => {
       header.classList.toggle('open');
       body.classList.toggle('open');
