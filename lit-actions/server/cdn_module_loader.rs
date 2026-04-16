@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -17,15 +18,15 @@ use tracing::{debug, error, info, instrument, warn};
 /// Truncate a string to approximately the first 100 bytes (on a valid UTF-8
 /// char boundary) if it exceeds 1000 bytes. Used to prevent logging huge
 /// base64 blobs in module specifiers.
-fn truncate_for_log(s: &str) -> String {
+fn truncate_for_log(s: &str) -> Cow<'_, str> {
     if s.len() > 1000 {
         let mut end = 100.min(s.len());
         while end > 0 && !s.is_char_boundary(end) {
             end -= 1;
         }
-        format!("{}…[truncated, len={}]", &s[..end], s.len())
+        Cow::Owned(format!("{}…[truncated, len={}]", &s[..end], s.len()))
     } else {
-        s.to_string()
+        Cow::Borrowed(s)
     }
 }
 
@@ -995,13 +996,17 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     #[test]
     fn test_truncate_for_log_short_string() {
         let short = "hello world";
-        assert_eq!(truncate_for_log(short), "hello world");
+        let result = truncate_for_log(short);
+        assert_eq!(&*result, "hello world");
+        assert!(matches!(result, Cow::Borrowed(_)));
     }
 
     #[test]
     fn test_truncate_for_log_exactly_1000_chars() {
         let s = "a".repeat(1000);
-        assert_eq!(truncate_for_log(&s), s);
+        let result = truncate_for_log(&s);
+        assert_eq!(&*result, s);
+        assert!(matches!(result, Cow::Borrowed(_)));
     }
 
     #[test]
