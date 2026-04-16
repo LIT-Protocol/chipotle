@@ -2,7 +2,7 @@
 //!
 //! Caches the results of on-chain permission checks (`canExecuteAction`,
 //! `canUseWalletInAction`) and wallet derivation lookups (`getWalletDerivation`)
-//! so that repeated calls for the same API key and action/wallet combination
+//! so that repeated calls for the same API key and relevant parameters
 //! avoid redundant contract calls.
 //!
 //! TTL: 60 minutes idle (extending on every access) with a hard upper bound
