@@ -36,6 +36,33 @@ const DEFAULT_MEMORY_LIMIT_MB: usize = 128; // 128MB
 const MEMORY_SAMPLE_INTERVAL_MS: u64 = 500; // 500ms
 const EXECUTION_TERMINATED_ERROR: &str = "Uncaught Error: execution terminated";
 
+/// Maximum number of entries in the code rewrite cache.
+const CODE_CACHE_MAX_ENTRIES: usize = 1_000;
+
+/// Cached result of import rewriting for a given IPFS CID.
+#[derive(Clone)]
+pub(crate) struct CachedRewrite {
+    /// SHA-256 digest of the original code, used to verify cache integrity.
+    pub code_hash: [u8; 32],
+    /// User code with import statements stripped.
+    pub rewritten_code: String,
+    /// Pre-rendered dynamic import statements (empty string when no imports).
+    pub dynamic_imports: String,
+    /// Whether the original code had imports.
+    pub has_imports: bool,
+}
+
+/// Thread-safe cache mapping IPFS CID → rewrite result.
+pub(crate) type CodeCache = Arc<RwLock<HashMap<String, CachedRewrite>>>;
+
+/// Compute a SHA-256 hash of the code for cache integrity verification.
+fn hash_code(code: &str) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(code.as_bytes());
+    hasher.finalize().into()
+}
+
 #[derive(Debug, Copy, Clone, PartialEq)]
 enum ExecutionResult {
     Complete,
@@ -269,6 +296,8 @@ pub(crate) async fn execute_js(
     module_cache: ModuleCache,
     lockfile_path: Option<PathBuf>,
     http_client: Arc<reqwest::Client>,
+    ipfs_id: Option<String>,
+    code_cache: CodeCache,
 ) -> Result<()> {
     // Fast path to do nothing, allowing us to benchmark with and without Deno involved
     if code.is_empty() || code.bytes().all(|b| b.is_ascii_whitespace()) {
@@ -341,16 +370,60 @@ pub(crate) async fn execute_js(
     let js_params = js_params.as_ref().unwrap_or_default();
     let js_func_params = js_params.to_string();
 
-    // Rewrite static ES `import` statements into dynamic `import()` calls.
-    // Static imports are not valid in script mode, so we strip them from the
-    // user code and generate equivalent dynamic imports inside the async wrapper
-    // where `await` is available and the imported bindings are in lexical scope.
-    let import_rewriter::RewriteResult {
-        code: rewritten_code,
-        imports,
-    } = import_rewriter::rewrite_imports(&code);
+    // Try to use cached rewrite result keyed by IPFS CID to skip import parsing.
+    // On cache hit, verify the code hash to prevent cache poisoning from mismatched CIDs.
+    let code_digest = hash_code(&code);
+    let cached = ipfs_id.as_deref().and_then(|cid| {
+        code_cache
+            .read()
+            .ok()
+            .and_then(|cache| cache.get(cid).cloned())
+            .filter(|entry| entry.code_hash == code_digest)
+    });
 
-    let code = if imports.is_empty() {
+    let (rewritten_code, dynamic_imports, has_imports) = if let Some(cached) = cached {
+        debug!("Code cache hit for IPFS CID");
+        (cached.rewritten_code, cached.dynamic_imports, cached.has_imports)
+    } else {
+        // Rewrite static ES `import` statements into dynamic `import()` calls.
+        // Static imports are not valid in script mode, so we strip them from the
+        // user code and generate equivalent dynamic imports inside the async wrapper
+        // where `await` is available and the imported bindings are in lexical scope.
+        let import_rewriter::RewriteResult {
+            code: rewritten_code,
+            imports,
+        } = import_rewriter::rewrite_imports(&code);
+
+        let has_imports = !imports.is_empty();
+        let dynamic_imports = if has_imports {
+            import_rewriter::generate_dynamic_imports(&imports)
+        } else {
+            String::new()
+        };
+
+        // Cache the rewrite result for future calls with the same IPFS CID.
+        if let Some(cid) = ipfs_id.as_deref() {
+            if let Ok(mut cache) = code_cache.write() {
+                if cache.len() < CODE_CACHE_MAX_ENTRIES {
+                    cache.insert(
+                        cid.to_string(),
+                        CachedRewrite {
+                            code_hash: code_digest,
+                            rewritten_code: rewritten_code.clone(),
+                            dynamic_imports: dynamic_imports.clone(),
+                            has_imports,
+                        },
+                    );
+                } else {
+                    debug!("Code cache full ({CODE_CACHE_MAX_ENTRIES} entries), skipping insert");
+                }
+            }
+        }
+
+        (rewritten_code, dynamic_imports, has_imports)
+    };
+
+    let code = if !has_imports {
         // No imports — preserve the existing wrapper layout unchanged.
         format!(
             "
@@ -367,7 +440,6 @@ pub(crate) async fn execute_js(
     } else {
         // Has imports — move user code inside the async IIFE so that the
         // dynamically imported bindings are in lexical scope for main().
-        let dynamic_imports = import_rewriter::generate_dynamic_imports(&imports);
         format!(
             "
         (async () => {{
@@ -522,4 +594,127 @@ fn start_controller_thread(
 
         res
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hash_code_is_deterministic() {
+        let code = "async function main() { return 42; }";
+        assert_eq!(hash_code(code), hash_code(code));
+    }
+
+    #[test]
+    fn hash_code_differs_for_different_input() {
+        let a = hash_code("async function main() { return 1; }");
+        let b = hash_code("async function main() { return 2; }");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn code_cache_hit_returns_cached_entry() {
+        let cache: CodeCache = Arc::new(RwLock::new(HashMap::new()));
+        let code = "async function main() {}";
+        let digest = hash_code(code);
+
+        cache.write().unwrap().insert(
+            "QmTest123".to_string(),
+            CachedRewrite {
+                code_hash: digest,
+                rewritten_code: code.to_string(),
+                dynamic_imports: String::new(),
+                has_imports: false,
+            },
+        );
+
+        let result = cache
+            .read()
+            .ok()
+            .and_then(|c| c.get("QmTest123").cloned())
+            .filter(|entry| entry.code_hash == digest);
+
+        assert!(result.is_some());
+        assert!(!result.unwrap().has_imports);
+    }
+
+    #[test]
+    fn code_cache_rejects_mismatched_hash() {
+        let cache: CodeCache = Arc::new(RwLock::new(HashMap::new()));
+        let original_code = "async function main() { return 1; }";
+        let different_code = "async function main() { return 2; }";
+
+        cache.write().unwrap().insert(
+            "QmTest456".to_string(),
+            CachedRewrite {
+                code_hash: hash_code(original_code),
+                rewritten_code: original_code.to_string(),
+                dynamic_imports: String::new(),
+                has_imports: false,
+            },
+        );
+
+        // Lookup with a different code should fail the hash check
+        let different_digest = hash_code(different_code);
+        let result = cache
+            .read()
+            .ok()
+            .and_then(|c| c.get("QmTest456").cloned())
+            .filter(|entry| entry.code_hash == different_digest);
+
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn code_cache_respects_max_entries() {
+        let cache: CodeCache = Arc::new(RwLock::new(HashMap::new()));
+
+        // Fill the cache to capacity
+        {
+            let mut c = cache.write().unwrap();
+            for i in 0..CODE_CACHE_MAX_ENTRIES {
+                c.insert(
+                    format!("Qm{i}"),
+                    CachedRewrite {
+                        code_hash: [0u8; 32],
+                        rewritten_code: String::new(),
+                        dynamic_imports: String::new(),
+                        has_imports: false,
+                    },
+                );
+            }
+        }
+
+        assert_eq!(cache.read().unwrap().len(), CODE_CACHE_MAX_ENTRIES);
+
+        // Attempting to insert when full should not increase size
+        {
+            let mut c = cache.write().unwrap();
+            if c.len() < CODE_CACHE_MAX_ENTRIES {
+                c.insert(
+                    "QmOverflow".to_string(),
+                    CachedRewrite {
+                        code_hash: [0u8; 32],
+                        rewritten_code: String::new(),
+                        dynamic_imports: String::new(),
+                        has_imports: false,
+                    },
+                );
+            }
+        }
+
+        assert_eq!(cache.read().unwrap().len(), CODE_CACHE_MAX_ENTRIES);
+        assert!(!cache.read().unwrap().contains_key("QmOverflow"));
+    }
+
+    #[test]
+    fn code_cache_miss_returns_none() {
+        let cache: CodeCache = Arc::new(RwLock::new(HashMap::new()));
+        let result = cache
+            .read()
+            .ok()
+            .and_then(|c| c.get("QmNonexistent").cloned());
+        assert!(result.is_none());
+    }
 }

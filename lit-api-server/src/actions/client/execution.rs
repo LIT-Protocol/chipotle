@@ -215,6 +215,11 @@ impl Client {
                     http_headers: self.http_headers.clone(),
                     timeout: Some(self.timeout_ms),
                     memory_limit: Some(self.memory_limit_mb),
+                    ipfs_id: if self.ipfs_id.is_empty() {
+                        None
+                    } else {
+                        Some(self.ipfs_id.clone())
+                    },
                 }
                 .into(),
             )
