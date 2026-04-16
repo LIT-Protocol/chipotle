@@ -42,7 +42,7 @@ pub async fn lit_action(
         http_headers.insert("x-correlation-id".to_string(), cid.clone());
     }
 
-    let (code_to_run, derived_ipfs_id) = get_or_prepare_action_code(
+    let (code_to_run, derived_ipfs_id) = resolve_action_code(
         &lit_action_request.code,
         &lit_action_request.ipfs_id,
         ipfs_cache,
@@ -58,6 +58,11 @@ pub async fn lit_action(
         );
         return Err(ApiStatus::forbidden(msg));
     }
+
+    // Cache after authorization so unauthorized requests cannot pollute the cache.
+    ipfs_cache
+        .insert(derived_ipfs_id.clone(), Arc::new(code_to_run.clone()))
+        .await;
 
     let deno_execution_env = DenoExecutionEnv {
         ipfs_cache: Some(moka::future::Cache::clone(ipfs_cache)),
@@ -132,13 +137,15 @@ fn get_lit_action_ipfs_id(code: &str) -> String {
     ipfs_hasher.compute(code.as_bytes())
 }
 
-/// Resolve the action code and its IPFS ID.
+/// Resolve the action code and its IPFS ID without modifying the cache.
 ///
-/// * If `code` is provided, compute the IPFS hash and cache the code for future
-///   look-ups by that hash.
+/// * If `code` is provided, compute the IPFS hash and return both.
 /// * If only `ipfs_id` is provided, attempt to retrieve the code from the cache.
 /// * If neither is provided, return an error.
-async fn get_or_prepare_action_code(
+///
+/// Callers should insert into the cache **after** authorization succeeds to prevent
+/// unauthorized requests from polluting the shared cache.
+async fn resolve_action_code(
     code: &Option<String>,
     ipfs_id: &Option<String>,
     ipfs_cache: &Cache<String, Arc<String>>,
@@ -158,10 +165,6 @@ async fn get_or_prepare_action_code(
                     );
                 }
             }
-            // Cache the code so later calls using only the IPFS ID can retrieve it.
-            ipfs_cache
-                .insert(derived_ipfs_id.clone(), Arc::new(code.to_string()))
-                .await;
             Ok((code.to_string(), derived_ipfs_id))
         }
         (None, Some(ipfs_id)) => {
@@ -451,27 +454,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_or_prepare_action_code_caches_inline_code() {
+    async fn resolve_action_code_returns_inline_code_without_caching() {
         let cache = test_cache();
         let code = Some("console.log('hello')".to_string());
-        let (returned_code, ipfs_id) = get_or_prepare_action_code(&code, &None, &cache)
-            .await
-            .unwrap();
+        let (returned_code, ipfs_id) = resolve_action_code(&code, &None, &cache).await.unwrap();
         assert_eq!(returned_code, "console.log('hello')");
         assert_eq!(ipfs_id, get_lit_action_ipfs_id(&returned_code));
-        // Verify it was cached
-        assert_eq!(&*cache.get(&ipfs_id).await.unwrap(), "console.log('hello')");
+        // resolve_action_code does NOT insert into cache; caller caches after auth.
+        assert!(cache.get(&ipfs_id).await.is_none());
     }
 
     #[tokio::test]
-    async fn get_or_prepare_action_code_retrieves_from_cache() {
+    async fn resolve_action_code_retrieves_from_cache() {
         let cache = test_cache();
         let code = "console.log('cached')".to_string();
         let ipfs_id = get_lit_action_ipfs_id(&code);
         cache.insert(ipfs_id.clone(), Arc::new(code.clone())).await;
 
         let (returned_code, returned_id) =
-            get_or_prepare_action_code(&None, &Some(ipfs_id.clone()), &cache)
+            resolve_action_code(&None, &Some(ipfs_id.clone()), &cache)
                 .await
                 .unwrap();
         assert_eq!(returned_code, code);
@@ -479,22 +480,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_or_prepare_action_code_cache_miss_errors() {
+    async fn resolve_action_code_cache_miss_errors() {
         let cache = test_cache();
-        let result =
-            get_or_prepare_action_code(&None, &Some("QmUnknown".to_string()), &cache).await;
+        let result = resolve_action_code(&None, &Some("QmUnknown".to_string()), &cache).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn get_or_prepare_action_code_neither_provided_errors() {
+    async fn resolve_action_code_neither_provided_errors() {
         let cache = test_cache();
-        let result = get_or_prepare_action_code(&None, &None, &cache).await;
+        let result = resolve_action_code(&None, &None, &cache).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn get_or_prepare_action_code_prefers_inline_code() {
+    async fn resolve_action_code_prefers_inline_code() {
         let cache = test_cache();
         // Pre-populate cache with different code under the same ID
         let code = "console.log('new')".to_string();
@@ -504,23 +504,22 @@ mod tests {
             .await;
 
         // When both code and ipfs_id are provided, code wins
-        let (returned_code, _) =
-            get_or_prepare_action_code(&Some(code.clone()), &Some(ipfs_id), &cache)
-                .await
-                .unwrap();
+        let (returned_code, _) = resolve_action_code(&Some(code.clone()), &Some(ipfs_id), &cache)
+            .await
+            .unwrap();
         assert_eq!(returned_code, code);
     }
 
     #[tokio::test]
-    async fn get_or_prepare_action_code_empty_strings_treated_as_none() {
+    async fn resolve_action_code_empty_strings_treated_as_none() {
         let cache = test_cache();
         let result =
-            get_or_prepare_action_code(&Some("".to_string()), &Some("".to_string()), &cache).await;
+            resolve_action_code(&Some("".to_string()), &Some("".to_string()), &cache).await;
         assert!(result.is_err());
     }
 
     #[tokio::test]
-    async fn get_or_prepare_action_code_mismatched_ipfs_id_uses_derived() {
+    async fn resolve_action_code_mismatched_ipfs_id_uses_derived() {
         let cache = test_cache();
         let old_code = "console.log('old')";
         let old_ipfs_id = get_lit_action_ipfs_id(old_code);
@@ -531,7 +530,7 @@ mod tests {
         let new_code = "console.log('new')".to_string();
         // Caller provides new code but references the OLD ipfs_id
         let (returned_code, returned_id) =
-            get_or_prepare_action_code(&Some(new_code.clone()), &Some(old_ipfs_id.clone()), &cache)
+            resolve_action_code(&Some(new_code.clone()), &Some(old_ipfs_id.clone()), &cache)
                 .await
                 .unwrap();
 
@@ -539,8 +538,8 @@ mod tests {
         assert_ne!(returned_id, old_ipfs_id);
         // Old cache entry must remain untouched
         assert_eq!(&*cache.get(&old_ipfs_id).await.unwrap(), old_code);
-        // New code is cached under its own derived ID
-        assert_eq!(&*cache.get(&returned_id).await.unwrap(), new_code.as_str());
+        // resolve_action_code does not cache the new code; caller does after auth
+        assert!(cache.get(&returned_id).await.is_none());
     }
 
     #[test]
