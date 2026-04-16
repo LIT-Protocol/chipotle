@@ -1,10 +1,11 @@
 use std::collections::{BTreeMap, HashMap};
+use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Once;
 use std::sync::{Arc, RwLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use deno_core::{JsRuntime, NoopModuleLoader, v8};
@@ -22,6 +23,7 @@ use deno_runtime::{
     worker::{MainWorker, WorkerOptions, WorkerServiceOptions},
 };
 use indoc::formatdoc;
+use ipfs_hasher::IpfsHasher;
 use lit_actions_grpc::proto::{ExecuteJsRequest, ExecuteJsResponse};
 use lit_api_core::context::HEADER_KEY_X_PRIVACY_MODE;
 use lit_observability::channels::TracedReceiver;
@@ -35,32 +37,163 @@ const DEFAULT_TIMEOUT_MS: u64 = 1000 * 60 * 15; // 15 minutes
 const DEFAULT_MEMORY_LIMIT_MB: usize = 128; // 128MB
 const MEMORY_SAMPLE_INTERVAL_MS: u64 = 500; // 500ms
 const EXECUTION_TERMINATED_ERROR: &str = "Uncaught Error: execution terminated";
+const MAX_ACTION_CODE_CACHE_BYTES: usize = 100 * 1024 * 1024;
+const ACTION_CODE_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
 
-/// Maximum number of entries in the code rewrite cache.
-const CODE_CACHE_MAX_ENTRIES: usize = 1_000;
+pub(crate) type ActionCodeCache = Arc<RwLock<ActionCodeCacheState>>;
 
-/// Cached result of import rewriting for a given IPFS CID.
-#[derive(Clone)]
-pub(crate) struct CachedRewrite {
-    /// SHA-256 digest of the original code, used to verify cache integrity.
-    pub code_hash: [u8; 32],
-    /// User code with import statements stripped.
-    pub rewritten_code: String,
-    /// Pre-rendered dynamic import statements (empty string when no imports).
-    pub dynamic_imports: String,
-    /// Whether the original code had imports.
-    pub has_imports: bool,
+pub(crate) fn new_action_code_cache() -> ActionCodeCache {
+    Arc::new(RwLock::new(ActionCodeCacheState::default()))
 }
 
-/// Thread-safe cache mapping IPFS CID → rewrite result.
-pub(crate) type CodeCache = Arc<RwLock<HashMap<String, CachedRewrite>>>;
+#[derive(Default)]
+pub(crate) struct ActionCodeCacheState {
+    entries: HashMap<String, ActionCodeCacheEntry>,
+    total_bytes: usize,
+}
 
-/// Compute a SHA-256 hash of the code for cache integrity verification.
-fn hash_code(code: &str) -> [u8; 32] {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(code.as_bytes());
-    hasher.finalize().into()
+struct ActionCodeCacheEntry {
+    code: CachedActionCode,
+    size_bytes: usize,
+    expires_at: Instant,
+}
+
+struct ActionCodePrepareContext<'a> {
+    client: &'a reqwest::Client,
+    integrity: &'a Arc<RwLock<HashMap<String, String>>>,
+    strict_imports: bool,
+    lockfile_path: &'a Option<PathBuf>,
+    module_cache: &'a ModuleCache,
+}
+
+impl ActionCodeCacheState {
+    fn get(&self, action_ipfs_id: &str, now: Instant) -> Option<CachedActionCode> {
+        let entry = self.entries.get(action_ipfs_id)?;
+        if entry.expires_at <= now {
+            return None;
+        }
+        Some(entry.code.clone())
+    }
+
+    fn insert(&mut self, action_ipfs_id: String, code: CachedActionCode, now: Instant) -> bool {
+        self.purge_expired(now);
+
+        let size_bytes =
+            action_code_cache_entry_size(&action_ipfs_id, action_ipfs_id.capacity(), &code);
+        if size_bytes > MAX_ACTION_CODE_CACHE_BYTES {
+            return false;
+        }
+
+        if let Some(old_entry) = self.entries.remove(&action_ipfs_id) {
+            self.total_bytes = self.total_bytes.saturating_sub(old_entry.size_bytes);
+        }
+
+        if self.total_bytes + size_bytes > MAX_ACTION_CODE_CACHE_BYTES {
+            return false;
+        }
+
+        self.total_bytes += size_bytes;
+        self.entries.insert(
+            action_ipfs_id,
+            ActionCodeCacheEntry {
+                code,
+                size_bytes,
+                expires_at: now + ACTION_CODE_CACHE_TTL,
+            },
+        );
+        true
+    }
+
+    fn purge_expired(&mut self, now: Instant) {
+        let expired_keys: Vec<String> = self
+            .entries
+            .iter()
+            .filter_map(|(key, entry)| {
+                if entry.expires_at <= now {
+                    Some(key.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for key in expired_keys {
+            if let Some(entry) = self.entries.remove(&key) {
+                self.total_bytes = self.total_bytes.saturating_sub(entry.size_bytes);
+            }
+        }
+    }
+
+    fn total_bytes(&self) -> usize {
+        self.total_bytes
+    }
+}
+
+fn action_code_cache_entry_size(
+    action_ipfs_id: &str,
+    action_ipfs_id_capacity: usize,
+    code: &CachedActionCode,
+) -> usize {
+    size_of::<ActionCodeCacheEntry>()
+        + size_of::<String>()
+        + action_ipfs_id_capacity.max(action_ipfs_id.len())
+        + code.allocated_bytes()
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CachedActionCode {
+    code: String,
+    dynamic_imports: Option<String>,
+    loaded_modules: Vec<(String, String)>,
+}
+
+impl CachedActionCode {
+    fn allocated_bytes(&self) -> usize {
+        self.code.capacity()
+            + self.dynamic_imports.as_ref().map_or(0, String::capacity)
+            + self.loaded_modules.capacity() * size_of::<(String, String)>()
+            + self
+                .loaded_modules
+                .iter()
+                .map(|(url, hash)| url.capacity() + hash.capacity())
+                .sum::<usize>()
+    }
+
+    fn to_executable_code(&self, js_func_params: &str) -> String {
+        if let Some(dynamic_imports) = &self.dynamic_imports {
+            // Has imports - move user code inside the async IIFE so that the
+            // dynamically imported bindings are in lexical scope for main().
+            format!(
+                "
+        (async () => {{
+        {dynamic_imports}
+        {code}
+        ;
+        const params = {js_func_params} ;
+        const data = await main(params);
+        if (typeof data !== \"undefined\") {{
+          LitActions.setResponse( {{ response: data }} );
+        }}
+        }})();",
+                code = self.code,
+            )
+        } else {
+            // No imports - preserve the existing wrapper layout unchanged.
+            format!(
+                "
+        {code}
+        ;
+        (async () => {{
+        const params = {js_func_params} ;
+        const data = await main(params);
+        if (typeof data !== \"undefined\") {{
+          LitActions.setResponse( {{ response: data }} );
+        }}
+        }})();",
+                code = self.code,
+            )
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -75,6 +208,107 @@ static RUNTIME_SNAPSHOT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/RUNTI
 fn deno_isolate_init() -> Option<&'static [u8]> {
     debug!("Deno isolate init with snapshots.");
     Some(RUNTIME_SNAPSHOT)
+}
+
+fn get_lit_action_ipfs_id(code: &str) -> String {
+    let ipfs_hasher = IpfsHasher::default();
+    ipfs_hasher.compute(code.as_bytes())
+}
+
+fn record_loaded_modules(loaded_modules: &LoadedModules, cached_code: &CachedActionCode) {
+    if let Ok(mut modules) = loaded_modules.0.write() {
+        for (url, hash) in &cached_code.loaded_modules {
+            if !modules.iter().any(|m| &m.url == url) {
+                modules.push(crate::cdn_module_loader::LoadedModuleInfo {
+                    url: url.clone(),
+                    hash: hash.clone(),
+                });
+            }
+        }
+    }
+}
+
+async fn prepare_action_code(
+    code: &str,
+    context: &ActionCodePrepareContext<'_>,
+) -> Result<CachedActionCode> {
+    // Rewrite static ES `import` statements into dynamic `import()` calls.
+    // Static imports are not valid in script mode, so we strip them from the
+    // user code and generate equivalent dynamic imports inside the async wrapper
+    // where `await` is available and the imported bindings are in lexical scope.
+    let import_rewriter::RewriteResult {
+        code: rewritten_code,
+        imports,
+    } = import_rewriter::rewrite_imports(code);
+
+    if imports.is_empty() {
+        return Ok(CachedActionCode {
+            code: code.to_string(),
+            dynamic_imports: None,
+            loaded_modules: Vec::new(),
+        });
+    }
+
+    // Has imports - bundle all transitive dependencies from jsDelivr as
+    // data: URLs so the module loader needs no network I/O at runtime.
+    let bundle_result = import_rewriter::bundle_imports(
+        &imports,
+        context.client,
+        context.integrity,
+        context.strict_imports,
+        context.lockfile_path,
+        context.module_cache,
+    )
+    .await
+    .map_err(|e| anyhow!("Failed to bundle CDN imports: {e}"))?;
+
+    Ok(CachedActionCode {
+        code: rewritten_code,
+        dynamic_imports: Some(bundle_result.dynamic_imports),
+        loaded_modules: bundle_result.loaded_modules,
+    })
+}
+
+async fn get_or_prepare_action_code(
+    code: &str,
+    action_ipfs_id: &str,
+    action_code_cache: &ActionCodeCache,
+    prepare_context: &ActionCodePrepareContext<'_>,
+) -> Result<CachedActionCode> {
+    let now = Instant::now();
+    if let Ok(cache) = action_code_cache.read()
+        && let Some(cached_code) = cache.get(action_ipfs_id, now)
+    {
+        debug!(action_ipfs_id, "action code loaded from cache");
+        return Ok(cached_code.clone());
+    }
+
+    let prepared_code = prepare_action_code(code, prepare_context).await?;
+
+    if let Ok(mut cache) = action_code_cache.write() {
+        if let Some(cached_code) = cache.get(action_ipfs_id, now) {
+            return Ok(cached_code.clone());
+        }
+
+        if cache.insert(action_ipfs_id.to_string(), prepared_code.clone(), now) {
+            debug!(
+                action_ipfs_id,
+                allocated_bytes = prepared_code.allocated_bytes(),
+                ttl_seconds = ACTION_CODE_CACHE_TTL.as_secs(),
+                "action code cached for future requests",
+            );
+        } else {
+            debug!(
+                action_ipfs_id,
+                cache_bytes = cache.total_bytes(),
+                allocated_bytes = prepared_code.allocated_bytes(),
+                max_cache = MAX_ACTION_CODE_CACHE_BYTES,
+                "action code cache full, skipping cache insertion"
+            );
+        }
+    }
+
+    Ok(prepared_code)
 }
 
 // using the worker built into deno
@@ -282,10 +516,9 @@ pub(crate) async fn execute_js(
     integrity_manifest: Arc<RwLock<HashMap<String, String>>>,
     strict_imports: bool,
     module_cache: ModuleCache,
+    action_code_cache: ActionCodeCache,
     lockfile_path: Option<PathBuf>,
     http_client: Arc<reqwest::Client>,
-    ipfs_id: Option<String>,
-    code_cache: CodeCache,
 ) -> Result<()> {
     // Fast path to do nothing, allowing us to benchmark with and without Deno involved
     if code.is_empty() || code.bytes().all(|b| b.is_ascii_whitespace()) {
@@ -299,33 +532,28 @@ pub(crate) async fn execute_js(
     let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
     let memory_limit_mb = memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB);
 
-    // Try to use cached rewrite result keyed by IPFS CID to skip import parsing.
-    // On cache hit, verify the code hash to prevent cache poisoning from mismatched CIDs.
-    // Only compute the hash when we have a CID (avoids O(n) hashing on every call).
-    let cached = ipfs_id.as_deref().and_then(|cid| {
-        code_cache
-            .read()
-            .ok()
-            .and_then(|cache| cache.get(cid).cloned())
-            .filter(|entry| entry.code_hash == hash_code(&code))
-    });
+    // Check the action code cache before building the worker. On cache hit we
+    // already have the prepared code, so no module loading is needed — use a
+    // cheap NoopModuleLoader instead of constructing the full CdnModuleLoader
+    // with its HTTP client, integrity manifest, etc.
+    let action_ipfs_id = get_lit_action_ipfs_id(&code);
+    let now = Instant::now();
+    let cached_code = action_code_cache
+        .read()
+        .ok()
+        .and_then(|cache| cache.get(&action_ipfs_id, now));
 
-    let cache_hit = cached.is_some();
-
-    // On cache hit we already have the rewritten code, so no module loading is
-    // needed — use a cheap NoopModuleLoader instead of constructing the full
-    // CdnModuleLoader with its HTTP client, integrity manifest, etc.
     let loaded_modules = LoadedModules::default();
-    let module_loader: Rc<dyn deno_core::ModuleLoader> = if cache_hit {
-        debug!("Cache hit for IPFS CID — using NoopModuleLoader");
+    let module_loader: Rc<dyn deno_core::ModuleLoader> = if cached_code.is_some() {
+        debug!(action_ipfs_id, "cache hit — using NoopModuleLoader");
         Rc::new(NoopModuleLoader)
     } else {
         Rc::new(CdnModuleLoader::with_options(
-            integrity_manifest,
+            integrity_manifest.clone(),
             strict_imports,
-            module_cache,
-            lockfile_path,
-            Some(http_client),
+            module_cache.clone(),
+            lockfile_path.clone(),
+            Some(http_client.clone()),
             loaded_modules.clone(),
         ))
     };
@@ -346,7 +574,7 @@ pub(crate) async fn execute_js(
         let mut state = op_state.borrow_mut();
         state.put(outbound_tx);
         state.put(inbound_rx);
-        state.put(loaded_modules);
+        state.put(loaded_modules.clone());
         drop(state);
     }
 
@@ -382,96 +610,23 @@ pub(crate) async fn execute_js(
     let js_params = js_params.as_ref().unwrap_or_default();
     let js_func_params = js_params.to_string();
 
-    let (rewritten_code, dynamic_imports, has_imports) = if let Some(cached) = cached {
-        debug!("Code cache hit for IPFS CID");
-        (
-            cached.rewritten_code,
-            cached.dynamic_imports,
-            cached.has_imports,
-        )
+    // On cache hit we already have the prepared code; on miss we need to
+    // prepare it (rewrite imports, bundle dependencies, cache the result).
+    let cached_code = if let Some(cached) = cached_code {
+        cached
     } else {
-        // Rewrite static ES `import` statements into dynamic `import()` calls.
-        // Static imports are not valid in script mode, so we strip them from the
-        // user code and generate equivalent dynamic imports inside the async wrapper
-        // where `await` is available and the imported bindings are in lexical scope.
-        let import_rewriter::RewriteResult {
-            code: rewritten_code,
-            imports,
-        } = import_rewriter::rewrite_imports(&code);
-
-        let has_imports = !imports.is_empty();
-        let dynamic_imports = if has_imports {
-            import_rewriter::generate_dynamic_imports(&imports)
-        } else {
-            String::new()
+        let prepare_context = ActionCodePrepareContext {
+            client: &http_client,
+            integrity: &integrity_manifest,
+            strict_imports,
+            lockfile_path: &lockfile_path,
+            module_cache: &module_cache,
         };
-
-        // Cache the rewrite result for future calls with the same IPFS CID.
-        // Use the entry API so existing CIDs can always be updated (e.g. code changed),
-        // while new inserts are blocked once the cache is at capacity.
-        if let Some(cid) = ipfs_id.as_deref()
-            && let Ok(mut cache) = code_cache.write()
-        {
-            let cached_rewrite = CachedRewrite {
-                code_hash: hash_code(&code),
-                rewritten_code: rewritten_code.clone(),
-                dynamic_imports: dynamic_imports.clone(),
-                has_imports,
-            };
-
-            // Check capacity before borrowing via entry() to avoid
-            // simultaneous mutable + immutable borrow of the HashMap.
-            let at_capacity = cache.len() >= CODE_CACHE_MAX_ENTRIES;
-            match cache.entry(cid.to_string()) {
-                std::collections::hash_map::Entry::Occupied(mut entry) => {
-                    entry.insert(cached_rewrite);
-                }
-                std::collections::hash_map::Entry::Vacant(entry) => {
-                    if !at_capacity {
-                        entry.insert(cached_rewrite);
-                    } else {
-                        debug!(
-                            "Code cache full ({CODE_CACHE_MAX_ENTRIES} entries), skipping insert"
-                        );
-                    }
-                }
-            }
-        }
-
-        (rewritten_code, dynamic_imports, has_imports)
+        get_or_prepare_action_code(&code, &action_ipfs_id, &action_code_cache, &prepare_context)
+            .await?
     };
-
-    let code = if !has_imports {
-        // No imports — preserve the existing wrapper layout unchanged.
-        format!(
-            "
-        {code}
-        ;
-        (async () => {{
-        const params = {js_func_params} ;
-        const data = await main(params);
-        if (typeof data !== \"undefined\") {{
-          LitActions.setResponse( {{ response: data }} );
-        }}
-        }})();"
-        )
-    } else {
-        // Has imports — move user code inside the async IIFE so that the
-        // dynamically imported bindings are in lexical scope for main().
-        format!(
-            "
-        (async () => {{
-        {dynamic_imports}
-        {rewritten_code}
-        ;
-        const params = {js_func_params} ;
-        const data = await main(params);
-        if (typeof data !== \"undefined\") {{
-          LitActions.setResponse( {{ response: data }} );
-        }}
-        }})();"
-        )
-    };
+    record_loaded_modules(&loaded_modules, &cached_code);
+    let code = cached_code.to_executable_code(&js_func_params);
 
     if let Err(e) = worker
         .js_runtime
@@ -618,191 +773,110 @@ fn start_controller_thread(
 mod tests {
     use super::*;
 
-    #[test]
-    fn hash_code_is_deterministic() {
-        let code = "async function main() { return 42; }";
-        assert_eq!(hash_code(code), hash_code(code));
-    }
-
-    #[test]
-    fn hash_code_differs_for_different_input() {
-        let a = hash_code("async function main() { return 1; }");
-        let b = hash_code("async function main() { return 2; }");
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn code_cache_hit_returns_cached_entry() {
-        let cache: CodeCache = Arc::new(RwLock::new(HashMap::new()));
-        let code = "async function main() {}";
-        let digest = hash_code(code);
-
-        cache.write().unwrap().insert(
-            "QmTest123".to_string(),
-            CachedRewrite {
-                code_hash: digest,
-                rewritten_code: code.to_string(),
-                dynamic_imports: String::new(),
-                has_imports: false,
-            },
-        );
-
-        let result = cache
-            .read()
-            .ok()
-            .and_then(|c| c.get("QmTest123").cloned())
-            .filter(|entry| entry.code_hash == digest);
-
-        assert!(result.is_some());
-        assert!(!result.unwrap().has_imports);
-    }
-
-    #[test]
-    fn code_cache_rejects_mismatched_hash() {
-        let cache: CodeCache = Arc::new(RwLock::new(HashMap::new()));
-        let original_code = "async function main() { return 1; }";
-        let different_code = "async function main() { return 2; }";
-
-        cache.write().unwrap().insert(
-            "QmTest456".to_string(),
-            CachedRewrite {
-                code_hash: hash_code(original_code),
-                rewritten_code: original_code.to_string(),
-                dynamic_imports: String::new(),
-                has_imports: false,
-            },
-        );
-
-        // Lookup with a different code should fail the hash check
-        let different_digest = hash_code(different_code);
-        let result = cache
-            .read()
-            .ok()
-            .and_then(|c| c.get("QmTest456").cloned())
-            .filter(|entry| entry.code_hash == different_digest);
-
-        assert!(result.is_none());
-    }
-
-    /// Helper that mirrors the entry-based insert logic used in execute_js.
-    fn cache_insert(cache: &CodeCache, cid: &str, entry: CachedRewrite) -> bool {
-        if let Ok(mut c) = cache.write() {
-            let at_capacity = c.len() >= CODE_CACHE_MAX_ENTRIES;
-            match c.entry(cid.to_string()) {
-                std::collections::hash_map::Entry::Occupied(mut slot) => {
-                    slot.insert(entry);
-                    true
-                }
-                std::collections::hash_map::Entry::Vacant(slot) => {
-                    if !at_capacity {
-                        slot.insert(entry);
-                        true
-                    } else {
-                        false
-                    }
-                }
-            }
-        } else {
-            false
+    fn cached_code(code: &str) -> CachedActionCode {
+        CachedActionCode {
+            code: code.to_string(),
+            dynamic_imports: None,
+            loaded_modules: Vec::new(),
         }
     }
 
     #[test]
-    fn code_cache_respects_max_entries() {
-        let cache: CodeCache = Arc::new(RwLock::new(HashMap::new()));
+    fn action_code_cache_entry_size_counts_entry_overhead() {
+        let action_ipfs_id = "QmTest".to_string();
+        let code = cached_code("x");
+        let size = action_code_cache_entry_size(&action_ipfs_id, action_ipfs_id.capacity(), &code);
 
-        // Fill the cache to capacity
-        {
-            let mut c = cache.write().unwrap();
-            for i in 0..CODE_CACHE_MAX_ENTRIES {
-                c.insert(
-                    format!("Qm{i}"),
-                    CachedRewrite {
-                        code_hash: [0u8; 32],
-                        rewritten_code: String::new(),
-                        dynamic_imports: String::new(),
-                        has_imports: false,
-                    },
-                );
-            }
-        }
-
-        assert_eq!(cache.read().unwrap().len(), CODE_CACHE_MAX_ENTRIES);
-
-        // New CID insert should be rejected when full
-        let inserted = cache_insert(
-            &cache,
-            "QmOverflow",
-            CachedRewrite {
-                code_hash: [0u8; 32],
-                rewritten_code: String::new(),
-                dynamic_imports: String::new(),
-                has_imports: false,
-            },
-        );
-
-        assert!(!inserted);
-        assert_eq!(cache.read().unwrap().len(), CODE_CACHE_MAX_ENTRIES);
-        assert!(!cache.read().unwrap().contains_key("QmOverflow"));
+        assert!(size > code.allocated_bytes() + action_ipfs_id.capacity());
     }
 
     #[test]
-    fn code_cache_allows_update_when_full() {
-        let cache: CodeCache = Arc::new(RwLock::new(HashMap::new()));
+    fn action_code_cache_entry_size_uses_allocated_capacity() {
+        let mut action_ipfs_id = String::with_capacity(64);
+        action_ipfs_id.push_str("QmTest");
 
-        // Fill the cache to capacity, including a known CID "QmExisting"
-        {
-            let mut c = cache.write().unwrap();
-            c.insert(
-                "QmExisting".to_string(),
-                CachedRewrite {
-                    code_hash: [1u8; 32],
-                    rewritten_code: "old".to_string(),
-                    dynamic_imports: String::new(),
-                    has_imports: false,
+        let mut code_string = String::with_capacity(128);
+        code_string.push('x');
+
+        let mut dynamic_imports = String::with_capacity(256);
+        dynamic_imports.push_str("await import(\"data:text/javascript,\");");
+
+        let mut loaded_modules = Vec::with_capacity(4);
+        let mut module_url = String::with_capacity(512);
+        module_url.push_str("https://cdn.jsdelivr.net/npm/example@1.0.0/+esm");
+        let mut module_hash = String::with_capacity(128);
+        module_hash.push_str("abc123");
+        loaded_modules.push((module_url, module_hash));
+
+        let code = CachedActionCode {
+            code: code_string,
+            dynamic_imports: Some(dynamic_imports),
+            loaded_modules,
+        };
+
+        let size = action_code_cache_entry_size(&action_ipfs_id, action_ipfs_id.capacity(), &code);
+        let minimum_allocated_bytes = action_ipfs_id.capacity()
+            + code.code.capacity()
+            + code.dynamic_imports.as_ref().unwrap().capacity()
+            + code.loaded_modules.capacity() * size_of::<(String, String)>()
+            + code.loaded_modules[0].0.capacity()
+            + code.loaded_modules[0].1.capacity();
+
+        assert!(size >= minimum_allocated_bytes);
+    }
+
+    #[test]
+    fn action_code_cache_expires_entries() {
+        let now = Instant::now();
+        let code = cached_code("console.log('old')");
+        let action_ipfs_id = "QmOld".to_string();
+        let size_bytes =
+            action_code_cache_entry_size(&action_ipfs_id, action_ipfs_id.capacity(), &code);
+        let mut cache = ActionCodeCacheState {
+            entries: HashMap::from([(
+                "QmOld".to_string(),
+                ActionCodeCacheEntry {
+                    code,
+                    size_bytes,
+                    expires_at: now,
                 },
-            );
-            for i in 1..CODE_CACHE_MAX_ENTRIES {
-                c.insert(
-                    format!("Qm{i}"),
-                    CachedRewrite {
-                        code_hash: [0u8; 32],
-                        rewritten_code: String::new(),
-                        dynamic_imports: String::new(),
-                        has_imports: false,
-                    },
-                );
-            }
-        }
+            )]),
+            total_bytes: size_bytes,
+        };
 
-        assert_eq!(cache.read().unwrap().len(), CODE_CACHE_MAX_ENTRIES);
-
-        // Updating an existing CID should succeed even when full
-        let updated = cache_insert(
-            &cache,
-            "QmExisting",
-            CachedRewrite {
-                code_hash: [2u8; 32],
-                rewritten_code: "new".to_string(),
-                dynamic_imports: String::new(),
-                has_imports: false,
-            },
-        );
-
-        assert!(updated);
-        assert_eq!(cache.read().unwrap().len(), CODE_CACHE_MAX_ENTRIES);
-        let entry = cache.read().unwrap().get("QmExisting").cloned().unwrap();
-        assert_eq!(entry.rewritten_code, "new");
-        assert_eq!(entry.code_hash, [2u8; 32]);
+        assert!(cache.get("QmOld", now).is_none());
+        cache.purge_expired(now);
+        assert_eq!(cache.total_bytes(), 0);
+        assert!(cache.entries.is_empty());
     }
 
     #[test]
-    fn code_cache_miss_returns_none() {
-        let cache: CodeCache = Arc::new(RwLock::new(HashMap::new()));
-        let result = cache
-            .read()
-            .ok()
-            .and_then(|c| c.get("QmNonexistent").cloned());
-        assert!(result.is_none());
+    fn action_code_cache_enforces_total_size_after_purging_expired_entries() {
+        let now = Instant::now();
+        let existing_code = cached_code("old");
+        let existing_size = MAX_ACTION_CODE_CACHE_BYTES - 1;
+        let mut cache = ActionCodeCacheState {
+            entries: HashMap::from([(
+                "QmOld".to_string(),
+                ActionCodeCacheEntry {
+                    code: existing_code,
+                    size_bytes: existing_size,
+                    expires_at: now + ACTION_CODE_CACHE_TTL,
+                },
+            )]),
+            total_bytes: existing_size,
+        };
+
+        assert!(!cache.insert("QmNew".to_string(), cached_code("new"), now));
+        assert_eq!(cache.total_bytes(), existing_size);
+
+        if let Some(entry) = cache.entries.get_mut("QmOld") {
+            entry.expires_at = now;
+        }
+
+        assert!(cache.insert("QmNew".to_string(), cached_code("new"), now));
+        assert!(cache.total_bytes() < MAX_ACTION_CODE_CACHE_BYTES);
+        assert!(cache.entries.contains_key("QmNew"));
+        assert!(!cache.entries.contains_key("QmOld"));
     }
 }
