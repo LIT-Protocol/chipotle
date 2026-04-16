@@ -408,30 +408,30 @@ pub(crate) async fn execute_js(
         // Cache the rewrite result for future calls with the same IPFS CID.
         // Use the entry API so existing CIDs can always be updated (e.g. code changed),
         // while new inserts are blocked once the cache is at capacity.
-        if let Some(cid) = ipfs_id.as_deref() {
-            if let Ok(mut cache) = code_cache.write() {
-                let cached_rewrite = CachedRewrite {
-                    code_hash: hash_code(&code),
-                    rewritten_code: rewritten_code.clone(),
-                    dynamic_imports: dynamic_imports.clone(),
-                    has_imports,
-                };
+        if let Some(cid) = ipfs_id.as_deref()
+            && let Ok(mut cache) = code_cache.write()
+        {
+            let cached_rewrite = CachedRewrite {
+                code_hash: hash_code(&code),
+                rewritten_code: rewritten_code.clone(),
+                dynamic_imports: dynamic_imports.clone(),
+                has_imports,
+            };
 
-                // Check capacity before borrowing via entry() to avoid
-                // simultaneous mutable + immutable borrow of the HashMap.
-                let at_capacity = cache.len() >= CODE_CACHE_MAX_ENTRIES;
-                match cache.entry(cid.to_string()) {
-                    std::collections::hash_map::Entry::Occupied(mut entry) => {
+            // Check capacity before borrowing via entry() to avoid
+            // simultaneous mutable + immutable borrow of the HashMap.
+            let at_capacity = cache.len() >= CODE_CACHE_MAX_ENTRIES;
+            match cache.entry(cid.to_string()) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    entry.insert(cached_rewrite);
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    if !at_capacity {
                         entry.insert(cached_rewrite);
-                    }
-                    std::collections::hash_map::Entry::Vacant(entry) => {
-                        if !at_capacity {
-                            entry.insert(cached_rewrite);
-                        } else {
-                            debug!(
-                                "Code cache full ({CODE_CACHE_MAX_ENTRIES} entries), skipping insert"
-                            );
-                        }
+                    } else {
+                        debug!(
+                            "Code cache full ({CODE_CACHE_MAX_ENTRIES} entries), skipping insert"
+                        );
                     }
                 }
             }
