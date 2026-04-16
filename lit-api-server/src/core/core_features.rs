@@ -156,14 +156,14 @@ async fn resolve_action_code(
     match (code_str, ipfs_id_str) {
         (Some(code), ipfs_id_hint) => {
             let derived_ipfs_id = get_lit_action_ipfs_id(code);
-            if let Some(hint) = ipfs_id_hint {
-                if hint != derived_ipfs_id {
-                    tracing::debug!(
-                        supplied_ipfs_id = hint,
-                        derived_ipfs_id = %derived_ipfs_id,
-                        "Supplied ipfs_id does not match derived hash of code; using derived hash"
-                    );
-                }
+            if let Some(hint) = ipfs_id_hint
+                && hint != derived_ipfs_id
+            {
+                tracing::debug!(
+                    supplied_ipfs_id = hint,
+                    derived_ipfs_id = %derived_ipfs_id,
+                    "Supplied ipfs_id does not match derived hash of code; using derived hash"
+                );
             }
             Ok((code.to_string(), derived_ipfs_id))
         }
