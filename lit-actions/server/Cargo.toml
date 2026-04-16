@@ -7,7 +7,6 @@ publish = { workspace = true }
 
 [lib]
 path = "lib.rs"
-test = false
 doctest = false
 
 [dependencies]
@@ -21,10 +20,12 @@ deno_runtime = { workspace = true }
 flume = { workspace = true }
 futures = "0.3"
 indoc = { workspace = true }
+ipfs-hasher = "0.13.0"
 lit-actions-ext = { workspace = true }
 lit-actions-grpc = { workspace = true }
 lit-api-core = { workspace = true }
 lit-observability = { workspace = true, features = ["channels"] }
+percent-encoding = "2"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 serde_json = { workspace = true }
 sha2 = "0.10"
@@ -34,6 +35,7 @@ tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
+url = "2"
 
 [build-dependencies]
 lit-actions-ext = { workspace = true }
