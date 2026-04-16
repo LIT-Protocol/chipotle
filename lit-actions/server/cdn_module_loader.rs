@@ -14,6 +14,16 @@ use futures::FutureExt;
 use sha2::{Digest, Sha384};
 use tracing::{debug, error, info, instrument, warn};
 
+/// Truncate a string to the first 100 characters (with "…[truncated]" suffix)
+/// if it exceeds 1000 characters. Used to prevent logging huge base64 blobs.
+fn truncate_for_log(s: &str) -> String {
+    if s.len() > 1000 {
+        format!("{}…[truncated, len={}]", &s[..100], s.len())
+    } else {
+        s.to_string()
+    }
+}
+
 /// Constant-time byte comparison to prevent timing side-channels on integrity hashes.
 fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
@@ -330,16 +340,16 @@ impl ModuleLoader for CdnModuleLoader {
             // Relative traversal (../../) could escape to /gh/ or other backends.
             if Self::is_allowed_cdn(resolved.as_str()) {
                 info!(
-                    specifier,
-                    referrer,
+                    specifier = %truncate_for_log(specifier),
+                    referrer = %truncate_for_log(referrer),
                     resolved_url = %resolved,
                     "CDN module resolve: relative import resolved against jsDelivr referrer"
                 );
                 return Ok(resolved);
             }
             warn!(
-                specifier,
-                referrer,
+                specifier = %truncate_for_log(specifier),
+                referrer = %truncate_for_log(referrer),
                 resolved_url = %resolved,
                 "CDN module resolve rejected: relative import resolved outside /npm/ boundary"
             );
@@ -351,7 +361,7 @@ impl ModuleLoader for CdnModuleLoader {
 
         // If it's already a full jsDelivr URL, pass through
         if Self::is_allowed_cdn(specifier) {
-            info!(specifier, "CDN module resolve: full URL accepted");
+            info!(specifier = %truncate_for_log(specifier), "CDN module resolve: full URL accepted");
             return ModuleSpecifier::parse(specifier).map_err(|e| {
                 JsErrorBox::generic(format!("Invalid module URL: {specifier}: {e}")).into()
             });
@@ -360,7 +370,7 @@ impl ModuleLoader for CdnModuleLoader {
         // Try parsing as an npm specifier (e.g. "zod@3.22.4/+esm")
         if let Some(cdn_url) = Self::parse_npm_specifier(specifier) {
             info!(
-                specifier,
+                specifier = %truncate_for_log(specifier),
                 resolved_url = %cdn_url,
                 "CDN module resolve: npm specifier resolved to jsDelivr URL"
             );
@@ -371,8 +381,9 @@ impl ModuleLoader for CdnModuleLoader {
 
         // Reject everything else
         warn!(
-            specifier,
-            referrer, "CDN module resolve rejected: not a valid npm specifier or jsDelivr URL"
+            specifier = %truncate_for_log(specifier),
+            referrer = %truncate_for_log(referrer),
+            "CDN module resolve rejected: not a valid npm specifier or jsDelivr URL"
         );
         Err(JsErrorBox::generic(format!(
             "Invalid import specifier: \"{specifier}\". \
