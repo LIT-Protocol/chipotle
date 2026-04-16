@@ -87,6 +87,7 @@ impl std::fmt::Debug for DebugExecutionRequest<'_> {
             .field("timeout", &req.timeout)
             .field("memory_limit", &req.memory_limit)
             .field("http_headers", &req.http_headers)
+            .field("ipfs_id", &req.ipfs_id)
             .finish()
     }
 }

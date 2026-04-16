@@ -4,6 +4,7 @@ use std::pin::Pin;
 use std::sync::{Arc, RwLock};
 
 use crate::cdn_module_loader::{CdnModuleLoader, ModuleCache};
+use crate::runtime::CodeCache;
 
 use anyhow::Result;
 use deno_core::error::CoreError;
@@ -41,6 +42,8 @@ pub struct Server {
     lockfile_path: Option<PathBuf>,
     /// Shared HTTP client for CDN fetches (connection pooling across executions).
     http_client: Arc<reqwest::Client>,
+    /// Shared cache for import-rewritten code keyed by IPFS CID.
+    code_cache: CodeCache,
 }
 
 impl Server {
@@ -63,6 +66,7 @@ impl Server {
             module_cache: Arc::new(RwLock::new(HashMap::new())),
             lockfile_path,
             http_client: CdnModuleLoader::build_http_client(),
+            code_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
@@ -74,6 +78,7 @@ impl Server {
             module_cache: Arc::new(RwLock::new(HashMap::new())),
             lockfile_path: None,
             http_client: CdnModuleLoader::build_http_client(),
+            code_cache: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 }
@@ -98,6 +103,7 @@ impl Action for Server {
         let module_cache = self.module_cache.clone();
         let lockfile_path = self.lockfile_path.clone();
         let http_client = self.http_client.clone();
+        let code_cache = self.code_cache.clone();
 
         // Put incoming requests into channel
         let send_exec_req_span = debug_span!("send_exec_req");
@@ -185,6 +191,8 @@ impl Action for Server {
                                     module_cache.clone(),
                                     lockfile_path.clone(),
                                     http_client.clone(),
+                                    req.ipfs_id,
+                                    code_cache.clone(),
                                 )
                                 .await;
                                 let _ = outbound_tx
