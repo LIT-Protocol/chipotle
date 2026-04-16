@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -13,6 +14,21 @@ use deno_error::JsErrorBox;
 use futures::FutureExt;
 use sha2::{Digest, Sha384};
 use tracing::{debug, error, info, instrument, warn};
+
+/// Truncate a string to approximately the first 100 bytes (on a valid UTF-8
+/// char boundary) if it exceeds 1000 bytes. Used to prevent logging huge
+/// base64 blobs in module specifiers.
+fn truncate_for_log(s: &str) -> Cow<'_, str> {
+    if s.len() > 1000 {
+        let mut end = 100.min(s.len());
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        Cow::Owned(format!("{}…[truncated, len={}]", &s[..end], s.len()))
+    } else {
+        Cow::Borrowed(s)
+    }
+}
 
 /// Constant-time byte comparison to prevent timing side-channels on integrity hashes.
 pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
@@ -348,32 +364,38 @@ impl ModuleLoader for CdnModuleLoader {
             && Self::is_allowed_cdn(referrer)
         {
             let base = ModuleSpecifier::parse(referrer).map_err(|e| {
-                JsErrorBox::generic(format!("Invalid referrer URL: {referrer}: {e}"))
+                JsErrorBox::generic(format!(
+                    "Invalid referrer URL: {}: {e}",
+                    truncate_for_log(referrer)
+                ))
             })?;
             let resolved = base.join(specifier).map_err(|e| {
                 JsErrorBox::generic(format!(
-                    "Failed to resolve relative import \"{specifier}\" against {referrer}: {e}"
+                    "Failed to resolve relative import \"{}\" against {}: {e}",
+                    truncate_for_log(specifier),
+                    truncate_for_log(referrer)
                 ))
             })?;
             // Verify the resolved URL stays within the /npm/ backend.
             // Relative traversal (../../) could escape to /gh/ or other backends.
             if Self::is_allowed_cdn(resolved.as_str()) {
                 info!(
-                    specifier,
-                    referrer,
+                    specifier = %truncate_for_log(specifier),
+                    referrer = %truncate_for_log(referrer),
                     resolved_url = %resolved,
                     "CDN module resolve: relative import resolved against jsDelivr referrer"
                 );
                 return Ok(resolved);
             }
             warn!(
-                specifier,
-                referrer,
+                specifier = %truncate_for_log(specifier),
+                referrer = %truncate_for_log(referrer),
                 resolved_url = %resolved,
                 "CDN module resolve rejected: relative import resolved outside /npm/ boundary"
             );
             return Err(JsErrorBox::generic(format!(
-                "Relative import \"{specifier}\" resolved to {resolved}, which is outside the allowed /npm/ CDN path"
+                "Relative import \"{}\" resolved to {resolved}, which is outside the allowed /npm/ CDN path",
+                truncate_for_log(specifier)
             ))
             .into());
         }
@@ -398,16 +420,20 @@ impl ModuleLoader for CdnModuleLoader {
 
         // If it's already a full jsDelivr URL, pass through
         if Self::is_allowed_cdn(specifier) {
-            info!(specifier, "CDN module resolve: full URL accepted");
+            info!(specifier = %truncate_for_log(specifier), "CDN module resolve: full URL accepted");
             return ModuleSpecifier::parse(specifier).map_err(|e| {
-                JsErrorBox::generic(format!("Invalid module URL: {specifier}: {e}")).into()
+                JsErrorBox::generic(format!(
+                    "Invalid module URL: {}: {e}",
+                    truncate_for_log(specifier)
+                ))
+                .into()
             });
         }
 
         // Try parsing as an npm specifier (e.g. "zod@3.22.4/+esm")
         if let Some(cdn_url) = Self::parse_npm_specifier(specifier) {
             info!(
-                specifier,
+                specifier = %truncate_for_log(specifier),
                 resolved_url = %cdn_url,
                 "CDN module resolve: npm specifier resolved to jsDelivr URL"
             );
@@ -418,13 +444,15 @@ impl ModuleLoader for CdnModuleLoader {
 
         // Reject everything else
         warn!(
-            specifier,
-            referrer, "CDN module resolve rejected: not a valid npm specifier or jsDelivr URL"
+            specifier = %truncate_for_log(specifier),
+            referrer = %truncate_for_log(referrer),
+            "CDN module resolve rejected: not a valid npm specifier or jsDelivr URL"
         );
         Err(JsErrorBox::generic(format!(
-            "Invalid import specifier: \"{specifier}\". \
+            "Invalid import specifier: \"{}\". \
              Use an npm specifier with a pinned version (e.g. zod@3.22.4) \
-             or a full jsDelivr URL (e.g. https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm)"
+             or a full jsDelivr URL (e.g. https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm)",
+            truncate_for_log(specifier)
         ))
         .into())
     }
@@ -1253,5 +1281,40 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
             matches!(response, ModuleLoadResponse::Sync(Ok(_))),
             "known cached module should load synchronously"
         );
+    }
+
+    #[test]
+    fn test_truncate_for_log_short_string() {
+        let short = "hello world";
+        let result = truncate_for_log(short);
+        assert_eq!(&*result, "hello world");
+        assert!(matches!(result, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_truncate_for_log_exactly_1000_chars() {
+        let s = "a".repeat(1000);
+        let result = truncate_for_log(&s);
+        assert_eq!(&*result, s);
+        assert!(matches!(result, Cow::Borrowed(_)));
+    }
+
+    #[test]
+    fn test_truncate_for_log_over_1000_chars() {
+        let s = "b".repeat(1500);
+        let result = truncate_for_log(&s);
+        assert!(result.starts_with(&"b".repeat(100)));
+        assert!(result.contains("[truncated, len=1500]"));
+        assert!(result.len() < 200);
+    }
+
+    #[test]
+    fn test_truncate_for_log_multibyte_utf8() {
+        // 4-byte emoji repeated: byte 100 falls mid-character, must not panic
+        let s = "\u{1F600}".repeat(500); // 2000 bytes, each char is 4 bytes
+        let result = truncate_for_log(&s);
+        assert!(result.contains("[truncated, len=2000]"));
+        // Should truncate to a valid char boundary (100 bytes / 4 bytes per char = 25 chars)
+        assert!(result.starts_with(&"\u{1F600}".repeat(25)));
     }
 }
