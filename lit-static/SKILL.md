@@ -26,7 +26,7 @@ Auth header: `X-Api-Key: <key>` or `Authorization: Bearer <key>`.
 5. **Register an action** — `POST /core/v1/add_action` with the IPFS CID of your JavaScript code.
 6. **Wire them together** — `POST /core/v1/add_action_to_group` and `POST /core/v1/add_pkp_to_group`.
 7. **Create a usage API key** — `POST /core/v1/add_usage_api_key` scoped to that group's `execute_in_groups`.
-8. **Run it** — `POST /core/v1/lit_action` with the usage key, your code (or IPFS CID), and `js_params`.
+8. **Run it** — `POST /core/v1/lit_action` with the usage key, your inline JavaScript code, and `js_params`. The server derives the IPFS CID from the code for permission checks.
 
 After setup, daily use is just step 8: call the API with your usage key, action code, and parameters.
 
@@ -71,14 +71,14 @@ Account
 
 ## Account management endpoints (`/core/v1/`)
 
-All write operations cost $0.01. All read (GET list) operations are free.
+Endpoints guarded by `BilledManagementApiKey` (all state-mutating endpoints including `create_wallet`) cost $0.01 per call. List and config reads are free. `lit_action` is billed per-second of execution time, with an upfront credit check.
 
 ### Account
 
 | Endpoint | Method | Request body | Response | Notes |
 |----------|--------|-------------|----------|-------|
 | `/new_account` | POST | `{ "account_name": "", "account_description": "", "email": "" }` | `{ "api_key": "", "wallet_address": "" }` | `email` is optional (Stripe). **Key shown once.** |
-| `/account_exists` | GET | — | `{ "exists": true }` | Uses API key from header. |
+| `/account_exists` | GET | — | `true` or `false` (bare boolean) | Uses API key from header. |
 
 ### Wallets (PKPs)
 
@@ -94,8 +94,8 @@ All write operations cost $0.01. All read (GET list) operations are free.
 
 | Endpoint | Method | Request body | Response | Notes |
 |----------|--------|-------------|----------|-------|
-| `/add_group` | POST | `{ "group_name": "", "group_description": "", "pkp_ids_permitted": [], "cid_hashes_permitted": [] }` | `{ "success": true, "group_id": "" }` | Pass `["0"]` in arrays for wildcard (all wallets/actions). Empty = none. |
-| `/list_groups` | GET | `?page_number=&page_size=` | `[{ "group_id": "", "group_name": "", "group_description": "" }]` | Free. |
+| `/add_group` | POST | `{ "group_name": "", "group_description": "", "pkp_ids_permitted": [], "cid_hashes_permitted": [] }` | `{ "success": true, "group_id": "" }` | Wildcard: pass the zero address (`"0x0000000000000000000000000000000000000000"`) in `pkp_ids_permitted` for all wallets, or `"0x0"` in `cid_hashes_permitted` for all actions. Empty = none. |
+| `/list_groups` | GET | `?page_number=&page_size=` | `[{ "id": "", "name": "", "description": "" }]` | Free. Uses `ListMetadataItem` shape. |
 | `/update_group` | POST | `{ "group_id": 1, "name": "", "description": "", "pkp_ids_permitted": [], "cid_hashes_permitted": [] }` | `{ "success": true }` | |
 | `/remove_group` | POST | `{ "group_id": "" }` | `{ "success": true }` | Affected usage keys lose access to that group. |
 
@@ -109,7 +109,7 @@ All write operations cost $0.01. All read (GET list) operations are free.
 | `/remove_action_from_group` | POST | `{ "group_id": 1, "hashed_cid": "0x..." }` | `{ "success": true }` | Use keccak256-hashed CID (0x-prefixed). |
 | `/delete_action` | POST | `{ "hashed_cid": "0x..." }` | `{ "success": true }` | Use keccak256-hashed CID. |
 | `/update_action_metadata` | POST | `{ "hashed_cid": "0x...", "name": "", "description": "" }` | `{ "success": true }` | |
-| `/get_lit_action_ipfs_id` | POST | `{ "code": "..." }` | `{ "ipfs_id": "Qm..." }` | Get IPFS CID for inline code. |
+| `/get_lit_action_ipfs_id` | POST | `"..."` (raw JSON string — the code) | `"Qm..."` (raw JSON string — the CID) | Get IPFS CID for inline code. Body is a JSON-encoded string, not an object. |
 
 **Important**: Creation endpoints (`add_action`, `add_action_to_group`) take raw IPFS CIDs. Modification/deletion endpoints (`delete_action`, `remove_action_from_group`, `update_action_metadata`) take keccak256-hashed CIDs (0x-prefixed hex).
 
@@ -143,7 +143,7 @@ Use `[0]` as wildcard for "all groups" in any group array.
 
 | Endpoint | Method | Request | Response | Notes |
 |----------|--------|---------|----------|-------|
-| `/billing/balance` | GET | — | `{ "balance_cents": -500, "balance_display": "$5.00" }` | Negative = credits available. |
+| `/billing/balance` | GET | — | `{ "balance_cents": -500, "balance_display": "$5.00 credit" }` | Negative = credits available. Display includes "credit" suffix or "No credits". |
 | `/billing/stripe_config` | GET | — | `{ "publishable_key": "" }` | No auth required. |
 | `/billing/create_payment_intent` | POST | `{ "amount_cents": 500 }` | `{ "client_secret": "", "payment_intent_id": "" }` | Minimum 500 ($5.00). |
 | `/billing/confirm_payment` | POST | `{ "payment_intent_id": "" }` | `{ "success": true }` | |
@@ -153,17 +153,22 @@ Use `[0]` as wildcard for "all groups" in any group array.
 | Endpoint | Method | Response |
 |----------|--------|----------|
 | `/get_lit_action_client_config` | GET | Execution limits: `timeout_ms`, `memory_limit_mb`, `max_code_length`, `max_fetch_count`, etc. |
-| `/get_node_chain_config` | GET | Supported chains: `chain_name`, `chain_id`, `is_evm`, `testnet`. |
+| `/get_node_chain_config` | GET | Single object for this node's chain: `chain_name`, `chain_id`, `is_evm`, `testnet`, `token`, `contract_address`. |
+| `/get_chain_config_keys` | GET | List of all configuration key names (`keys: [...]`). |
+| `/get_api_payers` | GET | List of addresses allowed to pay for state mutations. |
+| `/get_admin_api_payer` | GET | Default API payer address. |
 | `/version` | GET | Server version, commit hash, submodule versions. |
 
 ---
 
 ## Running Lit Actions (`POST /core/v1/lit_action`)
 
+**Important**: The `code` field accepts **inline JavaScript only** (not IPFS CIDs). The server derives the CID from the code for permission checks. Your code must define an `async function main(params)` — the runtime wrapper automatically calls `main(params)` with your `js_params` as the argument. Do not call `main()` yourself. If `main` returns a value, it is automatically passed to `setResponse`.
+
 ### Request
 ```json
 {
-  "code": "const result = 'hello'; Lit.Actions.setResponse({ response: result });",
+  "code": "async function main(params) { return 'hello'; }",
   "js_params": { "pkpId": "0x..." }
 }
 ```
@@ -207,39 +212,44 @@ Use `[0]` as wildcard for "all groups" in any group array.
 ### Example: Sign a message
 
 ```javascript
-async function main() {
+async function main(params) {
   const wallet = new ethers.Wallet(
     await Lit.Actions.getPrivateKey({ pkpId: params.pkpId })
   );
   const signature = await wallet.signMessage(params.message);
-  Lit.Actions.setResponse({ response: JSON.stringify({ signature }) });
+  return JSON.stringify({ signature });
 }
-main();
 ```
 Call with: `{ "code": "...", "js_params": { "pkpId": "0x...", "message": "hello" } }`
 
-### Example: Encrypt and decrypt a secret
+### Example: Encrypt a secret
 
 ```javascript
-// Encrypt
-const ciphertext = await Lit.Actions.Encrypt({
-  pkpId: params.pkpId,
-  message: params.secret
-});
-Lit.Actions.setResponse({ response: JSON.stringify({ ciphertext }) });
+async function main(params) {
+  const ciphertext = await Lit.Actions.Encrypt({
+    pkpId: params.pkpId,
+    message: params.secret
+  });
+  return JSON.stringify({ ciphertext });
+}
+```
 
-// Decrypt (separate action call)
-const plaintext = await Lit.Actions.Decrypt({
-  pkpId: params.pkpId,
-  ciphertext: params.ciphertext
-});
-Lit.Actions.setResponse({ response: JSON.stringify({ plaintext }) });
+### Example: Decrypt a secret (separate action call)
+
+```javascript
+async function main(params) {
+  const plaintext = await Lit.Actions.Decrypt({
+    pkpId: params.pkpId,
+    ciphertext: params.ciphertext
+  });
+  return JSON.stringify({ plaintext });
+}
 ```
 
 ### Example: Fetch external data and sign it (oracle proof)
 
 ```javascript
-async function main() {
+async function main(params) {
   const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd");
   const data = await res.json();
   const price = data.ethereum.usd;
@@ -249,15 +259,14 @@ async function main() {
     await Lit.Actions.getPrivateKey({ pkpId: params.pkpId })
   );
   const signature = await wallet.signMessage(payload);
-  Lit.Actions.setResponse({ response: JSON.stringify({ payload, signature }) });
+  return JSON.stringify({ payload, signature });
 }
-main();
 ```
 
 ### Example: Read a smart contract
 
 ```javascript
-async function main() {
+async function main(params) {
   const provider = new ethers.providers.JsonRpcProvider(params.rpcUrl);
   const abi = ["function balanceOf(address) view returns (uint256)", "function symbol() view returns (string)"];
   const contract = new ethers.Contract(params.tokenAddress, abi, provider);
@@ -267,17 +276,14 @@ async function main() {
     contract.symbol()
   ]);
 
-  Lit.Actions.setResponse({
-    response: JSON.stringify({ balance: balance.toString(), symbol })
-  });
+  return JSON.stringify({ balance: balance.toString(), symbol });
 }
-main();
 ```
 
 ### Example: Send ETH from a PKP
 
 ```javascript
-async function main() {
+async function main(params) {
   const provider = new ethers.providers.JsonRpcProvider(params.rpcUrl);
   const wallet = new ethers.Wallet(
     await Lit.Actions.getPrivateKey({ pkpId: params.pkpId }),
@@ -288,11 +294,8 @@ async function main() {
     value: ethers.utils.parseEther(params.amount)
   });
   const receipt = await tx.wait();
-  Lit.Actions.setResponse({
-    response: JSON.stringify({ txHash: receipt.transactionHash })
-  });
+  return JSON.stringify({ txHash: receipt.transactionHash });
 }
-main();
 ```
 
 ### Design patterns
@@ -339,8 +342,8 @@ main();
 
 - **Request bodies**: `snake_case` (`api_key`, `group_id`, `action_ipfs_cid`).
 - **JS SDK options**: `camelCase` (`apiKey`, `groupId`, `actionIpfsCid`); SDKs convert to snake_case.
-- **Errors**: `{ "message": "...", "errors": [{ "description": "..." }] }`. HTTP 400 = bad input, 402 = insufficient credits, 403 = permission denied.
-- **Pagination**: `page_number` (1-based) and `page_size` query params on all list endpoints.
+- **Errors**: Response body is a JSON string (e.g. `"Permission denied"`). The JS SDK parses `{error}`, `{message}`, `["..."]`, or plain string formats. HTTP 400 = bad input, 402 = insufficient credits, 403 = permission denied.
+- **Pagination**: `page_number` (0-based) and `page_size` query params on all list endpoints. Page 0 is the first page.
 - **CID formats**: Raw CID for creation, keccak256-hashed (0x-prefixed) for modification/deletion.
 
 ## Pricing
@@ -355,12 +358,15 @@ main();
 
 Use `core_sdk.js` in this folder:
 ```javascript
-const client = new LitCoreClient({ baseUrl: "https://api.chipotle.litprotocol.com" });
-const { apiKey, walletAddress } = await client.newAccount({
+import LitNodeSimpleApiClient from './core_sdk.js';
+
+const client = new LitNodeSimpleApiClient({ baseUrl: "https://api.chipotle.litprotocol.com" });
+const { api_key, wallet_address } = await client.newAccount({
   accountName: "my-account",
   accountDescription: "demo"
 });
 ```
+Note: SDK methods accept camelCase options but responses use snake_case field names.
 
 ## File references
 
