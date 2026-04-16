@@ -118,11 +118,7 @@ impl BlockchainCache {
     }
 
     /// Build a cache key for `get_wallet_derivation`.
-    pub fn wallet_derivation_key(
-        &self,
-        api_key_hash: U256,
-        wallet: ethers::types::H160,
-    ) -> String {
+    pub fn wallet_derivation_key(&self, api_key_hash: U256, wallet: ethers::types::H160) -> String {
         let h = api_key_hash.to_string();
         let g = self.generation(&h);
         format!("{h}:g{g}:wd:{wallet:?}")
