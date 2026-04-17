@@ -10,10 +10,12 @@
 //! rewrite no longer defers module loading to Deno's `ModuleLoader`, so the
 //! internal `resolve`/`load` pipeline is not re-entered on every action run.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow, bail};
 use deno_core::ModuleSpecifier;
+use futures::future::try_join_all;
 use swc_bundler::{Bundler, Config, Hook, Load, ModuleData, ModuleRecord, ModuleType, Resolve};
 use swc_common::{FileName, GLOBALS, Globals, Span, SyntaxContext, sync::Lrc};
 use swc_ecma_ast::{EsVersion, KeyValueProp, Module, ModuleDecl, ModuleItem};
@@ -53,9 +55,11 @@ pub(crate) async fn bundle_user_code(
         initial_imports = initial_urls.len(),
         "bundler: walking CDN dependency graph"
     );
+    let walk_started = Instant::now();
     let sources = walk_deps(loader, &initial_urls).await?;
     info!(
         total_modules = sources.len(),
+        walk_elapsed_ms = walk_started.elapsed().as_millis() as u64,
         "bundler: dependency graph walk complete"
     );
 
@@ -106,51 +110,73 @@ fn resolve_dep_specifier(base_url: &str, spec: &str) -> Result<String> {
 }
 
 /// Walk the dependency graph from the initial entry's imports outward,
-/// fetching + verifying each module via `loader`. Returns a map of
-/// absolute URL → module source.
+/// fetching + verifying each module via `loader`. Fetches within a single BFS
+/// layer run concurrently via `try_join_all`, so cold-path latency scales with
+/// graph depth instead of total module count.
 async fn walk_deps(
     loader: &CdnModuleLoader,
     initial: &[String],
 ) -> Result<HashMap<String, String>> {
     let mut sources: HashMap<String, String> = HashMap::new();
     let mut seen: HashSet<String> = HashSet::new();
-    let mut queue: VecDeque<String> = VecDeque::new();
+    let mut frontier: Vec<String> = Vec::new();
 
     for url in initial {
         if seen.insert(url.clone()) {
-            queue.push_back(url.clone());
+            frontier.push(url.clone());
         }
     }
 
-    while let Some(url) = queue.pop_front() {
-        let bytes = loader
-            .fetch_module_bytes(&url)
-            .await
-            .map_err(|e| anyhow!("failed to fetch {url}: {e}"))?;
-        let source =
-            String::from_utf8(bytes).with_context(|| format!("module {url} is not valid UTF-8"))?;
+    while !frontier.is_empty() {
+        let layer_size = frontier.len();
+        let layer_started = Instant::now();
 
-        // Strip the integrity fragment before using as a resolver base and
-        // as the in-memory map key, so the bundler's resolve step produces
-        // the same key shape.
-        let key = url
-            .split_once('#')
-            .map(|(u, _)| u.to_string())
-            .unwrap_or_else(|| url.clone());
+        // The `seen` set guarantees each URL appears at most once in the
+        // frontier, so the concurrent fetches cannot race against each other
+        // for the same URL. `try_join_all` short-circuits on the first error,
+        // matching the serial implementation's fail-fast behavior.
+        let fetched = try_join_all(frontier.iter().map(|url| async move {
+            let bytes = loader
+                .fetch_module_bytes(url)
+                .await
+                .map_err(|e| anyhow!("failed to fetch {url}: {e}"))?;
+            let source = String::from_utf8(bytes)
+                .with_context(|| format!("module {url} is not valid UTF-8"))?;
+            anyhow::Ok((url.clone(), source))
+        }))
+        .await?;
 
-        let deps = extract_module_imports(&source)
-            .with_context(|| format!("parse error while scanning imports in {key}"))?;
+        debug!(
+            modules = layer_size,
+            elapsed_ms = layer_started.elapsed().as_millis() as u64,
+            "bundler: fetched BFS layer"
+        );
 
-        for dep_spec in deps {
-            let resolved = resolve_dep_specifier(&key, &dep_spec)
-                .with_context(|| format!("cannot resolve {dep_spec} from {key}"))?;
-            if seen.insert(resolved.clone()) {
-                queue.push_back(resolved);
+        let mut next: Vec<String> = Vec::new();
+        for (url, source) in fetched {
+            // Strip the integrity fragment before using as a resolver base and
+            // as the in-memory map key, so the bundler's resolve step produces
+            // the same key shape.
+            let key = url
+                .split_once('#')
+                .map(|(u, _)| u.to_string())
+                .unwrap_or(url);
+
+            let deps = extract_module_imports(&source)
+                .with_context(|| format!("parse error while scanning imports in {key}"))?;
+
+            for dep_spec in deps {
+                let resolved = resolve_dep_specifier(&key, &dep_spec)
+                    .with_context(|| format!("cannot resolve {dep_spec} from {key}"))?;
+                if seen.insert(resolved.clone()) {
+                    next.push(resolved);
+                }
             }
-        }
 
-        debug!(module_url = %key, bytes = source.len(), "bundler: collected module source");
-        sources.insert(key, source);
+            debug!(module_url = %key, bytes = source.len(), "bundler: collected module source");
+            sources.insert(key, source);
+        }
+        frontier = next;
     }
 
     Ok(sources)
@@ -208,6 +234,7 @@ fn run_swc_bundler(entry_src: String, mut sources: HashMap<String, String>) -> R
     sources.insert(SYNTHETIC_ENTRY_URL.to_string(), entry_with_export);
 
     let cm: Lrc<swc_common::SourceMap> = Default::default();
+    let bundle_started = Instant::now();
     let globals = Globals::default();
     GLOBALS.set(&globals, || -> Result<String> {
         let loader = InMemoryLoad {
@@ -256,7 +283,12 @@ fn run_swc_bundler(entry_src: String, mut sources: HashMap<String, String>) -> R
         // which is a bundler bug we want to surface early.
         strip_module_decls(&mut bundle.module)?;
 
-        codegen_module(&cm, &bundle.module)
+        let out = codegen_module(&cm, &bundle.module)?;
+        debug!(
+            elapsed_ms = bundle_started.elapsed().as_millis() as u64,
+            "bundler: SWC bundle + codegen complete"
+        );
+        Ok(out)
     })
 }
 
