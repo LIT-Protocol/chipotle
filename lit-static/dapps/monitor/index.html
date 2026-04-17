@@ -331,6 +331,11 @@
         cursor: pointer;
         user-select: none;
       }
+      .card-header:focus-visible {
+        outline: 2px solid var(--accent);
+        outline-offset: 2px;
+        border-radius: 6px;
+      }
       .card-header .chevron {
         transition: transform 0.2s ease;
         color: var(--muted);
@@ -342,17 +347,15 @@
       }
       .card-body {
         overflow: hidden;
-        transition: max-height 0.25s ease, opacity 0.2s ease;
-        max-height: 2000px;
+        transition: max-height 0.25s ease, opacity 0.2s ease, visibility 0s;
         opacity: 1;
-        visibility: visible;
-        pointer-events: auto;
       }
       .card.collapsed .card-body {
         max-height: 0;
         opacity: 0;
         visibility: hidden;
         pointer-events: none;
+        transition: max-height 0.25s ease, opacity 0.2s ease, visibility 0s 0.25s;
       }
 
       /* ── Wallet picker dialog ── */
@@ -410,7 +413,7 @@
 
         <!-- Payer Health Table (primary view) -->
         <div class="card" data-accordion>
-          <div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')">
+          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
             <div>
               <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Payer Health</h2>
               <p style="color: var(--muted); font-size: 0.85rem; margin: 0">
@@ -446,7 +449,7 @@
         </div>
 
         <div class="card" data-accordion>
-          <div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')">
+          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
             <div>
               <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Server Version</h2>
               <p style="color: var(--muted); font-size: 0.85rem; margin: 0">
@@ -476,7 +479,7 @@
         </div>
 
         <div class="card" data-accordion>
-          <div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')">
+          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
             <div>
               <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Lit Node Express - Configuration</h2>
               <p style="color: var(--muted); font-size: 0.85rem; margin: 0">
@@ -505,7 +508,7 @@
       <div class="col">
 
         <div class="card" data-accordion>
-          <div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')">
+          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
             <div>
               <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Supported Chain Config Keys</h2>
               <p style="color: var(--muted); font-size: 0.85rem; margin: 0">
@@ -521,7 +524,7 @@
         </div>
 
         <div class="card" data-accordion>
-          <div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')">
+          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
             <div>
               <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Lit Action Client Configuration</h2>
               <p style="color: var(--muted); font-size: 0.85rem; margin: 0">
@@ -547,10 +550,10 @@
         </div>
 
         <div class="card" data-accordion>
-          <div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')">
+          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
             <div style="display:flex;align-items:center;gap:0.75rem">
               <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Account Configuration Contract</h2>
-              <button type="button" id="btn-refresh-contract" onclick="event.stopPropagation()" style="margin-top:0;padding:0.3rem 0.75rem;font-size:0.8rem;">Refresh</button>
+              <button type="button" id="btn-refresh-contract" style="margin-top:0;padding:0.3rem 0.75rem;font-size:0.8rem;">Refresh</button>
             </div>
             <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4.47 5.47a.75.75 0 011.06 0L8 7.94l2.47-2.47a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06z"/></svg>
           </div>
@@ -591,10 +594,10 @@
         </div>
 
         <div class="card" data-accordion>
-          <div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')">
+          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
             <div style="display:flex;align-items:center;gap:0.75rem">
               <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Node Configuration</h2>
-              <button type="button" id="btn-refresh-node-config" onclick="event.stopPropagation()" style="margin-top:0;padding:0.3rem 0.75rem;font-size:0.8rem;">Refresh</button>
+              <button type="button" id="btn-refresh-node-config" style="margin-top:0;padding:0.3rem 0.75rem;font-size:0.8rem;">Refresh</button>
             </div>
             <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4.47 5.47a.75.75 0 011.06 0L8 7.94l2.47-2.47a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06z"/></svg>
           </div>
@@ -627,7 +630,7 @@
         </div>
 
         <div class="card" data-accordion>
-          <div class="card-header" onclick="this.parentElement.classList.toggle('collapsed')">
+          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
             <div>
               <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">API Payer Accounts</h2>
               <p style="color: var(--muted); font-size: 0.85rem; margin: 0">
