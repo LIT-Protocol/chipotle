@@ -1,3 +1,4 @@
+mod bundler;
 pub mod cdn_module_loader;
 mod import_rewriter;
 mod runtime;

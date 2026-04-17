@@ -7,8 +7,8 @@ use std::time::Duration;
 use base64::Engine;
 use deno_core::error::ModuleLoaderError;
 use deno_core::{
-    ModuleLoadResponse, ModuleLoader, ModuleSource, ModuleSourceCode, ModuleSpecifier, ModuleType,
-    RequestedModuleType, ResolutionKind,
+    ModuleLoadResponse, ModuleLoader, ModuleSource, ModuleSpecifier, RequestedModuleType,
+    ResolutionKind,
 };
 use deno_error::JsErrorBox;
 use futures::FutureExt;
@@ -51,13 +51,13 @@ pub(crate) const ALLOWED_CDN_PREFIX: &str = "https://cdn.jsdelivr.net/";
 pub(crate) const ALLOWED_NPM_PREFIX: &str = "https://cdn.jsdelivr.net/npm/";
 
 /// Maximum response body size (10 MB).
-const MAX_MODULE_SIZE_BYTES: usize = 10 * 1024 * 1024;
+pub(crate) const MAX_MODULE_SIZE_BYTES: usize = 10 * 1024 * 1024;
 
 /// Maximum total cached bytes (100 MB). When full, new entries are skipped (no eviction).
 pub(crate) const MAX_CACHE_BYTES: usize = 100 * 1024 * 1024;
 
 /// HTTP request timeout.
-const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
+pub(crate) const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Maximum number of distinct modules that can be loaded per action execution.
 /// Prevents DoS via dependency graphs with thousands of tiny files.
@@ -183,7 +183,7 @@ impl CdnModuleLoader {
     /// Check whether a URL is from the allowed CDN npm backend.
     /// Only `https://cdn.jsdelivr.net/npm/` URLs are accepted; other jsDelivr
     /// backends (`/gh/`, `/wp/`, etc.) serve mutable content and are rejected.
-    fn is_allowed_cdn(url: &str) -> bool {
+    pub(crate) fn is_allowed_cdn(url: &str) -> bool {
         url.starts_with(ALLOWED_NPM_PREFIX)
     }
 
@@ -319,6 +319,293 @@ impl CdnModuleLoader {
         info!(module_url = %url, fetch = label, size_bytes = bytes.len(), "CDN module fetch: download complete");
         Ok((bytes, cdn_sri_hash))
     }
+
+    /// Fetch and verify a module by URL, returning its raw source bytes.
+    ///
+    /// Runs the same cache-check + integrity/TOFU/lockfile pipeline as
+    /// `ModuleLoader::load`, but returns the module source as bytes rather than
+    /// a `ModuleSource`. Used by the pre-execution bundler to walk the CDN
+    /// dependency graph before handing the flattened JS to V8.
+    ///
+    /// `url` may include a `#sha384-...` fragment for inline integrity pinning.
+    #[instrument(skip_all, err, fields(module_url = %url))]
+    pub(crate) async fn fetch_module_bytes(
+        &self,
+        url: &str,
+    ) -> Result<Vec<u8>, ModuleLoaderError> {
+        // Enforce per-execution module count limit to prevent DoS via
+        // dependency graphs with thousands of tiny files.
+        if let Ok(modules) = self.loaded_modules.0.read()
+            && modules.len() >= MAX_MODULE_COUNT
+        {
+            error!(
+                module_count = modules.len(),
+                max = MAX_MODULE_COUNT,
+                "CDN module load rejected: maximum module count exceeded"
+            );
+            return Err(JsErrorBox::generic(format!(
+                "Maximum module count ({MAX_MODULE_COUNT}) exceeded. \
+                 Reduce the number of imported modules."
+            ))
+            .into());
+        }
+
+        // Parse the URL so we can separate the optional inline-hash fragment.
+        let parsed = ModuleSpecifier::parse(url).map_err(|e| {
+            JsErrorBox::generic(format!("Invalid module URL {url}: {e}"))
+        })?;
+        let inline_hash = parsed
+            .fragment()
+            .and_then(|f| f.strip_prefix("sha384-"))
+            .map(|h| h.to_string());
+        let mut fetch_url = parsed.clone();
+        fetch_url.set_fragment(None);
+        let url = fetch_url.to_string();
+
+        if let Some(ref h) = inline_hash {
+            info!(
+                module_url = %url,
+                inline_hash = %format!("sha384-{h}"),
+                "CDN module load: inline integrity hash provided in import specifier"
+            );
+        }
+
+        // Inline hash takes priority, then lockfile manifest.
+        let expected_hash = inline_hash.clone().or_else(|| {
+            self.integrity
+                .read()
+                .expect("integrity lock poisoned")
+                .get(&url)
+                .cloned()
+        });
+
+        // Cache hit path: verify integrity against cached bytes and return.
+        if let Ok(cache) = self.cache.read()
+            && let Some(cached_bytes) = cache.get(&url)
+        {
+            if let Some(ref expected_b64) = expected_hash {
+                let mut hasher = Sha384::new();
+                hasher.update(cached_bytes);
+                let cached_digest = hasher.finalize();
+                let cached_b64 = base64::engine::general_purpose::STANDARD.encode(cached_digest);
+                if !constant_time_eq(cached_b64.as_bytes(), expected_b64.as_bytes()) {
+                    error!(
+                        module_url = %url,
+                        expected_hash = %format!("sha384-{expected_b64}"),
+                        cached_hash = %format!("sha384-{cached_b64}"),
+                        "CDN module cache: integrity check failed for cached bytes"
+                    );
+                    return Err(JsErrorBox::generic(format!(
+                        "Integrity check failed for cached {url}: \
+                         expected sha384-{expected_b64}, got sha384-{cached_b64}"
+                    ))
+                    .into());
+                }
+            }
+
+            let hash = expected_hash
+                .clone()
+                .or_else(|| {
+                    self.integrity
+                        .read()
+                        .expect("integrity lock poisoned")
+                        .get(&url)
+                        .cloned()
+                })
+                .unwrap_or_default();
+            if let Ok(mut modules) = self.loaded_modules.0.write()
+                && !modules.iter().any(|m| m.url == url)
+            {
+                modules.push(LoadedModuleInfo {
+                    url: url.clone(),
+                    hash,
+                });
+            }
+            debug!(module_url = %url, size_bytes = cached_bytes.len(), "CDN module loaded from cache");
+            return Ok(cached_bytes.clone());
+        }
+
+        // Fetch + integrity + pin + cache path.
+        info!(module_url = %url, "CDN module fetch: downloading");
+        let (bytes, cdn_sri_hash) =
+            Self::fetch_with_size_limit(&self.client, &url, "Primary").await?;
+
+        let mut hasher = Sha384::new();
+        hasher.update(&bytes);
+        let actual_digest = hasher.finalize();
+        let actual_b64 = base64::engine::general_purpose::STANDARD.encode(actual_digest);
+
+        if let Some(expected_b64) = &expected_hash {
+            let expected_digest = base64::engine::general_purpose::STANDARD
+                .decode(expected_b64)
+                .map_err(|e| {
+                    error!(module_url = %url, error = %e, "CDN module integrity: invalid base64 in manifest");
+                    JsErrorBox::generic(format!(
+                        "Invalid base64 in integrity manifest for {url}: {e}"
+                    ))
+                })?;
+
+            if actual_digest.len() != expected_digest.len()
+                || !constant_time_eq(&actual_digest, &expected_digest)
+            {
+                error!(
+                    module_url = %url,
+                    expected_hash = %format!("sha384-{expected_b64}"),
+                    actual_hash = %format!("sha384-{actual_b64}"),
+                    "CDN module integrity check FAILED: hash mismatch"
+                );
+                return Err(JsErrorBox::generic(format!(
+                    "Integrity check failed for {url}: \
+                     expected sha384-{expected_b64}, got sha384-{actual_b64}"
+                ))
+                .into());
+            }
+            info!(
+                module_url = %url,
+                hash = %format!("sha384-{actual_b64}"),
+                size_bytes = bytes.len(),
+                "CDN module integrity check passed"
+            );
+        } else if self.strict {
+            // TOFU: double-fetch + CDN SRI header verification.
+            info!(
+                module_url = %url,
+                first_hash = %format!("sha384-{actual_b64}"),
+                "TOFU: new module detected, starting verification fetch"
+            );
+
+            let (bytes2, _) =
+                Self::fetch_with_size_limit(&self.client, &url, "TOFU verification").await?;
+
+            let mut hasher2 = Sha384::new();
+            hasher2.update(&bytes2);
+            let verify_digest = hasher2.finalize();
+            let verify_b64 =
+                base64::engine::general_purpose::STANDARD.encode(verify_digest);
+
+            if !constant_time_eq(&actual_digest, &verify_digest) {
+                error!(
+                    module_url = %url,
+                    first_hash = %format!("sha384-{actual_b64}"),
+                    second_hash = %format!("sha384-{verify_b64}"),
+                    first_size = bytes.len(),
+                    second_size = bytes2.len(),
+                    "TOFU: REJECTED — CDN returned inconsistent content between fetches. Possible tampering."
+                );
+                return Err(JsErrorBox::generic(format!(
+                    "TOFU: CDN returned inconsistent content for {url}. \
+                     Hash mismatch between first and second fetch. Possible tampering."
+                ))
+                .into());
+            }
+
+            info!(
+                module_url = %url,
+                hash = %format!("sha384-{actual_b64}"),
+                size_bytes = bytes.len(),
+                "TOFU: verification passed — both fetches produced identical hash"
+            );
+
+            if let Some(ref sri_b64) = cdn_sri_hash {
+                let sri_digest = base64::engine::general_purpose::STANDARD
+                    .decode(sri_b64)
+                    .map_err(|e| {
+                        error!(module_url = %url, cdn_sri = %format!("sha384-{sri_b64}"), error = %e, "TOFU: CDN SRI header contains invalid base64");
+                        JsErrorBox::generic(format!(
+                            "CDN SRI header for {url} contains invalid base64: {e}"
+                        ))
+                    })?;
+
+                if !constant_time_eq(&actual_digest, &sri_digest) {
+                    error!(
+                        module_url = %url,
+                        computed_hash = %format!("sha384-{actual_b64}"),
+                        cdn_sri = %format!("sha384-{sri_b64}"),
+                        "TOFU: REJECTED — computed hash does not match CDN SRI header. Possible tampering."
+                    );
+                    return Err(JsErrorBox::generic(format!(
+                        "TOFU: computed hash does not match CDN SRI header for {url}. \
+                         Computed sha384-{actual_b64}, CDN declared sha384-{sri_b64}."
+                    ))
+                    .into());
+                }
+                info!(
+                    module_url = %url,
+                    hash = %format!("sha384-{actual_b64}"),
+                    "TOFU: three-way verification passed (first fetch, second fetch, CDN SRI header)"
+                );
+            }
+
+            if let Some(ref path) = self.lockfile_path {
+                use std::io::Write;
+                let mut file = std::fs::OpenOptions::new()
+                    .create(true)
+                    .append(true)
+                    .open(path)
+                    .map_err(|e| {
+                        error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to open integrity lockfile");
+                        JsErrorBox::generic(format!(
+                            "Failed to open integrity lockfile: {e}"
+                        ))
+                    })?;
+                writeln!(file, "{url} sha384-{actual_b64}").map_err(|e| {
+                    error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to write integrity lockfile");
+                    JsErrorBox::generic(format!(
+                        "Failed to write integrity lockfile: {e}"
+                    ))
+                })?;
+                file.flush().map_err(|e| {
+                    error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to flush integrity lockfile");
+                    JsErrorBox::generic(format!(
+                        "Failed to flush integrity lockfile: {e}"
+                    ))
+                })?;
+                info!(
+                    module_url = %url,
+                    hash = %format!("sha384-{actual_b64}"),
+                    lockfile = ?path,
+                    "TOFU: pinned new module to integrity lockfile"
+                );
+            }
+
+            if let Ok(mut map) = self.integrity.write() {
+                map.entry(url.clone()).or_insert(actual_b64.clone());
+            }
+        } else {
+            info!(
+                module_url = %url,
+                hash = %format!("sha384-{actual_b64}"),
+                size_bytes = bytes.len(),
+                "Non-strict mode: accepting module without TOFU verification"
+            );
+
+            if let Ok(mut map) = self.integrity.write() {
+                map.entry(url.clone()).or_insert(actual_b64.clone());
+            }
+        }
+
+        if let Ok(mut modules) = self.loaded_modules.0.write()
+            && !modules.iter().any(|m| m.url == url)
+        {
+            modules.push(LoadedModuleInfo {
+                url: url.clone(),
+                hash: actual_b64.clone(),
+            });
+        }
+
+        if let Ok(mut cache_w) = self.cache.write() {
+            let total: usize = cache_w.values().map(|v| v.len()).sum();
+            if total + bytes.len() <= MAX_CACHE_BYTES {
+                cache_w.insert(url.clone(), bytes.clone());
+                debug!(module_url = %url, "CDN module cached for future requests");
+            } else {
+                warn!(module_url = %url, cache_bytes = total, module_bytes = bytes.len(), max_cache = MAX_CACHE_BYTES, "CDN module cache full, skipping cache insertion");
+            }
+        }
+
+        info!(module_url = %url, size_bytes = bytes.len(), "CDN module loaded successfully");
+        Ok(bytes)
+    }
 }
 
 impl ModuleLoader for CdnModuleLoader {
@@ -448,404 +735,30 @@ impl ModuleLoader for CdnModuleLoader {
         &self,
         module_specifier: &ModuleSpecifier,
         _maybe_referrer: Option<&ModuleSpecifier>,
-        _is_dyn_import: bool,
+        is_dyn_import: bool,
         _requested_module_type: RequestedModuleType,
     ) -> ModuleLoadResponse {
-        // Enforce per-execution module count limit to prevent DoS via
-        // dependency graphs with thousands of tiny files.
-        if let Ok(modules) = self.loaded_modules.0.read()
-            && modules.len() >= MAX_MODULE_COUNT
-        {
-            error!(
-                module_count = modules.len(),
-                max = MAX_MODULE_COUNT,
-                "CDN module load rejected: maximum module count exceeded"
-            );
-            return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
-                "Maximum module count ({MAX_MODULE_COUNT}) exceeded. \
-                     Reduce the number of imported modules."
-            ))
-            .into()));
-        }
-
-        // Handle data: URIs inline — these are inlined dependencies from CDN ESM bundles.
-        // Decode the base64 content directly instead of attempting an HTTP fetch.
-        let url_str = module_specifier.as_str();
-        if url_str.starts_with("data:text/javascript;")
-            || url_str.starts_with("data:text/javascript,")
-        {
-            // Pre-check raw URI body length to avoid large transient allocations during decode.
-            // Base64 expands ~33%, so the raw body can be up to 4/3 of the decoded size limit.
-            let max_raw_len = MAX_MODULE_SIZE_BYTES * 4 / 3 + 4;
-            let body_start = url_str.find(',').map(|i| i + 1).unwrap_or(url_str.len());
-            if url_str.len() - body_start > max_raw_len {
-                return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
-                    "data: URI body exceeds maximum size ({} bytes > {max_raw_len} bytes)",
-                    url_str.len() - body_start
-                ))
-                .into()));
-            }
-
-            let data_body = if let Some(rest) = url_str.strip_prefix("data:text/javascript;base64,")
-            {
-                base64::engine::general_purpose::STANDARD
-                    .decode(rest)
-                    .map_err(|e| JsErrorBox::generic(format!("Invalid base64 in data: URI: {e}")))
-            } else if let Some(rest) = url_str.strip_prefix("data:text/javascript,") {
-                // Plain (non-base64) data URI — percent-decode the body
-                Ok(percent_encoding::percent_decode_str(rest).collect::<Vec<u8>>())
-            } else {
-                Err(JsErrorBox::generic(format!(
-                    "Unsupported data: URI encoding: {}",
-                    truncate_for_log(url_str)
-                )))
-            };
-
-            return match data_body {
-                Ok(bytes) => {
-                    if bytes.len() > MAX_MODULE_SIZE_BYTES {
-                        ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
-                            "data: URI exceeds maximum module size ({} bytes > {MAX_MODULE_SIZE_BYTES} bytes)",
-                            bytes.len()
-                        )).into()))
-                    } else {
-                        // Track data URI in loaded_modules so it counts toward MAX_MODULE_COUNT
-                        // and appears in showImportDetails(). Use a hash of the content as the
-                        // dedup key to prevent same-length data URIs from collapsing into one entry.
-                        if let Ok(mut modules) = self.loaded_modules.0.write() {
-                            let mut hasher = Sha384::new();
-                            hasher.update(&bytes);
-                            let hash =
-                                base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
-                            let data_key = format!("data:text/javascript;sha384-{}", &hash[..16]);
-                            if !modules.iter().any(|m| m.url == data_key) {
-                                modules.push(LoadedModuleInfo {
-                                    url: data_key,
-                                    hash,
-                                });
-                            }
-                        }
-                        info!(
-                            module_url = %truncate_for_log(url_str),
-                            size_bytes = bytes.len(),
-                            "CDN module loaded from data: URI"
-                        );
-                        ModuleLoadResponse::Sync(Ok(ModuleSource::new(
-                            ModuleType::JavaScript,
-                            ModuleSourceCode::Bytes(bytes.into_boxed_slice().into()),
-                            module_specifier,
-                            None,
-                        )))
-                    }
-                }
-                Err(e) => ModuleLoadResponse::Sync(Err(e.into())),
-            };
-        }
-
-        // Extract inline hash from URL fragment (e.g. #sha384-abc123...)
-        let inline_hash = module_specifier
-            .fragment()
-            .and_then(|f| f.strip_prefix("sha384-"))
-            .map(|h| h.to_string());
-
-        // Build the fetch URL without the fragment
-        let mut fetch_url = module_specifier.clone();
-        fetch_url.set_fragment(None);
-        let url = fetch_url.to_string();
-
-        if let Some(ref h) = inline_hash {
-            info!(
-                module_url = %url,
-                inline_hash = %format!("sha384-{h}"),
-                "CDN module load: inline integrity hash provided in import specifier"
-            );
-        }
-
-        // Inline hash takes priority, then lockfile manifest
-        let expected_hash = inline_hash.clone().or_else(|| {
-            self.integrity
-                .read()
-                .expect("integrity lock poisoned")
-                .get(&url)
-                .cloned()
-        });
-
-        // In strict mode, unknown modules (not in manifest and no inline hash)
-        // are verified via TOFU (trust-on-first-use): double-fetch + CDN SRI
-        // header check. If a lockfile path is configured, the verified hash is
-        // also persisted to disk; otherwise the pin lives only in memory for
-        // the lifetime of this process.
-
-        // Check cache first
-        if let Ok(cache) = self.cache.read()
-            && let Some(cached_bytes) = cache.get(&url)
-        {
-            // If an expected hash exists (inline or manifest), verify it against
-            // the actual cached bytes. This catches both stale manifest entries and
-            // inline hash mismatches, even when the URL has no manifest entry.
-            if let Some(ref expected_b64) = expected_hash {
-                let mut hasher = Sha384::new();
-                hasher.update(cached_bytes);
-                let cached_digest = hasher.finalize();
-                let cached_b64 = base64::engine::general_purpose::STANDARD.encode(cached_digest);
-                if !constant_time_eq(cached_b64.as_bytes(), expected_b64.as_bytes()) {
-                    error!(
-                        module_url = %url,
-                        expected_hash = %format!("sha384-{expected_b64}"),
-                        cached_hash = %format!("sha384-{cached_b64}"),
-                        "CDN module cache: integrity check failed for cached bytes"
-                    );
-                    return ModuleLoadResponse::Sync(Err(JsErrorBox::generic(format!(
-                        "Integrity check failed for cached {url}: \
-                             expected sha384-{expected_b64}, got sha384-{cached_b64}"
-                    ))
-                    .into()));
-                }
-            }
-
-            // Record the loaded module for showImportDetails().
-            // Use expected_hash (inline or manifest) when available, so inline-hash-only
-            // imports don't lose the declared hash.
-            let hash = expected_hash
-                .clone()
-                .or_else(|| {
-                    self.integrity
-                        .read()
-                        .expect("integrity lock poisoned")
-                        .get(&url)
-                        .cloned()
-                })
-                .unwrap_or_default();
-            if let Ok(mut modules) = self.loaded_modules.0.write()
-                && !modules.iter().any(|m| m.url == url)
-            {
-                modules.push(LoadedModuleInfo {
-                    url: url.clone(),
-                    hash,
-                });
-            }
-            debug!(module_url = %url, size_bytes = cached_bytes.len(), "CDN module loaded from cache");
-            return ModuleLoadResponse::Sync(Ok(ModuleSource::new(
-                ModuleType::JavaScript,
-                ModuleSourceCode::Bytes(cached_bytes.clone().into_boxed_slice().into()),
-                module_specifier,
-                None,
-            )));
-        }
-
-        let client = self.client.clone();
-        let cache = self.cache.clone();
-        let integrity = self.integrity.clone();
-        let lockfile_path = self.lockfile_path.clone();
-        let strict = self.strict;
-        let loaded_modules = self.loaded_modules.clone();
-
+        // With the pre-execution bundler inlining all imports, this method is
+        // expected to be unreachable during user-action execution (CPL-262).
+        // A call here signals that a dynamic `import()` survived bundling or
+        // that the caller is a test harness exercising the loader directly.
+        // Reject the request so regressions in the bundler surface loudly —
+        // the fallback fetch path is no longer part of the hot path.
+        let url = module_specifier.to_string();
+        warn!(
+            module_url = %url,
+            is_dyn_import,
+            "CDN module load invoked at execution time — bundler should have inlined this import"
+        );
         let fut = async move {
-            info!(module_url = %url, "CDN module fetch: downloading");
-
-            let (bytes, cdn_sri_hash) =
-                Self::fetch_with_size_limit(&client, &url, "Primary").await?;
-
-            let mut hasher = Sha384::new();
-            hasher.update(&bytes);
-            let actual_digest = hasher.finalize();
-
-            let actual_b64 = base64::engine::general_purpose::STANDARD.encode(actual_digest);
-
-            if let Some(expected_b64) = &expected_hash {
-                // Known module: verify against stored hash
-                let expected_digest = base64::engine::general_purpose::STANDARD
-                    .decode(expected_b64)
-                    .map_err(|e| {
-                        error!(module_url = %url, error = %e, "CDN module integrity: invalid base64 in manifest");
-                        JsErrorBox::generic(format!(
-                            "Invalid base64 in integrity manifest for {url}: {e}"
-                        ))
-                    })?;
-
-                if actual_digest.len() != expected_digest.len()
-                    || !constant_time_eq(&actual_digest, &expected_digest)
-                {
-                    error!(
-                        module_url = %url,
-                        expected_hash = %format!("sha384-{expected_b64}"),
-                        actual_hash = %format!("sha384-{actual_b64}"),
-                        "CDN module integrity check FAILED: hash mismatch"
-                    );
-                    return Err(JsErrorBox::generic(format!(
-                        "Integrity check failed for {url}: \
-                         expected sha384-{expected_b64}, got sha384-{actual_b64}"
-                    ))
-                    .into());
-                }
-                info!(
-                    module_url = %url,
-                    hash = %format!("sha384-{actual_b64}"),
-                    size_bytes = bytes.len(),
-                    "CDN module integrity check passed"
-                );
-            } else if strict {
-                // Unknown module in strict mode: trust-on-first-use (TOFU)
-                // Double-fetch + CDN SRI header verification.
-                info!(
-                    module_url = %url,
-                    first_hash = %format!("sha384-{actual_b64}"),
-                    "TOFU: new module detected, starting verification fetch"
-                );
-
-                // Second fetch with identical protections (redirect/status/size checks)
-                let (bytes2, _) =
-                    Self::fetch_with_size_limit(&client, &url, "TOFU verification").await?;
-
-                let mut hasher2 = Sha384::new();
-                hasher2.update(&bytes2);
-                let verify_digest = hasher2.finalize();
-                let verify_b64 =
-                    base64::engine::general_purpose::STANDARD.encode(verify_digest);
-
-                if !constant_time_eq(&actual_digest, &verify_digest) {
-                    error!(
-                        module_url = %url,
-                        first_hash = %format!("sha384-{actual_b64}"),
-                        second_hash = %format!("sha384-{verify_b64}"),
-                        first_size = bytes.len(),
-                        second_size = bytes2.len(),
-                        "TOFU: REJECTED — CDN returned inconsistent content between fetches. Possible tampering."
-                    );
-                    return Err(JsErrorBox::generic(format!(
-                        "TOFU: CDN returned inconsistent content for {url}. \
-                         Hash mismatch between first and second fetch. Possible tampering."
-                    ))
-                    .into());
-                }
-
-                info!(
-                    module_url = %url,
-                    hash = %format!("sha384-{actual_b64}"),
-                    size_bytes = bytes.len(),
-                    "TOFU: verification passed — both fetches produced identical hash"
-                );
-
-                // Verify against CDN's SRI hash header if available
-                if let Some(ref sri_b64) = cdn_sri_hash {
-                    let sri_digest = base64::engine::general_purpose::STANDARD
-                        .decode(sri_b64)
-                        .map_err(|e| {
-                            error!(module_url = %url, cdn_sri = %format!("sha384-{sri_b64}"), error = %e, "TOFU: CDN SRI header contains invalid base64");
-                            JsErrorBox::generic(format!(
-                                "CDN SRI header for {url} contains invalid base64: {e}"
-                            ))
-                        })?;
-
-                    if !constant_time_eq(&actual_digest, &sri_digest) {
-                        error!(
-                            module_url = %url,
-                            computed_hash = %format!("sha384-{actual_b64}"),
-                            cdn_sri = %format!("sha384-{sri_b64}"),
-                            "TOFU: REJECTED — computed hash does not match CDN SRI header. Possible tampering."
-                        );
-                        return Err(JsErrorBox::generic(format!(
-                            "TOFU: computed hash does not match CDN SRI header for {url}. \
-                             Computed sha384-{actual_b64}, CDN declared sha384-{sri_b64}."
-                        ))
-                        .into());
-                    }
-                    info!(
-                        module_url = %url,
-                        hash = %format!("sha384-{actual_b64}"),
-                        "TOFU: three-way verification passed (first fetch, second fetch, CDN SRI header)"
-                    );
-                }
-
-                // Pin to lockfile on disk.
-                // Note: each JS execution runs on its own dedicated thread via
-                // create_and_run_current_thread, so blocking I/O here does not starve
-                // other async work. Concurrent appends are safe because we re-check
-                // the in-memory map under write lock before writing.
-                if let Some(ref path) = lockfile_path {
-                    use std::io::Write;
-                    let mut file = std::fs::OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(path)
-                        .map_err(|e| {
-                            error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to open integrity lockfile");
-                            JsErrorBox::generic(format!(
-                                "Failed to open integrity lockfile: {e}"
-                            ))
-                        })?;
-                    writeln!(file, "{url} sha384-{actual_b64}").map_err(|e| {
-                        error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to write integrity lockfile");
-                        JsErrorBox::generic(format!(
-                            "Failed to write integrity lockfile: {e}"
-                        ))
-                    })?;
-                    file.flush().map_err(|e| {
-                        error!(module_url = %url, lockfile = ?path, error = %e, "TOFU: failed to flush integrity lockfile");
-                        JsErrorBox::generic(format!(
-                            "Failed to flush integrity lockfile: {e}"
-                        ))
-                    })?;
-                    info!(
-                        module_url = %url,
-                        hash = %format!("sha384-{actual_b64}"),
-                        lockfile = ?path,
-                        "TOFU: pinned new module to integrity lockfile"
-                    );
-                }
-
-                // Update in-memory manifest (re-check for concurrent pin)
-                if let Ok(mut map) = integrity.write() {
-                    map.entry(url.clone()).or_insert(actual_b64.clone());
-                }
-            } else {
-                // Non-strict mode: pin hash from single fetch without TOFU verification.
-                // Used in test/development environments for faster iteration.
-                info!(
-                    module_url = %url,
-                    hash = %format!("sha384-{actual_b64}"),
-                    size_bytes = bytes.len(),
-                    "Non-strict mode: accepting module without TOFU verification"
-                );
-
-                if let Ok(mut map) = integrity.write() {
-                    map.entry(url.clone()).or_insert(actual_b64.clone());
-                }
-            }
-
-            // Record the loaded module for showImportDetails() (dedup by URL)
-            if let Ok(mut modules) = loaded_modules.0.write()
-                && !modules.iter().any(|m| m.url == url)
-            {
-                modules.push(LoadedModuleInfo {
-                    url: url.clone(),
-                    hash: actual_b64.clone(),
-                });
-            }
-
-            // Cache the verified module source (bounded by MAX_CACHE_BYTES)
-            if let Ok(mut cache_w) = cache.write() {
-                let total: usize = cache_w.values().map(|v| v.len()).sum();
-                if total + bytes.len() <= MAX_CACHE_BYTES {
-                    cache_w.insert(url.clone(), bytes.clone());
-                    debug!(module_url = %url, "CDN module cached for future requests");
-                } else {
-                    warn!(module_url = %url, cache_bytes = total, module_bytes = bytes.len(), max_cache = MAX_CACHE_BYTES, "CDN module cache full, skipping cache insertion");
-                }
-            }
-
-            info!(module_url = %url, size_bytes = bytes.len(), "CDN module loaded successfully");
-
-            let module_specifier = ModuleSpecifier::parse(&url).map_err(|e| {
-                JsErrorBox::generic(format!("Invalid module URL during load: {url}: {e}"))
-            })?;
-
-            Ok(ModuleSource::new(
-                ModuleType::JavaScript,
-                ModuleSourceCode::Bytes(bytes.into_boxed_slice().into()),
-                &module_specifier,
-                None,
-            ))
+            Err::<ModuleSource, ModuleLoaderError>(
+                JsErrorBox::generic(format!(
+                    "Runtime import of {url} was rejected: all static imports must be \
+                     resolved by the pre-execution bundler and dynamic `import()` is not \
+                     permitted in lit-actions."
+                ))
+                .into(),
+            )
         }
         .boxed_local();
 
@@ -1146,71 +1059,6 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
     }
 
     #[test]
-    fn test_load_data_uri_base64() {
-        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
-        // "export default 42;" base64-encoded
-        let specifier =
-            ModuleSpecifier::parse("data:text/javascript;base64,ZXhwb3J0IGRlZmF1bHQgNDI7").unwrap();
-        let response = loader.load(&specifier, None, false, RequestedModuleType::None);
-        match response {
-            ModuleLoadResponse::Sync(Ok(source)) => {
-                let code = match &source.code {
-                    ModuleSourceCode::Bytes(b) => String::from_utf8_lossy(b.as_bytes()).to_string(),
-                    _ => panic!("expected Bytes"),
-                };
-                assert_eq!(code, "export default 42;");
-            }
-            ModuleLoadResponse::Sync(Err(e)) => panic!("expected Ok, got Err: {e:?}"),
-            ModuleLoadResponse::Async(_) => panic!("expected Sync response for data: URI"),
-        }
-    }
-
-    #[test]
-    fn test_load_data_uri_plain() {
-        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
-        let specifier =
-            ModuleSpecifier::parse("data:text/javascript,export%20default%2042%3B").unwrap();
-        let response = loader.load(&specifier, None, false, RequestedModuleType::None);
-        match response {
-            ModuleLoadResponse::Sync(Ok(source)) => {
-                let code = match &source.code {
-                    ModuleSourceCode::Bytes(b) => String::from_utf8_lossy(b.as_bytes()).to_string(),
-                    _ => panic!("expected Bytes"),
-                };
-                assert_eq!(code, "export default 42;");
-            }
-            ModuleLoadResponse::Sync(Err(e)) => panic!("expected Ok, got Err: {e:?}"),
-            ModuleLoadResponse::Async(_) => panic!("expected Sync response for data: URI"),
-        }
-    }
-
-    #[test]
-    fn test_load_data_uri_invalid_base64() {
-        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
-        let specifier = ModuleSpecifier::parse("data:text/javascript;base64,NOT_VALID!!!").unwrap();
-        let response = loader.load(&specifier, None, false, RequestedModuleType::None);
-        assert!(
-            matches!(response, ModuleLoadResponse::Sync(Err(_))),
-            "invalid base64 should return an error"
-        );
-    }
-
-    #[test]
-    fn test_load_data_uri_unsupported_encoding() {
-        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
-        // charset parameter before base64 is a valid data URI format but unsupported
-        let specifier = ModuleSpecifier::parse(
-            "data:text/javascript;charset=utf-8;base64,ZXhwb3J0IGRlZmF1bHQgNDI7",
-        )
-        .unwrap();
-        let response = loader.load(&specifier, None, false, RequestedModuleType::None);
-        assert!(
-            matches!(response, ModuleLoadResponse::Sync(Err(_))),
-            "unsupported data URI encoding should return an error"
-        );
-    }
-
-    #[test]
     fn test_resolve_data_uri_prefix_boundary() {
         let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), false);
         // "data:text/javascript-evil" should NOT match — only data:text/javascript; or data:text/javascript,
@@ -1225,28 +1073,15 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
         );
     }
 
-    #[test]
-    fn test_strict_mode_allows_tofu_for_unknown_modules() {
-        // Even without a lockfile, strict mode should fall through to async
-        // TOFU verification instead of rejecting synchronously.
-        let loader = CdnModuleLoader::new(Arc::new(RwLock::new(HashMap::new())), true);
-        let specifier =
-            ModuleSpecifier::parse("https://cdn.jsdelivr.net/npm/unknown@1.0.0/+esm").unwrap();
-        let response = loader.load(&specifier, None, false, RequestedModuleType::None);
-        assert!(
-            matches!(response, ModuleLoadResponse::Async(_)),
-            "strict mode without lockfile should use async TOFU, not reject synchronously"
-        );
-    }
-
-    #[test]
-    fn test_strict_mode_serves_known_module_from_cache() {
-        // A module already in the manifest + cache should still load synchronously.
+    /// CPL-262: runtime `load()` must fail loudly — every import is supposed
+    /// to have been inlined by the pre-execution bundler. Even a module that
+    /// is already cached and manifest-pinned must be rejected.
+    #[tokio::test]
+    async fn runtime_load_is_rejected_even_for_cached_modules() {
         let mut manifest = HashMap::new();
         manifest.insert(
             "https://cdn.jsdelivr.net/npm/known@1.0.0/+esm".to_string(),
-            // SHA-384 of b"export default 42;\n"
-            "QgPNAKp0t4YJhHqUicStPFXVxqvr39RgTDy1l+4dm0U712X8pePGvAI6/42P5ow3".to_string(),
+            "dGVzdA==".to_string(),
         );
         let cache: ModuleCache = Arc::new(RwLock::new(HashMap::new()));
         cache.write().unwrap().insert(
@@ -1264,9 +1099,15 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
         let specifier =
             ModuleSpecifier::parse("https://cdn.jsdelivr.net/npm/known@1.0.0/+esm").unwrap();
         let response = loader.load(&specifier, None, false, RequestedModuleType::None);
+        let fut = match response {
+            ModuleLoadResponse::Async(fut) => fut,
+            _ => panic!("load should always return Async after CPL-262"),
+        };
+        let err = fut.await.expect_err("runtime import must be rejected");
+        let msg = format!("{err}");
         assert!(
-            matches!(response, ModuleLoadResponse::Sync(Ok(_))),
-            "known cached module should load synchronously"
+            msg.contains("bundler") || msg.contains("Runtime import"),
+            "unexpected rejection message: {msg}"
         );
     }
 
