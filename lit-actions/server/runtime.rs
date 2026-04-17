@@ -145,8 +145,10 @@ fn action_code_cache_entry_size(
 pub(crate) struct CachedActionCode {
     /// Fully self-contained JavaScript. When the user had static imports, this
     /// is the `swc_bundler` output with every transitive CDN dependency inlined
-    /// — no `import` or `import()` call survives. Otherwise it is the untouched
-    /// user code. Params are wrapped around this at execute-time (never cached).
+    /// and static ESM `import` / `export` syntax removed. User-authored dynamic
+    /// `import()` expressions are not transformed by bundling, are unsupported,
+    /// and may still appear in untouched user code (failing later at runtime).
+    /// Params are wrapped around this at execute-time (never cached).
     code: String,
     /// URL→hash of every module the bundler fetched while producing `code`.
     /// Replayed into the per-execution `LoadedModules` tracker on cache hit so
