@@ -242,7 +242,17 @@ impl CdnModuleLoader {
             url.push('#');
             url.push_str(frag);
         }
-        Some(url)
+
+        // Parse and re-serialize so URL normalization is applied BEFORE the
+        // allowlist check. Without this, a specifier like
+        // `pkg@1.0.0/../../gh/evil/x.js` would pass the `/npm/` prefix check
+        // on the raw string but resolve to the mutable `/gh/` backend after
+        // the HTTP client normalizes `..` segments at fetch time.
+        let parsed = ModuleSpecifier::parse(&url).ok()?;
+        if parsed.host_str() != Some("cdn.jsdelivr.net") || !parsed.path().starts_with("/npm/") {
+            return None;
+        }
+        Some(parsed.to_string())
     }
 
     /// Fetch a URL with streaming body read, enforcing size limits during download.
@@ -833,6 +843,36 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
         assert_eq!(CdnModuleLoader::parse_npm_specifier("lodash-es"), None);
         assert_eq!(CdnModuleLoader::parse_npm_specifier("./local.js"), None);
         assert_eq!(CdnModuleLoader::parse_npm_specifier("@scope/pkg"), None);
+    }
+
+    /// A specifier with `..` segments that escape the /npm/ path must be rejected,
+    /// even though the raw constructed URL string starts with the allowed prefix.
+    /// Without post-normalization validation, `zod@3.22.4/../../gh/evil/x.js`
+    /// would pass the prefix check and reach jsDelivr's mutable /gh/ backend.
+    #[test]
+    fn test_parse_npm_specifier_rejects_path_traversal_to_gh() {
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("zod@3.22.4/../../gh/evil/repo@1/x.js"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_parse_npm_specifier_rejects_path_traversal_to_root() {
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("pkg@1.0.0/../../other"),
+            None
+        );
+    }
+
+    /// Relative traversal that stays inside /npm/ is still valid — normalization
+    /// collapses the `./../` back into the same package path.
+    #[test]
+    fn test_parse_npm_specifier_traversal_inside_npm_is_normalized() {
+        assert_eq!(
+            CdnModuleLoader::parse_npm_specifier("pkg@1.0.0/dist/./../dist/index.js"),
+            Some("https://cdn.jsdelivr.net/npm/pkg@1.0.0/dist/index.js".to_string())
+        );
     }
 
     #[test]
