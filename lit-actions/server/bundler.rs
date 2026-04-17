@@ -80,7 +80,10 @@ fn resolve_entry_specifier(spec: &str) -> Result<String> {
 /// Resolve a dependency specifier found inside a fetched module to an absolute
 /// CDN URL, relative to the URL it was imported from.
 fn resolve_dep_specifier(base_url: &str, spec: &str) -> Result<String> {
-    if spec.starts_with("./") || spec.starts_with("../") {
+    // jsDelivr's +esm bundles reference sibling packages via either relative
+    // paths (`./util.js`) or absolute origin-relative paths (`/npm/other@1/+esm`).
+    // Both are resolved against the base URL using standard URL joining.
+    if spec.starts_with("./") || spec.starts_with("../") || spec.starts_with('/') {
         let base = ModuleSpecifier::parse(base_url)
             .with_context(|| format!("invalid base URL {base_url}"))?;
         let joined = base
@@ -154,9 +157,9 @@ async fn walk_deps(
 }
 
 /// Parse a JS source and return every static import/re-export specifier.
-/// Dynamic `import()` calls are not followed (the bundler ignores them and
-/// they will be left as runtime imports — but the `import_rewriter` step
-/// ensures user code has no dynamic imports to begin with).
+/// Dynamic `import()` calls are intentionally not followed. Any surviving
+/// dynamic import is rejected by `CdnModuleLoader::load` at execution time,
+/// which is the runtime safety net for CPL-262.
 fn extract_module_imports(source: &str) -> Result<Vec<String>> {
     let cm: Lrc<swc_common::SourceMap> = Default::default();
     let fm = cm.new_source_file(
@@ -457,6 +460,27 @@ mod tests {
     fn resolve_dep_specifier_relative_escape_rejected() {
         let base = "https://cdn.jsdelivr.net/npm/pkg@1.0.0/dist/index.js";
         let err = resolve_dep_specifier(base, "../../../gh/evil/repo@1.0.0/x.js").unwrap_err();
+        assert!(format!("{err:#}").contains("outside"));
+    }
+
+    /// jsDelivr's +esm bundles reference sibling packages with origin-absolute
+    /// paths like `/npm/@noble/curves@2.0.1/secp256k1.js/+esm`. Resolving these
+    /// against the base URL must produce a full CDN URL.
+    #[test]
+    fn resolve_dep_specifier_absolute_path() {
+        let base = "https://cdn.jsdelivr.net/npm/micro-eth-signer@0.18.1/+esm";
+        let resolved =
+            resolve_dep_specifier(base, "/npm/@noble/curves@2.0.1/secp256k1.js/+esm").unwrap();
+        assert_eq!(
+            resolved,
+            "https://cdn.jsdelivr.net/npm/@noble/curves@2.0.1/secp256k1.js/+esm"
+        );
+    }
+
+    #[test]
+    fn resolve_dep_specifier_absolute_path_escape_rejected() {
+        let base = "https://cdn.jsdelivr.net/npm/pkg@1.0.0/+esm";
+        let err = resolve_dep_specifier(base, "/gh/evil/repo@1.0.0/x.js").unwrap_err();
         assert!(format!("{err:#}").contains("outside"));
     }
 
