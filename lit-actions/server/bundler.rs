@@ -127,8 +127,8 @@ async fn walk_deps(
             .fetch_module_bytes(&url)
             .await
             .map_err(|e| anyhow!("failed to fetch {url}: {e}"))?;
-        let source = String::from_utf8(bytes)
-            .with_context(|| format!("module {url} is not valid UTF-8"))?;
+        let source =
+            String::from_utf8(bytes).with_context(|| format!("module {url} is not valid UTF-8"))?;
 
         // Strip the integrity fragment before using as a resolver base and
         // as the in-memory map key, so the bundler's resolve step produces
@@ -225,8 +225,14 @@ fn run_swc_bundler(entry_src: String, mut sources: HashMap<String, String>) -> R
             module: ModuleType::Es,
         };
 
-        let mut bundler =
-            Bundler::new(&globals, cm.clone(), loader, resolver, config, Box::new(NoopHook));
+        let mut bundler = Bundler::new(
+            &globals,
+            cm.clone(),
+            loader,
+            resolver,
+            config,
+            Box::new(NoopHook),
+        );
 
         let mut entries: HashMap<String, FileName> = HashMap::new();
         entries.insert(
@@ -322,9 +328,7 @@ impl Load for InMemoryLoad {
             .sources
             .get(url)
             .ok_or_else(|| anyhow!("bundler requested {url} but it was not pre-fetched"))?;
-        let fm = self
-            .cm
-            .new_source_file(Lrc::new(file.clone()), src.clone());
+        let fm = self.cm.new_source_file(Lrc::new(file.clone()), src.clone());
         let mut errors = vec![];
         let module = parse_file_as_module(
             &fm,
@@ -435,8 +439,7 @@ mod tests {
 
     #[test]
     fn resolve_entry_specifier_full_url() {
-        let url =
-            resolve_entry_specifier("https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm").unwrap();
+        let url = resolve_entry_specifier("https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm").unwrap();
         assert_eq!(url, "https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm");
     }
 
@@ -508,13 +511,19 @@ mod tests {
 
         let bundled = run_swc_bundler(entry.to_string(), sources).unwrap();
 
-        assert!(!bundled.contains("import "), "leftover static import: {bundled}");
+        assert!(
+            !bundled.contains("import "),
+            "leftover static import: {bundled}"
+        );
         assert!(
             !bundled.contains("await import("),
             "leftover dynamic import: {bundled}"
         );
         assert!(!bundled.contains("export "), "leftover export: {bundled}");
-        assert!(bundled.contains("async function main"), "main missing: {bundled}");
+        assert!(
+            bundled.contains("async function main"),
+            "main missing: {bundled}"
+        );
         assert!(
             bundled.contains("hello"),
             "greet body not inlined: {bundled}"
@@ -544,8 +553,14 @@ mod tests {
 
         assert!(!bundled.contains("import "), "leftover import: {bundled}");
         assert!(!bundled.contains("export "), "leftover export: {bundled}");
-        assert!(bundled.contains("async function main"), "main missing: {bundled}");
-        assert!(bundled.contains("41"), "transitive body not inlined: {bundled}");
+        assert!(
+            bundled.contains("async function main"),
+            "main missing: {bundled}"
+        );
+        assert!(
+            bundled.contains("41"),
+            "transitive body not inlined: {bundled}"
+        );
     }
 
     /// Default exports must route to a local binding usable by the entry.
@@ -564,6 +579,9 @@ mod tests {
         let bundled = run_swc_bundler(entry.to_string(), sources).unwrap();
         assert!(!bundled.contains("import "), "leftover import: {bundled}");
         assert!(!bundled.contains("export "), "leftover export: {bundled}");
-        assert!(bundled.contains("42"), "default body not inlined: {bundled}");
+        assert!(
+            bundled.contains("42"),
+            "default body not inlined: {bundled}"
+        );
     }
 }

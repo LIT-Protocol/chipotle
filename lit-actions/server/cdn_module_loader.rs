@@ -339,10 +339,7 @@ impl CdnModuleLoader {
     ///
     /// `url` may include a `#sha384-...` fragment for inline integrity pinning.
     #[instrument(skip_all, err, fields(module_url = %url))]
-    pub(crate) async fn fetch_module_bytes(
-        &self,
-        url: &str,
-    ) -> Result<Vec<u8>, ModuleLoaderError> {
+    pub(crate) async fn fetch_module_bytes(&self, url: &str) -> Result<Vec<u8>, ModuleLoaderError> {
         // Enforce per-execution module count limit to prevent DoS via
         // dependency graphs with thousands of tiny files.
         if let Ok(modules) = self.loaded_modules.0.read()
@@ -361,9 +358,8 @@ impl CdnModuleLoader {
         }
 
         // Parse the URL so we can separate the optional inline-hash fragment.
-        let parsed = ModuleSpecifier::parse(url).map_err(|e| {
-            JsErrorBox::generic(format!("Invalid module URL {url}: {e}"))
-        })?;
+        let parsed = ModuleSpecifier::parse(url)
+            .map_err(|e| JsErrorBox::generic(format!("Invalid module URL {url}: {e}")))?;
         let inline_hash = parsed
             .fragment()
             .and_then(|f| f.strip_prefix("sha384-"))
@@ -490,8 +486,7 @@ impl CdnModuleLoader {
             let mut hasher2 = Sha384::new();
             hasher2.update(&bytes2);
             let verify_digest = hasher2.finalize();
-            let verify_b64 =
-                base64::engine::general_purpose::STANDARD.encode(verify_digest);
+            let verify_b64 = base64::engine::general_purpose::STANDARD.encode(verify_digest);
 
             if !constant_time_eq(&actual_digest, &verify_digest) {
                 error!(
