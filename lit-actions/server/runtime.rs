@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, anyhow, bail};
 use deno_core::{JsRuntime, v8};
 
+use crate::bundler;
 use crate::cdn_module_loader::{CdnModuleLoader, LoadedModules, ModuleCache};
 use crate::import_rewriter;
 use deno_resolver::npm::{DenoInNpmPackageChecker, ManagedNpmResolver};
@@ -59,7 +60,7 @@ struct ActionCodeCacheEntry {
 }
 
 struct ActionCodePrepareContext<'a> {
-    client: &'a reqwest::Client,
+    client: &'a Arc<reqwest::Client>,
     integrity: &'a Arc<RwLock<HashMap<String, String>>>,
     strict_imports: bool,
     lockfile_path: &'a Option<PathBuf>,
@@ -142,15 +143,22 @@ fn action_code_cache_entry_size(
 
 #[derive(Clone, Debug)]
 pub(crate) struct CachedActionCode {
+    /// Fully self-contained JavaScript. When the user had static imports, this
+    /// is the `swc_bundler` output with every transitive CDN dependency inlined
+    /// and static ESM `import` / `export` syntax removed. User-authored dynamic
+    /// `import()` expressions are not transformed by bundling, are unsupported,
+    /// and may still appear in untouched user code (failing later at runtime).
+    /// Params are wrapped around this at execute-time (never cached).
     code: String,
-    dynamic_imports: Option<String>,
+    /// URL→hash of every module the bundler fetched while producing `code`.
+    /// Replayed into the per-execution `LoadedModules` tracker on cache hit so
+    /// billing / `showImportDetails()` sees the same set as on a cache miss.
     loaded_modules: Vec<(String, String)>,
 }
 
 impl CachedActionCode {
     fn allocated_bytes(&self) -> usize {
         self.code.capacity()
-            + self.dynamic_imports.as_ref().map_or(0, String::capacity)
             + self.loaded_modules.capacity() * size_of::<(String, String)>()
             + self
                 .loaded_modules
@@ -160,27 +168,8 @@ impl CachedActionCode {
     }
 
     fn to_executable_code(&self, js_func_params: &str) -> String {
-        if let Some(dynamic_imports) = &self.dynamic_imports {
-            // Has imports - move user code inside the async IIFE so that the
-            // dynamically imported bindings are in lexical scope for main().
-            format!(
-                "
-        (async () => {{
-        {dynamic_imports}
-        {code}
-        ;
-        const params = {js_func_params} ;
-        const data = await main(params);
-        if (typeof data !== \"undefined\") {{
-          LitActions.setResponse( {{ response: data }} );
-        }}
-        }})();",
-                code = self.code,
-            )
-        } else {
-            // No imports - preserve the existing wrapper layout unchanged.
-            format!(
-                "
+        format!(
+            "
         {code}
         ;
         (async () => {{
@@ -190,9 +179,8 @@ impl CachedActionCode {
           LitActions.setResponse( {{ response: data }} );
         }}
         }})();",
-                code = self.code,
-            )
-        }
+            code = self.code,
+        )
     }
 }
 
@@ -232,40 +220,54 @@ async fn prepare_action_code(
     code: &str,
     context: &ActionCodePrepareContext<'_>,
 ) -> Result<CachedActionCode> {
-    // Rewrite static ES `import` statements into dynamic `import()` calls.
-    // Static imports are not valid in script mode, so we strip them from the
-    // user code and generate equivalent dynamic imports inside the async wrapper
-    // where `await` is available and the imported bindings are in lexical scope.
-    let import_rewriter::RewriteResult {
-        code: rewritten_code,
-        imports,
-    } = import_rewriter::rewrite_imports(code);
+    // Detect the user's static imports. If there are none, the raw code is
+    // already executable as a script. Otherwise, hand off to the pre-execution
+    // bundler, which inlines every CDN dep into the entry source so the cached
+    // form contains no `import` call of any kind — eliminating Deno's
+    // `resolve`/`load` pipeline from the hot path (CPL-262).
+    //
+    // `rewrite_imports` is used only to decide whether bundling is necessary
+    // and to seed the dep-graph walk; the bundler consumes the **original**
+    // code (with imports intact) so SWC can map each imported binding to its
+    // inlined definition.
+    let import_rewriter::RewriteResult { code: _, imports } =
+        import_rewriter::rewrite_imports(code);
 
     if imports.is_empty() {
         return Ok(CachedActionCode {
             code: code.to_string(),
-            dynamic_imports: None,
             loaded_modules: Vec::new(),
         });
     }
 
-    // Has imports - bundle all transitive dependencies from jsDelivr as
-    // data: URLs so the module loader needs no network I/O at runtime.
-    let bundle_result = import_rewriter::bundle_imports(
-        &imports,
-        context.client,
-        context.integrity,
+    let bundle_loader = CdnModuleLoader::with_options(
+        context.integrity.clone(),
         context.strict_imports,
-        context.lockfile_path,
-        context.module_cache,
-    )
-    .await
-    .map_err(|e| anyhow!("Failed to bundle CDN imports: {e}"))?;
+        context.module_cache.clone(),
+        context.lockfile_path.clone(),
+        Some(context.client.clone()),
+        LoadedModules::default(),
+    );
+    let bundled = bundler::bundle_user_code(code, &imports, &bundle_loader)
+        .await
+        .map_err(|e| anyhow!("Failed to bundle CDN imports: {e}"))?;
+
+    // Snapshot the modules the bundler fetched, so cache hits can replay
+    // them into the per-execution LoadedModules handle for billing.
+    let loaded_modules = bundle_loader
+        .loaded_modules()
+        .0
+        .read()
+        .map(|m| {
+            m.iter()
+                .map(|info| (info.url.clone(), info.hash.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
 
     Ok(CachedActionCode {
-        code: rewritten_code,
-        dynamic_imports: Some(bundle_result.dynamic_imports),
-        loaded_modules: bundle_result.loaded_modules,
+        code: bundled,
+        loaded_modules,
     })
 }
 
@@ -609,8 +611,10 @@ pub(crate) async fn execute_js(
     let js_params = js_params.as_ref().unwrap_or_default();
     let js_func_params = js_params.to_string();
 
-    // On cache hit we already have the prepared code; on miss we need to
-    // prepare it (rewrite imports, bundle dependencies, cache the result).
+    // Params are injected per-execution and MUST NOT be part of the cached
+    // form: they change between invocations while the bundled JS stays the
+    // same. On cache hit we reuse the prepared form; on miss we prepare it
+    // (bundle CDN deps, snapshot loaded modules, cache the result).
     let cached_code = if let Some(cached) = cached_code {
         cached
     } else {
@@ -775,7 +779,6 @@ mod tests {
     fn cached_code(code: &str) -> CachedActionCode {
         CachedActionCode {
             code: code.to_string(),
-            dynamic_imports: None,
             loaded_modules: Vec::new(),
         }
     }
@@ -797,9 +800,6 @@ mod tests {
         let mut code_string = String::with_capacity(128);
         code_string.push('x');
 
-        let mut dynamic_imports = String::with_capacity(256);
-        dynamic_imports.push_str("await import(\"data:text/javascript,\");");
-
         let mut loaded_modules = Vec::with_capacity(4);
         let mut module_url = String::with_capacity(512);
         module_url.push_str("https://cdn.jsdelivr.net/npm/example@1.0.0/+esm");
@@ -809,14 +809,12 @@ mod tests {
 
         let code = CachedActionCode {
             code: code_string,
-            dynamic_imports: Some(dynamic_imports),
             loaded_modules,
         };
 
         let size = action_code_cache_entry_size(&action_ipfs_id, action_ipfs_id.capacity(), &code);
         let minimum_allocated_bytes = action_ipfs_id.capacity()
             + code.code.capacity()
-            + code.dynamic_imports.as_ref().unwrap().capacity()
             + code.loaded_modules.capacity() * size_of::<(String, String)>()
             + code.loaded_modules[0].0.capacity()
             + code.loaded_modules[0].1.capacity();
