@@ -32,7 +32,7 @@ for arg in "$@"; do
             NO_CODE=true
             ;;
         -h|--help)
-            sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+            awk 'NR == 1 { next } /^$/ { exit } { sub(/^# ?/, ""); print }' "$0"
             exit 0
             ;;
         *)
