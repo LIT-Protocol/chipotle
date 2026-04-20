@@ -253,6 +253,7 @@ impl Action for Server {
 /// Custom `memory_limit` requests bypass the pool entirely: pool workers
 /// are bootstrapped at `DEFAULT_MEMORY_LIMIT_MB` and V8's heap limit is
 /// immutable post-creation.
+#[instrument(skip_all)]
 async fn dispatch_execute_request(
     dispatch: &DispatchState,
     req: ExecutionRequest,
@@ -286,8 +287,10 @@ async fn dispatch_execute_request(
     // can.
     let can_pool = match memory_limit_mb {
         None => true,
-        Some(m) => m == DEFAULT_MEMORY_LIMIT_MB,
+        Some(m) => m <= DEFAULT_MEMORY_LIMIT_MB,
     };
+
+    // let can_pool = true;
 
     let request_id = req
         .http_headers
@@ -346,6 +349,7 @@ async fn dispatch_execute_request(
 /// the snapshot inside `runtime::execute_js`, and execute. Preserves the
 /// original execution model for custom `memory_limit` requests and as the
 /// fallback when the pool can't service a request.
+#[instrument(skip_all)]
 fn spawn_legacy(dispatch: &DispatchState, work: WorkItem, memory_limit_mb: Option<usize>) {
     let integrity_manifest = dispatch.integrity_manifest.clone();
     let strict_imports = dispatch.strict_imports;
