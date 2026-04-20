@@ -384,8 +384,14 @@ async function getNodeChainConfig(serverUrl) {
     setValue('cc-token',            cfg.token        ?? '—', !cfg.token);
 
     let rpcUrl = cfg.rpc_url ?? '';
-    if (!rpcUrl && cfg.chain_id != null && cfg.is_evm) {
-      rpcUrl = (await resolveRpcUrlFromChainlist(cfg.chain_id)) ?? '';
+    if (!rpcUrl) {
+      const selectedNetwork = el('network')?.value || '';
+      const isLocal = (() => { try { return new URL(selectedNetwork).hostname === 'localhost'; } catch { return false; } })();
+      if (isLocal) {
+        rpcUrl = 'http://localhost:8545';
+      } else if (cfg.chain_id != null && cfg.is_evm) {
+        rpcUrl = (await resolveRpcUrlFromChainlist(cfg.chain_id)) ?? '';
+      }
     }
     const rpcInput = el('cc-rpc-url');
     if (rpcInput) rpcInput.value = rpcUrl;
@@ -874,54 +880,24 @@ async function refreshBalances() {
   }
 }
 
-/* ═══ Accordion ══════════════════════════════════════════════════════════════ */
-
-function toggleAccordion(card) {
-  if (!card) return;
-  const header = card.querySelector(':scope > .card-header');
-  const body = card.querySelector(':scope > .card-body');
-  const willCollapse = !card.classList.contains('collapsed');
-  if (body) {
-    if (willCollapse) {
-      body.style.maxHeight = body.scrollHeight + 'px';
-      requestAnimationFrame(() => {
-        card.classList.add('collapsed');
-        body.style.maxHeight = '0px';
-      });
-    } else {
-      card.classList.remove('collapsed');
-      body.style.maxHeight = body.scrollHeight + 'px';
-      const onEnd = (e) => {
-        if (e.propertyName !== 'max-height') return;
-        body.style.maxHeight = '';
-        body.removeEventListener('transitionend', onEnd);
-      };
-      body.addEventListener('transitionend', onEnd);
-    }
-  }
-  if (header) header.setAttribute('aria-expanded', String(!willCollapse));
-}
-
-document.addEventListener('click', (e) => {
-  const header = e.target.closest('[data-accordion] > .card-header');
-  if (!header) return;
-  if (e.target.closest('button, input, select, textarea, a')) return;
-  toggleAccordion(header.parentElement);
-});
-
-document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Enter' && e.key !== ' ') return;
-  const header = e.target.closest('[data-accordion] > .card-header');
-  if (!header || e.target !== header) return;
-  e.preventDefault();
-  toggleAccordion(header.parentElement);
-});
-
 /* ═══ Settings panel ═════════════════════════════════════════════════════════ */
 
 el('btn-toggle-settings')?.addEventListener('click', () => {
   const panel = el('settings-panel');
   if (panel) panel.classList.toggle('open');
+});
+
+/* ═══ Accordion toggles ═════════════════════════════════════════════════════ */
+
+document.querySelectorAll('[id^="accordion-"][id$="-header"]').forEach(header => {
+  const bodyId = header.id.replace(/-header$/, '-body');
+  const body = el(bodyId);
+  if (body) {
+    header.addEventListener('click', () => {
+      header.classList.toggle('open');
+      body.classList.toggle('open');
+    });
+  }
 });
 
 el('btn-save-thresholds')?.addEventListener('click', () => {
@@ -1065,7 +1041,8 @@ el('btn-set-node-config')?.addEventListener('click', async () => {
   }
 });
 
-el('btn-refresh-node-config')?.addEventListener('click', async () => {
+el('btn-refresh-node-config')?.addEventListener('click', async (e) => {
+  e.stopPropagation(); // prevent accordion toggle when clicking Refresh inside header
   const btn = el('btn-refresh-node-config');
   btn.disabled = true;
   try { await fetchNodeConfigValues(); } finally { btn.disabled = false; }

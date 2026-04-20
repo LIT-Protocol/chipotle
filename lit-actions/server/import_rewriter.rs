@@ -1,11 +1,13 @@
-//! Rewrites static ES module `import` statements into dynamic `import()` calls.
+//! Parses the user's static ES module `import` statements so the rest of the
+//! pipeline can inline them.
 //!
 //! The Deno runtime executes user code in **script mode** via `execute_script()`,
 //! which does not support static `import` declarations (an ES module feature).
-//! This module scans user code for static imports that appear before
-//! `async function main`, strips them from the source, and returns structured
-//! data that the runtime uses to generate equivalent dynamic `import()` calls
-//! inside the async wrapper.
+//! `rewrite_imports` scans user code for static imports that appear before
+//! `async function main`, strips them from the source, and returns the parsed
+//! imports. The `bundler` module consumes these (and the original code) to
+//! produce a fully self-contained script with all CDN deps inlined, so no
+//! `import`/`import()` survives into the cached form (CPL-262).
 
 /// A single binding from an import statement.
 #[derive(Debug, Clone, PartialEq)]
@@ -29,7 +31,10 @@ pub(crate) struct ParsedImport {
 
 /// Result of rewriting imports in user code.
 pub(crate) struct RewriteResult {
-    /// The user code with import statements removed.
+    /// The user code with import statements removed. Non-test callers currently
+    /// ignore this (the bundler consumes the original code with imports intact),
+    /// but tests assert on the stripped form to pin the scanner's behavior.
+    #[allow(dead_code)]
     pub code: String,
     /// The parsed imports in order of appearance.
     pub imports: Vec<ParsedImport>,
@@ -216,101 +221,9 @@ fn find_main_declaration(code: &str) -> usize {
     code.len()
 }
 
-/// Generate JavaScript code that performs dynamic `import()` calls and
-/// destructures the results into local `const` bindings.
-///
-/// Each import becomes one or two statements:
-/// - Side-effect: `await import("specifier");`
-/// - Named/default/namespace: `const { a, b: c, default: D } = await import("specifier");`
-/// - Namespace: `const Mod = await import("specifier");`
-pub(crate) fn generate_dynamic_imports(imports: &[ParsedImport]) -> String {
-    let mut out = String::new();
-    for imp in imports {
-        let spec = js_escape(&imp.specifier);
-
-        if imp.bindings.is_empty() {
-            // Side-effect import
-            out.push_str(&format!("await import(\"{spec}\");\n"));
-            continue;
-        }
-
-        // Check if there's exactly one namespace binding (no destructuring needed)
-        if imp.bindings.len() == 1
-            && let ImportBinding::Namespace(ref name) = imp.bindings[0]
-        {
-            out.push_str(&format!("const {name} = await import(\"{spec}\");\n"));
-            continue;
-        }
-
-        // Destructuring: const { ... } = await import("...");
-        // When both a namespace and named/default bindings exist (e.g.
-        // `import Default, * as NS from "..."`), import once into a temp
-        // variable and assign both from it to avoid a redundant fetch.
-        let mut parts = Vec::new();
-        let mut has_namespace = false;
-        let mut ns_name = String::new();
-
-        for binding in &imp.bindings {
-            match binding {
-                ImportBinding::Default(name) => {
-                    if name == "default" {
-                        parts.push("default".to_string());
-                    } else {
-                        parts.push(format!("default: {name}"));
-                    }
-                }
-                ImportBinding::Named { imported, local } => {
-                    if imported == local {
-                        parts.push(imported.clone());
-                    } else {
-                        parts.push(format!("{imported}: {local}"));
-                    }
-                }
-                ImportBinding::Namespace(name) => {
-                    has_namespace = true;
-                    ns_name = name.clone();
-                }
-            }
-        }
-
-        if has_namespace && !parts.is_empty() {
-            // Mixed namespace + named/default: import once, assign both
-            out.push_str(&format!("const {ns_name} = await import(\"{spec}\");\n"));
-            out.push_str(&format!("const {{ {} }} = {ns_name};\n", parts.join(", "),));
-        } else if !parts.is_empty() {
-            out.push_str(&format!(
-                "const {{ {} }} = await import(\"{spec}\");\n",
-                parts.join(", "),
-            ));
-        } else if has_namespace {
-            out.push_str(&format!("const {ns_name} = await import(\"{spec}\");\n"));
-        }
-    }
-    out
-}
-
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
-
-/// Escape a string for embedding inside a JS double-quoted string literal.
-/// Handles backslashes, double quotes, and JS line terminators.
-fn js_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for ch in s.chars() {
-        match ch {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\0' => out.push_str("\\0"),
-            '\u{2028}' => out.push_str("\\u2028"),
-            '\u{2029}' => out.push_str("\\u2029"),
-            _ => out.push(ch),
-        }
-    }
-    out
-}
 
 fn is_ident_byte(b: Option<u8>) -> bool {
     matches!(b, Some(c) if c.is_ascii_alphanumeric() || c == b'_' || c == b'$')
@@ -761,87 +674,6 @@ async function main() {}";
         assert_eq!(result.imports[0].specifier, "zod@3.22.4/+esm");
     }
 
-    #[test]
-    fn generate_named_dynamic_import() {
-        let imports = vec![ParsedImport {
-            specifier: "zod@3.22.4/+esm".into(),
-            bindings: vec![ImportBinding::Named {
-                imported: "z".into(),
-                local: "z".into(),
-            }],
-        }];
-        let code = generate_dynamic_imports(&imports);
-        assert_eq!(code, "const { z } = await import(\"zod@3.22.4/+esm\");\n");
-    }
-
-    #[test]
-    fn generate_default_dynamic_import() {
-        let imports = vec![ParsedImport {
-            specifier: "ajv@8.12.0/+esm".into(),
-            bindings: vec![ImportBinding::Default("Ajv".into())],
-        }];
-        let code = generate_dynamic_imports(&imports);
-        assert_eq!(
-            code,
-            "const { default: Ajv } = await import(\"ajv@8.12.0/+esm\");\n"
-        );
-    }
-
-    #[test]
-    fn generate_namespace_dynamic_import() {
-        let imports = vec![ParsedImport {
-            specifier: "pkg@1.0.0/+esm".into(),
-            bindings: vec![ImportBinding::Namespace("Mod".into())],
-        }];
-        let code = generate_dynamic_imports(&imports);
-        assert_eq!(code, "const Mod = await import(\"pkg@1.0.0/+esm\");\n");
-    }
-
-    #[test]
-    fn generate_side_effect_dynamic_import() {
-        let imports = vec![ParsedImport {
-            specifier: "side-effect@1.0.0/+esm".into(),
-            bindings: vec![],
-        }];
-        let code = generate_dynamic_imports(&imports);
-        assert_eq!(code, "await import(\"side-effect@1.0.0/+esm\");\n");
-    }
-
-    #[test]
-    fn generate_renamed_dynamic_import() {
-        let imports = vec![ParsedImport {
-            specifier: "pkg@1.0.0/+esm".into(),
-            bindings: vec![ImportBinding::Named {
-                imported: "foo".into(),
-                local: "bar".into(),
-            }],
-        }];
-        let code = generate_dynamic_imports(&imports);
-        assert_eq!(
-            code,
-            "const { foo: bar } = await import(\"pkg@1.0.0/+esm\");\n"
-        );
-    }
-
-    #[test]
-    fn generate_default_and_named() {
-        let imports = vec![ParsedImport {
-            specifier: "pkg@1.0.0/+esm".into(),
-            bindings: vec![
-                ImportBinding::Default("D".into()),
-                ImportBinding::Named {
-                    imported: "a".into(),
-                    local: "a".into(),
-                },
-            ],
-        }];
-        let code = generate_dynamic_imports(&imports);
-        assert_eq!(
-            code,
-            "const { default: D, a } = await import(\"pkg@1.0.0/+esm\");\n"
-        );
-    }
-
     // -----------------------------------------------------------------------
     // Comment / string / template literal awareness
     // -----------------------------------------------------------------------
@@ -878,6 +710,10 @@ async function main() {}";
         assert!(result.imports.is_empty());
         assert_eq!(result.code, code);
     }
+
+    // -----------------------------------------------------------------------
+    // Comment / string / template literal awareness (existing tests below)
+    // -----------------------------------------------------------------------
 
     #[test]
     fn real_import_after_block_comment() {

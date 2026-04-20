@@ -323,39 +323,27 @@
         color: var(--text);
       }
 
-      /* ── Accordion ── */
-      .card-header {
+      /* ── Accordion cards ── */
+      .accordion-header {
         display: flex;
         align-items: center;
         justify-content: space-between;
         cursor: pointer;
         user-select: none;
       }
-      .card-header:focus-visible {
-        outline: 2px solid var(--accent);
-        outline-offset: 2px;
-        border-radius: 6px;
-      }
-      .card-header .chevron {
-        transition: transform 0.2s ease;
+      .accordion-header .accordion-arrow {
+        transition: transform 0.2s;
         color: var(--muted);
-        flex-shrink: 0;
-        margin-left: 0.75rem;
+        font-size: 0.75rem;
       }
-      .card.collapsed .card-header .chevron {
-        transform: rotate(-90deg);
+      .accordion-header.open .accordion-arrow {
+        transform: rotate(180deg);
       }
-      .card-body {
-        overflow: hidden;
-        transition: max-height 0.25s ease, opacity 0.2s ease, visibility 0s;
-        opacity: 1;
+      .accordion-body {
+        display: none;
       }
-      .card.collapsed .card-body {
-        max-height: 0;
-        opacity: 0;
-        visibility: hidden;
-        pointer-events: none;
-        transition: max-height 0.25s ease, opacity 0.2s ease, visibility 0s 0.25s;
+      .accordion-body.open {
+        display: block;
       }
 
       /* ── Wallet picker dialog ── */
@@ -381,7 +369,6 @@
         <select id="network">
           <option value="http://localhost:8000/core/v1/">Local Development</option>
           <option value="https://test.chipotle.litprotocol.com/core/v1/">Next - Phala</option>
-          <option value="https://api.dev.litprotocol.com/core/v1/">Dev - Phala</option>
           <option value="https://api.chipotle.litprotocol.com/core/v1/">Prod - Phala</option>
         </select>
       </div>
@@ -412,128 +399,84 @@
       <div class="col">
 
         <!-- Payer Health Table (primary view) -->
-        <div class="card" data-accordion>
-          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
-            <div>
-              <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Payer Health</h2>
-              <p style="color: var(--muted); font-size: 0.85rem; margin: 0">
-                <code>GET /get_api_payers</code> — balance health based on configurable thresholds. Click addresses to copy.
-              </p>
-            </div>
-            <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4.47 5.47a.75.75 0 011.06 0L8 7.94l2.47-2.47a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06z"/></svg>
+        <div class="card">
+          <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Payer Health</h2>
+          <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+            <code>GET /get_api_payers</code> — balance health based on configurable thresholds. Click addresses to copy.
+          </p>
+          <div id="api-payers-results" style="display: none; margin-top: 1rem">
+            <div id="api-payers-list"></div>
           </div>
-          <div class="card-body">
-            <div id="api-payers-results" style="display: none; margin-top: 1rem">
-              <div id="api-payers-list"></div>
-            </div>
-            <div id="api-payers-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+          <div id="api-payers-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
 
-            <button type="button" class="settings-toggle" id="btn-toggle-settings">&#9881; Thresholds</button>
-            <div id="settings-panel" class="settings-panel">
-              <div class="settings-row">
-                <label for="threshold-warning">Warning</label>
-                <input type="number" id="threshold-warning" step="0.001" min="0" placeholder="0.02" />
-              </div>
-              <div class="settings-row">
-                <label for="threshold-critical">Critical</label>
-                <input type="number" id="threshold-critical" step="0.001" min="0" placeholder="0.005" />
-              </div>
-              <div class="settings-row">
-                <label for="threshold-target">Target</label>
-                <input type="number" id="threshold-target" step="0.001" min="0" placeholder="0.05" />
-              </div>
-              <button type="button" id="btn-save-thresholds" style="font-size: 0.8rem; padding: 0.3rem 0.75rem;">Save</button>
-              <span id="threshold-status" style="display: none; font-size: 0.8rem; margin-left: 0.5rem;"></span>
+          <button type="button" class="settings-toggle" id="btn-toggle-settings">&#9881; Thresholds</button>
+          <div id="settings-panel" class="settings-panel">
+            <div class="settings-row">
+              <label for="threshold-warning">Warning</label>
+              <input type="number" id="threshold-warning" step="0.001" min="0" placeholder="0.02" />
             </div>
+            <div class="settings-row">
+              <label for="threshold-critical">Critical</label>
+              <input type="number" id="threshold-critical" step="0.001" min="0" placeholder="0.005" />
+            </div>
+            <div class="settings-row">
+              <label for="threshold-target">Target</label>
+              <input type="number" id="threshold-target" step="0.001" min="0" placeholder="0.05" />
+            </div>
+            <button type="button" id="btn-save-thresholds" style="font-size: 0.8rem; padding: 0.3rem 0.75rem;">Save</button>
+            <span id="threshold-status" style="display: none; font-size: 0.8rem; margin-left: 0.5rem;"></span>
           </div>
         </div>
 
-        <div class="card" data-accordion>
-          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
-            <div>
-              <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Server Version</h2>
-              <p style="color: var(--muted); font-size: 0.85rem; margin: 0">
-                <code>GET /version</code>
-              </p>
+        <div class="card">
+          <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Server Version</h2>
+          <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+            <code>GET /version</code>
+          </p>
+          <div id="version-results" style="display: none; margin-top: 1rem">
+            <div class="result-row">
+              <span class="result-label">name</span>
+              <span class="result-value" id="ver-name">—</span>
             </div>
-            <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4.47 5.47a.75.75 0 011.06 0L8 7.94l2.47-2.47a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06z"/></svg>
-          </div>
-          <div class="card-body">
-            <div id="version-results" style="display: none; margin-top: 1rem">
-              <div class="result-row">
-                <span class="result-label">name</span>
-                <span class="result-value" id="ver-name">—</span>
-              </div>
-              <div class="result-row">
-                <span class="result-label">version</span>
-                <span class="result-value" id="ver-version">—</span>
-              </div>
-              <div class="result-row">
-                <span class="result-label">commit</span>
-                <span class="result-value" id="ver-commit-version">—</span>
-              </div>
-              <div style="margin-top: 0.75rem" id="ver-submodules"></div>
+            <div class="result-row">
+              <span class="result-label">version</span>
+              <span class="result-value" id="ver-version">—</span>
             </div>
-            <div id="version-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
+            <div class="result-row">
+              <span class="result-label">commit</span>
+              <span class="result-value" id="ver-commit-version">—</span>
+            </div>
+            <div style="margin-top: 0.75rem" id="ver-submodules"></div>
           </div>
+          <div id="version-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
         </div>
 
-        <div class="card" data-accordion>
-          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
-            <div>
-              <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Lit Node Express - Configuration</h2>
-              <p style="color: var(--muted); font-size: 0.85rem; margin: 0">
-                <code>GET /get_node_chain_config</code>
-              </p>
-            </div>
-            <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4.47 5.47a.75.75 0 011.06 0L8 7.94l2.47-2.47a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06z"/></svg>
+        <div class="card">
+          <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Lit Node Express - Configuration</h2>
+          <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+            <code>GET /get_node_chain_config</code>
+          </p>
+          <div id="chain-config-results" style="display: none; margin-top: 1rem">
+            <div class="result-row"><span class="result-label">chain_name</span><span class="result-value" id="cc-chain-name">—</span></div>
+            <div class="result-row"><span class="result-label">chain_id</span><span class="result-value" id="cc-chain-id">—</span></div>
+            <div class="result-row"><span class="result-label">is_evm</span><span class="result-value" id="cc-is-evm">—</span></div>
+            <div class="result-row"><span class="result-label">testnet</span><span class="result-value" id="cc-testnet">—</span></div>
+            <div class="result-row"><span class="result-label">token</span><span class="result-value" id="cc-token">—</span></div>
+            <div class="result-row"><span class="result-label">rpc_url</span><input type="text" id="cc-rpc-url" placeholder="—" style="flex:1;padding:0.3rem 0.5rem;font-family:'JetBrains Mono',monospace;font-size:0.85rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);" /></div>
+            <div class="result-row"><span class="result-label">contract_address</span><span class="result-value" id="cc-contract-address">—</span></div>
           </div>
-          <div class="card-body">
-            <div id="chain-config-results" style="display: none; margin-top: 1rem">
-              <div class="result-row"><span class="result-label">chain_name</span><span class="result-value" id="cc-chain-name">—</span></div>
-              <div class="result-row"><span class="result-label">chain_id</span><span class="result-value" id="cc-chain-id">—</span></div>
-              <div class="result-row"><span class="result-label">is_evm</span><span class="result-value" id="cc-is-evm">—</span></div>
-              <div class="result-row"><span class="result-label">testnet</span><span class="result-value" id="cc-testnet">—</span></div>
-              <div class="result-row"><span class="result-label">token</span><span class="result-value" id="cc-token">—</span></div>
-              <div class="result-row"><span class="result-label">rpc_url</span><input type="text" id="cc-rpc-url" placeholder="—" style="flex:1;padding:0.3rem 0.5rem;font-family:'JetBrains Mono',monospace;font-size:0.85rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);" /></div>
-              <div class="result-row"><span class="result-label">contract_address</span><span class="result-value" id="cc-contract-address">—</span></div>
-            </div>
-            <div id="chain-config-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
-          </div>
+          <div id="chain-config-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
         </div>
 
-      </div>
-
-      <!-- ═══ RIGHT COLUMN — config & interactive ═══ -->
-      <div class="col">
-
-        <div class="card" data-accordion>
-          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
-            <div>
-              <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Supported Chain Config Keys</h2>
-              <p style="color: var(--muted); font-size: 0.85rem; margin: 0">
-                <code>GET /get_chain_config_keys</code> — all recognised <code>ConfigKeys</code> variants that the node reads from chain.
-              </p>
-            </div>
-            <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4.47 5.47a.75.75 0 011.06 0L8 7.94l2.47-2.47a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06z"/></svg>
+        <div class="card">
+          <div class="accordion-header" id="accordion-lit-action-header">
+            <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Lit Action Client Configuration</h2>
+            <span class="accordion-arrow">&#9660;</span>
           </div>
-          <div class="card-body">
-            <div id="chain-config-keys-list"></div>
-            <div id="chain-config-keys-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
-          </div>
-        </div>
-
-        <div class="card" data-accordion>
-          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
-            <div>
-              <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Lit Action Client Configuration</h2>
-              <p style="color: var(--muted); font-size: 0.85rem; margin: 0">
-                <code>GET /get_lit_action_client_config</code> — effective builder values, including any chain-config overrides.
-              </p>
-            </div>
-            <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4.47 5.47a.75.75 0 011.06 0L8 7.94l2.47-2.47a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06z"/></svg>
-          </div>
-          <div class="card-body">
+          <div class="accordion-body" id="accordion-lit-action-body">
+            <p style="color: var(--muted); font-size: 0.85rem; margin: 0.5rem 0 1rem">
+              <code>GET /get_lit_action_client_config</code> — effective builder values, including any chain-config overrides.
+            </p>
             <div id="lit-action-config-results" style="display: none;">
               <div class="result-row"><span class="result-label">timeout_ms</span><span class="result-value" id="lac-timeout-ms">—</span></div>
               <div class="result-row"><span class="result-label">async_timeout_ms</span><span class="result-value" id="lac-async-timeout-ms">—</span></div>
@@ -549,60 +492,60 @@
           </div>
         </div>
 
-        <div class="card" data-accordion>
-          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
-            <div style="display:flex;align-items:center;gap:0.75rem">
-              <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Account Configuration Contract</h2>
-              <button type="button" id="btn-refresh-contract" style="margin-top:0;padding:0.3rem 0.75rem;font-size:0.8rem;">Refresh</button>
-            </div>
-            <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4.47 5.47a.75.75 0 011.06 0L8 7.94l2.47-2.47a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06z"/></svg>
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.25rem">
+            <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Account Configuration Contract</h2>
+            <button type="button" id="btn-refresh-contract" style="margin-top:0;padding:0.3rem 0.75rem;font-size:0.8rem;">Refresh</button>
           </div>
-          <div class="card-body">
-            <input type="hidden" id="contract-address" />
+          <input type="hidden" id="contract-address" />
 
-            <div class="results" id="results" style="display: none">
-              <h2>Contract values</h2>
-              <div class="result-row">
-                <span class="result-label">pricing</span
-                ><span class="result-value" id="val-pricing-operator">—</span
-                ><span class="result-value" id="val-pricing-operator-balance" style="color:var(--muted);margin-left:auto"></span>
-              </div>
-              <div class="result-row">
-                <span class="result-label">admin Payer</span
-                ><span class="result-value" id="val-admin-api-payer">—</span
-                ><span class="result-value" id="val-admin-api-payer-balance" style="color:var(--muted);margin-left:auto"></span>
-              </div>
-              <div class="result-row">
-                <span class="result-label">Actual #</span
-                ><span class="result-value" id="val-payer-count">—</span>
-              </div>
-              <div class="result-row">
-                <span class="result-label">Requested #</span
-                ><span class="result-value" id="val-requested-api-payer-count">—</span>
-              </div>
-              <div class="result-row">
-                <span class="result-label">Rebalance</span
-                ><span class="result-value" id="val-rebalance-amount">—</span>
-              </div>
-              <div class="result-row">
-                <span class="result-label">PKP count</span
-                ><span class="result-value" id="val-pkp-count">—</span>
-              </div>
+          <div class="results" id="results" style="display: none">
+            <h2>Contract values</h2>
+            <div class="result-row">
+              <span class="result-label">pricing</span
+              ><span class="result-value" id="val-pricing-operator">—</span
+              ><span class="result-value" id="val-pricing-operator-balance" style="color:var(--muted);margin-left:auto"></span>
             </div>
-            <div class="error" id="error" style="display: none"></div>
+            <div class="result-row">
+              <span class="result-label">admin Payer</span
+              ><span class="result-value" id="val-admin-api-payer">—</span
+              ><span class="result-value" id="val-admin-api-payer-balance" style="color:var(--muted);margin-left:auto"></span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">Actual #</span
+              ><span class="result-value" id="val-payer-count">—</span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">Requested #</span
+              ><span class="result-value" id="val-requested-api-payer-count">—</span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">Rebalance</span
+              ><span class="result-value" id="val-rebalance-amount">—</span>
+            </div>
+            <div class="result-row">
+              <span class="result-label">PKP count</span
+              ><span class="result-value" id="val-pkp-count">—</span>
+            </div>
           </div>
+          <div class="error" id="error" style="display: none"></div>
         </div>
 
-        <div class="card" data-accordion>
-          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
-            <div style="display:flex;align-items:center;gap:0.75rem">
+      </div>
+
+      <!-- ═══ RIGHT COLUMN — updateable / interactive ═══ -->
+      <div class="col">
+
+        <div class="card">
+          <div class="accordion-header" id="accordion-node-config-header">
+            <div style="display:flex;align-items:center;gap:0.5rem">
               <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Node Configuration</h2>
               <button type="button" id="btn-refresh-node-config" style="margin-top:0;padding:0.3rem 0.75rem;font-size:0.8rem;">Refresh</button>
             </div>
-            <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4.47 5.47a.75.75 0 011.06 0L8 7.94l2.47-2.47a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06z"/></svg>
+            <span class="accordion-arrow">&#9660;</span>
           </div>
-          <div class="card-body">
-            <p style="color: var(--muted); font-size: 0.85rem; margin: 0 0 1rem">
+          <div class="accordion-body" id="accordion-node-config-body">
+            <p style="color: var(--muted); font-size: 0.85rem; margin: 0.5rem 0 1rem">
               Key-value pairs stored on-chain via <code>setNodeConfiguration</code>. Read by the node every 30 seconds.
             </p>
 
@@ -629,17 +572,16 @@
           </div>
         </div>
 
-        <div class="card" data-accordion>
-          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
-            <div>
-              <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">API Payer Accounts</h2>
-              <p style="color: var(--muted); font-size: 0.85rem; margin: 0">
-                Sets the default API payer account and the number of payers the node will use to process mutable API calls. If rebalance is enabled, the node will rebalance the payers to ensure each payer has equal funds, using funds that exist in the admin API payer account.
-              </p>
-            </div>
-            <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4.47 5.47a.75.75 0 011.06 0L8 7.94l2.47-2.47a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06z"/></svg>
+        <div class="card">
+          <div class="accordion-header" id="accordion-api-payer-header">
+            <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Api Payer Accounts</h2>
+            <span class="accordion-arrow">&#9660;</span>
           </div>
-          <div class="card-body">
+          <div class="accordion-body" id="accordion-api-payer-body">
+            <p style="color: var(--muted); font-size: 0.85rem; margin: 0.5rem 0 1rem">
+              Sets the default API payer account and the number of payers the node will use to process mutable API calls. If rebalance is enabled, the node will rebalance the payers to ensure each payer has equal funds, using funds that exist in the admin API payer account.
+            </p>
+
             <div class="form-group" style="margin-top: 1.25rem">
               <label for="default-api-payer">Admin API payer address</label>
               <input type="text" id="default-api-payer" placeholder="0x…" />
@@ -662,6 +604,20 @@
             </div>
             <button type="button" id="btn-set-rebalance-amount">Set Rebalance Amount</button>
             <div id="rebalance-amount-status" style="display: none; font-size: 0.85rem; margin-top: 0.5rem; font-family: 'JetBrains Mono', monospace; word-break: break-all;"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="accordion-header" id="accordion-chain-config-keys-header">
+            <h2 style="font-size: 1rem; font-weight: 600; margin: 0">Supported Chain Config Keys</h2>
+            <span class="accordion-arrow">&#9660;</span>
+          </div>
+          <div class="accordion-body" id="accordion-chain-config-keys-body">
+            <p style="color: var(--muted); font-size: 0.85rem; margin: 0.5rem 0 1rem">
+              <code>GET /get_chain_config_keys</code> — all recognised <code>ConfigKeys</code> variants that the node reads from chain.
+            </p>
+            <div id="chain-config-keys-list"></div>
+            <div id="chain-config-keys-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
           </div>
         </div>
 

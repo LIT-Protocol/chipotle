@@ -64,9 +64,20 @@ export type LitActionRequestJsParams = unknown | null;
 
 /**
  * API key via header.
+
+Provide either `code` (inline JS) or `ipfs_id` (IPFS CID of a previously-cached action). When `code` is provided it is cached by its IPFS hash so subsequent calls can use `ipfs_id`.
  */
 export interface LitActionRequest {
-  code: string;
+  /**
+   * Inline JS source. Optional when `ipfs_id` is supplied.
+   * @nullable
+   */
+  code?: string | null;
+  /**
+   * IPFS CID of a previously-submitted action. Looked up in the in-memory cache.
+   * @nullable
+   */
+  ipfs_id?: string | null;
   /** @nullable */
   js_params?: LitActionRequestJsParams;
 }
