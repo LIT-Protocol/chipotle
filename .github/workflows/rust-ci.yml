@@ -1,5 +1,5 @@
-# Runs cargo fmt --check, cargo clippy, and cargo build --all-features
-# on every pull request.
+# Runs cargo fmt --check, cargo clippy, cargo build --all-features, and
+# cargo test --all-features on every pull request.
 
 name: Rust CI
 
@@ -79,3 +79,7 @@ jobs:
       - name: build
         working-directory: ${{ matrix.crate }}
         run: cargo build --all-features
+
+      - name: test
+        working-directory: ${{ matrix.crate }}
+        run: cargo test --all-features
