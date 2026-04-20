@@ -233,13 +233,7 @@ impl Action for Server {
                         debug!("{:?}", DebugExecutionRequest::from(&req));
                     }
 
-                    dispatch_execute_request(
-                        &dispatch,
-                        req,
-                        outbound_tx,
-                        inbound_rx,
-                        span,
-                    );
+                    dispatch_execute_request(&dispatch, req, outbound_tx, inbound_rx, span);
                 }
                 _ => {} // Ignore empty requests
             }
@@ -313,26 +307,24 @@ fn dispatch_execute_request(
         span,
     };
 
-    if can_pool {
-        if let Some(handle) = dispatch.pool.try_acquire() {
-            match handle.work_tx.try_send(work) {
-                Ok(()) => return,
-                Err(flume::TrySendError::Disconnected(reclaimed)) => {
-                    // Worker thread died between publishing its handle and
-                    // the dispatcher trying to hand it work. Reclaim the
-                    // WorkItem and route to legacy.
-                    dispatch.pool.note_disconnected();
-                    spawn_legacy(dispatch, reclaimed, memory_limit_mb);
-                    return;
-                }
-                Err(flume::TrySendError::Full(reclaimed)) => {
-                    // One-shot lifecycle invariant violation: the work
-                    // channel is bounded(1) and no work has been sent yet.
-                    // Logged at WARN with a separate counter; still safe.
-                    dispatch.pool.note_full_error();
-                    spawn_legacy(dispatch, reclaimed, memory_limit_mb);
-                    return;
-                }
+    if can_pool && let Some(handle) = dispatch.pool.try_acquire() {
+        match handle.work_tx.try_send(work) {
+            Ok(()) => return,
+            Err(flume::TrySendError::Disconnected(reclaimed)) => {
+                // Worker thread died between publishing its handle and
+                // the dispatcher trying to hand it work. Reclaim the
+                // WorkItem and route to legacy.
+                dispatch.pool.note_disconnected();
+                spawn_legacy(dispatch, reclaimed, memory_limit_mb);
+                return;
+            }
+            Err(flume::TrySendError::Full(reclaimed)) => {
+                // One-shot lifecycle invariant violation: the work
+                // channel is bounded(1) and no work has been sent yet.
+                // Logged at WARN with a separate counter; still safe.
+                dispatch.pool.note_full_error();
+                spawn_legacy(dispatch, reclaimed, memory_limit_mb);
+                return;
             }
         }
         // Pool miss (empty ready channel, breaker open, etc): fall
@@ -346,11 +338,7 @@ fn dispatch_execute_request(
 /// the snapshot inside `runtime::execute_js`, and execute. Preserves the
 /// original execution model for custom `memory_limit` requests and as the
 /// fallback when the pool can't service a request.
-fn spawn_legacy(
-    dispatch: &DispatchState,
-    work: WorkItem,
-    memory_limit_mb: Option<usize>,
-) {
+fn spawn_legacy(dispatch: &DispatchState, work: WorkItem, memory_limit_mb: Option<usize>) {
     let integrity_manifest = dispatch.integrity_manifest.clone();
     let strict_imports = dispatch.strict_imports;
     let module_cache = dispatch.module_cache.clone();

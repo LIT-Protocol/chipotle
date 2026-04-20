@@ -375,11 +375,9 @@ fn run_worker_thread(pool: Arc<WorkerPool>) {
             // Per-request JS injection: namespace globals first (so user
             // code sees Lit.*), PatchDeno + everything else is owned by
             // execute_with_worker — preserves today's bootstrap order.
-            if let Err(err) = runtime::inject_lit_namespace(
-                &mut prepared.worker,
-                &auth_context,
-                &http_headers,
-            ) {
+            if let Err(err) =
+                runtime::inject_lit_namespace(&mut prepared.worker, &auth_context, &http_headers)
+            {
                 error!("pool worker failed to inject Lit namespace: {err:#}");
                 server::send_execution_result(&outbound_tx, Err(err)).await;
                 return;
@@ -540,12 +538,16 @@ mod tests {
         pool.record_refill_failure(&"first");
         pool.record_refill_failure(&"second");
         assert_eq!(
-            pool.health.consecutive_refill_failures.load(Ordering::Relaxed),
+            pool.health
+                .consecutive_refill_failures
+                .load(Ordering::Relaxed),
             2
         );
         pool.record_refill_success();
         assert_eq!(
-            pool.health.consecutive_refill_failures.load(Ordering::Relaxed),
+            pool.health
+                .consecutive_refill_failures
+                .load(Ordering::Relaxed),
             0
         );
     }
