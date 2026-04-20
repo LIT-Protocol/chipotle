@@ -24,7 +24,7 @@ use swc_ecma_loader::resolve::Resolution;
 use swc_ecma_parser::{EsSyntax, Syntax, parse_file_as_module};
 use tracing::{debug, info, instrument};
 
-use crate::cdn_module_loader::CdnModuleLoader;
+use crate::cdn_module_loader::{CdnModuleLoader, MAX_MODULE_COUNT};
 use crate::import_rewriter::ParsedImport;
 
 /// Synthetic FileName used for the user's entry point. Chosen to be distinct
@@ -128,6 +128,19 @@ async fn walk_deps(
     }
 
     while !frontier.is_empty() {
+        // Enforce the per-execution module cap here, before launching the
+        // layer. The same check inside `fetch_module_bytes` reads
+        // `loaded_modules.len()` and acts on it, which is racy under
+        // `try_join_all`: every concurrent fetch in a wide layer sees the
+        // pre-layer count and passes, so a single layer can blow past the
+        // limit. `seen` already counts every URL we have committed to
+        // fetching, so bounding it here gives a deterministic gate.
+        if seen.len() > MAX_MODULE_COUNT {
+            bail!(
+                "dependency graph exceeds maximum module count ({MAX_MODULE_COUNT})"
+            );
+        }
+
         let layer_size = frontier.len();
         let layer_started = Instant::now();
 
@@ -592,6 +605,85 @@ mod tests {
         assert!(
             bundled.contains("41"),
             "transitive body not inlined: {bundled}"
+        );
+    }
+
+    /// Build a `CdnModuleLoader` whose cache is pre-seeded with the given
+    /// `(url, source)` pairs and whose integrity manifest is empty. With no
+    /// expected hash, the cache-hit path in `fetch_module_bytes` returns the
+    /// cached bytes without any HTTP traffic, which lets us drive `walk_deps`
+    /// deterministically in unit tests.
+    fn cached_loader<I: IntoIterator<Item = (String, Vec<u8>)>>(entries: I) -> CdnModuleLoader {
+        use std::sync::{Arc, RwLock};
+
+        use crate::cdn_module_loader::ModuleCache;
+        use lit_actions_ext::bindings::LoadedModules;
+
+        let cache: ModuleCache = Arc::new(RwLock::new(HashMap::new()));
+        {
+            let mut w = cache.write().unwrap();
+            for (url, bytes) in entries {
+                w.insert(url, bytes);
+            }
+        }
+        CdnModuleLoader::with_options(
+            Arc::new(RwLock::new(HashMap::new())),
+            false,
+            cache,
+            None,
+            None,
+            LoadedModules::default(),
+        )
+    }
+
+    /// `walk_deps` must traverse a transitive graph (entry → a → b) across
+    /// multiple BFS layers and return every reachable module. This exercises
+    /// the layered fetch + dedup + dep-discovery flow added in CPL-263.
+    #[tokio::test]
+    async fn walk_deps_collects_transitive_graph() {
+        let entry_url = "https://cdn.jsdelivr.net/npm/entry@1.0.0/+esm".to_string();
+        let a_url = "https://cdn.jsdelivr.net/npm/a@1.0.0/+esm".to_string();
+        let b_url = "https://cdn.jsdelivr.net/npm/b@1.0.0/+esm".to_string();
+
+        let entry_src = format!(r#"import {{ a }} from "{a_url}"; export const e = a;"#);
+        let a_src = format!(r#"import {{ b }} from "{b_url}"; export const a = b + 1;"#);
+        let b_src = "export const b = 41;".to_string();
+
+        let loader = cached_loader([
+            (entry_url.clone(), entry_src.into_bytes()),
+            (a_url.clone(), a_src.into_bytes()),
+            (b_url.clone(), b_src.into_bytes()),
+        ]);
+
+        let sources = walk_deps(&loader, &[entry_url.clone()]).await.unwrap();
+
+        assert_eq!(sources.len(), 3, "expected 3 modules, got {sources:?}");
+        assert!(sources.contains_key(&entry_url));
+        assert!(sources.contains_key(&a_url));
+        assert!(sources.contains_key(&b_url));
+    }
+
+    /// The per-execution module cap must be enforced in `walk_deps` itself,
+    /// not just in `fetch_module_bytes`. The loader's check is racy under
+    /// `try_join_all` — every concurrent fetch in a single layer reads the
+    /// pre-layer count and passes — so a wide entry must be rejected before
+    /// the layer is launched.
+    #[tokio::test]
+    async fn walk_deps_enforces_max_module_count_on_wide_layer() {
+        let mut entries = Vec::new();
+        let mut initial = Vec::new();
+        for i in 0..(MAX_MODULE_COUNT + 1) {
+            let url = format!("https://cdn.jsdelivr.net/npm/pkg{i}@1.0.0/+esm");
+            entries.push((url.clone(), b"export const x = 1;".to_vec()));
+            initial.push(url);
+        }
+        let loader = cached_loader(entries);
+
+        let err = walk_deps(&loader, &initial).await.unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("maximum module count"),
+            "unexpected error: {msg}"
         );
     }
 
