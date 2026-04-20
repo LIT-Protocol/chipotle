@@ -16,10 +16,15 @@ use anyhow::{Context, Result, anyhow, bail};
 use deno_core::ModuleSpecifier;
 use swc_bundler::{Bundler, Config, Hook, Load, ModuleData, ModuleRecord, ModuleType, Resolve};
 use swc_common::{FileName, GLOBALS, Globals, Span, SyntaxContext, sync::Lrc};
-use swc_ecma_ast::{EsVersion, KeyValueProp, Module, ModuleDecl, ModuleItem};
+use swc_ecma_ast::{
+    CallExpr, Callee, EsVersion, Expr, ExprOrSpread, Ident, IdentName, ImportDecl,
+    ImportPhase, ImportSpecifier, ImportStarAsSpecifier, KeyValueProp, Lit, MemberExpr,
+    MemberProp, Module, ModuleDecl, ModuleItem, Str,
+};
 use swc_ecma_codegen::{Emitter, text_writer::JsWriter};
 use swc_ecma_loader::resolve::Resolution;
 use swc_ecma_parser::{EsSyntax, Syntax, parse_file_as_module};
+use swc_ecma_visit::{VisitMut, VisitMutWith};
 use tracing::{debug, info, instrument};
 
 use crate::cdn_module_loader::CdnModuleLoader;
@@ -41,16 +46,31 @@ pub(crate) async fn bundle_user_code(
     imports: &[ParsedImport],
     loader: &CdnModuleLoader,
 ) -> Result<String> {
+    // Pre-bundle pass: rewrite literal `import("...")` calls into static
+    // `import * as __litDyn_<i> from "..."` + `Promise.resolve(__litDyn_<i>)`
+    // so swc_bundler will inline the module and the runtime never re-enters
+    // the module loader for them. Non-literal `import(expr)` calls are
+    // rejected here because the bundler-only design (CPL-262/CPL-264) cannot
+    // pre-fetch unknown specifiers at cache time.
+    let (rewritten_entry, dynamic_specifiers) = rewrite_literal_dynamic_imports(user_code)
+        .context("scanning entry for literal dynamic imports")?;
+
     let initial_urls: Vec<String> = imports
         .iter()
         .map(|imp| {
             resolve_entry_specifier(&imp.specifier)
                 .with_context(|| format!("invalid import specifier: {}", imp.specifier))
         })
+        .chain(dynamic_specifiers.iter().map(|spec| {
+            resolve_entry_specifier(spec)
+                .with_context(|| format!("invalid dynamic import specifier: {spec}"))
+        }))
         .collect::<Result<_>>()?;
 
     info!(
-        initial_imports = initial_urls.len(),
+        static_imports = imports.len(),
+        dynamic_imports = dynamic_specifiers.len(),
+        initial_urls = initial_urls.len(),
         "bundler: walking CDN dependency graph"
     );
     let sources = walk_deps(loader, &initial_urls).await?;
@@ -59,8 +79,7 @@ pub(crate) async fn bundle_user_code(
         "bundler: dependency graph walk complete"
     );
 
-    let entry_src = user_code.to_string();
-    tokio::task::spawn_blocking(move || run_swc_bundler(entry_src, sources))
+    tokio::task::spawn_blocking(move || run_swc_bundler(rewritten_entry, sources))
         .await
         .context("bundler task join failed")?
 }
@@ -154,6 +173,144 @@ async fn walk_deps(
     }
 
     Ok(sources)
+}
+
+/// Rewrite literal `import("...")` calls in `source` into a static
+/// `import * as __litDyn_<i> from "<spec>"` declaration plus
+/// `Promise.resolve(__litDyn_<i>)` at the call site. Returns the rewritten
+/// source plus the list of newly-introduced specifiers (in alias index order).
+///
+/// The rewrite preserves the `Promise<Namespace>` type that the original
+/// `import()` call returned, so destructuring (`const { foo } = await import(..)`)
+/// continues to work.
+///
+/// Errors if the entry contains an `import(...)` whose argument is not a string
+/// literal: the bundler cannot pre-fetch unknown specifiers, and the bundler-only
+/// design rejects runtime module resolution.
+///
+/// NOTE: this rewrite only runs on the user's entry source, not on fetched CDN
+/// modules. CDN modules that contain dynamic `import()` calls are still left to
+/// fail at execution time via `CdnModuleLoader::load`. In practice jsDelivr's
+/// `+esm` bundles compile dependencies down to static imports, so this gap is
+/// rarely hit; if it becomes a problem, walk_deps can be extended to apply the
+/// same rewrite to each fetched module.
+fn rewrite_literal_dynamic_imports(source: &str) -> Result<(String, Vec<String>)> {
+    let cm: Lrc<swc_common::SourceMap> = Default::default();
+    let fm = cm.new_source_file(
+        Lrc::new(FileName::Custom("entry-dyn-rewrite".into())),
+        source.to_string(),
+    );
+    let mut errors = vec![];
+    let mut module = parse_file_as_module(
+        &fm,
+        Syntax::Es(EsSyntax::default()),
+        EsVersion::Es2022,
+        None,
+        &mut errors,
+    )
+    .map_err(|e| anyhow!("parse error during dynamic-import scan: {e:?}"))?;
+
+    let mut visitor = DynamicImportRewriter::default();
+    module.visit_mut_with(&mut visitor);
+
+    if visitor.non_literal_count > 0 {
+        bail!(
+            "{} dynamic import(...) call(s) with non-literal specifiers; only string-literal specifiers can be bundled at cache-write time",
+            visitor.non_literal_count
+        );
+    }
+
+    if visitor.specifiers.is_empty() {
+        return Ok((source.to_string(), Vec::new()));
+    }
+
+    let mut prepended: Vec<ModuleItem> = visitor
+        .specifiers
+        .iter()
+        .enumerate()
+        .map(|(i, spec)| {
+            ModuleItem::ModuleDecl(ModuleDecl::Import(ImportDecl {
+                span: Span::default(),
+                specifiers: vec![ImportSpecifier::Namespace(ImportStarAsSpecifier {
+                    span: Span::default(),
+                    local: Ident::new(
+                        format!("__litDyn_{i}").into(),
+                        Span::default(),
+                        SyntaxContext::empty(),
+                    ),
+                })],
+                src: Box::new(Str::from(spec.clone())),
+                type_only: false,
+                with: None,
+                phase: ImportPhase::Evaluation,
+            }))
+        })
+        .collect();
+    prepended.extend(module.body.drain(..));
+    module.body = prepended;
+
+    let rewritten = codegen_module(&cm, &module)?;
+    Ok((rewritten, visitor.specifiers))
+}
+
+#[derive(Default)]
+struct DynamicImportRewriter {
+    /// Specifiers found, in source order. Each occurrence gets its own alias
+    /// (swc_bundler dedups identical specifiers across the bundle anyway).
+    specifiers: Vec<String>,
+    /// Number of `import(expr)` calls whose argument is not a string literal.
+    /// We surface these as a hard error from the rewriter.
+    non_literal_count: usize,
+}
+
+impl VisitMut for DynamicImportRewriter {
+    fn visit_mut_call_expr(&mut self, call: &mut CallExpr) {
+        call.visit_mut_children_with(self);
+
+        if !matches!(call.callee, Callee::Import(_)) {
+            return;
+        }
+        if call.args.len() != 1 || call.args[0].spread.is_some() {
+            self.non_literal_count += 1;
+            return;
+        }
+        let spec = match &*call.args[0].expr {
+            Expr::Lit(Lit::Str(s)) => s.value.to_string(),
+            _ => {
+                self.non_literal_count += 1;
+                return;
+            }
+        };
+
+        let i = self.specifiers.len();
+        self.specifiers.push(spec);
+
+        let alias = Ident::new(
+            format!("__litDyn_{i}").into(),
+            Span::default(),
+            SyntaxContext::empty(),
+        );
+
+        // Replace the CallExpr in place with: Promise.resolve(<alias>)
+        *call = CallExpr {
+            span: Span::default(),
+            ctxt: SyntaxContext::empty(),
+            callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
+                span: Span::default(),
+                obj: Box::new(Expr::Ident(Ident::new(
+                    "Promise".into(),
+                    Span::default(),
+                    SyntaxContext::empty(),
+                ))),
+                prop: MemberProp::Ident(IdentName::new("resolve".into(), Span::default())),
+            }))),
+            args: vec![ExprOrSpread {
+                spread: None,
+                expr: Box::new(Expr::Ident(alias)),
+            }],
+            type_args: None,
+        };
+    }
 }
 
 /// Parse a JS source and return every static import/re-export specifier.
@@ -560,6 +717,97 @@ mod tests {
         assert!(
             bundled.contains("41"),
             "transitive body not inlined: {bundled}"
+        );
+    }
+
+    #[test]
+    fn rewrite_dynamic_imports_noop_when_none_present() {
+        let src = "async function main() { return 1; }";
+        let (out, specs) = rewrite_literal_dynamic_imports(src).unwrap();
+        assert!(specs.is_empty());
+        assert_eq!(out, src);
+    }
+
+    #[test]
+    fn rewrite_dynamic_imports_inlines_literal_call() {
+        let src = r#"async function main() {
+  const ns = await import("zod@3.22.4/+esm");
+  return ns.foo;
+}"#;
+        let (out, specs) = rewrite_literal_dynamic_imports(src).unwrap();
+        assert_eq!(specs, vec!["zod@3.22.4/+esm"]);
+        assert!(
+            out.contains(r#"import * as __litDyn_0 from "zod@3.22.4/+esm""#),
+            "expected static import alias prepended; got: {out}"
+        );
+        assert!(
+            out.contains("Promise.resolve(__litDyn_0)"),
+            "expected dynamic call rewritten; got: {out}"
+        );
+        assert!(
+            !out.contains(r#"import("zod"#),
+            "literal import() should be gone; got: {out}"
+        );
+    }
+
+    #[test]
+    fn rewrite_dynamic_imports_assigns_unique_alias_per_call() {
+        let src = r#"async function main() {
+  const a = await import("a@1.0.0/+esm");
+  const b = await import("b@1.0.0/+esm");
+  return [a, b];
+}"#;
+        let (out, specs) = rewrite_literal_dynamic_imports(src).unwrap();
+        assert_eq!(specs, vec!["a@1.0.0/+esm", "b@1.0.0/+esm"]);
+        assert!(out.contains("__litDyn_0"));
+        assert!(out.contains("__litDyn_1"));
+    }
+
+    #[test]
+    fn rewrite_dynamic_imports_rejects_non_literal_specifier() {
+        let src = r#"async function main(spec) {
+  return await import(spec);
+}"#;
+        let err = rewrite_literal_dynamic_imports(src).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("non-literal"),
+            "expected non-literal rejection; got: {msg}"
+        );
+    }
+
+    /// End-to-end through the bundler: a dynamic `import("...")` call must be
+    /// fully inlined so the output script contains no `import(` of any kind.
+    #[test]
+    fn run_swc_bundler_inlines_literal_dynamic_import() {
+        // Drive bundle_user_code's machinery without actually fetching: build
+        // the rewritten entry + sources by hand and run run_swc_bundler.
+        let entry = r#"async function main() {
+  const ns = await import("https://cdn.jsdelivr.net/npm/dyn@1.0.0/+esm");
+  return ns.greet();
+}"#;
+        let (rewritten, specs) = rewrite_literal_dynamic_imports(entry).unwrap();
+        assert_eq!(specs, vec!["https://cdn.jsdelivr.net/npm/dyn@1.0.0/+esm"]);
+
+        let mut sources = HashMap::new();
+        sources.insert(
+            "https://cdn.jsdelivr.net/npm/dyn@1.0.0/+esm".to_string(),
+            "export function greet() { return 'hi from dyn'; }".to_string(),
+        );
+
+        let bundled = run_swc_bundler(rewritten, sources).unwrap();
+        assert!(
+            !bundled.contains("import("),
+            "leftover dynamic import: {bundled}"
+        );
+        assert!(!bundled.contains("import "), "leftover import: {bundled}");
+        assert!(
+            bundled.contains("hi from dyn"),
+            "dyn body not inlined: {bundled}"
+        );
+        assert!(
+            bundled.contains("Promise.resolve"),
+            "Promise.resolve wrap missing: {bundled}"
         );
     }
 

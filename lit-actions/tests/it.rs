@@ -279,6 +279,36 @@ async fn lit_namespace_protection(mut client: TestClient) {
     assert!(client.received::<ExecutionResult>().success);
 }
 
+/// User code must not see the internal `__litEvalCached` helper that wraps
+/// the action source for V8's eval-context code cache (CPL-264). The helper
+/// deletes itself from globalThis as its first action; if that ever regresses,
+/// user code would gain a string-eval primitive that bypasses
+/// `--disallow-code-generation-from-strings`.
+#[rstest]
+#[tokio::test]
+async fn lit_eval_cached_is_hidden_from_user_code(mut client: TestClient) {
+    let code = indoc! {r#"
+        async function main() {
+        console.log(
+            typeof __litEvalCached,
+            typeof globalThis.__litEvalCached,
+        )
+        }
+    "#};
+
+    client
+        .respond_with(PrintResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        client.received::<PrintRequest>().message.trim_end(),
+        "undefined undefined"
+    );
+    assert!(client.received::<ExecutionResult>().success);
+}
+
 #[rstest]
 #[tokio::test]
 async fn js_params(mut client: TestClient) {
@@ -534,13 +564,19 @@ async fn reference_error(mut client: TestClient) {
         .execute_js("async function main() { nonexisting_function() }")
         .await;
 
+    // User code now runs through `__litEvalCached` (op_eval_context) so V8's
+    // script code cache is reachable for the bundled action (CPL-264). Side
+    // effects on error output: the script name is the URL specifier used by
+    // op_eval_context, and two wrapper frames appear at the tail.
     assert_eq!(
         res.unwrap_err().to_string(),
         indoc! {r#"
             Uncaught (in promise) ReferenceError: nonexisting_function is not defined
-                at main (<user_provided_script>:2:33)
-                at <user_provided_script>:6:28
-                at <user_provided_script>:10:11
+                at main (file:///user_provided_script.js:2:33)
+                at file:///user_provided_script.js:6:28
+                at file:///user_provided_script.js:10:11
+                at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:52:21)
+                at <user_provided_script>:1:1
         "#}
         .trim()
     );
@@ -558,13 +594,17 @@ async fn throw_error(mut client: TestClient) {
         "#};
         let res = client.execute_js(code).await;
 
+        // See `reference_error` for why the stack format differs from
+        // pre-CPL-264 output.
         assert_eq!(
             res.unwrap_err().to_string(),
             indoc! {r#"
                 Uncaught (in promise) Error: boom
-                    at main (<user_provided_script>:3:7)
-                    at <user_provided_script>:9:28
-                    at <user_provided_script>:13:11
+                    at main (file:///user_provided_script.js:3:7)
+                    at file:///user_provided_script.js:9:28
+                    at file:///user_provided_script.js:13:11
+                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:52:21)
+                    at <user_provided_script>:1:1
             "#}
             .trim(),
         );
@@ -583,9 +623,11 @@ async fn throw_error(mut client: TestClient) {
             res.unwrap_err().to_string(),
             indoc! {r#"
                 Uncaught (in promise) Error: boom
-                    at main (<user_provided_script>:3:11)
-                    at <user_provided_script>:9:28
-                    at <user_provided_script>:13:11
+                    at main (file:///user_provided_script.js:3:11)
+                    at file:///user_provided_script.js:9:28
+                    at file:///user_provided_script.js:13:11
+                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:52:21)
+                    at <user_provided_script>:1:1
             "#}
             .trim(),
         );

@@ -5,6 +5,7 @@ use std::sync::{Arc, RwLock};
 
 use crate::cdn_module_loader::{CdnModuleLoader, ModuleCache};
 use crate::runtime::{ActionCodeCache, new_action_code_cache};
+use crate::v8_code_cache::{SharedV8CodeCache, new_v8_code_cache};
 
 use anyhow::Result;
 use deno_core::error::CoreError;
@@ -40,6 +41,9 @@ pub struct Server {
     module_cache: ModuleCache,
     /// Shared cache for action code prepared from the incoming code CID.
     action_code_cache: ActionCodeCache,
+    /// Shared V8 code cache: handed to each MainWorker so compiled bytecode
+    /// for cached actions is reused instead of being recompiled every run.
+    v8_code_cache: SharedV8CodeCache,
     /// Path to integrity.lock file for TOFU auto-pinning.
     lockfile_path: Option<PathBuf>,
     /// Shared HTTP client for CDN fetches (connection pooling across executions).
@@ -65,6 +69,7 @@ impl Server {
             strict_imports,
             module_cache: Arc::new(RwLock::new(HashMap::new())),
             action_code_cache: new_action_code_cache(),
+            v8_code_cache: new_v8_code_cache(),
             lockfile_path,
             http_client: CdnModuleLoader::build_http_client(),
         }
@@ -77,6 +82,7 @@ impl Server {
             strict_imports: false,
             module_cache: Arc::new(RwLock::new(HashMap::new())),
             action_code_cache: new_action_code_cache(),
+            v8_code_cache: new_v8_code_cache(),
             lockfile_path: None,
             http_client: CdnModuleLoader::build_http_client(),
         }
@@ -102,6 +108,7 @@ impl Action for Server {
         let strict_imports = self.strict_imports;
         let module_cache = self.module_cache.clone();
         let action_code_cache = self.action_code_cache.clone();
+        let v8_code_cache = self.v8_code_cache.clone();
         let lockfile_path = self.lockfile_path.clone();
         let http_client = self.http_client.clone();
 
@@ -190,6 +197,7 @@ impl Action for Server {
                                     strict_imports,
                                     module_cache.clone(),
                                     action_code_cache.clone(),
+                                    v8_code_cache.clone(),
                                     lockfile_path.clone(),
                                     http_client.clone(),
                                 )

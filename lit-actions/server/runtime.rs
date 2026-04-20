@@ -3,7 +3,7 @@ use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Once;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, LazyLock, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -13,6 +13,7 @@ use deno_core::{JsRuntime, v8};
 use crate::bundler;
 use crate::cdn_module_loader::{CdnModuleLoader, LoadedModules, ModuleCache};
 use crate::import_rewriter;
+use crate::v8_code_cache::SharedV8CodeCache;
 use deno_resolver::npm::{DenoInNpmPackageChecker, ManagedNpmResolver};
 use deno_runtime::{
     BootstrapOptions, WorkerLogLevel,
@@ -40,6 +41,27 @@ const MEMORY_SAMPLE_INTERVAL_MS: u64 = 500; // 500ms
 const EXECUTION_TERMINATED_ERROR: &str = "Uncaught Error: execution terminated";
 const MAX_ACTION_CODE_CACHE_BYTES: usize = 100 * 1024 * 1024;
 const ACTION_CODE_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
+
+// Permissions are identical for every execution (deny everything except outbound
+// `fetch`), so we build the descriptor parser and the `Permissions` instance
+// once and clone per execution instead of rebuilding them inside
+// `build_main_worker_and_inject_sdk`.
+static PERMISSION_DESC_PARSER: LazyLock<Arc<RuntimePermissionDescriptorParser<RealSys>>> =
+    LazyLock::new(|| Arc::new(RuntimePermissionDescriptorParser::new(RealSys)));
+
+static BASE_PERMISSIONS: LazyLock<Permissions> = LazyLock::new(|| {
+    Permissions::from_options(
+        PERMISSION_DESC_PARSER.as_ref(),
+        &PermissionsOptions {
+            allow_net: Some(vec![]),
+            ..Default::default()
+        },
+    )
+    .expect("valid permissions")
+});
+
+static PRIVACY_MODE_HEADER_KEY: LazyLock<String> =
+    LazyLock::new(|| HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase());
 
 pub(crate) type ActionCodeCache = Arc<RwLock<ActionCodeCacheState>>;
 
@@ -220,20 +242,25 @@ async fn prepare_action_code(
     code: &str,
     context: &ActionCodePrepareContext<'_>,
 ) -> Result<CachedActionCode> {
-    // Detect the user's static imports. If there are none, the raw code is
-    // already executable as a script. Otherwise, hand off to the pre-execution
-    // bundler, which inlines every CDN dep into the entry source so the cached
-    // form contains no `import` call of any kind — eliminating Deno's
-    // `resolve`/`load` pipeline from the hot path (CPL-262).
+    // Detect the user's static imports. If there are none AND no `import(`
+    // substring is present, the raw code is already executable as a script.
+    // Otherwise, hand off to the pre-execution bundler, which inlines every
+    // CDN dep into the entry source so the cached form contains no `import`
+    // call of any kind — eliminating Deno's `resolve`/`load` pipeline from
+    // the hot path (CPL-262).
     //
-    // `rewrite_imports` is used only to decide whether bundling is necessary
-    // and to seed the dep-graph walk; the bundler consumes the **original**
-    // code (with imports intact) so SWC can map each imported binding to its
-    // inlined definition.
-    let import_rewriter::RewriteResult { code: _, imports } =
-        import_rewriter::rewrite_imports(code);
+    // The `import(` substring check is intentionally permissive — false
+    // positives (e.g. the literal text inside a string or comment) just route
+    // through the bundler, which is harmless. The bundler then parses the
+    // source with SWC and either inlines literal `import("...")` calls or
+    // surfaces a clear error for non-literal dynamic imports.
+    //
+    // `rewrite_imports` is used only to seed the static-import dep walk; the
+    // bundler consumes the **original** code (with imports intact) so SWC can
+    // map each imported binding to its inlined definition.
+    let import_rewriter::RewriteResult { imports, .. } = import_rewriter::rewrite_imports(code);
 
-    if imports.is_empty() {
+    if imports.is_empty() && !code.contains("import(") {
         return Ok(CachedActionCode {
             code: code.to_string(),
             loaded_modules: Vec::new(),
@@ -322,6 +349,7 @@ fn build_main_worker_and_inject_sdk(
     http_headers: BTreeMap<String, String>,
     memory_limit_mb: Option<usize>,
     module_loader: Rc<dyn deno_core::ModuleLoader>,
+    v8_code_cache: SharedV8CodeCache,
 ) -> Result<MainWorker> {
     let options = WorkerOptions {
         bootstrap: BootstrapOptions {
@@ -339,7 +367,7 @@ fn build_main_worker_and_inject_sdk(
         unsafely_ignore_certificate_errors: None,
         seed: None,
         create_web_worker_cb: Arc::new(|_| {
-            unreachable!("web workers are disabled in PatchDeno.js")
+            unreachable!("Worker is deleted from globalThis in LitNamespace.js")
         }),
         format_js_error_fn: Some(Arc::new(format_js_error)),
         maybe_inspector_server: None,
@@ -352,16 +380,13 @@ fn build_main_worker_and_inject_sdk(
         enable_stack_trace_arg_in_ops: false,
     };
 
-    // Deny everything except for network access, e.g. via fetch()
-    let desc_parser = Arc::new(RuntimePermissionDescriptorParser::new(RealSys));
-    let perms = Permissions::from_options(
-        desc_parser.as_ref(),
-        &PermissionsOptions {
-            allow_net: Some(vec![]),
-            ..Default::default()
-        },
-    )
-    .expect("valid permissions");
+    // Deny everything except for network access, e.g. via fetch(). The parser
+    // and the base `Permissions` instance are identical per execution, so we
+    // keep them in `LazyLock`s and clone the struct (cheap — it's a few
+    // `UnaryPermission` fields) instead of rebuilding via `from_options` each
+    // time.
+    let desc_parser = Arc::clone(&PERMISSION_DESC_PARSER);
+    let perms = BASE_PERMISSIONS.clone();
 
     let services =
         WorkerServiceOptions::<DenoInNpmPackageChecker, ManagedNpmResolver<RealSys>, RealSys> {
@@ -377,7 +402,7 @@ fn build_main_worker_and_inject_sdk(
             fetch_dns_resolver: Default::default(),
             shared_array_buffer_store: Default::default(),
             compiled_wasm_module_store: Default::default(),
-            v8_code_cache: Default::default(),
+            v8_code_cache: Some(v8_code_cache),
         };
 
     let main_module =
@@ -388,9 +413,8 @@ fn build_main_worker_and_inject_sdk(
         let _span = info_span!("LitNamespace.js").entered();
 
         if http_headers
-            .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
-            .unwrap_or(&"false".to_string())
-            == "true"
+            .get(PRIVACY_MODE_HEADER_KEY.as_str())
+            .is_some_and(|v| v == "true")
         {
             debug!("Populating LitHeaders: **PRIVACY MODE**");
         } else {
@@ -430,34 +454,26 @@ fn build_main_worker_and_inject_sdk(
             code.push_str("delete globalThis.LitTest;\n");
         }
 
+        // These introspection APIs are (re)installed on globalThis by the
+        // deno_runtime bootstrap that runs at MainWorker creation — *after*
+        // our snapshot-embedded 99_patches.js — so they must be deleted
+        // per-execution. Appending here lets us do all bootstrap cleanup in
+        // a single `execute_script` call instead of two.
+        code.push_str(
+            "delete Deno.build;\ndelete Deno.permissions;\ndelete Deno.version;\ndelete globalThis.Worker;\n",
+        );
+
         worker
             .execute_script("LitNamespace.js", code.into())
             .context("Error populating Lit namespace")?;
-    }
-
-    {
-        let _span = info_span!("PatchDeno.js").entered();
-
-        let code = formatdoc! {r#"
-            "use strict";
-            delete Deno.build;
-            delete Deno.permissions;
-            delete Deno.version;
-            delete globalThis.Worker;
-        "#};
-
-        worker
-            .execute_script("PatchDeno.js", code.into())
-            .context("Error patching Deno runtime")?;
     }
 
     if let Some(params) = globals_to_inject {
         let _span = info_span!("Params.js").entered();
 
         if http_headers
-            .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
-            .unwrap_or(&"false".to_string())
-            == "true"
+            .get(PRIVACY_MODE_HEADER_KEY.as_str())
+            .is_some_and(|v| v == "true")
         {
             debug!("Injecting params as globals: **PRIVACY MODE**");
         } else {
@@ -519,6 +535,7 @@ pub(crate) async fn execute_js(
     strict_imports: bool,
     module_cache: ModuleCache,
     action_code_cache: ActionCodeCache,
+    v8_code_cache: SharedV8CodeCache,
     lockfile_path: Option<PathBuf>,
     http_client: Arc<reqwest::Client>,
 ) -> Result<()> {
@@ -565,6 +582,7 @@ pub(crate) async fn execute_js(
         http_headers,
         Some(memory_limit_mb),
         module_loader,
+        v8_code_cache,
     )
     .context("Error building main worker")
     .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
@@ -629,11 +647,23 @@ pub(crate) async fn execute_js(
             .await?
     };
     record_loaded_modules(&loaded_modules, &cached_code);
-    let code = cached_code.to_executable_code(&js_func_params);
+    let user_code = cached_code.to_executable_code(&js_func_params);
+
+    // Route user code through op_eval_context (via the __litEvalCached helper
+    // baked into 99_patches.js) so Deno's `eval_context_code_cache_cbs` —
+    // wired to our SharedV8CodeCache — gets to see the source. execute_script
+    // bypasses that cache entirely, forcing V8 to reparse and recompile the
+    // bundled action on every request. The outer stub still parses per
+    // execution, but its body is one string literal, so V8 only pays for
+    // source-string scanning rather than compiling the bundled action body
+    // (CPL-264).
+    let user_code_literal =
+        serde_json::to_string(&user_code).context("Could not serialize user code for eval stub")?;
+    let stub = format!("__litEvalCached({user_code_literal}, \"file:///user_provided_script.js\");");
 
     if let Err(e) = worker
         .js_runtime
-        .execute_script("<user_provided_script>", code)
+        .execute_script("<user_provided_script>", stub)
     {
         // Delay error handling if the controller has terminated the isolate,
         // in which case halt_isolate_rx will tell the reason.
