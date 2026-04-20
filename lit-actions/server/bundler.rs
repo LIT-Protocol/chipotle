@@ -136,9 +136,7 @@ async fn walk_deps(
         // limit. `seen` already counts every URL we have committed to
         // fetching, so bounding it here gives a deterministic gate.
         if seen.len() > MAX_MODULE_COUNT {
-            bail!(
-                "dependency graph exceeds maximum module count ({MAX_MODULE_COUNT})"
-            );
+            bail!("dependency graph exceeds maximum module count ({MAX_MODULE_COUNT})");
         }
 
         let layer_size = frontier.len();
