@@ -35,7 +35,7 @@ use deno_runtime::tokio_util::create_and_run_current_thread;
 use lit_actions_grpc::proto::{ExecuteJsRequest, ExecuteJsResponse};
 use lit_observability::channels::TracedReceiver;
 use lit_observability::logging::set_request_context;
-use tracing::{Instrument, Span, debug, error, warn};
+use tracing::{Instrument, Span, debug, error, instrument, warn};
 
 use crate::runtime::{self, ActionCodeCache, PoolSharedState};
 use crate::server;
@@ -174,6 +174,7 @@ impl WorkerPool {
     /// Try to grab a pre-warmed worker. On hit, the pool spawns one
     /// replacement asynchronously (drain-then-refill). On miss returns
     /// `None`; caller must fall through to the legacy cold path.
+    #[instrument(skip_all)]
     pub(crate) fn try_acquire(self: &Arc<Self>) -> Option<WorkerHandle> {
         if self.target_size == 0 {
             return None;
@@ -214,6 +215,7 @@ impl WorkerPool {
     /// Note a `TrySendError::Disconnected` from the dispatcher: the worker
     /// thread died between publishing its handle and the dispatcher
     /// trying to hand it work. Counted at DEBUG: this is a normal-ish race.
+    #[instrument(skip_all)]
     pub(crate) fn note_disconnected(&self) {
         self.health
             .disconnected_misses
@@ -243,6 +245,7 @@ impl WorkerPool {
         }
     }
 
+    #[instrument(skip_all)]
     fn record_refill_success(&self) {
         self.health
             .consecutive_refill_failures
@@ -266,6 +269,7 @@ impl WorkerPool {
         }
     }
 
+    #[instrument(skip_all)]
     fn record_refill_failure(&self, err: &dyn std::fmt::Display) {
         self.health.refill_failed.fetch_add(1, Ordering::Relaxed);
         let prev = self
@@ -304,6 +308,7 @@ impl WorkerPool {
     }
 }
 
+#[instrument(skip_all)]
 fn run_worker_thread(pool: Arc<WorkerPool>) {
     // Bootstrap is the panic surface: any V8 / Deno init issue lands here.
     // catch_unwind protects against Rust panics; aborts/segfaults/SIGTRAP
@@ -404,6 +409,7 @@ fn run_worker_thread(pool: Arc<WorkerPool>) {
     // MainWorker dropped here; thread exits.
 }
 
+#[instrument(skip_all)]
 fn schedule_replacement(pool: &Arc<WorkerPool>) {
     let failures = pool
         .health
