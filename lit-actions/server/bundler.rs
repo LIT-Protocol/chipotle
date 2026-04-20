@@ -17,9 +17,9 @@ use deno_core::ModuleSpecifier;
 use swc_bundler::{Bundler, Config, Hook, Load, ModuleData, ModuleRecord, ModuleType, Resolve};
 use swc_common::{FileName, GLOBALS, Globals, Span, SyntaxContext, sync::Lrc};
 use swc_ecma_ast::{
-    CallExpr, Callee, EsVersion, Expr, ExprOrSpread, Ident, IdentName, ImportDecl,
-    ImportPhase, ImportSpecifier, ImportStarAsSpecifier, KeyValueProp, Lit, MemberExpr,
-    MemberProp, Module, ModuleDecl, ModuleItem, Str,
+    CallExpr, Callee, EsVersion, Expr, ExprOrSpread, Ident, IdentName, ImportDecl, ImportPhase,
+    ImportSpecifier, ImportStarAsSpecifier, KeyValueProp, Lit, MemberExpr, MemberProp, Module,
+    ModuleDecl, ModuleItem, Str,
 };
 use swc_ecma_codegen::{Emitter, text_writer::JsWriter};
 use swc_ecma_loader::resolve::Resolution;

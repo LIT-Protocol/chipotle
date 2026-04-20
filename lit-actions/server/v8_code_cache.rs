@@ -92,7 +92,9 @@ impl CodeCache for V8CodeCache {
         };
 
         if let Some(old) = inner.entries.remove(&key) {
-            inner.total_bytes = inner.total_bytes.saturating_sub(entry_size(&key, old.len()));
+            inner.total_bytes = inner
+                .total_bytes
+                .saturating_sub(entry_size(&key, old.len()));
         }
 
         if inner.total_bytes + size_bytes > MAX_V8_CODE_CACHE_BYTES {
@@ -116,11 +118,7 @@ mod tests {
     fn round_trip() {
         let cache = V8CodeCache::default();
         let s = specifier();
-        assert!(
-            cache
-                .get_sync(&s, CodeCacheType::Script, 42)
-                .is_none()
-        );
+        assert!(cache.get_sync(&s, CodeCacheType::Script, 42).is_none());
         cache.set_sync(s.clone(), CodeCacheType::Script, 42, b"bytecode");
         assert_eq!(
             cache.get_sync(&s, CodeCacheType::Script, 42).as_deref(),
@@ -133,16 +131,8 @@ mod tests {
         let cache = V8CodeCache::default();
         let s = specifier();
         cache.set_sync(s.clone(), CodeCacheType::Script, 1, b"a");
-        assert!(
-            cache
-                .get_sync(&s, CodeCacheType::EsModule, 1)
-                .is_none()
-        );
-        assert!(
-            cache
-                .get_sync(&s, CodeCacheType::Script, 2)
-                .is_none()
-        );
+        assert!(cache.get_sync(&s, CodeCacheType::EsModule, 1).is_none());
+        assert!(cache.get_sync(&s, CodeCacheType::Script, 2).is_none());
     }
 
     #[test]

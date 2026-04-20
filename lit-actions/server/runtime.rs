@@ -659,7 +659,8 @@ pub(crate) async fn execute_js(
     // (CPL-264).
     let user_code_literal =
         serde_json::to_string(&user_code).context("Could not serialize user code for eval stub")?;
-    let stub = format!("__litEvalCached({user_code_literal}, \"file:///user_provided_script.js\");");
+    let stub =
+        format!("__litEvalCached({user_code_literal}, \"file:///user_provided_script.js\");");
 
     if let Err(e) = worker
         .js_runtime
