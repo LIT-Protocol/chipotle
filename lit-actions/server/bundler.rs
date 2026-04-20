@@ -15,7 +15,9 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use anyhow::{Context, Result, anyhow, bail};
 use deno_core::ModuleSpecifier;
 use swc_bundler::{Bundler, Config, Hook, Load, ModuleData, ModuleRecord, ModuleType, Resolve};
-use swc_common::{FileName, GLOBALS, Globals, Span, SyntaxContext, sync::Lrc};
+use swc_common::{
+    FileName, GLOBALS, Globals, SourceMapper, Span, Spanned, SyntaxContext, sync::Lrc,
+};
 use swc_ecma_ast::{
     CallExpr, Callee, EsVersion, Expr, ExprOrSpread, Ident, IdentName, ImportDecl, ImportPhase,
     ImportSpecifier, ImportStarAsSpecifier, KeyValueProp, Lit, MemberExpr, MemberProp, Module,
@@ -188,6 +190,18 @@ async fn walk_deps(
 /// literal: the bundler cannot pre-fetch unknown specifiers, and the bundler-only
 /// design rejects runtime module resolution.
 ///
+/// SEMANTIC CHANGE — eager evaluation. A literal `import("X")` originally
+/// loaded and evaluated module X lazily, only when the call site executed. After
+/// rewrite, X becomes a top-level static import: it is fetched, parsed, and
+/// evaluated *unconditionally at script start*, even if the original `import()`
+/// call site was never reached (e.g. inside a branch never taken). Side effects
+/// of X's top-level code (and of any module X transitively imports) therefore
+/// run earlier and always. This matches the bundler-only design (CPL-262/264):
+/// every dependency a Lit Action *might* use must be known at cache-write time,
+/// so lazy/conditional `import()` is not a supported part of the Lit Action JS
+/// subset. Authors needing conditional execution should branch on the namespace
+/// after the await rather than relying on `import()` being skipped.
+///
 /// NOTE: this rewrite only runs on the user's entry source, not on fetched CDN
 /// modules. CDN modules that contain dynamic `import()` calls are still left to
 /// fail at execution time via `CdnModuleLoader::load`. In practice jsDelivr's
@@ -213,10 +227,20 @@ fn rewrite_literal_dynamic_imports(source: &str) -> Result<(String, Vec<String>)
     let mut visitor = DynamicImportRewriter::default();
     module.visit_mut_with(&mut visitor);
 
-    if visitor.non_literal_count > 0 {
+    if !visitor.non_literal_spans.is_empty() {
+        let count = visitor.non_literal_spans.len();
+        let first = visitor.non_literal_spans[0];
+        let loc = cm.lookup_char_pos(first.lo);
+        let snippet = cm
+            .span_to_snippet(first)
+            .ok()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "<unavailable>".to_string());
         bail!(
-            "{} dynamic import(...) call(s) with non-literal specifiers; only string-literal specifiers can be bundled at cache-write time",
-            visitor.non_literal_count
+            "{count} dynamic import(...) call(s) with non-literal specifiers; only string-literal specifiers can be bundled at cache-write time. First offender at line {}, col {}: `{snippet}`",
+            loc.line,
+            loc.col_display + 1,
         );
     }
 
@@ -246,7 +270,7 @@ fn rewrite_literal_dynamic_imports(source: &str) -> Result<(String, Vec<String>)
             }))
         })
         .collect();
-    prepended.extend(module.body.drain(..));
+    prepended.append(&mut module.body);
     module.body = prepended;
 
     let rewritten = codegen_module(&cm, &module)?;
@@ -258,9 +282,10 @@ struct DynamicImportRewriter {
     /// Specifiers found, in source order. Each occurrence gets its own alias
     /// (swc_bundler dedups identical specifiers across the bundle anyway).
     specifiers: Vec<String>,
-    /// Number of `import(expr)` calls whose argument is not a string literal.
-    /// We surface these as a hard error from the rewriter.
-    non_literal_count: usize,
+    /// Spans of `import(expr)` calls whose argument is not a string literal.
+    /// We surface these as a hard error from the caller, with line/col + snippet
+    /// from the first offender so the user knows where to refactor.
+    non_literal_spans: Vec<Span>,
 }
 
 impl VisitMut for DynamicImportRewriter {
@@ -271,13 +296,16 @@ impl VisitMut for DynamicImportRewriter {
             return;
         }
         if call.args.len() != 1 || call.args[0].spread.is_some() {
-            self.non_literal_count += 1;
+            // Span the whole call so the snippet captures `import(...)` shape.
+            self.non_literal_spans.push(call.span);
             return;
         }
         let spec = match &*call.args[0].expr {
             Expr::Lit(Lit::Str(s)) => s.value.to_string(),
             _ => {
-                self.non_literal_count += 1;
+                // Span the offending argument expression so the snippet shows
+                // exactly what couldn't be evaluated at cache-write time.
+                self.non_literal_spans.push(call.args[0].expr.span());
                 return;
             }
         };
@@ -774,6 +802,9 @@ mod tests {
             msg.contains("non-literal"),
             "expected non-literal rejection; got: {msg}"
         );
+        // Error must point at where to refactor: line + col + offending snippet.
+        assert!(msg.contains("line 2"), "missing line info; got: {msg}");
+        assert!(msg.contains("`spec`"), "missing snippet; got: {msg}");
     }
 
     /// End-to-end through the bundler: a dynamic `import("...")` call must be
