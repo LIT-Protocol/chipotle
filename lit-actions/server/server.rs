@@ -233,7 +233,7 @@ impl Action for Server {
                         debug!("{:?}", DebugExecutionRequest::from(&req));
                     }
 
-                    dispatch_execute_request(&dispatch, req, outbound_tx, inbound_rx, span);
+                    dispatch_execute_request(&dispatch, req, outbound_tx, inbound_rx, span).await;
                 }
                 _ => {} // Ignore empty requests
             }
@@ -253,7 +253,7 @@ impl Action for Server {
 /// Custom `memory_limit` requests bypass the pool entirely: pool workers
 /// are bootstrapped at `DEFAULT_MEMORY_LIMIT_MB` and V8's heap limit is
 /// immutable post-creation.
-fn dispatch_execute_request(
+async fn dispatch_execute_request(
     dispatch: &DispatchState,
     req: ExecutionRequest,
     outbound_tx: flume::Sender<tonic::Result<ExecuteJsResponse>>,
@@ -263,12 +263,20 @@ fn dispatch_execute_request(
     // Empty-code shortcut: never consume a pre-warmed worker for this.
     // Mirrors the fast path in `runtime::execute_js` but moved up so the
     // pool isn't drained and refilled for a no-op.
+    //
+    // Use `send_async().await` rather than `try_send`: `outbound_tx` is a
+    // rendezvous channel (`flume::bounded(0)`), and the receiver is the
+    // tonic response stream. If the dispatcher fires before tonic begins
+    // polling the stream, `try_send` drops the only response and the client
+    // observes an empty stream / hang.
     if req.code.is_empty() || req.code.bytes().all(|b| b.is_ascii_whitespace()) {
-        let _ = outbound_tx.try_send(Ok(ExecutionResult {
-            success: true,
-            ..Default::default()
-        }
-        .into()));
+        let _ = outbound_tx
+            .send_async(Ok(ExecutionResult {
+                success: true,
+                ..Default::default()
+            }
+            .into()))
+            .await;
         return;
     }
 

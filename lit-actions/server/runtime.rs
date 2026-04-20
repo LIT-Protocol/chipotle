@@ -445,8 +445,7 @@ pub(crate) fn inject_lit_namespace(
 
     if http_headers
         .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
-        .unwrap_or(&"false".to_string())
-        == "true"
+        .is_some_and(|v| v == "true")
     {
         debug!("Populating LitHeaders: **PRIVACY MODE**");
     } else {
@@ -528,8 +527,7 @@ fn inject_params_globals(
 
     if http_headers
         .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
-        .unwrap_or(&"false".to_string())
-        == "true"
+        .is_some_and(|v| v == "true")
     {
         debug!("Injecting params as globals: **PRIVACY MODE**");
     } else {

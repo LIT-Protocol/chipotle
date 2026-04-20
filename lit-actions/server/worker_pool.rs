@@ -411,9 +411,10 @@ fn schedule_replacement(pool: &Arc<WorkerPool>) {
         .load(Ordering::Relaxed)
         .max(1);
     // Exponential backoff, capped: 50ms, 100, 200, 400, 800, 1600, 3200, 5000ms.
+    // First failure (failures == 1) → BASE_MS << 0 = 50ms.
     // Shift bounded to 7 — shifting a u64 by >=64 bits is UB (panics in debug).
-    let backoff_ms =
-        (POOL_REFILL_BACKOFF_BASE_MS << failures.min(7)).min(POOL_REFILL_BACKOFF_MAX_MS);
+    let shift = (failures - 1).min(7);
+    let backoff_ms = (POOL_REFILL_BACKOFF_BASE_MS << shift).min(POOL_REFILL_BACKOFF_MAX_MS);
     let pool = pool.clone();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(backoff_ms));
