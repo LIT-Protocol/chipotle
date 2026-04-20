@@ -42,7 +42,6 @@ pub(crate) struct RewriteResult {
 /// preserved unchanged. The scanner is aware of single-line comments (`//`),
 /// block comments (`/* */`), and string/template literals so that import-like
 /// text inside those constructs is never mistakenly rewritten.
-
 pub(crate) fn rewrite_imports(code: &str) -> RewriteResult {
     let main_pos = find_main_declaration(code);
     let preamble = &code[..main_pos];
