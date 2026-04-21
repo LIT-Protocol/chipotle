@@ -909,7 +909,7 @@ async fn pool_memory_limit_bypass() {
         .respond_with(PrintResponse {})
         .execute_js(ExecutionRequest {
             code: r#"async function main() { console.log("custom limit") }"#.into(),
-            memory_limit: Some(64),
+            memory_limit: Some(100),
             ..Default::default()
         })
         .await

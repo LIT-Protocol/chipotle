@@ -36,7 +36,7 @@ use tracing::{debug, error, info_span, instrument};
 
 // Same default limits as in lit-node's action client
 const DEFAULT_TIMEOUT_MS: u64 = 1000 * 60 * 15; // 15 minutes
-pub(crate) const DEFAULT_MEMORY_LIMIT_MB: usize = 128; // 128MB
+pub(crate) const DEFAULT_MEMORY_LIMIT_MB: usize = 64; // 64MB
 const MEMORY_SAMPLE_INTERVAL_MS: u64 = 500; // 500ms
 const EXECUTION_TERMINATED_ERROR: &str = "Uncaught Error: execution terminated";
 const MAX_ACTION_CODE_CACHE_BYTES: usize = 100 * 1024 * 1024;
