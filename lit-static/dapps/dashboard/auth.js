@@ -182,8 +182,8 @@ export async function getClient() {
  */
 async function ensureSovereignSigner(client) {
   if (client.signer) return;
-  const { connectEoa, assertChain, switchChain } = await import('../../wallet_connect.js');
-  const { signer, chainId } = await connectEoa();
+  const { connectEoa, switchChain } = await import('../../wallet_connect.js');
+  let { signer, chainId } = await connectEoa();
   if (client.chainId != null && chainId !== client.chainId) {
     try {
       await switchChain(client.chainId);
@@ -192,6 +192,10 @@ async function ensureSovereignSigner(client) {
         `Your wallet is on chain ${chainId} but this dashboard expects chain ${client.chainId}. Switch network in your wallet and retry.`,
       );
     }
+    // switchChain rebinds window.ethereum to the new network; re-derive the
+    // signer from a fresh BrowserProvider so ethers caches the new chainId
+    // instead of signing against the previous network.
+    ({ signer } = await connectEoa());
   }
   client.connectSigner(signer);
 }

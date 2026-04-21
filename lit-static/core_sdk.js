@@ -7,9 +7,11 @@
  *
  * Modes:
  *  - 'api'       (default): every call goes through lit-api-server over HTTP.
- *  - 'sovereign'          : read methods call the AccountConfig contract directly
- *                           via RPC (no server round-trip). Writes still use HTTP
- *                           until Phase 1 adds the wallet-signed path.
+ *  - 'sovereign'          : reads call the AccountConfig contract directly via
+ *                           RPC (no server round-trip). Writes are submitted
+ *                           as wallet-signed contract transactions once
+ *                           `connectSigner(signer)` has been called; without a
+ *                           signer, write methods throw.
  *
  * In sovereign mode the constructor requires `rpcUrl` + `contractAddress`, or
  * the dashboard can call `getNodeChainConfig()` first and pass the values in.
@@ -20,6 +22,7 @@ import {
   ACCOUNT_CONFIG_FULL_ABI,
   ACCOUNT_CONFIG_ABI_VERSION,
   mergeDeployments,
+  isAbiDriftDevOverrideEnabled,
 } from './account_config_full_abi.js';
 import { runContractWrite, TX_STATES } from './tx_lifecycle.js';
 
@@ -408,9 +411,9 @@ export class LitNodeSimpleApiClient {
    * Hard-blocks sovereign writes on mismatch. Runs once per client instance;
    * cached promise is reused for subsequent calls.
    *
-   * Dev-override: if no entry exists for (chainId, address) in `deployments`,
-   * the check is skipped with a console warning. Shipping dashboards MUST
-   * provide pinned entries or users are vulnerable to ABI drift.
+   * Fail-closed: if no entry exists for (chainId, address), hard-block sovereign
+   * writes unless LIT_ACCOUNT_CONFIG_ALLOW_UNPINNED_DEPLOYMENTS is set (dev-only).
+   * Operators MUST populate ACCOUNT_CONFIG_DEPLOYMENTS or pass `deployments`.
    */
   async _verifyAbiIntegrity() {
     if (this.mode !== 'sovereign') return;
@@ -433,8 +436,13 @@ export class LitNodeSimpleApiClient {
         const key = `${chainId}:${this.contractAddress.toLowerCase()}`;
         const pinned = this.deployments[key];
         if (!pinned) {
+          if (!isAbiDriftDevOverrideEnabled()) {
+            throw new Error(
+              `ABI drift check: no pinned entry for ${key}. Add one to ACCOUNT_CONFIG_DEPLOYMENTS or pass 'deployments' option. To run against an unpinned deployment (dev only), set window.LIT_ACCOUNT_CONFIG_ALLOW_UNPINNED_DEPLOYMENTS = true. (ABI version: ${ACCOUNT_CONFIG_ABI_VERSION})`,
+            );
+          }
           console.warn(
-            `[LitNodeSimpleApiClient] ABI drift check SKIPPED: no pinned entry for ${key}. Add one to ACCOUNT_CONFIG_DEPLOYMENTS or pass 'deployments' option before shipping to production. (ABI version: ${ACCOUNT_CONFIG_ABI_VERSION})`,
+            `[LitNodeSimpleApiClient] ABI drift check SKIPPED (dev override): no pinned entry for ${key}. (ABI version: ${ACCOUNT_CONFIG_ABI_VERSION})`,
           );
           return;
         }
@@ -1238,7 +1246,11 @@ export class LitNodeSimpleApiClient {
     if (this.mode === 'sovereign') {
       const contract = await this._getViewContract();
       const hash = await this._apiKeyHash(apiKey);
-      const rows = groupId !== undefined
+      // Match server semantics: group IDs start at 1, so groupId==0 means
+      // "account-level listing", not "group zero". listActionsInGroup with 0
+      // can revert (GroupDoesNotExist) or return wrong data.
+      const inGroup = groupId !== undefined && Number(groupId) > 0;
+      const rows = inGroup
         ? await contract.listActionsInGroup(hash, groupId, pageNumber, pageSize)
         : await contract.listActions(hash, pageNumber, pageSize);
       return rows.map((r) => ({

@@ -324,7 +324,27 @@ export const ACCOUNT_CONFIG_FULL_ABI = [
  * Operators: regenerate hashes after any deployment with
  *   `cast keccak $(cast code <address> --rpc-url <rpc>)`.
  */
-export const ACCOUNT_CONFIG_DEPLOYMENTS = {};
+export const ACCOUNT_CONFIG_DEPLOYMENTS = Object.freeze({});
+
+/**
+ * Dev-only escape hatch for running sovereign mode against a deployment that
+ * has no pinned bytecode hash yet (local anvil, a fresh testnet deploy, etc.).
+ * Browser-only: checks `window` / `globalThis` for a truthy flag.
+ *
+ * Shipping dashboards MUST either populate ACCOUNT_CONFIG_DEPLOYMENTS with the
+ * target (chainId, address) entries or pass them via `deployments` option;
+ * otherwise sovereign writes hard-fail. See _verifyAbiIntegrity.
+ */
+export function isAbiDriftDevOverrideEnabled() {
+  const v = (typeof globalThis !== 'undefined' && globalThis.LIT_ACCOUNT_CONFIG_ALLOW_UNPINNED_DEPLOYMENTS)
+    ?? (typeof window !== 'undefined' && window.LIT_ACCOUNT_CONFIG_ALLOW_UNPINNED_DEPLOYMENTS);
+  if (typeof v === 'boolean') return v;
+  if (typeof v === 'string') {
+    const s = v.trim().toLowerCase();
+    return s === '1' || s === 'true' || s === 'yes' || s === 'on';
+  }
+  return false;
+}
 
 /**
  * Merge operator-provided deployments (e.g. from a build-time config or

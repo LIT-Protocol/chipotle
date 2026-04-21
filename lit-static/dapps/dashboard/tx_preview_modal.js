@@ -165,11 +165,27 @@ export function showTxPreview(methodName, args, meta = {}) {
 
     openModal(prettifyMethod(methodName), bodyHTML, footerHTML);
 
-    const cleanup = (result) => {
+    // The generic modal (initModalClose) already wires #modal-close-btn and
+    // overlay-background clicks to closeModal(). Without our own handlers on
+    // those paths, closing via the X or backdrop would hide the modal but
+    // leave this Promise unresolved, hanging the write flow in PREVIEWING.
+    // Resolve false on any close path; closeModal() is idempotent.
+    let settled = false;
+    const overlay = document.getElementById('modal-overlay');
+    const closeBtn = document.getElementById('modal-close-btn');
+    const onOverlayClick = (e) => { if (e.target.id === 'modal-overlay') settle(false); };
+    const onCloseClick = () => settle(false);
+    const settle = (result) => {
+      if (settled) return;
+      settled = true;
+      overlay?.removeEventListener('click', onOverlayClick);
+      closeBtn?.removeEventListener('click', onCloseClick);
       closeModal();
       resolve(result);
     };
-    document.getElementById('tx-preview-cancel')?.addEventListener('click', () => cleanup(false), { once: true });
-    document.getElementById('tx-preview-confirm')?.addEventListener('click', () => cleanup(true), { once: true });
+    overlay?.addEventListener('click', onOverlayClick);
+    closeBtn?.addEventListener('click', onCloseClick);
+    document.getElementById('tx-preview-cancel')?.addEventListener('click', () => settle(false), { once: true });
+    document.getElementById('tx-preview-confirm')?.addEventListener('click', () => settle(true), { once: true });
   });
 }

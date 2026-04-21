@@ -110,13 +110,27 @@ export async function switchChain(targetChainId, addParams) {
       params: [{ chainId: hexId }],
     });
   } catch (err) {
-    // EIP-3326 error code 4902: chain not added. Try to add then re-switch.
+    // EIP-3326 error code 4902: chain not added. Add it, then re-issue switch.
+    // Some wallets auto-switch after add, others do not, so we always retry
+    // the switch and verify chainId afterwards.
     const code = err?.code ?? err?.data?.originalError?.code;
     if (code === 4902 && addParams) {
       await window.ethereum.request({
         method: 'wallet_addEthereumChain',
         params: [{ ...addParams, chainId: hexId }],
       });
+      try {
+        await window.ethereum.request({
+          method: 'wallet_switchEthereumChain',
+          params: [{ chainId: hexId }],
+        });
+      } catch (switchErr) {
+        // Some wallets return success from add + auto-switch internally; if
+        // this second switch throws 4902 or "already on chain", treat it as
+        // non-fatal and fall through to the network-verification step below.
+        const sc = switchErr?.code ?? switchErr?.data?.originalError?.code;
+        if (sc !== 4902 && sc !== -32602) throw switchErr;
+      }
     } else {
       throw err;
     }
@@ -127,11 +141,20 @@ export async function switchChain(targetChainId, addParams) {
   const provider = new ethers.BrowserProvider(window.ethereum);
   const signer = await provider.getSigner();
   const network = await provider.getNetwork();
+  const activeChainId = Number(network.chainId);
+  if (activeChainId !== Number(targetChainId)) {
+    throw Object.assign(
+      new Error(
+        `Chain switch did not take effect: wallet is on chain ${activeChainId}, expected ${targetChainId}. Switch network manually and retry.`,
+      ),
+      { wrongChain: true, actual: activeChainId, expected: Number(targetChainId) },
+    );
+  }
   _state = {
     ..._state,
     provider,
     signer,
-    chainId: Number(network.chainId),
+    chainId: activeChainId,
   };
   emit();
 }
