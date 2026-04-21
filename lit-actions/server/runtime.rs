@@ -1,14 +1,16 @@
 use std::collections::{BTreeMap, HashMap};
+use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Once;
 use std::sync::{Arc, RwLock};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use deno_core::{JsRuntime, v8};
 
+use crate::bundler;
 use crate::cdn_module_loader::{CdnModuleLoader, LoadedModules, ModuleCache};
 use crate::import_rewriter;
 use deno_resolver::npm::{DenoInNpmPackageChecker, ManagedNpmResolver};
@@ -22,9 +24,11 @@ use deno_runtime::{
     worker::{MainWorker, WorkerOptions, WorkerServiceOptions},
 };
 use indoc::formatdoc;
+use ipfs_hasher::IpfsHasher;
 use lit_actions_grpc::proto::{ExecuteJsRequest, ExecuteJsResponse};
 use lit_api_core::context::HEADER_KEY_X_PRIVACY_MODE;
 use lit_observability::channels::TracedReceiver;
+use lit_observability::logging::clear_task_request_context;
 use sys_traits::impls::RealSys;
 use tokio::sync::{mpsc, oneshot};
 use tonic::Status;
@@ -32,35 +36,153 @@ use tracing::{debug, error, info_span, instrument};
 
 // Same default limits as in lit-node's action client
 const DEFAULT_TIMEOUT_MS: u64 = 1000 * 60 * 15; // 15 minutes
-const DEFAULT_MEMORY_LIMIT_MB: usize = 128; // 128MB
+pub(crate) const DEFAULT_MEMORY_LIMIT_MB: usize = 64; // 64MB
 const MEMORY_SAMPLE_INTERVAL_MS: u64 = 500; // 500ms
 const EXECUTION_TERMINATED_ERROR: &str = "Uncaught Error: execution terminated";
+const MAX_ACTION_CODE_CACHE_BYTES: usize = 100 * 1024 * 1024;
+const ACTION_CODE_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
 
-/// Maximum number of entries in the code rewrite cache.
-const CODE_CACHE_MAX_ENTRIES: usize = 1_000;
+pub(crate) type ActionCodeCache = Arc<RwLock<ActionCodeCacheState>>;
 
-/// Cached result of import rewriting for a given IPFS CID.
-#[derive(Clone)]
-pub(crate) struct CachedRewrite {
-    /// SHA-256 digest of the original code, used to verify cache integrity.
-    pub code_hash: [u8; 32],
-    /// User code with import statements stripped.
-    pub rewritten_code: String,
-    /// Pre-rendered dynamic import statements (empty string when no imports).
-    pub dynamic_imports: String,
-    /// Whether the original code had imports.
-    pub has_imports: bool,
+pub(crate) fn new_action_code_cache() -> ActionCodeCache {
+    Arc::new(RwLock::new(ActionCodeCacheState::default()))
 }
 
-/// Thread-safe cache mapping IPFS CID → rewrite result.
-pub(crate) type CodeCache = Arc<RwLock<HashMap<String, CachedRewrite>>>;
+#[derive(Default)]
+pub(crate) struct ActionCodeCacheState {
+    entries: HashMap<String, ActionCodeCacheEntry>,
+    total_bytes: usize,
+}
 
-/// Compute a SHA-256 hash of the code for cache integrity verification.
-fn hash_code(code: &str) -> [u8; 32] {
-    use sha2::{Digest, Sha256};
-    let mut hasher = Sha256::new();
-    hasher.update(code.as_bytes());
-    hasher.finalize().into()
+struct ActionCodeCacheEntry {
+    code: CachedActionCode,
+    size_bytes: usize,
+    expires_at: Instant,
+}
+
+struct ActionCodePrepareContext<'a> {
+    client: &'a Arc<reqwest::Client>,
+    integrity: &'a Arc<RwLock<HashMap<String, String>>>,
+    strict_imports: bool,
+    lockfile_path: &'a Option<PathBuf>,
+    module_cache: &'a ModuleCache,
+}
+
+impl ActionCodeCacheState {
+    fn get(&self, action_ipfs_id: &str, now: Instant) -> Option<CachedActionCode> {
+        let entry = self.entries.get(action_ipfs_id)?;
+        if entry.expires_at <= now {
+            return None;
+        }
+        Some(entry.code.clone())
+    }
+
+    fn insert(&mut self, action_ipfs_id: String, code: CachedActionCode, now: Instant) -> bool {
+        self.purge_expired(now);
+
+        let size_bytes =
+            action_code_cache_entry_size(&action_ipfs_id, action_ipfs_id.capacity(), &code);
+        if size_bytes > MAX_ACTION_CODE_CACHE_BYTES {
+            return false;
+        }
+
+        if let Some(old_entry) = self.entries.remove(&action_ipfs_id) {
+            self.total_bytes = self.total_bytes.saturating_sub(old_entry.size_bytes);
+        }
+
+        if self.total_bytes + size_bytes > MAX_ACTION_CODE_CACHE_BYTES {
+            return false;
+        }
+
+        self.total_bytes += size_bytes;
+        self.entries.insert(
+            action_ipfs_id,
+            ActionCodeCacheEntry {
+                code,
+                size_bytes,
+                expires_at: now + ACTION_CODE_CACHE_TTL,
+            },
+        );
+        true
+    }
+
+    fn purge_expired(&mut self, now: Instant) {
+        let expired_keys: Vec<String> = self
+            .entries
+            .iter()
+            .filter_map(|(key, entry)| {
+                if entry.expires_at <= now {
+                    Some(key.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        for key in expired_keys {
+            if let Some(entry) = self.entries.remove(&key) {
+                self.total_bytes = self.total_bytes.saturating_sub(entry.size_bytes);
+            }
+        }
+    }
+
+    fn total_bytes(&self) -> usize {
+        self.total_bytes
+    }
+}
+
+fn action_code_cache_entry_size(
+    action_ipfs_id: &str,
+    action_ipfs_id_capacity: usize,
+    code: &CachedActionCode,
+) -> usize {
+    size_of::<ActionCodeCacheEntry>()
+        + size_of::<String>()
+        + action_ipfs_id_capacity.max(action_ipfs_id.len())
+        + code.allocated_bytes()
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct CachedActionCode {
+    /// Fully self-contained JavaScript. When the user had static imports, this
+    /// is the `swc_bundler` output with every transitive CDN dependency inlined
+    /// and static ESM `import` / `export` syntax removed. User-authored dynamic
+    /// `import()` expressions are not transformed by bundling, are unsupported,
+    /// and may still appear in untouched user code (failing later at runtime).
+    /// Params are wrapped around this at execute-time (never cached).
+    code: String,
+    /// URL→hash of every module the bundler fetched while producing `code`.
+    /// Replayed into the per-execution `LoadedModules` tracker on cache hit so
+    /// billing / `showImportDetails()` sees the same set as on a cache miss.
+    loaded_modules: Vec<(String, String)>,
+}
+
+impl CachedActionCode {
+    fn allocated_bytes(&self) -> usize {
+        self.code.capacity()
+            + self.loaded_modules.capacity() * size_of::<(String, String)>()
+            + self
+                .loaded_modules
+                .iter()
+                .map(|(url, hash)| url.capacity() + hash.capacity())
+                .sum::<usize>()
+    }
+
+    fn to_executable_code(&self, js_func_params: &str) -> String {
+        format!(
+            "
+        {code}
+        ;
+        (async () => {{
+        const params = {js_func_params} ;
+        const data = await main(params);
+        if (typeof data !== \"undefined\") {{
+          LitActions.setResponse( {{ response: data }} );
+        }}
+        }})();",
+            code = self.code,
+        )
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]
@@ -70,6 +192,40 @@ enum ExecutionResult {
     OutOfMemory,
 }
 
+/// State shared across all worker constructions in a single process.
+/// Built once at server startup; cloned cheaply via `Arc` clone of fields.
+#[derive(Clone)]
+pub(crate) struct PoolSharedState {
+    pub integrity_manifest: Arc<RwLock<HashMap<String, String>>>,
+    pub strict_imports: bool,
+    pub module_cache: ModuleCache,
+    pub lockfile_path: Option<PathBuf>,
+    pub http_client: Arc<reqwest::Client>,
+    /// Heap limit in MB. Pool workers always use `DEFAULT_MEMORY_LIMIT_MB`;
+    /// the legacy cold path uses whatever the caller specified.
+    pub memory_limit_mb: usize,
+}
+
+/// A `MainWorker` that has been bootstrapped from the V8 snapshot but has
+/// not yet had any per-request JS injected. Carries the `LoadedModules`
+/// handle that was wired into its `CdnModuleLoader`; the same handle is
+/// later inserted into `op_state` so billing sees a single source of truth.
+///
+/// `PreparedWorker` is consumed by value in `execute_with_worker` to enforce
+/// one-shot lifecycle at the type level: the worker cannot be reused after
+/// a single execution.
+pub(crate) struct PreparedWorker {
+    pub worker: MainWorker,
+    pub loaded_modules: LoadedModules,
+}
+
+#[cfg(test)]
+impl PreparedWorker {
+    pub(crate) fn loaded_modules_for_test(&self) -> LoadedModules {
+        self.loaded_modules.clone()
+    }
+}
+
 static RUNTIME_SNAPSHOT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/RUNTIME_SNAPSHOT.bin"));
 
 fn deno_isolate_init() -> Option<&'static [u8]> {
@@ -77,21 +233,138 @@ fn deno_isolate_init() -> Option<&'static [u8]> {
     Some(RUNTIME_SNAPSHOT)
 }
 
-// using the worker built into deno
-#[allow(clippy::too_many_arguments)]
+fn get_lit_action_ipfs_id(code: &str) -> String {
+    let ipfs_hasher = IpfsHasher::default();
+    ipfs_hasher.compute(code.as_bytes())
+}
+
+fn record_loaded_modules(loaded_modules: &LoadedModules, cached_code: &CachedActionCode) {
+    if let Ok(mut modules) = loaded_modules.0.write() {
+        for (url, hash) in &cached_code.loaded_modules {
+            if !modules.iter().any(|m| &m.url == url) {
+                modules.push(crate::cdn_module_loader::LoadedModuleInfo {
+                    url: url.clone(),
+                    hash: hash.clone(),
+                });
+            }
+        }
+    }
+}
+
+async fn prepare_action_code(
+    code: &str,
+    context: &ActionCodePrepareContext<'_>,
+) -> Result<CachedActionCode> {
+    // Detect the user's static imports. If there are none, the raw code is
+    // already executable as a script. Otherwise, hand off to the pre-execution
+    // bundler, which inlines every CDN dep into the entry source so the cached
+    // form contains no `import` call of any kind — eliminating Deno's
+    // `resolve`/`load` pipeline from the hot path (CPL-262).
+    //
+    // `rewrite_imports` is used only to decide whether bundling is necessary
+    // and to seed the dep-graph walk; the bundler consumes the **original**
+    // code (with imports intact) so SWC can map each imported binding to its
+    // inlined definition.
+    let import_rewriter::RewriteResult { code: _, imports } =
+        import_rewriter::rewrite_imports(code);
+
+    if imports.is_empty() {
+        return Ok(CachedActionCode {
+            code: code.to_string(),
+            loaded_modules: Vec::new(),
+        });
+    }
+
+    let bundle_loader = CdnModuleLoader::with_options(
+        context.integrity.clone(),
+        context.strict_imports,
+        context.module_cache.clone(),
+        context.lockfile_path.clone(),
+        Some(context.client.clone()),
+        LoadedModules::default(),
+    );
+    let bundled = bundler::bundle_user_code(code, &imports, &bundle_loader)
+        .await
+        .map_err(|e| anyhow!("Failed to bundle CDN imports: {e}"))?;
+
+    // Snapshot the modules the bundler fetched, so cache hits can replay
+    // them into the per-execution LoadedModules handle for billing.
+    let loaded_modules = bundle_loader
+        .loaded_modules()
+        .0
+        .read()
+        .map(|m| {
+            m.iter()
+                .map(|info| (info.url.clone(), info.hash.clone()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Ok(CachedActionCode {
+        code: bundled,
+        loaded_modules,
+    })
+}
+
+async fn get_or_prepare_action_code(
+    code: &str,
+    action_ipfs_id: &str,
+    action_code_cache: &ActionCodeCache,
+    prepare_context: &ActionCodePrepareContext<'_>,
+) -> Result<CachedActionCode> {
+    let now = Instant::now();
+    if let Ok(cache) = action_code_cache.read()
+        && let Some(cached_code) = cache.get(action_ipfs_id, now)
+    {
+        debug!(action_ipfs_id, "action code loaded from cache");
+        return Ok(cached_code.clone());
+    }
+
+    let prepared_code = prepare_action_code(code, prepare_context).await?;
+
+    if let Ok(mut cache) = action_code_cache.write() {
+        if let Some(cached_code) = cache.get(action_ipfs_id, now) {
+            return Ok(cached_code.clone());
+        }
+
+        if cache.insert(action_ipfs_id.to_string(), prepared_code.clone(), now) {
+            debug!(
+                action_ipfs_id,
+                allocated_bytes = prepared_code.allocated_bytes(),
+                ttl_seconds = ACTION_CODE_CACHE_TTL.as_secs(),
+                "action code cached for future requests",
+            );
+        } else {
+            debug!(
+                action_ipfs_id,
+                cache_bytes = cache.total_bytes(),
+                allocated_bytes = prepared_code.allocated_bytes(),
+                max_cache = MAX_ACTION_CODE_CACHE_BYTES,
+                "action code cache full, skipping cache insertion"
+            );
+        }
+    }
+
+    Ok(prepared_code)
+}
+
+/// Build a `MainWorker` from the V8 snapshot. Warm-time safe: does no JS
+/// injection, so it can run off the request path before `auth_context` and
+/// `http_headers` are known. The single `LoadedModules` handle wired into
+/// the `CdnModuleLoader` is also returned on the `PreparedWorker`, so the
+/// caller can insert the same `Arc` into `op_state` later.
 #[instrument(skip_all, err)]
-fn build_main_worker_and_inject_sdk(
-    globals_to_inject: &Option<serde_json::Value>,
-    auth_context: &Option<serde_json::Value>,
-    http_headers: BTreeMap<String, String>,
-    memory_limit_mb: Option<usize>,
-    integrity_manifest: Arc<RwLock<HashMap<String, String>>>,
-    strict_imports: bool,
-    module_cache: ModuleCache,
-    lockfile_path: Option<PathBuf>,
-    http_client: Arc<reqwest::Client>,
-    loaded_modules: LoadedModules,
-) -> Result<MainWorker> {
+pub(crate) fn build_worker_base(shared: &PoolSharedState) -> Result<PreparedWorker> {
+    let loaded_modules = LoadedModules::default();
+    let module_loader: Rc<dyn deno_core::ModuleLoader> = Rc::new(CdnModuleLoader::with_options(
+        shared.integrity_manifest.clone(),
+        shared.strict_imports,
+        shared.module_cache.clone(),
+        shared.lockfile_path.clone(),
+        Some(shared.http_client.clone()),
+        loaded_modules.clone(),
+    ));
+
     let options = WorkerOptions {
         bootstrap: BootstrapOptions {
             cpu_count: 1,
@@ -103,8 +376,9 @@ fn build_main_worker_and_inject_sdk(
         extensions: vec![lit_actions_ext::lit_actions::init_ops()],
         startup_snapshot: deno_isolate_init(),
         skip_op_registration: false,
-        create_params: memory_limit_mb
-            .map(|limit| v8::CreateParams::default().heap_limits(0, limit * 1024 * 1024)),
+        create_params: Some(
+            v8::CreateParams::default().heap_limits(0, shared.memory_limit_mb * 1024 * 1024),
+        ),
         unsafely_ignore_certificate_errors: None,
         seed: None,
         create_web_worker_cb: Arc::new(|_| {
@@ -138,14 +412,7 @@ fn build_main_worker_and_inject_sdk(
             broadcast_channel: Default::default(),
             feature_checker: Default::default(),
             fs: Arc::new(RealFs),
-            module_loader: Rc::new(CdnModuleLoader::with_options(
-                integrity_manifest,
-                strict_imports,
-                module_cache,
-                lockfile_path,
-                Some(http_client),
-                loaded_modules,
-            )),
+            module_loader,
             node_services: Default::default(),
             npm_process_state_provider: Default::default(),
             permissions: PermissionsContainer::new(desc_parser, perms),
@@ -158,103 +425,129 @@ fn build_main_worker_and_inject_sdk(
 
     let main_module =
         deno_core::resolve_url_or_path("./$lit$actions.js", Path::new(env!("CARGO_MANIFEST_DIR")))?;
-    let mut worker = MainWorker::bootstrap_from_options(&main_module, services, options);
+    let worker = MainWorker::bootstrap_from_options(&main_module, services, options);
 
+    Ok(PreparedWorker {
+        worker,
+        loaded_modules,
+    })
+}
+
+/// Inject `LitNamespace.js` (LitActions / LitAuth / LitHeaders globals).
+/// Request-time only: needs `auth_context` and `http_headers`. Runs BEFORE
+/// `PatchDeno.js` so it can rely on the unmodified `Deno` namespace if needed.
+pub(crate) fn inject_lit_namespace(
+    worker: &mut MainWorker,
+    auth_context: &Option<serde_json::Value>,
+    http_headers: &BTreeMap<String, String>,
+) -> Result<()> {
+    let _span = info_span!("LitNamespace.js").entered();
+
+    if http_headers
+        .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
+        .is_some_and(|v| v == "true")
     {
-        let _span = info_span!("LitNamespace.js").entered();
-
-        if http_headers
-            .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
-            .unwrap_or(&"false".to_string())
-            == "true"
-        {
-            debug!("Populating LitHeaders: **PRIVACY MODE**");
-        } else {
-            debug!("Populating LitHeaders: {http_headers:?}");
-        }
-
-        // NB: globalThis.LitActions is already part of the V8 snapshot
-        let mut code = formatdoc! {r#"
-            "use strict";
-            (function (actions, auth, headers) {{
-                const {{ freeze }} = Object;
-                const readOnly = value => ({{ value, enumerable: true, writable: false, configurable: false }});
-
-                Object.defineProperties(globalThis, {{
-                    LitActions: readOnly(freeze(actions)),
-                    LitAuth: readOnly(freeze(auth)),
-                    LitHeaders: readOnly(headers),
-                }});
-
-                Object.defineProperty(globalThis, "Lit", readOnly(freeze({{
-                    Actions: LitActions,
-                    Auth: LitAuth,
-                    Headers: LitHeaders,
-                }})));
-            }})(LitActions, {auth}, new Headers({headers}));
-            "#,
-            auth = if let Some(ctx) = auth_context {
-                serde_json::to_string(ctx).context("Could not serialize auth_context")?
-            } else {
-                "{}".to_string()
-            },
-            headers = serde_json::to_string(&http_headers).context("Could not serialize HTTP headers")?
-        };
-
-        // Remove LitTest from non-debug builds
-        if !cfg!(debug_assertions) {
-            code.push_str("delete globalThis.LitTest;\n");
-        }
-
-        worker
-            .execute_script("LitNamespace.js", code.into())
-            .context("Error populating Lit namespace")?;
+        debug!("Populating LitHeaders: **PRIVACY MODE**");
+    } else {
+        debug!("Populating LitHeaders: {http_headers:?}");
     }
 
+    // NB: globalThis.LitActions is already part of the V8 snapshot
+    let mut code = formatdoc! {r#"
+        "use strict";
+        (function (actions, auth, headers) {{
+            const {{ freeze }} = Object;
+            const readOnly = value => ({{ value, enumerable: true, writable: false, configurable: false }});
+
+            Object.defineProperties(globalThis, {{
+                LitActions: readOnly(freeze(actions)),
+                LitAuth: readOnly(freeze(auth)),
+                LitHeaders: readOnly(headers),
+            }});
+
+            Object.defineProperty(globalThis, "Lit", readOnly(freeze({{
+                Actions: LitActions,
+                Auth: LitAuth,
+                Headers: LitHeaders,
+            }})));
+        }})(LitActions, {auth}, new Headers({headers}));
+        "#,
+        auth = if let Some(ctx) = auth_context {
+            serde_json::to_string(ctx).context("Could not serialize auth_context")?
+        } else {
+            "{}".to_string()
+        },
+        headers = serde_json::to_string(http_headers).context("Could not serialize HTTP headers")?
+    };
+
+    // Remove LitTest from non-debug builds
+    if !cfg!(debug_assertions) {
+        code.push_str("delete globalThis.LitTest;\n");
+    }
+
+    worker
+        .execute_script("LitNamespace.js", code.into())
+        .context("Error populating Lit namespace")?;
+
+    Ok(())
+}
+
+/// Strip privileged `Deno.*` surface and disable `Worker`. Must run AFTER
+/// `inject_lit_namespace` to preserve today's bootstrap order.
+fn execute_patch_deno(worker: &mut MainWorker) -> Result<()> {
+    let _span = info_span!("PatchDeno.js").entered();
+
+    let code = formatdoc! {r#"
+        "use strict";
+        delete Deno.build;
+        delete Deno.permissions;
+        delete Deno.version;
+        delete globalThis.Worker;
+    "#};
+
+    worker
+        .execute_script("PatchDeno.js", code.into())
+        .context("Error patching Deno runtime")?;
+
+    Ok(())
+}
+
+/// Inject caller-supplied globals via `Params.js`. Reserved for future use:
+/// `execute_js` always passes `None` today, so this is normally a no-op.
+fn inject_params_globals(
+    worker: &mut MainWorker,
+    globals_to_inject: &Option<serde_json::Value>,
+    http_headers: &BTreeMap<String, String>,
+) -> Result<()> {
+    let Some(params) = globals_to_inject else {
+        return Ok(());
+    };
+
+    let _span = info_span!("Params.js").entered();
+
+    if http_headers
+        .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
+        .is_some_and(|v| v == "true")
     {
-        let _span = info_span!("PatchDeno.js").entered();
-
-        let code = formatdoc! {r#"
-            "use strict";
-            delete Deno.build;
-            delete Deno.permissions;
-            delete Deno.version;
-            delete globalThis.Worker;
-        "#};
-
-        worker
-            .execute_script("PatchDeno.js", code.into())
-            .context("Error patching Deno runtime")?;
+        debug!("Injecting params as globals: **PRIVACY MODE**");
+    } else {
+        debug!("Injecting params as globals: {params:?}");
     }
 
-    if let Some(params) = globals_to_inject {
-        let _span = info_span!("Params.js").entered();
+    let _ = params
+        .as_object()
+        .context("Could not convert params to map")?;
 
-        if http_headers
-            .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
-            .unwrap_or(&"false".to_string())
-            == "true"
-        {
-            debug!("Injecting params as globals: **PRIVACY MODE**");
-        } else {
-            debug!("Injecting params as globals: {params:?}");
-        }
+    let code = formatdoc! {r#"
+        "use strict";
+        Object.assign(globalThis, {params});
+    "#};
 
-        let _ = params
-            .as_object()
-            .context("Could not convert params to map")?;
+    worker
+        .execute_script("Params.js", code.into())
+        .context("Error injecting params as globals")?;
 
-        let code = formatdoc! {r#"
-            "use strict";
-            Object.assign(globalThis, {params});
-        "#};
-
-        worker
-            .execute_script("Params.js", code.into())
-            .context("Error injecting params as globals")?;
-    }
-
-    Ok(worker)
+    Ok(())
 }
 
 // NB: Due to the new PKU feature introduced in V8 11.6, we need to init the V8
@@ -279,6 +572,13 @@ pub fn init_v8() {
     JsRuntime::init_platform(None, false);
 }
 
+/// Legacy cold path: build a one-off `PoolSharedState` with the caller's
+/// `memory_limit_mb`, bootstrap a fresh `MainWorker`, inject per-request
+/// state, and execute.
+///
+/// Pool path callers (see `worker_pool::WorkerPool`) instead call
+/// `build_worker_base` once at warm-time, then `inject_lit_namespace` +
+/// `execute_with_worker` per request against a pre-warmed `PreparedWorker`.
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, err)]
 pub(crate) async fn execute_js(
@@ -294,10 +594,9 @@ pub(crate) async fn execute_js(
     integrity_manifest: Arc<RwLock<HashMap<String, String>>>,
     strict_imports: bool,
     module_cache: ModuleCache,
+    action_code_cache: ActionCodeCache,
     lockfile_path: Option<PathBuf>,
     http_client: Arc<reqwest::Client>,
-    ipfs_id: Option<String>,
-    code_cache: CodeCache,
 ) -> Result<()> {
     // Fast path to do nothing, allowing us to benchmark with and without Deno involved
     if code.is_empty() || code.bytes().all(|b| b.is_ascii_whitespace()) {
@@ -308,25 +607,124 @@ pub(crate) async fn execute_js(
     static COLOR_INIT: Once = Once::new();
     COLOR_INIT.call_once(|| deno_runtime::colors::set_use_color(false));
 
-    let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
-    let memory_limit_mb = memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB);
-
-    let loaded_modules = LoadedModules::default();
-
-    let mut worker = build_main_worker_and_inject_sdk(
-        &None,
-        &auth_context,
-        http_headers,
-        Some(memory_limit_mb),
+    let shared = Arc::new(PoolSharedState {
         integrity_manifest,
         strict_imports,
         module_cache,
         lockfile_path,
         http_client,
-        loaded_modules.clone(),
+        memory_limit_mb: memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB),
+    });
+
+    let mut prepared = build_worker_base(&shared)
+        .context("Error building main worker")
+        .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
+
+    inject_lit_namespace(&mut prepared.worker, &auth_context, &http_headers)?;
+
+    execute_with_worker(
+        prepared,
+        shared,
+        code,
+        js_params,
+        http_headers,
+        timeout_ms,
+        outbound_tx,
+        inbound_rx,
+        is_test_server,
+        action_code_cache,
     )
-    .context("Error building main worker")
-    .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
+    .await
+}
+
+/// Run a single request against an already-bootstrapped `PreparedWorker`.
+/// Consumes `prepared` by value to enforce one-shot lifecycle: the worker
+/// is dropped when this function returns. Owns everything from the post-
+/// bootstrap body of the original `execute_js`: `PatchDeno.js`, op-state
+/// wiring, controller thread, near-heap callback, resource-usage polling,
+/// action code cache lookup, user code execution, termination select loop,
+/// and final `clear_task_request_context`.
+#[allow(clippy::too_many_arguments)]
+#[instrument(skip_all, err)]
+pub(crate) async fn execute_with_worker(
+    prepared: PreparedWorker,
+    shared: Arc<PoolSharedState>,
+    code: String,
+    js_params: Option<serde_json::Value>,
+    http_headers: BTreeMap<String, String>,
+    timeout_ms: Option<u64>,
+    outbound_tx: flume::Sender<tonic::Result<ExecuteJsResponse>>,
+    inbound_rx: TracedReceiver<ExecuteJsRequest>,
+    is_test_server: bool,
+    action_code_cache: ActionCodeCache,
+) -> Result<()> {
+    let result = execute_with_worker_inner(
+        prepared,
+        shared,
+        code,
+        js_params,
+        http_headers,
+        timeout_ms,
+        outbound_tx,
+        inbound_rx,
+        is_test_server,
+        action_code_cache,
+    )
+    .await;
+
+    // Always clear request context at the end of a request. The pool
+    // worker thread is reused for refill state machinery before being
+    // dropped; the legacy thread is also reused by the OS thread pool
+    // implicitly. Either way, leaving stale tracing fields would leak
+    // request_id / correlation_id into unrelated spans.
+    clear_task_request_context();
+
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_with_worker_inner(
+    prepared: PreparedWorker,
+    shared: Arc<PoolSharedState>,
+    code: String,
+    js_params: Option<serde_json::Value>,
+    http_headers: BTreeMap<String, String>,
+    timeout_ms: Option<u64>,
+    outbound_tx: flume::Sender<tonic::Result<ExecuteJsResponse>>,
+    inbound_rx: TracedReceiver<ExecuteJsRequest>,
+    is_test_server: bool,
+    action_code_cache: ActionCodeCache,
+) -> Result<()> {
+    let PreparedWorker {
+        mut worker,
+        loaded_modules,
+    } = prepared;
+
+    let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
+    let memory_limit_mb = shared.memory_limit_mb;
+
+    // PatchDeno.js must run AFTER LitNamespace.js (which the caller already
+    // injected) to preserve the original bootstrap order.
+    execute_patch_deno(&mut worker)?;
+    // Reserved hook: today's call sites always pass globals=None; preserved
+    // here so re-enabling globals injection drops in at the historical spot
+    // (between PatchDeno.js and op-state wiring).
+    inject_params_globals(&mut worker, &None, &http_headers)?;
+
+    // Check the action code cache early so we can skip prepare_action_code
+    // on cache hit (the real performance win). We always use CdnModuleLoader
+    // regardless of cache hit/miss so that runtime dynamic imports (e.g.
+    // `await import("zod@3.22.4")`) continue to work even for cached actions.
+    let action_ipfs_id = get_lit_action_ipfs_id(&code);
+    let now = Instant::now();
+    let cached_code = action_code_cache
+        .read()
+        .ok()
+        .and_then(|cache| cache.get(&action_ipfs_id, now));
+
+    if cached_code.is_some() {
+        debug!(action_ipfs_id, "action code cache hit");
+    }
 
     let op_state = worker.js_runtime.op_state();
     {
@@ -334,7 +732,7 @@ pub(crate) async fn execute_js(
         let mut state = op_state.borrow_mut();
         state.put(outbound_tx);
         state.put(inbound_rx);
-        state.put(loaded_modules);
+        state.put(loaded_modules.clone());
         drop(state);
     }
 
@@ -370,107 +768,25 @@ pub(crate) async fn execute_js(
     let js_params = js_params.as_ref().unwrap_or_default();
     let js_func_params = js_params.to_string();
 
-    // Try to use cached rewrite result keyed by IPFS CID to skip import parsing.
-    // On cache hit, verify the code hash to prevent cache poisoning from mismatched CIDs.
-    // Only compute the hash when we have a CID (avoids O(n) hashing on every call).
-    let cached = ipfs_id.as_deref().and_then(|cid| {
-        code_cache
-            .read()
-            .ok()
-            .and_then(|cache| cache.get(cid).cloned())
-            .filter(|entry| entry.code_hash == hash_code(&code))
-    });
-
-    let (rewritten_code, dynamic_imports, has_imports) = if let Some(cached) = cached {
-        debug!("Code cache hit for IPFS CID");
-        (
-            cached.rewritten_code,
-            cached.dynamic_imports,
-            cached.has_imports,
-        )
+    // Params are injected per-execution and MUST NOT be part of the cached
+    // form: they change between invocations while the bundled JS stays the
+    // same. On cache hit we reuse the prepared form; on miss we prepare it
+    // (bundle CDN deps, snapshot loaded modules, cache the result).
+    let cached_code = if let Some(cached) = cached_code {
+        cached
     } else {
-        // Rewrite static ES `import` statements into dynamic `import()` calls.
-        // Static imports are not valid in script mode, so we strip them from the
-        // user code and generate equivalent dynamic imports inside the async wrapper
-        // where `await` is available and the imported bindings are in lexical scope.
-        let import_rewriter::RewriteResult {
-            code: rewritten_code,
-            imports,
-        } = import_rewriter::rewrite_imports(&code);
-
-        let has_imports = !imports.is_empty();
-        let dynamic_imports = if has_imports {
-            import_rewriter::generate_dynamic_imports(&imports)
-        } else {
-            String::new()
+        let prepare_context = ActionCodePrepareContext {
+            client: &shared.http_client,
+            integrity: &shared.integrity_manifest,
+            strict_imports: shared.strict_imports,
+            lockfile_path: &shared.lockfile_path,
+            module_cache: &shared.module_cache,
         };
-
-        // Cache the rewrite result for future calls with the same IPFS CID.
-        // Use the entry API so existing CIDs can always be updated (e.g. code changed),
-        // while new inserts are blocked once the cache is at capacity.
-        if let Some(cid) = ipfs_id.as_deref()
-            && let Ok(mut cache) = code_cache.write()
-        {
-            let cached_rewrite = CachedRewrite {
-                code_hash: hash_code(&code),
-                rewritten_code: rewritten_code.clone(),
-                dynamic_imports: dynamic_imports.clone(),
-                has_imports,
-            };
-
-            // Check capacity before borrowing via entry() to avoid
-            // simultaneous mutable + immutable borrow of the HashMap.
-            let at_capacity = cache.len() >= CODE_CACHE_MAX_ENTRIES;
-            match cache.entry(cid.to_string()) {
-                std::collections::hash_map::Entry::Occupied(mut entry) => {
-                    entry.insert(cached_rewrite);
-                }
-                std::collections::hash_map::Entry::Vacant(entry) => {
-                    if !at_capacity {
-                        entry.insert(cached_rewrite);
-                    } else {
-                        debug!(
-                            "Code cache full ({CODE_CACHE_MAX_ENTRIES} entries), skipping insert"
-                        );
-                    }
-                }
-            }
-        }
-
-        (rewritten_code, dynamic_imports, has_imports)
+        get_or_prepare_action_code(&code, &action_ipfs_id, &action_code_cache, &prepare_context)
+            .await?
     };
-
-    let code = if !has_imports {
-        // No imports — preserve the existing wrapper layout unchanged.
-        format!(
-            "
-        {code}
-        ;
-        (async () => {{
-        const params = {js_func_params} ;
-        const data = await main(params);
-        if (typeof data !== \"undefined\") {{
-          LitActions.setResponse( {{ response: data }} );
-        }}
-        }})();"
-        )
-    } else {
-        // Has imports — move user code inside the async IIFE so that the
-        // dynamically imported bindings are in lexical scope for main().
-        format!(
-            "
-        (async () => {{
-        {dynamic_imports}
-        {rewritten_code}
-        ;
-        const params = {js_func_params} ;
-        const data = await main(params);
-        if (typeof data !== \"undefined\") {{
-          LitActions.setResponse( {{ response: data }} );
-        }}
-        }})();"
-        )
-    };
+    record_loaded_modules(&loaded_modules, &cached_code);
+    let code = cached_code.to_executable_code(&js_func_params);
 
     if let Err(e) = worker
         .js_runtime
@@ -617,191 +933,136 @@ fn start_controller_thread(
 mod tests {
     use super::*;
 
-    #[test]
-    fn hash_code_is_deterministic() {
-        let code = "async function main() { return 42; }";
-        assert_eq!(hash_code(code), hash_code(code));
-    }
-
-    #[test]
-    fn hash_code_differs_for_different_input() {
-        let a = hash_code("async function main() { return 1; }");
-        let b = hash_code("async function main() { return 2; }");
-        assert_ne!(a, b);
-    }
-
-    #[test]
-    fn code_cache_hit_returns_cached_entry() {
-        let cache: CodeCache = Arc::new(RwLock::new(HashMap::new()));
-        let code = "async function main() {}";
-        let digest = hash_code(code);
-
-        cache.write().unwrap().insert(
-            "QmTest123".to_string(),
-            CachedRewrite {
-                code_hash: digest,
-                rewritten_code: code.to_string(),
-                dynamic_imports: String::new(),
-                has_imports: false,
-            },
-        );
-
-        let result = cache
-            .read()
-            .ok()
-            .and_then(|c| c.get("QmTest123").cloned())
-            .filter(|entry| entry.code_hash == digest);
-
-        assert!(result.is_some());
-        assert!(!result.unwrap().has_imports);
-    }
-
-    #[test]
-    fn code_cache_rejects_mismatched_hash() {
-        let cache: CodeCache = Arc::new(RwLock::new(HashMap::new()));
-        let original_code = "async function main() { return 1; }";
-        let different_code = "async function main() { return 2; }";
-
-        cache.write().unwrap().insert(
-            "QmTest456".to_string(),
-            CachedRewrite {
-                code_hash: hash_code(original_code),
-                rewritten_code: original_code.to_string(),
-                dynamic_imports: String::new(),
-                has_imports: false,
-            },
-        );
-
-        // Lookup with a different code should fail the hash check
-        let different_digest = hash_code(different_code);
-        let result = cache
-            .read()
-            .ok()
-            .and_then(|c| c.get("QmTest456").cloned())
-            .filter(|entry| entry.code_hash == different_digest);
-
-        assert!(result.is_none());
-    }
-
-    /// Helper that mirrors the entry-based insert logic used in execute_js.
-    fn cache_insert(cache: &CodeCache, cid: &str, entry: CachedRewrite) -> bool {
-        if let Ok(mut c) = cache.write() {
-            let at_capacity = c.len() >= CODE_CACHE_MAX_ENTRIES;
-            match c.entry(cid.to_string()) {
-                std::collections::hash_map::Entry::Occupied(mut slot) => {
-                    slot.insert(entry);
-                    true
-                }
-                std::collections::hash_map::Entry::Vacant(slot) => {
-                    if !at_capacity {
-                        slot.insert(entry);
-                        true
-                    } else {
-                        false
-                    }
-                }
-            }
-        } else {
-            false
+    fn cached_code(code: &str) -> CachedActionCode {
+        CachedActionCode {
+            code: code.to_string(),
+            loaded_modules: Vec::new(),
         }
     }
 
     #[test]
-    fn code_cache_respects_max_entries() {
-        let cache: CodeCache = Arc::new(RwLock::new(HashMap::new()));
+    fn action_code_cache_entry_size_counts_entry_overhead() {
+        let action_ipfs_id = "QmTest".to_string();
+        let code = cached_code("x");
+        let size = action_code_cache_entry_size(&action_ipfs_id, action_ipfs_id.capacity(), &code);
 
-        // Fill the cache to capacity
-        {
-            let mut c = cache.write().unwrap();
-            for i in 0..CODE_CACHE_MAX_ENTRIES {
-                c.insert(
-                    format!("Qm{i}"),
-                    CachedRewrite {
-                        code_hash: [0u8; 32],
-                        rewritten_code: String::new(),
-                        dynamic_imports: String::new(),
-                        has_imports: false,
-                    },
-                );
-            }
-        }
-
-        assert_eq!(cache.read().unwrap().len(), CODE_CACHE_MAX_ENTRIES);
-
-        // New CID insert should be rejected when full
-        let inserted = cache_insert(
-            &cache,
-            "QmOverflow",
-            CachedRewrite {
-                code_hash: [0u8; 32],
-                rewritten_code: String::new(),
-                dynamic_imports: String::new(),
-                has_imports: false,
-            },
-        );
-
-        assert!(!inserted);
-        assert_eq!(cache.read().unwrap().len(), CODE_CACHE_MAX_ENTRIES);
-        assert!(!cache.read().unwrap().contains_key("QmOverflow"));
+        assert!(size > code.allocated_bytes() + action_ipfs_id.capacity());
     }
 
     #[test]
-    fn code_cache_allows_update_when_full() {
-        let cache: CodeCache = Arc::new(RwLock::new(HashMap::new()));
+    fn action_code_cache_entry_size_uses_allocated_capacity() {
+        let mut action_ipfs_id = String::with_capacity(64);
+        action_ipfs_id.push_str("QmTest");
 
-        // Fill the cache to capacity, including a known CID "QmExisting"
-        {
-            let mut c = cache.write().unwrap();
-            c.insert(
-                "QmExisting".to_string(),
-                CachedRewrite {
-                    code_hash: [1u8; 32],
-                    rewritten_code: "old".to_string(),
-                    dynamic_imports: String::new(),
-                    has_imports: false,
+        let mut code_string = String::with_capacity(128);
+        code_string.push('x');
+
+        let mut loaded_modules = Vec::with_capacity(4);
+        let mut module_url = String::with_capacity(512);
+        module_url.push_str("https://cdn.jsdelivr.net/npm/example@1.0.0/+esm");
+        let mut module_hash = String::with_capacity(128);
+        module_hash.push_str("abc123");
+        loaded_modules.push((module_url, module_hash));
+
+        let code = CachedActionCode {
+            code: code_string,
+            loaded_modules,
+        };
+
+        let size = action_code_cache_entry_size(&action_ipfs_id, action_ipfs_id.capacity(), &code);
+        let minimum_allocated_bytes = action_ipfs_id.capacity()
+            + code.code.capacity()
+            + code.loaded_modules.capacity() * size_of::<(String, String)>()
+            + code.loaded_modules[0].0.capacity()
+            + code.loaded_modules[0].1.capacity();
+
+        assert!(size >= minimum_allocated_bytes);
+    }
+
+    #[test]
+    fn action_code_cache_expires_entries() {
+        let now = Instant::now();
+        let code = cached_code("console.log('old')");
+        let action_ipfs_id = "QmOld".to_string();
+        let size_bytes =
+            action_code_cache_entry_size(&action_ipfs_id, action_ipfs_id.capacity(), &code);
+        let mut cache = ActionCodeCacheState {
+            entries: HashMap::from([(
+                "QmOld".to_string(),
+                ActionCodeCacheEntry {
+                    code,
+                    size_bytes,
+                    expires_at: now,
                 },
-            );
-            for i in 1..CODE_CACHE_MAX_ENTRIES {
-                c.insert(
-                    format!("Qm{i}"),
-                    CachedRewrite {
-                        code_hash: [0u8; 32],
-                        rewritten_code: String::new(),
-                        dynamic_imports: String::new(),
-                        has_imports: false,
-                    },
-                );
-            }
-        }
+            )]),
+            total_bytes: size_bytes,
+        };
 
-        assert_eq!(cache.read().unwrap().len(), CODE_CACHE_MAX_ENTRIES);
-
-        // Updating an existing CID should succeed even when full
-        let updated = cache_insert(
-            &cache,
-            "QmExisting",
-            CachedRewrite {
-                code_hash: [2u8; 32],
-                rewritten_code: "new".to_string(),
-                dynamic_imports: String::new(),
-                has_imports: false,
-            },
-        );
-
-        assert!(updated);
-        assert_eq!(cache.read().unwrap().len(), CODE_CACHE_MAX_ENTRIES);
-        let entry = cache.read().unwrap().get("QmExisting").cloned().unwrap();
-        assert_eq!(entry.rewritten_code, "new");
-        assert_eq!(entry.code_hash, [2u8; 32]);
+        assert!(cache.get("QmOld", now).is_none());
+        cache.purge_expired(now);
+        assert_eq!(cache.total_bytes(), 0);
+        assert!(cache.entries.is_empty());
     }
 
     #[test]
-    fn code_cache_miss_returns_none() {
-        let cache: CodeCache = Arc::new(RwLock::new(HashMap::new()));
-        let result = cache
-            .read()
-            .ok()
-            .and_then(|c| c.get("QmNonexistent").cloned());
-        assert!(result.is_none());
+    fn action_code_cache_enforces_total_size_after_purging_expired_entries() {
+        let now = Instant::now();
+        let existing_code = cached_code("old");
+        let existing_size = MAX_ACTION_CODE_CACHE_BYTES - 1;
+        let mut cache = ActionCodeCacheState {
+            entries: HashMap::from([(
+                "QmOld".to_string(),
+                ActionCodeCacheEntry {
+                    code: existing_code,
+                    size_bytes: existing_size,
+                    expires_at: now + ACTION_CODE_CACHE_TTL,
+                },
+            )]),
+            total_bytes: existing_size,
+        };
+
+        assert!(!cache.insert("QmNew".to_string(), cached_code("new"), now));
+        assert_eq!(cache.total_bytes(), existing_size);
+
+        if let Some(entry) = cache.entries.get_mut("QmOld") {
+            entry.expires_at = now;
+        }
+
+        assert!(cache.insert("QmNew".to_string(), cached_code("new"), now));
+        assert!(cache.total_bytes() < MAX_ACTION_CODE_CACHE_BYTES);
+        assert!(cache.entries.contains_key("QmNew"));
+        assert!(!cache.entries.contains_key("QmOld"));
+    }
+
+    /// Each `PreparedWorker` must have a fresh `LoadedModules` `Arc`.
+    /// If two workers ever shared the same accumulator, per-tenant module
+    /// state would leak between the requests dispatched to those workers.
+    /// This is the core safety invariant for the pool.
+    #[test]
+    fn prepared_workers_have_distinct_loaded_modules_arcs() {
+        use std::sync::Once;
+        static INIT_V8_ONCE: Once = Once::new();
+        INIT_V8_ONCE.call_once(super::init_v8);
+
+        let shared = PoolSharedState {
+            integrity_manifest: Arc::new(RwLock::new(HashMap::new())),
+            strict_imports: false,
+            module_cache: Arc::new(RwLock::new(HashMap::new())),
+            lockfile_path: None,
+            http_client: CdnModuleLoader::build_http_client(),
+            memory_limit_mb: DEFAULT_MEMORY_LIMIT_MB,
+        };
+
+        let w1 = build_worker_base(&shared).expect("first worker built");
+        let w2 = build_worker_base(&shared).expect("second worker built");
+
+        let m1 = w1.loaded_modules_for_test();
+        let m2 = w2.loaded_modules_for_test();
+
+        assert!(
+            !Arc::ptr_eq(&m1.0, &m2.0),
+            "two PreparedWorkers must not share a LoadedModules Arc; \
+             this would leak per-request module state between tenants",
+        );
     }
 }

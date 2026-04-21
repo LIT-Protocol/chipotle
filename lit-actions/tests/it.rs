@@ -1,8 +1,10 @@
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use anyhow::{Result, bail};
 use indoc::{formatdoc, indoc};
 use lit_actions_server::proto::execute_js_request::AesEncryptResponse;
+use lit_actions_server::worker_pool::PoolHealth;
 use lit_actions_server::{TestServer, init_v8, proto::*, unix};
 use pretty_assertions::assert_eq;
 use rstest::*;
@@ -312,6 +314,40 @@ async fn js_params(mut client: TestClient) {
             client.received::<PrintRequest>().message,
             "true false false true false false\n"
         );
+        assert!(client.received::<ExecutionResult>().success);
+    }
+
+    {
+        let code = indoc! {r#"
+            async function main({ message }) {
+                console.log(message)
+            }
+        "#};
+
+        client
+            .respond_with(PrintResponse {})
+            .execute_js(ExecutionRequest {
+                code: code.into(),
+                js_params: Some(b"{\"message\":\"first\"}".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(client.received::<PrintRequest>().message, "first\n");
+        assert!(client.received::<ExecutionResult>().success);
+
+        client
+            .respond_with(PrintResponse {})
+            .execute_js(ExecutionRequest {
+                code: code.into(),
+                js_params: Some(b"{\"message\":\"second\"}".into()),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(client.received::<PrintRequest>().message, "second\n");
         assert!(client.received::<ExecutionResult>().success);
     }
 
@@ -798,3 +834,162 @@ async fn import_rewrite_no_imports(mut client: TestClient) {
     );
     assert!(client.received::<ExecutionResult>().success);
 }
+
+// =================================================================
+// Pre-warmed worker pool tests (CPL-265)
+// =================================================================
+
+/// Spin up a fresh server, hand back the pool counters, and a TestClient
+/// pointed at it. Server thread keeps running after the function returns;
+/// `pool_health` is a clone of the live counter `Arc`.
+fn pool_test_setup() -> (TestClient, Arc<PoolHealth>, usize) {
+    let server = TestServer::start();
+    let pool_health = server.pool_health.clone();
+    let pool_target = server.pool_target_size;
+    let client = TestClient::new(server.socket_file);
+    (client, pool_health, pool_target)
+}
+
+/// Coarse warmup wait. There's no "ready workers" counter today, so we
+/// just sleep long enough for snapshot-bootstrapped workers to land in
+/// the ready channel. With pool=10, 600ms is plenty under load.
+async fn wait_for_warmup(target: usize) {
+    if target == 0 {
+        return;
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+}
+
+/// Pool hit on the warm path: after warmup, a request should be served by
+/// a pre-warmed worker (hits counter increments).
+#[tokio::test]
+async fn pool_warm_hit() {
+    let (mut client, pool_health, target) = pool_test_setup();
+    if target == 0 {
+        // Pool disabled (LIT_ACTIONS_POOL_SIZE=0) — nothing to assert.
+        return;
+    }
+
+    wait_for_warmup(target).await;
+
+    let hits_before = pool_health.hits();
+    client
+        .respond_with(PrintResponse {})
+        .execute_js(r#"async function main() { console.log("warm hit") }"#)
+        .await
+        .unwrap();
+
+    let _ = client.received::<PrintRequest>();
+    assert!(client.received::<ExecutionResult>().success);
+
+    let hits_after = pool_health.hits();
+    assert!(
+        hits_after > hits_before,
+        "expected pool hit (hits before={}, after={}, target={})",
+        hits_before,
+        hits_after,
+        target,
+    );
+}
+
+/// Custom `memory_limit` requests must bypass the pool (V8 heap limits are
+/// immutable post-bootstrap, so pre-warmed workers can't honour them).
+#[tokio::test]
+async fn pool_memory_limit_bypass() {
+    let (mut client, pool_health, target) = pool_test_setup();
+    if target == 0 {
+        return;
+    }
+
+    wait_for_warmup(target).await;
+
+    let hits_before = pool_health.hits();
+    let misses_before = pool_health.misses();
+    client
+        .respond_with(PrintResponse {})
+        .execute_js(ExecutionRequest {
+            code: r#"async function main() { console.log("custom limit") }"#.into(),
+            memory_limit: Some(100),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+
+    let _ = client.received::<PrintRequest>();
+    assert!(client.received::<ExecutionResult>().success);
+
+    let hits_after = pool_health.hits();
+    let misses_after = pool_health.misses();
+    assert_eq!(
+        hits_before, hits_after,
+        "custom memory_limit must not consume a pooled worker (hits should not increment)",
+    );
+    assert_eq!(
+        misses_before, misses_after,
+        "custom memory_limit must bypass the pool entirely (misses should not increment either)",
+    );
+}
+
+/// Concurrent execution: 20 in-flight requests against a pool of 10. Mix
+/// of pool hits and legacy fallbacks; all must succeed without deadlock.
+#[tokio::test]
+async fn pool_concurrent_exhaustion() {
+    use deno_runtime::deno_core::futures::future::join_all;
+
+    let server = TestServer::start();
+    let socket_path = server.socket_file.path().to_path_buf();
+    // Keep `server` alive until the end of the test so the socket file
+    // and runtime thread don't get torn down before requests complete.
+    let _server_keepalive = server;
+
+    let futures = (0..20).map(|i| {
+        let path = socket_path.clone();
+        async move { (i, raw_execute_no_op(&path).await) }
+    });
+
+    for (i, res) in join_all(futures).await {
+        res.unwrap_or_else(|e| panic!("request {i} failed: {e}"));
+    }
+}
+
+/// Minimal raw client helper for the concurrency test: dials the socket,
+/// runs an empty `nop` action, and returns. Used so concurrent tests
+/// don't share a single `TestClient` (which is sequential by design).
+async fn raw_execute_no_op(socket_path: &std::path::Path) -> Result<()> {
+    use lit_actions_server::proto::execute_js_response::Union as UnionResp;
+
+    let (outbound_tx, outbound_rx) = flume::bounded::<ExecuteJsRequest>(0);
+    let channel = unix::connect_to_socket(socket_path).await?;
+    let mut client = ActionClient::new(channel);
+
+    let req = ExecutionRequest {
+        code: "async function main() {}".into(),
+        ..Default::default()
+    };
+    let response = client
+        .execute_js(Request::new(outbound_rx.into_stream()))
+        .await?;
+    outbound_tx.send_async(req.into()).await?;
+
+    let mut stream = response.into_inner();
+    while let Some(resp) = stream.try_next().await? {
+        match resp.union {
+            Some(UnionResp::Result(res)) => {
+                if !res.success {
+                    bail!("execution failed: {}", res.error);
+                }
+                return Ok(());
+            }
+            Some(_) => bail!("unexpected op request from no-op action"),
+            None => {}
+        }
+    }
+    bail!("server closed connection without result")
+}
+
+/// Pool isolation: per-request `LoadedModules` must be a fresh `Arc` for
+/// each pooled worker. Tested at the unit level inside the runtime crate
+/// (see `runtime::tests::loaded_modules_arc_is_distinct_per_prepared_worker`)
+/// — kept here as a documentation marker so future readers find it.
+#[allow(dead_code)]
+fn pool_isolation_doc() {}

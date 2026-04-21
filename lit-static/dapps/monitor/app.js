@@ -384,8 +384,14 @@ async function getNodeChainConfig(serverUrl) {
     setValue('cc-token',            cfg.token        ?? '—', !cfg.token);
 
     let rpcUrl = cfg.rpc_url ?? '';
-    if (!rpcUrl && cfg.chain_id != null && cfg.is_evm) {
-      rpcUrl = (await resolveRpcUrlFromChainlist(cfg.chain_id)) ?? '';
+    if (!rpcUrl) {
+      const selectedNetwork = el('network')?.value || '';
+      const isLocal = (() => { try { return new URL(selectedNetwork).hostname === 'localhost'; } catch { return false; } })();
+      if (isLocal) {
+        rpcUrl = 'http://localhost:8545';
+      } else if (cfg.chain_id != null && cfg.is_evm) {
+        rpcUrl = (await resolveRpcUrlFromChainlist(cfg.chain_id)) ?? '';
+      }
     }
     const rpcInput = el('cc-rpc-url');
     if (rpcInput) rpcInput.value = rpcUrl;

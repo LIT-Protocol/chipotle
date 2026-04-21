@@ -147,8 +147,8 @@ async fn main() -> Result<(), rocket::Error> {
     let stripe_state = stripe::init();
 
     // IPFS cache lives outside the restart loop so warm entries survive restarts.
-    let ipfs_cache: Cache<String, String> = Cache::builder()
-        .weigher(|_key, value: &String| -> u32 { value.len().try_into().unwrap_or(u32::MAX) })
+    let ipfs_cache: Cache<String, Arc<String>> = Cache::builder()
+        .weigher(|_key, value: &Arc<String>| -> u32 { value.len().try_into().unwrap_or(u32::MAX) })
         .max_capacity(1024 * 1024 * 1024) // 1 GB
         .build();
 
@@ -272,7 +272,7 @@ fn build_rocket(
     chain_config: Arc<lit_api_server::accounts::chain_config::ChainConfig>,
     cpu_monitor: CpuOverloadMonitor,
     stripe_state: Option<Arc<stripe::StripeState>>,
-    ipfs_cache: Cache<String, String>,
+    ipfs_cache: Cache<String, Arc<String>>,
 ) -> rocket::Rocket<rocket::Build> {
     let allowed_methods = HashSet::from([
         Method::from_str("Get").expect("Invalid method: Get"),
