@@ -29,6 +29,7 @@ message ExecuteJsRequest {
     optional uint64 timeout = 4;       // milliseconds
     optional uint32 memory_limit = 5;  // megabytes
     map<string, string> http_headers = 6;
+    optional string ipfs_id = 7;       // IPFS CID for code cache lookup
   }
 
   message ErrorResponse {

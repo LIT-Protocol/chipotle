@@ -3,7 +3,7 @@
 /// @notice Mutable (state-changing) functions for AccountConfig diamond.
 
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity =0.8.28;
 
 import {
     EnumerableSet
@@ -15,7 +15,21 @@ contract WritesFacet {
     using EnumerableSet for EnumerableSet.UintSet;
     using EnumerableSet for EnumerableSet.AddressSet;
     using EnumerableSet for EnumerableSet.StringSet;
-    
+
+    event AccountCreated(uint256 indexed apiKeyHash, address indexed creator, bool managed);
+    event UsageApiKeySet(uint256 indexed accountApiKeyHash, uint256 indexed usageApiKeyHash);
+    event GroupAdded(uint256 indexed apiKeyHash, uint256 indexed groupId);
+    event GroupUpdated(uint256 indexed accountApiKeyHash, uint256 indexed groupId);
+    event GroupRemoved(uint256 indexed apiKeyHash, uint256 indexed groupId);
+    event ActionAdded(uint256 indexed accountApiKeyHash, uint256 indexed actionHash);
+    event ActionRemoved(uint256 indexed accountApiKeyHash, uint256 indexed actionHash);
+    event PkpAddedToGroup(uint256 indexed apiKeyHash, uint256 indexed groupId, address pkpId);
+    event PkpRemovedFromGroup(uint256 indexed apiKeyHash, uint256 indexed groupId, address pkpId);
+    event ActionAddedToGroup(uint256 indexed apiKeyHash, uint256 indexed groupId, uint256 action);
+    event ActionRemovedFromGroup(uint256 indexed apiKeyHash, uint256 indexed groupId, uint256 action);
+    event WalletDerivationRegistered(uint256 indexed apiKeyHash, address indexed pkpId, uint256 derivationPath);
+    event UsageApiKeyRemoved(uint256 indexed accountApiKeyHash, uint256 indexed usageApiKeyHash);
+
     function newAccount(
         uint256 apiKeyHash,
         bool managed,
@@ -43,6 +57,7 @@ contract WritesFacet {
         s.allApiKeyHashesToMaster[apiKeyHash] = apiKeyHash;
         s.accountCount++;
         s.indexToAccountHash[s.accountCount] = apiKeyHash;
+        emit AccountCreated(apiKeyHash, creatorWalletAddress, managed);
     }
 
     function setUsageApiKey(
@@ -60,6 +75,18 @@ contract WritesFacet {
         uint256[] memory removePkpFromGroups,
         uint256[] memory executeInGroups
     ) public {
+        if (manageIPFSIdsInGroups.length > 50) {
+            revert AppStorage.InvalidRequest("manageIPFSIdsInGroups must be 50 items or fewer");
+        }
+        if (addPkpToGroups.length > 50) {
+            revert AppStorage.InvalidRequest("addPkpToGroups must be 50 items or fewer");
+        }
+        if (removePkpFromGroups.length > 50) {
+            revert AppStorage.InvalidRequest("removePkpFromGroups must be 50 items or fewer");
+        }
+        if (executeInGroups.length > 50) {
+            revert AppStorage.InvalidRequest("executeInGroups must be 50 items or fewer");
+        }
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         uint256 masterAccountApiKeyHash = s.allApiKeyHashesToMaster[
@@ -99,6 +126,7 @@ contract WritesFacet {
             usageApiKeyHash
         );
         s.allApiKeyHashesToMaster[usageApiKeyHash] = masterAccountApiKeyHash;
+        emit UsageApiKeySet(masterAccountApiKeyHash, usageApiKeyHash);
     }
 
     function addGroup(
@@ -108,6 +136,16 @@ contract WritesFacet {
         uint256[] memory cidHashes,
         address[] memory pkpIds
     ) public returns (uint256) {
+        if (cidHashes.length > 10) {
+            revert AppStorage.InvalidRequest(
+                "cidHashes must be 10 items or fewer"
+            );
+        }
+        if (pkpIds.length > 10) {
+            revert AppStorage.InvalidRequest(
+                "pkpIds must be 10 items or fewer"
+            );
+        }
         SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
         uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
         if (masterHash != apiKeyHash) {
@@ -127,6 +165,7 @@ contract WritesFacet {
         for (uint256 i = 0; i < pkpIds.length; i++) {
             group.pkpId.add(pkpIds[i]);
         }
+        emit GroupAdded(masterHash, account.groupCount);
         return account.groupCount;
     }
 
@@ -140,12 +179,12 @@ contract WritesFacet {
     ) public {
         if (cidHashes.length > 10) {
             revert AppStorage.InvalidRequest(
-                "cidHashes must be less than 10 items to bulk update"
+                "cidHashes must be 10 items or fewer"
             );
         }
         if (pkpIds.length > 10) {
             revert AppStorage.InvalidRequest(
-                "pkpIds must be less than 10 items to bulk update"
+                "pkpIds must be 10 items or fewer"
             );
         }
 
@@ -172,6 +211,7 @@ contract WritesFacet {
         for (uint256 i = 0; i < pkpIds.length; i++) {
             group.pkpId.add(pkpIds[i]);
         }
+        emit GroupUpdated(accountApiKeyHash, groupId);
     }
 
     function updateGroupMetadata(
@@ -208,6 +248,7 @@ contract WritesFacet {
         AppStorage.Account storage account = s.accounts[masterHash];
         account.groupList.remove(groupId);
         delete account.groups[groupId];
+        emit GroupRemoved(masterHash, groupId);
     }
 
     function addPkpToGroup(
@@ -223,6 +264,7 @@ contract WritesFacet {
         AppStorage.revertIfGroupDoesNotExist(masterHash, groupId);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         s.accounts[masterHash].groups[groupId].pkpId.add(pkpId);
+        emit PkpAddedToGroup(masterHash, groupId, pkpId);
     }
 
     function addAction(
@@ -242,6 +284,7 @@ contract WritesFacet {
         account.actionMetadata[actionHash].id = actionHash;
         account.actionMetadata[actionHash].name = name;
         account.actionMetadata[actionHash].description = description;
+        emit ActionAdded(accountApiKeyHash, actionHash);
     }
 
     function removeAction(
@@ -268,6 +311,7 @@ contract WritesFacet {
             account.groups[groupId].cidHash.remove(actionHash);
         }
         delete account.actionMetadata[actionHash];
+        emit ActionRemoved(accountApiKeyHash, actionHash);
     }
 
     function addActionToGroup(
@@ -283,6 +327,7 @@ contract WritesFacet {
         AppStorage.revertIfGroupDoesNotExist(masterHash, groupId);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         s.accounts[masterHash].groups[groupId].cidHash.add(action);
+        emit ActionAddedToGroup(masterHash, groupId, action);
     }
 
     function updateActionMetadata(
@@ -320,6 +365,7 @@ contract WritesFacet {
             revert AppStorage.ActionDoesNotExist(masterHash, groupId, action);
         }
         account.groups[groupId].cidHash.remove(action);
+        emit ActionRemovedFromGroup(masterHash, groupId, action);
     }
 
     function removePkpFromGroup(
@@ -338,6 +384,7 @@ contract WritesFacet {
             revert AppStorage.PkpDoesNotExist(masterHash, groupId, pkpId);
         }
         s.accounts[masterHash].groups[groupId].pkpId.remove(pkpId);
+        emit PkpRemovedFromGroup(masterHash, groupId, pkpId);
     }
 
     function updateUsageApiKeyMetadata(
@@ -380,6 +427,7 @@ contract WritesFacet {
         account.usageApiKeysList.remove(usageApiKeyHash);
         delete account.usageApiKeys[usageApiKeyHash];
         delete s.allApiKeyHashesToMaster[usageApiKeyHash];
+        emit UsageApiKeyRemoved(accountApiKeyHash, usageApiKeyHash);
     }
 
     function registerWalletDerivation(
@@ -396,6 +444,12 @@ contract WritesFacet {
         }
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         AppStorage.Account storage account = s.accounts[masterHash];
+        if (derivationPath == 0) {
+            revert AppStorage.InvalidRequest("derivationPath must be non-zero");
+        }
+        if (account.pkpData[pkpId].id != 0) {
+            revert AppStorage.InvalidRequest("PKP already registered");
+        }
         account.pkpData[pkpId].id = derivationPath;
         account.pkpData[pkpId].name = name;
         account.pkpData[pkpId].description = description;
@@ -403,6 +457,7 @@ contract WritesFacet {
         account.pkpCount++;
         s.pkpCount++;
         s.allPkpIds[s.pkpCount] = pkpId;
+        emit WalletDerivationRegistered(masterHash, pkpId, derivationPath);
     }
 
     function setNodeConfiguration(

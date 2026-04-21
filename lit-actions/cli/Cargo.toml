@@ -20,7 +20,7 @@ production = ["otlp"]
 
 [dependencies]
 anyhow = { workspace = true }
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 lit-actions-server = { workspace = true }
 lit-api-core = { workspace = true }
 lit-core = { workspace = true }

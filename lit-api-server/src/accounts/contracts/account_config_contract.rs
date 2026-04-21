@@ -1515,6 +1515,22 @@ pub mod account_config {
                     },],
                 ),
                 (
+                    ::std::borrow::ToOwned::to_owned("serverTrigger"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("serverTrigger"),
+                        inputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::borrow::ToOwned::to_owned("value"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("uint256"),
+                            ),
+                        },],
+                        outputs: ::std::vec![],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                    },],
+                ),
+                (
                     ::std::borrow::ToOwned::to_owned("setAdminApiPayerAccount"),
                     ::std::vec![::ethers::core::abi::ethabi::Function {
                         name: ::std::borrow::ToOwned::to_owned("setAdminApiPayerAccount",),
@@ -1968,7 +1984,437 @@ pub mod account_config {
                     },],
                 ),
             ]),
-            events: ::std::collections::BTreeMap::new(),
+            events: ::core::convert::From::from([
+                (
+                    ::std::borrow::ToOwned::to_owned("AccountCreated"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("AccountCreated"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("creator"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("managed"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Bool,
+                                indexed: false,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("ActionAdded"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("ActionAdded"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("actionHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("ActionAddedToGroup"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("ActionAddedToGroup"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("action"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: false,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("ActionRemoved"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("ActionRemoved"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("actionHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("ActionRemovedFromGroup"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("ActionRemovedFromGroup",),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("action"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: false,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("AdminApiPayerUpdated"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("AdminApiPayerUpdated",),
+                        inputs: ::std::vec![::ethers::core::abi::ethabi::EventParam {
+                            name: ::std::borrow::ToOwned::to_owned("newAdminApiPayerAccount",),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                            indexed: true,
+                        },],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("ApiKeyCredited"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("ApiKeyCredited"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("amount"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: false,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("ApiKeyDebited"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("ApiKeyDebited"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("amount"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: false,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("ApiPayersUpdated"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("ApiPayersUpdated"),
+                        inputs: ::std::vec![::ethers::core::abi::ethabi::EventParam {
+                            name: ::std::borrow::ToOwned::to_owned("newApiPayers"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Array(
+                                ::std::boxed::Box::new(
+                                    ::ethers::core::abi::ethabi::ParamType::Address,
+                                ),
+                            ),
+                            indexed: false,
+                        },],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("ConfigOperatorUpdated"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("ConfigOperatorUpdated",),
+                        inputs: ::std::vec![::ethers::core::abi::ethabi::EventParam {
+                            name: ::std::borrow::ToOwned::to_owned("newConfigOperator"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                            indexed: true,
+                        },],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("GroupAdded"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("GroupAdded"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("GroupRemoved"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("GroupRemoved"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("GroupUpdated"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("GroupUpdated"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("PkpAddedToGroup"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("PkpAddedToGroup"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("pkpId"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                indexed: false,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("PkpRemovedFromGroup"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("PkpRemovedFromGroup",),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("groupId"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("pkpId"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                indexed: false,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("PricingOperatorUpdated"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("PricingOperatorUpdated",),
+                        inputs: ::std::vec![::ethers::core::abi::ethabi::EventParam {
+                            name: ::std::borrow::ToOwned::to_owned("newPricingOperator",),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                            indexed: true,
+                        },],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("PricingUpdated"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("PricingUpdated"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("pricingItemId"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("price"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: false,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("RebalanceAmountUpdated"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("RebalanceAmountUpdated",),
+                        inputs: ::std::vec![::ethers::core::abi::ethabi::EventParam {
+                            name: ::std::borrow::ToOwned::to_owned("newRebalanceAmount",),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                            indexed: false,
+                        },],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("RequestedApiPayerCountUpdated"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("RequestedApiPayerCountUpdated",),
+                        inputs: ::std::vec![::ethers::core::abi::ethabi::EventParam {
+                            name: ::std::borrow::ToOwned::to_owned("newCount"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                            indexed: false,
+                        },],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("ServerTriggered"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("ServerTriggered"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("value"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: false,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("sender"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                indexed: true,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("UsageApiKeyRemoved"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("UsageApiKeyRemoved"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("usageApiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("UsageApiKeySet"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("UsageApiKeySet"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("accountApiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("usageApiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("WalletDerivationRegistered"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("WalletDerivationRegistered",),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("pkpId"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("derivationPath"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: false,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+            ]),
             errors: ::core::convert::From::from([
                 (
                     ::std::borrow::ToOwned::to_owned("AccountAlreadyExists"),
@@ -2204,6 +2650,28 @@ pub mod account_config {
                                 kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
                                 internal_type: ::core::option::Option::Some(
                                     ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                        ],
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("NotContractOwner"),
+                    ::std::vec![::ethers::core::abi::ethabi::AbiError {
+                        name: ::std::borrow::ToOwned::to_owned("NotContractOwner"),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("_user"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("address"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("_contractOwner"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("address"),
                                 ),
                             },
                         ],
@@ -2879,6 +3347,15 @@ pub mod account_config {
                 .method_hash([52, 183, 248, 122], ())
                 .expect("method not found (this should never happen)")
         }
+        ///Calls the contract's `serverTrigger` (0x286cf9bb) function
+        pub fn server_trigger(
+            &self,
+            value: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([40, 108, 249, 187], value)
+                .expect("method not found (this should never happen)")
+        }
         ///Calls the contract's `setAdminApiPayerAccount` (0xc001bc79) function
         pub fn set_admin_api_payer_account(
             &self,
@@ -3066,6 +3543,180 @@ pub mod account_config {
                     (account_api_key_hash, usage_api_key_hash, name, description),
                 )
                 .expect("method not found (this should never happen)")
+        }
+        ///Gets the contract's `AccountCreated` event
+        pub fn account_created_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, AccountCreatedFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `ActionAdded` event
+        pub fn action_added_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, ActionAddedFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `ActionAddedToGroup` event
+        pub fn action_added_to_group_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, ActionAddedToGroupFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `ActionRemoved` event
+        pub fn action_removed_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, ActionRemovedFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `ActionRemovedFromGroup` event
+        pub fn action_removed_from_group_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, ActionRemovedFromGroupFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `AdminApiPayerUpdated` event
+        pub fn admin_api_payer_updated_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, AdminApiPayerUpdatedFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `ApiKeyCredited` event
+        pub fn api_key_credited_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, ApiKeyCreditedFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `ApiKeyDebited` event
+        pub fn api_key_debited_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, ApiKeyDebitedFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `ApiPayersUpdated` event
+        pub fn api_payers_updated_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, ApiPayersUpdatedFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `ConfigOperatorUpdated` event
+        pub fn config_operator_updated_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, ConfigOperatorUpdatedFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `GroupAdded` event
+        pub fn group_added_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, GroupAddedFilter> {
+            self.0.event()
+        }
+        ///Gets the contract's `GroupRemoved` event
+        pub fn group_removed_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, GroupRemovedFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `GroupUpdated` event
+        pub fn group_updated_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, GroupUpdatedFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `PkpAddedToGroup` event
+        pub fn pkp_added_to_group_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, PkpAddedToGroupFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `PkpRemovedFromGroup` event
+        pub fn pkp_removed_from_group_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, PkpRemovedFromGroupFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `PricingOperatorUpdated` event
+        pub fn pricing_operator_updated_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, PricingOperatorUpdatedFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `PricingUpdated` event
+        pub fn pricing_updated_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, PricingUpdatedFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `RebalanceAmountUpdated` event
+        pub fn rebalance_amount_updated_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, RebalanceAmountUpdatedFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `RequestedApiPayerCountUpdated` event
+        pub fn requested_api_payer_count_updated_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<
+            ::std::sync::Arc<M>,
+            M,
+            RequestedApiPayerCountUpdatedFilter,
+        > {
+            self.0.event()
+        }
+        ///Gets the contract's `ServerTriggered` event
+        pub fn server_triggered_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, ServerTriggeredFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `UsageApiKeyRemoved` event
+        pub fn usage_api_key_removed_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, UsageApiKeyRemovedFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `UsageApiKeySet` event
+        pub fn usage_api_key_set_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, UsageApiKeySetFilter>
+        {
+            self.0.event()
+        }
+        ///Gets the contract's `WalletDerivationRegistered` event
+        pub fn wallet_derivation_registered_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<
+            ::std::sync::Arc<M>,
+            M,
+            WalletDerivationRegisteredFilter,
+        > {
+            self.0.event()
+        }
+        /// Returns an `Event` builder for all the events of this contract.
+        pub fn events(
+            &self,
+        ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, AccountConfigEvents>
+        {
+            self.0
+                .event_with_filter(::core::default::Default::default())
         }
     }
     impl<M: ::ethers::providers::Middleware> From<::ethers::contract::Contract<M>>
@@ -3325,6 +3976,24 @@ pub mod account_config {
         pub api_key_hash: ::ethers::core::types::U256,
         pub group_id: ::ethers::core::types::U256,
     }
+    ///Custom Error type `NotContractOwner` with signature `NotContractOwner(address,address)` and selector `0xff4127cb`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthError,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[etherror(name = "NotContractOwner", abi = "NotContractOwner(address,address)")]
+    pub struct NotContractOwner {
+        pub user: ::ethers::core::types::Address,
+        pub contract_owner: ::ethers::core::types::Address,
+    }
     ///Custom Error type `NotMasterAccount` with signature `NotMasterAccount(uint256)` and selector `0x1d0932ee`
     #[derive(
         Clone,
@@ -3467,6 +4136,7 @@ pub mod account_config {
         NotAllowedToDeleteGroup(NotAllowedToDeleteGroup),
         NotAllowedToManageIPFSIdsInGroup(NotAllowedToManageIPFSIdsInGroup),
         NotAllowedToRemovePkpFromGroup(NotAllowedToRemovePkpFromGroup),
+        NotContractOwner(NotContractOwner),
         NotMasterAccount(NotMasterAccount),
         OnlyApiPayerOrOwner(OnlyApiPayerOrOwner),
         OnlyApiPayerOrPricingOperator(OnlyApiPayerOrPricingOperator),
@@ -3547,6 +4217,10 @@ pub mod account_config {
             {
                 return Ok(Self::NotAllowedToRemovePkpFromGroup(decoded));
             }
+            if let Ok(decoded) = <NotContractOwner as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::NotContractOwner(decoded));
+            }
             if let Ok(decoded) = <NotMasterAccount as ::ethers::core::abi::AbiDecode>::decode(data)
             {
                 return Ok(Self::NotMasterAccount(decoded));
@@ -3613,6 +4287,7 @@ pub mod account_config {
                 Self::NotAllowedToRemovePkpFromGroup(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
+                Self::NotContractOwner(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::NotMasterAccount(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::OnlyApiPayerOrOwner(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
@@ -3688,6 +4363,10 @@ pub mod account_config {
                     true
                 }
                 _ if selector
+                    == <NotContractOwner as ::ethers::contract::EthError>::selector() => {
+                    true
+                }
+                _ if selector
                     == <NotMasterAccount as ::ethers::contract::EthError>::selector() => {
                     true
                 }
@@ -3735,6 +4414,7 @@ pub mod account_config {
                 Self::NotAllowedToRemovePkpFromGroup(element) => {
                     ::core::fmt::Display::fmt(element, f)
                 }
+                Self::NotContractOwner(element) => ::core::fmt::Display::fmt(element, f),
                 Self::NotMasterAccount(element) => ::core::fmt::Display::fmt(element, f),
                 Self::OnlyApiPayerOrOwner(element) => ::core::fmt::Display::fmt(element, f),
                 Self::OnlyApiPayerOrPricingOperator(element) => {
@@ -3817,6 +4497,11 @@ pub mod account_config {
             Self::NotAllowedToRemovePkpFromGroup(value)
         }
     }
+    impl ::core::convert::From<NotContractOwner> for AccountConfigErrors {
+        fn from(value: NotContractOwner) -> Self {
+            Self::NotContractOwner(value)
+        }
+    }
     impl ::core::convert::From<NotMasterAccount> for AccountConfigErrors {
         fn from(value: NotMasterAccount) -> Self {
             Self::NotMasterAccount(value)
@@ -3845,6 +4530,727 @@ pub mod account_config {
     impl ::core::convert::From<UsageApiKeyDoesNotExist> for AccountConfigErrors {
         fn from(value: UsageApiKeyDoesNotExist) -> Self {
             Self::UsageApiKeyDoesNotExist(value)
+        }
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(name = "AccountCreated", abi = "AccountCreated(uint256,address,bool)")]
+    pub struct AccountCreatedFilter {
+        #[ethevent(indexed)]
+        pub api_key_hash: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub creator: ::ethers::core::types::Address,
+        pub managed: bool,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(name = "ActionAdded", abi = "ActionAdded(uint256,uint256)")]
+    pub struct ActionAddedFilter {
+        #[ethevent(indexed)]
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub action_hash: ::ethers::core::types::U256,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(
+        name = "ActionAddedToGroup",
+        abi = "ActionAddedToGroup(uint256,uint256,uint256)"
+    )]
+    pub struct ActionAddedToGroupFilter {
+        #[ethevent(indexed)]
+        pub api_key_hash: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub group_id: ::ethers::core::types::U256,
+        pub action: ::ethers::core::types::U256,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(name = "ActionRemoved", abi = "ActionRemoved(uint256,uint256)")]
+    pub struct ActionRemovedFilter {
+        #[ethevent(indexed)]
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub action_hash: ::ethers::core::types::U256,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(
+        name = "ActionRemovedFromGroup",
+        abi = "ActionRemovedFromGroup(uint256,uint256,uint256)"
+    )]
+    pub struct ActionRemovedFromGroupFilter {
+        #[ethevent(indexed)]
+        pub api_key_hash: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub group_id: ::ethers::core::types::U256,
+        pub action: ::ethers::core::types::U256,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(name = "AdminApiPayerUpdated", abi = "AdminApiPayerUpdated(address)")]
+    pub struct AdminApiPayerUpdatedFilter {
+        #[ethevent(indexed)]
+        pub new_admin_api_payer_account: ::ethers::core::types::Address,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(name = "ApiKeyCredited", abi = "ApiKeyCredited(uint256,uint256)")]
+    pub struct ApiKeyCreditedFilter {
+        #[ethevent(indexed)]
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub amount: ::ethers::core::types::U256,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(name = "ApiKeyDebited", abi = "ApiKeyDebited(uint256,uint256)")]
+    pub struct ApiKeyDebitedFilter {
+        #[ethevent(indexed)]
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub amount: ::ethers::core::types::U256,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(name = "ApiPayersUpdated", abi = "ApiPayersUpdated(address[])")]
+    pub struct ApiPayersUpdatedFilter {
+        pub new_api_payers: ::std::vec::Vec<::ethers::core::types::Address>,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(name = "ConfigOperatorUpdated", abi = "ConfigOperatorUpdated(address)")]
+    pub struct ConfigOperatorUpdatedFilter {
+        #[ethevent(indexed)]
+        pub new_config_operator: ::ethers::core::types::Address,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(name = "GroupAdded", abi = "GroupAdded(uint256,uint256)")]
+    pub struct GroupAddedFilter {
+        #[ethevent(indexed)]
+        pub api_key_hash: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub group_id: ::ethers::core::types::U256,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(name = "GroupRemoved", abi = "GroupRemoved(uint256,uint256)")]
+    pub struct GroupRemovedFilter {
+        #[ethevent(indexed)]
+        pub api_key_hash: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub group_id: ::ethers::core::types::U256,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(name = "GroupUpdated", abi = "GroupUpdated(uint256,uint256)")]
+    pub struct GroupUpdatedFilter {
+        #[ethevent(indexed)]
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub group_id: ::ethers::core::types::U256,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(
+        name = "PkpAddedToGroup",
+        abi = "PkpAddedToGroup(uint256,uint256,address)"
+    )]
+    pub struct PkpAddedToGroupFilter {
+        #[ethevent(indexed)]
+        pub api_key_hash: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub group_id: ::ethers::core::types::U256,
+        pub pkp_id: ::ethers::core::types::Address,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(
+        name = "PkpRemovedFromGroup",
+        abi = "PkpRemovedFromGroup(uint256,uint256,address)"
+    )]
+    pub struct PkpRemovedFromGroupFilter {
+        #[ethevent(indexed)]
+        pub api_key_hash: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub group_id: ::ethers::core::types::U256,
+        pub pkp_id: ::ethers::core::types::Address,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(
+        name = "PricingOperatorUpdated",
+        abi = "PricingOperatorUpdated(address)"
+    )]
+    pub struct PricingOperatorUpdatedFilter {
+        #[ethevent(indexed)]
+        pub new_pricing_operator: ::ethers::core::types::Address,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(name = "PricingUpdated", abi = "PricingUpdated(uint256,uint256)")]
+    pub struct PricingUpdatedFilter {
+        #[ethevent(indexed)]
+        pub pricing_item_id: ::ethers::core::types::U256,
+        pub price: ::ethers::core::types::U256,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(
+        name = "RebalanceAmountUpdated",
+        abi = "RebalanceAmountUpdated(uint256)"
+    )]
+    pub struct RebalanceAmountUpdatedFilter {
+        pub new_rebalance_amount: ::ethers::core::types::U256,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(
+        name = "RequestedApiPayerCountUpdated",
+        abi = "RequestedApiPayerCountUpdated(uint256)"
+    )]
+    pub struct RequestedApiPayerCountUpdatedFilter {
+        pub new_count: ::ethers::core::types::U256,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(name = "ServerTriggered", abi = "ServerTriggered(uint256,address)")]
+    pub struct ServerTriggeredFilter {
+        pub value: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub sender: ::ethers::core::types::Address,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(
+        name = "UsageApiKeyRemoved",
+        abi = "UsageApiKeyRemoved(uint256,uint256)"
+    )]
+    pub struct UsageApiKeyRemovedFilter {
+        #[ethevent(indexed)]
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub usage_api_key_hash: ::ethers::core::types::U256,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(name = "UsageApiKeySet", abi = "UsageApiKeySet(uint256,uint256)")]
+    pub struct UsageApiKeySetFilter {
+        #[ethevent(indexed)]
+        pub account_api_key_hash: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub usage_api_key_hash: ::ethers::core::types::U256,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethevent(
+        name = "WalletDerivationRegistered",
+        abi = "WalletDerivationRegistered(uint256,address,uint256)"
+    )]
+    pub struct WalletDerivationRegisteredFilter {
+        #[ethevent(indexed)]
+        pub api_key_hash: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub pkp_id: ::ethers::core::types::Address,
+        pub derivation_path: ::ethers::core::types::U256,
+    }
+    ///Container type for all of the contract's events
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        serde::Serialize,
+        serde::Deserialize,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    pub enum AccountConfigEvents {
+        AccountCreatedFilter(AccountCreatedFilter),
+        ActionAddedFilter(ActionAddedFilter),
+        ActionAddedToGroupFilter(ActionAddedToGroupFilter),
+        ActionRemovedFilter(ActionRemovedFilter),
+        ActionRemovedFromGroupFilter(ActionRemovedFromGroupFilter),
+        AdminApiPayerUpdatedFilter(AdminApiPayerUpdatedFilter),
+        ApiKeyCreditedFilter(ApiKeyCreditedFilter),
+        ApiKeyDebitedFilter(ApiKeyDebitedFilter),
+        ApiPayersUpdatedFilter(ApiPayersUpdatedFilter),
+        ConfigOperatorUpdatedFilter(ConfigOperatorUpdatedFilter),
+        GroupAddedFilter(GroupAddedFilter),
+        GroupRemovedFilter(GroupRemovedFilter),
+        GroupUpdatedFilter(GroupUpdatedFilter),
+        PkpAddedToGroupFilter(PkpAddedToGroupFilter),
+        PkpRemovedFromGroupFilter(PkpRemovedFromGroupFilter),
+        PricingOperatorUpdatedFilter(PricingOperatorUpdatedFilter),
+        PricingUpdatedFilter(PricingUpdatedFilter),
+        RebalanceAmountUpdatedFilter(RebalanceAmountUpdatedFilter),
+        RequestedApiPayerCountUpdatedFilter(RequestedApiPayerCountUpdatedFilter),
+        ServerTriggeredFilter(ServerTriggeredFilter),
+        UsageApiKeyRemovedFilter(UsageApiKeyRemovedFilter),
+        UsageApiKeySetFilter(UsageApiKeySetFilter),
+        WalletDerivationRegisteredFilter(WalletDerivationRegisteredFilter),
+    }
+    impl ::ethers::contract::EthLogDecode for AccountConfigEvents {
+        fn decode_log(
+            log: &::ethers::core::abi::RawLog,
+        ) -> ::core::result::Result<Self, ::ethers::core::abi::Error> {
+            if let Ok(decoded) = AccountCreatedFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::AccountCreatedFilter(decoded));
+            }
+            if let Ok(decoded) = ActionAddedFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::ActionAddedFilter(decoded));
+            }
+            if let Ok(decoded) = ActionAddedToGroupFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::ActionAddedToGroupFilter(decoded));
+            }
+            if let Ok(decoded) = ActionRemovedFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::ActionRemovedFilter(decoded));
+            }
+            if let Ok(decoded) = ActionRemovedFromGroupFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::ActionRemovedFromGroupFilter(decoded));
+            }
+            if let Ok(decoded) = AdminApiPayerUpdatedFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::AdminApiPayerUpdatedFilter(decoded));
+            }
+            if let Ok(decoded) = ApiKeyCreditedFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::ApiKeyCreditedFilter(decoded));
+            }
+            if let Ok(decoded) = ApiKeyDebitedFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::ApiKeyDebitedFilter(decoded));
+            }
+            if let Ok(decoded) = ApiPayersUpdatedFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::ApiPayersUpdatedFilter(decoded));
+            }
+            if let Ok(decoded) = ConfigOperatorUpdatedFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::ConfigOperatorUpdatedFilter(decoded));
+            }
+            if let Ok(decoded) = GroupAddedFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::GroupAddedFilter(decoded));
+            }
+            if let Ok(decoded) = GroupRemovedFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::GroupRemovedFilter(decoded));
+            }
+            if let Ok(decoded) = GroupUpdatedFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::GroupUpdatedFilter(decoded));
+            }
+            if let Ok(decoded) = PkpAddedToGroupFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::PkpAddedToGroupFilter(decoded));
+            }
+            if let Ok(decoded) = PkpRemovedFromGroupFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::PkpRemovedFromGroupFilter(decoded));
+            }
+            if let Ok(decoded) = PricingOperatorUpdatedFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::PricingOperatorUpdatedFilter(decoded));
+            }
+            if let Ok(decoded) = PricingUpdatedFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::PricingUpdatedFilter(decoded));
+            }
+            if let Ok(decoded) = RebalanceAmountUpdatedFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::RebalanceAmountUpdatedFilter(decoded));
+            }
+            if let Ok(decoded) = RequestedApiPayerCountUpdatedFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::RequestedApiPayerCountUpdatedFilter(
+                    decoded,
+                ));
+            }
+            if let Ok(decoded) = ServerTriggeredFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::ServerTriggeredFilter(decoded));
+            }
+            if let Ok(decoded) = UsageApiKeyRemovedFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::UsageApiKeyRemovedFilter(decoded));
+            }
+            if let Ok(decoded) = UsageApiKeySetFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::UsageApiKeySetFilter(decoded));
+            }
+            if let Ok(decoded) = WalletDerivationRegisteredFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::WalletDerivationRegisteredFilter(
+                    decoded,
+                ));
+            }
+            Err(::ethers::core::abi::Error::InvalidData)
+        }
+    }
+    impl ::core::fmt::Display for AccountConfigEvents {
+        fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+            match self {
+                Self::AccountCreatedFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ActionAddedFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ActionAddedToGroupFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ActionRemovedFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ActionRemovedFromGroupFilter(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::AdminApiPayerUpdatedFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ApiKeyCreditedFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ApiKeyDebitedFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ApiPayersUpdatedFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ConfigOperatorUpdatedFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::GroupAddedFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::GroupRemovedFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::GroupUpdatedFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::PkpAddedToGroupFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::PkpRemovedFromGroupFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::PricingOperatorUpdatedFilter(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::PricingUpdatedFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::RebalanceAmountUpdatedFilter(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::RequestedApiPayerCountUpdatedFilter(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+                Self::ServerTriggeredFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::UsageApiKeyRemovedFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::UsageApiKeySetFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::WalletDerivationRegisteredFilter(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
+            }
+        }
+    }
+    impl ::core::convert::From<AccountCreatedFilter> for AccountConfigEvents {
+        fn from(value: AccountCreatedFilter) -> Self {
+            Self::AccountCreatedFilter(value)
+        }
+    }
+    impl ::core::convert::From<ActionAddedFilter> for AccountConfigEvents {
+        fn from(value: ActionAddedFilter) -> Self {
+            Self::ActionAddedFilter(value)
+        }
+    }
+    impl ::core::convert::From<ActionAddedToGroupFilter> for AccountConfigEvents {
+        fn from(value: ActionAddedToGroupFilter) -> Self {
+            Self::ActionAddedToGroupFilter(value)
+        }
+    }
+    impl ::core::convert::From<ActionRemovedFilter> for AccountConfigEvents {
+        fn from(value: ActionRemovedFilter) -> Self {
+            Self::ActionRemovedFilter(value)
+        }
+    }
+    impl ::core::convert::From<ActionRemovedFromGroupFilter> for AccountConfigEvents {
+        fn from(value: ActionRemovedFromGroupFilter) -> Self {
+            Self::ActionRemovedFromGroupFilter(value)
+        }
+    }
+    impl ::core::convert::From<AdminApiPayerUpdatedFilter> for AccountConfigEvents {
+        fn from(value: AdminApiPayerUpdatedFilter) -> Self {
+            Self::AdminApiPayerUpdatedFilter(value)
+        }
+    }
+    impl ::core::convert::From<ApiKeyCreditedFilter> for AccountConfigEvents {
+        fn from(value: ApiKeyCreditedFilter) -> Self {
+            Self::ApiKeyCreditedFilter(value)
+        }
+    }
+    impl ::core::convert::From<ApiKeyDebitedFilter> for AccountConfigEvents {
+        fn from(value: ApiKeyDebitedFilter) -> Self {
+            Self::ApiKeyDebitedFilter(value)
+        }
+    }
+    impl ::core::convert::From<ApiPayersUpdatedFilter> for AccountConfigEvents {
+        fn from(value: ApiPayersUpdatedFilter) -> Self {
+            Self::ApiPayersUpdatedFilter(value)
+        }
+    }
+    impl ::core::convert::From<ConfigOperatorUpdatedFilter> for AccountConfigEvents {
+        fn from(value: ConfigOperatorUpdatedFilter) -> Self {
+            Self::ConfigOperatorUpdatedFilter(value)
+        }
+    }
+    impl ::core::convert::From<GroupAddedFilter> for AccountConfigEvents {
+        fn from(value: GroupAddedFilter) -> Self {
+            Self::GroupAddedFilter(value)
+        }
+    }
+    impl ::core::convert::From<GroupRemovedFilter> for AccountConfigEvents {
+        fn from(value: GroupRemovedFilter) -> Self {
+            Self::GroupRemovedFilter(value)
+        }
+    }
+    impl ::core::convert::From<GroupUpdatedFilter> for AccountConfigEvents {
+        fn from(value: GroupUpdatedFilter) -> Self {
+            Self::GroupUpdatedFilter(value)
+        }
+    }
+    impl ::core::convert::From<PkpAddedToGroupFilter> for AccountConfigEvents {
+        fn from(value: PkpAddedToGroupFilter) -> Self {
+            Self::PkpAddedToGroupFilter(value)
+        }
+    }
+    impl ::core::convert::From<PkpRemovedFromGroupFilter> for AccountConfigEvents {
+        fn from(value: PkpRemovedFromGroupFilter) -> Self {
+            Self::PkpRemovedFromGroupFilter(value)
+        }
+    }
+    impl ::core::convert::From<PricingOperatorUpdatedFilter> for AccountConfigEvents {
+        fn from(value: PricingOperatorUpdatedFilter) -> Self {
+            Self::PricingOperatorUpdatedFilter(value)
+        }
+    }
+    impl ::core::convert::From<PricingUpdatedFilter> for AccountConfigEvents {
+        fn from(value: PricingUpdatedFilter) -> Self {
+            Self::PricingUpdatedFilter(value)
+        }
+    }
+    impl ::core::convert::From<RebalanceAmountUpdatedFilter> for AccountConfigEvents {
+        fn from(value: RebalanceAmountUpdatedFilter) -> Self {
+            Self::RebalanceAmountUpdatedFilter(value)
+        }
+    }
+    impl ::core::convert::From<RequestedApiPayerCountUpdatedFilter> for AccountConfigEvents {
+        fn from(value: RequestedApiPayerCountUpdatedFilter) -> Self {
+            Self::RequestedApiPayerCountUpdatedFilter(value)
+        }
+    }
+    impl ::core::convert::From<ServerTriggeredFilter> for AccountConfigEvents {
+        fn from(value: ServerTriggeredFilter) -> Self {
+            Self::ServerTriggeredFilter(value)
+        }
+    }
+    impl ::core::convert::From<UsageApiKeyRemovedFilter> for AccountConfigEvents {
+        fn from(value: UsageApiKeyRemovedFilter) -> Self {
+            Self::UsageApiKeyRemovedFilter(value)
+        }
+    }
+    impl ::core::convert::From<UsageApiKeySetFilter> for AccountConfigEvents {
+        fn from(value: UsageApiKeySetFilter) -> Self {
+            Self::UsageApiKeySetFilter(value)
+        }
+    }
+    impl ::core::convert::From<WalletDerivationRegisteredFilter> for AccountConfigEvents {
+        fn from(value: WalletDerivationRegisteredFilter) -> Self {
+            Self::WalletDerivationRegisteredFilter(value)
         }
     }
     ///Container type for all input parameters for the `accountCount` function with signature `accountCount()` and selector `0xe4af29fc`
@@ -4734,6 +6140,23 @@ pub mod account_config {
     )]
     #[ethcall(name = "requestedApiPayerCount", abi = "requestedApiPayerCount()")]
     pub struct RequestedApiPayerCountCall;
+    ///Container type for all input parameters for the `serverTrigger` function with signature `serverTrigger(uint256)` and selector `0x286cf9bb`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(name = "serverTrigger", abi = "serverTrigger(uint256)")]
+    pub struct ServerTriggerCall {
+        pub value: ::ethers::core::types::U256,
+    }
     ///Container type for all input parameters for the `setAdminApiPayerAccount` function with signature `setAdminApiPayerAccount(address)` and selector `0xc001bc79`
     #[derive(
         Clone,
@@ -5067,6 +6490,7 @@ pub mod account_config {
         RemovePkpFromGroup(RemovePkpFromGroupCall),
         RemoveUsageApiKey(RemoveUsageApiKeyCall),
         RequestedApiPayerCount(RequestedApiPayerCountCall),
+        ServerTrigger(ServerTriggerCall),
         SetAdminApiPayerAccount(SetAdminApiPayerAccountCall),
         SetApiPayers(SetApiPayersCall),
         SetConfigOperator(SetConfigOperatorCall),
@@ -5288,6 +6712,10 @@ pub mod account_config {
             {
                 return Ok(Self::RequestedApiPayerCount(decoded));
             }
+            if let Ok(decoded) = <ServerTriggerCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::ServerTrigger(decoded));
+            }
             if let Ok(decoded) =
                 <SetAdminApiPayerAccountCall as ::ethers::core::abi::AbiDecode>::decode(data)
             {
@@ -5441,6 +6869,7 @@ pub mod account_config {
                 Self::RequestedApiPayerCount(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
+                Self::ServerTrigger(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::SetAdminApiPayerAccount(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
@@ -5525,6 +6954,7 @@ pub mod account_config {
                 Self::RemovePkpFromGroup(element) => ::core::fmt::Display::fmt(element, f),
                 Self::RemoveUsageApiKey(element) => ::core::fmt::Display::fmt(element, f),
                 Self::RequestedApiPayerCount(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ServerTrigger(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetAdminApiPayerAccount(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetApiPayers(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetConfigOperator(element) => ::core::fmt::Display::fmt(element, f),
@@ -5774,6 +7204,11 @@ pub mod account_config {
     impl ::core::convert::From<RequestedApiPayerCountCall> for AccountConfigCalls {
         fn from(value: RequestedApiPayerCountCall) -> Self {
             Self::RequestedApiPayerCount(value)
+        }
+    }
+    impl ::core::convert::From<ServerTriggerCall> for AccountConfigCalls {
+        fn from(value: ServerTriggerCall) -> Self {
+            Self::ServerTrigger(value)
         }
     }
     impl ::core::convert::From<SetAdminApiPayerAccountCall> for AccountConfigCalls {

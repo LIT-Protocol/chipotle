@@ -28,6 +28,7 @@ use std::time::Duration;
 /// Monitors system load average + CPU pressure and exposes an overload flag.
 ///
 /// Register as Rocket managed state via `.manage(CpuOverloadMonitor::start())`.
+#[derive(Clone)]
 pub struct CpuOverloadMonitor {
     overloaded: Arc<AtomicBool>,
 }
@@ -226,6 +227,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(target_os = "linux")]
     async fn read_load_avg_returns_some_on_linux() {
         let load = read_1m_load_avg().await;
         assert!(load.is_some(), "/proc/loadavg should be readable");
@@ -233,6 +235,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(target_os = "linux")]
     async fn read_psi_cpu_total_returns_some_on_linux() {
         let total = read_psi_cpu_total().await;
         assert!(

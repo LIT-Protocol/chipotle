@@ -2,7 +2,9 @@ use crate::actions::aes::{aes_decrypt, aes_encrypt};
 use crate::core::pkp_id_to_derviation_path;
 use crate::dstack::v1::get_client_key;
 use anyhow::{Result, anyhow};
+use tracing::instrument;
 
+#[instrument(skip_all, err)]
 pub async fn aes_encrypt_with_pkp(api_key: &str, pkp_id: &str, plaintext: &str) -> Result<String> {
     let derivation_path = pkp_id_to_derviation_path(api_key, pkp_id)
         .await
@@ -16,6 +18,7 @@ pub async fn aes_encrypt_with_pkp(api_key: &str, pkp_id: &str, plaintext: &str) 
     Ok(encrypted)
 }
 
+#[instrument(skip_all, err)]
 pub async fn aes_decrypt_with_pkp(api_key: &str, pkp_id: &str, ciphertext: &str) -> Result<String> {
     let derivation_path = pkp_id_to_derviation_path(api_key, pkp_id)
         .await

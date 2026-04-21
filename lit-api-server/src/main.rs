@@ -7,6 +7,7 @@ use lit_api_server::core;
 use lit_api_server::core::v1::guards::cpu_overload::CpuOverloadMonitor;
 use lit_api_server::dstack;
 use lit_api_server::observability;
+use lit_api_server::restart::{RestartHandle, start_server_trigger_listener};
 use lit_api_server::stripe;
 use lit_api_server::utils::chain_info::Chain;
 use moka::future::Cache;
@@ -17,6 +18,13 @@ use rocket_cors::{AllowedOrigins, Method};
 use rocket_okapi::okapi::openapi3::{OpenApi, Server};
 use rocket_okapi::swagger_ui::{SwaggerUIConfig, make_swagger_ui};
 use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
+use tokio::sync::mpsc;
+
+/// Maximum number of restarts allowed within `RESTART_WINDOW`.
+/// Once this limit is reached, the process exits to avoid an infinite restart loop.
+const MAX_RESTARTS: u64 = 3;
+/// Time window (in seconds) for restart loop protection.
+const RESTART_WINDOW: Duration = Duration::from_secs(60);
 
 // The default signer count for a new instance when contracts are deployed.
 // Note that if the signers aren't funded, nothing will work until an admin sets the default api payer.
@@ -135,6 +143,137 @@ async fn main() -> Result<(), rocket::Error> {
         }
     };
 
+    let cpu_monitor = CpuOverloadMonitor::start();
+    let stripe_state = stripe::init();
+
+    // IPFS cache lives outside the restart loop so warm entries survive restarts.
+    let ipfs_cache: Cache<String, Arc<String>> = Cache::builder()
+        .weigher(|_key, value: &Arc<String>| -> u32 { value.len().try_into().unwrap_or(u32::MAX) })
+        .max_capacity(1024 * 1024 * 1024) // 1 GB
+        .build();
+
+    // Restart metrics: total restart count for logging.
+    let mut restart_count: u64 = 0;
+
+    // Restart loop: each iteration builds and launches a fresh Rocket instance.
+    // Long-lived background services (signer pool, chain config, CPU monitor, IPFS cache)
+    // are preserved across restarts.
+    //
+    //   main() -> init -> loop { build Rocket -> ignite -> launch <-> restart_rx } -> exit
+    //                      ^                                    |
+    //                      +------------------------------------+
+    //                             restart signal received
+    let (restart_tx, mut restart_rx) = mpsc::channel::<()>(1);
+
+    // Start the on-chain event listener that watches for ServerTriggered events
+    // from the contract owner and sends restart signals via the channel.
+    start_server_trigger_listener(RestartHandle::new(restart_tx.clone()));
+
+    // Restart loop protection: track timestamps of recent restarts.
+    let mut restart_timestamps: Vec<std::time::Instant> = Vec::new();
+
+    let mut server_error: Option<rocket::Error> = None;
+
+    loop {
+        let r = build_rocket(
+            signer_pool.clone(),
+            chain_config.clone(),
+            cpu_monitor.clone(),
+            stripe_state.clone(),
+            ipfs_cache.clone(),
+        );
+
+        let rocket = match r.ignite().await {
+            Ok(rocket) => rocket,
+            Err(e) => {
+                tracing::error!("Failed to ignite Rocket: {e}. Exiting restart loop.");
+                server_error = Some(e);
+                break;
+            }
+        };
+        let shutdown = rocket.shutdown();
+        let mut server_handle = tokio::spawn(rocket.launch());
+
+        tokio::select! {
+            res = &mut server_handle => {
+                match res {
+                    Ok(Ok(_)) => tracing::info!("Server exited cleanly."),
+                    Ok(Err(e)) => {
+                        tracing::error!("Server exited with error: {e}");
+                        server_error = Some(e);
+                    }
+                    Err(e) => tracing::error!("Server task panicked: {e}"),
+                }
+                break;
+            }
+            msg = restart_rx.recv() => {
+                if msg.is_none() {
+                    // All senders dropped, channel closed. Exit the loop.
+                    tracing::warn!("Restart channel closed. Shutting down.");
+                    shutdown.notify();
+                    let _ = server_handle.await;
+                    break;
+                }
+
+                restart_count += 1;
+                let count = restart_count;
+                let now = std::time::Instant::now();
+                restart_timestamps.push(now);
+
+                // Evict timestamps outside the window.
+                restart_timestamps.retain(|ts| now.duration_since(*ts) < RESTART_WINDOW);
+
+                tracing::info!(
+                    restart_count = count,
+                    restarts_in_window = restart_timestamps.len(),
+                    "Restart signal received. Shutting down current instance..."
+                );
+
+                if restart_timestamps.len() as u64 > MAX_RESTARTS {
+                    tracing::error!(
+                        max = MAX_RESTARTS,
+                        window_secs = RESTART_WINDOW.as_secs(),
+                        "Restart loop protection triggered. Too many restarts. Exiting."
+                    );
+                    shutdown.notify();
+                    let _ = server_handle.await;
+                    break;
+                }
+
+                shutdown.notify();
+                let _ = server_handle.await;
+                tracing::info!(restart_count = count, "Restarting Rocket...");
+            }
+        }
+    }
+
+    #[cfg(feature = "otlp")]
+    if let Some((tracing_provider, metrics_provider, logger_provider)) = _otlp_providers {
+        if let Err(e) = tracing_provider.shutdown() {
+            eprintln!("Failed to shutdown tracing provider: {e}");
+        }
+        if let Err(e) = metrics_provider.shutdown() {
+            eprintln!("Failed to shutdown metrics provider: {e}");
+        }
+        if let Err(e) = logger_provider.shutdown() {
+            eprintln!("Failed to shutdown logger provider: {e}");
+        }
+    }
+
+    if let Some(e) = server_error {
+        Err(e)
+    } else {
+        Ok(())
+    }
+}
+
+fn build_rocket(
+    signer_pool: Arc<lit_api_server::accounts::signer_pool::SignerPool>,
+    chain_config: Arc<lit_api_server::accounts::chain_config::ChainConfig>,
+    cpu_monitor: CpuOverloadMonitor,
+    stripe_state: Option<Arc<stripe::StripeState>>,
+    ipfs_cache: Cache<String, Arc<String>>,
+) -> rocket::Rocket<rocket::Build> {
     let allowed_methods = HashSet::from([
         Method::from_str("Get").expect("Invalid method: Get"),
         Method::from_str("Options").expect("Invalid method: Options"),
@@ -151,13 +290,7 @@ async fn main() -> Result<(), rocket::Error> {
     .to_cors()
     .expect("CORS failed to build");
 
-    // 1gb max capacity
-    let ipfs_cache: Cache<String, String> = Cache::builder()
-        .weigher(|_key, value: &String| -> u32 { value.len().try_into().unwrap_or(u32::MAX) })
-        .max_capacity(1024 * 1024 * 1024)
-        .build();
-
-    let stripe_state = stripe::init();
+    accounts::blockchain_cache::init();
 
     let (core_routes, openapi_spec) = core::v1::endpoints::routes_with_spec();
 
@@ -191,36 +324,18 @@ async fn main() -> Result<(), rocket::Error> {
         .manage(ipfs_cache)
         .manage(openapi_spec)
         .manage(default_http_client())
-        // .manage(action_store)
         .manage(GrpcClientPool::<tonic::transport::Channel>::new())
         .manage(signer_pool)
         .manage(chain_config)
-        .manage(CpuOverloadMonitor::start())
+        .manage(cpu_monitor)
         .manage(stripe_state);
 
-    {
-        // /attestation at root — per Phala Get Attestation
-        r = r
-            .mount("/", dstack::v1::endpoints::attestation_routes())
-            .mount("/dstack/v1/", dstack::v1::endpoints::routes());
-    }
+    // /attestation at root — per Phala Get Attestation
+    r = r
+        .mount("/", dstack::v1::endpoints::attestation_routes())
+        .mount("/dstack/v1/", dstack::v1::endpoints::routes());
 
-    let launch_result = r.launch().await;
-
-    #[cfg(feature = "otlp")]
-    if let Some((tracing_provider, metrics_provider, logger_provider)) = _otlp_providers {
-        if let Err(e) = tracing_provider.shutdown() {
-            eprintln!("Failed to shutdown tracing provider: {e}");
-        }
-        if let Err(e) = metrics_provider.shutdown() {
-            eprintln!("Failed to shutdown metrics provider: {e}");
-        }
-        if let Err(e) = logger_provider.shutdown() {
-            eprintln!("Failed to shutdown logger provider: {e}");
-        }
-    }
-
-    launch_result.map(|_| ())
+    r
 }
 
 #[get("/core/v1/openapi.json")]

@@ -4,7 +4,7 @@
 /// @notice This contract composes both facets so a single deployment exposes the full interface.
 
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity =0.8.28;
 
 import {AppStorage} from "./AccountConfigFacets/AppStorage.sol";
 import {
@@ -16,6 +16,8 @@ import {IDiamondLoupe} from "../interfaces/IDiamondLoupe.sol";
 
 // When no function exists for function called
 error FunctionNotFound(bytes4 _functionSelector);
+// When ETH is sent directly to the contract
+error DirectETHTransferNotAllowed();
 
 contract AccountConfig {
     using EnumerableSet for EnumerableSet.AddressSet;
@@ -35,6 +37,11 @@ contract AccountConfig {
         s.configOperator = owner;
         s.pricing[1] = 1;
         s.requestedApiPayerCount = 3; // just a default for spinning up a new instance
+    }
+
+    /// @notice Reject any ETH sent directly to the contract.
+    receive() external payable {
+        revert DirectETHTransferNotAllowed();
     }
 
     // Find facet for function that is called and execute the

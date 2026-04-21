@@ -19,6 +19,7 @@ export function getApiKey() {
 export function setApiKey(v) {
   if (v) sessionStorage.setItem(STORAGE_KEY_API, v);
   else sessionStorage.removeItem(STORAGE_KEY_API);
+  import('./billing.js').then((m) => m.resetBillingAvailability()).catch(() => {});
   updateAuthUI();
 }
 
@@ -48,16 +49,18 @@ export function toggleOverrideEnabled() {
   updateUsageKeyOverrideUI();
 }
 
+export function hasUsageKeyOverride() {
+  return !!sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE);
+}
+
 export function updateUsageKeyOverrideUI() {
   const card = document.getElementById('usage-key-override-card');
   const badge = document.getElementById('usage-key-override-badge');
   const input = document.getElementById('usage-key-override-input');
   const clearBtn = document.getElementById('usage-key-override-clear');
-  const balanceEl = document.getElementById('billing-balance-display');
-  const addFundsBtn = document.getElementById('btn-add-funds');
   const toggleBtn = document.getElementById('toggle-usage-override-btn');
   const enabled = isOverrideEnabled();
-  const hasOverride = !!sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE);
+  const hasOverride = hasUsageKeyOverride();
   if (card) card.style.display = enabled ? '' : 'none';
   if (badge) {
     badge.style.display = hasOverride ? '' : 'none';
@@ -66,9 +69,7 @@ export function updateUsageKeyOverrideUI() {
   if (input) input.value = sessionStorage.getItem(STORAGE_KEY_USAGE_OVERRIDE) || '';
   if (clearBtn) clearBtn.style.display = hasOverride ? '' : 'none';
   if (toggleBtn) toggleBtn.textContent = enabled ? '\u2713 Usage Key Override' : 'Usage Key Override';
-  const showBilling = !!getApiKey() && !hasOverride;
-  if (balanceEl) balanceEl.style.display = showBilling ? '' : 'none';
-  if (addFundsBtn) addFundsBtn.style.display = showBilling ? '' : 'none';
+  import('./billing.js').then((m) => m.refreshBillingUI()).catch(() => {});
 }
 
 export function clearOverrideState() {
@@ -183,10 +184,7 @@ export function setOnAuthReady(fn) { _onAuthReady = fn; }
 function updateAuthUI() {
   const hasKey = !!getApiKey();
   document.body.classList.toggle('has-api-key', hasKey);
-  const balanceEl = document.getElementById('billing-balance-display');
-  const addFundsBtn = document.getElementById('btn-add-funds');
-  if (balanceEl) balanceEl.style.display = hasKey ? '' : 'none';
-  if (addFundsBtn) addFundsBtn.style.display = hasKey ? '' : 'none';
+  import('./billing.js').then((m) => m.refreshBillingUI()).catch(() => {});
   if (hasKey && _onAuthReady) {
     _onAuthReady();
   }

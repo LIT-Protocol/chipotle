@@ -2,28 +2,100 @@
  * Billing — Stripe integration, payment flow.
  */
 
-import { getApiKey, getClient } from './auth.js';
+import { getApiKey, getClient, hasUsageKeyOverride } from './auth.js';
 import { formatError, logError } from './ui-utils.js';
 
 let _stripe = null;
 let _stripeCard = null;
+
+let _billingAvailable = null;
+let _billingCheckedAt = 0;
+let _billingRetryTimer = null;
+const BILLING_RETRY_MS = 30000;
+
+export async function checkBillingAvailable() {
+  if (_billingAvailable === true) return true;
+  if (_billingAvailable === false && (Date.now() - _billingCheckedAt) < BILLING_RETRY_MS) {
+    return false;
+  }
+  try {
+    const client = await getClient();
+    await client.getStripeConfig();
+    _billingAvailable = true;
+  } catch (_) {
+    _billingAvailable = false;
+  }
+  _billingCheckedAt = Date.now();
+  return _billingAvailable;
+}
+
+export function resetBillingAvailability() {
+  _billingAvailable = null;
+  _billingCheckedAt = 0;
+  if (_billingRetryTimer) { clearTimeout(_billingRetryTimer); _billingRetryTimer = null; }
+}
+
+export function refreshBillingUI() {
+  const capturedKey = getApiKey();
+  const balanceEl = document.getElementById('billing-balance-display');
+  const addFundsBtn = document.getElementById('btn-add-funds');
+  const notRequiredEl = document.getElementById('billing-not-required');
+  const billingBanner = document.getElementById('billing-disabled-banner');
+  const noFundsWarning = document.getElementById('no-funds-warning');
+  if (!capturedKey || hasUsageKeyOverride()) {
+    if (balanceEl) balanceEl.style.display = 'none';
+    if (addFundsBtn) addFundsBtn.style.display = 'none';
+    if (notRequiredEl) notRequiredEl.style.display = 'none';
+    if (billingBanner) billingBanner.style.display = 'none';
+    if (noFundsWarning) noFundsWarning.style.display = 'none';
+    return;
+  }
+  checkBillingAvailable().then((available) => {
+    if (getApiKey() !== capturedKey) return;
+    if (available) {
+      if (balanceEl) balanceEl.style.display = '';
+      if (addFundsBtn) addFundsBtn.style.display = '';
+      if (notRequiredEl) notRequiredEl.style.display = 'none';
+      if (billingBanner) billingBanner.style.display = 'none';
+      loadBillingBalance();
+    } else {
+      if (balanceEl) balanceEl.style.display = 'none';
+      if (addFundsBtn) addFundsBtn.style.display = 'none';
+      if (notRequiredEl) notRequiredEl.style.display = '';
+      if (billingBanner) billingBanner.style.display = '';
+      if (noFundsWarning) noFundsWarning.style.display = 'none';
+      if (_billingRetryTimer) clearTimeout(_billingRetryTimer);
+      _billingRetryTimer = setTimeout(() => {
+        _billingRetryTimer = null;
+        refreshBillingUI();
+      }, BILLING_RETRY_MS);
+    }
+  }).catch((e) => console.error('billing check failed', e));
+}
 
 async function loadBillingBalance() {
   const apiKey = getApiKey();
   if (!apiKey) return;
   const el = document.getElementById('billing-balance-display');
   if (!el) return;
+  const noFundsWarning = document.getElementById('no-funds-warning');
   try {
     const client = await getClient();
     const data = await client.getBillingBalance(apiKey);
     el.textContent = data.balance_display || '';
+    if (noFundsWarning) {
+      const hasNoFunds = typeof data.balance_cents === 'number' && data.balance_cents >= 0;
+      noFundsWarning.style.display = hasNoFunds ? '' : 'none';
+    }
   } catch (e) {
     logError('loadBillingBalance', e);
     el.textContent = 'Balance unavailable';
+    if (noFundsWarning) noFundsWarning.style.display = 'none';
   }
 }
 
 async function openAddFundsModal() {
+  if (_billingAvailable === false) return;
   const overlay = document.getElementById('billing-modal-overlay');
   if (!overlay) return;
   overlay.classList.add('is-open');
@@ -72,6 +144,8 @@ export function initBilling() {
   const payBtn = document.getElementById('billing-pay-btn');
 
   if (addFundsBtn) addFundsBtn.addEventListener('click', openAddFundsModal);
+  const noFundsLink = document.getElementById('no-funds-add-funds');
+  if (noFundsLink) noFundsLink.addEventListener('click', (e) => { e.preventDefault(); openAddFundsModal(); });
   if (closeBtn) closeBtn.addEventListener('click', closeBillingModal);
   if (cancelBtn) cancelBtn.addEventListener('click', closeBillingModal);
 
@@ -142,4 +216,3 @@ export function initBilling() {
   }
 }
 
-export { loadBillingBalance };

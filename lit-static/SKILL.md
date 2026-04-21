@@ -1,94 +1,382 @@
 ---
-name: lit-peer-api-endpoints
-description: Teaches how to use the Lit Node Simple API endpoints and for which purposes. Use when an AI needs to call the API, choose the right endpoint, or implement flows (auth, signing, encrypt/decrypt, transfers, swaps). Covers /core/v1/, /transfer/v1/, /swaps/v1/.
+name: lit-chipotle-api
+description: Teaches how to create and configure a Lit Chipotle account (accounts, groups, wallets, actions, API keys), write and run Lit Actions, and use the Core/Transfer/Swaps APIs. Use when an AI needs to set up an account, manage resources, write a Lit Action, or call any API endpoint.
 ---
 
-# Lit Node Simple API – Endpoint usage for AIs
+# Lit Chipotle API — Complete guide for AIs
 
-Base URL is typically `http://localhost:8000`. Routes are mounted at `/core/v1/`, `/transfer/v1/`, and `/swaps/v1/`. Use the JavaScript SDKs in this folder (`core_sdk.js`, `transfer_sdk.js`, `swaps_sdk.js`) or call the HTTP endpoints directly.
+Lit Chipotle is a programmable key management system. Accounts hold wallets (PKPs), IPFS-pinned JavaScript programs (Lit Actions), and permission groups — all enforced on-chain via the `AccountConfig` smart contract and executed inside a TEE (Trusted Execution Environment).
 
----
+**Production API**: `https://api.chipotle.litprotocol.com`
+**Dev API**: `https://api.dev.litprotocol.com`
+**Dashboard**: `https://dashboard.chipotle.litprotocol.com/dapps/dashboard/`
+**Local dev**: `http://localhost:8000`
 
-## When to use which API
-
-| Need | Use |
-|------|-----|
-| **Identity / wallet for this session** | Core: `get_api_key` → then use `api_key` for all wallet-scoped core and transfer calls. |
-| **Prove control of a key (PKP)** | Core: `mint_pkp` (get a PKP), then `sign_with_pkp` + `combine_signature_shares` to produce a single signature. |
-| **Run custom logic on Lit nodes** | Core: `lit_action` (JavaScript code + optional `js_params`). |
-| **Encrypt so only a wallet can decrypt** | Core: `encrypt` (time-lock for wallet) → later `decrypt` with same `api_key` and `ciphertext` + `data_to_encrypt_hash`. |
-| **Check or spend balances on chains** | Transfer: `get_all_chains`, then `get_api_key_balance` / `get_pkp_balance` / `get_address_balance`; to send funds use `send`. |
-| **Swap / quote flows** | Swaps: create request → fill quote → accept quote → check balances → attempt swap. |
+Routes are mounted at `/core/v1/`, `/transfer/v1/`, and `/swaps/v1/`.
+Auth header: `X-Api-Key: <key>` or `Authorization: Bearer <key>`.
 
 ---
 
-## Core API (`/core/v1/`) – SDK: `core_sdk.js`
+## Quick-start: zero to running a Lit Action
 
-**Purpose**: Lit node primitives: session identity, PKP mint/sign, Lit actions, time-lock encrypt/decrypt, ledger balance.
+1. **Create an account** — `POST /core/v1/new_account` (or use the Dashboard). Save the returned `api_key` immediately; it is shown once.
+2. **Add funds** — Dashboard "Add Funds" button or Stripe billing endpoints. Minimum $5.00.
+3. **Create a wallet** — `GET /core/v1/create_wallet` with your API key. Returns a `wallet_address` (PKP).
+4. **Create a group** — `POST /core/v1/add_group` to organize wallets and actions together.
+5. **Register an action** — `POST /core/v1/add_action` with the IPFS CID of your JavaScript code.
+6. **Wire them together** — `POST /core/v1/add_action_to_group` and `POST /core/v1/add_pkp_to_group`.
+7. **Create a usage API key** — `POST /core/v1/add_usage_api_key` scoped to that group's `execute_in_groups`.
+8. **Run it** — `POST /core/v1/lit_action` with the usage key, your inline JavaScript code, and `js_params`. The server derives the IPFS CID from the code for permission checks.
 
-| Endpoint | Method | Purpose | When to use |
-|----------|--------|---------|-------------|
-| **get_api_key** | GET | Create a new API key (wallet secret) and fund it. | Start of any flow that needs a wallet identity. Use returned `api_key` for mint_pkp, sign, encrypt/decrypt, lit_action, combine_signature_shares, and transfer. |
-| **handshake** | GET | Handshake with validators; returns their responses. | When you need to establish or verify validator connectivity. |
-| **mint_pkp** | GET `/<api_key>` | Mint a PKP for the wallet tied to `api_key`. | When you need a programmable key pair (e.g. to sign on behalf of a user or run Lit actions with a PKP). |
-| **sign_with_pkp** | POST JSON | Sign a message with a PKP. Returns **SignWithPkpResponse** (signing_scheme, signed_digest, public_key, share_type, shares, etc.). | To produce a threshold signature; pass the full response to **combine_signature_shares** as share_data. |
-| **combine_signature_shares** | POST JSON | Turn a **SignWithPkpResponse** (from sign_with_pkp) into one signature. Request body: `api_key` + `share_date` (the full sign response). | After every sign_with_pkp when you need the final signature (e.g. for broadcasting a tx). |
-| **lit_action** | POST JSON | Run JavaScript Lit action (code + optional js_params). | Custom logic on Lit nodes (e.g. signing, condition checks, multi-step flows). |
-| **encrypt** | POST JSON | Time-lock encrypt a message for the wallet identified by `api_key`. | When only that wallet (or someone with its key) should decrypt later. |
-| **decrypt** | POST JSON | Decrypt ciphertext; server fetches decryption shares. Body: `api_key`, `ciphertext`, `data_to_encrypt_hash` (from encrypt). | After encrypt; use same `api_key` and the encrypt response fields. No client-side shares. |
-| **get_ledger_balance** | GET `/<api_key>` | Ledger (inquiry) balance for the API key’s wallet. | To check on-ledger balance for that wallet. |
-
-**Typical core flow**: `get_api_key` → `mint_pkp` → `sign_with_pkp` → `combine_signature_shares` (and/or `encrypt` → `decrypt`, and/or `lit_action`).
+After setup, daily use is just step 8: call the API with your usage key, action code, and parameters.
 
 ---
 
-## Transfer API (`/transfer/v1/`) – SDK: `transfer_sdk.js`
+## Concepts
 
-**Purpose**: Chain metadata, balance lookups (by API key, PKP, or address), and sending funds (PKP-signed).
+### Accounts
+An account is the top-level entity. Creating one mints a master **account API key** and an initial wallet. The account key has full administrative control — never embed it in client code.
 
-| Endpoint | Method | Purpose | When to use |
-|----------|--------|---------|-------------|
-| **get_all_chains** | GET `?is_evm=&is_testnet=` | List supported chains (EVM, non-EVM, testnet). | To get valid `chain` values for balance/send and for UI (display_name, token). |
-| **get_api_key_balance** | GET `/<api_key>/<chain>` | Balance of the wallet for that API key on the given chain. | Check wallet balance before/after transfers. |
-| **get_pkp_balance** | GET `/<pkp_public_key>/<chain>` | Balance of a PKP address on a chain. | Check PKP balance (e.g. before swap or send). |
-| **get_address_balance** | GET `/<address>/<chain>` | Balance of an arbitrary address on a chain. | Generic balance lookup. |
-| **send** | POST JSON | Send funds from a PKP to a destination (PKP-signed tx). | To move funds: need `api_key`, `pkp_public_key`, `chain`, `destination_address`, `amount`. |
+### Wallets (PKPs)
+Programmable Key Pairs. Each is an elliptic-curve key pair held by the TEE. A wallet address is an Ethereum-compatible address. PKPs can sign data, hold funds, and be used by Lit Actions. Create more with `/create_wallet`.
 
-**When to use**: Any balance check or send on a supported chain; chain ids come from `get_all_chains`. Use the same `api_key` from core for consistency.
+### Groups
+The primary organizational unit binding three things together:
+- **Wallets (PKPs)** — which wallets can be used
+- **IPFS Actions** — which Lit Actions can execute
+- **Usage API Keys** — which keys have access (via permission arrays)
+
+A usage API key can only run actions and use wallets that belong to groups it has been granted access to.
+
+Use cases: single-dApp scoping, environment isolation (staging vs prod), safe key revocation.
+
+### Actions (IPFS CIDs)
+Immutable JavaScript programs stored on IPFS, identified by content hash (CID). Register them with `/add_action`, then assign to groups. The CID is keccak256-hashed on-chain for permission checks.
+
+### Usage API Keys
+Scoped, rotatable credentials for operational use. Created from the account key with granular permissions: which groups to execute in, whether to create/delete groups or PKPs. A compromised usage key only affects its permitted groups.
+
+### Permission model
+```
+Account
+  ├── Account API Key (full admin)
+  ├── Usage API Keys (scoped per-group)
+  ├── Groups
+  │     ├── PKPs (wallets)
+  │     └── IPFS Actions (permitted CIDs)
+  └── Wallets (PKPs, can belong to multiple groups)
+```
 
 ---
 
-## Swaps API (`/swaps/v1/`) – SDK: `swaps_sdk.js`
+## Account management endpoints (`/core/v1/`)
 
-**Purpose**: Swap intents: create swap requests, get quotes, check quote balances, execute swaps.
+Endpoints guarded by `BilledManagementApiKey` (all state-mutating endpoints including `create_wallet`) cost $0.01 per call. List and config reads are free. `lit_action` is billed per-second of execution time, with an upfront credit check.
 
-| Endpoint | Method | Purpose | When to use |
-|----------|--------|---------|-------------|
-| **get_contract_address** | GET | Quote storage contract address. | If the client needs the contract address for display or direct calls. |
-| **token_list** | GET | Supported tokens list. | To show token options in a swap UI. |
-| **new_quote_request** | POST JSON | Create a swap request (origin/destination chain, amounts, addresses). Returns `swap_request_id`, `transaction_hash`, etc. | Start a swap: user wants to swap X on chain A for Y on chain B. |
-| **fill_quote** | POST JSON | Provider fills the request; returns `quote_id`, `transaction_hash`, etc. | After a swap request exists; solver/provider fills it. |
-| **accept_quote** | POST JSON | Accept a quote; returns PKP address to send funds to. | When user/solver accepts the quoted terms. |
-| **get_swap_status** | GET `/<quote_id>` | Status of a swap by quote id. | Poll or display status (Pending, Processing, Success, etc.). |
-| **get_open_swap_requests** | GET | Open swap requests from contract. | Solver: see what requests need quotes. |
-| **get_open_quotes** | GET | Open quotes from contract. | Solver: see available quotes. |
-| **get_quote_balances** | GET `/<quote_id>` | PKP balances on source/destination chains for that quote. | Before attempt_swap_request: ensure sufficient balance. |
-| **attempt_swap_request** | GET `/<quote_id>` | Execute the swap (origin + destination transfers). | After balances are sufficient; completes the swap flow. May return 402 if insufficient funds. |
+### Account
 
-**Typical swap flow**: User: `new_quote_request` → (solver fills) `fill_quote` → `accept_quote` → `get_quote_balances` → `attempt_swap_request`. Solver: `get_open_swap_requests` / `get_open_quotes` → `fill_quote` (and related).
+| Endpoint | Method | Request body | Response | Notes |
+|----------|--------|-------------|----------|-------|
+| `/new_account` | POST | `{ "account_name": "", "account_description": "", "email": "" }` | `{ "api_key": "", "wallet_address": "" }` | `email` is optional (Stripe). **Key shown once.** |
+| `/account_exists` | GET | — | `true` or `false` (bare boolean) | Uses API key from header. |
+
+### Wallets (PKPs)
+
+| Endpoint | Method | Request | Response | Notes |
+|----------|--------|---------|----------|-------|
+| `/create_wallet` | GET | — | `{ "wallet_address": "" }` | Mints a new PKP. Billable. |
+| `/list_wallets` | GET | `?page_number=&page_size=` | `[{ "id": "", "name": "", "description": "", "wallet_address": "" }]` | Free. |
+| `/list_wallets_in_group` | GET | `?group_id=&page_number=&page_size=` | Same shape | Free. |
+| `/add_pkp_to_group` | POST | `{ "group_id": 1, "pkp_id": "" }` | `{ "success": true }` | Wallet can belong to multiple groups. |
+| `/remove_pkp_from_group` | POST | `{ "group_id": 1, "pkp_id": "" }` | `{ "success": true }` | |
+
+### Groups
+
+| Endpoint | Method | Request body | Response | Notes |
+|----------|--------|-------------|----------|-------|
+| `/add_group` | POST | `{ "group_name": "", "group_description": "", "pkp_ids_permitted": [], "cid_hashes_permitted": [] }` | `{ "success": true, "group_id": "" }` | Wildcard: pass the zero address (`"0x0000000000000000000000000000000000000000"`) in `pkp_ids_permitted` for all wallets, or `"0x0"` in `cid_hashes_permitted` for all actions. Empty = none. |
+| `/list_groups` | GET | `?page_number=&page_size=` | `[{ "id": "", "name": "", "description": "" }]` | Free. Uses `ListMetadataItem` shape. |
+| `/update_group` | POST | `{ "group_id": 1, "name": "", "description": "", "pkp_ids_permitted": [], "cid_hashes_permitted": [] }` | `{ "success": true }` | |
+| `/remove_group` | POST | `{ "group_id": "" }` | `{ "success": true }` | Affected usage keys lose access to that group. |
+
+### Actions (IPFS)
+
+| Endpoint | Method | Request body | Response | Notes |
+|----------|--------|-------------|----------|-------|
+| `/add_action` | POST | `{ "action_ipfs_cid": "Qm...", "name": "", "description": "" }` | `{ "success": true }` | CID is keccak256-hashed on server. Use raw CID here. |
+| `/list_actions` | GET | `?group_id=&page_number=&page_size=` | `[{ "id": "", "name": "", "description": "" }]` | `group_id` is optional filter. Free. |
+| `/add_action_to_group` | POST | `{ "group_id": 1, "action_ipfs_cid": "Qm..." }` | `{ "success": true }` | Use raw CID. |
+| `/remove_action_from_group` | POST | `{ "group_id": 1, "hashed_cid": "0x..." }` | `{ "success": true }` | Use keccak256-hashed CID (0x-prefixed). |
+| `/delete_action` | POST | `{ "hashed_cid": "0x..." }` | `{ "success": true }` | Use keccak256-hashed CID. |
+| `/update_action_metadata` | POST | `{ "hashed_cid": "0x...", "name": "", "description": "" }` | `{ "success": true }` | |
+| `/get_lit_action_ipfs_id` | POST | `"..."` (raw JSON string — the code) | `"Qm..."` (raw JSON string — the CID) | Get IPFS CID for inline code. Body is a JSON-encoded string, not an object. |
+
+**Important**: Creation endpoints (`add_action`, `add_action_to_group`) take raw IPFS CIDs. Modification/deletion endpoints (`delete_action`, `remove_action_from_group`, `update_action_metadata`) take keccak256-hashed CIDs (0x-prefixed hex).
+
+### Usage API Keys
+
+| Endpoint | Method | Request body | Response | Notes |
+|----------|--------|-------------|----------|-------|
+| `/add_usage_api_key` | POST | See below | `{ "success": true, "usage_api_key": "" }` | **Key shown once.** |
+| `/list_api_keys` | GET | `?page_number=&page_size=` | Array of key objects | Free. |
+| `/update_usage_api_key` | POST | Same fields as add + `usage_api_key` | `{ "success": true }` | |
+| `/update_usage_api_key_metadata` | POST | `{ "usage_api_key": "", "name": "", "description": "" }` | `{ "success": true }` | |
+| `/remove_usage_api_key` | POST | `{ "usage_api_key": "" }` | `{ "success": true }` | |
+
+**Usage API key permission fields:**
+```json
+{
+  "name": "my-app-key",
+  "description": "Production key for price oracle",
+  "can_create_groups": false,
+  "can_delete_groups": false,
+  "can_create_pkps": false,
+  "manage_ipfs_ids_in_groups": [],
+  "add_pkp_to_groups": [],
+  "remove_pkp_from_groups": [],
+  "execute_in_groups": [1, 2]
+}
+```
+Use `[0]` as wildcard for "all groups" in any group array.
+
+### Billing
+
+| Endpoint | Method | Request | Response | Notes |
+|----------|--------|---------|----------|-------|
+| `/billing/balance` | GET | — | `{ "balance_cents": -500, "balance_display": "$5.00 credit" }` | Negative = credits available. Display includes "credit" suffix or "No credits". |
+| `/billing/stripe_config` | GET | — | `{ "publishable_key": "" }` | No auth required. |
+| `/billing/create_payment_intent` | POST | `{ "amount_cents": 500 }` | `{ "client_secret": "", "payment_intent_id": "" }` | Minimum 500 ($5.00). |
+| `/billing/confirm_payment` | POST | `{ "payment_intent_id": "" }` | `{ "success": true }` | |
+
+### Configuration
+
+| Endpoint | Method | Response |
+|----------|--------|----------|
+| `/get_lit_action_client_config` | GET | Execution limits: `timeout_ms`, `memory_limit_mb`, `max_code_length`, `max_fetch_count`, etc. |
+| `/get_node_chain_config` | GET | Single object for this node's chain: `chain_name`, `chain_id`, `is_evm`, `testnet`, `token`, `contract_address`. |
+| `/get_chain_config_keys` | GET | List of all configuration key names (`keys: [...]`). |
+| `/get_api_payers` | GET | List of addresses allowed to pay for state mutations. |
+| `/get_admin_api_payer` | GET | Default API payer address. |
+| `/version` | GET | Server version, commit hash, submodule versions. |
 
 ---
 
-## Conventions for implementers
+## Running Lit Actions (`POST /core/v1/lit_action`)
 
-- **Request bodies**: snake_case (`api_key`, `data_to_encrypt_hash`, `pkp_public_key`). Match Rust request structs in `src/core/v1/models/request.rs` and transfer/swaps models.
-- **SDK options**: camelCase in JS (`apiKey`, `dataToEncryptHash`, `pkpPublicKey`); SDKs convert to snake_case when building JSON.
-- **Errors**: Responses include a body with a message (e.g. `{ "error": "..." }`). SDKs parse this and throw with that message; use it when advising users or retrying.
-- **Decrypt**: Only `api_key`, `ciphertext`, `data_to_encrypt_hash` (from encrypt response). No shares in the request.
-- **Combine signature shares**: Request body is `api_key` + `share_date` (the full **SignWithPkpResponse** from sign_with_pkp), not an array of shares. SDK: `combineSignatureShares({ apiKey, shareData })` where `shareData` is the full object returned by `signWithPkp`.
+**Important**: The `code` field accepts **inline JavaScript only** (not IPFS CIDs). The server derives the CID from the code for permission checks. Your code must define an `async function main(params)` — the runtime wrapper automatically calls `main(params)` with your `js_params` as the argument. Do not call `main()` yourself. If `main` returns a value, it is automatically passed to `setResponse`.
+
+### Request
+```json
+{
+  "code": "async function main(params) { return 'hello'; }",
+  "js_params": { "pkpId": "0x..." }
+}
+```
+
+### Response
+```json
+{
+  "response": "hello",
+  "logs": "",
+  "has_error": false
+}
+```
+
+### Lit Actions SDK (available inside action code)
+
+| Function | Parameters | Returns | Purpose |
+|----------|-----------|---------|---------|
+| `Lit.Actions.getPrivateKey` | `{ pkpId }` | Private key string | Get PKP's private key for signing |
+| `Lit.Actions.Encrypt` | `{ pkpId, message }` | Ciphertext string | Encrypt data with PKP-derived key |
+| `Lit.Actions.Decrypt` | `{ pkpId, ciphertext }` | Plaintext string | Decrypt data |
+| `Lit.Actions.getLitActionPrivateKey` | — | Private key string | Get the executing action's own private key |
+| `Lit.Actions.getLitActionPublicKey` | `{ ipfsId }` | Public key string | Get an action's public key |
+| `Lit.Actions.getLitActionWalletAddress` | `{ ipfsId }` | Address string | Get an action's wallet address |
+| `Lit.Actions.setResponse` | `{ response }` | void | Set the return value (non-strings are JSON-encoded) |
+
+**Globals**: `ethers` (ethers.js v5), `Lit.Auth.authSigAddress`, `Lit.Auth.actionIpfsIdStack`.
+
+### Resource limits
+
+| Limit | Value |
+|-------|-------|
+| Max code size (inline) | 16 MB |
+| Max `js_params` payload | 64 KB |
+| Max execution time | 15 minutes |
+| Max memory | 64 MB |
+| Max HTTP fetches per action | 50 |
+| Max response payload | 100 KB |
+| Max console log output | 100 KB |
+| Max key/signature operations | 10 |
+
+### Example: Sign a message
+
+```javascript
+async function main(params) {
+  const wallet = new ethers.Wallet(
+    await Lit.Actions.getPrivateKey({ pkpId: params.pkpId })
+  );
+  const signature = await wallet.signMessage(params.message);
+  return JSON.stringify({ signature });
+}
+```
+Call with: `{ "code": "...", "js_params": { "pkpId": "0x...", "message": "hello" } }`
+
+### Example: Encrypt a secret
+
+```javascript
+async function main(params) {
+  const ciphertext = await Lit.Actions.Encrypt({
+    pkpId: params.pkpId,
+    message: params.secret
+  });
+  return JSON.stringify({ ciphertext });
+}
+```
+
+### Example: Decrypt a secret (separate action call)
+
+```javascript
+async function main(params) {
+  const plaintext = await Lit.Actions.Decrypt({
+    pkpId: params.pkpId,
+    ciphertext: params.ciphertext
+  });
+  return JSON.stringify({ plaintext });
+}
+```
+
+### Example: Fetch external data and sign it (oracle proof)
+
+```javascript
+async function main(params) {
+  const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=ethereum&vs_currencies=usd");
+  const data = await res.json();
+  const price = data.ethereum.usd;
+  const payload = JSON.stringify({ price, timestamp: Date.now() });
+
+  const wallet = new ethers.Wallet(
+    await Lit.Actions.getPrivateKey({ pkpId: params.pkpId })
+  );
+  const signature = await wallet.signMessage(payload);
+  return JSON.stringify({ payload, signature });
+}
+```
+
+### Example: Read a smart contract
+
+```javascript
+async function main(params) {
+  const provider = new ethers.providers.JsonRpcProvider(params.rpcUrl);
+  const abi = ["function balanceOf(address) view returns (uint256)", "function symbol() view returns (string)"];
+  const contract = new ethers.Contract(params.tokenAddress, abi, provider);
+
+  const [balance, symbol] = await Promise.all([
+    contract.balanceOf(params.walletAddress),
+    contract.symbol()
+  ]);
+
+  return JSON.stringify({ balance: balance.toString(), symbol });
+}
+```
+
+### Example: Send ETH from a PKP
+
+```javascript
+async function main(params) {
+  const provider = new ethers.providers.JsonRpcProvider(params.rpcUrl);
+  const wallet = new ethers.Wallet(
+    await Lit.Actions.getPrivateKey({ pkpId: params.pkpId }),
+    provider
+  );
+  const tx = await wallet.sendTransaction({
+    to: params.to,
+    value: ethers.utils.parseEther(params.amount)
+  });
+  const receipt = await tx.wait();
+  return JSON.stringify({ txHash: receipt.transactionHash });
+}
+```
+
+### Design patterns
+
+1. **Gating logic** — Write access conditions as plain JavaScript (check balances, token holdings, timestamps) before signing or decrypting.
+2. **Action-identity signing** — Use `getLitActionPrivateKey()` when the proof must bind to the immutable action code itself (verifiable via IPFS CID). Use `getPrivateKey({ pkpId })` when proof must bind to a specific wallet.
+3. **PKP-as-data-vault** — Create a dedicated PKP per data boundary. Encrypt with it, gate decryption inside a Lit Action.
+4. **Secure RPC URLs** — Encrypt API keys with a "secrets PKP", decrypt inside the TEE at runtime. Hard-code the base URL in action code for verifiability.
+
+---
+
+## Transfer API (`/transfer/v1/`)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/get_all_chains` | GET `?is_evm=&is_testnet=` | List supported chains. |
+| `/get_api_key_balance` | GET `/<api_key>/<chain>` | Balance of API key's wallet. |
+| `/get_pkp_balance` | GET `/<pkp_public_key>/<chain>` | Balance of a PKP on a chain. |
+| `/get_address_balance` | GET `/<address>/<chain>` | Balance of any address. |
+| `/send` | POST | Send funds from a PKP. Body: `api_key`, `pkp_public_key`, `chain`, `destination_address`, `amount`. |
+
+---
+
+## Swaps API (`/swaps/v1/`)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/new_quote_request` | POST | Create a swap request. |
+| `/fill_quote` | POST | Provider fills the request. |
+| `/accept_quote` | POST | Accept a quote. |
+| `/get_swap_status` | GET `/<quote_id>` | Poll swap status. |
+| `/get_quote_balances` | GET `/<quote_id>` | Check balances before swap. |
+| `/attempt_swap_request` | GET `/<quote_id>` | Execute the swap. |
+| `/get_open_swap_requests` | GET | List open requests. |
+| `/get_open_quotes` | GET | List open quotes. |
+| `/token_list` | GET | Supported tokens. |
+| `/get_contract_address` | GET | Quote storage contract. |
+
+**Flow**: `new_quote_request` → `fill_quote` → `accept_quote` → `get_quote_balances` → `attempt_swap_request`.
+
+---
+
+## Conventions
+
+- **Request bodies**: `snake_case` (`api_key`, `group_id`, `action_ipfs_cid`).
+- **JS SDK options**: `camelCase` (`apiKey`, `groupId`, `actionIpfsCid`); SDKs convert to snake_case.
+- **Errors**: Response body is a JSON string (e.g. `"Permission denied"`). The JS SDK parses `{error}`, `{message}`, `["..."]`, or plain string formats. HTTP 400 = bad input, 402 = insufficient credits, 403 = permission denied.
+- **Pagination**: `page_number` (0-based) and `page_size` query params on all list endpoints. Page 0 is the first page.
+- **CID formats**: Raw CID for creation, keccak256-hashed (0x-prefixed) for modification/deletion.
+
+## Pricing
+
+- Read operations (GET lists, config): **free**.
+- Management writes (create/update/delete): **$0.01 per call**.
+- Lit Action execution: **$0.01 per second**.
+- Minimum credit purchase: **$5.00** (500 credits).
+- No subscriptions, no expiration.
+
+## JavaScript SDK
+
+Use `core_sdk.js` in this folder:
+```javascript
+import LitNodeSimpleApiClient from './core_sdk.js';
+
+const client = new LitNodeSimpleApiClient({ baseUrl: "https://api.chipotle.litprotocol.com" });
+const { api_key, wallet_address } = await client.newAccount({
+  accountName: "my-account",
+  accountDescription: "demo"
+});
+```
+Note: SDK methods accept camelCase options but responses use snake_case field names.
 
 ## File references
 
-- Core: `src/core/v1/endpoints.rs`, `src/core/v1/models/request.rs`, `src/core/v1/models/response.rs`
-- Transfer: `src/abstractions/transfer/endpoints.rs`, `src/abstractions/transfer/models.rs`
-- Swaps: `src/abstractions/intents/swaps/endpoints.rs`, `src/abstractions/intents/swaps/models.rs`
+- SDK: `lit-static/core_sdk.js`
+- Endpoints: `lit-api-server/src/core/v1/endpoints/account_management.rs`, `actions.rs`, `billing.rs`, `configuration.rs`
+- Request models: `lit-api-server/src/core/v1/models/request.rs`
+- Response models: `lit-api-server/src/core/v1/models/response.rs`
+- Guards/auth: `lit-api-server/src/core/v1/guards/apikey.rs`, `billing.rs`
+- Lit Actions runtime: `lit-actions/ext/js/02_litActionsSDK.js`
+- Lit Actions types: `lit-actions/packages/naga-la-types/types.d.ts`
+- On-chain storage: `blockchain/lit_node_express/contracts/AccountConfigFacets/AppStorage.sol`
+- OpenAPI spec: `spec.json` (auto-generated), Swagger UI at `/core/v1/swagger-ui/`
+- Developer docs: `https://developer.litprotocol.com/`

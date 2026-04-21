@@ -201,7 +201,12 @@ jobs:
           else
             cp lit-api-server/NodeConfig.next.toml lit-api-server/NodeConfig.toml
           fi
-          (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" "$API_BIN") >> "$SIM_TMP/lit-api-server.log" 2>&1 &
+          # Pick a random free TCP port per run so concurrent jobs on the
+          # same self-hosted host don't collide on the default Rocket port
+          # (8000). ROCKET_PORT overrides lit-api-server/Rocket.toml.
+          API_PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("",0)); print(s.getsockname()[1]); s.close()')
+          echo "lit-api-server will bind to port $API_PORT"
+          (cd lit-api-server && DSTACK_SOCKET="$SIM_SOCK" ROCKET_PORT="$API_PORT" "$API_BIN") >> "$SIM_TMP/lit-api-server.log" 2>&1 &
           API_PID=$!
           if ! kill -0 "$API_PID" 2>/dev/null; then
             echo "ERROR: lit-api-server failed to start"
@@ -213,14 +218,14 @@ jobs:
 
           # Wait for /attestation to respond (up to 5 min).
           for i in $(seq 1 300); do
-            if curl -sf http://localhost:8000/attestation >/dev/null 2>&1; then
+            if curl -sf "http://localhost:$API_PORT/attestation" >/dev/null 2>&1; then
               echo "lit-api-server /attestation ready."
               break
             fi
             echo "  waiting for lit-api-server ($i/300)..."
             sleep 1
           done
-          if ! curl -sf http://localhost:8000/attestation >/dev/null 2>&1; then
+          if ! curl -sf "http://localhost:$API_PORT/attestation" >/dev/null 2>&1; then
             echo "ERROR: lit-api-server /attestation never responded"
             cat "$SIM_TMP/lit-api-server.log"
             kill "$SIM_PID" "$API_PID" 2>/dev/null || true
@@ -229,7 +234,7 @@ jobs:
           fi
 
           # Get attestation from lit-api-server (which got it from the simulator).
-          curl -sf http://localhost:8000/attestation > "$SIM_TMP/attestation.json"
+          curl -sf "http://localhost:$API_PORT/attestation" > "$SIM_TMP/attestation.json"
 
           # Teardown simulator and lit-api-server.
           kill "$SIM_PID" "$API_PID" 2>/dev/null || true

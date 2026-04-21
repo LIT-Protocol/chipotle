@@ -5,7 +5,7 @@
 
 import { getApiKey, setTheme, getTheme, setApiKey, setOnAuthReady, updateStatCards, initLogin, setUsageKeyOverride, toggleOverrideEnabled, updateUsageKeyOverrideUI, clearOverrideState } from './auth.js';
 import { initModalClose, initConfirmClose, showStatus, hideStatus, logError } from './ui-utils.js';
-import { initBilling, loadBillingBalance } from './billing.js';
+import { initBilling } from './billing.js';
 import { initGroups, loadGroups } from './groups.js';
 import { initKeys, loadUsageKeys } from './keys.js';
 import { initActions, loadActions } from './actions.js';
@@ -153,14 +153,26 @@ function initHeader() {
 setOnAuthReady(() => {
   updateStatCards();
   preloadAllTables();
-  loadBillingBalance();
   updateUsageKeyOverrideUI();
 });
 
 // ----- Init -----
 
+function showDevWarning() {
+  if (location.hostname === 'dashboard.dev.litprotocol.com') {
+    const overlay = document.getElementById('dev-warning-overlay');
+    if (overlay) {
+      overlay.classList.add('is-open');
+      overlay.setAttribute('aria-hidden', 'false');
+    }
+    return true;
+  }
+  return false;
+}
+
 function init() {
   setTheme(getTheme());
+  if (showDevWarning()) return;
   initModalClose();
   initConfirmClose();
   initLogin();

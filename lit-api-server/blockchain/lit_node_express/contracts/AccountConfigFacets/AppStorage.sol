@@ -5,7 +5,7 @@
 /// @notice Each struct contains a keccak256 that matches the mapping to prove existence of the struct.
 
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.0;
+pragma solidity =0.8.28;
 
 import {
     EnumerableSet
@@ -118,6 +118,7 @@ library AppStorage {
         uint256 rebalanceAmount; // amount of ether to rebalance the api payers with.  If 0, then don't rebalance.
         EnumerableSet.StringSet nodeConfigurationKeys;
         mapping(string => string) nodeConfigurationValues;
+        uint256 serverTriggerValue;
     }
 
     function getStorage()
