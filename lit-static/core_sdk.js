@@ -510,12 +510,47 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
-   * POST /core/v1/new_account
-   * Creates a new account; server generates API key and wallet. Returns api_key and wallet_address.
-   * @param {NewAccountOptions} options
+   * POST /core/v1/new_account  (api mode)
+   *   Creates a new account; server generates API key and wallet.
+   *
+   * contract.newAccount(hash, managed=false, name, description, creator)  (sovereign mode)
+   *   User generates their own API key client-side, hashes it locally, and
+   *   submits a tx from their wallet. managed=false flags the account as
+   *   self-sovereign (server billing still applies to Lit Action execution).
+   *
+   *   BLOCKER: today `newAccount` has an OnlyApiPayerOrOwner guard on the
+   *   contract, so a random user wallet reverts. Phase 2 requires a contract
+   *   change that relaxes this for unmanaged self-sovereign accounts. See
+   *   TODOS.md "CPL-267 Phase 2: newAccount access control for sovereign
+   *   self-serve".
+   *
+   * @param {NewAccountOptions & { sovereignLifecycle?: Object }} options
    * @returns {Promise<NewAccountResponse>}
    */
-  async newAccount({ accountName, accountDescription, email }) {
+  async newAccount({ accountName, accountDescription, email, sovereignLifecycle } = {}) {
+    if (this.mode === 'sovereign') {
+      const ethers = await loadEthers();
+      const randBytes = new Uint8Array(32);
+      crypto.getRandomValues(randBytes);
+      const apiKey = 'lk_' + Array.from(randBytes, (b) => b.toString(16).padStart(2, '0')).join('');
+      const hash = ethers.keccak256(ethers.toUtf8Bytes(apiKey));
+      const contract = await this._getWriteContract();
+      const creator = await this.signer.getAddress();
+      const { txHash } = await runContractWrite({
+        contract, method: 'newAccount',
+        args: [hash, false, accountName ?? '', accountDescription ?? '', creator],
+        ...(sovereignLifecycle ?? {}),
+      });
+      // Email is not surfaced on-chain; if it ever needs to be linked, that
+      // belongs in an off-chain account-registry service keyed by hash.
+      return {
+        success: true,
+        api_key: apiKey,
+        account_hash: hash,
+        creator_wallet_address: creator,
+        transaction_hash: txHash,
+      };
+    }
     const body = {
       account_name: accountName,
       account_description: accountDescription ?? '',
@@ -557,17 +592,100 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
-   * GET /core/v1/create_wallet
-   * Creates a wallet for the given API key and returns the wallet address.
-   * API key via X-Api-Key or Authorization: Bearer header.
-   * @param {string} apiKey - API key (from getApiKey)
+   * Create a wallet (PKP) for the account.
+   *
+   * Accepts either a bare apiKey string (backwards compat with GET /core/v1/create_wallet)
+   * or an options object: { apiKey, name?, description?, sovereignLifecycle? }.
+   *
+   * api mode      : GET /core/v1/create_wallet — server generates PKP end-to-end.
+   *
+   * sovereign mode: hybrid flow. The TEE still has to generate the key (the
+   *   user's browser can't mint a PKP) but registration happens on-chain via a
+   *   user-signed tx. Two round-trips:
+   *     1) POST /core/v1/prepare_sovereign_wallet { api_key } → { pkp_id, derivation_path }
+   *        Server generates and holds the key in TEE state, returns metadata.
+   *     2) contract.registerWalletDerivation(hash, pkp_id, derivation_path, name, description)
+   *        User signs; tx settles; server listener finalizes persistence.
+   *
+   *   BLOCKER: step 1 endpoint does not exist yet. See TODOS.md
+   *   "CPL-267 Phase 2: POST /prepare_sovereign_wallet TEE-prepare endpoint".
+   *   Without it, sovereign createWallet will 404. Standalone registration via
+   *   `registerWalletDerivation` is available if the caller has pkp_id +
+   *   derivation_path from elsewhere.
+   *
+   * @param {string | { apiKey: string, name?: string, description?: string, sovereignLifecycle?: Object }} arg
    * @returns {Promise<CreateWalletResponse>}
    */
-  async createWallet(apiKey) {
+  async createWallet(arg) {
+    const opts = typeof arg === 'string' ? { apiKey: arg } : (arg ?? {});
+    const { apiKey, name = '', description = '', sovereignLifecycle } = opts;
+
+    if (this.mode === 'sovereign') {
+      // Step 1: server-side TEE prepare.
+      const prepRes = await fetch(`${this.baseUrl}/prepare_sovereign_wallet`, {
+        method: 'POST',
+        headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+        body: JSON.stringify({}),
+      });
+      if (!prepRes.ok) {
+        if (prepRes.status === 404) {
+          throw new Error(
+            'Sovereign createWallet is not yet available: the server /prepare_sovereign_wallet endpoint is not deployed. ' +
+            'Track progress in TODOS.md ("CPL-267 Phase 2: prepare_sovereign_wallet").',
+          );
+        }
+        throw new Error(`prepare_sovereign_wallet failed with HTTP ${prepRes.status}`);
+      }
+      const prep = await prepRes.json();
+      if (!prep?.pkp_id || prep.derivation_path == null) {
+        throw new Error('prepare_sovereign_wallet response missing pkp_id or derivation_path');
+      }
+
+      // Step 2: on-chain registration, user-signed.
+      const contract = await this._getWriteContract();
+      const hash = await this._apiKeyHash(apiKey);
+      const { txHash } = await runContractWrite({
+        contract, method: 'registerWalletDerivation',
+        args: [hash, prep.pkp_id, BigInt(prep.derivation_path), name, description],
+        ...(sovereignLifecycle ?? {}),
+      });
+      return {
+        success: true,
+        wallet_address: prep.pkp_id,
+        derivation_path: String(prep.derivation_path),
+        transaction_hash: txHash,
+      };
+    }
+
     const res = await fetch(`${this.baseUrl}/create_wallet`, {
       headers: headersWithApiKey(apiKey),
     });
     return parseResponse(res, 'create_wallet');
+  }
+
+  /**
+   * Register an existing server-prepared PKP derivation on-chain.
+   *
+   * Exposed for advanced callers who already have pkp_id + derivation_path
+   * from a bespoke server flow and just need the on-chain registration leg.
+   * Regular dashboard users should call createWallet() which does both steps.
+   *
+   * sovereign mode only. Throws in api mode (registration is implicit there).
+   *
+   * @param {{ apiKey: string, pkpId: string, derivationPath: string|number|bigint, name?: string, description?: string, sovereignLifecycle?: Object }} options
+   */
+  async registerWalletDerivation({ apiKey, pkpId, derivationPath, name = '', description = '', sovereignLifecycle } = {}) {
+    if (this.mode !== 'sovereign') {
+      throw new Error('registerWalletDerivation is sovereign-mode only; in api mode use createWallet instead.');
+    }
+    const contract = await this._getWriteContract();
+    const hash = await this._apiKeyHash(apiKey);
+    const { txHash } = await runContractWrite({
+      contract, method: 'registerWalletDerivation',
+      args: [hash, pkpId, BigInt(derivationPath), name, description],
+      ...(sovereignLifecycle ?? {}),
+    });
+    return { success: true, transaction_hash: txHash };
   }
 
   /**

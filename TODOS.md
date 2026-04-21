@@ -92,6 +92,42 @@
   **Branch:** GTC6244/k6-api-key-security-tests
   **Noticed:** 2026-03-26
 
+## CPL-267 Phase 2: newAccount access control for sovereign self-serve
+
+**What:** Relax the `OnlyApiPayerOrOwner` guard on `AccountConfig.newAccount` so a user-owned wallet can create an unmanaged (`managed=false`) self-sovereign account. Today the check blocks every non-api_payer caller, which is correct for server-managed accounts but blocks the whole Phase 2 direct-write path.
+
+**Why:** Without this, sovereign `newAccount` always reverts with `OnlyApiPayerOrOwner(0x…)`. The client-side SDK branch is already wired and decoded end-to-end (see `core_sdk.js::newAccount` sovereign branch on `feature/cpl-267-phase-2-sovereign-accounts`); only the contract gate stands in the way.
+
+**How to fix:** Add a branch in `AccountConfig.newAccount`: if `managed == false` and `creatorWalletAddress == msg.sender`, skip the api_payer check. Keep managed accounts behind the existing guard. Consider rate-limiting per-address to avoid spam.
+
+**Priority:** P1 (blocks Phase 2 demo)
+
+**Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-phase-2-sovereign-accounts
+
+## CPL-267 Phase 2: POST /prepare_sovereign_wallet TEE-prepare endpoint
+
+**What:** Add a new endpoint that generates a PKP inside the TEE, persists derivation metadata, and returns `{ pkp_id, derivation_path, expires_at }`. Hybrid `createWallet` in sovereign mode calls this first, then the user signs `registerWalletDerivation` on-chain to finalize.
+
+**Why:** PKPs must be generated inside the TEE (the user's browser can't mint one). But registration should land on-chain from the user's wallet so the server is not in the trust boundary for account linkage. Without this endpoint, sovereign `createWallet` 404s at step 1.
+
+**How to fix:** New endpoint `/core/v1/prepare_sovereign_wallet` accepting `{ api_key }`, generating a PKP in TEE, storing `{ pkp_id → { derivation_path, expires_at, registered: false } }` in persistent state, returning pkp_id + derivation_path. Pair with the "GC orphan prepared wallet keys" TODO.
+
+**Priority:** P1 (blocks Phase 2 createWallet)
+
+**Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-phase-2-sovereign-accounts
+
+## CPL-267 Phase 2: API → sovereign conversion dashboard UX
+
+**What:** Add a one-way "convert this account to sovereign" flow in the dashboard. Requires a wallet-connect step, an explicit confirmation modal explaining consequences (server can no longer act on your behalf; all admin ops need your wallet signature; Lit Action billing continues), and a contract write that flips `managed` to `false` for the account.
+
+**Why:** Users who currently run API-mode accounts can't migrate today without manually rotating. One-way conversion is the sanctioned path; pairing it with an explanatory modal prevents support tickets and accidental lockouts.
+
+**How to fix:** Need a contract function like `setAccountManaged(hash, false)` gated to the current owner. Dashboard adds a "Convert to sovereign" button in account settings that runs through the preview+confirm pipeline like any other sovereign write.
+
+**Priority:** P2 (nice-to-have for Phase 2 ship; parallel to contract work)
+
+**Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-phase-2-sovereign-accounts
+
 ## CPL-267 Sovereign Mode: blockchain_cache needs `invalidate_for_account_hash(hash)` primitive
 
 **What:** Add `invalidate_for_account_hash(api_key_hash: Bytes32)` to `lit-api-server/src/accounts/blockchain_cache.rs`. Existing invalidation functions (`invalidate_for_account`, `invalidate_for_key`) take raw api_key and hash internally, but the Phase 3 event listener only has the hashed apiKeyHash from chain event topics.

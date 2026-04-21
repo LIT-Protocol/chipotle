@@ -23,6 +23,8 @@ const SOVEREIGN_WRITE_METHODS = new Set([
   'addAction', 'deleteAction', 'addActionToGroup', 'removeActionFromGroup', 'updateActionMetadata',
   'addPkpToGroup', 'removePkpFromGroup',
   'addUsageApiKey', 'updateUsageApiKey', 'removeUsageApiKey', 'updateUsageApiKeyMetadata',
+  // Phase 2 additions: direct account + wallet writes.
+  'newAccount', 'createWallet', 'registerWalletDerivation',
 ]);
 
 // ----- Mode (api | sovereign) -----
