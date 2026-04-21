@@ -8,7 +8,38 @@ const STORAGE_KEY_API = 'accountconfig_api_key';
 const STORAGE_KEY_THEME = 'accountconfig_theme';
 const STORAGE_KEY_USAGE_OVERRIDE = 'accountconfig_usage_key_override';
 const STORAGE_KEY_OVERRIDE_ENABLED = 'accountconfig_usage_override_enabled';
+const STORAGE_KEY_MODE = 'accountconfig_mode';
 export const LIST_PAGE_SIZE = '20';
+
+/**
+ * SDK methods that perform admin writes. In sovereign mode these get
+ * auto-injected with a sovereignLifecycle (wallet connect + preview modal +
+ * tx status banner) by the getClient() Proxy.
+ *
+ * Keep in sync with branched writes in core_sdk.js.
+ */
+const SOVEREIGN_WRITE_METHODS = new Set([
+  'addGroup', 'removeGroup', 'updateGroup',
+  'addAction', 'deleteAction', 'addActionToGroup', 'removeActionFromGroup', 'updateActionMetadata',
+  'addPkpToGroup', 'removePkpFromGroup',
+  'addUsageApiKey', 'updateUsageApiKey', 'removeUsageApiKey', 'updateUsageApiKeyMetadata',
+]);
+
+// ----- Mode (api | sovereign) -----
+
+/** @returns {'api'|'sovereign'} */
+export function getMode() {
+  return sessionStorage.getItem(STORAGE_KEY_MODE) === 'sovereign' ? 'sovereign' : 'api';
+}
+
+export function setMode(mode) {
+  if (mode === 'sovereign') sessionStorage.setItem(STORAGE_KEY_MODE, 'sovereign');
+  else sessionStorage.removeItem(STORAGE_KEY_MODE);
+  // Invalidate cached client so the next getClient() rebuilds with the new mode.
+  _clientInstance = null;
+  _clientBaseUrl = null;
+  _clientMode = null;
+}
 
 // ----- API key session -----
 
@@ -89,31 +120,115 @@ export function getBaseUrl() {
 
 let _clientInstance = null;
 let _clientBaseUrl = null;
+let _clientMode = null;
 
 export async function getClient() {
   const baseUrl = getBaseUrl();
-  if (_clientInstance && _clientBaseUrl === baseUrl) return _clientInstance;
+  const mode = getMode();
+  if (_clientInstance && _clientBaseUrl === baseUrl && _clientMode === mode) {
+    return _clientInstance;
+  }
   try {
     const { createClient } = await import('../../core_sdk.js');
-    const client = createClient(baseUrl);
+    const opts = { baseUrl, mode };
+    if (mode === 'sovereign') {
+      // Bootstrap RPC + contract address via the server config endpoint
+      // (explicitly stays on the API path per CPL-267 plan).
+      const bootstrap = createClient({ baseUrl });
+      const cfg = await bootstrap.getNodeChainConfig();
+      if (!cfg || !cfg.rpc_url || !cfg.contract_address) {
+        throw new Error('Node chain config missing rpc_url or contract_address');
+      }
+      opts.rpcUrl = cfg.rpc_url;
+      opts.contractAddress = cfg.contract_address;
+      if (cfg.chain_id != null) opts.chainId = Number(cfg.chain_id);
+    }
+    const client = createClient(opts);
     _clientInstance = new Proxy(client, {
       get(target, prop) {
         const val = target[prop];
         if (typeof val !== 'function') return val;
-        return function (...args) {
+        return async function (...args) {
           const apiKey = (args[0] && typeof args[0] === 'object' && args[0].apiKey) || args[0];
           const keyPreview = typeof apiKey === 'string' ? apiKey.substring(0, 6) + '\u2026' : '(none)';
-          console.log(`[dashboard] ${prop} \u2192 ${baseUrl} | key: ${keyPreview}`);
+          console.log(`[dashboard:${mode}] ${prop} \u2192 ${baseUrl} | key: ${keyPreview}`);
+
+          // Sovereign-mode writes: auto-inject lifecycle (wallet connect +
+          // preview modal + tx status banner) unless caller already supplied
+          // its own sovereignLifecycle.
+          if (mode === 'sovereign' && SOVEREIGN_WRITE_METHODS.has(prop) &&
+              args[0] && typeof args[0] === 'object' && !args[0].sovereignLifecycle) {
+            await ensureSovereignSigner(target);
+            const sovereignLifecycle = await buildSovereignLifecycle(target, prop);
+            args = [{ ...args[0], sovereignLifecycle }];
+          }
           return val.apply(target, args);
         };
       },
     });
     _clientBaseUrl = baseUrl;
+    _clientMode = mode;
     return _clientInstance;
   } catch (e) {
     logError('getClient', e);
     throw new Error('Unable to connect to API: ' + formatError(e));
   }
+}
+
+/**
+ * Lazy wallet-connect for sovereign writes. Prompts the user to connect a
+ * browser wallet (MetaMask et al.) on first sovereign write. Also enforces
+ * the chain guard against the SDK's expected chainId.
+ */
+async function ensureSovereignSigner(client) {
+  if (client.signer) return;
+  const { connectEoa, assertChain, switchChain } = await import('../../wallet_connect.js');
+  const { signer, chainId } = await connectEoa();
+  if (client.chainId != null && chainId !== client.chainId) {
+    try {
+      await switchChain(client.chainId);
+    } catch (err) {
+      throw new Error(
+        `Your wallet is on chain ${chainId} but this dashboard expects chain ${client.chainId}. Switch network in your wallet and retry.`,
+      );
+    }
+  }
+  client.connectSigner(signer);
+}
+
+/**
+ * Build the sovereignLifecycle hook set for a given SDK method invocation.
+ * onPreview: blocks on the tx preview modal (must resolve true to proceed).
+ * onState: surfaces tx status in a non-dismissible progress banner.
+ */
+async function buildSovereignLifecycle(client, sdkMethodName) {
+  const [{ showTxPreview }, { describeState, TX_STATES }] = await Promise.all([
+    import('./tx_preview_modal.js'),
+    import('../../tx_lifecycle.js'),
+  ]);
+  const signerAddress = client.signer ? await client.signer.getAddress() : null;
+  const meta = {
+    signerAddress,
+    chainId: client.chainId,
+    contractAddress: client.contractAddress,
+  };
+  return {
+    onPreview: (contractMethod, contractArgs) =>
+      showTxPreview(contractMethod, contractArgs, meta),
+    onState: (state, payload) => {
+      if (state === TX_STATES.SIGNING) {
+        showActionProgress(sdkMethodName, 'Open your wallet to sign the transaction…');
+      } else if (state === TX_STATES.PENDING) {
+        showActionProgress(sdkMethodName, `Broadcast — ${payload?.txHash?.slice(0, 10)}… waiting for inclusion.`);
+      } else if (state === TX_STATES.CONFIRMING) {
+        showActionProgress(sdkMethodName, `Included — waiting for ${payload?.target} confirmations.`);
+      } else if (state === TX_STATES.CONFIRMED || state === TX_STATES.FAILED || state === TX_STATES.REORGED) {
+        closeActionProgress();
+      } else {
+        showActionProgress(sdkMethodName, describeState(state));
+      }
+    },
+  };
 }
 
 // ----- Theme -----
@@ -207,6 +322,21 @@ export function keyPreview(key) {
 export function initLogin() {
   const apiKeyInput = document.getElementById('login-api-key');
   if (getApiKey()) apiKeyInput.value = '';
+
+  // Sovereign-mode toggle — reflects the current session mode and persists on change.
+  const modeToggle = document.getElementById('login-mode-sovereign');
+  const modeLabel = document.getElementById('login-mode-label');
+  if (modeToggle) {
+    modeToggle.checked = getMode() === 'sovereign';
+    const syncLabel = () => {
+      if (modeLabel) modeLabel.textContent = modeToggle.checked ? 'Sovereign mode' : 'API mode';
+    };
+    syncLabel();
+    modeToggle.addEventListener('change', () => {
+      setMode(modeToggle.checked ? 'sovereign' : 'api');
+      syncLabel();
+    });
+  }
 
   const tabExisting = document.getElementById('login-tab-existing');
   const tabNew = document.getElementById('login-tab-new');
