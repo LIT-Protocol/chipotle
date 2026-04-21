@@ -146,6 +146,10 @@ async fn main() -> Result<(), rocket::Error> {
     let cpu_monitor = CpuOverloadMonitor::start();
     let stripe_state = stripe::init();
 
+    // Initialize global singletons once, outside the restart loop, so they
+    // aren't re-initialized (and don't re-log) on every Rocket rebuild.
+    accounts::blockchain_cache::init();
+
     // IPFS cache lives outside the restart loop so warm entries survive restarts.
     let ipfs_cache: Cache<String, Arc<String>> = Cache::builder()
         .weigher(|_key, value: &Arc<String>| -> u32 { value.len().try_into().unwrap_or(u32::MAX) })
@@ -202,7 +206,12 @@ async fn main() -> Result<(), rocket::Error> {
                         tracing::error!("Server exited with error: {e}");
                         server_error = Some(e);
                     }
-                    Err(e) => tracing::error!("Server task panicked: {e}"),
+                    Err(e) => {
+                        // A panic in the Rocket task is fatal — exit non-zero so
+                        // supervisors (systemd, k8s, etc.) detect the crash.
+                        tracing::error!("Server task panicked: {e}. Exiting.");
+                        std::process::exit(1);
+                    }
                 }
                 break;
             }
@@ -211,7 +220,7 @@ async fn main() -> Result<(), rocket::Error> {
                     // All senders dropped, channel closed. Exit the loop.
                     tracing::warn!("Restart channel closed. Shutting down.");
                     shutdown.notify();
-                    let _ = server_handle.await;
+                    await_server_handle(server_handle, &mut server_error).await;
                     break;
                 }
 
@@ -236,12 +245,12 @@ async fn main() -> Result<(), rocket::Error> {
                         "Restart loop protection triggered. Too many restarts. Exiting."
                     );
                     shutdown.notify();
-                    let _ = server_handle.await;
+                    await_server_handle(server_handle, &mut server_error).await;
                     break;
                 }
 
                 shutdown.notify();
-                let _ = server_handle.await;
+                await_server_handle(server_handle, &mut server_error).await;
                 tracing::info!(restart_count = count, "Restarting Rocket...");
             }
         }
@@ -267,6 +276,29 @@ async fn main() -> Result<(), rocket::Error> {
     }
 }
 
+/// Await the Rocket server task after a shutdown has been signalled.
+///
+/// A clean shutdown yields `Ok(Ok(()))`. An `Err` from Rocket is recorded in
+/// `server_error` so `main()` returns it. A `JoinError` (panic) is fatal:
+/// we exit non-zero so supervisors detect the crash rather than silently
+/// looping on a broken Rocket.
+async fn await_server_handle(
+    server_handle: tokio::task::JoinHandle<Result<rocket::Rocket<rocket::Ignite>, rocket::Error>>,
+    server_error: &mut Option<rocket::Error>,
+) {
+    match server_handle.await {
+        Ok(Ok(_)) => {}
+        Ok(Err(e)) => {
+            tracing::error!("Server exited with error during shutdown: {e}");
+            *server_error = Some(e);
+        }
+        Err(e) => {
+            tracing::error!("Server task panicked during shutdown: {e}. Exiting.");
+            std::process::exit(1);
+        }
+    }
+}
+
 fn build_rocket(
     signer_pool: Arc<lit_api_server::accounts::signer_pool::SignerPool>,
     chain_config: Arc<lit_api_server::accounts::chain_config::ChainConfig>,
@@ -289,8 +321,6 @@ fn build_rocket(
     }
     .to_cors()
     .expect("CORS failed to build");
-
-    accounts::blockchain_cache::init();
 
     let (core_routes, openapi_spec) = core::v1::endpoints::routes_with_spec();
 
