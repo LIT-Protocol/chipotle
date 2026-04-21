@@ -288,24 +288,24 @@ fn render_html(
         total_cents: i64,
         total_charges: u64,
     }
-    let customer_by_id: std::collections::HashMap<&str, &ReportCustomer> = customers
-        .iter()
-        .map(|c| (c.id.as_str(), c))
-        .collect();
+    let customer_by_id: std::collections::HashMap<&str, &ReportCustomer> =
+        customers.iter().map(|c| (c.id.as_str(), c)).collect();
     let mut clients: BTreeMap<String, ClientAgg> = BTreeMap::new();
     for r in rows {
         let agg = clients.entry(r.customer_id.clone()).or_default();
         if agg.wallet.is_none() {
-            agg.wallet = r
-                .wallet_address
-                .clone()
-                .or_else(|| customer_by_id.get(r.customer_id.as_str()).and_then(|c| c.wallet_address.clone()));
+            agg.wallet = r.wallet_address.clone().or_else(|| {
+                customer_by_id
+                    .get(r.customer_id.as_str())
+                    .and_then(|c| c.wallet_address.clone())
+            });
         }
         if agg.email.is_none() {
-            agg.email = r
-                .email
-                .clone()
-                .or_else(|| customer_by_id.get(r.customer_id.as_str()).and_then(|c| c.email.clone()));
+            agg.email = r.email.clone().or_else(|| {
+                customer_by_id
+                    .get(r.customer_id.as_str())
+                    .and_then(|c| c.email.clone())
+            });
         }
         agg.per_day_cents
             .entry(r.date.clone())
@@ -338,7 +338,11 @@ fn render_html(
 
     let mut html = String::new();
     writeln!(&mut html, "<!DOCTYPE html>").unwrap();
-    writeln!(&mut html, "<html lang=\"en\"><head><meta charset=\"utf-8\">").unwrap();
+    writeln!(
+        &mut html,
+        "<html lang=\"en\"><head><meta charset=\"utf-8\">"
+    )
+    .unwrap();
     writeln!(
         &mut html,
         "<title>Stripe Usage Report — {} to {}</title>",
@@ -384,7 +388,12 @@ fn render_html(
             write!(&mut html, "<code>{}</code>", html_escape(cid)).unwrap();
         }
         if let Some(e) = &agg.email {
-            write!(&mut html, "<br><span class=\"muted\">{}</span>", html_escape(e)).unwrap();
+            write!(
+                &mut html,
+                "<br><span class=\"muted\">{}</span>",
+                html_escape(e)
+            )
+            .unwrap();
         }
         write!(&mut html, "</td>").unwrap();
         for d in &dates {

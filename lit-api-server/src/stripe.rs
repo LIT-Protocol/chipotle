@@ -867,10 +867,8 @@ pub fn aggregate_report_rows(
     transactions: &[ReportBalanceTx],
 ) -> Vec<ReportRow> {
     use std::collections::BTreeMap;
-    let customer_by_id: std::collections::HashMap<&str, &ReportCustomer> = customers
-        .iter()
-        .map(|c| (c.id.as_str(), c))
-        .collect();
+    let customer_by_id: std::collections::HashMap<&str, &ReportCustomer> =
+        customers.iter().map(|c| (c.id.as_str(), c)).collect();
     // BTreeMap so output is sorted by (date, customer_id) deterministically.
     let mut buckets: BTreeMap<(String, String), ReportRow> = BTreeMap::new();
     for tx in transactions {
