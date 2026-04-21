@@ -282,15 +282,15 @@ async fn dispatch_execute_request(
     }
 
     let memory_limit_mb = req.memory_limit.map(|limit| limit as usize);
-    // Custom-limit requests can't ride pool workers (heap limits are baked
-    // in at isolate creation). Default-limit and unspecified-limit requests
-    // can.
+    // Pool workers are bootstrapped with DEFAULT_MEMORY_LIMIT_MB and V8's
+    // heap limit is immutable post-creation. Serving a request with a
+    // smaller requested limit from a pool worker would misreport the OOM
+    // message and silently mask OOMs between the requested limit and the
+    // default. Only match unspecified or exactly-default limits.
     let can_pool = match memory_limit_mb {
         None => true,
-        Some(m) => m <= DEFAULT_MEMORY_LIMIT_MB,
+        Some(m) => m == DEFAULT_MEMORY_LIMIT_MB,
     };
-
-    // let can_pool = true;
 
     let request_id = req
         .http_headers
