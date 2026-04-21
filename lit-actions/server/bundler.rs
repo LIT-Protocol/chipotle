@@ -10,10 +10,12 @@
 //! rewrite no longer defers module loading to Deno's `ModuleLoader`, so the
 //! internal `resolve`/`load` pipeline is not re-entered on every action run.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use anyhow::{Context, Result, anyhow, bail};
 use deno_core::ModuleSpecifier;
+use futures::future::try_join_all;
 use swc_bundler::{Bundler, Config, Hook, Load, ModuleData, ModuleRecord, ModuleType, Resolve};
 use swc_common::{FileName, GLOBALS, Globals, Span, SyntaxContext, sync::Lrc};
 use swc_ecma_ast::{EsVersion, KeyValueProp, Module, ModuleDecl, ModuleItem};
@@ -22,7 +24,7 @@ use swc_ecma_loader::resolve::Resolution;
 use swc_ecma_parser::{EsSyntax, Syntax, parse_file_as_module};
 use tracing::{debug, info, instrument};
 
-use crate::cdn_module_loader::CdnModuleLoader;
+use crate::cdn_module_loader::{CdnModuleLoader, MAX_MODULE_COUNT};
 use crate::import_rewriter::ParsedImport;
 
 /// Synthetic FileName used for the user's entry point. Chosen to be distinct
@@ -53,9 +55,11 @@ pub(crate) async fn bundle_user_code(
         initial_imports = initial_urls.len(),
         "bundler: walking CDN dependency graph"
     );
+    let walk_started = Instant::now();
     let sources = walk_deps(loader, &initial_urls).await?;
     info!(
         total_modules = sources.len(),
+        walk_elapsed_ms = walk_started.elapsed().as_millis() as u64,
         "bundler: dependency graph walk complete"
     );
 
@@ -106,51 +110,84 @@ fn resolve_dep_specifier(base_url: &str, spec: &str) -> Result<String> {
 }
 
 /// Walk the dependency graph from the initial entry's imports outward,
-/// fetching + verifying each module via `loader`. Returns a map of
-/// absolute URL → module source.
+/// fetching + verifying each module via `loader`. Fetches within a single BFS
+/// layer run concurrently via `try_join_all`, so cold-path latency scales with
+/// graph depth instead of total module count.
 async fn walk_deps(
     loader: &CdnModuleLoader,
     initial: &[String],
 ) -> Result<HashMap<String, String>> {
     let mut sources: HashMap<String, String> = HashMap::new();
     let mut seen: HashSet<String> = HashSet::new();
-    let mut queue: VecDeque<String> = VecDeque::new();
+    let mut frontier: Vec<String> = Vec::new();
 
     for url in initial {
         if seen.insert(url.clone()) {
-            queue.push_back(url.clone());
+            frontier.push(url.clone());
         }
     }
 
-    while let Some(url) = queue.pop_front() {
-        let bytes = loader
-            .fetch_module_bytes(&url)
-            .await
-            .map_err(|e| anyhow!("failed to fetch {url}: {e}"))?;
-        let source =
-            String::from_utf8(bytes).with_context(|| format!("module {url} is not valid UTF-8"))?;
-
-        // Strip the integrity fragment before using as a resolver base and
-        // as the in-memory map key, so the bundler's resolve step produces
-        // the same key shape.
-        let key = url
-            .split_once('#')
-            .map(|(u, _)| u.to_string())
-            .unwrap_or_else(|| url.clone());
-
-        let deps = extract_module_imports(&source)
-            .with_context(|| format!("parse error while scanning imports in {key}"))?;
-
-        for dep_spec in deps {
-            let resolved = resolve_dep_specifier(&key, &dep_spec)
-                .with_context(|| format!("cannot resolve {dep_spec} from {key}"))?;
-            if seen.insert(resolved.clone()) {
-                queue.push_back(resolved);
-            }
+    while !frontier.is_empty() {
+        // Enforce the per-execution module cap here, before launching the
+        // layer. The same check inside `fetch_module_bytes` reads
+        // `loaded_modules.len()` and acts on it, which is racy under
+        // `try_join_all`: every concurrent fetch in a wide layer sees the
+        // pre-layer count and passes, so a single layer can blow past the
+        // limit. `seen` already counts every URL we have committed to
+        // fetching, so bounding it here gives a deterministic gate.
+        if seen.len() > MAX_MODULE_COUNT {
+            bail!("dependency graph exceeds maximum module count ({MAX_MODULE_COUNT})");
         }
 
-        debug!(module_url = %key, bytes = source.len(), "bundler: collected module source");
-        sources.insert(key, source);
+        let layer_size = frontier.len();
+        let layer_started = Instant::now();
+
+        // The `seen` set guarantees each URL appears at most once in the
+        // frontier, so the concurrent fetches cannot race against each other
+        // for the same URL. `try_join_all` short-circuits on the first error,
+        // matching the serial implementation's fail-fast behavior.
+        let fetched = try_join_all(frontier.iter().map(|url| async move {
+            let bytes = loader
+                .fetch_module_bytes(url)
+                .await
+                .map_err(|e| anyhow!("failed to fetch {url}: {e}"))?;
+            let source = String::from_utf8(bytes)
+                .with_context(|| format!("module {url} is not valid UTF-8"))?;
+            anyhow::Ok((url.clone(), source))
+        }))
+        .await?;
+
+        debug!(
+            modules = layer_size,
+            elapsed_ms = layer_started.elapsed().as_millis() as u64,
+            "bundler: fetched BFS layer"
+        );
+
+        let mut next: Vec<String> = Vec::new();
+        for (url, source) in fetched {
+            // Strip the integrity fragment before using as a resolver base and
+            // as the in-memory map key, so the bundler's resolve step produces
+            // the same key shape.
+            let key = url
+                .split_once('#')
+                .map(|(u, _)| u.to_string())
+                .unwrap_or(url);
+
+            let deps = extract_module_imports(&source)
+                .with_context(|| format!("parse error while scanning imports in {key}"))?;
+
+            for dep_spec in deps {
+                let resolved = resolve_dep_specifier(&key, &dep_spec)
+                    .with_context(|| format!("cannot resolve {dep_spec} from {key}"))?;
+                if seen.insert(resolved.clone()) {
+                    next.push(resolved);
+                }
+            }
+
+            debug!(module_url = %key, bytes = source.len(), "bundler: collected module source");
+            sources.insert(key, source);
+        }
+        frontier = next;
     }
 
     Ok(sources)
@@ -208,6 +245,7 @@ fn run_swc_bundler(entry_src: String, mut sources: HashMap<String, String>) -> R
     sources.insert(SYNTHETIC_ENTRY_URL.to_string(), entry_with_export);
 
     let cm: Lrc<swc_common::SourceMap> = Default::default();
+    let bundle_started = Instant::now();
     let globals = Globals::default();
     GLOBALS.set(&globals, || -> Result<String> {
         let loader = InMemoryLoad {
@@ -256,7 +294,12 @@ fn run_swc_bundler(entry_src: String, mut sources: HashMap<String, String>) -> R
         // which is a bundler bug we want to surface early.
         strip_module_decls(&mut bundle.module)?;
 
-        codegen_module(&cm, &bundle.module)
+        let out = codegen_module(&cm, &bundle.module)?;
+        debug!(
+            elapsed_ms = bundle_started.elapsed().as_millis() as u64,
+            "bundler: SWC bundle + codegen complete"
+        );
+        Ok(out)
     })
 }
 
@@ -560,6 +603,85 @@ mod tests {
         assert!(
             bundled.contains("41"),
             "transitive body not inlined: {bundled}"
+        );
+    }
+
+    /// Build a `CdnModuleLoader` whose cache is pre-seeded with the given
+    /// `(url, source)` pairs and whose integrity manifest is empty. With no
+    /// expected hash, the cache-hit path in `fetch_module_bytes` returns the
+    /// cached bytes without any HTTP traffic, which lets us drive `walk_deps`
+    /// deterministically in unit tests.
+    fn cached_loader<I: IntoIterator<Item = (String, Vec<u8>)>>(entries: I) -> CdnModuleLoader {
+        use std::sync::{Arc, RwLock};
+
+        use crate::cdn_module_loader::ModuleCache;
+        use lit_actions_ext::bindings::LoadedModules;
+
+        let cache: ModuleCache = Arc::new(RwLock::new(HashMap::new()));
+        {
+            let mut w = cache.write().unwrap();
+            for (url, bytes) in entries {
+                w.insert(url, bytes);
+            }
+        }
+        CdnModuleLoader::with_options(
+            Arc::new(RwLock::new(HashMap::new())),
+            false,
+            cache,
+            None,
+            None,
+            LoadedModules::default(),
+        )
+    }
+
+    /// `walk_deps` must traverse a transitive graph (entry → a → b) across
+    /// multiple BFS layers and return every reachable module. This exercises
+    /// the layered fetch + dedup + dep-discovery flow added in CPL-263.
+    #[tokio::test]
+    async fn walk_deps_collects_transitive_graph() {
+        let entry_url = "https://cdn.jsdelivr.net/npm/entry@1.0.0/+esm".to_string();
+        let a_url = "https://cdn.jsdelivr.net/npm/a@1.0.0/+esm".to_string();
+        let b_url = "https://cdn.jsdelivr.net/npm/b@1.0.0/+esm".to_string();
+
+        let entry_src = format!(r#"import {{ a }} from "{a_url}"; export const e = a;"#);
+        let a_src = format!(r#"import {{ b }} from "{b_url}"; export const a = b + 1;"#);
+        let b_src = "export const b = 41;".to_string();
+
+        let loader = cached_loader([
+            (entry_url.clone(), entry_src.into_bytes()),
+            (a_url.clone(), a_src.into_bytes()),
+            (b_url.clone(), b_src.into_bytes()),
+        ]);
+
+        let sources = walk_deps(&loader, &[entry_url.clone()]).await.unwrap();
+
+        assert_eq!(sources.len(), 3, "expected 3 modules, got {sources:?}");
+        assert!(sources.contains_key(&entry_url));
+        assert!(sources.contains_key(&a_url));
+        assert!(sources.contains_key(&b_url));
+    }
+
+    /// The per-execution module cap must be enforced in `walk_deps` itself,
+    /// not just in `fetch_module_bytes`. The loader's check is racy under
+    /// `try_join_all` — every concurrent fetch in a single layer reads the
+    /// pre-layer count and passes — so a wide entry must be rejected before
+    /// the layer is launched.
+    #[tokio::test]
+    async fn walk_deps_enforces_max_module_count_on_wide_layer() {
+        let mut entries = Vec::new();
+        let mut initial = Vec::new();
+        for i in 0..(MAX_MODULE_COUNT + 1) {
+            let url = format!("https://cdn.jsdelivr.net/npm/pkg{i}@1.0.0/+esm");
+            entries.push((url.clone(), b"export const x = 1;".to_vec()));
+            initial.push(url);
+        }
+        let loader = cached_loader(entries);
+
+        let err = walk_deps(&loader, &initial).await.unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("maximum module count"),
+            "unexpected error: {msg}"
         );
     }
 

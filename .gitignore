@@ -7,3 +7,4 @@ docker-compose.deploy.yml
 .digest-*.txt
 dstack-cache/
 CLAUDE.MD
+.gstack/

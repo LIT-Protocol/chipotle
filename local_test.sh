@@ -5,9 +5,15 @@
 #   1. Start Anvil (local Ethereum node)
 #   2. Start dstack simulator
 #   3. Deploy contracts and generate NodeConfig.toml
-#   4. cargo run lit-api-server
-#   5. cargo run lit-actions
-#   6. Serve lit-static via static-web-server
+#   4. Start Jaeger (docker container, UI on default port 16686)
+#   5. cargo run lit-api-server
+#   6. cargo run lit-actions
+#   7. Serve lit-static via static-web-server
+#
+# Flags:
+#   --no_code   Skip steps 5–7 (lit-api-server, lit-actions, lit-static).
+#               Prints the cargo commands needed to start them manually,
+#               with and without OTEL support.
 #
 # Press Ctrl+C to tear down all background processes.
 
@@ -16,13 +22,42 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# --------------------------------------------------------------------------
+# Argument parsing
+# --------------------------------------------------------------------------
+NO_CODE=false
+for arg in "$@"; do
+    case "$arg" in
+        --no_code|--no-code)
+            NO_CODE=true
+            ;;
+        -h|--help)
+            awk 'NR == 1 { next } /^$/ { exit } { sub(/^# ?/, ""); print }' "$0"
+            exit 0
+            ;;
+        *)
+            echo "ERROR: Unknown argument: $arg"
+            echo "Usage: $0 [--no_code]"
+            exit 1
+            ;;
+    esac
+done
+
 # Simulator path (override with SIMULATOR_DIR env var if cloned elsewhere)
 SIMULATOR_DIR="${SIMULATOR_DIR:-$HOME/GitHub/dstack/sdk/simulator}"
 SIMULATOR_BIN="$SIMULATOR_DIR/dstack-simulator"
 
+# Jaeger configuration
+JAEGER_CONTAINER_NAME="lit-local-jaeger"
+JAEGER_UI_PORT=16686
+JAEGER_OTLP_GRPC_PORT=4317
+JAEGER_OTLP_HTTP_PORT=4318
+JAEGER_IMAGE="jaegertracing/all-in-one:latest"
+
 # Track background PIDs for cleanup
 PIDS=()
 SIM_TMP_OWNED=false
+JAEGER_OWNED=false
 
 cleanup() {
     echo ""
@@ -30,6 +65,11 @@ cleanup() {
     for pid in "${PIDS[@]}"; do
         kill "$pid" 2>/dev/null || true
     done
+    # Only stop Jaeger container if we started it
+    if [ "$JAEGER_OWNED" = true ]; then
+        docker stop "$JAEGER_CONTAINER_NAME" >/dev/null 2>&1 || true
+        docker rm "$JAEGER_CONTAINER_NAME" >/dev/null 2>&1 || true
+    fi
     # Only clean up simulator temp dir if we created it
     if [ "$SIM_TMP_OWNED" = true ] && [ -n "${SIM_TMP:-}" ] && [ -d "${SIM_TMP:-}" ]; then
         rm -rf "$SIM_TMP"
@@ -188,9 +228,133 @@ EOF
 echo "    NodeConfig.toml written."
 
 # --------------------------------------------------------------------------
-# 4. cargo run lit-api-server
+# 4. Start Jaeger (docker)
 # --------------------------------------------------------------------------
-echo "==> Step 4: Starting lit-api-server..."
+echo "==> Step 4: Starting Jaeger (docker)..."
+
+if ! command -v docker &>/dev/null; then
+    echo "ERROR: docker is not installed or not on PATH."
+    echo ""
+    echo "Install Docker Desktop from https://www.docker.com/products/docker-desktop/"
+    echo "and ensure the daemon is running, then re-run this script."
+    exit 1
+fi
+
+if ! docker info >/dev/null 2>&1; then
+    echo "ERROR: docker daemon is not reachable. Start Docker Desktop and re-run."
+    exit 1
+fi
+
+# If a container with our name already exists, reuse it (start if stopped).
+if docker ps -a --format '{{.Names}}' | grep -qx "$JAEGER_CONTAINER_NAME"; then
+    if docker ps --format '{{.Names}}' | grep -qx "$JAEGER_CONTAINER_NAME"; then
+        echo "    Reusing running container '$JAEGER_CONTAINER_NAME'."
+    else
+        echo "    Starting existing container '$JAEGER_CONTAINER_NAME'..."
+        docker start "$JAEGER_CONTAINER_NAME" >/dev/null
+    fi
+else
+    echo "    Launching new Jaeger container '$JAEGER_CONTAINER_NAME'..."
+    docker run -d \
+        --name "$JAEGER_CONTAINER_NAME" \
+        -e COLLECTOR_OTLP_ENABLED=true \
+        -p "${JAEGER_UI_PORT}:16686" \
+        -p "${JAEGER_OTLP_GRPC_PORT}:4317" \
+        -p "${JAEGER_OTLP_HTTP_PORT}:4318" \
+        "$JAEGER_IMAGE" >/dev/null
+    JAEGER_OWNED=true
+fi
+
+if wait_for "Jaeger UI" 30 "" \
+    "curl -sf http://localhost:${JAEGER_UI_PORT}/ -o /dev/null"; then
+    echo "    Jaeger UI ready at http://localhost:${JAEGER_UI_PORT}"
+    echo "    OTLP gRPC endpoint: http://127.0.0.1:${JAEGER_OTLP_GRPC_PORT}"
+else
+    echo "    WARNING: Jaeger UI did not respond on port ${JAEGER_UI_PORT} within 30s."
+    echo "             Check 'docker logs $JAEGER_CONTAINER_NAME' for details."
+fi
+
+LIT_TELEMETRY_ENDPOINT_URL="http://127.0.0.1:${JAEGER_OTLP_GRPC_PORT}"
+
+# --------------------------------------------------------------------------
+# --no_code: print summary + cargo commands and wait
+# --------------------------------------------------------------------------
+if [ "$NO_CODE" = true ]; then
+    echo ""
+    echo "============================================"
+    echo "  --no_code mode: skipping cargo services"
+    echo "============================================"
+    echo "  Anvil (chain):        http://127.0.0.1:8545"
+    echo "  dstack simulator:     $DSTACK_SOCKET"
+    echo "  Contract address:     $CONTRACT_ADDRESS"
+    echo "  Jaeger UI:            http://localhost:${JAEGER_UI_PORT}"
+    echo "  Jaeger OTLP (gRPC):   $LIT_TELEMETRY_ENDPOINT_URL"
+    echo "============================================"
+    echo ""
+    echo "Run the following commands in separate terminals to start the"
+    echo "remaining services. Each service has two variants:"
+    echo "  (a) normal      — no telemetry export"
+    echo "  (b) with OTEL   — exports traces to the local Jaeger above"
+    echo ""
+    echo "Required env for any cargo run:"
+    echo "  export DSTACK_SOCKET=\"$DSTACK_SOCKET\""
+    echo ""
+    echo "--- lit-api-server ---"
+    echo "  (a) Normal:"
+    echo "      cd $SCRIPT_DIR/lit-api-server && \\"
+    echo "          DSTACK_SOCKET=\"$DSTACK_SOCKET\" \\"
+    echo "          cargo run --bin lit-api-server"
+    echo ""
+    echo "  (b) With OTEL → local Jaeger:"
+    echo "      cd $SCRIPT_DIR/lit-api-server && \\"
+    echo "          DSTACK_SOCKET=\"$DSTACK_SOCKET\" \\"
+    echo "          LIT_TELEMETRY_ENDPOINT=\"$LIT_TELEMETRY_ENDPOINT_URL\" \\"
+    echo "          cargo run --bin lit-api-server --features otlp"
+    echo ""
+    echo "--- lit-actions ---"
+    echo "  (a) Normal:"
+    echo "      cd $SCRIPT_DIR && \\"
+    echo "          cargo run --manifest-path=lit-actions/Cargo.toml --bin lit_actions"
+    echo ""
+    echo "  (b) With OTEL → local Jaeger:"
+    echo "      cd $SCRIPT_DIR && \\"
+    echo "          LIT_TELEMETRY_ENDPOINT=\"$LIT_TELEMETRY_ENDPOINT_URL\" \\"
+    echo "          cargo run --manifest-path=lit-actions/Cargo.toml --bin lit_actions \\"
+    echo "                    --features otlp"
+    echo ""
+    echo "--- lit-static ---"
+    echo "      static-web-server -p 8080 -d \"$SCRIPT_DIR/lit-static\" -g info"
+    echo ""
+    echo "Press Ctrl+C to stop the services started by this script"
+    echo "(Anvil, dstack-simulator, Jaeger)."
+    echo ""
+
+    # Idle loop — keep Anvil/simulator/Jaeger alive until Ctrl+C.
+    set +e
+    while true; do
+        for pid in "${PIDS[@]}"; do
+            if ! kill -0 "$pid" 2>/dev/null; then
+                wait "$pid" 2>/dev/null
+                EXIT_CODE=$?
+                EXITED_NAME="unknown"
+                [ "$pid" = "${ANVIL_PID:-}" ] && EXITED_NAME="anvil"
+                [ "$pid" = "${SIM_PID:-}" ] && EXITED_NAME="dstack-simulator"
+                if [ "$EXIT_CODE" -eq 0 ]; then
+                    echo "WARNING: $EXITED_NAME (PID $pid) exited cleanly. Shutting down."
+                else
+                    echo "ERROR: $EXITED_NAME (PID $pid) exited with code $EXIT_CODE"
+                fi
+                exit "$EXIT_CODE"
+            fi
+        done
+        sleep 2
+    done
+fi
+
+# --------------------------------------------------------------------------
+# 5. cargo run lit-api-server
+# --------------------------------------------------------------------------
+echo "==> Step 5: Starting lit-api-server..."
 
 (cd "$SCRIPT_DIR/lit-api-server" && \
     DSTACK_SOCKET="$DSTACK_SOCKET" \
@@ -207,9 +371,9 @@ else
 fi
 
 # --------------------------------------------------------------------------
-# 5. cargo run lit-actions
+# 6. cargo run lit-actions
 # --------------------------------------------------------------------------
-echo "==> Step 5: Starting lit-actions..."
+echo "==> Step 6: Starting lit-actions..."
 
 (cd "$SCRIPT_DIR" && \
     cargo run --manifest-path=lit-actions/Cargo.toml --bin lit_actions) &
@@ -224,9 +388,9 @@ else
 fi
 
 # --------------------------------------------------------------------------
-# 6. Serve lit-static via static-web-server
+# 7. Serve lit-static via static-web-server
 # --------------------------------------------------------------------------
-echo "==> Step 6: Starting static-web-server for lit-static..."
+echo "==> Step 7: Starting static-web-server for lit-static..."
 
 if ! command -v static-web-server &>/dev/null; then
     echo "ERROR: static-web-server is not installed."
@@ -255,6 +419,8 @@ echo "  lit-api-server:       http://localhost:8000"
 echo "  lit-actions (gRPC):   /tmp/lit_actions.sock"
 echo "  lit-static:           http://localhost:8080"
 echo "  dstack simulator:     $DSTACK_SOCKET"
+echo "  Jaeger UI:            http://localhost:${JAEGER_UI_PORT}"
+echo "  Jaeger OTLP (gRPC):   $LIT_TELEMETRY_ENDPOINT_URL"
 echo "  Contract address:     $CONTRACT_ADDRESS"
 echo "============================================"
 echo ""

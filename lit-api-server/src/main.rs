@@ -147,10 +147,9 @@ async fn main() -> Result<(), rocket::Error> {
     let stripe_state = stripe::init();
 
     // IPFS cache lives outside the restart loop so warm entries survive restarts.
-    // 1 GB max capacity.
     let ipfs_cache: Cache<String, Arc<String>> = Cache::builder()
         .weigher(|_key, value: &Arc<String>| -> u32 { value.len().try_into().unwrap_or(u32::MAX) })
-        .max_capacity(1024 * 1024 * 1024)
+        .max_capacity(1024 * 1024 * 1024) // 1 GB
         .build();
 
     // Restart metrics: total restart count for logging.

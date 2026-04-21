@@ -28,6 +28,7 @@ use ipfs_hasher::IpfsHasher;
 use lit_actions_grpc::proto::{ExecuteJsRequest, ExecuteJsResponse};
 use lit_api_core::context::HEADER_KEY_X_PRIVACY_MODE;
 use lit_observability::channels::TracedReceiver;
+use lit_observability::logging::clear_task_request_context;
 use sys_traits::impls::RealSys;
 use tokio::sync::{mpsc, oneshot};
 use tonic::Status;
@@ -35,7 +36,7 @@ use tracing::{debug, error, info_span, instrument};
 
 // Same default limits as in lit-node's action client
 const DEFAULT_TIMEOUT_MS: u64 = 1000 * 60 * 15; // 15 minutes
-const DEFAULT_MEMORY_LIMIT_MB: usize = 128; // 128MB
+pub(crate) const DEFAULT_MEMORY_LIMIT_MB: usize = 64; // 64MB
 const MEMORY_SAMPLE_INTERVAL_MS: u64 = 500; // 500ms
 const EXECUTION_TERMINATED_ERROR: &str = "Uncaught Error: execution terminated";
 const MAX_ACTION_CODE_CACHE_BYTES: usize = 100 * 1024 * 1024;
@@ -191,6 +192,40 @@ enum ExecutionResult {
     OutOfMemory,
 }
 
+/// State shared across all worker constructions in a single process.
+/// Built once at server startup; cloned cheaply via `Arc` clone of fields.
+#[derive(Clone)]
+pub(crate) struct PoolSharedState {
+    pub integrity_manifest: Arc<RwLock<HashMap<String, String>>>,
+    pub strict_imports: bool,
+    pub module_cache: ModuleCache,
+    pub lockfile_path: Option<PathBuf>,
+    pub http_client: Arc<reqwest::Client>,
+    /// Heap limit in MB. Pool workers always use `DEFAULT_MEMORY_LIMIT_MB`;
+    /// the legacy cold path uses whatever the caller specified.
+    pub memory_limit_mb: usize,
+}
+
+/// A `MainWorker` that has been bootstrapped from the V8 snapshot but has
+/// not yet had any per-request JS injected. Carries the `LoadedModules`
+/// handle that was wired into its `CdnModuleLoader`; the same handle is
+/// later inserted into `op_state` so billing sees a single source of truth.
+///
+/// `PreparedWorker` is consumed by value in `execute_with_worker` to enforce
+/// one-shot lifecycle at the type level: the worker cannot be reused after
+/// a single execution.
+pub(crate) struct PreparedWorker {
+    pub worker: MainWorker,
+    pub loaded_modules: LoadedModules,
+}
+
+#[cfg(test)]
+impl PreparedWorker {
+    pub(crate) fn loaded_modules_for_test(&self) -> LoadedModules {
+        self.loaded_modules.clone()
+    }
+}
+
 static RUNTIME_SNAPSHOT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/RUNTIME_SNAPSHOT.bin"));
 
 fn deno_isolate_init() -> Option<&'static [u8]> {
@@ -313,16 +348,23 @@ async fn get_or_prepare_action_code(
     Ok(prepared_code)
 }
 
-// using the worker built into deno
-#[allow(clippy::too_many_arguments)]
+/// Build a `MainWorker` from the V8 snapshot. Warm-time safe: does no JS
+/// injection, so it can run off the request path before `auth_context` and
+/// `http_headers` are known. The single `LoadedModules` handle wired into
+/// the `CdnModuleLoader` is also returned on the `PreparedWorker`, so the
+/// caller can insert the same `Arc` into `op_state` later.
 #[instrument(skip_all, err)]
-fn build_main_worker_and_inject_sdk(
-    globals_to_inject: &Option<serde_json::Value>,
-    auth_context: &Option<serde_json::Value>,
-    http_headers: BTreeMap<String, String>,
-    memory_limit_mb: Option<usize>,
-    module_loader: Rc<dyn deno_core::ModuleLoader>,
-) -> Result<MainWorker> {
+pub(crate) fn build_worker_base(shared: &PoolSharedState) -> Result<PreparedWorker> {
+    let loaded_modules = LoadedModules::default();
+    let module_loader: Rc<dyn deno_core::ModuleLoader> = Rc::new(CdnModuleLoader::with_options(
+        shared.integrity_manifest.clone(),
+        shared.strict_imports,
+        shared.module_cache.clone(),
+        shared.lockfile_path.clone(),
+        Some(shared.http_client.clone()),
+        loaded_modules.clone(),
+    ));
+
     let options = WorkerOptions {
         bootstrap: BootstrapOptions {
             cpu_count: 1,
@@ -334,8 +376,9 @@ fn build_main_worker_and_inject_sdk(
         extensions: vec![lit_actions_ext::lit_actions::init_ops()],
         startup_snapshot: deno_isolate_init(),
         skip_op_registration: false,
-        create_params: memory_limit_mb
-            .map(|limit| v8::CreateParams::default().heap_limits(0, limit * 1024 * 1024)),
+        create_params: Some(
+            v8::CreateParams::default().heap_limits(0, shared.memory_limit_mb * 1024 * 1024),
+        ),
         unsafely_ignore_certificate_errors: None,
         seed: None,
         create_web_worker_cb: Arc::new(|_| {
@@ -382,103 +425,129 @@ fn build_main_worker_and_inject_sdk(
 
     let main_module =
         deno_core::resolve_url_or_path("./$lit$actions.js", Path::new(env!("CARGO_MANIFEST_DIR")))?;
-    let mut worker = MainWorker::bootstrap_from_options(&main_module, services, options);
+    let worker = MainWorker::bootstrap_from_options(&main_module, services, options);
 
+    Ok(PreparedWorker {
+        worker,
+        loaded_modules,
+    })
+}
+
+/// Inject `LitNamespace.js` (LitActions / LitAuth / LitHeaders globals).
+/// Request-time only: needs `auth_context` and `http_headers`. Runs BEFORE
+/// `PatchDeno.js` so it can rely on the unmodified `Deno` namespace if needed.
+pub(crate) fn inject_lit_namespace(
+    worker: &mut MainWorker,
+    auth_context: &Option<serde_json::Value>,
+    http_headers: &BTreeMap<String, String>,
+) -> Result<()> {
+    let _span = info_span!("LitNamespace.js").entered();
+
+    if http_headers
+        .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
+        .is_some_and(|v| v == "true")
     {
-        let _span = info_span!("LitNamespace.js").entered();
-
-        if http_headers
-            .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
-            .unwrap_or(&"false".to_string())
-            == "true"
-        {
-            debug!("Populating LitHeaders: **PRIVACY MODE**");
-        } else {
-            debug!("Populating LitHeaders: {http_headers:?}");
-        }
-
-        // NB: globalThis.LitActions is already part of the V8 snapshot
-        let mut code = formatdoc! {r#"
-            "use strict";
-            (function (actions, auth, headers) {{
-                const {{ freeze }} = Object;
-                const readOnly = value => ({{ value, enumerable: true, writable: false, configurable: false }});
-
-                Object.defineProperties(globalThis, {{
-                    LitActions: readOnly(freeze(actions)),
-                    LitAuth: readOnly(freeze(auth)),
-                    LitHeaders: readOnly(headers),
-                }});
-
-                Object.defineProperty(globalThis, "Lit", readOnly(freeze({{
-                    Actions: LitActions,
-                    Auth: LitAuth,
-                    Headers: LitHeaders,
-                }})));
-            }})(LitActions, {auth}, new Headers({headers}));
-            "#,
-            auth = if let Some(ctx) = auth_context {
-                serde_json::to_string(ctx).context("Could not serialize auth_context")?
-            } else {
-                "{}".to_string()
-            },
-            headers = serde_json::to_string(&http_headers).context("Could not serialize HTTP headers")?
-        };
-
-        // Remove LitTest from non-debug builds
-        if !cfg!(debug_assertions) {
-            code.push_str("delete globalThis.LitTest;\n");
-        }
-
-        worker
-            .execute_script("LitNamespace.js", code.into())
-            .context("Error populating Lit namespace")?;
+        debug!("Populating LitHeaders: **PRIVACY MODE**");
+    } else {
+        debug!("Populating LitHeaders: {http_headers:?}");
     }
 
+    // NB: globalThis.LitActions is already part of the V8 snapshot
+    let mut code = formatdoc! {r#"
+        "use strict";
+        (function (actions, auth, headers) {{
+            const {{ freeze }} = Object;
+            const readOnly = value => ({{ value, enumerable: true, writable: false, configurable: false }});
+
+            Object.defineProperties(globalThis, {{
+                LitActions: readOnly(freeze(actions)),
+                LitAuth: readOnly(freeze(auth)),
+                LitHeaders: readOnly(headers),
+            }});
+
+            Object.defineProperty(globalThis, "Lit", readOnly(freeze({{
+                Actions: LitActions,
+                Auth: LitAuth,
+                Headers: LitHeaders,
+            }})));
+        }})(LitActions, {auth}, new Headers({headers}));
+        "#,
+        auth = if let Some(ctx) = auth_context {
+            serde_json::to_string(ctx).context("Could not serialize auth_context")?
+        } else {
+            "{}".to_string()
+        },
+        headers = serde_json::to_string(http_headers).context("Could not serialize HTTP headers")?
+    };
+
+    // Remove LitTest from non-debug builds
+    if !cfg!(debug_assertions) {
+        code.push_str("delete globalThis.LitTest;\n");
+    }
+
+    worker
+        .execute_script("LitNamespace.js", code.into())
+        .context("Error populating Lit namespace")?;
+
+    Ok(())
+}
+
+/// Strip privileged `Deno.*` surface and disable `Worker`. Must run AFTER
+/// `inject_lit_namespace` to preserve today's bootstrap order.
+fn execute_patch_deno(worker: &mut MainWorker) -> Result<()> {
+    let _span = info_span!("PatchDeno.js").entered();
+
+    let code = formatdoc! {r#"
+        "use strict";
+        delete Deno.build;
+        delete Deno.permissions;
+        delete Deno.version;
+        delete globalThis.Worker;
+    "#};
+
+    worker
+        .execute_script("PatchDeno.js", code.into())
+        .context("Error patching Deno runtime")?;
+
+    Ok(())
+}
+
+/// Inject caller-supplied globals via `Params.js`. Reserved for future use:
+/// `execute_js` always passes `None` today, so this is normally a no-op.
+fn inject_params_globals(
+    worker: &mut MainWorker,
+    globals_to_inject: &Option<serde_json::Value>,
+    http_headers: &BTreeMap<String, String>,
+) -> Result<()> {
+    let Some(params) = globals_to_inject else {
+        return Ok(());
+    };
+
+    let _span = info_span!("Params.js").entered();
+
+    if http_headers
+        .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
+        .is_some_and(|v| v == "true")
     {
-        let _span = info_span!("PatchDeno.js").entered();
-
-        let code = formatdoc! {r#"
-            "use strict";
-            delete Deno.build;
-            delete Deno.permissions;
-            delete Deno.version;
-            delete globalThis.Worker;
-        "#};
-
-        worker
-            .execute_script("PatchDeno.js", code.into())
-            .context("Error patching Deno runtime")?;
+        debug!("Injecting params as globals: **PRIVACY MODE**");
+    } else {
+        debug!("Injecting params as globals: {params:?}");
     }
 
-    if let Some(params) = globals_to_inject {
-        let _span = info_span!("Params.js").entered();
+    let _ = params
+        .as_object()
+        .context("Could not convert params to map")?;
 
-        if http_headers
-            .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
-            .unwrap_or(&"false".to_string())
-            == "true"
-        {
-            debug!("Injecting params as globals: **PRIVACY MODE**");
-        } else {
-            debug!("Injecting params as globals: {params:?}");
-        }
+    let code = formatdoc! {r#"
+        "use strict";
+        Object.assign(globalThis, {params});
+    "#};
 
-        let _ = params
-            .as_object()
-            .context("Could not convert params to map")?;
+    worker
+        .execute_script("Params.js", code.into())
+        .context("Error injecting params as globals")?;
 
-        let code = formatdoc! {r#"
-            "use strict";
-            Object.assign(globalThis, {params});
-        "#};
-
-        worker
-            .execute_script("Params.js", code.into())
-            .context("Error injecting params as globals")?;
-    }
-
-    Ok(worker)
+    Ok(())
 }
 
 // NB: Due to the new PKU feature introduced in V8 11.6, we need to init the V8
@@ -503,6 +572,13 @@ pub fn init_v8() {
     JsRuntime::init_platform(None, false);
 }
 
+/// Legacy cold path: build a one-off `PoolSharedState` with the caller's
+/// `memory_limit_mb`, bootstrap a fresh `MainWorker`, inject per-request
+/// state, and execute.
+///
+/// Pool path callers (see `worker_pool::WorkerPool`) instead call
+/// `build_worker_base` once at warm-time, then `inject_lit_namespace` +
+/// `execute_with_worker` per request against a pre-warmed `PreparedWorker`.
 #[allow(clippy::too_many_arguments)]
 #[instrument(skip_all, err)]
 pub(crate) async fn execute_js(
@@ -531,8 +607,109 @@ pub(crate) async fn execute_js(
     static COLOR_INIT: Once = Once::new();
     COLOR_INIT.call_once(|| deno_runtime::colors::set_use_color(false));
 
+    let shared = Arc::new(PoolSharedState {
+        integrity_manifest,
+        strict_imports,
+        module_cache,
+        lockfile_path,
+        http_client,
+        memory_limit_mb: memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB),
+    });
+
+    let mut prepared = build_worker_base(&shared)
+        .context("Error building main worker")
+        .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
+
+    inject_lit_namespace(&mut prepared.worker, &auth_context, &http_headers)?;
+
+    execute_with_worker(
+        prepared,
+        shared,
+        code,
+        js_params,
+        http_headers,
+        timeout_ms,
+        outbound_tx,
+        inbound_rx,
+        is_test_server,
+        action_code_cache,
+    )
+    .await
+}
+
+/// Run a single request against an already-bootstrapped `PreparedWorker`.
+/// Consumes `prepared` by value to enforce one-shot lifecycle: the worker
+/// is dropped when this function returns. Owns everything from the post-
+/// bootstrap body of the original `execute_js`: `PatchDeno.js`, op-state
+/// wiring, controller thread, near-heap callback, resource-usage polling,
+/// action code cache lookup, user code execution, termination select loop,
+/// and final `clear_task_request_context`.
+#[allow(clippy::too_many_arguments)]
+#[instrument(skip_all, err)]
+pub(crate) async fn execute_with_worker(
+    prepared: PreparedWorker,
+    shared: Arc<PoolSharedState>,
+    code: String,
+    js_params: Option<serde_json::Value>,
+    http_headers: BTreeMap<String, String>,
+    timeout_ms: Option<u64>,
+    outbound_tx: flume::Sender<tonic::Result<ExecuteJsResponse>>,
+    inbound_rx: TracedReceiver<ExecuteJsRequest>,
+    is_test_server: bool,
+    action_code_cache: ActionCodeCache,
+) -> Result<()> {
+    let result = execute_with_worker_inner(
+        prepared,
+        shared,
+        code,
+        js_params,
+        http_headers,
+        timeout_ms,
+        outbound_tx,
+        inbound_rx,
+        is_test_server,
+        action_code_cache,
+    )
+    .await;
+
+    // Always clear request context at the end of a request. The pool
+    // worker thread is reused for refill state machinery before being
+    // dropped; the legacy thread is also reused by the OS thread pool
+    // implicitly. Either way, leaving stale tracing fields would leak
+    // request_id / correlation_id into unrelated spans.
+    clear_task_request_context();
+
+    result
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_with_worker_inner(
+    prepared: PreparedWorker,
+    shared: Arc<PoolSharedState>,
+    code: String,
+    js_params: Option<serde_json::Value>,
+    http_headers: BTreeMap<String, String>,
+    timeout_ms: Option<u64>,
+    outbound_tx: flume::Sender<tonic::Result<ExecuteJsResponse>>,
+    inbound_rx: TracedReceiver<ExecuteJsRequest>,
+    is_test_server: bool,
+    action_code_cache: ActionCodeCache,
+) -> Result<()> {
+    let PreparedWorker {
+        mut worker,
+        loaded_modules,
+    } = prepared;
+
     let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
-    let memory_limit_mb = memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB);
+    let memory_limit_mb = shared.memory_limit_mb;
+
+    // PatchDeno.js must run AFTER LitNamespace.js (which the caller already
+    // injected) to preserve the original bootstrap order.
+    execute_patch_deno(&mut worker)?;
+    // Reserved hook: today's call sites always pass globals=None; preserved
+    // here so re-enabling globals injection drops in at the historical spot
+    // (between PatchDeno.js and op-state wiring).
+    inject_params_globals(&mut worker, &None, &http_headers)?;
 
     // Check the action code cache early so we can skip prepare_action_code
     // on cache hit (the real performance win). We always use CdnModuleLoader
@@ -548,26 +725,6 @@ pub(crate) async fn execute_js(
     if cached_code.is_some() {
         debug!(action_ipfs_id, "action code cache hit");
     }
-
-    let loaded_modules = LoadedModules::default();
-    let module_loader: Rc<dyn deno_core::ModuleLoader> = Rc::new(CdnModuleLoader::with_options(
-        integrity_manifest.clone(),
-        strict_imports,
-        module_cache.clone(),
-        lockfile_path.clone(),
-        Some(http_client.clone()),
-        loaded_modules.clone(),
-    ));
-
-    let mut worker = build_main_worker_and_inject_sdk(
-        &None,
-        &auth_context,
-        http_headers,
-        Some(memory_limit_mb),
-        module_loader,
-    )
-    .context("Error building main worker")
-    .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
 
     let op_state = worker.js_runtime.op_state();
     {
@@ -619,11 +776,11 @@ pub(crate) async fn execute_js(
         cached
     } else {
         let prepare_context = ActionCodePrepareContext {
-            client: &http_client,
-            integrity: &integrity_manifest,
-            strict_imports,
-            lockfile_path: &lockfile_path,
-            module_cache: &module_cache,
+            client: &shared.http_client,
+            integrity: &shared.integrity_manifest,
+            strict_imports: shared.strict_imports,
+            lockfile_path: &shared.lockfile_path,
+            module_cache: &shared.module_cache,
         };
         get_or_prepare_action_code(&code, &action_ipfs_id, &action_code_cache, &prepare_context)
             .await?
@@ -875,5 +1032,37 @@ mod tests {
         assert!(cache.total_bytes() < MAX_ACTION_CODE_CACHE_BYTES);
         assert!(cache.entries.contains_key("QmNew"));
         assert!(!cache.entries.contains_key("QmOld"));
+    }
+
+    /// Each `PreparedWorker` must have a fresh `LoadedModules` `Arc`.
+    /// If two workers ever shared the same accumulator, per-tenant module
+    /// state would leak between the requests dispatched to those workers.
+    /// This is the core safety invariant for the pool.
+    #[test]
+    fn prepared_workers_have_distinct_loaded_modules_arcs() {
+        use std::sync::Once;
+        static INIT_V8_ONCE: Once = Once::new();
+        INIT_V8_ONCE.call_once(super::init_v8);
+
+        let shared = PoolSharedState {
+            integrity_manifest: Arc::new(RwLock::new(HashMap::new())),
+            strict_imports: false,
+            module_cache: Arc::new(RwLock::new(HashMap::new())),
+            lockfile_path: None,
+            http_client: CdnModuleLoader::build_http_client(),
+            memory_limit_mb: DEFAULT_MEMORY_LIMIT_MB,
+        };
+
+        let w1 = build_worker_base(&shared).expect("first worker built");
+        let w2 = build_worker_base(&shared).expect("second worker built");
+
+        let m1 = w1.loaded_modules_for_test();
+        let m2 = w2.loaded_modules_for_test();
+
+        assert!(
+            !Arc::ptr_eq(&m1.0, &m2.0),
+            "two PreparedWorkers must not share a LoadedModules Arc; \
+             this would leak per-request module state between tenants",
+        );
     }
 }
