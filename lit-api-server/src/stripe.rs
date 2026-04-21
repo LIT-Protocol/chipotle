@@ -715,6 +715,7 @@ pub async fn list_all_customers(state: &StripeState) -> Result<Vec<ReportCustome
                 .get("metadata")
                 .and_then(|m| m.get("wallet_address"))
                 .and_then(|v| v.as_str())
+                .filter(|s| !s.trim().is_empty())
                 .map(|s| s.to_string());
             let email = c
                 .get("email")
@@ -782,8 +783,21 @@ pub async fn list_balance_transactions_since(
             let Some(id) = tx.get("id").and_then(|v| v.as_str()) else {
                 continue;
             };
-            let amount = tx.get("amount").and_then(|v| v.as_i64()).unwrap_or(0);
-            let created = tx.get("created").and_then(|v| v.as_i64()).unwrap_or(0);
+            // Don't silently default missing amount/created to 0 — that would
+            // bucket malformed transactions into 1970-01-01 with $0 and skew
+            // the report. Skip with a warning instead.
+            let Some(amount) = tx.get("amount").and_then(|v| v.as_i64()) else {
+                tracing::warn!(
+                    "stripe_report: skipping tx {id} for customer {customer_id}: missing/invalid 'amount' field"
+                );
+                continue;
+            };
+            let Some(created) = tx.get("created").and_then(|v| v.as_i64()) else {
+                tracing::warn!(
+                    "stripe_report: skipping tx {id} for customer {customer_id}: missing/invalid 'created' field"
+                );
+                continue;
+            };
             let description = tx
                 .get("description")
                 .and_then(|v| v.as_str())

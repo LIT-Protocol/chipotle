@@ -117,9 +117,14 @@ async fn main() -> ExitCode {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0);
-    let since = now - (args.days as i64) * 86_400;
+    // Snap to UTC midnight so the Stripe query window, the rendered date
+    // columns, and the "last N days" label all refer to the same whole days.
+    // Without this the first bucket is partial (starts at `now`'s time-of-day)
+    // and we end up with N+1 date columns.
+    let today_start = now - now.rem_euclid(86_400);
+    let since = today_start - (args.days.saturating_sub(1) as i64) * 86_400;
     let since_date = stripe::unix_to_utc_date(since);
-    let until_date = stripe::unix_to_utc_date(now);
+    let until_date = stripe::unix_to_utc_date(today_start);
 
     eprintln!(
         "Fetching Stripe customers and balance transactions for {since_date} .. {until_date} ({} days) …",
@@ -227,7 +232,9 @@ fn csv_escape(s: &str) -> String {
     } else {
         s
     };
-    if s.contains(',') || s.contains('"') || s.contains('\n') {
+    // Quote on CR too, not just LF: a bare \r embedded in a field can otherwise
+    // confuse CSV consumers that treat it as a record separator.
+    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
         let escaped = s.replace('"', "\"\"");
         format!("\"{escaped}\"")
     } else {
@@ -482,7 +489,14 @@ fn parse_utc_date(s: &str) -> Option<i64> {
     let doy = (153 * mp + 2) / 5 + d as u64 - 1; // [0, 365]
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy; // [0, 146096]
     let days = era * 146_097 + doe as i64 - 719_468;
-    Some(days * 86_400)
+    let ts = days * 86_400;
+    // Reject impossible dates like 2026-02-31 by round-tripping: if the math
+    // silently normalized the components, the formatted timestamp won't match
+    // the input string.
+    if stripe::unix_to_utc_date(ts) != s {
+        return None;
+    }
+    Some(ts)
 }
 
 fn html_escape(s: &str) -> String {
@@ -600,6 +614,29 @@ mod tests {
         assert!(parse_utc_date("2026-13-01").is_none());
         assert!(parse_utc_date("2026-04-00").is_none());
         assert!(parse_utc_date("2026-04-21-01").is_none());
+    }
+
+    #[test]
+    fn parse_utc_date_rejects_impossible_calendar_days() {
+        // These would silently normalize without round-trip validation (e.g.
+        // Feb 31 → Mar 3), producing a wrong date range in the report.
+        assert!(parse_utc_date("2026-02-31").is_none());
+        assert!(parse_utc_date("2026-02-30").is_none());
+        assert!(parse_utc_date("2025-02-29").is_none()); // 2025 is not leap
+        assert!(parse_utc_date("2026-04-31").is_none()); // April has 30 days
+        // Actual leap day in a leap year must still parse.
+        assert!(parse_utc_date("2024-02-29").is_some());
+    }
+
+    #[test]
+    fn csv_escape_quotes_embedded_carriage_return() {
+        // Bare \r inside a field must be quoted so CSV consumers that treat
+        // \r as a record separator don't split the row.
+        let escaped = csv_escape("alice\rbob@example.com");
+        assert!(
+            escaped.starts_with('"') && escaped.ends_with('"'),
+            "expected quoted field, got {escaped:?}"
+        );
     }
 
     #[test]
