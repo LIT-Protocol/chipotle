@@ -83,7 +83,7 @@ function openAddWalletModal() {
     try {
       showActionProgress('Creating wallet', 'Creating and registering a new wallet for this account.');
       const client = await getClient();
-      const res = await client.createWallet(apiKey);
+      const res = await client.createWallet({ apiKey });
       await loadWallets();
       showStatus('wallets-status', 'Wallet created: ' + (res.wallet_address || ''), 'success');
     } catch (e) {

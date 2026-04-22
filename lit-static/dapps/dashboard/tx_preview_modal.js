@@ -33,8 +33,8 @@ const METHOD_LABELS = {
   setUsageApiKey: 'Create/update usage API key',
   removeUsageApiKey: 'Delete usage API key',
   updateUsageApiKeyMetadata: 'Update usage API key metadata',
-  newAccount: 'Create account',
-  registerWalletDerivation: 'Register wallet',
+  newAccount: 'Create account (sovereign)',
+  registerWalletDerivation: 'Register wallet on-chain',
 };
 
 /**
@@ -61,6 +61,9 @@ const ARG_LABELS = {
   balance: 'Starting balance',
   creatorWalletAddress: 'Creator wallet',
   derivationPath: 'Derivation path',
+  managed: 'Server-managed account',
+  accountName: 'Account name',
+  accountDescription: 'Account description',
 };
 
 function prettifyMethod(name) {
