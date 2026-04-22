@@ -92,6 +92,64 @@
   **Branch:** GTC6244/k6-api-key-security-tests
   **Noticed:** 2026-03-26
 
+## CPL-267 Sovereign Mode: blockchain_cache needs `invalidate_for_account_hash(hash)` primitive
+
+**What:** Add `invalidate_for_account_hash(api_key_hash: Bytes32)` to `lit-api-server/src/accounts/blockchain_cache.rs`. Existing invalidation functions (`invalidate_for_account`, `invalidate_for_key`) take raw api_key and hash internally, but the Phase 3 event listener only has the hashed apiKeyHash from chain event topics.
+
+**Why:** Blocker for Phase 3 event listener in CPL-267 sovereign mode. Without this primitive, listener can't invalidate cache entries for direct-write transactions.
+
+**How to fix:** Factor out the hash-based invalidation path from `invalidate_for_account` into a new public function. Existing callers keep their raw-key signature; listener calls the hash variant directly.
+
+**Priority:** P1 (blocks Phase 3)
+
+**Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode
+
+## CPL-267 Sovereign Mode: GC orphan prepared wallet keys
+
+**What:** Add periodic cleanup sweep for TEE-prepared wallets that were never registered on-chain. After server generates a key for sovereign `createWallet` and returns derivation metadata, user wallet may abandon before signing `register_wallet_derivation`, leaving TEE with an un-tracked key.
+
+**Why:** Unbounded growth of orphan keys in TEE state. Also a minor security concern (keys exist with no on-chain accountability).
+
+**How to fix:** Track prepared-wallet state with timestamp in TEE persistent storage. Background task (every N hours) drops entries older than threshold (e.g., 24h) that have no on-chain derivation registered.
+
+**Priority:** P2 (not blocking ship, but required before external users)
+
+**Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode
+
+## CPL-267 Sovereign Mode: Document cache staleness window
+
+**What:** SDK + dashboard docs should state: "After a sovereign-mode write, reads on other server instances may show stale data for up to N seconds (polling interval)."
+
+**Why:** Per-instance event listener (user chose over single-leader) means N independent views of chain state. Users hitting load-balanced servers can see brief staleness. Undocumented surprises become support tickets.
+
+**How to fix:** Add to SDK README + dashboard user docs. Also add dashboard banner when detected listener lag > 30s.
+
+**Priority:** P2 (pair with Phase 3 listener ship)
+
+**Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode
+
+## CPL-267 Sovereign Mode: 6-month adoption re-evaluation
+
+**What:** At 6 months post-ship of sovereign mode, review adoption metrics. If <5% of active accounts have converted or started sovereign, open a design doc to evaluate: (a) pivot to Approach B signed intents, (b) sunset sovereign mode, (c) continue parallel.
+
+**Why:** Driver was internal alignment, not customer demand. Codex outside voice flagged whole approach as potentially wrong first proof. We rejected pivot now for philosophical reasons, but committed to data-driven re-evaluation.
+
+**Priority:** P3 (reminder, not urgent)
+
+**Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode
+
+## CPL-267 Sovereign Mode: Billing bypass documentation
+
+**What:** Admin writes in sovereign mode bypass Stripe billing guards (user's wallet pays gas directly to chain). Lit Action execution still charges via Stripe. Document this split explicitly in SDK + billing page.
+
+**Why:** Billing logic is per-op today (see `stripe::` in lit-api-server); sovereign admin writes never hit those guards. Accounting split must be visible to ops and support, otherwise conversion-to-sovereign looks like "billing broken."
+
+**How to fix:** Add note to `billing.md` or equivalent. Add sovereign-mode label to Stripe dashboard for per-account identification.
+
+**Priority:** P3
+
+**Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode
+
 ## Completed
 ## Monitor: Keyboard Shortcuts
 - **What:** Add keyboard shortcuts to the Lit Node Monitor: R to refresh, F to fund all critical, S to toggle settings panel.

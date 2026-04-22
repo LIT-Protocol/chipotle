@@ -9,6 +9,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.umd.min.js"></script>
 </head>
 <body>
   <div class="app">
@@ -28,8 +29,12 @@
               <label for="login-api-key">API key</label>
               <input type="password" id="login-api-key" class="input" placeholder="Paste your API key">
             </div>
+            <div class="form-group" style="display:flex; align-items:center; gap:0.75rem;">
+              <input type="checkbox" id="login-mode-sovereign">
+              <label for="login-mode-sovereign" id="login-mode-label" class="form-hint" style="margin:0; cursor:pointer;">API mode</label>
+            </div>
             <button type="button" id="btn-login" class="btn btn-primary btn-block">Log in</button>
-            <p class="form-hint">Log in verifies the API key with the server (account exists and is mutable).</p>
+            <p class="form-hint">Log in verifies the API key. Sovereign mode reads directly from the AccountConfig contract over RPC; writes are previewed, then submitted as wallet-signed transactions from your connected browser wallet.</p>
           </div>
         </div>
         <div id="login-panel-new" class="login-tab-panel" role="tabpanel" aria-labelledby="login-tab-new" hidden>
