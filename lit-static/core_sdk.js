@@ -529,11 +529,10 @@ export class LitNodeSimpleApiClient {
    */
   async newAccount({ accountName, accountDescription, email, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
-      const ethers = await loadEthers();
       const randBytes = new Uint8Array(32);
       crypto.getRandomValues(randBytes);
       const apiKey = 'lk_' + Array.from(randBytes, (b) => b.toString(16).padStart(2, '0')).join('');
-      const hash = ethers.keccak256(ethers.toUtf8Bytes(apiKey));
+      const hash = await this._apiKeyHash(apiKey);
       const contract = await this._getWriteContract();
       const creator = await this.signer.getAddress();
       const { txHash } = await runContractWrite({
@@ -602,8 +601,10 @@ export class LitNodeSimpleApiClient {
    * sovereign mode: hybrid flow. The TEE still has to generate the key (the
    *   user's browser can't mint a PKP) but registration happens on-chain via a
    *   user-signed tx. Two round-trips:
-   *     1) POST /core/v1/prepare_sovereign_wallet { api_key } → { pkp_id, derivation_path }
-   *        Server generates and holds the key in TEE state, returns metadata.
+   *     1) POST /core/v1/prepare_sovereign_wallet → { pkp_id, derivation_path }
+   *        Auth: X-Api-Key / Authorization header (same as other account-scoped
+   *        endpoints). Request body is an empty JSON object. Server generates
+   *        and holds the key in TEE state, returns metadata.
    *     2) contract.registerWalletDerivation(hash, pkp_id, derivation_path, name, description)
    *        User signs; tx settles; server listener finalizes persistence.
    *
@@ -630,11 +631,12 @@ export class LitNodeSimpleApiClient {
       if (!prepRes.ok) {
         if (prepRes.status === 404) {
           throw new Error(
-            'Sovereign createWallet is not yet available: the server /prepare_sovereign_wallet endpoint is not deployed. ' +
+            'Sovereign createWallet is not yet available: the server ' +
+            `${this.baseUrl}/prepare_sovereign_wallet endpoint is not deployed. ` +
             'Track progress in TODOS.md ("CPL-267 Phase 2: prepare_sovereign_wallet").',
           );
         }
-        throw new Error(`prepare_sovereign_wallet failed with HTTP ${prepRes.status}`);
+        throw new Error(`POST ${this.baseUrl}/prepare_sovereign_wallet failed with HTTP ${prepRes.status}`);
       }
       const prep = await prepRes.json();
       if (!prep?.pkp_id || prep.derivation_path == null) {

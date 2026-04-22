@@ -110,7 +110,7 @@
 
 **Why:** PKPs must be generated inside the TEE (the user's browser can't mint one). But registration should land on-chain from the user's wallet so the server is not in the trust boundary for account linkage. Without this endpoint, sovereign `createWallet` 404s at step 1.
 
-**How to fix:** New endpoint `/core/v1/prepare_sovereign_wallet` accepting `{ api_key }`, generating a PKP in TEE, storing `{ pkp_id → { derivation_path, expires_at, registered: false } }` in persistent state, returning pkp_id + derivation_path. Pair with the "GC orphan prepared wallet keys" TODO.
+**How to fix:** New endpoint `/core/v1/prepare_sovereign_wallet` authenticating via the existing `X-Api-Key` / `Authorization: Bearer` headers (same shape as other account-scoped endpoints; the SDK sends an empty JSON body). Generate a PKP in TEE, store `{ pkp_id → { derivation_path, expires_at, registered: false } }` in persistent state, return `{ pkp_id, derivation_path, expires_at }`. Pair with the "GC orphan prepared wallet keys" TODO.
 
 **Priority:** P1 (blocks Phase 2 createWallet)
 
