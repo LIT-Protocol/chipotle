@@ -91,17 +91,26 @@ contract ViewsFacet {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         return s.nodeConfigurationKeys.values();
     }
-    function nodeConfigurationValue(string memory key) public view returns (string memory) {
+    function nodeConfigurationValue(
+        string memory key
+    ) public view returns (string memory) {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         return s.nodeConfigurationValues[key];
     }
 
-    function nodeConfigurationValues() public view returns (KeyValueReturn[] memory) {
+    function nodeConfigurationValues()
+        public
+        view
+        returns (KeyValueReturn[] memory)
+    {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         uint256 length = s.nodeConfigurationKeys.length();
         KeyValueReturn[] memory values = new KeyValueReturn[](length);
         for (uint256 i = 0; i < length; i++) {
-            values[i] = KeyValueReturn(s.nodeConfigurationKeys.at(i), s.nodeConfigurationValues[s.nodeConfigurationKeys.at(i)]);
+            values[i] = KeyValueReturn(
+                s.nodeConfigurationKeys.at(i),
+                s.nodeConfigurationValues[s.nodeConfigurationKeys.at(i)]
+            );
         }
         return values;
     }
@@ -120,7 +129,7 @@ contract ViewsFacet {
         uint256 apiKeyHash
     ) public view returns (address) {
         AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
-        return account.creatorWalletAddress;
+        return account.adminWalletAddress;
     }
 
     function getWalletDerivation(
