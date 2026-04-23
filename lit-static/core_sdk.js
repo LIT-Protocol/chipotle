@@ -616,20 +616,15 @@ export class LitNodeSimpleApiClient {
       const hash = await this._apiKeyHash(apiKey);
       const name = groupName ?? '';
       const description = groupDescription ?? '';
-      // staticCall first to pre-fetch the new group_id without burning a tx.
-      let groupId = null;
-      try {
-        groupId = await contract.addGroup.staticCall(hash, name, description, cidHashesPermitted, pkpIdsPermitted);
-      } catch (e) {
-        // staticCall revert will surface again on the real call; proceed and
-        // let runContractWrite produce a decoded error.
-      }
-      const { txHash } = await runContractWrite({
+      // runContractWrite's call-before-send simulation returns the new group_id
+      // (addGroup's return value) as `simulatedResult`, so we can surface it
+      // without a separate staticCall.
+      const { txHash, simulatedResult } = await runContractWrite({
         contract, method: 'addGroup',
         args: [hash, name, description, cidHashesPermitted, pkpIdsPermitted],
         ...(sovereignLifecycle ?? {}),
       });
-      return { success: true, group_id: groupId != null ? groupId.toString() : null, transaction_hash: txHash };
+      return { success: true, group_id: simulatedResult != null ? simulatedResult.toString() : null, transaction_hash: txHash };
     }
     const body = {
       group_name: groupName ?? '',
