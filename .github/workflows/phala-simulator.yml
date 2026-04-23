@@ -21,7 +21,7 @@ name: Phala Simulator Validation
 
 on:
   push:
-    branches: [main, next]
+    branches: [main]
   pull_request:
 
 permissions:
@@ -195,12 +195,8 @@ jobs:
             exit 1
           }
 
-          # Copy branch-appropriate config (NodeConfig.toml is gitignored); main uses main.toml, others use next.toml.
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            cp lit-api-server/NodeConfig.main.toml lit-api-server/NodeConfig.toml
-          else
-            cp lit-api-server/NodeConfig.next.toml lit-api-server/NodeConfig.toml
-          fi
+          # NodeConfig.toml is gitignored; copy the main config in.
+          cp lit-api-server/NodeConfig.main.toml lit-api-server/NodeConfig.toml
           # Pick a random free TCP port per run so concurrent jobs on the
           # same self-hosted host don't collide on the default Rocket port
           # (8000). ROCKET_PORT overrides lit-api-server/Rocket.toml.

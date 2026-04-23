@@ -1,8 +1,7 @@
 # Deploy lit-api-server + lit-actions + otel-collector to Phala CVM
 #
 # Deployment targets:
-#   push to next → chipotle-next (direct automated deploy)
-#   push to main → chipotle-dev  (direct automated deploy)
+#   push to main → chipotle-next (direct automated deploy)
 #
 # For production (v* tag) deploys, see deploy-prod-1-propose.yml and deploy-prod-2-execute.yml.
 #
@@ -56,7 +55,7 @@ concurrency:
 
 on:
   push:
-    branches: [main, next]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -101,16 +100,10 @@ jobs:
         id: set
         run: |
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            echo "phala_app_name=chipotle-dev" >> "$GITHUB_OUTPUT"
-            echo "instance_type=tdx.large" >> "$GITHUB_OUTPUT"
-            echo "gcp_project_id=chipotle-dev" >> "$GITHUB_OUTPUT"
-            echo "node_config=NodeConfig.main.toml" >> "$GITHUB_OUTPUT"
-            DOMAIN="api.dev.litprotocol.com"
-          elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
             echo "phala_app_name=chipotle-next" >> "$GITHUB_OUTPUT"
             echo "instance_type=tdx.small" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-next" >> "$GITHUB_OUTPUT"
-            echo "node_config=NodeConfig.next.toml" >> "$GITHUB_OUTPUT"
+            echo "node_config=NodeConfig.main.toml" >> "$GITHUB_OUTPUT"
             DOMAIN="test.chipotle.litprotocol.com"
           else
             echo "Unsupported branch for deployment"
@@ -292,8 +285,8 @@ jobs:
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
           PHALA_PRIVATE_KEY: ${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}
-          STRIPE_SECRET_KEY: ${{ github.ref != 'refs/heads/main' && secrets.STRIPE_SANDBOX_SECRET_KEY || '' }}
-          STRIPE_PUBLISHABLE_KEY: ${{ github.ref != 'refs/heads/main' && secrets.STRIPE_SANDBOX_PUBLISHABLE_KEY || '' }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SANDBOX_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_SANDBOX_PUBLISHABLE_KEY }}
           GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
           BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
           CERTBOT_AWS_ACCESS_KEY_ID: ${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}

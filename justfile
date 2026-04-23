@@ -8,12 +8,12 @@ image_tag := env('DOCKER_TAG', `uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '\n
 image_lit_actions     := image_base + '-lit-actions:'     + image_tag
 image_lit_api_server  := image_base + '-lit-api-server:'  + image_tag
 image_otel_collector  := image_base + '-otel-collector:'  + image_tag
-# main → chipotle-dev; any other branch → chipotle-next (override with PHALA_APP_NAME)
-app_name       := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo chipotle-dev || echo chipotle-next'`
-instance_type  := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo tdx.small || echo tdx.small'`
-gcp_project_id := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo chipotle-dev || echo chipotle-next'`
-node_config    := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo NodeConfig.main.toml || echo NodeConfig.next.toml'`
-domain         := `git branch --show-current | xargs -I {} sh -c '[ "{}" = "main" ] && echo api.dev.litprotocol.com || echo test.chipotle.litprotocol.com'`
+# main → chipotle-next (override with PHALA_APP_NAME)
+app_name       := 'chipotle-next'
+instance_type  := 'tdx.small'
+gcp_project_id := 'chipotle-next'
+node_config    := 'NodeConfig.main.toml'
+domain         := 'test.chipotle.litprotocol.com'
 
 import "justfile.deploy"
 import "justfile.sim"

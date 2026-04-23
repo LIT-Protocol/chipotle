@@ -37,7 +37,7 @@ jobs:
   k6-smoke:
     runs-on: self-hosted
     env:
-      K6_ACCOUNTS_FILE: ${{ inputs.accounts_file || (github.ref_name == 'next' && './data/accounts.next.json' || './data/accounts.dev.json') }}
+      K6_ACCOUNTS_FILE: ${{ inputs.accounts_file || (github.ref_name == 'main' && './data/accounts.next.json' || './data/accounts.dev.json') }}
     steps:
       - uses: actions/checkout@v4
 
