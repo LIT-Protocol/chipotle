@@ -228,7 +228,7 @@
         {
           "indexed": true,
           "internalType": "address",
-          "name": "creator",
+          "name": "admin",
           "type": "address"
         },
         {
@@ -636,11 +636,29 @@
         },
         {
           "internalType": "address",
-          "name": "creatorWalletAddress",
+          "name": "adminWalletAddress",
           "type": "address"
         }
       ],
       "name": "newAccount",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "accountName",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "accountDescription",
+          "type": "string"
+        }
+      ],
+      "name": "newChainSecuredAccount",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"

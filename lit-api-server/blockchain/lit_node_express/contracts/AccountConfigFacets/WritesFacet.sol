@@ -16,35 +16,104 @@ contract WritesFacet {
     using EnumerableSet for EnumerableSet.AddressSet;
     using EnumerableSet for EnumerableSet.StringSet;
 
-    event AccountCreated(uint256 indexed apiKeyHash, address indexed creator, bool managed);
-    event UsageApiKeySet(uint256 indexed accountApiKeyHash, uint256 indexed usageApiKeyHash);
+    event AccountCreated(
+        uint256 indexed apiKeyHash,
+        address indexed admin,
+        bool managed
+    );
+    event UsageApiKeySet(
+        uint256 indexed accountApiKeyHash,
+        uint256 indexed usageApiKeyHash
+    );
     event GroupAdded(uint256 indexed apiKeyHash, uint256 indexed groupId);
-    event GroupUpdated(uint256 indexed accountApiKeyHash, uint256 indexed groupId);
+    event GroupUpdated(
+        uint256 indexed accountApiKeyHash,
+        uint256 indexed groupId
+    );
     event GroupRemoved(uint256 indexed apiKeyHash, uint256 indexed groupId);
-    event ActionAdded(uint256 indexed accountApiKeyHash, uint256 indexed actionHash);
-    event ActionRemoved(uint256 indexed accountApiKeyHash, uint256 indexed actionHash);
-    event PkpAddedToGroup(uint256 indexed apiKeyHash, uint256 indexed groupId, address pkpId);
-    event PkpRemovedFromGroup(uint256 indexed apiKeyHash, uint256 indexed groupId, address pkpId);
-    event ActionAddedToGroup(uint256 indexed apiKeyHash, uint256 indexed groupId, uint256 action);
-    event ActionRemovedFromGroup(uint256 indexed apiKeyHash, uint256 indexed groupId, uint256 action);
-    event WalletDerivationRegistered(uint256 indexed apiKeyHash, address indexed pkpId, uint256 derivationPath);
-    event UsageApiKeyRemoved(uint256 indexed accountApiKeyHash, uint256 indexed usageApiKeyHash);
+    event ActionAdded(
+        uint256 indexed accountApiKeyHash,
+        uint256 indexed actionHash
+    );
+    event ActionRemoved(
+        uint256 indexed accountApiKeyHash,
+        uint256 indexed actionHash
+    );
+    event PkpAddedToGroup(
+        uint256 indexed apiKeyHash,
+        uint256 indexed groupId,
+        address pkpId
+    );
+    event PkpRemovedFromGroup(
+        uint256 indexed apiKeyHash,
+        uint256 indexed groupId,
+        address pkpId
+    );
+    event ActionAddedToGroup(
+        uint256 indexed apiKeyHash,
+        uint256 indexed groupId,
+        uint256 action
+    );
+    event ActionRemovedFromGroup(
+        uint256 indexed apiKeyHash,
+        uint256 indexed groupId,
+        uint256 action
+    );
+    event WalletDerivationRegistered(
+        uint256 indexed apiKeyHash,
+        address indexed pkpId,
+        uint256 derivationPath
+    );
+    event UsageApiKeyRemoved(
+        uint256 indexed accountApiKeyHash,
+        uint256 indexed usageApiKeyHash
+    );
+
+    function newChainSecuredAccount(
+        string memory accountName,
+        string memory accountDescription
+    ) public {
+        address adminWalletAddress = msg.sender;
+        uint256 apiKeyHash = uint256(
+            keccak256(abi.encodePacked(adminWalletAddress))
+        );
+        newAccount(apiKeyHash, false, accountName, accountDescription, adminWalletAddress);
+    }
 
     function newAccount(
         uint256 apiKeyHash,
         bool managed,
         string memory accountName,
         string memory accountDescription,
-        address creatorWalletAddress
+        address adminWalletAddress
     ) public {
-        SecurityLib.revertIfNotApiPayerOrOwner(msg.sender); // for now, the UI is the only one that can create accounts
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        if (!SecurityLib.isApiPayerOrOwner(msg.sender)) {
+            if (managed) {
+                revert AppStorage.InvalidRequest(
+                    "unprivileged accounts must be unmanaged"
+                );
+            }
+            if (
+                apiKeyHash !=
+                uint256(keccak256(abi.encodePacked(msg.sender)))
+            ) {
+                revert AppStorage.InvalidRequest(
+                    "unprivileged apiKeyHash must equal keccak256 of sender"
+                );
+            }
+            if (adminWalletAddress != msg.sender) {
+                revert AppStorage.InvalidRequest(
+                    "unprivileged adminWalletAddress must equal sender"
+                );
+            }
+        }
         if (s.allApiKeyHashesToMaster[apiKeyHash] != 0) {
             revert AppStorage.AccountAlreadyExists(apiKeyHash);
         }
         AppStorage.Account storage account = s.accounts[apiKeyHash];
         account.managed = managed;
-        account.creatorWalletAddress = creatorWalletAddress;
+        account.adminWalletAddress = adminWalletAddress;
         account.accountApiKey.metadata.id = apiKeyHash;
         account.accountApiKey.metadata.name = accountName;
         account.accountApiKey.metadata.description = accountDescription;
@@ -57,7 +126,7 @@ contract WritesFacet {
         s.allApiKeyHashesToMaster[apiKeyHash] = apiKeyHash;
         s.accountCount++;
         s.indexToAccountHash[s.accountCount] = apiKeyHash;
-        emit AccountCreated(apiKeyHash, creatorWalletAddress, managed);
+        emit AccountCreated(apiKeyHash, adminWalletAddress, managed);
     }
 
     function setUsageApiKey(
@@ -76,16 +145,24 @@ contract WritesFacet {
         uint256[] memory executeInGroups
     ) public {
         if (manageIPFSIdsInGroups.length > 50) {
-            revert AppStorage.InvalidRequest("manageIPFSIdsInGroups must be 50 items or fewer");
+            revert AppStorage.InvalidRequest(
+                "manageIPFSIdsInGroups must be 50 items or fewer"
+            );
         }
         if (addPkpToGroups.length > 50) {
-            revert AppStorage.InvalidRequest("addPkpToGroups must be 50 items or fewer");
+            revert AppStorage.InvalidRequest(
+                "addPkpToGroups must be 50 items or fewer"
+            );
         }
         if (removePkpFromGroups.length > 50) {
-            revert AppStorage.InvalidRequest("removePkpFromGroups must be 50 items or fewer");
+            revert AppStorage.InvalidRequest(
+                "removePkpFromGroups must be 50 items or fewer"
+            );
         }
         if (executeInGroups.length > 50) {
-            revert AppStorage.InvalidRequest("executeInGroups must be 50 items or fewer");
+            revert AppStorage.InvalidRequest(
+                "executeInGroups must be 50 items or fewer"
+            );
         }
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
@@ -207,7 +284,7 @@ contract WritesFacet {
         for (uint256 i = 0; i < cidHashes.length; i++) {
             group.cidHash.add(cidHashes[i]);
         }
-        
+
         for (uint256 i = 0; i < pkpIds.length; i++) {
             group.pkpId.add(pkpIds[i]);
         }
@@ -234,10 +311,7 @@ contract WritesFacet {
         group.metadata.description = description;
     }
 
-    function removeGroup(
-        uint256 apiKeyHash,
-        uint256 groupId
-    ) public {
+    function removeGroup(uint256 apiKeyHash, uint256 groupId) public {
         SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
         uint256 masterHash = SecurityLib.resolveToMaster(apiKeyHash);
         if (masterHash != apiKeyHash) {
@@ -292,7 +366,9 @@ contract WritesFacet {
         uint256 actionHash
     ) public {
         if (actionHash == 0) {
-            revert AppStorage.InvalidRequest("Cannot remove action with hash 0x0");
+            revert AppStorage.InvalidRequest(
+                "Cannot remove action with hash 0x0"
+            );
         }
         SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
         SecurityLib.revertIfNotMasterAccount(accountApiKeyHash);
@@ -342,7 +418,11 @@ contract WritesFacet {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         AppStorage.Account storage account = s.accounts[accountApiKeyHash];
         if (!account.actionHashesList.contains(actionHash)) {
-            revert AppStorage.ActionDoesNotExist(accountApiKeyHash, groupId, actionHash);
+            revert AppStorage.ActionDoesNotExist(
+                accountApiKeyHash,
+                groupId,
+                actionHash
+            );
         }
         account.actionMetadata[actionHash].name = name;
         account.actionMetadata[actionHash].description = description;
