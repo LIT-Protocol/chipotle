@@ -88,6 +88,21 @@ contract WritesFacet {
         address adminWalletAddress
     ) public {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        if (!s.api_payers.contains(msg.sender)) {
+            if (managed) {
+                revert AppStorage.InvalidRequest(
+                    "non-API-payer accounts must be unmanaged"
+                );
+            }
+            if (
+                apiKeyHash !=
+                uint256(keccak256(abi.encodePacked(msg.sender)))
+            ) {
+                revert AppStorage.InvalidRequest(
+                    "non-API-payer apiKeyHash must equal keccak256 of sender"
+                );
+            }
+        }
         if (s.allApiKeyHashesToMaster[apiKeyHash] != 0) {
             revert AppStorage.AccountAlreadyExists(apiKeyHash);
         }
