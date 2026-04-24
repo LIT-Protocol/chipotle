@@ -71,10 +71,12 @@ contract WritesFacet {
 
     function newChainSecuredAccount(
         string memory accountName,
-        string memory accountDescription,
+        string memory accountDescription
     ) public {
         address adminWalletAddress = msg.sender;
-        uint256 apiKeyHash = keccak256(abi.encodePacked(adminWalletAddress));
+        uint256 apiKeyHash = uint256(
+            keccak256(abi.encodePacked(adminWalletAddress))
+        );
         newAccount(apiKeyHash, false, accountName, accountDescription, adminWalletAddress);
     }
 

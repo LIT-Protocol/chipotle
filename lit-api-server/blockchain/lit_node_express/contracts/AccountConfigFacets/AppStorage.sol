@@ -82,7 +82,7 @@ library AppStorage {
     /// @notice Account struct for accounts.
     struct Account {
         UsageApiKey accountApiKey; // the api key that is used to access the account
-        address adminWalletAddress; // wallet address of the creator of the account
+        address adminWalletAddress; // admin/owner wallet address for the account; not necessarily the transaction creator
         // Usage API Keys are rotatable keys that can be used to fund the account
         EnumerableSet.UintSet usageApiKeysList; // set of usage api keys that the account is a member of
         mapping(uint256 => UsageApiKey) usageApiKeys; // mapping from a keccak256 of a usage api key to it's config
