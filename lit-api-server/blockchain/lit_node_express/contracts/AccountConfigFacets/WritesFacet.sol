@@ -18,7 +18,7 @@ contract WritesFacet {
 
     event AccountCreated(
         uint256 indexed apiKeyHash,
-        address indexed creator,
+        address indexed admin,
         bool managed
     );
     event UsageApiKeySet(
@@ -100,6 +100,11 @@ contract WritesFacet {
             ) {
                 revert AppStorage.InvalidRequest(
                     "non-API-payer apiKeyHash must equal keccak256 of sender"
+                );
+            }
+            if (adminWalletAddress != msg.sender) {
+                revert AppStorage.InvalidRequest(
+                    "non-API-payer adminWalletAddress must equal sender"
                 );
             }
         }

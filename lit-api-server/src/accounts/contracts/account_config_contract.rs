@@ -2021,7 +2021,7 @@ pub mod account_config {
                                 indexed: true,
                             },
                             ::ethers::core::abi::ethabi::EventParam {
-                                name: ::std::borrow::ToOwned::to_owned("creator"),
+                                name: ::std::borrow::ToOwned::to_owned("admin"),
                                 kind: ::ethers::core::abi::ethabi::ParamType::Address,
                                 indexed: true,
                             },
@@ -4584,7 +4584,7 @@ pub mod account_config {
         #[ethevent(indexed)]
         pub api_key_hash: ::ethers::core::types::U256,
         #[ethevent(indexed)]
-        pub creator: ::ethers::core::types::Address,
+        pub admin: ::ethers::core::types::Address,
         pub managed: bool,
     }
     #[derive(
