@@ -17,7 +17,7 @@
 
 import { ACCOUNT_CONFIG_VIEW_ABI } from './account_config_view_abi.js';
 
-export const ACCOUNT_CONFIG_ABI_VERSION = '2026-04-21.1';
+export const ACCOUNT_CONFIG_ABI_VERSION = '2026-04-24.1';
 
 const WRITE_FUNCTIONS = [
   {
@@ -197,9 +197,19 @@ const WRITE_FUNCTIONS = [
       { internalType: 'bool', name: 'managed', type: 'bool' },
       { internalType: 'string', name: 'accountName', type: 'string' },
       { internalType: 'string', name: 'accountDescription', type: 'string' },
-      { internalType: 'address', name: 'creatorWalletAddress', type: 'address' },
+      { internalType: 'address', name: 'adminWalletAddress', type: 'address' },
     ],
     name: 'newAccount',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'string', name: 'accountName', type: 'string' },
+      { internalType: 'string', name: 'accountDescription', type: 'string' },
+    ],
+    name: 'newChainSecuredAccount',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',

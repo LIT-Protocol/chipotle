@@ -88,10 +88,10 @@ contract WritesFacet {
         address adminWalletAddress
     ) public {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        if (!s.api_payers.contains(msg.sender)) {
+        if (!SecurityLib.isApiPayerOrOwner(msg.sender)) {
             if (managed) {
                 revert AppStorage.InvalidRequest(
-                    "non-API-payer accounts must be unmanaged"
+                    "unprivileged accounts must be unmanaged"
                 );
             }
             if (
@@ -99,12 +99,12 @@ contract WritesFacet {
                 uint256(keccak256(abi.encodePacked(msg.sender)))
             ) {
                 revert AppStorage.InvalidRequest(
-                    "non-API-payer apiKeyHash must equal keccak256 of sender"
+                    "unprivileged apiKeyHash must equal keccak256 of sender"
                 );
             }
             if (adminWalletAddress != msg.sender) {
                 revert AppStorage.InvalidRequest(
-                    "non-API-payer adminWalletAddress must equal sender"
+                    "unprivileged adminWalletAddress must equal sender"
                 );
             }
         }
