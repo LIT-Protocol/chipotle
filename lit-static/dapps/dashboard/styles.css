@@ -57,6 +57,16 @@ body {
   font-size: 14px;
 }
 
+a {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--primary-hover);
+  text-decoration: underline;
+}
+
 /* ----- Login page (standalone) ----- */
 .login-page {
   min-height: 100vh;
