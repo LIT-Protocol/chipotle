@@ -1555,3 +1555,15 @@ textarea.input.textarea-sm {
 .new-account-dismiss:hover {
   color: var(--text);
 }
+
+/* ----- Mobile touch targets ----- */
+@media (max-width: 768px) {
+  .btn,
+  .input,
+  .login-tab {
+    min-height: 44px;
+  }
+  .btn-sm {
+    min-height: 36px;
+  }
+}
