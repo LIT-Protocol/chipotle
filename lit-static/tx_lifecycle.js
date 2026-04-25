@@ -152,7 +152,7 @@ function extractRevertData(err) {
  * @param {Object} [options.overrides] - ethers tx overrides (gasLimit, value, etc.)
  * @param {number} [options.confirmations=1] - confirmations to wait for before marking confirmed
  * @param {(state: string, payload?: Object) => void} [options.onState] - called on every state transition
- * @param {() => Promise<boolean>} [options.onPreview] - user-preview gate; must resolve true to proceed
+ * @param {(method: string, args: any[]) => Promise<boolean>} [options.onPreview] - user-preview gate; must resolve true to proceed
  * @returns {Promise<{receipt: Object, txHash: string, simulatedResult: any}>}
  *   `simulatedResult` is the eth_call return value from the pre-send
  *   simulation — useful for write methods that return a value that is not

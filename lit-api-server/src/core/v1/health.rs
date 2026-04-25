@@ -94,7 +94,31 @@ mod tests {
     use crate::core::v1::guards::cpu_overload::CpuOverloadMonitor;
     use rocket::local::asynchronous::Client;
     use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+    /// Build a per-test socket path under `temp_dir()` keyed by PID + a
+    /// monotonic counter, then assert it doesn't already exist. This keeps
+    /// the lit-actions reachability probe hermetic across concurrent test
+    /// runs and across machines where the previously-used hardcoded path
+    /// might (in theory) be created by something else.
+    fn unique_nonexistent_socket_path() -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "lit_actions_test_{}_{}_{}.sock",
+            std::process::id(),
+            n,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        assert!(
+            !path.exists(),
+            "test socket path collided with existing file: {path:?}"
+        );
+        path
+    }
 
     fn build_rocket(
         overloaded: bool,
@@ -102,14 +126,12 @@ mod tests {
     ) -> rocket::Rocket<rocket::Build> {
         let pool = GrpcClientPool::<tonic::transport::Channel>::new();
         let monitor = CpuOverloadMonitor::new_with_flag(Arc::new(AtomicBool::new(overloaded)));
-        // Use a path guaranteed not to exist so the lit-actions reachability
-        // probe is hermetic — otherwise the test inherits whatever
+        // Per-test path under temp_dir() so the lit-actions reachability probe
+        // is hermetic — otherwise the test would inherit whatever
         // /tmp/lit_actions.sock happens to be on the host (e.g. a real
         // lit-actions process running for local dev), which would flip the
         // expected "unreachable" result to "reachable".
-        let socket = LitActionsSocketPath(PathBuf::from(
-            "/tmp/lit_actions_test_nonexistent_socket_path.sock",
-        ));
+        let socket = LitActionsSocketPath(unique_nonexistent_socket_path());
         rocket::build()
             .manage(pool)
             .manage(monitor)
