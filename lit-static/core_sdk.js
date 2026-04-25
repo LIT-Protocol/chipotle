@@ -362,7 +362,7 @@ export class LitNodeSimpleApiClient {
    * @param {Object} [options.deployments] - Optional override map `{ "<chainId>:<address>": { runtimeBytecodeKeccak } }` for drift pinning.
    * @param {import('ethers').Signer} [options.signer] - Pre-connected signer for sovereign writes. May be set later via connectSigner().
    */
-  constructor({ baseUrl = 'http://localhost:8000', mode = 'api', rpcUrl, contractAddress, chainId, deployments, signer } = {}) {
+  constructor({ baseUrl = 'http://localhost:8000', mode = 'api', rpcUrl, contractAddress, chainId, deployments, signer, adminHashOverride } = {}) {
     const base = baseUrl.replace(/\/$/, '');
     this.baseUrl = `${base}/core/v1`;
     this.mode = mode;
@@ -371,6 +371,11 @@ export class LitNodeSimpleApiClient {
     this.chainId = chainId ?? null;
     this.deployments = mergeDeployments(deployments);
     this.signer = signer ?? null;
+    // When set (e.g. ChainSecured login: keccak256(abi.encodePacked(address))),
+    // `_adminHash(apiKey)` returns this and ignores the apiKey argument.
+    // Leave null for API-mode and legacy sovereign API-key sessions, which
+    // still derive the identity hash from the api key string itself.
+    this.adminHashOverride = adminHashOverride ?? null;
     this._viewContractPromise = null;
     this._writeContract = null;
     this._driftCheckPromise = null;
@@ -510,6 +515,25 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
+   * Resolve the 32-byte `apiKeyHash` used as the account identity on-chain.
+   * ChainSecured sessions set `adminHashOverride = keccak256(abi.encodePacked(address))`
+   * at login; API-key sessions (API mode or legacy sovereign) leave it null
+   * and this falls through to `_apiKeyHash(apiKey)`.
+   *
+   * IMPORTANT: only call this at identity sites (the "whose account is it"
+   * hash). Content hashes for actionIpfsCid and pkp addresses must keep
+   * calling `_apiKeyHash(value)` directly so the override does not corrupt
+   * them.
+   *
+   * @param {string} apiKey - apiKey string; may be empty for ChainSecured sessions.
+   * @returns {Promise<string>} 0x-prefixed 32-byte hex.
+   */
+  async _adminHash(apiKey) {
+    if (this.adminHashOverride) return this.adminHashOverride;
+    return this._apiKeyHash(apiKey);
+  }
+
+  /**
    * POST /core/v1/new_account
    * Creates a new account; server generates API key and wallet. Returns api_key and wallet_address.
    * @param {NewAccountOptions} options
@@ -530,6 +554,49 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
+   * Contract: WritesFacet.newChainSecuredAccount(string, string).
+   * Creates a ChainSecured (unmanaged, wallet-signed) account. The connected
+   * signer address IS the admin; on-chain, apiKeyHash = keccak256(abi.encodePacked(msg.sender)).
+   *
+   * Sovereign mode only. Requires a connected signer + the chain drift check
+   * to pass. Reverts on collision (existing account for this wallet).
+   *
+   * @param {Object} options
+   * @param {string} options.accountName
+   * @param {string} options.accountDescription
+   * @param {Object} [options.sovereignLifecycle] - injected by the dashboard Proxy
+   * @returns {Promise<{wallet_address: string, api_key_hash: string, transaction_hash: string}>}
+   */
+  async newChainSecuredAccount({ accountName, accountDescription, sovereignLifecycle } = {}) {
+    if (this.mode !== 'sovereign') {
+      throw new Error('newChainSecuredAccount requires sovereign mode');
+    }
+    const contract = await this._getWriteContract();
+    const ethers = await loadEthers();
+    const signerAddress = await this.signer.getAddress();
+    const apiKeyHash = ethers.solidityPackedKeccak256(['address'], [signerAddress]);
+    try {
+      const { txHash } = await runContractWrite({
+        contract, method: 'newChainSecuredAccount',
+        args: [accountName ?? '', accountDescription ?? ''],
+        ...(sovereignLifecycle ?? {}),
+      });
+      return { wallet_address: signerAddress, api_key_hash: apiKeyHash, transaction_hash: txHash };
+    } catch (err) {
+      const msg = err?.decoded || err?.message || '';
+      if (msg.includes('AccountAlreadyExists')) {
+        const friendly = new Error(
+          'An account already exists for this wallet address. Connect a different wallet or log in with your existing account.',
+        );
+        friendly.cause = err;
+        friendly.accountAlreadyExists = true;
+        throw friendly;
+      }
+      throw err;
+    }
+  }
+
+  /**
    * GET /core/v1/account_exists
    * Checks whether an account exists and is mutable for the given API key (contract: accountExistsAndIsMutable).
    * API key via X-Api-Key or Authorization: Bearer header.
@@ -539,7 +606,7 @@ export class LitNodeSimpleApiClient {
   async accountExists(apiKey) {
     if (this.mode === 'sovereign') {
       const contract = await this._getViewContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       // accountExistsAndIsMutable has an msg.sender check (caller must be an
       // api_payer). The server-side path spoofs this by setting `.from(api_payer)`
       // on the eth_call. For sovereign reads we take the same approach: fetch
@@ -554,6 +621,48 @@ export class LitNodeSimpleApiClient {
       headers: headersWithApiKey(apiKey),
     });
     return parseResponse(res, 'account_exists');
+  }
+
+  /**
+   * Sovereign-only variant of `accountExists` that takes a pre-computed
+   * apiKeyHash (0x-prefixed uint256 hex). Used by the ChainSecured login
+   * flow where the dashboard computes `keccak256(abi.encodePacked(address))`
+   * before it has (or needs) an apiKey string.
+   *
+   * Uses the same api_payer spoofing pattern as `accountExists` sovereign.
+   *
+   * @param {string} apiKeyHashHex - 0x-prefixed 32-byte hex
+   * @returns {Promise<boolean>}
+   */
+  async accountExistsByHash(apiKeyHashHex) {
+    if (this.mode !== 'sovereign') {
+      throw new Error('accountExistsByHash requires sovereign mode');
+    }
+    const contract = await this._getViewContract();
+    const payers = await contract.api_payers();
+    if (!payers || payers.length === 0) {
+      throw new Error('accountExistsByHash: no api_payers configured on contract');
+    }
+    return await contract.accountExistsAndIsMutable.staticCall(apiKeyHashHex, { from: payers[0] });
+  }
+
+  /**
+   * Public wrapper around `_verifyAbiIntegrity` that uses a read-only provider
+   * (no wallet required) and returns a non-throwing result. Safe to call
+   * post-wallet-connect to drive the drift banner.
+   *
+   * @returns {Promise<{ok: true} | {ok: false, reason: string}>}
+   */
+  async checkAbiDrift() {
+    if (this.mode !== 'sovereign') {
+      return { ok: true };
+    }
+    try {
+      await this._verifyAbiIntegrity();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, reason: err?.message || String(err) };
+    }
   }
 
   /**
@@ -613,7 +722,7 @@ export class LitNodeSimpleApiClient {
   async addGroup({ apiKey, groupName, groupDescription = '', pkpIdsPermitted = [], cidHashesPermitted = [], sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const name = groupName ?? '';
       const description = groupDescription ?? '';
       // staticCall first to pre-fetch the new group_id without burning a tx.
@@ -654,7 +763,7 @@ export class LitNodeSimpleApiClient {
   async addAction({ apiKey, actionIpfsCid, name, description, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const actionHash = await this._apiKeyHash(actionIpfsCid);
       const { txHash } = await runContractWrite({
         contract, method: 'addAction',
@@ -681,7 +790,7 @@ export class LitNodeSimpleApiClient {
   async addActionToGroup({ apiKey, groupId, actionIpfsCid, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const actionHash = await this._apiKeyHash(actionIpfsCid);
       const { txHash } = await runContractWrite({
         contract, method: 'addActionToGroup',
@@ -711,7 +820,7 @@ export class LitNodeSimpleApiClient {
   async addPkpToGroup({ apiKey, groupId, pkpId, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const { txHash } = await runContractWrite({
         contract, method: 'addPkpToGroup',
         args: [hash, BigInt(groupId), pkpId],
@@ -740,7 +849,7 @@ export class LitNodeSimpleApiClient {
   async removePkpFromGroup({ apiKey, groupId, pkpId, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const { txHash } = await runContractWrite({
         contract, method: 'removePkpFromGroup',
         args: [hash, BigInt(groupId), pkpId],
@@ -784,7 +893,7 @@ export class LitNodeSimpleApiClient {
     if (this.mode === 'sovereign') {
       const ethers = await loadEthers();
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       // Sovereign mode has no server-side Stripe billing: balance starts at 0
       // and can't be topped up without API mode. Caller may pass expiration
       // (uint256 seconds timestamp; 0 = never) and balance explicitly.
@@ -862,7 +971,7 @@ export class LitNodeSimpleApiClient {
     if (this.mode === 'sovereign') {
       const ethers = await loadEthers();
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const usageHash = ethers.keccak256(ethers.toUtf8Bytes(usageApiKey));
       // setUsageApiKey is an upsert; existing expiration/balance are
       // overwritten. Sovereign callers should fetch current values via
@@ -920,7 +1029,7 @@ export class LitNodeSimpleApiClient {
     if (this.mode === 'sovereign') {
       const ethers = await loadEthers();
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const usageHash = ethers.keccak256(ethers.toUtf8Bytes(usageApiKey));
       const { txHash } = await runContractWrite({
         contract, method: 'removeUsageApiKey',
@@ -943,7 +1052,7 @@ export class LitNodeSimpleApiClient {
   async removeGroup({ apiKey, groupId, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const { txHash } = await runContractWrite({
         contract, method: 'removeGroup',
         args: [hash, BigInt(groupId)],
@@ -969,7 +1078,7 @@ export class LitNodeSimpleApiClient {
   async updateGroup({ apiKey, groupId, name, description, pkpIdsPermitted = [], cidHashesPermitted = [], sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const { txHash } = await runContractWrite({
         contract, method: 'updateGroup',
         args: [hash, BigInt(groupId), name ?? '', description ?? '', cidHashesPermitted, pkpIdsPermitted],
@@ -1001,7 +1110,7 @@ export class LitNodeSimpleApiClient {
   async deleteAction({ apiKey, hashedCid, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const { txHash } = await runContractWrite({
         contract, method: 'removeAction',
         args: [hash, hashedCid],
@@ -1027,7 +1136,7 @@ export class LitNodeSimpleApiClient {
   async removeActionFromGroup({ apiKey, groupId, hashedCid, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const { txHash } = await runContractWrite({
         contract, method: 'removeActionFromGroup',
         args: [hash, BigInt(groupId), hashedCid],
@@ -1056,7 +1165,7 @@ export class LitNodeSimpleApiClient {
   async updateActionMetadata({ apiKey, hashedCid, name, description, groupId = 0, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       // groupId === 0 means "account-level action metadata" per contract convention.
       const { txHash } = await runContractWrite({
         contract, method: 'updateActionMetadata',
@@ -1088,7 +1197,7 @@ export class LitNodeSimpleApiClient {
     if (this.mode === 'sovereign') {
       const ethers = await loadEthers();
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const usageHash = ethers.keccak256(ethers.toUtf8Bytes(usageApiKey));
       const { txHash } = await runContractWrite({
         contract, method: 'updateUsageApiKeyMetadata',
@@ -1119,7 +1228,7 @@ export class LitNodeSimpleApiClient {
   async listApiKeys({ apiKey, pageNumber = '0', pageSize = '10' }) {
     if (this.mode === 'sovereign') {
       const contract = await this._getViewContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const rows = await contract.listApiKeys(hash, pageNumber, pageSize);
       return rows.map((r) => ({
         id: r.metadata.id.toString(),
@@ -1156,7 +1265,7 @@ export class LitNodeSimpleApiClient {
   async listGroups({ apiKey, pageNumber = '0', pageSize = '10' }) {
     if (this.mode === 'sovereign') {
       const contract = await this._getViewContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const rows = await contract.listGroups(hash, pageNumber, pageSize);
       return rows.map((r) => ({
         id: r.id.toString(),
@@ -1183,7 +1292,7 @@ export class LitNodeSimpleApiClient {
   async listWallets({ apiKey, pageNumber = '0', pageSize = '10' }) {
     if (this.mode === 'sovereign') {
       const contract = await this._getViewContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const rows = await contract.listPkps(hash, pageNumber, pageSize);
       return rows.map((r) => ({
         id: r.id.toString(),
@@ -1211,7 +1320,7 @@ export class LitNodeSimpleApiClient {
   async listWalletsInGroup({ apiKey, groupId, pageNumber = '0', pageSize = '10' }) {
     if (this.mode === 'sovereign') {
       const contract = await this._getViewContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const rows = await contract.listWalletsInGroup(hash, groupId, pageNumber, pageSize);
       return rows.map((r) => ({
         id: r.id.toString(),
@@ -1245,7 +1354,7 @@ export class LitNodeSimpleApiClient {
   async listActions({ apiKey, groupId, pageNumber = '0', pageSize = '10' }) {
     if (this.mode === 'sovereign') {
       const contract = await this._getViewContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       // Match server semantics: group IDs start at 1, so groupId==0 means
       // "account-level listing", not "group zero". listActionsInGroup with 0
       // can revert (GroupDoesNotExist) or return wrong data.

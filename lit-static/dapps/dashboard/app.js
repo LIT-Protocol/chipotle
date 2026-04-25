@@ -3,7 +3,7 @@
  * Imports all feature modules and orchestrates initialization.
  */
 
-import { getApiKey, setTheme, getTheme, setApiKey, setOnAuthReady, updateStatCards, initLogin, setUsageKeyOverride, toggleOverrideEnabled, updateUsageKeyOverrideUI, clearOverrideState } from './auth.js';
+import { isAuthenticated, setTheme, getTheme, logOut, setOnAuthReady, updateStatCards, initLogin, setUsageKeyOverride, toggleOverrideEnabled, updateUsageKeyOverrideUI } from './auth.js';
 import { initModalClose, initConfirmClose, showStatus, hideStatus, logError } from './ui-utils.js';
 import { initBilling } from './billing.js';
 import { initGroups, loadGroups } from './groups.js';
@@ -15,8 +15,7 @@ import { initActionRunner } from './runner.js';
 // ----- Preload all tables (with error visibility) -----
 
 async function preloadAllTables() {
-  const apiKey = getApiKey();
-  if (!apiKey) return;
+  if (!isAuthenticated()) return;
   const results = await Promise.allSettled([
     loadGroups(),
     loadWallets(),
@@ -142,8 +141,7 @@ function initHeader() {
     signoutBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       closeAccountDropdown();
-      clearOverrideState();
-      setApiKey('');
+      logOut();
     });
   }
 }

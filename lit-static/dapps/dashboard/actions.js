@@ -2,7 +2,7 @@
  * IPFS Actions — table rendering, CRUD.
  */
 
-import { getEffectiveApiKey, getClient, getActionsStore, setActionsStore, setStat, updateStatCards, LIST_PAGE_SIZE } from './auth.js';
+import { getEffectiveApiKey, isAuthenticated, getClient, getActionsStore, setActionsStore, setStat, updateStatCards, LIST_PAGE_SIZE } from './auth.js';
 import { escapeHtml, showStatus, hideStatus, showActionProgress, closeActionProgress, openModal, closeModal, confirmDelete, formatError, logError, ICON_PENCIL, ICON_TRASH } from './ui-utils.js';
 
 // ----- Table rendering -----
@@ -48,7 +48,7 @@ export function renderActionsTable(items) {
 
 export async function loadActions() {
   const apiKey = getEffectiveApiKey();
-  if (!apiKey) return;
+  if (!isAuthenticated()) return;
   hideStatus('actions-status');
   const btn = document.getElementById('btn-load-actions');
   if (btn) btn.disabled = true;
@@ -154,7 +154,7 @@ async function confirmAndRemoveAction(item) {
   const confirmed = await confirmDelete(msg);
   if (!confirmed) return;
   const apiKey = getEffectiveApiKey();
-  if (!apiKey) return;
+  if (!isAuthenticated()) return;
   hideStatus('actions-status');
   try {
     showActionProgress('Deleting action', `Deleting action CID "${cid}".`);

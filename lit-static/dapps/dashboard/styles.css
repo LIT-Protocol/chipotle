@@ -73,7 +73,30 @@ body {
 
 .login-container {
   width: 100%;
-  max-width: 420px;
+  max-width: 820px;
+}
+
+.login-cards {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+
+.login-cards > .login-card {
+  background: var(--card-bg, transparent);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  margin-bottom: 0;
+  box-shadow: none;
+  display: flex;
+  flex-direction: column;
+}
+
+@media (max-width: 768px) {
+  .login-cards {
+    grid-template-columns: 1fr;
+  }
 }
 
 .login-title {
@@ -489,6 +512,78 @@ body.has-api-key .dashboard-wrap {
   font-weight: 700;
   margin: 0;
   color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.topbar-mode-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  background: rgba(60, 80, 224, 0.12);
+  color: var(--primary, #3c50e0);
+  border: 1px solid rgba(60, 80, 224, 0.25);
+  cursor: help;
+}
+
+[data-theme="dark"] .topbar-mode-badge {
+  background: rgba(99, 102, 241, 0.18);
+  color: #a5b4fc;
+  border-color: rgba(99, 102, 241, 0.35);
+}
+
+.topbar-wallet-pill {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 9999px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.topbar-wallet-pill:hover {
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--text);
+}
+
+[data-theme="dark"] .topbar-wallet-pill:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.abi-drift-banner {
+  padding: 0.75rem 1rem;
+  margin: 0 0 1rem;
+  border-radius: var(--radius);
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.3);
+  color: #b91c1c;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+[data-theme="dark"] .abi-drift-banner {
+  background: rgba(248, 113, 113, 0.12);
+  color: #fca5a5;
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+/* ChainSecured mode: hide Action Runner + Billing surfaces. */
+body.is-chainsecured .sidebar-link[data-scroll="action-runner"],
+body.is-chainsecured #section-action-runner,
+body.is-chainsecured #billing-balance-display,
+body.is-chainsecured #btn-add-funds,
+body.is-chainsecured #billing-disabled-banner,
+body.is-chainsecured #billing-not-required,
+body.is-chainsecured #no-funds-warning {
+  display: none !important;
 }
 
 .btn-topbar {

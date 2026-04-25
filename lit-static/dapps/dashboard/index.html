@@ -24,35 +24,56 @@
           <button type="button" class="login-tab" role="tab" id="login-tab-new" aria-selected="false" aria-controls="login-panel-new" data-tab="new">New User</button>
         </div>
         <div id="login-panel-existing" class="login-tab-panel is-active" role="tabpanel" aria-labelledby="login-tab-existing">
-          <div class="login-card">
-            <div class="form-group">
-              <label for="login-api-key">API key</label>
-              <input type="password" id="login-api-key" class="input" placeholder="Paste your API key">
+          <div class="login-cards">
+            <div class="login-card">
+              <h3 class="login-card-title">API mode</h3>
+              <p class="form-hint" style="margin-bottom: 1rem;">Log in with an account API key. All writes go through the Lit Express API.</p>
+              <div class="form-group">
+                <label for="login-api-key">API key</label>
+                <input type="password" id="login-api-key" class="input" placeholder="Paste your API key">
+              </div>
+              <button type="button" id="btn-login" class="btn btn-primary btn-block">Log in</button>
             </div>
-            <div class="form-group" style="display:flex; align-items:center; gap:0.75rem;">
-              <input type="checkbox" id="login-mode-sovereign">
-              <label for="login-mode-sovereign" id="login-mode-label" class="form-hint" style="margin:0; cursor:pointer;">API mode</label>
+            <div class="login-card">
+              <h3 class="login-card-title">ChainSecured mode</h3>
+              <p class="form-hint" style="margin-bottom: 1rem;">Connect the wallet that owns the account. Writes are previewed then submitted as wallet-signed on-chain transactions.</p>
+              <button type="button" id="btn-login-wallet" class="btn btn-primary btn-block">Connect wallet</button>
+              <p class="form-hint" style="margin-top: 0.75rem;">Your wallet address is the account identity. No API key is involved.</p>
             </div>
-            <button type="button" id="btn-login" class="btn btn-primary btn-block">Log in</button>
-            <p class="form-hint">Log in verifies the API key. Sovereign mode reads directly from the AccountConfig contract over RPC; writes are previewed, then submitted as wallet-signed transactions from your connected browser wallet.</p>
           </div>
         </div>
         <div id="login-panel-new" class="login-tab-panel" role="tabpanel" aria-labelledby="login-tab-new" hidden>
-          <div class="login-card">
-            <p class="form-hint" style="margin-bottom: 1rem;">Creates an account on Lit Express Node and returns a new API key. Store it securely.</p>
-            <div class="form-group">
-              <label for="new-account-email">Email</label>
-              <input type="email" id="new-account-email" class="input" placeholder="you@example.com" required>
+          <div class="login-cards">
+            <div class="login-card">
+              <h3 class="login-card-title">API mode</h3>
+              <p class="form-hint" style="margin-bottom: 1rem;">Creates a managed account and returns a new API key. Store it securely.</p>
+              <div class="form-group">
+                <label for="new-account-email">Email</label>
+                <input type="email" id="new-account-email" class="input" placeholder="you@example.com" required>
+              </div>
+              <div class="form-group">
+                <label for="new-account-name">Account name</label>
+                <input type="text" id="new-account-name" class="input" placeholder="My account">
+              </div>
+              <div class="form-group">
+                <label for="new-account-desc">Account description</label>
+                <input type="text" id="new-account-desc" class="input" placeholder="Optional">
+              </div>
+              <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account</button>
             </div>
-            <div class="form-group">
-              <label for="new-account-name">Account name</label>
-              <input type="text" id="new-account-name" class="input" placeholder="My account">
+            <div class="login-card">
+              <h3 class="login-card-title">ChainSecured mode</h3>
+              <p class="form-hint" style="margin-bottom: 1rem;">Creates an unmanaged account owned by the connected wallet. Writes are wallet-signed on-chain.</p>
+              <div class="form-group">
+                <label for="new-chainsecured-name">Account name</label>
+                <input type="text" id="new-chainsecured-name" class="input" placeholder="My account">
+              </div>
+              <div class="form-group">
+                <label for="new-chainsecured-desc">Account description</label>
+                <input type="text" id="new-chainsecured-desc" class="input" placeholder="Optional">
+              </div>
+              <button type="button" id="btn-create-chainsecured" class="btn btn-primary btn-block">Connect wallet &amp; create</button>
             </div>
-            <div class="form-group">
-              <label for="new-account-desc">Account description</label>
-              <input type="text" id="new-account-desc" class="input" placeholder="Optional">
-            </div>
-            <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account</button>
           </div>
         </div>
       </div>
@@ -119,6 +140,9 @@
         </header>
 
         <div class="dashboard-content">
+          <!-- ABI drift banner (post-wallet-connect, sovereign only) -->
+          <div id="abi-drift-banner" class="abi-drift-banner" role="alert" style="display:none;"></div>
+
           <!-- New account API key banner (shown once after account creation) -->
           <div id="new-account-banner" class="new-account-banner" style="display:none;" role="alert" aria-live="assertive">
             <div class="new-account-banner-body">
