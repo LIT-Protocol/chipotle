@@ -331,10 +331,28 @@ export function updateStatCards() {
   const elGroups = document.getElementById('stat-groups');
   const elWallets = document.getElementById('stat-wallets');
   const elActions = document.getElementById('stat-actions');
-  if (elUsageKeys) elUsageKeys.textContent = (typeof _stats.usageKeys === 'number') ? _stats.usageKeys : getUsageKeysStore().length;
+  const usageKeysVal = (typeof _stats.usageKeys === 'number') ? _stats.usageKeys : getUsageKeysStore().length;
+  if (elUsageKeys) elUsageKeys.textContent = usageKeysVal;
   if (elGroups) elGroups.textContent = (typeof _stats.groups === 'number') ? _stats.groups : '—';
   if (elWallets) elWallets.textContent = (typeof _stats.wallets === 'number') ? _stats.wallets : '—';
   if (elActions) elActions.textContent = (typeof _stats.actions === 'number') ? _stats.actions : '—';
+
+  // Empty hero ↔ stats grid swap. Only swap once all four stores have resolved
+  // to numbers, otherwise we'd flash the hero during initial load.
+  const allResolved = typeof _stats.groups === 'number'
+    && typeof _stats.wallets === 'number'
+    && typeof _stats.actions === 'number';
+  const allZero = allResolved
+    && usageKeysVal === 0
+    && _stats.groups === 0
+    && _stats.wallets === 0
+    && _stats.actions === 0;
+  const heroEl = document.getElementById('overview-empty-state');
+  const statsEl = document.getElementById('stats-row');
+  if (heroEl && statsEl) {
+    heroEl.hidden = !allZero;
+    statsEl.hidden = allZero;
+  }
 }
 
 // ----- Module-scoped state (replaces window._*) -----

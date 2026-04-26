@@ -819,12 +819,62 @@ body.is-chainsecured #no-funds-warning {
   width: 100%;
 }
 
+/* ----- Overview empty state ----- */
+.overview-empty-state {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 2.5rem 1.5rem;
+  margin-bottom: 1.5rem;
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.overview-empty-state[hidden] {
+  display: none;
+}
+
+.overview-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+  background: rgba(60, 80, 224, 0.1);
+  color: var(--primary);
+  margin-bottom: 1rem;
+}
+
+[data-theme="dark"] .overview-empty-icon {
+  background: rgba(99, 102, 241, 0.18);
+}
+
+.overview-empty-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+  color: var(--text);
+}
+
+.overview-empty-body {
+  font-size: 0.9375rem;
+  color: var(--text-muted);
+  margin: 0 auto 1.25rem;
+  max-width: 460px;
+  line-height: 1.5;
+}
+
 /* ----- Stat cards ----- */
 .stats-row {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
   gap: 1.25rem;
   margin-bottom: 1.5rem;
+}
+
+.stats-row[hidden] {
+  display: none;
 }
 
 .stat-card {

@@ -171,8 +171,18 @@
             <p>This environment is not configured to accept payments. You should migrate towards using the production system as there are no uptime or state guarantees available for test systems.</p>
           </div>
 
+          <!-- Empty state (shown when account has no keys/groups/wallets/actions) -->
+          <div id="overview-empty-state" class="overview-empty-state" hidden>
+            <div class="overview-empty-icon" aria-hidden="true">
+              <svg xmlns="http://www.w3.org/2000/svg" width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-3 3"/><path d="m18 5 3 3"/></svg>
+            </div>
+            <h2 class="overview-empty-title">You're all set. Now create your first key.</h2>
+            <p class="overview-empty-body">Usage API keys authorize and pay for Lit Action runs. Create one to start tracking activity here.</p>
+            <a href="#usage-keys" class="btn btn-primary" data-scroll="usage-keys">Create your first usage key</a>
+          </div>
+
           <!-- Stat cards -->
-          <div class="stats-row">
+          <div class="stats-row" id="stats-row">
             <div class="stat-card">
               <span class="stat-value" id="stat-usage-keys">—</span>
               <span class="stat-label">Usage API Keys</span>
