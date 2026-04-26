@@ -398,16 +398,46 @@ function renderModeBadge() {
   }
   const isChainSecured = mode === 'sovereign' && !!getChainSecuredWallet();
   const modeLabel = isChainSecured ? 'ChainSecured mode' : 'API mode';
-  const tooltip = isChainSecured
-    ? 'Writes are wallet-signed transactions on-chain.'
-    : 'Writes go through the Lit Express API.';
+  const popoverContent = isChainSecured
+    ? `<strong>ChainSecured mode</strong>
+       <p>Your wallet is the account identity. Writes are signed on-chain as transactions you authorize in your wallet.</p>
+       <p class="mode-popover-hidden">Hidden in this mode: Action Runner, Billing.</p>`
+    : `<strong>API mode</strong>
+       <p>Writes go through the Lit Express API using your account API key. Fastest path, no wallet popups.</p>`;
   let pillHtml = '';
   if (isChainSecured) {
     const wallet = getChainSecuredWallet();
     const trunc = `${wallet.slice(0, 6)}\u2026${wallet.slice(-4)}`;
     pillHtml = ` <button type="button" class="topbar-wallet-pill" id="topbar-wallet-pill" title="Copy wallet address" data-wallet="${escapeHtml(wallet)}">${escapeHtml(trunc)}</button>`;
   }
-  host.innerHTML = `<span class="topbar-mode-badge" title="${escapeHtml(tooltip)}">${escapeHtml(modeLabel)}</span>${pillHtml}`;
+  host.innerHTML = `<span class="topbar-mode-badge-wrap">
+      <button type="button" class="topbar-mode-badge" id="topbar-mode-badge" aria-haspopup="dialog" aria-expanded="false">${escapeHtml(modeLabel)}</button>
+      <div class="topbar-mode-popover" id="topbar-mode-popover" role="dialog" aria-label="${escapeHtml(modeLabel)} details" hidden>${popoverContent}</div>
+    </span>${pillHtml}`;
+  const badgeBtn = document.getElementById('topbar-mode-badge');
+  const popover = document.getElementById('topbar-mode-popover');
+  if (badgeBtn && popover) {
+    const close = () => {
+      popover.hidden = true;
+      badgeBtn.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('click', onDocClick, true);
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+    const onDocClick = (ev) => {
+      if (!badgeBtn.contains(ev.target) && !popover.contains(ev.target)) close();
+    };
+    const onKeyDown = (ev) => { if (ev.key === 'Escape') close(); };
+    badgeBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const open = popover.hidden;
+      popover.hidden = !open;
+      badgeBtn.setAttribute('aria-expanded', String(open));
+      if (open) {
+        document.addEventListener('click', onDocClick, true);
+        document.addEventListener('keydown', onKeyDown, true);
+      }
+    });
+  }
   const pill = document.getElementById('topbar-wallet-pill');
   if (pill) {
     pill.addEventListener('click', async () => {

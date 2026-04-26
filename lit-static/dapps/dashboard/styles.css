@@ -641,6 +641,11 @@ body.has-api-key .dashboard-wrap {
   gap: 0.5rem;
 }
 
+.topbar-mode-badge-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
 .topbar-mode-badge {
   display: inline-flex;
   align-items: center;
@@ -652,7 +657,57 @@ body.has-api-key .dashboard-wrap {
   background: rgba(60, 80, 224, 0.12);
   color: var(--primary, #3c50e0);
   border: 1px solid rgba(60, 80, 224, 0.25);
-  cursor: help;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s;
+}
+
+.topbar-mode-badge:hover {
+  background: rgba(60, 80, 224, 0.2);
+}
+
+.topbar-mode-popover {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  width: 280px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow), 0 10px 25px rgba(0, 0, 0, 0.15);
+  padding: 0.85rem 1rem;
+  z-index: 100;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  color: var(--text);
+}
+
+.topbar-mode-popover[hidden] {
+  display: none;
+}
+
+.topbar-mode-popover strong {
+  display: block;
+  font-size: 0.875rem;
+  margin-bottom: 0.4rem;
+  color: var(--text);
+}
+
+.topbar-mode-popover p {
+  margin: 0 0 0.4rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.topbar-mode-popover p:last-child {
+  margin-bottom: 0;
+}
+
+.topbar-mode-popover .mode-popover-hidden {
+  font-size: 0.75rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--border);
+  color: var(--text-muted);
 }
 
 [data-theme="dark"] .topbar-mode-badge {
