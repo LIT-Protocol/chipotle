@@ -284,8 +284,22 @@ body.has-api-key .dashboard-wrap {
 }
 
 .sidebar-link-icon {
-  font-size: 0.5rem;
-  opacity: 0.7;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--sidebar-text);
+}
+
+.sidebar-link-icon svg {
+  display: block;
+}
+
+.sidebar-link:hover .sidebar-link-icon,
+.sidebar-link.is-active .sidebar-link-icon {
+  color: var(--primary);
 }
 
 /* ----- Main content ----- */
