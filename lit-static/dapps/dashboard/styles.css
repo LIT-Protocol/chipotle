@@ -191,13 +191,113 @@ a:hover {
   padding: 0;
   margin-bottom: 0;
   box-shadow: none;
+  position: relative;
+}
+
+.login-cards > .login-card {
+  padding: 1.5rem 1.25rem 1.25rem;
+}
+
+.login-cards > .login-card.login-card-recommended {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary), var(--shadow);
+}
+
+.login-card-recommended-badge {
+  position: absolute;
+  top: -0.6rem;
+  left: 1.25rem;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.2rem 0.55rem;
+  border-radius: 9999px;
+  line-height: 1;
+}
+
+.login-card-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: rgba(60, 80, 224, 0.1);
+  color: var(--primary);
+  margin-bottom: 0.75rem;
+}
+
+[data-theme="dark"] .login-card-icon {
+  background: rgba(99, 102, 241, 0.18);
 }
 
 .login-card-title {
-  font-size: 1rem;
+  font-size: 1.0625rem;
   font-weight: 600;
-  margin: 0 0 1rem;
+  margin: 0 0 0.25rem;
   color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.login-card-tagline {
+  font-size: 0.875rem;
+  color: var(--text);
+  margin: 0 0 0.75rem;
+  font-weight: 500;
+}
+
+.login-card-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--bg-muted);
+  color: var(--text-muted);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  cursor: help;
+  position: relative;
+}
+
+.login-card-help:hover,
+.login-card-help:focus {
+  background: var(--primary);
+  color: #fff;
+  outline: none;
+}
+
+.login-card-help::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--card-bg);
+  font-size: 0.75rem;
+  font-weight: 400;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+  white-space: normal;
+  width: max-content;
+  max-width: 220px;
+  line-height: 1.4;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s;
+  z-index: 10;
+}
+
+.login-card-help:hover::after,
+.login-card-help:focus::after {
+  opacity: 1;
 }
 
 .form-hint {

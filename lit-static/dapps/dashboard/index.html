@@ -17,17 +17,20 @@
     <section id="page-login" class="login-page">
       <div class="login-container">
         <h1 class="login-title">Lit Express Dashboard</h1>
-        <p class="login-subtitle">Sign in or create an account to manage a Lit Express Node account.</p>
+        <p class="login-subtitle">Sign in to manage your account, or create a new one to get started.</p>
         <div id="login-status" class="status info" style="display: none;"></div>
-        <div class="login-tabs" role="tablist" aria-label="Login or create account">
-          <button type="button" class="login-tab is-active" role="tab" id="login-tab-existing" aria-selected="true" aria-controls="login-panel-existing" data-tab="existing">Existing User</button>
-          <button type="button" class="login-tab" role="tab" id="login-tab-new" aria-selected="false" aria-controls="login-panel-new" data-tab="new">New User</button>
+        <div class="login-tabs" role="tablist" aria-label="Sign in or create account">
+          <button type="button" class="login-tab is-active" role="tab" id="login-tab-existing" aria-selected="true" aria-controls="login-panel-existing" data-tab="existing">Sign in</button>
+          <button type="button" class="login-tab" role="tab" id="login-tab-new" aria-selected="false" aria-controls="login-panel-new" data-tab="new">Create account</button>
         </div>
         <div id="login-panel-existing" class="login-tab-panel is-active" role="tabpanel" aria-labelledby="login-tab-existing">
           <div class="login-cards">
-            <div class="login-card">
+            <div class="login-card login-card-recommended">
+              <span class="login-card-recommended-badge">Recommended</span>
+              <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-3 3"/><path d="m18 5 3 3"/></svg></div>
               <h3 class="login-card-title">API mode</h3>
-              <p class="form-hint" style="margin-bottom: 1rem;">Log in with an account API key. All writes go through the Lit Express API.</p>
+              <p class="login-card-tagline">Best if you want the fastest start. One key, no wallet needed.</p>
+              <p class="form-hint" style="margin-bottom: 1rem;">Writes go through the Lit Express API.</p>
               <div class="form-group">
                 <label for="login-api-key">API key</label>
                 <input type="password" id="login-api-key" class="input" placeholder="Paste your API key">
@@ -35,17 +38,22 @@
               <button type="button" id="btn-login" class="btn btn-primary btn-block">Log in</button>
             </div>
             <div class="login-card">
-              <h3 class="login-card-title">ChainSecured mode</h3>
-              <p class="form-hint" style="margin-bottom: 1rem;">Connect the wallet that owns the account. Writes are previewed then submitted as wallet-signed on-chain transactions.</p>
-              <button type="button" id="btn-login-wallet" class="btn btn-primary btn-block">Connect wallet</button>
-              <p class="form-hint" style="margin-top: 0.75rem;">Your wallet address is the account identity. No API key is involved.</p>
+              <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div>
+              <h3 class="login-card-title">ChainSecured mode <span class="login-card-help" tabindex="0" aria-label="What is ChainSecured?" data-tooltip="Your wallet is the key. Writes are signed on-chain — no API key shared.">?</span></h3>
+              <p class="login-card-tagline">Best if you want self-custody. Your wallet signs every write.</p>
+              <p class="form-hint" style="margin-bottom: 1rem;">Connect the wallet that owns the account.</p>
+              <button type="button" id="btn-login-wallet" class="btn btn-outline btn-block">Connect wallet</button>
+              <p class="form-hint" style="margin-top: 0.75rem;">Your wallet address is the account identity.</p>
             </div>
           </div>
         </div>
         <div id="login-panel-new" class="login-tab-panel" role="tabpanel" aria-labelledby="login-tab-new" hidden>
           <div class="login-cards">
-            <div class="login-card">
+            <div class="login-card login-card-recommended">
+              <span class="login-card-recommended-badge">Recommended</span>
+              <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-3 3"/><path d="m18 5 3 3"/></svg></div>
               <h3 class="login-card-title">API mode</h3>
+              <p class="login-card-tagline">Best if you want the fastest start. We manage the account; you get a key.</p>
               <p class="form-hint" style="margin-bottom: 1rem;">Creates a managed account and returns a new API key. Store it securely.</p>
               <div class="form-group">
                 <label for="new-account-email">Email</label>
@@ -62,8 +70,10 @@
               <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account</button>
             </div>
             <div class="login-card">
-              <h3 class="login-card-title">ChainSecured mode</h3>
-              <p class="form-hint" style="margin-bottom: 1rem;">Creates an unmanaged account owned by the connected wallet. Writes are wallet-signed on-chain.</p>
+              <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div>
+              <h3 class="login-card-title">ChainSecured mode <span class="login-card-help" tabindex="0" aria-label="What is ChainSecured?" data-tooltip="Your wallet is the key. Writes are signed on-chain — no API key shared.">?</span></h3>
+              <p class="login-card-tagline">Best if you want self-custody. The connected wallet owns the account.</p>
+              <p class="form-hint" style="margin-bottom: 1rem;">Creates an unmanaged account owned by the connected wallet.</p>
               <div class="form-group">
                 <label for="new-chainsecured-name">Account name</label>
                 <input type="text" id="new-chainsecured-name" class="input" placeholder="My account">
@@ -72,7 +82,7 @@
                 <label for="new-chainsecured-desc">Account description</label>
                 <input type="text" id="new-chainsecured-desc" class="input" placeholder="Optional">
               </div>
-              <button type="button" id="btn-create-chainsecured" class="btn btn-primary btn-block">Connect wallet &amp; create</button>
+              <button type="button" id="btn-create-chainsecured" class="btn btn-outline btn-block">Connect wallet &amp; create</button>
             </div>
           </div>
         </div>
