@@ -363,6 +363,11 @@ export class LitNodeSimpleApiClient {
    * @param {import('ethers').Signer} [options.signer] - Pre-connected signer for sovereign writes. May be set later via connectSigner().
    */
   constructor({ baseUrl = 'http://localhost:8000', mode = 'api', rpcUrl, contractAddress, chainId, deployments, signer, adminHashOverride } = {}) {
+    if (typeof baseUrl !== 'string') {
+      throw new Error(
+        `LitNodeSimpleApiClient: baseUrl must be a string, got ${typeof baseUrl} (${JSON.stringify(baseUrl)})`,
+      );
+    }
     const base = baseUrl.replace(/\/$/, '');
     this.baseUrl = `${base}/core/v1`;
     this.mode = mode;
