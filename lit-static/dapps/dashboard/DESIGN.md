@@ -132,8 +132,13 @@ CSS hides the wrong-mode-only elements:
 
 ```css
 body.is-chainsecured .sidebar-link[data-scroll="action-runner"] { display: none; }
-body.is-chainsecured #section-billing { display: none; }
+body.is-chainsecured #section-action-runner { display: none; }
 ```
+
+Billing (balance, Add Funds, no-funds warning, billing banners) is **not**
+mode-conditional. Stripe credit funds action runs in both modes. ChainSecured
+only changes how admin operations are signed (wallet vs API key), not how
+runs are paid for.
 
 Do not hide via JS-set inline styles. CSS-only toggles are easier to audit
 and survive page reloads.

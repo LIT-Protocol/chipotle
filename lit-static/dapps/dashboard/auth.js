@@ -419,7 +419,7 @@ function renderModeBadge() {
   const popoverContent = isChainSecured
     ? `<strong>ChainSecured mode</strong>
        <p>Your wallet is the account identity. Writes are signed on-chain as transactions you authorize in your wallet.</p>
-       <p class="mode-popover-hidden">Hidden in this mode: Action Runner, Billing.</p>`
+       <p class="mode-popover-hidden">Hidden in this mode: Action Runner. Funding still uses your account billing.</p>`
     : `<strong>API mode</strong>
        <p>Writes go through the Lit Express API using your account API key. Fastest path, no wallet popups.</p>`;
   let pillHtml = '';

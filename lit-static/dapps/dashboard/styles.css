@@ -790,14 +790,10 @@ body.has-api-key .dashboard-wrap {
   border-color: rgba(248, 113, 113, 0.35);
 }
 
-/* ChainSecured mode: hide Action Runner + Billing surfaces. */
+/* ChainSecured mode hides Action Runner only. Billing (Stripe credit) is
+   still the funding path for action runs regardless of admin auth mode. */
 body.is-chainsecured .sidebar-link[data-scroll="action-runner"],
-body.is-chainsecured #section-action-runner,
-body.is-chainsecured #billing-balance-display,
-body.is-chainsecured #btn-add-funds,
-body.is-chainsecured #billing-disabled-banner,
-body.is-chainsecured #billing-not-required,
-body.is-chainsecured #no-funds-warning {
+body.is-chainsecured #section-action-runner {
   display: none !important;
 }
 
