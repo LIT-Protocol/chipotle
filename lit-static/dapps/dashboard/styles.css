@@ -1105,6 +1105,58 @@ body.is-chainsecured #no-funds-warning {
   margin-bottom: 0;
 }
 
+/* ----- Collapsible help / details disclosure ----- */
+.help-details {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow);
+  margin-bottom: 1rem;
+}
+
+.help-details-summary {
+  list-style: none;
+  cursor: pointer;
+  padding: 0.85rem 1.25rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 600;
+  font-size: 0.9375rem;
+  color: var(--text);
+  user-select: none;
+}
+
+.help-details-summary::-webkit-details-marker {
+  display: none;
+}
+
+.help-details-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+
+.help-details-chevron {
+  margin-left: auto;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+}
+
+.help-details[open] .help-details-chevron {
+  transform: rotate(180deg);
+}
+
+.help-details[open] .help-details-summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.help-details > .instructions-block {
+  padding: 1rem 1.25rem;
+}
+
 /* ----- Forms ----- */
 .form-group {
   margin-bottom: 1rem;

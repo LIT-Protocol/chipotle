@@ -231,26 +231,26 @@
                 </div>
               </div>
             </div>
-            <div class="card">
-              <div class="card-header">
-                <h3 class="card-title">Instructions</h3>
-              </div>
-              <div class="card-body">
-                <div id="no-funds-warning" class="no-funds-warning" role="alert" style="display: none;">
-                  <strong>No funds available</strong>
-                  <p>Your account has no credit balance. Please <a href="#" id="no-funds-add-funds">add funds</a> for Lit Actions to work.</p>
-                </div>
-                <div class="instructions-block">
-                  <p>You can control access to the Lit Actions run by this node in the following ways:</p>
-                  <ul>
-                    <li><strong>Groups</strong> — Create groups for different categories of actions (e.g. by app or use case). Each group can have its own set of allowed IPFS action CIDs and wallet (PKP) restrictions.</li>
-                    <li><strong>Usage API keys</strong> — Create usage API keys and assign them to pay for Lit Action runs. Use different keys per client or app to track and limit spending. Add keys in the <strong>Usage API Keys</strong> section and use them when calling the node.  <strong>Note: </strong> your account api key can be also be used as a usage api key, but can not be rotated or removed, so this is not recommended.</li>
-                    <li><strong>Wallet restrictions</strong> — For any group, you can restrict which wallets (PKPs) are allowed to run actions in that group. Add or remove PKPs in the <strong>Wallets</strong> section (Add PKP to group / Remove PKP from group). You can also set a group to allow all wallets, if you do not need this limit.</li>
-                  </ul>
-                  <p>In short: create groups, add the IPFS action CIDs and (optionally) the wallets allowed for each group, then use usage API keys to authorize and pay for runs.</p>
-                </div>
-              </div>
+            <div id="no-funds-warning" class="no-funds-warning" role="alert" style="display: none;">
+              <strong>No funds available</strong>
+              <p>Your account has no credit balance. Please <a href="#" id="no-funds-add-funds">add funds</a> for Lit Actions to work.</p>
             </div>
+            <details class="help-details">
+              <summary class="help-details-summary">
+                <span class="help-details-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></span>
+                <span>How does this work?</span>
+                <span class="help-details-chevron" aria-hidden="true">▾</span>
+              </summary>
+              <div class="instructions-block">
+                <p>You control access to Lit Actions run by this node three ways:</p>
+                <ul>
+                  <li><strong>Groups</strong> — Categories of actions (by app or use case). Each group has its own allowed IPFS action CIDs and wallet (PKP) restrictions.</li>
+                  <li><strong>Usage API keys</strong> — Authorize and pay for Lit Action runs. Use different keys per client to track and limit spending.</li>
+                  <li><strong>Wallet restrictions</strong> — Limit which wallets (PKPs) can run actions in a group, or open it to all wallets.</li>
+                </ul>
+                <p>Workflow: create a group, add action CIDs and (optionally) allowed wallets, then issue usage API keys to authorize and pay for runs.</p>
+              </div>
+            </details>
           </section>
 
           <!-- Usage API Keys -->
