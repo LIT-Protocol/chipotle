@@ -269,7 +269,11 @@
                     <thead><tr><th>Name</th><th>Description</th><th>Permissions</th><th>Expiration</th><th class="th-actions"></th></tr></thead>
                     <tbody id="usage-keys-tbody"></tbody>
                   </table>
-                  <p id="usage-keys-empty" class="empty-state" style="display: none;">No usage API keys.</p>
+                  <div id="usage-keys-empty" class="empty-state" style="display: none;">
+                    <span class="empty-state-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-3 3"/><path d="m18 5 3 3"/></svg></span>
+                    <p class="empty-state-title">No usage API keys yet</p>
+                    <p class="empty-state-body">Create a key to authorize and track Lit Action runs.</p>
+                  </div>
                 </div>
                 <div class="table-add-row">
                   <button type="button" id="btn-add-usage-key" class="btn btn-primary">Add</button>
@@ -294,7 +298,11 @@
                     <thead><tr><th>Name</th><th>Description</th><th class="th-actions"></th></tr></thead>
                     <tbody id="groups-tbody"></tbody>
                   </table>
-                  <p id="groups-empty" class="empty-state" style="display: none;">No groups.</p>
+                  <div id="groups-empty" class="empty-state" style="display: none;">
+                    <span class="empty-state-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg></span>
+                    <p class="empty-state-title">No groups yet</p>
+                    <p class="empty-state-body">Groups bundle action CIDs and wallet permissions per app or use case.</p>
+                  </div>
                 </div>
                 <div class="table-add-row">
                   <button type="button" id="btn-add-group" class="btn btn-primary">Add</button>
@@ -321,7 +329,11 @@
                     <thead><tr><th>Name</th><th>Hashed CID</th><th>Description</th><th class="th-actions"></th></tr></thead>
                     <tbody id="actions-tbody"></tbody>
                   </table>
-                  <p id="actions-empty" class="empty-state" style="display: none;">No actions found.</p>
+                  <div id="actions-empty" class="empty-state" style="display: none;">
+                    <span class="empty-state-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></span>
+                    <p class="empty-state-title">No actions yet</p>
+                    <p class="empty-state-body">Add an IPFS CID to allow it to run inside a group.</p>
+                  </div>
                 </div>
                 <div class="table-add-row">
                   <button type="button" id="btn-add-action" class="btn btn-primary">Add</button>
@@ -346,7 +358,11 @@
                     <thead><tr><th>Description</th><th>PkpId (Address)</th></tr></thead>
                     <tbody id="wallets-tbody"></tbody>
                   </table>
-                  <p id="wallets-empty" class="empty-state" style="display: none;">No wallets.</p>
+                  <div id="wallets-empty" class="empty-state" style="display: none;">
+                    <span class="empty-state-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg></span>
+                    <p class="empty-state-title">No wallets yet</p>
+                    <p class="empty-state-body">Add a PKP wallet to restrict which signers can run actions in a group.</p>
+                  </div>
                 </div>
                 <div class="table-add-row">
                   <button type="button" id="btn-add-wallet" class="btn btn-primary">Add</button>
