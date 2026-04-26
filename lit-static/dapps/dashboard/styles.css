@@ -67,6 +67,25 @@ a:hover {
   text-decoration: underline;
 }
 
+/* Keyboard focus ring (only shows for keyboard users via :focus-visible) */
+button:focus-visible,
+a:focus-visible,
+[role="tab"]:focus-visible,
+summary:focus-visible,
+.stat-card:focus-visible,
+.sidebar-link:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
+
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 0;
+}
+
 /* ----- Login page (standalone) ----- */
 .login-page {
   min-height: 100vh;
