@@ -122,7 +122,7 @@ select:focus-visible {
   flex-direction: column;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 640px) {
   .login-cards {
     grid-template-columns: 1fr;
   }
