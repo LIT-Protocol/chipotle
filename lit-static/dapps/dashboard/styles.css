@@ -421,6 +421,23 @@ body.has-api-key .dashboard-wrap {
   color: var(--primary);
 }
 
+.sidebar-link.is-active {
+  color: var(--primary);
+  background: var(--sidebar-link-hover-bg);
+  position: relative;
+}
+
+.sidebar-link.is-active::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.5rem;
+  bottom: 0.5rem;
+  width: 3px;
+  border-radius: 0 2px 2px 0;
+  background: var(--primary);
+}
+
 /* ----- Main content ----- */
 .dashboard-main {
   flex: 1;
