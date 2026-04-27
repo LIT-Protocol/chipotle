@@ -22,6 +22,7 @@ export const LIST_PAGE_SIZE = '20';
  */
 const SOVEREIGN_WRITE_METHODS = new Set([
   'newChainSecuredAccount',
+  'createWallet',
   'addGroup', 'removeGroup', 'updateGroup',
   'addAction', 'deleteAction', 'addActionToGroup', 'removeActionFromGroup', 'updateActionMetadata',
   'addPkpToGroup', 'removePkpFromGroup',
@@ -638,7 +639,12 @@ async function loginWithWallet(btn) {
     const client = await getClient();
     const { connectEoa } = await import('../../wallet_connect.js');
     const ethers = await loadEthersLocal();
-    const { address } = await connectEoa();
+    const { signer, address } = await connectEoa();
+    // Attach the signer before the existence check: accountExistsAndIsMutable
+    // is msg.sender-gated and only the wallet that owns an unmanaged
+    // (ChainSecured) account passes. Without this, the SDK falls back to
+    // api_payer and the contract returns false for valid ChainSecured accounts.
+    client.connectSigner(signer);
     const apiKeyHash = ethers.solidityPackedKeccak256(['address'], [address]);
     const exists = await client.accountExistsByHash(apiKeyHash);
     if (!exists) {

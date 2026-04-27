@@ -16,12 +16,21 @@
     <!-- Login (standalone when not authenticated) -->
     <section id="page-login" class="login-page">
       <div class="login-container">
-        <h1 class="login-title">Lit Express Dashboard</h1>
+        <h1 class="login-title">Chipotle Dashboard</h1>
         <p class="login-subtitle">Sign in to manage your account, or create a new one to get started.</p>
         <div id="login-status" class="status info" style="display: none;"></div>
-        <div class="login-tabs" role="tablist" aria-label="Sign in or create account">
-          <button type="button" class="login-tab is-active" role="tab" id="login-tab-existing" aria-selected="true" aria-controls="login-panel-existing" data-tab="existing">Sign in</button>
-          <button type="button" class="login-tab" role="tab" id="login-tab-new" aria-selected="false" aria-controls="login-panel-new" data-tab="new">Create account</button>
+        <div class="login-mode">
+          <span class="login-mode-label" id="login-mode-label">I would like to:</span>
+          <div class="login-tabs" role="tablist" aria-labelledby="login-mode-label">
+            <button type="button" class="login-tab is-active" role="tab" id="login-tab-existing" aria-selected="true" aria-controls="login-panel-existing" data-tab="existing">
+              <svg class="login-tab-check" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+              <span>Sign in</span>
+            </button>
+            <button type="button" class="login-tab" role="tab" id="login-tab-new" aria-selected="false" aria-controls="login-panel-new" data-tab="new">
+              <svg class="login-tab-check" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+              <span>Create account</span>
+            </button>
+          </div>
         </div>
         <div id="login-panel-existing" class="login-tab-panel is-active" role="tabpanel" aria-labelledby="login-tab-existing">
           <div class="login-cards">
@@ -38,12 +47,12 @@
               <button type="button" id="btn-login" class="btn btn-primary btn-block">Log in</button>
             </div>
             <div class="login-card">
+              <span class="login-card-required-badge">Wallet required</span>
               <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div>
               <h3 class="login-card-title">ChainSecured mode <span class="login-card-help" tabindex="0" aria-label="What is ChainSecured?" data-tooltip="Your wallet is the key. Writes are signed on-chain — no API key shared.">?</span></h3>
               <p class="login-card-tagline">Best if you want self-custody. Your wallet signs every write &mdash; the API is only used to call an action.</p>
-              <p class="form-hint" style="margin-bottom: 1rem;">Connect the wallet that owns the account.</p>
+              <p class="form-hint" style="margin-bottom: 1rem;">Connect the wallet that owns the account. Your wallet address is the account identity.</p>
               <button type="button" id="btn-login-wallet" class="btn btn-outline btn-block">Connect wallet</button>
-              <p class="form-hint" style="margin-top: 0.75rem;">Your wallet address is the account identity.</p>
             </div>
           </div>
         </div>
@@ -70,6 +79,7 @@
               <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account</button>
             </div>
             <div class="login-card">
+              <span class="login-card-required-badge">Wallet required</span>
               <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div>
               <h3 class="login-card-title">ChainSecured mode <span class="login-card-help" tabindex="0" aria-label="What is ChainSecured?" data-tooltip="Your wallet is the key. Writes are signed on-chain — no API key shared.">?</span></h3>
               <p class="login-card-tagline">Best if you want self-custody. The connected wallet owns the account.</p>
@@ -93,7 +103,7 @@
     <div id="dashboard-wrap" class="dashboard-wrap">
       <aside class="sidebar">
         <div class="sidebar-brand">
-          <span class="sidebar-brand-text">Lit Express Dashboard</span>
+          <span class="sidebar-brand-text">Chipotle Dashboard</span>
         </div>
         <nav class="sidebar-nav">
           <span class="sidebar-menu-label">MENU</span>

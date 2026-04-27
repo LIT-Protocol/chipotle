@@ -1,4 +1,4 @@
-# Lit Express Dashboard — Design System
+# Chipotle Dashboard — Design System
 
 What this document is: the source of truth for how the dashboard looks and behaves.
 Edit when the system actually changes. Do not edit to describe aspirational state.
@@ -112,8 +112,20 @@ Radii:
 ### Login mode cards
 
 - Side-by-side on desktop, stacked on mobile.
-- API mode card carries the `RECOMMENDED` badge — primary path.
-- Each card: icon, title, tagline, body, CTA.
+- API mode card carries the `RECOMMENDED` badge (filled primary) — primary path.
+- ChainSecured card carries the `WALLET REQUIRED` badge (muted, neutral fill)
+  to set expectation.
+- Neither card has a default highlight; both start with the same neutral
+  `--border` ring. Hover or focus-within either card → that card gets the
+  primary ring while the sibling stays neutral. The badges carry which is
+  recommended vs which requires a wallet, so the highlight follows intent
+  instead of pre-selecting one.
+- Each card's CTA (Log in / Create account / Connect wallet / Connect wallet
+  & create) shares the same shape (full-width, btn-block padding) but its
+  color follows the card's selected state: neutral outlined at rest, primary
+  blue when the card is hovered or focus-within. The btn-primary vs
+  btn-outline class no longer drives color here — the parent card does.
+- Each card: badge, icon, title, tagline, body, CTA.
 - Help glyph next to "ChainSecured" → tooltip defining the term.
 
 ### Help disclosure (`details.help-details`)
