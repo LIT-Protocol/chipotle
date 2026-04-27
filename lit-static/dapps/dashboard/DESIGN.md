@@ -123,22 +123,24 @@ Radii:
 
 ## Mode-conditional UI
 
-The dashboard hides features by mode using body classes:
+The dashboard exposes the same surface in both modes. Body classes are
+available for future gating but no features are currently hidden by mode:
 
 - `body.has-api-key` — set after successful API-mode login.
 - `body.is-chainsecured` — set after successful wallet connect.
 
-CSS hides the wrong-mode-only elements:
-
-```css
-body.is-chainsecured .sidebar-link[data-scroll="action-runner"] { display: none; }
-body.is-chainsecured #section-action-runner { display: none; }
-```
+Action Runner, Wallets, Actions, and Usage Keys all render in both modes.
+ChainSecured admin operations (add action, mint usage key) are signed by the
+connected wallet via the AccountConfig contract. ChainSecured users execute
+Lit Actions by pasting a usage API key they minted from the contract.
 
 Billing (balance, Add Funds, no-funds warning, billing banners) is **not**
 mode-conditional. Stripe credit funds action runs in both modes. ChainSecured
-only changes how admin operations are signed (wallet vs API key), not how
+only changes how admin writes are authorized (wallet vs API key), not how
 runs are paid for.
+
+Validation guards must use `isAuthenticated()`, not `!apiKey` — ChainSecured
+users authenticate via wallet and have no account-level api key.
 
 Do not hide via JS-set inline styles. CSS-only toggles are easier to audit
 and survive page reloads.

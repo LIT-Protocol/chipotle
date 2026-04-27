@@ -80,7 +80,9 @@ function setActiveSidebarLink(id) {
 }
 
 function initSidebar() {
-  document.querySelectorAll('.sidebar-link[data-scroll]').forEach((a) => {
+  // Bind to any element with data-scroll (sidebar links, stat cards, empty-state CTAs).
+  // Active-link styling stays sidebar-only via setActiveSidebarLink's selector.
+  document.querySelectorAll('[data-scroll]').forEach((a) => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
       const id = a.getAttribute('data-scroll');

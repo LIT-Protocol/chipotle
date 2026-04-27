@@ -790,12 +790,6 @@ body.has-api-key .dashboard-wrap {
   border-color: rgba(248, 113, 113, 0.35);
 }
 
-/* ChainSecured mode hides Action Runner only. Billing (Stripe credit) is
-   still the funding path for action runs regardless of admin auth mode. */
-body.is-chainsecured .sidebar-link[data-scroll="action-runner"],
-body.is-chainsecured #section-action-runner {
-  display: none !important;
-}
 
 .btn-topbar {
   padding: 0.5rem 1rem;

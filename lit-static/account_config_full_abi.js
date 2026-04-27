@@ -353,6 +353,10 @@ export function isAbiDriftDevOverrideEnabled() {
     const s = v.trim().toLowerCase();
     return s === '1' || s === 'true' || s === 'yes' || s === 'on';
   }
+  if (typeof location !== 'undefined' && location.hostname) {
+    const h = location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1' || h === '[::1]') return true;
+  }
   return false;
 }
 

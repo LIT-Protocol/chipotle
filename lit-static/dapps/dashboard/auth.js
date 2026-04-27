@@ -273,7 +273,7 @@ async function ensureSovereignSigner(client) {
  * onState: surfaces tx status in a non-dismissible progress banner.
  */
 async function buildSovereignLifecycle(client, sdkMethodName) {
-  const [{ showTxPreview }, { describeState, TX_STATES }] = await Promise.all([
+  const [{ showTxPreview }, { TX_STATES }] = await Promise.all([
     import('./tx_preview_modal.js'),
     import('../../tx_lifecycle.js'),
   ]);
@@ -287,7 +287,13 @@ async function buildSovereignLifecycle(client, sdkMethodName) {
     onPreview: (contractMethod, contractArgs) =>
       showTxPreview(contractMethod, contractArgs, meta),
     onState: (state, payload) => {
-      if (state === TX_STATES.SIGNING) {
+      // Preview modal owns the screen during PREPARING/PREVIEWING. Close any
+      // pre-existing action-overlay that a dashboard handler opened before
+      // calling the SDK (otherwise it stacks above and blocks the Confirm
+      // button). It is re-opened on SIGNING below.
+      if (state === TX_STATES.PREPARING || state === TX_STATES.PREVIEWING) {
+        closeActionProgress();
+      } else if (state === TX_STATES.SIGNING) {
         showActionProgress(sdkMethodName, 'Open your wallet to sign the transaction…');
       } else if (state === TX_STATES.PENDING) {
         showActionProgress(sdkMethodName, `Broadcast — ${payload?.txHash?.slice(0, 10)}… waiting for inclusion.`);
@@ -295,8 +301,6 @@ async function buildSovereignLifecycle(client, sdkMethodName) {
         showActionProgress(sdkMethodName, `Included — waiting for ${payload?.target} confirmations.`);
       } else if (state === TX_STATES.CONFIRMED || state === TX_STATES.FAILED || state === TX_STATES.REORGED) {
         closeActionProgress();
-      } else {
-        showActionProgress(sdkMethodName, describeState(state));
       }
     },
   };
@@ -419,7 +423,7 @@ function renderModeBadge() {
   const popoverContent = isChainSecured
     ? `<strong>ChainSecured mode</strong>
        <p>Your wallet is the account identity. Writes are signed on-chain as transactions you authorize in your wallet.</p>
-       <p class="mode-popover-hidden">Hidden in this mode: Action Runner. Funding still uses your account billing.</p>`
+       <p class="mode-popover-hidden">Action runs use a usage API key from your account. Funding still uses your account billing.</p>`
     : `<strong>API mode</strong>
        <p>Writes go through the Lit Express API using your account API key. Fastest path, no wallet popups.</p>`;
   let pillHtml = '';

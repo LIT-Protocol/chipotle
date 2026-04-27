@@ -930,7 +930,7 @@ export class LitNodeSimpleApiClient {
         ],
         ...(sovereignLifecycle ?? {}),
       });
-      return { success: true, api_key: newUsageKey, hash: usageHash, transaction_hash: txHash };
+      return { success: true, usage_api_key: newUsageKey, hash: usageHash, transaction_hash: txHash };
     }
     const body = {
       name,
@@ -1397,8 +1397,13 @@ export class LitNodeSimpleApiClient {
     const res = await fetch(`${this.baseUrl}/get_node_chain_config`);
     const cfg = await parseResponse(res, 'get_node_chain_config');
     if (!cfg.rpc_url && cfg.chain_id != null && cfg.is_evm) {
-      const rpcUrl = await resolveRpcUrlFromChainlist(cfg.chain_id);
-      if (rpcUrl) cfg.rpc_url = rpcUrl;
+      // Anvil isn't on chainlist; fall back to the local default.
+      if (Number(cfg.chain_id) === 31337) {
+        cfg.rpc_url = 'http://127.0.0.1:8545';
+      } else {
+        const rpcUrl = await resolveRpcUrlFromChainlist(cfg.chain_id);
+        if (rpcUrl) cfg.rpc_url = rpcUrl;
+      }
     }
     return cfg;
   }
