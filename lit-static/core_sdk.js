@@ -612,15 +612,21 @@ export class LitNodeSimpleApiClient {
     if (this.mode === 'sovereign') {
       const contract = await this._getViewContract();
       const hash = await this._adminHash(apiKey);
-      // accountExistsAndIsMutable has an msg.sender check (caller must be an
-      // api_payer). The server-side path spoofs this by setting `.from(api_payer)`
-      // on the eth_call. For sovereign reads we take the same approach: fetch
-      // api_payers via the same contract and use the first one as the from address.
-      const payers = await contract.api_payers();
-      if (!payers || payers.length === 0) {
-        throw new Error('account_exists (sovereign): no api_payers configured on contract');
+      // accountExistsAndIsMutable is msg.sender-gated. For unmanaged
+      // (ChainSecured) accounts only the wallet that owns the account passes;
+      // for managed accounts an api_payer passes. Use the connected signer
+      // when available (covers ChainSecured), fall back to api_payer.
+      let from;
+      if (this.signer) {
+        from = await this.signer.getAddress();
+      } else {
+        const payers = await contract.api_payers();
+        if (!payers || payers.length === 0) {
+          throw new Error('account_exists (sovereign): no api_payers configured on contract');
+        }
+        from = payers[0];
       }
-      return await contract.accountExistsAndIsMutable.staticCall(hash, { from: payers[0] });
+      return await contract.accountExistsAndIsMutable.staticCall(hash, { from });
     }
     const res = await fetch(`${this.baseUrl}/account_exists`, {
       headers: headersWithApiKey(apiKey),
@@ -634,7 +640,12 @@ export class LitNodeSimpleApiClient {
    * flow where the dashboard computes `keccak256(abi.encodePacked(address))`
    * before it has (or needs) an apiKey string.
    *
-   * Uses the same api_payer spoofing pattern as `accountExists` sovereign.
+   * `accountExistsAndIsMutable` is gated by msg.sender. For unmanaged
+   * (ChainSecured) accounts the contract requires `msg.sender ==
+   * account.adminWalletAddress` — i.e., the user's own wallet. Spoofing
+   * api_payer here would falsely return false for ChainSecured accounts.
+   * If a signer is connected we use its address; otherwise we fall back to
+   * api_payer for the managed-account case.
    *
    * @param {string} apiKeyHashHex - 0x-prefixed 32-byte hex
    * @returns {Promise<boolean>}
@@ -644,11 +655,17 @@ export class LitNodeSimpleApiClient {
       throw new Error('accountExistsByHash requires sovereign mode');
     }
     const contract = await this._getViewContract();
-    const payers = await contract.api_payers();
-    if (!payers || payers.length === 0) {
-      throw new Error('accountExistsByHash: no api_payers configured on contract');
+    let from;
+    if (this.signer) {
+      from = await this.signer.getAddress();
+    } else {
+      const payers = await contract.api_payers();
+      if (!payers || payers.length === 0) {
+        throw new Error('accountExistsByHash: no api_payers configured on contract');
+      }
+      from = payers[0];
     }
-    return await contract.accountExistsAndIsMutable.staticCall(apiKeyHashHex, { from: payers[0] });
+    return await contract.accountExistsAndIsMutable.staticCall(apiKeyHashHex, { from });
   }
 
   /**
@@ -671,13 +688,59 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
-   * GET /core/v1/create_wallet
-   * Creates a wallet for the given API key and returns the wallet address.
-   * API key via X-Api-Key or Authorization: Bearer header.
-   * @param {string} apiKey - API key (from getApiKey)
+   * Creates a wallet for the given account.
+   *
+   * API mode (default): GET /core/v1/create_wallet — server mints + registers
+   * the PKP on-chain (api_payer pays gas, account is billed $0.01).
+   *
+   * ChainSecured mode: two wallet popups.
+   *   1. Sign a SIWE-style message proving wallet ownership; server verifies
+   *      and mints the PKP via DStack MPC (no on-chain write).
+   *   2. Wallet calls `registerWalletDerivation(adminHash, pkpAddress,
+   *      derivationPath, name, description)` to register the PKP on-chain.
+   *
+   * Backward-compat: legacy `createWallet(apiKey)` (bare string) still works.
+   *
+   * @param {string|Object} options - apiKey string (legacy) or options bag.
+   * @param {string} [options.apiKey]
+   * @param {string} [options.name='Wallet']
+   * @param {string} [options.description='Wallet']
+   * @param {Object} [options.sovereignLifecycle] - injected by the dashboard Proxy
    * @returns {Promise<CreateWalletResponse>}
    */
-  async createWallet(apiKey) {
+  async createWallet(options = {}) {
+    if (typeof options === 'string') {
+      options = { apiKey: options };
+    }
+    const { apiKey, name = 'Wallet', description = 'Wallet', sovereignLifecycle } = options;
+
+    if (this.mode === 'sovereign') {
+      if (!this.signer) {
+        throw new Error('createWallet (sovereign): wallet signer not connected');
+      }
+      const signerAddress = await this.signer.getAddress();
+      const issuedAt = Math.floor(Date.now() / 1000);
+      const host = (typeof location !== 'undefined' && location.host) ? location.host : 'lit';
+      const message = `${host} wants you to create a new wallet for ChainSecured account.\n\nAddress: ${signerAddress}\nChain ID: ${this.chainId}\nIssued At: ${issuedAt}`;
+      const signature = await this.signer.signMessage(message);
+      const res = await fetch(`${this.baseUrl}/create_wallet_with_signature`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message, signature }),
+      });
+      const minted = await parseResponse(res, 'create_wallet_with_signature');
+      const { wallet_address, derivation_path } = minted;
+
+      const contract = await this._getWriteContract();
+      const adminHash = await this._adminHash(apiKey);
+      const { txHash } = await runContractWrite({
+        contract, method: 'registerWalletDerivation',
+        args: [adminHash, wallet_address, derivation_path, name, description],
+        ...(sovereignLifecycle ?? {}),
+      });
+      return { wallet_address, transaction_hash: txHash };
+    }
+
     const res = await fetch(`${this.baseUrl}/create_wallet`, {
       headers: headersWithApiKey(apiKey),
     });
