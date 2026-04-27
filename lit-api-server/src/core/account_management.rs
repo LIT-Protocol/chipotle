@@ -7,9 +7,9 @@ use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
     AddUsageApiKeyRequest, CreateWalletWithSignatureRequest, DeleteActionRequest,
-    NewAccountRequest, RemoveActionFromGroupRequest, RemoveGroupRequest,
-    RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest, UpdateActionMetadataRequest,
-    UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
+    NewAccountRequest, RemoveActionFromGroupRequest, RemoveGroupRequest, RemovePkpFromGroupRequest,
+    RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
+    UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
     AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse, ApiKeyItem,
@@ -245,12 +245,13 @@ fn parse_create_wallet_siwe(message: &str) -> Result<ParsedCreateWalletSiwe, Api
 
 /// Recovers the EIP-191 personal-sign signer for `message`.
 fn recover_eip191_signer(message: &str, signature_hex: &str) -> Result<H160, ApiStatus> {
-    let sig: EthSignature = signature_hex
-        .trim()
-        .parse()
-        .map_err(|e: ethers::core::types::SignatureError| {
-            ApiStatus::bad_request(anyhow::anyhow!(e), "Invalid signature hex")
-        })?;
+    let sig: EthSignature =
+        signature_hex
+            .trim()
+            .parse()
+            .map_err(|e: ethers::core::types::SignatureError| {
+                ApiStatus::bad_request(anyhow::anyhow!(e), "Invalid signature hex")
+            })?;
     sig.recover(message.as_bytes().to_vec())
         .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "Signature recovery failed"))
 }

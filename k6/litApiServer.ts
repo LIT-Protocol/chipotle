@@ -51,6 +51,27 @@ export interface CreateWalletResponse {
   wallet_address: string;
 }
 
+/**
+ * Returned by `/create_wallet_with_signature`. The client must follow up with an on-chain `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` call signed by the same wallet — until that lands, the PKP exists in MPC but is not registered to any account.
+ */
+export interface CreateWalletWithSignatureResponse {
+  wallet_address: string;
+  /** 0x-prefixed lowercase hex (uint256). Pass through verbatim to `registerWalletDerivation`'s `derivationPath` arg. */
+  derivation_path: string;
+}
+
+/**
+ * ChainSecured wallet creation. The client builds a SIWE-style message and signs it with their wallet; the server verifies the signature, mints a PKP via DStack MPC, and returns the new wallet address + derivation path so the client can register it on-chain via `registerWalletDerivation`.
+
+V1 does not maintain a server-side nonce store. The server enforces a ±5-minute window on the message's `Issued At` timestamp, which is the only replay protection. Worst-case replay just mints an extra PKP (compute cost only — registration still requires a separate wallet signature on-chain).
+ */
+export interface CreateWalletWithSignatureRequest {
+  /** EIP-191 plaintext message that was signed. Must contain `Address: 0x…`, `Chain ID: <u64>`, and `Issued At: <unix-seconds>` lines (case-sensitive prefixes). */
+  message: string;
+  /** 0x-prefixed hex signature (65 bytes — r||s||v, EIP-191 personal-sign). */
+  signature: string;
+}
+
 export interface LitActionResponse {
   response: unknown;
   logs: string;
@@ -398,6 +419,10 @@ export type CreateWalletHeaders = {
 };
 
 export type CreateWalletDefault = CreateWalletResponse | ErrMessage;
+
+export type CreateWalletWithSignatureDefault =
+  | CreateWalletWithSignatureResponse
+  | ErrMessage;
 
 export type LitActionHeaders = {
   /**
@@ -846,6 +871,45 @@ export class LitApiServerClient {
       response,
       data,
       operationId: "create_wallet",
+    };
+  }
+
+  createWalletWithSignature(
+    createWalletWithSignatureRequest: CreateWalletWithSignatureRequest,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: CreateWalletWithSignatureDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/create_wallet_with_signature`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      JSON.stringify(createWalletWithSignatureRequest),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "create_wallet_with_signature",
     };
   }
 

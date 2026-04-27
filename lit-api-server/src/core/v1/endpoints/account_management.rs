@@ -9,9 +9,9 @@ use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
     AddUsageApiKeyRequest, CreateWalletWithSignatureRequest, DeleteActionRequest,
-    NewAccountRequest, RemoveActionFromGroupRequest, RemoveGroupRequest,
-    RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest, UpdateActionMetadataRequest,
-    UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
+    NewAccountRequest, RemoveActionFromGroupRequest, RemoveGroupRequest, RemovePkpFromGroupRequest,
+    RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
+    UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
     AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse, ApiKeyItem,
