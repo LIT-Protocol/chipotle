@@ -67,6 +67,12 @@ a:hover {
   text-decoration: underline;
 }
 
+/* Anchors styled as buttons (e.g. <a class="btn btn-primary">) shouldn't pick
+   up the underline-on-hover from the global <a> rule above. */
+a.btn:hover {
+  text-decoration: none;
+}
+
 /* Keyboard focus ring (only shows for keyboard users via :focus-visible) */
 button:focus-visible,
 a:focus-visible,
@@ -345,8 +351,12 @@ select:focus-visible {
   color: var(--text-muted);
   font-size: 0.6875rem;
   font-weight: 600;
+  font-family: inherit;
   cursor: help;
   position: relative;
+  padding: 0;
+  border: none;
+  line-height: 1;
 }
 
 .login-card-help:hover,
@@ -354,6 +364,11 @@ select:focus-visible {
   background: var(--primary);
   color: #fff;
   outline: none;
+}
+
+.login-card-help:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .login-card-help::after {
@@ -841,17 +856,11 @@ body.has-api-key .dashboard-wrap {
   padding: 0.75rem 1rem;
   margin: 0 0 1rem;
   border-radius: var(--radius);
-  background: rgba(220, 38, 38, 0.08);
-  border: 1px solid rgba(220, 38, 38, 0.3);
-  color: #b91c1c;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--danger) 30%, transparent);
+  color: var(--danger);
   font-size: 0.875rem;
   font-weight: 500;
-}
-
-[data-theme="dark"] .abi-drift-banner {
-  background: rgba(248, 113, 113, 0.12);
-  color: #fca5a5;
-  border-color: rgba(248, 113, 113, 0.35);
 }
 
 

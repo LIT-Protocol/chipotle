@@ -39,7 +39,7 @@
               <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-3 3"/><path d="m18 5 3 3"/></svg></div>
               <h3 class="login-card-title">API mode</h3>
               <p class="login-card-tagline">Best if you want the fastest start. One key, no wallet needed.</p>
-              <p class="form-hint" style="margin-bottom: 1rem;">Writes go through the Lit Express API.</p>
+              <p class="form-hint" style="margin-bottom: 1rem;">Writes go through the Chipotle API.</p>
               <div class="form-group">
                 <label for="login-api-key">API key</label>
                 <input type="password" id="login-api-key" class="input" placeholder="Paste your API key">
@@ -49,7 +49,7 @@
             <div class="login-card">
               <span class="login-card-required-badge">Wallet required</span>
               <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div>
-              <h3 class="login-card-title">ChainSecured mode <span class="login-card-help" tabindex="0" aria-label="What is ChainSecured?" data-tooltip="Your wallet is the key. Writes are signed on-chain — no API key shared.">?</span></h3>
+              <h3 class="login-card-title">ChainSecured mode <button type="button" class="login-card-help" aria-label="What is ChainSecured? Your wallet is the key. Writes are signed on-chain — no API key shared." data-tooltip="Your wallet is the key. Writes are signed on-chain — no API key shared.">?</button></h3>
               <p class="login-card-tagline">Best if you want self-custody. Your wallet signs every write &mdash; the API is only used to call an action.</p>
               <p class="form-hint" style="margin-bottom: 1rem;">Connect the wallet that owns the account. Your wallet address is the account identity.</p>
               <button type="button" id="btn-login-wallet" class="btn btn-outline btn-block">Connect wallet</button>
@@ -81,7 +81,7 @@
             <div class="login-card">
               <span class="login-card-required-badge">Wallet required</span>
               <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div>
-              <h3 class="login-card-title">ChainSecured mode <span class="login-card-help" tabindex="0" aria-label="What is ChainSecured?" data-tooltip="Your wallet is the key. Writes are signed on-chain — no API key shared.">?</span></h3>
+              <h3 class="login-card-title">ChainSecured mode <button type="button" class="login-card-help" aria-label="What is ChainSecured? Your wallet is the key. Writes are signed on-chain — no API key shared." data-tooltip="Your wallet is the key. Writes are signed on-chain — no API key shared.">?</button></h3>
               <p class="login-card-tagline">Best if you want self-custody. The connected wallet owns the account.</p>
               <p class="form-hint" style="margin-bottom: 1rem;">Creates an unmanaged account owned by the connected wallet.</p>
               <div class="form-group">
@@ -252,7 +252,7 @@
                 <span class="help-details-chevron" aria-hidden="true">▾</span>
               </summary>
               <div class="instructions-block">
-                <p>You control access to Lit Actions run by this node three ways:</p>
+                <p>You control access to Lit Actions run by this node in three ways:</p>
                 <ul>
                   <li><strong>Groups</strong> — Categories of actions (by app or use case). Each group has its own allowed IPFS action CIDs and wallet (PKP) restrictions.</li>
                   <li><strong>Usage API keys</strong> — Authorize and pay for Lit Action runs. Use different keys per client to track and limit spending.</li>

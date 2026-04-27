@@ -718,6 +718,14 @@ export class LitNodeSimpleApiClient {
       if (!this.signer) {
         throw new Error('createWallet (sovereign): wallet signer not connected');
       }
+      // _verifyAbiIntegrity populates this.chainId from the RPC if it wasn't
+      // passed at construction. Run it before composing the SIWE message so
+      // the server sees a real "Chain ID:" line instead of "null" — the
+      // registerWalletDerivation step does the same verify, so this is free.
+      await this._verifyAbiIntegrity();
+      if (this.chainId == null) {
+        throw new Error('createWallet (sovereign): chainId could not be resolved from RPC');
+      }
       const signerAddress = await this.signer.getAddress();
       const issuedAt = Math.floor(Date.now() / 1000);
       const host = (typeof location !== 'undefined' && location.host) ? location.host : 'lit';

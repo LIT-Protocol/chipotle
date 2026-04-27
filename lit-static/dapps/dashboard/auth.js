@@ -88,9 +88,19 @@ export function clearChainSecuredSession() {
   resetClient();
 }
 
-/** True if the user has any authenticated session — api key OR ChainSecured. */
+/** True if the user has any authenticated session — api key OR ChainSecured.
+ *  ChainSecured requires BOTH wallet + admin hash; if only one is present the
+ *  session is half-written (e.g. mid-login crash) and we clear it so the
+ *  caller can re-auth instead of hashing an empty api key against the wrong
+ *  on-chain identity. */
 export function isAuthenticated() {
-  return !!getApiKey() || (getMode() === 'sovereign' && !!getChainSecuredWallet());
+  if (getApiKey()) return true;
+  if (getMode() !== 'sovereign') return false;
+  const hasWallet = !!getChainSecuredWallet();
+  const hasHash = !!sessionStorage.getItem(STORAGE_KEY_CHAINSECURED_HASH);
+  if (hasWallet && hasHash) return true;
+  if (hasWallet || hasHash) clearChainSecuredSession();
+  return false;
 }
 
 /** Full sign-out: clears api-key, ChainSecured session, and the client cache. */
@@ -426,7 +436,7 @@ function renderModeBadge() {
        <p>Your wallet is the account identity. Writes are signed on-chain as transactions you authorize in your wallet.</p>
        <p class="mode-popover-hidden">Action runs use a usage API key from your account. Funding still uses your account billing.</p>`
     : `<strong>API mode</strong>
-       <p>Writes go through the Lit Express API using your account API key. Fastest path, no wallet popups.</p>`;
+       <p>Writes go through the Chipotle API using your account API key. Fastest path, no wallet popups.</p>`;
   let pillHtml = '';
   if (isChainSecured) {
     const wallet = getChainSecuredWallet();
