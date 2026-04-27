@@ -26,6 +26,12 @@ use ethers::types::{Address, H160, U256};
 use tracing::instrument;
 
 /// Create a new account. `initial_balance` is stored on the account's apiKey (AccountConfig.accountApiKey.balance).
+#[instrument(
+    name = "accounts::new_account",
+    level = "debug",
+    skip_all,
+    err
+)]
 pub async fn new_account(
     signer_pool: Arc<SignerPool>,
     api_key: &str,
@@ -50,6 +56,12 @@ pub async fn new_account(
 /// Check whether an account exists and is mutable. Uses an api_payer address as the
 /// simulated caller (msg.sender) because accountExistsAndIsMutable requires the
 /// caller to be an api_payer (for managed accounts) or the creator.
+#[instrument(
+    name = "accounts::account_exists",
+    level = "debug",
+    skip_all,
+    err
+)]
 pub async fn account_exists(api_key: &str) -> Result<bool> {
     let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
@@ -69,6 +81,12 @@ pub async fn account_exists(api_key: &str) -> Result<bool> {
 /// `permitted_actions` and `wallets` are keccak256 hashes (U256). Use `keccak256(action_ipfs_cid)` and `keccak256(pkp_public_key)` to produce them.
 /// `all_wallets_permitted` and `all_actions_permitted` match AccountConfig.sol Group fields.
 #[allow(clippy::too_many_arguments)]
+#[instrument(
+    name = "accounts::add_group",
+    level = "debug",
+    skip_all,
+    err
+)]
 pub async fn add_group(
     signer_pool: Arc<SignerPool>,
     api_key: &str,
@@ -112,6 +130,12 @@ pub async fn add_group(
 }
 
 /// Create a new action entry with name, description, and IPFS CID hash in the account's actionMetadata mapping.
+#[instrument(
+    name = "accounts::add_action",
+    level = "debug",
+    skip_all,
+    err
+)]
 pub async fn add_action(
     signer_pool: Arc<SignerPool>,
     api_key: &str,
