@@ -20,7 +20,13 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-const LIT_ACTIONS_SOCKET: &str = "/tmp/lit_actions.sock";
+pub const LIT_ACTIONS_SOCKET: &str = "/tmp/lit_actions.sock";
+
+/// Wrapper around the lit-actions socket path so it can be injected via
+/// Rocket managed state. Tests build the rocket with a path guaranteed not to
+/// exist so the reachability probe is hermetic; production wires in the real
+/// `/tmp/lit_actions.sock`.
+pub struct LitActionsSocketPath(pub PathBuf);
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HealthResponse {
@@ -39,18 +45,20 @@ async fn health(
     grpc_pool: &State<GrpcClientPool<tonic::transport::Channel>>,
     cpu_monitor: &State<CpuOverloadMonitor>,
     stripe_state: &State<Option<Arc<StripeState>>>,
+    socket_path: &State<LitActionsSocketPath>,
 ) -> (Status, Json<HealthResponse>) {
+    let socket_key = socket_path.0.to_string_lossy();
     // Check if we have a pooled gRPC connection to lit-actions.  If not, try
     // to connect (1s timeout via connect_to_socket).  This avoids the deadlock
     // where NLB marks the node unhealthy → no traffic → lazy connection never
     // established → stays unhealthy.  A successful connect also populates the
     // pool so subsequent probes are a cheap HashMap lookup.
-    let lit_actions_reachable = if grpc_pool.get_connection(LIT_ACTIONS_SOCKET).await.is_some() {
+    let lit_actions_reachable = if grpc_pool.get_connection(&socket_key).await.is_some() {
         true
     } else {
-        match unix::connect_to_socket(PathBuf::from(LIT_ACTIONS_SOCKET)).await {
+        match unix::connect_to_socket(socket_path.0.clone()).await {
             Ok(channel) => {
-                grpc_pool.add_connection(LIT_ACTIONS_SOCKET, channel).await;
+                grpc_pool.add_connection(&socket_key, channel).await;
                 true
             }
             Err(_) => false,
@@ -86,7 +94,31 @@ mod tests {
     use crate::core::v1::guards::cpu_overload::CpuOverloadMonitor;
     use rocket::local::asynchronous::Client;
     use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+    /// Build a per-test socket path under `temp_dir()` keyed by PID + a
+    /// monotonic counter, then assert it doesn't already exist. This keeps
+    /// the lit-actions reachability probe hermetic across concurrent test
+    /// runs and across machines where the previously-used hardcoded path
+    /// might (in theory) be created by something else.
+    fn unique_nonexistent_socket_path() -> PathBuf {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "lit_actions_test_{}_{}_{}.sock",
+            std::process::id(),
+            n,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        assert!(
+            !path.exists(),
+            "test socket path collided with existing file: {path:?}"
+        );
+        path
+    }
 
     fn build_rocket(
         overloaded: bool,
@@ -94,10 +126,17 @@ mod tests {
     ) -> rocket::Rocket<rocket::Build> {
         let pool = GrpcClientPool::<tonic::transport::Channel>::new();
         let monitor = CpuOverloadMonitor::new_with_flag(Arc::new(AtomicBool::new(overloaded)));
+        // Per-test path under temp_dir() so the lit-actions reachability probe
+        // is hermetic — otherwise the test would inherit whatever
+        // /tmp/lit_actions.sock happens to be on the host (e.g. a real
+        // lit-actions process running for local dev), which would flip the
+        // expected "unreachable" result to "reachable".
+        let socket = LitActionsSocketPath(unique_nonexistent_socket_path());
         rocket::build()
             .manage(pool)
             .manage(monitor)
             .manage(stripe_state)
+            .manage(socket)
             .mount("/", routes![health])
     }
 
