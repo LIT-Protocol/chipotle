@@ -3,7 +3,7 @@
  * Imports all feature modules and orchestrates initialization.
  */
 
-import { getApiKey, setTheme, getTheme, setApiKey, setOnAuthReady, updateStatCards, initLogin, setUsageKeyOverride, toggleOverrideEnabled, updateUsageKeyOverrideUI, clearOverrideState } from './auth.js';
+import { isAuthenticated, setTheme, getTheme, logOut, setOnAuthReady, updateStatCards, initLogin, setUsageKeyOverride, toggleOverrideEnabled, updateUsageKeyOverrideUI } from './auth.js';
 import { initModalClose, initConfirmClose, showStatus, hideStatus, logError } from './ui-utils.js';
 import { initBilling } from './billing.js';
 import { initGroups, loadGroups } from './groups.js';
@@ -15,8 +15,7 @@ import { initActionRunner } from './runner.js';
 // ----- Preload all tables (with error visibility) -----
 
 async function preloadAllTables() {
-  const apiKey = getApiKey();
-  if (!apiKey) return;
+  if (!isAuthenticated()) return;
   const results = await Promise.allSettled([
     loadGroups(),
     loadWallets(),
@@ -74,22 +73,60 @@ function setActionRunnerVisible(visible) {
   });
 }
 
-function initSidebar() {
+function setActiveSidebarLink(id) {
   document.querySelectorAll('.sidebar-link[data-scroll]').forEach((a) => {
+    a.classList.toggle('is-active', a.getAttribute('data-scroll') === id);
+  });
+}
+
+function initSidebar() {
+  // Bind to any element with data-scroll (sidebar links, stat cards, empty-state CTAs).
+  // Active-link styling stays sidebar-only via setActiveSidebarLink's selector.
+  document.querySelectorAll('[data-scroll]').forEach((a) => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
       const id = a.getAttribute('data-scroll');
       if (id === ACTION_RUNNER_ID) {
         setActionRunnerVisible(true);
-        const el = document.getElementById('section-' + id);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       } else {
         setActionRunnerVisible(false);
-        const el = document.getElementById('section-' + id);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
+      const el = document.getElementById('section-' + id);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setActiveSidebarLink(id);
     });
   });
+
+  // Scroll-spy: highlight sidebar link for whichever section is in view.
+  const sections = MAIN_SECTION_IDS
+    .map((id) => document.getElementById('section-' + id))
+    .filter(Boolean);
+  if (sections.length === 0 || !('IntersectionObserver' in window)) return;
+
+  const visible = new Map();
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        visible.set(entry.target.id, entry.intersectionRatio);
+      } else {
+        visible.delete(entry.target.id);
+      }
+    });
+    if (visible.size === 0) return;
+    let bestId = null;
+    let bestRatio = -1;
+    visible.forEach((ratio, sectionId) => {
+      if (ratio > bestRatio) {
+        bestRatio = ratio;
+        bestId = sectionId;
+      }
+    });
+    if (bestId) setActiveSidebarLink(bestId.replace(/^section-/, ''));
+  }, {
+    rootMargin: '-80px 0px -55% 0px',
+    threshold: [0, 0.1, 0.25, 0.5, 0.75, 1],
+  });
+  sections.forEach((el) => observer.observe(el));
 }
 
 // ----- Header (theme toggle, account dropdown, sign out) -----
@@ -142,8 +179,7 @@ function initHeader() {
     signoutBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       closeAccountDropdown();
-      clearOverrideState();
-      setApiKey('');
+      logOut();
     });
   }
 }

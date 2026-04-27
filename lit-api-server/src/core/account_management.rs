@@ -6,15 +6,15 @@ use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
-    AddUsageApiKeyRequest, DeleteActionRequest, NewAccountRequest, RemoveActionFromGroupRequest,
-    RemoveGroupRequest, RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest,
-    UpdateActionMetadataRequest, UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest,
-    UpdateUsageApiKeyRequest,
+    AddUsageApiKeyRequest, CreateWalletWithSignatureRequest, DeleteActionRequest,
+    NewAccountRequest, RemoveActionFromGroupRequest, RemoveGroupRequest, RemovePkpFromGroupRequest,
+    RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
+    UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
     AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse, ApiKeyItem,
-    ChainConfigKeysResponse, CreateWalletResponse, ListMetadataItem, NewAccountResponse,
-    NodeChainConfigResponse, WalletItem,
+    ChainConfigKeysResponse, CreateWalletResponse, CreateWalletWithSignatureResponse,
+    ListMetadataItem, NewAccountResponse, NodeChainConfigResponse, WalletItem,
 };
 use crate::dstack::v1::get_client_key;
 use crate::stripe::StripeState;
@@ -25,6 +25,7 @@ use crate::utils::parse_with_hash::{
 };
 use crate::{accounts, dstack};
 use elliptic_curve::group::GroupEncoding;
+use ethers::core::types::Signature as EthSignature;
 use ethers::signers::{LocalWallet, Signer};
 use ethers::types::{H160, U256};
 use ipfs_hasher::IpfsHasher;
@@ -160,6 +161,158 @@ pub async fn create_wallet(
 
     Ok(CreateWalletResponse {
         wallet_address: bytes_to_0x_hex(wallet_address.as_bytes()),
+    })
+}
+
+/// V1 SIWE-lite. ChainSecured users have no api key, so we authenticate
+/// PKP minting with a wallet signature instead. The server only mints —
+/// the client follows up with `registerWalletDerivation` signed by the
+/// same wallet to register the PKP on-chain.
+///
+/// Replay: ±5-minute timestamp window, no nonce store. Worst case is an
+/// extra unregistered PKP (compute cost only).
+const SIWE_TIMESTAMP_SKEW_SECONDS: i64 = 300;
+
+/// Parsed shape of a `create_wallet_with_signature` SIWE message.
+struct ParsedCreateWalletSiwe {
+    address: H160,
+    chain_id: u64,
+    issued_at: i64,
+}
+
+/// Parses a `create_wallet_with_signature` message. Required lines (case-sensitive):
+///   `Address: 0x…`
+///   `Chain ID: <u64>`
+///   `Issued At: <unix-seconds>`
+/// Other lines are ignored so callers can include domain/statement framing.
+fn parse_create_wallet_siwe(message: &str) -> Result<ParsedCreateWalletSiwe, ApiStatus> {
+    let mut address: Option<H160> = None;
+    let mut chain_id: Option<u64> = None;
+    let mut issued_at: Option<i64> = None;
+    for line in message.lines() {
+        if let Some(v) = line.strip_prefix("Address:") {
+            let trimmed = v.trim();
+            let bytes = hex_to_bytes(trimmed.trim_start_matches("0x")).map_err(|_| {
+                ApiStatus::bad_request(
+                    anyhow::anyhow!("Address line not valid hex"),
+                    "Address line not valid hex",
+                )
+            })?;
+            if bytes.len() != 20 {
+                return Err(ApiStatus::bad_request(
+                    anyhow::anyhow!("Address must be 20 bytes"),
+                    "Address must be 20 bytes",
+                ));
+            }
+            address = Some(H160::from_slice(&bytes));
+        } else if let Some(v) = line.strip_prefix("Chain ID:") {
+            chain_id = Some(v.trim().parse::<u64>().map_err(|_| {
+                ApiStatus::bad_request(
+                    anyhow::anyhow!("Chain ID line not a u64"),
+                    "Chain ID line not a u64",
+                )
+            })?);
+        } else if let Some(v) = line.strip_prefix("Issued At:") {
+            issued_at = Some(v.trim().parse::<i64>().map_err(|_| {
+                ApiStatus::bad_request(
+                    anyhow::anyhow!("Issued At line not a unix timestamp"),
+                    "Issued At line not a unix timestamp",
+                )
+            })?);
+        }
+    }
+    Ok(ParsedCreateWalletSiwe {
+        address: address.ok_or_else(|| {
+            ApiStatus::bad_request(
+                anyhow::anyhow!("Missing Address line"),
+                "Missing Address line",
+            )
+        })?,
+        chain_id: chain_id.ok_or_else(|| {
+            ApiStatus::bad_request(
+                anyhow::anyhow!("Missing Chain ID line"),
+                "Missing Chain ID line",
+            )
+        })?,
+        issued_at: issued_at.ok_or_else(|| {
+            ApiStatus::bad_request(
+                anyhow::anyhow!("Missing Issued At line"),
+                "Missing Issued At line",
+            )
+        })?,
+    })
+}
+
+/// Recovers the EIP-191 personal-sign signer for `message`.
+fn recover_eip191_signer(message: &str, signature_hex: &str) -> Result<H160, ApiStatus> {
+    let sig: EthSignature =
+        signature_hex
+            .trim()
+            .parse()
+            .map_err(|e: ethers::core::types::SignatureError| {
+                ApiStatus::bad_request(anyhow::anyhow!(e), "Invalid signature hex")
+            })?;
+    sig.recover(message.as_bytes().to_vec())
+        .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "Signature recovery failed"))
+}
+
+pub async fn create_wallet_with_signature(
+    req: Json<CreateWalletWithSignatureRequest>,
+) -> Result<CreateWalletWithSignatureResponse, ApiStatus> {
+    let parsed = parse_create_wallet_siwe(&req.message)?;
+    let signer = recover_eip191_signer(&req.message, &req.signature)?;
+    if signer != parsed.address {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Signature does not match claimed address"),
+            "Signature does not match claimed address",
+        ));
+    }
+
+    let node_config = GLOBAL_NODE_CONFIG
+        .get()
+        .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))
+        .map_err(|e| ApiStatus::internal_server_error(e, "GLOBAL_NODE_CONFIG missing"))?;
+    let expected_chain_id = node_config.chain.info().chain_id;
+    if parsed.chain_id != expected_chain_id {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!(
+                "Chain ID mismatch: message says {}, server is on {}",
+                parsed.chain_id,
+                expected_chain_id
+            ),
+            "Chain ID mismatch",
+        ));
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| {
+            ApiStatus::internal_server_error(
+                anyhow::anyhow!(e),
+                "System clock is before the Unix epoch",
+            )
+        })?
+        .as_secs() as i64;
+    if (now - parsed.issued_at).abs() > SIWE_TIMESTAMP_SKEW_SECONDS {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!(
+                "Issued At {} is outside the ±{}s window from now ({})",
+                parsed.issued_at,
+                SIWE_TIMESTAMP_SKEW_SECONDS,
+                now
+            ),
+            "Signed message timestamp is too old or too far in the future",
+        ));
+    }
+
+    tracing::info!(
+        "create_wallet_with_signature: minting PKP for ChainSecured signer {:?}",
+        signer
+    );
+    let (_public_key, wallet_address, _secret, derivation_u256) = create_new_wallet().await?;
+    Ok(CreateWalletWithSignatureResponse {
+        wallet_address: bytes_to_0x_hex(wallet_address.as_bytes()),
+        derivation_path: format!("0x{:x}", derivation_u256),
     })
 }
 

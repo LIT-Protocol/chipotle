@@ -8,3 +8,4 @@ docker-compose.deploy.yml
 dstack-cache/
 CLAUDE.MD
 .gstack/
+.gstack-design-audit/

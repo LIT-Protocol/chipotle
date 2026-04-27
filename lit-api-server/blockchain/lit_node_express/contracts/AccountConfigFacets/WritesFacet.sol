@@ -91,7 +91,7 @@ contract WritesFacet {
         if (!SecurityLib.isApiPayerOrOwner(msg.sender)) {
             if (managed) {
                 revert AppStorage.InvalidRequest(
-                    "unprivileged accounts must be unmanaged"
+                    "ChainSecured accounts must be unmanaged."
                 );
             }
             if (
@@ -99,12 +99,12 @@ contract WritesFacet {
                 uint256(keccak256(abi.encodePacked(msg.sender)))
             ) {
                 revert AppStorage.InvalidRequest(
-                    "unprivileged apiKeyHash must equal keccak256 of sender"
+                    "ChainSecured apiKeyHash must equal the keccak256 of the sender."
                 );
             }
             if (adminWalletAddress != msg.sender) {
                 revert AppStorage.InvalidRequest(
-                    "unprivileged adminWalletAddress must equal sender"
+                    "ChainSecured adminWalletAddress must equal the sender."
                 );
             }
         }

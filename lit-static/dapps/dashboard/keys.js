@@ -2,7 +2,7 @@
  * Usage API Keys — table rendering, CRUD, permission summary.
  */
 
-import { getEffectiveApiKey, getClient, getUsageKeysStore, setUsageKeysStore, getGroupsStore, setStat, updateStatCards, maskApiKey, LIST_PAGE_SIZE } from './auth.js';
+import { getEffectiveApiKey, isAuthenticated, getClient, getUsageKeysStore, setUsageKeysStore, getGroupsStore, setStat, updateStatCards, maskApiKey, LIST_PAGE_SIZE } from './auth.js';
 import { escapeHtml, showStatus, hideStatus, showActionProgress, closeActionProgress, openModal, closeModal, confirmDelete, copyToClipboard, formatError, logError, ICON_PENCIL, ICON_TRASH, ICON_COPY } from './ui-utils.js';
 import { buildGroupMultiSelect, attachGroupMultiSelectLogic, updateMultiSelectSummary, getSelectedGroupIds } from './groups.js';
 
@@ -107,7 +107,7 @@ export function renderUsageKeysTable() {
 
 export async function loadUsageKeys() {
   const apiKey = getEffectiveApiKey();
-  if (!apiKey) return [];
+  if (!isAuthenticated()) return [];
   hideStatus('overview-status-usage-keys');
   const btn = document.getElementById('btn-load-usage-keys');
   if (btn) btn.disabled = true;
@@ -203,7 +203,7 @@ function openUsageKeyModal(item = null) {
     const name = document.getElementById('modal-usage-name').value.trim() || 'Usage Key';
     const description = document.getElementById('modal-usage-desc').value.trim() || '';
     const apiKey = getEffectiveApiKey();
-    if (!apiKey) {
+    if (!isAuthenticated()) {
       showStatus('overview-status-usage-keys', 'Log in first.', 'error');
       return;
     }
@@ -301,7 +301,7 @@ async function confirmAndRemoveUsageKey(item) {
   const confirmed = await confirmDelete(msg);
   if (!confirmed) return;
   const apiKey = getEffectiveApiKey();
-  if (!apiKey) return;
+  if (!isAuthenticated()) return;
   hideStatus('overview-status-usage-keys');
   try {
     showActionProgress('Removing usage API key', `Removing usage API key "${masked}".`);
