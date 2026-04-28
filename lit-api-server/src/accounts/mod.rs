@@ -48,6 +48,30 @@ pub async fn new_account(
     send_transaction(function_call, signer_pool, signer_address, client).await
 }
 
+/// Reassign a managed account's admin wallet to a user-controlled address and flip it
+/// to ChainSecured (unmanaged). One-way: the contract reverts if the account is already
+/// unmanaged. Caller must be an api_payer.
+#[instrument(
+    name = "accounts::convert_to_chain_secured_account",
+    level = "debug",
+    skip_all,
+    err
+)]
+pub async fn convert_to_chain_secured_account(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    new_admin_wallet_address: H160,
+) -> Result<bool> {
+    let (contract, signer_address, client) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
+    let api_key_hash = api_key_hash(api_key);
+    let function_call =
+        contract.convert_to_chain_secured_account(api_key_hash, new_admin_wallet_address);
+    let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
+    blockchain_cache::invalidate_for_account(api_key).await;
+    Ok(result)
+}
+
 /// Check whether an account exists and is mutable. Uses an api_payer address as the
 /// simulated caller (msg.sender) because accountExistsAndIsMutable requires the
 /// caller to be an api_payer (for managed accounts) or the creator.

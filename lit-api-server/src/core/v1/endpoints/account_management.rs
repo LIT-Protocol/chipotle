@@ -8,10 +8,10 @@ use crate::core::v1::helpers::api_status::{ApiResult, ErrMessage};
 use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
-    AddUsageApiKeyRequest, CreateWalletWithSignatureRequest, DeleteActionRequest,
-    NewAccountRequest, RemoveActionFromGroupRequest, RemoveGroupRequest, RemovePkpFromGroupRequest,
-    RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
-    UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
+    AddUsageApiKeyRequest, ConvertToChainSecuredAccountRequest, CreateWalletWithSignatureRequest,
+    DeleteActionRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemoveGroupRequest,
+    RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest, UpdateActionMetadataRequest,
+    UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
     AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse, ApiKeyItem,
@@ -37,6 +37,30 @@ pub(super) async fn new_account(
                 signer_pool.inner().clone(),
                 stripe_state.inner().clone(),
                 new_account_request,
+            )
+            .await,
+        )
+        .into(),
+    }
+}
+
+#[openapi(tag = "Account Management")]
+#[post(
+    "/convert_to_chain_secured_account",
+    format = "json",
+    data = "<req>"
+)]
+pub(super) async fn convert_to_chain_secured_account(
+    signer_pool: &State<Arc<SignerPool>>,
+    api_key: BilledManagementApiKey,
+    req: Json<ConvertToChainSecuredAccountRequest>,
+) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(
+            account_management::convert_to_chain_secured_account(
+                signer_pool.inner().clone(),
+                api_key.0.as_str(),
+                req,
             )
             .await,
         )
