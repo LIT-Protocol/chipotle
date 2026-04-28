@@ -5,7 +5,7 @@ name: k6 Client Check
 
 on:
   push:
-    branches: [main, next]
+    branches: [main]
   pull_request:
 
 permissions:
