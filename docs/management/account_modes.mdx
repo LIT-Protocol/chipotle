@@ -169,77 +169,126 @@ the wallet to sign; API-mode operations submit immediately. Billing,
 balance display, and Add Funds are identical in both modes — Stripe
 credits fund Lit Action execution either way.
 
+API-mode users see one extra item in the account dropdown: **Convert to
+ChainSecured**, which kicks off the conversion flow described below.
+
 ## Converting an API account to ChainSecured
 
-There is no in-place flag flip. An API account has `managed = true`, a
-ChainSecured account has `managed = false`, and the on-chain owner address
-differs. Conversion means re-anchoring the account to a wallet-owned
-identity and migrating its resources.
+Conversion flips a managed account to unmanaged in a single on-chain
+transaction. The account's on-chain `apiKeyHash` is preserved, so groups,
+PKPs, action metadata, usage API keys, and the Stripe credit balance all
+stay attached to the same account record. Only the admin wallet address
+and the `managed` flag change.
 
-<Note>
-The conversion tooling itself is delivered separately under issue
-**CPL-277** ("Convert an API-based account to a ChainSecured account").
-The flow described below is the supported migration path; the exact
-endpoint names may shift before that work merges.
-</Note>
+The contract function is
+`WritesFacet.convertToChainSecuredAccount(uint256 apiKeyHash, address newAdminWalletAddress)`,
+which is `apiPayerOrOwner`-gated. End users don't call it directly — they
+call `POST /core/v1/convert_to_chain_secured_account` with their existing
+API key plus a wallet-signed proof of ownership of the new admin address;
+the server's api\_payer signs the on-chain conversion on their behalf.
 
-### What gets migrated
+### What's preserved
 
-- **Groups** (and their permitted PKP IDs and CID hashes)
-- **PKPs** (derivation paths, names, descriptions)
-- **Action metadata** (registered IPFS CID names and descriptions)
-- **Usage API keys** are *not* automatically copied. Mint fresh usage keys
-  from the new ChainSecured account so their permissions are signed by the
-  new owner.
+- The on-chain `apiKeyHash` (so all child resources stay attached).
+- **Groups** (permitted PKP IDs and CID hashes).
+- **PKPs** (derivation paths, names, descriptions).
+- **Action metadata** (registered IPFS CID names and descriptions).
+- **Usage API keys** — they continue to authorize Lit Action execution
+  exactly as before.
+- **Stripe credit balance** — the wallet\_cache entry is invalidated on
+  conversion so billing routes to the new admin wallet's customer record
+  immediately.
 
-Action CIDs themselves are content-addressed and globally referenceable —
-they don't need to be "moved", just re-listed in the new account's groups.
-Stripe credit balance does not move with the account.
+### What changes
 
-### Step-by-step
+- `account.adminWalletAddress` becomes the new wallet you signed with.
+- `account.managed` flips from `true` to `false`.
+- Admin write authority moves entirely to the connected wallet. The
+  original master API key can no longer authorize writes on this account
+  (the contract rejects api\_payer relays for unmanaged accounts).
+- Read endpoints that key off `apiKeyHash` continue to resolve to the
+  same account.
 
-1. **Pick the wallet that will own the converted account.** This can be an
-   EOA you already control, a freshly deployed Safe with your desired
-   signer set, or any contract account on Base. The chosen wallet must be
-   able to sign and pay gas for several Base transactions.
-2. **Connect that wallet to the dashboard** in ChainSecured mode (or
-   construct an SDK client with `mode: 'sovereign'` and that signer).
-3. **Run the conversion call.** From the API account (still authenticated
-   with the existing API key), call the conversion endpoint with the
-   target wallet address. The server validates that the API account exists
-   and is mutable, then submits an on-chain `transferOwnership`-style
-   transaction to the `AccountConfig` contract. After it lands, the
-   account's on-chain admin address is the new wallet and `managed` is
-   flipped to `false`.
-4. **Re-mint usage keys.** Sign in with the new wallet, open Usage API
-   Keys in the dashboard (or call `addUsageApiKey` from the SDK with
-   `mode: 'sovereign'`), and create the keys your dApp needs. Existing
-   usage keys minted before the conversion stop being honored once the
-   admin changes.
-5. **Revoke the old API key.** From the new ChainSecured session, remove
-   the original account-level API key so no one can write to the account
-   via the legacy credential path.
-6. **Update your clients.** Anywhere you stored the old API key for admin
-   calls, switch to wallet signatures (or the new SDK config with
-   `mode: 'sovereign'`). Calls that *only* execute Lit Actions can keep
-   using a usage API key — execution is identical in both modes; only the
-   admin path changes.
+### Step-by-step (dashboard)
+
+1. **Sign in to the dashboard in API mode** with your existing master API
+   key.
+2. Open the account dropdown and click **Convert to ChainSecured**.
+   Confirm the irreversible-action prompt.
+3. **Connect the wallet** that will become the new admin (EOA, Safe, or
+   any contract account on Base). The dashboard prompts a chain switch if
+   your wallet isn't on the chain reported by `GET /get_node_chain_config`.
+4. **Sign the SIWE-style ownership-transfer message.** The dashboard
+   composes:
+   ```
+   <host> wants you to take admin ownership of this account.
+
+   Address: <new admin address>
+   Chain ID: <chain id>
+   Issued At: <unix seconds>
+   ```
+   Your wallet produces an EIP-191 `personal_sign` signature.
+5. The dashboard `POST`s `/core/v1/convert_to_chain_secured_account` with
+   `{ new_admin_wallet_address, message, signature }` and your existing
+   API key in the header. The server verifies the address matches the
+   recovered signer, the chain ID matches the node, and the `Issued At`
+   timestamp is within ±300 seconds, then has the api\_payer submit the
+   on-chain conversion.
+6. On success, the dashboard switches mode to `sovereign`, clears the
+   stored API key, persists the wallet + preserved `apiKeyHash` to the
+   ChainSecured session, and reloads.
+
+### Step-by-step (SDK)
+
+```javascript
+import { createClient } from './core_sdk.js';
+import { ethers } from 'ethers';
+
+// Sign in with API mode (default) and your existing master API key.
+const client = createClient('https://api.chipotle.litprotocol.com');
+
+// Connect the wallet that will become the new on-chain admin.
+const provider = new ethers.BrowserProvider(window.ethereum);
+const signer = await provider.getSigner();
+
+// Look up the chain id the server expects so the SIWE message matches.
+const cfg = await client.getNodeChainConfig();
+
+const res = await client.convertToChainSecuredAccount({
+  apiKey: existingApiKey,
+  signer,
+  chainId: Number(cfg.chain_id),
+});
+console.log('New admin wallet:', res.wallet_address);
+console.log('Preserved apiKeyHash:', res.api_key_hash);
+```
+
+`convertToChainSecuredAccount` is API-mode only and throws if called from
+a sovereign-mode client. The returned `api_key_hash` is the same hash the
+account had before conversion — keep it around if you need to seed a
+sovereign-mode session for this account (the dashboard does this for you
+automatically).
 
 ### Things to verify after conversion
 
-- `accountExistsByHash(adminHash)` returns `true`, where `adminHash` is
-  `ethers.solidityPackedKeccak256(['address'], [walletAddress])` (matches
-  the contract's `keccak256(abi.encodePacked(msg.sender))`).
-- `accountExists(<old apiKey>)` returns `false`.
-- All groups, PKPs, and action CIDs you expect are visible in the
-  dashboard under the new wallet session.
-- A trial Lit Action run with a freshly minted usage key succeeds.
+- `accountExistsByHash(api_key_hash)` returns `true` from the wallet
+  context, where `api_key_hash` is the value returned by
+  `convertToChainSecuredAccount` (the preserved on-chain hash).
+- An admin write attempted with the original API key (e.g.
+  `addUsageApiKey`) fails — the contract rejects it now that the account
+  is unmanaged.
+- An admin write signed by the new wallet succeeds.
+- All groups, PKPs, action CIDs, and existing usage API keys are visible
+  in the dashboard under the new wallet session, and a Lit Action run
+  with one of those usage keys still succeeds.
+- The Stripe credit balance is unchanged.
 
 ### Reverse direction
 
-There is no path back from ChainSecured to API mode. If you need a managed
-account again, create a new one with `newAccount` and re-add the
-resources you want.
+There is no path back from ChainSecured to API mode. The contract reverts
+`convertToChainSecuredAccount` if the account is already unmanaged. If
+you need a managed account again, create a new one with `newAccount`
+and re-add resources manually.
 
 ## Further reading
 
