@@ -746,6 +746,11 @@ body.has-api-key .dashboard-wrap {
   background: rgba(248, 113, 113, 0.12);
 }
 
+/* Mode-conditional UI: hide ChainSecured-only items in API mode (CPL-276). */
+body:not(.is-chainsecured) .is-chainsecured-only {
+  display: none !important;
+}
+
 .topbar-title {
   font-size: 1.25rem;
   font-weight: 700;

@@ -135,11 +135,16 @@ Radii:
 
 ## Mode-conditional UI
 
-The dashboard exposes the same surface in both modes. Body classes are
-available for future gating but no features are currently hidden by mode:
+The dashboard exposes the same core surface in both modes. Body classes drive
+mode-specific gating via CSS:
 
 - `body.has-api-key` — set after successful API-mode login.
 - `body.is-chainsecured` — set after successful wallet connect.
+
+Mode-conditional elements use the `.is-chainsecured-only` class — hidden in API
+mode via `body:not(.is-chainsecured) .is-chainsecured-only { display: none }`.
+Today this gates the **ChainSecured RPC URL** override (Account → RPC URL),
+which is meaningless in API mode.
 
 Action Runner, Wallets, Actions, and Usage Keys all render in both modes.
 ChainSecured admin operations (add action, mint usage key) are signed by the
