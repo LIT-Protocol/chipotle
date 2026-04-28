@@ -826,9 +826,17 @@ export async function convertToChainSecured() {
       }
       ({ signer } = await connectEoa());
     }
-    showActionProgress('Convert to ChainSecured', 'Sign the ownership transfer message in your wallet…');
+    // The SDK call is one opaque await: wallet sign → server signs+broadcasts
+    // the on-chain tx → server awaits inclusion → returns. By the time it
+    // resolves the conversion is already on-chain, so the progress text
+    // covers both phases (sign + submit) before the await rather than
+    // claiming a phase that has already happened after.
+    showActionProgress(
+      'Convert to ChainSecured',
+      'Sign in your wallet, then we submit the conversion on-chain (this may take ~10–30 seconds)…',
+    );
     const res = await client.convertToChainSecuredAccount({ apiKey, signer, chainId: expectedChainId });
-    showActionProgress('Convert to ChainSecured', 'Submitting conversion on-chain…');
+    showActionProgress('Convert to ChainSecured', 'Conversion confirmed. Switching to ChainSecured mode…');
     setMode('sovereign');
     setApiKey('');
     await setChainSecuredSession({ walletAddress: res.wallet_address, apiKeyHash: res.api_key_hash });

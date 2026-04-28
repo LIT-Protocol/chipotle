@@ -342,6 +342,12 @@ pub async fn convert_to_chain_secured_account(
         ));
     }
     let claimed_address = H160::from_slice(&claimed_address_bytes);
+    if claimed_address == H160::zero() {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("new_admin_wallet_address must be non-zero"),
+            "new_admin_wallet_address must be non-zero",
+        ));
+    }
 
     let parsed = parse_create_wallet_siwe(&req.message)?;
     if parsed.address != claimed_address {

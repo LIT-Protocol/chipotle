@@ -623,7 +623,6 @@ export class LitNodeSimpleApiClient {
     }
     if (!apiKey) throw new Error('convertToChainSecuredAccount requires apiKey');
     if (!signer) throw new Error('convertToChainSecuredAccount requires a connected signer');
-    const ethers = await loadEthers();
     const newAdminAddress = await signer.getAddress();
     const targetChainId = chainId ?? this.chainId;
     if (targetChainId == null) {
@@ -643,7 +642,9 @@ export class LitNodeSimpleApiClient {
       }),
     });
     await parseResponse(res, 'convert_to_chain_secured_account');
-    const apiKeyHash = ethers.keccak256(ethers.toUtf8Bytes(apiKey));
+    // Reuse the canonical hash helper so this stays in sync with the
+    // server-side `api_key_hash` if the convention ever changes.
+    const apiKeyHash = await this._apiKeyHash(apiKey);
     return { wallet_address: newAdminAddress, api_key_hash: apiKeyHash };
   }
 
