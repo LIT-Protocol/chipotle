@@ -17,7 +17,7 @@
 
 import { ACCOUNT_CONFIG_VIEW_ABI } from './account_config_view_abi.js';
 
-export const ACCOUNT_CONFIG_ABI_VERSION = '2026-04-21.1';
+export const ACCOUNT_CONFIG_ABI_VERSION = '2026-04-24.1';
 
 const WRITE_FUNCTIONS = [
   {
@@ -197,9 +197,19 @@ const WRITE_FUNCTIONS = [
       { internalType: 'bool', name: 'managed', type: 'bool' },
       { internalType: 'string', name: 'accountName', type: 'string' },
       { internalType: 'string', name: 'accountDescription', type: 'string' },
-      { internalType: 'address', name: 'creatorWalletAddress', type: 'address' },
+      { internalType: 'address', name: 'adminWalletAddress', type: 'address' },
     ],
     name: 'newAccount',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'string', name: 'accountName', type: 'string' },
+      { internalType: 'string', name: 'accountDescription', type: 'string' },
+    ],
+    name: 'newChainSecuredAccount',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
@@ -331,6 +341,11 @@ export const ACCOUNT_CONFIG_DEPLOYMENTS = Object.freeze({});
  * has no pinned bytecode hash yet (local anvil, a fresh testnet deploy, etc.).
  * Browser-only: checks `window` / `globalThis` for a truthy flag.
  *
+ * Auto-enables on `localhost`, `127.0.0.1`, and `[::1]` so a contributor doing
+ * `python -m http.server` against a local anvil isn't blocked by drift checks.
+ * On any other hostname (including LAN IPs and *.local), the override is
+ * strictly opt-in via `window.LIT_ACCOUNT_CONFIG_ALLOW_UNPINNED_DEPLOYMENTS`.
+ *
  * Shipping dashboards MUST either populate ACCOUNT_CONFIG_DEPLOYMENTS with the
  * target (chainId, address) entries or pass them via `deployments` option;
  * otherwise sovereign writes hard-fail. See _verifyAbiIntegrity.
@@ -342,6 +357,10 @@ export function isAbiDriftDevOverrideEnabled() {
   if (typeof v === 'string') {
     const s = v.trim().toLowerCase();
     return s === '1' || s === 'true' || s === 'yes' || s === 'on';
+  }
+  if (typeof location !== 'undefined' && location.hostname) {
+    const h = location.hostname;
+    if (h === 'localhost' || h === '127.0.0.1' || h === '[::1]') return true;
   }
   return false;
 }

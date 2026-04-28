@@ -1164,10 +1164,35 @@ pub mod account_config {
                                 ),
                             },
                             ::ethers::core::abi::ethabi::Param {
-                                name: ::std::borrow::ToOwned::to_owned("creatorWalletAddress",),
+                                name: ::std::borrow::ToOwned::to_owned("adminWalletAddress",),
                                 kind: ::ethers::core::abi::ethabi::ParamType::Address,
                                 internal_type: ::core::option::Option::Some(
                                     ::std::borrow::ToOwned::to_owned("address"),
+                                ),
+                            },
+                        ],
+                        outputs: ::std::vec![],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("newChainSecuredAccount"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("newChainSecuredAccount",),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("accountName"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("string"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("accountDescription",),
+                                kind: ::ethers::core::abi::ethabi::ParamType::String,
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("string"),
                                 ),
                             },
                         ],
@@ -1996,7 +2021,7 @@ pub mod account_config {
                                 indexed: true,
                             },
                             ::ethers::core::abi::ethabi::EventParam {
-                                name: ::std::borrow::ToOwned::to_owned("creator"),
+                                name: ::std::borrow::ToOwned::to_owned("admin"),
                                 kind: ::ethers::core::abi::ethabi::ParamType::Address,
                                 indexed: true,
                             },
@@ -3193,7 +3218,7 @@ pub mod account_config {
             managed: bool,
             account_name: ::std::string::String,
             account_description: ::std::string::String,
-            creator_wallet_address: ::ethers::core::types::Address,
+            admin_wallet_address: ::ethers::core::types::Address,
         ) -> ::ethers::contract::builders::ContractCall<M, ()> {
             self.0
                 .method_hash(
@@ -3203,9 +3228,19 @@ pub mod account_config {
                         managed,
                         account_name,
                         account_description,
-                        creator_wallet_address,
+                        admin_wallet_address,
                     ),
                 )
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `newChainSecuredAccount` (0x4dbebfe5) function
+        pub fn new_chain_secured_account(
+            &self,
+            account_name: ::std::string::String,
+            account_description: ::std::string::String,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([77, 190, 191, 229], (account_name, account_description))
                 .expect("method not found (this should never happen)")
         }
         ///Calls the contract's `nodeConfigurationKeys` (0x6066dc14) function
@@ -4549,7 +4584,7 @@ pub mod account_config {
         #[ethevent(indexed)]
         pub api_key_hash: ::ethers::core::types::U256,
         #[ethevent(indexed)]
-        pub creator: ::ethers::core::types::Address,
+        pub admin: ::ethers::core::types::Address,
         pub managed: bool,
     }
     #[derive(
@@ -5889,7 +5924,28 @@ pub mod account_config {
         pub managed: bool,
         pub account_name: ::std::string::String,
         pub account_description: ::std::string::String,
-        pub creator_wallet_address: ::ethers::core::types::Address,
+        pub admin_wallet_address: ::ethers::core::types::Address,
+    }
+    ///Container type for all input parameters for the `newChainSecuredAccount` function with signature `newChainSecuredAccount(string,string)` and selector `0x4dbebfe5`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(
+        name = "newChainSecuredAccount",
+        abi = "newChainSecuredAccount(string,string)"
+    )]
+    pub struct NewChainSecuredAccountCall {
+        pub account_name: ::std::string::String,
+        pub account_description: ::std::string::String,
     }
     ///Container type for all input parameters for the `nodeConfigurationKeys` function with signature `nodeConfigurationKeys()` and selector `0x6066dc14`
     #[derive(
@@ -6476,6 +6532,7 @@ pub mod account_config {
         ListPkps(ListPkpsCall),
         ListWalletsInGroup(ListWalletsInGroupCall),
         NewAccount(NewAccountCall),
+        NewChainSecuredAccount(NewChainSecuredAccountCall),
         NodeConfigurationKeys(NodeConfigurationKeysCall),
         NodeConfigurationValue(NodeConfigurationValueCall),
         NodeConfigurationValues(NodeConfigurationValuesCall),
@@ -6648,6 +6705,11 @@ pub mod account_config {
             }
             if let Ok(decoded) = <NewAccountCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::NewAccount(decoded));
+            }
+            if let Ok(decoded) =
+                <NewChainSecuredAccountCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::NewChainSecuredAccount(decoded));
             }
             if let Ok(decoded) =
                 <NodeConfigurationKeysCall as ::ethers::core::abi::AbiDecode>::decode(data)
@@ -6841,6 +6903,9 @@ pub mod account_config {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
                 Self::NewAccount(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::NewChainSecuredAccount(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
                 Self::NodeConfigurationKeys(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
@@ -6940,6 +7005,7 @@ pub mod account_config {
                 Self::ListPkps(element) => ::core::fmt::Display::fmt(element, f),
                 Self::ListWalletsInGroup(element) => ::core::fmt::Display::fmt(element, f),
                 Self::NewAccount(element) => ::core::fmt::Display::fmt(element, f),
+                Self::NewChainSecuredAccount(element) => ::core::fmt::Display::fmt(element, f),
                 Self::NodeConfigurationKeys(element) => ::core::fmt::Display::fmt(element, f),
                 Self::NodeConfigurationValue(element) => ::core::fmt::Display::fmt(element, f),
                 Self::NodeConfigurationValues(element) => ::core::fmt::Display::fmt(element, f),
@@ -7134,6 +7200,11 @@ pub mod account_config {
     impl ::core::convert::From<NewAccountCall> for AccountConfigCalls {
         fn from(value: NewAccountCall) -> Self {
             Self::NewAccount(value)
+        }
+    }
+    impl ::core::convert::From<NewChainSecuredAccountCall> for AccountConfigCalls {
+        fn from(value: NewChainSecuredAccountCall) -> Self {
+            Self::NewChainSecuredAccount(value)
         }
     }
     impl ::core::convert::From<NodeConfigurationKeysCall> for AccountConfigCalls {

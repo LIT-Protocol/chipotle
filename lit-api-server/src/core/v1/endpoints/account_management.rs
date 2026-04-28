@@ -8,15 +8,15 @@ use crate::core::v1::helpers::api_status::{ApiResult, ErrMessage};
 use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
-    AddUsageApiKeyRequest, DeleteActionRequest, NewAccountRequest, RemoveActionFromGroupRequest,
-    RemoveGroupRequest, RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest,
-    UpdateActionMetadataRequest, UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest,
-    UpdateUsageApiKeyRequest,
+    AddUsageApiKeyRequest, CreateWalletWithSignatureRequest, DeleteActionRequest,
+    NewAccountRequest, RemoveActionFromGroupRequest, RemoveGroupRequest, RemovePkpFromGroupRequest,
+    RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
+    UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
     AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse, ApiKeyItem,
-    ChainConfigKeysResponse, CreateWalletResponse, ListMetadataItem, NewAccountResponse,
-    NodeChainConfigResponse, WalletItem,
+    ChainConfigKeysResponse, CreateWalletResponse, CreateWalletWithSignatureResponse,
+    ListMetadataItem, NewAccountResponse, NodeChainConfigResponse, WalletItem,
 };
 use crate::stripe::StripeState;
 use rocket::State;
@@ -182,6 +182,16 @@ pub(super) async fn create_wallet(
                 .await,
         )
         .into(),
+    }
+}
+
+#[openapi(tag = "Account Management")]
+#[post("/create_wallet_with_signature", format = "json", data = "<req>")]
+pub(super) async fn create_wallet_with_signature(
+    req: Json<CreateWalletWithSignatureRequest>,
+) -> OpenApiResponse<CreateWalletWithSignatureResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(account_management::create_wallet_with_signature(req).await).into(),
     }
 }
 

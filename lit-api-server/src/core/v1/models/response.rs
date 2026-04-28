@@ -17,6 +17,18 @@ pub struct CreateWalletResponse {
     pub wallet_address: String,
 }
 
+/// Returned by `/create_wallet_with_signature`. The client must follow up with
+/// an on-chain `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)`
+/// call signed by the same wallet — until that lands, the PKP exists in MPC but
+/// is not registered to any account.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CreateWalletWithSignatureResponse {
+    pub wallet_address: String,
+    /// 0x-prefixed lowercase hex (uint256). Pass through verbatim to
+    /// `registerWalletDerivation`'s `derivationPath` arg.
+    pub derivation_path: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LitActionResponse {
     pub response: serde_json::Value,

@@ -172,6 +172,26 @@ pub struct ConfirmPaymentRequest {
     pub payment_intent_id: String,
 }
 
+/// ChainSecured wallet creation. The client builds a SIWE-style message
+/// and signs it with their wallet; the server verifies the signature, mints
+/// a PKP via DStack MPC, and returns the new wallet address + derivation
+/// path so the client can register it on-chain via `registerWalletDerivation`.
+///
+/// V1 does not maintain a server-side nonce store. The server enforces a
+/// ±5-minute window on the message's `Issued At` timestamp, which is the
+/// only replay protection. Worst-case replay just mints an extra PKP
+/// (compute cost only — registration still requires a separate wallet
+/// signature on-chain).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CreateWalletWithSignatureRequest {
+    /// EIP-191 plaintext message that was signed. Must contain
+    /// `Address: 0x…`, `Chain ID: <u64>`, and `Issued At: <unix-seconds>`
+    /// lines (case-sensitive prefixes).
+    pub message: String,
+    /// 0x-prefixed hex signature (65 bytes — r||s||v, EIP-191 personal-sign).
+    pub signature: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct EncryptRequest {
     pub api_key: String,

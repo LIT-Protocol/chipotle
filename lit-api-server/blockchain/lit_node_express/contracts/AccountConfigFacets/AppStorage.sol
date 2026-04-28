@@ -42,7 +42,6 @@ library AppStorage {
     error NotAllowedToManageIPFSIdsInGroup(uint256 apiKeyHash, uint256 groupId);
     error InvalidRequest(string message);
     error OnlyConfigOperatorOrOwner(address caller);
-    
 
     struct PkpData {
         uint256 id; // keccak256 of the pkp id - this is used to prove existence of the struct.
@@ -83,7 +82,7 @@ library AppStorage {
     /// @notice Account struct for accounts.
     struct Account {
         UsageApiKey accountApiKey; // the api key that is used to access the account
-        address creatorWalletAddress; // wallet address of the creator of the account
+        address adminWalletAddress; // admin/owner wallet address for the account; not necessarily the transaction creator
         // Usage API Keys are rotatable keys that can be used to fund the account
         EnumerableSet.UintSet usageApiKeysList; // set of usage api keys that the account is a member of
         mapping(uint256 => UsageApiKey) usageApiKeys; // mapping from a keccak256 of a usage api key to it's config
@@ -149,7 +148,7 @@ library AppStorage {
             return false;
         if (s.api_payers.contains(sender) && account.managed == true)
             return true;
-        return account.creatorWalletAddress == sender;
+        return account.adminWalletAddress == sender;
     }
 
     /// @notice Returns whether a group exists for the account (and reverts if account is not mutable by caller).

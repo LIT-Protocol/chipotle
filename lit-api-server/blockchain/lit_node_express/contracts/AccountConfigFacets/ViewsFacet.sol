@@ -91,17 +91,26 @@ contract ViewsFacet {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         return s.nodeConfigurationKeys.values();
     }
-    function nodeConfigurationValue(string memory key) public view returns (string memory) {
+    function nodeConfigurationValue(
+        string memory key
+    ) public view returns (string memory) {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         return s.nodeConfigurationValues[key];
     }
 
-    function nodeConfigurationValues() public view returns (KeyValueReturn[] memory) {
+    function nodeConfigurationValues()
+        public
+        view
+        returns (KeyValueReturn[] memory)
+    {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
         uint256 length = s.nodeConfigurationKeys.length();
         KeyValueReturn[] memory values = new KeyValueReturn[](length);
         for (uint256 i = 0; i < length; i++) {
-            values[i] = KeyValueReturn(s.nodeConfigurationKeys.at(i), s.nodeConfigurationValues[s.nodeConfigurationKeys.at(i)]);
+            values[i] = KeyValueReturn(
+                s.nodeConfigurationKeys.at(i),
+                s.nodeConfigurationValues[s.nodeConfigurationKeys.at(i)]
+            );
         }
         return values;
     }
@@ -112,15 +121,16 @@ contract ViewsFacet {
         return AppStorage.accountExistsAndIsMutable(apiKeyHash, msg.sender);
     }
 
-    /// @notice Return the creator wallet address for the account that owns the given API key.
+    /// @notice Return the admin/owner wallet address for the account that owns the given API key.
     /// @dev Works with both master and usage API key hashes (resolves via allApiKeyHashesToMaster).
+    ///      The admin wallet is set at account creation and is not necessarily the transaction creator.
     /// @param apiKeyHash keccak256 of a master or usage API key (base64-encoded).
-    /// @return The creator wallet address stored on the resolved master account.
+    /// @return The admin/owner wallet address stored on the resolved master account.
     function getAccountWalletAddress(
         uint256 apiKeyHash
     ) public view returns (address) {
         AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
-        return account.creatorWalletAddress;
+        return account.adminWalletAddress;
     }
 
     function getWalletDerivation(

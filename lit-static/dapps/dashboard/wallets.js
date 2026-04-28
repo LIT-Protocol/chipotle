@@ -2,7 +2,7 @@
  * Wallets — table rendering, CRUD.
  */
 
-import { getEffectiveApiKey, getClient, getWalletsStore, setWalletsStore, setStat, updateStatCards, LIST_PAGE_SIZE } from './auth.js';
+import { getEffectiveApiKey, isAuthenticated, getClient, getWalletsStore, setWalletsStore, setStat, updateStatCards, LIST_PAGE_SIZE } from './auth.js';
 import { escapeHtml, showStatus, hideStatus, showActionProgress, closeActionProgress, openModal, closeModal, copyToClipboard, formatError, logError } from './ui-utils.js';
 
 // ----- Table rendering -----
@@ -42,7 +42,7 @@ export function renderWalletsTable(items) {
 
 export async function loadWallets() {
   const apiKey = getEffectiveApiKey();
-  if (!apiKey) return;
+  if (!isAuthenticated()) return;
   hideStatus('wallets-status');
   const btn = document.getElementById('btn-load-wallets');
   if (btn) btn.disabled = true;
@@ -75,7 +75,7 @@ function openAddWalletModal() {
   document.getElementById('modal-cancel-btn').addEventListener('click', closeModal);
   document.getElementById('modal-add-btn').addEventListener('click', async () => {
     const apiKey = getEffectiveApiKey();
-    if (!apiKey) return;
+    if (!isAuthenticated()) return;
     const addBtn = document.getElementById('modal-add-btn');
     if (addBtn) addBtn.disabled = true;
     closeModal();
@@ -83,7 +83,7 @@ function openAddWalletModal() {
     try {
       showActionProgress('Creating wallet', 'Creating and registering a new wallet for this account.');
       const client = await getClient();
-      const res = await client.createWallet(apiKey);
+      const res = await client.createWallet({ apiKey });
       await loadWallets();
       showStatus('wallets-status', 'Wallet created: ' + (res.wallet_address || ''), 'success');
     } catch (e) {
