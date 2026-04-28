@@ -11,6 +11,10 @@ const STORAGE_KEY_OVERRIDE_ENABLED = 'accountconfig_usage_override_enabled';
 const STORAGE_KEY_MODE = 'accountconfig_mode';
 const STORAGE_KEY_CHAINSECURED_WALLET = 'accountconfig_chainsecured_wallet';
 const STORAGE_KEY_CHAINSECURED_HASH = 'accountconfig_chainsecured_hash';
+const STORAGE_KEY_CHAINSECURED_RPC = 'accountconfig_chainsecured_rpc_url';
+const STORAGE_KEY_CHAINSECURED_RPC_PANEL = 'accountconfig_chainsecured_rpc_panel_visible';
+const DEFAULT_CHAINSECURED_RPC_URL_REMOTE = 'https://base-rpc.publicnode.com';
+const DEFAULT_CHAINSECURED_RPC_URL_LOCAL = 'http://127.0.0.1:8545';
 export const LIST_PAGE_SIZE = '20';
 
 /**
@@ -174,11 +178,72 @@ export function clearOverrideState() {
   setUsageKeyOverride('');
 }
 
+// ----- ChainSecured RPC URL override (CPL-276) -----
+
+/** True when the dashboard is served from a localhost origin. Shared by
+ *  `getBaseUrl()` and `getDefaultChainSecuredRpcUrl()`. */
+function isLocalhostOrigin() {
+  return typeof location !== 'undefined' && !!location.origin && location.origin.indexOf('localhost') !== -1;
+}
+
+/** Default RPC URL when no user override is set: local Anvil on localhost,
+ *  public Base RPC everywhere else. */
+export function getDefaultChainSecuredRpcUrl() {
+  return isLocalhostOrigin() ? DEFAULT_CHAINSECURED_RPC_URL_LOCAL : DEFAULT_CHAINSECURED_RPC_URL_REMOTE;
+}
+
+/** Effective RPC URL for ChainSecured reads/writes — user override or default. */
+export function getChainSecuredRpcUrl() {
+  return sessionStorage.getItem(STORAGE_KEY_CHAINSECURED_RPC) || getDefaultChainSecuredRpcUrl();
+}
+
+export function hasChainSecuredRpcOverride() {
+  return !!sessionStorage.getItem(STORAGE_KEY_CHAINSECURED_RPC);
+}
+
+/** Persist (or clear, on falsy) the user-supplied RPC URL.
+ *  Forces a fresh SDK client so its JsonRpcProvider rebinds to the new RPC. */
+export function setChainSecuredRpcUrl(v) {
+  if (v) sessionStorage.setItem(STORAGE_KEY_CHAINSECURED_RPC, v);
+  else sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_RPC);
+  resetClient();
+  updateChainSecuredRpcUrlUI();
+}
+
+export function isChainSecuredRpcPanelVisible() {
+  return sessionStorage.getItem(STORAGE_KEY_CHAINSECURED_RPC_PANEL) === 'true';
+}
+
+export function toggleChainSecuredRpcPanel() {
+  const next = !isChainSecuredRpcPanelVisible();
+  if (next) sessionStorage.setItem(STORAGE_KEY_CHAINSECURED_RPC_PANEL, 'true');
+  else sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_RPC_PANEL);
+  updateChainSecuredRpcUrlUI();
+}
+
+export function updateChainSecuredRpcUrlUI() {
+  const card = document.getElementById('chainsecured-rpc-card');
+  const input = document.getElementById('chainsecured-rpc-input');
+  const toggleBtn = document.getElementById('toggle-chainsecured-rpc-btn');
+  const resetBtn = document.getElementById('chainsecured-rpc-reset');
+  const defaultEl = document.getElementById('chainsecured-rpc-default');
+  const visible = isChainSecuredRpcPanelVisible();
+  const hasOverride = hasChainSecuredRpcOverride();
+  const defaultUrl = getDefaultChainSecuredRpcUrl();
+  if (card) card.style.display = visible ? '' : 'none';
+  if (input) {
+    input.value = getChainSecuredRpcUrl();
+    input.placeholder = defaultUrl;
+  }
+  if (defaultEl) defaultEl.textContent = defaultUrl;
+  if (resetBtn) resetBtn.style.display = hasOverride ? '' : 'none';
+  if (toggleBtn) toggleBtn.textContent = hasOverride ? '✓ RPC URL' : 'RPC URL';
+}
+
 // ----- Base URL -----
 
 export function getBaseUrl() {
-  if (typeof location !== 'undefined' && location.origin && location.origin.indexOf('localhost') !== -1)
-    return 'http://localhost:8000';
+  if (isLocalhostOrigin()) return 'http://localhost:8000';
   return '__LIT_API_BASE_URL__';
 }
 
@@ -198,14 +263,15 @@ export async function getClient() {
     const { createClient } = await import('../../core_sdk.js');
     const opts = { baseUrl, mode };
     if (mode === 'sovereign') {
-      // Bootstrap RPC + contract address via the server config endpoint
-      // (explicitly stays on the API path per CPL-267 plan).
+      // Bootstrap contract address + chain id via the server config endpoint.
+      // RPC URL is sourced from `getChainSecuredRpcUrl()` (default or user
+      // override under Account → RPC URL, per CPL-276), not the API.
       const bootstrap = createClient({ baseUrl });
       const cfg = await bootstrap.getNodeChainConfig();
-      if (!cfg || !cfg.rpc_url || !cfg.contract_address) {
-        throw new Error('Node chain config missing rpc_url or contract_address');
+      if (!cfg || !cfg.contract_address) {
+        throw new Error('Node chain config missing contract_address');
       }
-      opts.rpcUrl = cfg.rpc_url;
+      opts.rpcUrl = getChainSecuredRpcUrl();
       opts.contractAddress = cfg.contract_address;
       if (cfg.chain_id != null) opts.chainId = Number(cfg.chain_id);
     }

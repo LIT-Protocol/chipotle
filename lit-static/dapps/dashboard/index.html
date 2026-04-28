@@ -153,6 +153,7 @@
               </button>
               <div class="account-dropdown-panel" id="account-dropdown-panel" role="menu" aria-hidden="true">
                 <button type="button" class="account-dropdown-item" id="toggle-usage-override-btn" role="menuitem">Usage Key Override</button>
+                <button type="button" class="account-dropdown-item is-chainsecured-only" id="toggle-chainsecured-rpc-btn" role="menuitem">RPC URL</button>
                 <button type="button" class="account-dropdown-item account-dropdown-convert" id="convert-to-chainsecured-btn" role="menuitem" hidden>Convert to ChainSecured</button>
                 <button type="button" class="account-dropdown-item account-dropdown-signout" id="account-signout-btn" role="menuitem">Sign out</button>
               </div>
@@ -239,6 +240,19 @@
                   <input type="password" id="usage-key-override-input" class="input" style="flex:1;font-family:'JetBrains Mono',monospace;font-size:0.8125rem;" placeholder="Paste a usage API key to override… " aria-label="Usage API key override">
                   <button type="button" id="usage-key-override-apply" class="btn btn-primary btn-sm">Apply</button>
                   <button type="button" id="usage-key-override-clear" class="btn btn-outline btn-sm">Clear</button>
+                </div>
+              </div>
+            </div>
+            <div class="card is-chainsecured-only" id="chainsecured-rpc-card" style="display:none;">
+              <div class="card-header">
+                <h3 class="card-title">ChainSecured RPC URL</h3>
+              </div>
+              <div class="card-body">
+                <p class="form-hint" style="margin-bottom: 0.75rem;">Default: <code class="mono" id="chainsecured-rpc-default">https://base-rpc.publicnode.com</code>. Point the dashboard at your own RPC if you'd prefer.</p>
+                <div style="display:flex;align-items:center;gap:0.5rem;">
+                  <input type="text" id="chainsecured-rpc-input" class="input" style="flex:1;font-family:'JetBrains Mono',monospace;font-size:0.8125rem;" placeholder="https://base-rpc.publicnode.com" aria-label="ChainSecured RPC URL">
+                  <button type="button" id="chainsecured-rpc-apply" class="btn btn-primary btn-sm">Apply</button>
+                  <button type="button" id="chainsecured-rpc-reset" class="btn btn-outline btn-sm">Reset</button>
                 </div>
               </div>
             </div>

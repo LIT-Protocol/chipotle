@@ -3,7 +3,7 @@
  * Imports all feature modules and orchestrates initialization.
  */
 
-import { isAuthenticated, setTheme, getTheme, logOut, setOnAuthReady, updateStatCards, initLogin, setUsageKeyOverride, toggleOverrideEnabled, updateUsageKeyOverrideUI, getMode, getApiKey, convertToChainSecured } from './auth.js';
+import { isAuthenticated, setTheme, getTheme, logOut, setOnAuthReady, updateStatCards, initLogin, setUsageKeyOverride, toggleOverrideEnabled, updateUsageKeyOverrideUI, setChainSecuredRpcUrl, toggleChainSecuredRpcPanel, updateChainSecuredRpcUrlUI, getMode, getApiKey, convertToChainSecured } from './auth.js';
 import { initModalClose, initConfirmClose, showStatus, hideStatus, logError } from './ui-utils.js';
 import { initBilling } from './billing.js';
 import { initGroups, loadGroups } from './groups.js';
@@ -57,6 +57,43 @@ function initUsageKeyOverride() {
     });
   }
   updateUsageKeyOverrideUI();
+}
+
+// ----- ChainSecured RPC URL UI (CPL-276) -----
+
+function initChainSecuredRpc() {
+  const input = document.getElementById('chainsecured-rpc-input');
+  const applyBtn = document.getElementById('chainsecured-rpc-apply');
+  const resetBtn = document.getElementById('chainsecured-rpc-reset');
+  if (applyBtn) {
+    applyBtn.addEventListener('click', () => {
+      const val = (input?.value || '').trim();
+      if (!val) {
+        showStatus('overview-status', 'Enter an RPC URL.', 'error');
+        return;
+      }
+      try {
+        const u = new URL(val);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('not http');
+      } catch {
+        showStatus('overview-status', 'Enter a valid http(s) RPC URL.', 'error');
+        return;
+      }
+      setChainSecuredRpcUrl(val);
+      hideStatus('overview-status');
+      showStatus('overview-status', 'RPC URL updated. Dashboard will use this RPC for ChainSecured reads and writes.', 'success');
+      preloadAllTables();
+    });
+  }
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      setChainSecuredRpcUrl('');
+      hideStatus('overview-status');
+      showStatus('overview-status', 'RPC URL reset to default.', 'success');
+      preloadAllTables();
+    });
+  }
+  updateChainSecuredRpcUrlUI();
 }
 
 // ----- Sidebar scroll -----
@@ -183,6 +220,15 @@ function initHeader() {
     });
   }
 
+  const toggleRpcBtn = document.getElementById('toggle-chainsecured-rpc-btn');
+  if (toggleRpcBtn) {
+    toggleRpcBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAccountDropdown();
+      toggleChainSecuredRpcPanel();
+    });
+  }
+
   const signoutBtn = document.getElementById('account-signout-btn');
   if (signoutBtn) {
     signoutBtn.addEventListener('click', (e) => {
@@ -211,6 +257,7 @@ setOnAuthReady(() => {
   preloadAllTables();
   updateUsageKeyOverrideUI();
   refreshConvertVisibility();
+  updateChainSecuredRpcUrlUI();
 });
 
 // ----- Init -----
@@ -242,6 +289,7 @@ function init() {
   initHeader();
   initBilling();
   initUsageKeyOverride();
+  initChainSecuredRpc();
 }
 
 init();
