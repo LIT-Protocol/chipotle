@@ -208,7 +208,7 @@ import { runContractWrite, TX_STATES } from './tx_lifecycle.js';
  * @property {boolean} is_evm - Whether the chain is EVM
  * @property {boolean} testnet - Whether the chain is a testnet
  * @property {string} token - Native token symbol
- * @property {string} [rpc_url] - RPC URL (resolved from chainlist when not in API response)
+ * @property {string} [rpc_url] - RPC URL (filled in from the known-chain map when omitted by the API)
  * @property {string} contract_address - AccountConfig contract address
  */
 
@@ -301,33 +301,21 @@ async function parseResponse(res, context) {
   }
 }
 
-const CHAINLIST_API = 'https://chainlistapi.com';
-const CORS_PROXY = 'https://whateverorigin.org/get?url=';
+// The dashboard and monitor support anvil for local dev and Base for everything else.
+const KNOWN_RPC_URLS = {
+  31337: 'http://127.0.0.1:8545',
+  8453: 'https://mainnet.base.org',
+  84532: 'https://sepolia.base.org',
+};
 
 /**
- * Resolve a public RPC URL for the given chain ID from chainlistapi.com.
- * Uses Whatever Origin CORS proxy (free, no domain whitelist) to avoid cross-origin restrictions.
- * @param {number} chainId - EVM chain ID
- * @returns {Promise<string|null>} First HTTP RPC URL, or null if not found
+ * Look up the public RPC URL for a known chain ID.
+ * @param {number|string} chainId - EVM chain ID
+ * @returns {string|null} RPC URL, or null if the chain is unknown
  */
-export async function resolveRpcUrlFromChainlist(chainId) {
+export function rpcUrlForChainId(chainId) {
   if (chainId == null || chainId === '') return null;
-  try {
-    const url = `${CORS_PROXY}${encodeURIComponent(`${CHAINLIST_API}/chains/${chainId}`)}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const wrapper = await res.json();
-    const data = typeof wrapper?.contents === 'string' ? JSON.parse(wrapper.contents) : wrapper;
-    const rpcs = data?.rpc;
-    if (!Array.isArray(rpcs)) return null;
-    const entry = rpcs.find((r) => {
-      const u = typeof r === 'string' ? r : r?.url;
-      return typeof u === 'string' && u.startsWith('https://');
-    });
-    return entry ? (typeof entry === 'string' ? entry : entry.url) : null;
-  } catch (_) {
-    return null;
-  }
+  return KNOWN_RPC_URLS[Number(chainId)] ?? null;
 }
 
 const ETHERS_CDN_URL = 'https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.min.js';
@@ -1503,20 +1491,16 @@ export class LitNodeSimpleApiClient {
   /**
    * GET /core/v1/get_node_chain_config
    * Returns the node's chain configuration (chain name, id, RPC URL, contract address, etc.).
-   * When the API does not include rpc_url, it is resolved from chainlistapi.com using chain_id.
+   * The API server omits rpc_url from the JSON response, so it is filled in from the
+   * known-chain map (anvil + Base).
    * @returns {Promise<NodeChainConfigResponse>}
    */
   async getNodeChainConfig() {
     const res = await fetch(`${this.baseUrl}/get_node_chain_config`);
     const cfg = await parseResponse(res, 'get_node_chain_config');
     if (!cfg.rpc_url && cfg.chain_id != null && cfg.is_evm) {
-      // Anvil isn't on chainlist; fall back to the local default.
-      if (Number(cfg.chain_id) === 31337) {
-        cfg.rpc_url = 'http://127.0.0.1:8545';
-      } else {
-        const rpcUrl = await resolveRpcUrlFromChainlist(cfg.chain_id);
-        if (rpcUrl) cfg.rpc_url = rpcUrl;
-      }
+      const rpcUrl = rpcUrlForChainId(cfg.chain_id);
+      if (rpcUrl) cfg.rpc_url = rpcUrl;
     }
     return cfg;
   }
