@@ -105,12 +105,11 @@ Every subsequent management call (`addGroup`, `addAction`,
 The Core SDK is constructed with `mode: 'sovereign'`, an RPC URL, and the
 on-chain `AccountConfig` contract address. Reads call the contract
 directly; writes are wallet-signed and submitted via the connected signer.
-Once a signer with a provider is attached (any
-`ethers.BrowserProvider`-derived signer, including the one from
-`new ethers.BrowserProvider(window.ethereum).getSigner()`), the SDK
-routes reads through the wallet's provider instead of `rpcUrl`. The
-`rpcUrl` constructor option is the fallback used for reads that happen
-before a signer is attached.
+Once a signer with a provider is attached (any ethers v6 signer that
+carries a provider — for example, a `JsonRpcSigner` returned by
+`BrowserProvider.getSigner()`), the SDK routes reads through that
+provider instead of `rpcUrl`. The `rpcUrl` constructor option is the
+fallback used for reads that happen before a signer is attached.
 
 ```javascript
 import { LitNodeSimpleApiClient } from './core_sdk.js';

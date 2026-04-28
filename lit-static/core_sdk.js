@@ -13,8 +13,10 @@
  *                           `connectSigner(signer)` has been called; without a
  *                           signer, write methods throw.
  *
- * In sovereign mode the constructor requires `rpcUrl` + `contractAddress`, or
- * the dashboard can call `getNodeChainConfig()` first and pass the values in.
+ * In sovereign mode the constructor requires `contractAddress` plus either
+ * `rpcUrl` or a signer that carries its own provider (any ethers v6 signer
+ * with `signer.provider` set). The dashboard typically calls
+ * `getNodeChainConfig()` first and passes the values in.
  */
 
 import { ACCOUNT_CONFIG_VIEW_ABI } from './account_config_view_abi.js';
@@ -344,7 +346,7 @@ export class LitNodeSimpleApiClient {
    * @param {Object} options
    * @param {string} [options.baseUrl='http://localhost:8000'] - Base URL of the API
    * @param {'api'|'sovereign'} [options.mode='api'] - Read-path mode. See module docblock.
-   * @param {string} [options.rpcUrl] - RPC URL fallback for sovereign reads when no signer-with-provider is attached. Required when mode === 'sovereign'.
+   * @param {string} [options.rpcUrl] - RPC URL fallback for sovereign reads when no signer-with-provider is attached. Required for sovereign mode unless `signer` (or a later `connectSigner()` call) supplies a provider.
    * @param {string} [options.contractAddress] - AccountConfig contract address. Required when mode === 'sovereign'.
    * @param {number} [options.chainId] - Expected chain ID. Used for drift pinning + wallet chain guard. Optional; auto-detected from RPC when omitted.
    * @param {Object} [options.deployments] - Optional override map `{ "<chainId>:<address>": { runtimeBytecodeKeccak } }` for drift pinning.
@@ -383,7 +385,7 @@ export class LitNodeSimpleApiClient {
     }
     if (mode === 'sovereign' && !rpcUrl && !this.provider) {
       throw new Error(
-        'LitNodeSimpleApiClient: sovereign mode requires rpcUrl, or a signer whose provider can be used for reads (CPL-283)',
+        'LitNodeSimpleApiClient: sovereign mode requires rpcUrl, or a signer whose provider can be used for reads',
       );
     }
   }
@@ -394,13 +396,16 @@ export class LitNodeSimpleApiClient {
    * @param {import('ethers').Signer} signer - ethers v6 Signer
    */
   connectSigner(signer) {
+    const nextProvider = signer?.provider ?? null;
+    const providerChanged = nextProvider !== this.provider;
     this.signer = signer;
     this._writeContract = null;
-    // Adopt the wallet's provider for reads (CPL-283). Drop cached read
-    // artifacts so the next read rebinds to the new provider instead of the
-    // stale JsonRpcProvider built from `this.rpcUrl`.
-    if (signer?.provider) {
-      this.provider = signer.provider;
+    // Adopt the wallet's provider for reads (CPL-283), or fall back to the
+    // `rpcUrl` JsonRpcProvider when the new signer has none / signer is null.
+    // Reset cached read artifacts on any provider change so the next read
+    // rebinds rather than keeping the previous wallet's provider.
+    if (providerChanged) {
+      this.provider = nextProvider;
       this._viewContractPromise = null;
       this._driftCheckPromise = null;
     }
