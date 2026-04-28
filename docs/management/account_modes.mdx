@@ -7,9 +7,11 @@ Chipotle accounts come in two flavors. Both speak to the same on-chain
 contracts and run the same Lit Actions; they only differ in **who owns the
 account and how administrative writes are signed**.
 
-- **API mode** (managed) — Lit derives a wallet for you from your authenticated
-  identity. You hold a base64 API key. Admin writes are sent as HTTP calls
-  and the server submits the on-chain transaction on your behalf.
+- **API mode** (managed) — `POST /core/v1/new_account` generates a fresh
+  random secret server-side and returns it once as a base64 API key, along
+  with the wallet address derived from that secret. You hold the key; that
+  key *is* the account credential. Admin writes are sent as HTTP calls and
+  the server submits the on-chain transaction on your behalf.
 - **ChainSecured mode** (unmanaged) — A wallet you control (an EOA, a Safe,
   or any contract account on Base) is the account owner directly on-chain.
   Admin writes are wallet-signed transactions you submit yourself. There is
@@ -23,11 +25,11 @@ actions, registering PKPs, minting usage keys, etc.
 
 | Dimension                | API mode                                              | ChainSecured mode                                    |
 | ------------------------ | ----------------------------------------------------- | ---------------------------------------------------- |
-| Account owner            | TEE-derived wallet, gated by your authentication      | Your wallet (EOA / Safe / contract) on Base          |
+| Account owner            | Wallet derived from a server-generated random secret  | Your wallet (EOA / Safe / contract) on Base          |
 | Account-level credential | Base64 API key (`X-Api-Key` header)                   | None — wallet signature is the credential            |
 | Admin write path         | HTTP `POST /core/v1/...` → server submits the tx      | Direct contract call from your wallet                |
 | Gas for admin writes     | Server pays (covered by the per-call credit charge)   | You pay gas from the connected wallet                |
-| Recovery                 | Re-authenticate to recover the same wallet            | Whatever your wallet supports (seed, Safe signers)   |
+| Recovery                 | Retain/back up the API key; if lost, create a new account | Whatever your wallet supports (seed, Safe signers) |
 | On-chain `managed` flag  | `true`                                                | `false`                                              |
 | Onboarding speed         | Fastest — paste an email, get a key                   | Requires a funded wallet on Base                     |
 | Trust model              | You trust Lit's server to relay your intent           | Trust-minimized — every admin write is on-chain      |
@@ -48,8 +50,9 @@ Base, with no required server round-trip for admin writes.
   popup in your admin tooling.
 - Your client is a server, a cron job, or a CI pipeline that needs a single
   shared credential.
-- You're prototyping or iterating quickly — the API key is rotatable and
-  the dashboard reflects every change immediately.
+- You're prototyping or iterating quickly — onboarding is fast, usage API
+  keys are rotatable (mint and revoke at will), and the dashboard reflects
+  every change immediately.
 - You don't have a strong requirement that *every* configuration change be
   visible on-chain.
 
@@ -140,8 +143,11 @@ const exists = await client.accountExistsByHash(apiKeyHash);
 
 PKP minting in ChainSecured mode uses a SIWE-style message that the server
 verifies before deriving key material via the TEE; the client then
-registers the derivation path on-chain in a second wallet-signed tx.
-`createWallet({ apiKey })` does both steps for you.
+registers the derivation path on-chain in a second wallet-signed tx. Once
+the signer is connected and the address-derived `adminHashOverride` is set
+on the client (the dashboard does this automatically at login),
+`createWallet({ name, description })` does both steps for you — no
+account-level `apiKey` is required in ChainSecured mode.
 
 Call `GET /get_node_chain_config` (no auth required) for the live
 `contract_address` and `chain_id`. The RPC URL is not returned by the API —
@@ -221,7 +227,9 @@ Stripe credit balance does not move with the account.
 
 ### Things to verify after conversion
 
-- `accountExistsByHash(keccak256(walletAddress))` returns `true`.
+- `accountExistsByHash(adminHash)` returns `true`, where `adminHash` is
+  `ethers.solidityPackedKeccak256(['address'], [walletAddress])` (matches
+  the contract's `keccak256(abi.encodePacked(msg.sender))`).
 - `accountExists(<old apiKey>)` returns `false`.
 - All groups, PKPs, and action CIDs you expect are visible in the
   dashboard under the new wallet session.
