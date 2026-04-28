@@ -1,0 +1,241 @@
+---
+title: "API Mode vs ChainSecured Mode"
+description: "How the two account ownership models differ, when to choose each, and how to move from API mode to ChainSecured."
+---
+
+Chipotle accounts come in two flavors. Both speak to the same on-chain
+contracts and run the same Lit Actions; they only differ in **who owns the
+account and how administrative writes are signed**.
+
+- **API mode** (managed) — Lit derives a wallet for you from your authenticated
+  identity. You hold a base64 API key. Admin writes are sent as HTTP calls
+  and the server submits the on-chain transaction on your behalf.
+- **ChainSecured mode** (unmanaged) — A wallet you control (an EOA, a Safe,
+  or any contract account on Base) is the account owner directly on-chain.
+  Admin writes are wallet-signed transactions you submit yourself. There is
+  no account-level API key.
+
+Both modes share the same `/core/v1` API for *executing* Lit Actions. The
+difference is only in *administrative* operations — creating groups, adding
+actions, registering PKPs, minting usage keys, etc.
+
+## Side-by-side
+
+| Dimension                | API mode                                              | ChainSecured mode                                    |
+| ------------------------ | ----------------------------------------------------- | ---------------------------------------------------- |
+| Account owner            | TEE-derived wallet, gated by your authentication      | Your wallet (EOA / Safe / contract) on Base          |
+| Account-level credential | Base64 API key (`X-Api-Key` header)                   | None — wallet signature is the credential            |
+| Admin write path         | HTTP `POST /core/v1/...` → server submits the tx      | Direct contract call from your wallet                |
+| Gas for admin writes     | Server pays (covered by the per-call credit charge)   | You pay gas from the connected wallet                |
+| Recovery                 | Re-authenticate to recover the same wallet            | Whatever your wallet supports (seed, Safe signers)   |
+| On-chain `managed` flag  | `true`                                                | `false`                                              |
+| Onboarding speed         | Fastest — paste an email, get a key                   | Requires a funded wallet on Base                     |
+| Trust model              | You trust Lit's server to relay your intent           | Trust-minimized — every admin write is on-chain      |
+| Auditability             | Server logs + on-chain events                         | On-chain events only; every change is wallet-signed  |
+| Dashboard surface        | Same management UI                                    | Same management UI; writes prompt the wallet         |
+| Lit Action execution     | Usage API key in `X-Api-Key`                          | Usage API key in `X-Api-Key` (minted from contract)  |
+| Billing                  | Stripe credits on the account                         | Stripe credits on the account (same flow)            |
+
+ChainSecured mode is referred to as *self-sovereign* in some internal
+material. They are the same thing — wallet ownership of the account on
+Base, with no required server round-trip for admin writes.
+
+## When to pick which
+
+### Pick API mode if:
+
+- You want to ship today and don't want to manage gas, an RPC, or a wallet
+  popup in your admin tooling.
+- Your client is a server, a cron job, or a CI pipeline that needs a single
+  shared credential.
+- You're prototyping or iterating quickly — the API key is rotatable and
+  the dashboard reflects every change immediately.
+- You don't have a strong requirement that *every* configuration change be
+  visible on-chain.
+
+API mode is the **default** and is shown as `Recommended` in the
+dashboard's login screen.
+
+### Pick ChainSecured mode if:
+
+- You want self-custody of the account: no third party (including Lit) can
+  unilaterally create groups, add actions, or mint usage keys on your
+  behalf.
+- A multisig (Safe) or DAO governs configuration changes — every action
+  upgrade, every PKP added to a group, becomes a Safe proposal that
+  signers can review.
+- You want a fully on-chain audit trail of every admin operation, signed
+  by your governance wallet.
+- You're integrating with a wallet-native dApp where the user's connected
+  wallet is already the natural source of authority.
+
+ChainSecured accounts have `managed = false` on-chain and reject any admin
+write that does not originate from the registered admin wallet.
+
+## How the wiring differs
+
+### API mode (`mode: 'api'`, default)
+
+Calls go over HTTP with your account API key in the header. The Core SDK
+default constructor is API mode:
+
+```javascript
+import { createClient } from './core_sdk.js';
+
+const client = createClient('https://api.chipotle.litprotocol.com');
+
+const res = await client.newAccount({
+  accountName: 'My App',
+  accountDescription: 'Optional',
+  email: 'optional@example.com',
+});
+console.log('API key:', res.api_key);          // store this
+console.log('Wallet:', res.wallet_address);
+```
+
+Every subsequent management call (`addGroup`, `addAction`,
+`addUsageApiKey`, ...) takes that API key in `X-Api-Key`. See
+[API direct usage](/management/api_direct) for the full workflow.
+
+### ChainSecured mode (`mode: 'sovereign'`)
+
+The Core SDK is constructed with `mode: 'sovereign'`, an RPC URL, and the
+on-chain `AccountConfig` contract address. Reads call the contract
+directly; writes are wallet-signed and submitted via the connected signer.
+
+```javascript
+import { LitNodeSimpleApiClient } from './core_sdk.js';
+import { ethers } from 'ethers';
+
+const provider = new ethers.BrowserProvider(window.ethereum);
+const signer = await provider.getSigner();
+
+const client = new LitNodeSimpleApiClient({
+  baseUrl: 'https://api.chipotle.litprotocol.com',
+  mode: 'sovereign',
+  rpcUrl: 'https://mainnet.base.org',
+  contractAddress: '0xYourAccountConfigDiamond',
+  signer,
+});
+
+// Creates an unmanaged account whose admin is the connected wallet.
+const res = await client.newChainSecuredAccount({
+  accountName: 'My App',
+  accountDescription: 'Optional',
+});
+console.log('Admin wallet:', res.wallet_address);
+console.log('Tx hash:', res.transaction_hash);
+```
+
+Logging back in is a wallet connect — no key to paste:
+
+```javascript
+client.connectSigner(signer);
+const apiKeyHash = ethers.solidityPackedKeccak256(
+  ['address'],
+  [await signer.getAddress()],
+);
+const exists = await client.accountExistsByHash(apiKeyHash);
+```
+
+PKP minting in ChainSecured mode uses a SIWE-style message that the server
+verifies before deriving key material via the TEE; the client then
+registers the derivation path on-chain in a second wallet-signed tx.
+`createWallet({ apiKey })` does both steps for you.
+
+Call `GET /get_node_chain_config` (no auth required) for the live
+`contract_address` and `chain_id`. The RPC URL is not returned by the API —
+supply your own Base RPC endpoint (any public Base RPC works, e.g.
+`https://mainnet.base.org` or `https://base-rpc.publicnode.com`).
+
+## Using the dashboard
+
+The Chipotle Dashboard offers both modes side-by-side on the login screen:
+
+- **Sign in** tab → "API mode" card (paste your API key) or "ChainSecured
+  mode" card (Connect wallet).
+- **Create account** tab → "API mode" card (email + name) or "ChainSecured
+  mode" card (Connect wallet & create).
+
+Once authenticated the dashboard renders the same surface in both modes.
+ChainSecured admin operations open a transaction preview before prompting
+the wallet to sign; API-mode operations submit immediately. Billing,
+balance display, and Add Funds are identical in both modes — Stripe
+credits fund Lit Action execution either way.
+
+## Converting an API account to ChainSecured
+
+There is no in-place flag flip. An API account has `managed = true`, a
+ChainSecured account has `managed = false`, and the on-chain owner address
+differs. Conversion means re-anchoring the account to a wallet-owned
+identity and migrating its resources.
+
+<Note>
+The conversion tooling itself is delivered separately under issue
+**CPL-277** ("Convert an API-based account to a ChainSecured account").
+The flow described below is the supported migration path; the exact
+endpoint names may shift before that work merges.
+</Note>
+
+### What gets migrated
+
+- **Groups** (and their permitted PKP IDs and CID hashes)
+- **PKPs** (derivation paths, names, descriptions)
+- **Action metadata** (registered IPFS CID names and descriptions)
+- **Usage API keys** are *not* automatically copied. Mint fresh usage keys
+  from the new ChainSecured account so their permissions are signed by the
+  new owner.
+
+Action CIDs themselves are content-addressed and globally referenceable —
+they don't need to be "moved", just re-listed in the new account's groups.
+Stripe credit balance does not move with the account.
+
+### Step-by-step
+
+1. **Pick the wallet that will own the converted account.** This can be an
+   EOA you already control, a freshly deployed Safe with your desired
+   signer set, or any contract account on Base. The chosen wallet must be
+   able to sign and pay gas for several Base transactions.
+2. **Connect that wallet to the dashboard** in ChainSecured mode (or
+   construct an SDK client with `mode: 'sovereign'` and that signer).
+3. **Run the conversion call.** From the API account (still authenticated
+   with the existing API key), call the conversion endpoint with the
+   target wallet address. The server validates that the API account exists
+   and is mutable, then submits an on-chain `transferOwnership`-style
+   transaction to the `AccountConfig` contract. After it lands, the
+   account's on-chain admin address is the new wallet and `managed` is
+   flipped to `false`.
+4. **Re-mint usage keys.** Sign in with the new wallet, open Usage API
+   Keys in the dashboard (or call `addUsageApiKey` from the SDK with
+   `mode: 'sovereign'`), and create the keys your dApp needs. Existing
+   usage keys minted before the conversion stop being honored once the
+   admin changes.
+5. **Revoke the old API key.** From the new ChainSecured session, remove
+   the original account-level API key so no one can write to the account
+   via the legacy credential path.
+6. **Update your clients.** Anywhere you stored the old API key for admin
+   calls, switch to wallet signatures (or the new SDK config with
+   `mode: 'sovereign'`). Calls that *only* execute Lit Actions can keep
+   using a usage API key — execution is identical in both modes; only the
+   admin path changes.
+
+### Things to verify after conversion
+
+- `accountExistsByHash(keccak256(walletAddress))` returns `true`.
+- `accountExists(<old apiKey>)` returns `false`.
+- All groups, PKPs, and action CIDs you expect are visible in the
+  dashboard under the new wallet session.
+- A trial Lit Action run with a freshly minted usage key succeeds.
+
+### Reverse direction
+
+There is no path back from ChainSecured to API mode. If you need a managed
+account again, create a new one with `newAccount` and re-add the
+resources you want.
+
+## Further reading
+
+- [Auth Model](/architecture/authModel) — owner / API key / scope model in detail.
+- [Architecture diagram](/architecture/diagram) — how the TEE, contracts, and dashboard fit together.
+- [Using the API directly](/management/api_direct) — endpoint-by-endpoint reference (API mode).
+- [Pricing](/management/pricing) — credit model, identical in both modes.
