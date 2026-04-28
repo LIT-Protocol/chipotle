@@ -18,6 +18,17 @@
           "internalType": "uint256",
           "name": "apiKeyHash",
           "type": "uint256"
+        }
+      ],
+      "name": "AccountDoesNotExist",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
         },
         {
           "internalType": "uint256",
@@ -215,6 +226,25 @@
       ],
       "name": "UsageApiKeyDoesNotExist",
       "type": "error"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "newAdminWalletAddress",
+          "type": "address"
+        }
+      ],
+      "name": "AccountConvertedToChainSecured",
+      "type": "event"
     },
     {
       "anonymous": false,
@@ -620,6 +650,24 @@
           "type": "uint256"
         },
         {
+          "internalType": "address",
+          "name": "newAdminWalletAddress",
+          "type": "address"
+        }
+      ],
+      "name": "convertToChainSecuredAccount",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
           "internalType": "bool",
           "name": "managed",
           "type": "bool"
@@ -1013,17 +1061,6 @@
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "uint256",
-          "name": "apiKeyHash",
-          "type": "uint256"
-        }
-      ],
-      "name": "AccountDoesNotExist",
-      "type": "error"
     },
     {
       "inputs": [],

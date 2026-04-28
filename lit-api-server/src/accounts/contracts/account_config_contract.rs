@@ -530,6 +530,31 @@ pub mod account_config {
                     },],
                 ),
                 (
+                    ::std::borrow::ToOwned::to_owned("convertToChainSecuredAccount"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("convertToChainSecuredAccount",),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("newAdminWalletAddress",),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("address"),
+                                ),
+                            },
+                        ],
+                        outputs: ::std::vec![],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                    },],
+                ),
+                (
                     ::std::borrow::ToOwned::to_owned("creditApiKey"),
                     ::std::vec![::ethers::core::abi::ethabi::Function {
                         name: ::std::borrow::ToOwned::to_owned("creditApiKey"),
@@ -2011,6 +2036,25 @@ pub mod account_config {
             ]),
             events: ::core::convert::From::from([
                 (
+                    ::std::borrow::ToOwned::to_owned("AccountConvertedToChainSecured"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned("AccountConvertedToChainSecured",),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("newAdminWalletAddress",),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                indexed: true,
+                            },
+                        ],
+                        anonymous: false,
+                    },],
+                ),
+                (
                     ::std::borrow::ToOwned::to_owned("AccountCreated"),
                     ::std::vec![::ethers::core::abi::ethabi::Event {
                         name: ::std::borrow::ToOwned::to_owned("AccountCreated"),
@@ -3027,6 +3071,16 @@ pub mod account_config {
                 .method_hash([20, 42, 98, 206], ())
                 .expect("method not found (this should never happen)")
         }
+        ///Calls the contract's `convertToChainSecuredAccount` (0x7c3822b1) function
+        pub fn convert_to_chain_secured_account(
+            &self,
+            api_key_hash: ::ethers::core::types::U256,
+            new_admin_wallet_address: ::ethers::core::types::Address,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([124, 56, 34, 177], (api_key_hash, new_admin_wallet_address))
+                .expect("method not found (this should never happen)")
+        }
         ///Calls the contract's `creditApiKey` (0x683f2de8) function
         pub fn credit_api_key(
             &self,
@@ -3578,6 +3632,16 @@ pub mod account_config {
                     (account_api_key_hash, usage_api_key_hash, name, description),
                 )
                 .expect("method not found (this should never happen)")
+        }
+        ///Gets the contract's `AccountConvertedToChainSecured` event
+        pub fn account_converted_to_chain_secured_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<
+            ::std::sync::Arc<M>,
+            M,
+            AccountConvertedToChainSecuredFilter,
+        > {
+            self.0.event()
         }
         ///Gets the contract's `AccountCreated` event
         pub fn account_created_filter(
@@ -4579,6 +4643,28 @@ pub mod account_config {
         Eq,
         Hash,
     )]
+    #[ethevent(
+        name = "AccountConvertedToChainSecured",
+        abi = "AccountConvertedToChainSecured(uint256,address)"
+    )]
+    pub struct AccountConvertedToChainSecuredFilter {
+        #[ethevent(indexed)]
+        pub api_key_hash: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub new_admin_wallet_address: ::ethers::core::types::Address,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
     #[ethevent(name = "AccountCreated", abi = "AccountCreated(uint256,address,bool)")]
     pub struct AccountCreatedFilter {
         #[ethevent(indexed)]
@@ -5030,6 +5116,7 @@ pub mod account_config {
         Hash,
     )]
     pub enum AccountConfigEvents {
+        AccountConvertedToChainSecuredFilter(AccountConvertedToChainSecuredFilter),
         AccountCreatedFilter(AccountCreatedFilter),
         ActionAddedFilter(ActionAddedFilter),
         ActionAddedToGroupFilter(ActionAddedToGroupFilter),
@@ -5058,6 +5145,11 @@ pub mod account_config {
         fn decode_log(
             log: &::ethers::core::abi::RawLog,
         ) -> ::core::result::Result<Self, ::ethers::core::abi::Error> {
+            if let Ok(decoded) = AccountConvertedToChainSecuredFilter::decode_log(log) {
+                return Ok(AccountConfigEvents::AccountConvertedToChainSecuredFilter(
+                    decoded,
+                ));
+            }
             if let Ok(decoded) = AccountCreatedFilter::decode_log(log) {
                 return Ok(AccountConfigEvents::AccountCreatedFilter(decoded));
             }
@@ -5137,6 +5229,9 @@ pub mod account_config {
     impl ::core::fmt::Display for AccountConfigEvents {
         fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
             match self {
+                Self::AccountConvertedToChainSecuredFilter(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
                 Self::AccountCreatedFilter(element) => ::core::fmt::Display::fmt(element, f),
                 Self::ActionAddedFilter(element) => ::core::fmt::Display::fmt(element, f),
                 Self::ActionAddedToGroupFilter(element) => ::core::fmt::Display::fmt(element, f),
@@ -5171,6 +5266,11 @@ pub mod account_config {
                     ::core::fmt::Display::fmt(element, f)
                 }
             }
+        }
+    }
+    impl ::core::convert::From<AccountConvertedToChainSecuredFilter> for AccountConfigEvents {
+        fn from(value: AccountConvertedToChainSecuredFilter) -> Self {
+            Self::AccountConvertedToChainSecuredFilter(value)
         }
     }
     impl ::core::convert::From<AccountCreatedFilter> for AccountConfigEvents {
@@ -5611,6 +5711,27 @@ pub mod account_config {
     )]
     #[ethcall(name = "configOperator", abi = "configOperator()")]
     pub struct ConfigOperatorCall;
+    ///Container type for all input parameters for the `convertToChainSecuredAccount` function with signature `convertToChainSecuredAccount(uint256,address)` and selector `0x7c3822b1`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(
+        name = "convertToChainSecuredAccount",
+        abi = "convertToChainSecuredAccount(uint256,address)"
+    )]
+    pub struct ConvertToChainSecuredAccountCall {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub new_admin_wallet_address: ::ethers::core::types::Address,
+    }
     ///Container type for all input parameters for the `creditApiKey` function with signature `creditApiKey(uint256,uint256)` and selector `0x683f2de8`
     #[derive(
         Clone,
@@ -6516,6 +6637,7 @@ pub mod account_config {
         CanUseWalletInAction(CanUseWalletInActionCall),
         CanUseWalletInActionFast(CanUseWalletInActionFastCall),
         ConfigOperator(ConfigOperatorCall),
+        ConvertToChainSecuredAccount(ConvertToChainSecuredAccountCall),
         CreditApiKey(CreditApiKeyCall),
         DebitApiKey(DebitApiKeyCall),
         GetAccountWalletAddress(GetAccountWalletAddressCall),
@@ -6640,6 +6762,11 @@ pub mod account_config {
                 <ConfigOperatorCall as ::ethers::core::abi::AbiDecode>::decode(data)
             {
                 return Ok(Self::ConfigOperator(decoded));
+            }
+            if let Ok(decoded) =
+                <ConvertToChainSecuredAccountCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::ConvertToChainSecuredAccount(decoded));
             }
             if let Ok(decoded) = <CreditApiKeyCall as ::ethers::core::abi::AbiDecode>::decode(data)
             {
@@ -6875,6 +7002,9 @@ pub mod account_config {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
                 Self::ConfigOperator(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::ConvertToChainSecuredAccount(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
                 Self::CreditApiKey(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::DebitApiKey(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::GetAccountWalletAddress(element) => {
@@ -6989,6 +7119,9 @@ pub mod account_config {
                 Self::CanUseWalletInAction(element) => ::core::fmt::Display::fmt(element, f),
                 Self::CanUseWalletInActionFast(element) => ::core::fmt::Display::fmt(element, f),
                 Self::ConfigOperator(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ConvertToChainSecuredAccount(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
                 Self::CreditApiKey(element) => ::core::fmt::Display::fmt(element, f),
                 Self::DebitApiKey(element) => ::core::fmt::Display::fmt(element, f),
                 Self::GetAccountWalletAddress(element) => ::core::fmt::Display::fmt(element, f),
@@ -7120,6 +7253,11 @@ pub mod account_config {
     impl ::core::convert::From<ConfigOperatorCall> for AccountConfigCalls {
         fn from(value: ConfigOperatorCall) -> Self {
             Self::ConfigOperator(value)
+        }
+    }
+    impl ::core::convert::From<ConvertToChainSecuredAccountCall> for AccountConfigCalls {
+        fn from(value: ConvertToChainSecuredAccountCall) -> Self {
+            Self::ConvertToChainSecuredAccount(value)
         }
     }
     impl ::core::convert::From<CreditApiKeyCall> for AccountConfigCalls {

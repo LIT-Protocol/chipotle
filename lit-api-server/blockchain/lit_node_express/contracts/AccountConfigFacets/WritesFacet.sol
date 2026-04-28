@@ -68,6 +68,10 @@ contract WritesFacet {
         uint256 indexed accountApiKeyHash,
         uint256 indexed usageApiKeyHash
     );
+    event AccountConvertedToChainSecured(
+        uint256 indexed apiKeyHash,
+        address indexed newAdminWalletAddress
+    );
 
     function newChainSecuredAccount(
         string memory accountName,
@@ -127,6 +131,37 @@ contract WritesFacet {
         s.accountCount++;
         s.indexToAccountHash[s.accountCount] = apiKeyHash;
         emit AccountCreated(apiKeyHash, adminWalletAddress, managed);
+    }
+
+    /// @notice Convert an existing managed (API-mode) account into a ChainSecured (sovereign)
+    ///         account by reassigning its admin wallet to a user-controlled address.
+    /// @dev    Only callable by an api_payer (or diamond owner) since a managed account has
+    ///         no on-chain admin yet. The conversion is one-way: re-running on an already
+    ///         unmanaged account reverts. The apiKeyHash is preserved so existing groups,
+    ///         actions, PKPs, and usage keys remain attached to the same account.
+    function convertToChainSecuredAccount(
+        uint256 apiKeyHash,
+        address newAdminWalletAddress
+    ) public {
+        SecurityLib.revertIfNotApiPayerOrOwner(msg.sender);
+        if (newAdminWalletAddress == address(0)) {
+            revert AppStorage.InvalidRequest(
+                "newAdminWalletAddress must be non-zero"
+            );
+        }
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        if (s.allApiKeyHashesToMaster[apiKeyHash] != apiKeyHash) {
+            revert AppStorage.AccountDoesNotExist(apiKeyHash);
+        }
+        AppStorage.Account storage account = s.accounts[apiKeyHash];
+        if (!account.managed) {
+            revert AppStorage.InvalidRequest(
+                "Account is already ChainSecured."
+            );
+        }
+        account.managed = false;
+        account.adminWalletAddress = newAdminWalletAddress;
+        emit AccountConvertedToChainSecured(apiKeyHash, newAdminWalletAddress);
     }
 
     function setUsageApiKey(
