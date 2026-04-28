@@ -3,21 +3,32 @@
  *
  * Source of truth: lit-api-server/src/accounts/contracts/AccountConfig.json.
  * This is the hand-maintained subset used for sovereign-mode direct contract
- * calls. If the on-chain contract changes, (a) regenerate entries from the
- * updated JSON, (b) bump ACCOUNT_CONFIG_ABI_VERSION, (c) update the pinned
- * bytecode hash in ACCOUNT_CONFIG_DEPLOYMENTS for each affected chain.
+ * calls.
+ *
+ * When to update what:
+ * - Facet code changes (function added/removed/signature changed in any
+ *   AccountConfigFacets/*.sol): regenerate the WRITE_FUNCTIONS / VIEW /
+ *   CUSTOM_ERRORS entries from the updated JSON, and bump
+ *   ACCOUNT_CONFIG_ABI_VERSION. The pinned bytecode hashes do NOT need to
+ *   change — facet upgrades go through diamondCut and don't shift the proxy
+ *   runtime bytecode that ACCOUNT_CONFIG_DEPLOYMENTS pins.
+ * - Diamond proxy itself redeployed (new address, or re-deployed at the same
+ *   address with new proxy code): update ACCOUNT_CONFIG_DEPLOYMENTS with the
+ *   new (chainId, address) → runtimeBytecodeKeccak pin.
  *
  * Drift detection:
  * - `runtimeBytecodeKeccak` is the keccak256 of the deployed runtime bytecode
  *   returned by eth_getCode for (chainId, address). Dashboard hard-blocks if
- *   the live hash does not match the pinned value.
+ *   the live hash does not match the pinned value. This catches proxy-level
+ *   swaps; it does NOT catch facet ABI drift — keep the JS ABI subset in sync
+ *   with AccountConfig.json by hand whenever facets change.
  * - If a (chainId, address) pair has `runtimeBytecodeKeccak: null`, drift is
  *   skipped (dev-only override; never ship null values to production).
  */
 
 import { ACCOUNT_CONFIG_VIEW_ABI } from './account_config_view_abi.js';
 
-export const ACCOUNT_CONFIG_ABI_VERSION = '2026-04-24.1';
+export const ACCOUNT_CONFIG_ABI_VERSION = '2026-04-28.1';
 
 const WRITE_FUNCTIONS = [
   {
@@ -331,10 +342,23 @@ export const ACCOUNT_CONFIG_FULL_ABI = [
  * Value.runtimeBytecodeKeccak === null: drift check DISABLED for this target
  *   (dev/local override; do not ship null values to production dashboards).
  *
- * Operators: regenerate hashes after any deployment with
+ * Operators: regenerate hashes after a proxy redeploy with
  *   `cast keccak $(cast code <address> --rpc-url <rpc>)`.
  */
-export const ACCOUNT_CONFIG_DEPLOYMENTS = Object.freeze({});
+export const ACCOUNT_CONFIG_DEPLOYMENTS = Object.freeze({
+  // Base mainnet — `next` (staging) deployment, NodeConfig.next.toml
+  '8453:0x98e501fab2d60a5119a185e1563f10cb54bc6068': {
+    runtimeBytecodeKeccak: '0x3e21f437bf1c1f75d60cdcf90aafef49ef2869aa18e58e37e282152c5c702254',
+  },
+  // Base mainnet — `main` deployment, NodeConfig.main.toml
+  '8453:0x4c8eb9f329ebfdb369f0c90954875ef8f568ad24': {
+    runtimeBytecodeKeccak: '0x3e21f437bf1c1f75d60cdcf90aafef49ef2869aa18e58e37e282152c5c702254',
+  },
+  // Base mainnet — `prod` deployment, NodeConfig.prod.toml
+  '8453:0xaaaaa9120fe271f653cfdb6bf400db93d2dea7aa': {
+    runtimeBytecodeKeccak: '0xa7c20a6750b5847265c831def8c009d92524ea0a83921261d065da58b366f074',
+  },
+});
 
 /**
  * Dev-only escape hatch for running sovereign mode against a deployment that
