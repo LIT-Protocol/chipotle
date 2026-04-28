@@ -320,9 +320,9 @@ curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/create_wallet_with
 
 #### `POST /convert_to_chain_secured_account`
 
-Flips a managed (API-mode) account to ChainSecured (unmanaged) in a single on-chain transaction. The account's `apiKeyHash` is preserved — groups, PKPs, action metadata, usage API keys, and Stripe credit balance all stay attached. Only the admin wallet and the `managed` flag change. There is no reverse path.
+Flips a managed (API-mode) account to ChainSecured (unmanaged) in a single on-chain transaction. The account's `apiKeyHash` is preserved — groups, PKPs, action metadata, and usage API keys (everything keyed by `apiKeyHash` on-chain) stay attached. Only the admin wallet and the `managed` flag change on-chain. **Billing should be re-verified after conversion:** Stripe credits are associated with the Stripe customer resolved from the current admin wallet address, so a credit balance is not guaranteed to carry over automatically when the admin wallet changes. There is no reverse path.
 
-Requires the existing master API key in `X-Api-Key`. The server's api\_payer signs the on-chain conversion after verifying the EIP-191 signature; the new admin must sign a SIWE-style message identical in shape to `create_wallet_with_signature`.
+Requires the existing master API key (sent via `X-Api-Key` or `Authorization: Bearer`, per the auth header conventions above). The server's api\_payer signs the on-chain conversion after verifying the EIP-191 signature; the new admin must sign a SIWE-style message identical in shape to `create_wallet_with_signature`.
 
 **Request body:**
 
