@@ -469,6 +469,7 @@ mod tests {
             lockfile_path: None,
             http_client: CdnModuleLoader::build_http_client(),
             memory_limit_mb: DEFAULT_MEMORY_LIMIT_MB,
+            v8_code_cache: crate::v8_code_cache::new_v8_code_cache(),
         })
     }
 

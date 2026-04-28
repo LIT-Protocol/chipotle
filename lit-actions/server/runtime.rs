@@ -3,7 +3,7 @@ use std::mem::size_of;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Once;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, LazyLock, RwLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -13,6 +13,7 @@ use deno_core::{JsRuntime, v8};
 use crate::bundler;
 use crate::cdn_module_loader::{CdnModuleLoader, LoadedModules, ModuleCache};
 use crate::import_rewriter;
+use crate::v8_code_cache::SharedV8CodeCache;
 use deno_resolver::npm::{DenoInNpmPackageChecker, ManagedNpmResolver};
 use deno_runtime::{
     BootstrapOptions, WorkerLogLevel,
@@ -41,6 +42,24 @@ const MEMORY_SAMPLE_INTERVAL_MS: u64 = 500; // 500ms
 const EXECUTION_TERMINATED_ERROR: &str = "Uncaught Error: execution terminated";
 const MAX_ACTION_CODE_CACHE_BYTES: usize = 100 * 1024 * 1024;
 const ACTION_CODE_CACHE_TTL: Duration = Duration::from_secs(30 * 60);
+
+// Permissions are identical for every execution (deny everything except outbound
+// `fetch`), so we build the descriptor parser and the `Permissions` instance
+// once and clone per execution instead of rebuilding them inside
+// `build_worker_base`.
+static PERMISSION_DESC_PARSER: LazyLock<Arc<RuntimePermissionDescriptorParser<RealSys>>> =
+    LazyLock::new(|| Arc::new(RuntimePermissionDescriptorParser::new(RealSys)));
+
+static BASE_PERMISSIONS: LazyLock<Permissions> = LazyLock::new(|| {
+    Permissions::from_options(
+        PERMISSION_DESC_PARSER.as_ref(),
+        &PermissionsOptions {
+            allow_net: Some(vec![]),
+            ..Default::default()
+        },
+    )
+    .expect("valid permissions")
+});
 
 pub(crate) type ActionCodeCache = Arc<RwLock<ActionCodeCacheState>>;
 
@@ -204,6 +223,10 @@ pub(crate) struct PoolSharedState {
     /// Heap limit in MB. Pool workers always use `DEFAULT_MEMORY_LIMIT_MB`;
     /// the legacy cold path uses whatever the caller specified.
     pub memory_limit_mb: usize,
+    /// Shared V8 code cache wired into every `MainWorker`'s
+    /// `WorkerServiceOptions`. Pool and legacy paths share the same cache,
+    /// so a code-cache hit warmed by either path benefits the other.
+    pub v8_code_cache: SharedV8CodeCache,
 }
 
 /// A `MainWorker` that has been bootstrapped from the V8 snapshot but has
@@ -255,20 +278,25 @@ async fn prepare_action_code(
     code: &str,
     context: &ActionCodePrepareContext<'_>,
 ) -> Result<CachedActionCode> {
-    // Detect the user's static imports. If there are none, the raw code is
-    // already executable as a script. Otherwise, hand off to the pre-execution
-    // bundler, which inlines every CDN dep into the entry source so the cached
-    // form contains no `import` call of any kind — eliminating Deno's
-    // `resolve`/`load` pipeline from the hot path (CPL-262).
+    // Detect the user's static imports. If there are none AND no `import(`
+    // substring is present, the raw code is already executable as a script.
+    // Otherwise, hand off to the pre-execution bundler, which inlines every
+    // CDN dep into the entry source so the cached form contains no `import`
+    // call of any kind — eliminating Deno's `resolve`/`load` pipeline from
+    // the hot path (CPL-262).
     //
-    // `rewrite_imports` is used only to decide whether bundling is necessary
-    // and to seed the dep-graph walk; the bundler consumes the **original**
-    // code (with imports intact) so SWC can map each imported binding to its
-    // inlined definition.
-    let import_rewriter::RewriteResult { code: _, imports } =
-        import_rewriter::rewrite_imports(code);
+    // The `import(` substring check is intentionally permissive — false
+    // positives (e.g. the literal text inside a string or comment) just route
+    // through the bundler, which is harmless. The bundler then parses the
+    // source with SWC and either inlines literal `import("...")` calls or
+    // surfaces a clear error for non-literal dynamic imports.
+    //
+    // `rewrite_imports` is used only to seed the static-import dep walk; the
+    // bundler consumes the **original** code (with imports intact) so SWC can
+    // map each imported binding to its inlined definition.
+    let import_rewriter::RewriteResult { imports, .. } = import_rewriter::rewrite_imports(code);
 
-    if imports.is_empty() {
+    if imports.is_empty() && !code.contains("import(") {
         return Ok(CachedActionCode {
             code: code.to_string(),
             loaded_modules: Vec::new(),
@@ -382,7 +410,7 @@ pub(crate) fn build_worker_base(shared: &PoolSharedState) -> Result<PreparedWork
         unsafely_ignore_certificate_errors: None,
         seed: None,
         create_web_worker_cb: Arc::new(|_| {
-            unreachable!("web workers are disabled in PatchDeno.js")
+            unreachable!("Worker is deleted from globalThis in LitNamespace.js")
         }),
         format_js_error_fn: Some(Arc::new(format_js_error)),
         maybe_inspector_server: None,
@@ -395,16 +423,13 @@ pub(crate) fn build_worker_base(shared: &PoolSharedState) -> Result<PreparedWork
         enable_stack_trace_arg_in_ops: false,
     };
 
-    // Deny everything except for network access, e.g. via fetch()
-    let desc_parser = Arc::new(RuntimePermissionDescriptorParser::new(RealSys));
-    let perms = Permissions::from_options(
-        desc_parser.as_ref(),
-        &PermissionsOptions {
-            allow_net: Some(vec![]),
-            ..Default::default()
-        },
-    )
-    .expect("valid permissions");
+    // Deny everything except for network access, e.g. via fetch(). The parser
+    // and the base `Permissions` instance are identical per execution, so we
+    // keep them in `LazyLock`s and clone the struct (cheap — it's a few
+    // `UnaryPermission` fields) instead of rebuilding via `from_options` each
+    // time.
+    let desc_parser = Arc::clone(&PERMISSION_DESC_PARSER);
+    let perms = BASE_PERMISSIONS.clone();
 
     let services =
         WorkerServiceOptions::<DenoInNpmPackageChecker, ManagedNpmResolver<RealSys>, RealSys> {
@@ -420,7 +445,7 @@ pub(crate) fn build_worker_base(shared: &PoolSharedState) -> Result<PreparedWork
             fetch_dns_resolver: Default::default(),
             shared_array_buffer_store: Default::default(),
             compiled_wasm_module_store: Default::default(),
-            v8_code_cache: Default::default(),
+            v8_code_cache: Some(shared.v8_code_cache.clone()),
         };
 
     let main_module =
@@ -595,6 +620,7 @@ pub(crate) async fn execute_js(
     strict_imports: bool,
     module_cache: ModuleCache,
     action_code_cache: ActionCodeCache,
+    v8_code_cache: SharedV8CodeCache,
     lockfile_path: Option<PathBuf>,
     http_client: Arc<reqwest::Client>,
 ) -> Result<()> {
@@ -614,6 +640,7 @@ pub(crate) async fn execute_js(
         lockfile_path,
         http_client,
         memory_limit_mb: memory_limit_mb.unwrap_or(DEFAULT_MEMORY_LIMIT_MB),
+        v8_code_cache,
     });
 
     let mut prepared = build_worker_base(&shared)
@@ -786,11 +813,24 @@ async fn execute_with_worker_inner(
             .await?
     };
     record_loaded_modules(&loaded_modules, &cached_code);
-    let code = cached_code.to_executable_code(&js_func_params);
+    let user_code = cached_code.to_executable_code(&js_func_params);
+
+    // Route user code through op_eval_context (via the __litEvalCached helper
+    // baked into 99_patches.js) so Deno's `eval_context_code_cache_cbs` —
+    // wired to our SharedV8CodeCache — gets to see the source. execute_script
+    // bypasses that cache entirely, forcing V8 to reparse and recompile the
+    // bundled action on every request. The outer stub still parses per
+    // execution, but its body is one string literal, so V8 only pays for
+    // source-string scanning rather than compiling the bundled action body
+    // (CPL-264).
+    let user_code_literal =
+        serde_json::to_string(&user_code).context("Could not serialize user code for eval stub")?;
+    let stub =
+        format!("__litEvalCached({user_code_literal}, \"file:///user_provided_script.js\");");
 
     if let Err(e) = worker
         .js_runtime
-        .execute_script("<user_provided_script>", code)
+        .execute_script("<user_provided_script>", stub)
     {
         // Delay error handling if the controller has terminated the isolate,
         // in which case halt_isolate_rx will tell the reason.
@@ -1051,6 +1091,7 @@ mod tests {
             lockfile_path: None,
             http_client: CdnModuleLoader::build_http_client(),
             memory_limit_mb: DEFAULT_MEMORY_LIMIT_MB,
+            v8_code_cache: crate::v8_code_cache::new_v8_code_cache(),
         };
 
         let w1 = build_worker_base(&shared).expect("first worker built");
