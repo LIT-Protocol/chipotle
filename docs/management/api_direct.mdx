@@ -280,6 +280,69 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
 - **`POST /billing/create_payment_intent`** — Creates a Stripe PaymentIntent. Body: `{"amount_cents": 500}` (minimum 500 = $5.00). Returns `client_secret` for use with Stripe.js.
 - **`POST /billing/confirm_payment`** — Verifies a succeeded PaymentIntent and credits the account. Body: `{"payment_intent_id": "pi_..."}`.
 
+### ChainSecured-mode HTTP endpoints
+
+Two HTTP endpoints back the ChainSecured (sovereign) flow. They sit alongside the on-chain writes — see [API mode vs ChainSecured mode](/management/account_modes) for the full SDK-side workflow and when to choose each mode.
+
+#### `POST /create_wallet_with_signature`
+
+Mints a PKP via DStack MPC after verifying a wallet-ownership signature. Used by `createWallet` in ChainSecured mode; the response is then passed to the on-chain `registerWalletDerivation` call (signed by the same wallet) to register the PKP to the account.
+
+No API key required. The server enforces a ±5-minute window on the message's `Issued At` timestamp as the only replay protection — worst-case replay just mints an extra unregistered PKP (compute cost only).
+
+**Request body:**
+
+```json
+{
+  "message": "<EIP-191 plaintext>",
+  "signature": "0x<65-byte hex>"
+}
+```
+
+The `message` must contain three case-sensitive lines: `Address: 0x…`, `Chain ID: <u64>`, and `Issued At: <unix-seconds>`. Other lines (domain, statement) are ignored.
+
+**Response:**
+
+```json
+{
+  "wallet_address": "0x...",
+  "derivation_path": "0x..."
+}
+```
+
+Pass `derivation_path` verbatim into `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` on the AccountConfig contract — until that lands, the PKP exists in MPC but is not registered to any account.
+
+```bash
+curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/create_wallet_with_signature" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"chipotle.dev wants you to create a new wallet for ChainSecured account.\n\nAddress: 0xabc...\nChain ID: 8453\nIssued At: 1745798400","signature":"0x..."}'
+```
+
+#### `POST /convert_to_chain_secured_account`
+
+Flips a managed (API-mode) account to ChainSecured (unmanaged) in a single on-chain transaction. The account's `apiKeyHash` is preserved — groups, PKPs, action metadata, and usage API keys (everything keyed by `apiKeyHash` on-chain) stay attached. Only the admin wallet and the `managed` flag change on-chain. **Billing should be re-verified after conversion:** Stripe credits are associated with the Stripe customer resolved from the current admin wallet address, so a credit balance is not guaranteed to carry over automatically when the admin wallet changes. There is no reverse path.
+
+Requires the existing master API key (sent via `X-Api-Key` or `Authorization: Bearer`, per the auth header conventions above). The server's api\_payer signs the on-chain conversion after verifying the EIP-191 signature; the new admin must sign a SIWE-style message identical in shape to `create_wallet_with_signature`.
+
+**Request body:**
+
+```json
+{
+  "new_admin_wallet_address": "0x...",
+  "message": "<EIP-191 plaintext containing Address/Chain ID/Issued At lines>",
+  "signature": "0x..."
+}
+```
+
+```bash
+curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/convert_to_chain_secured_account" \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: KEY" \
+  -d '{"new_admin_wallet_address":"0xabc...","message":"chipotle.dev wants you to take admin ownership of this account.\n\nAddress: 0xabc...\nChain ID: 8453\nIssued At: 1745798400","signature":"0x..."}'
+```
+
+See [API mode vs ChainSecured mode → Converting an API account to ChainSecured](/management/account_modes#converting-an-api-account-to-chainsecured) for the dashboard flow, the SDK wrapper (`client.convertToChainSecuredAccount`), and the post-conversion verification checklist.
+
 ---
 
 Both request/response shapes and OpenAPI spec are available directly in the dev system. For a Swagger UI implementation of the OpenAPI spec, please browse to:\
