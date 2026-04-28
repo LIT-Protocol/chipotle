@@ -45,11 +45,7 @@ pub(super) async fn new_account(
 }
 
 #[openapi(tag = "Account Management")]
-#[post(
-    "/convert_to_chain_secured_account",
-    format = "json",
-    data = "<req>"
-)]
+#[post("/convert_to_chain_secured_account", format = "json", data = "<req>")]
 pub(super) async fn convert_to_chain_secured_account(
     signer_pool: &State<Arc<SignerPool>>,
     stripe_state: &State<Option<Arc<StripeState>>>,
