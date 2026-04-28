@@ -138,18 +138,6 @@
 
 **Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode
 
-## CPL-277 Convert API → ChainSecured: bump ABI version + bytecode hash post-deploy
-
-**What:** After the diamond is redeployed with `WritesFacet.convertToChainSecuredAccount`, bump `ACCOUNT_CONFIG_ABI_VERSION` in `lit-static/account_config_full_abi.js` and update the pinned `runtimeBytecodeKeccak` for each chain in `ACCOUNT_CONFIG_DEPLOYMENTS`.
-
-**Why:** Sovereign-mode dashboard users hit a hard ABI drift block when the live deployed bytecode hash does not match the pinned value. Adding a new facet function changes the bytecode, so the pin must be updated alongside the deploy.
-
-**How to fix:** Run `make deploy_<network>` with the updated facet, capture the deployed runtime bytecode keccak via `eth_getCode`, update both `ACCOUNT_CONFIG_ABI_VERSION` (e.g. `'2026-04-28.1'`) and the per-chain `runtimeBytecodeKeccak` values.
-
-**Priority:** P1
-
-**Added:** 2026-04-28 via /ship on branch feature/cpl-277-convert-an-api-based-account-to-a-chainsecured-account
-
 ## CPL-267 Sovereign Mode: Billing bypass documentation
 
 **What:** Admin writes in sovereign mode bypass Stripe billing guards (user's wallet pays gas directly to chain). Lit Action execution still charges via Stripe. Document this split explicitly in SDK + billing page.
