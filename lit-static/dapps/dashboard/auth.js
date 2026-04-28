@@ -265,7 +265,10 @@ export async function getClient() {
     if (mode === 'sovereign') {
       // Bootstrap contract address + chain id via the server config endpoint.
       // RPC URL is sourced from `getChainSecuredRpcUrl()` (default or user
-      // override under Account → RPC URL, per CPL-276), not the API.
+      // override under Account → RPC URL, per CPL-276), not the API. This is
+      // the fallback for reads that happen before a wallet signer is attached
+      // — once `connectSigner(signer)` runs, the SDK switches to the wallet's
+      // own provider for reads (CPL-283).
       const bootstrap = createClient({ baseUrl });
       const cfg = await bootstrap.getNodeChainConfig();
       if (!cfg || !cfg.contract_address) {

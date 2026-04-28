@@ -105,6 +105,11 @@ Every subsequent management call (`addGroup`, `addAction`,
 The Core SDK is constructed with `mode: 'sovereign'`, an RPC URL, and the
 on-chain `AccountConfig` contract address. Reads call the contract
 directly; writes are wallet-signed and submitted via the connected signer.
+Once a signer with a provider is attached (any ethers v6 signer that
+carries a provider — for example, a `JsonRpcSigner` returned by
+`BrowserProvider.getSigner()`), the SDK routes reads through that
+provider instead of `rpcUrl`. The `rpcUrl` constructor option is the
+fallback used for reads that happen before a signer is attached.
 
 ```javascript
 import { LitNodeSimpleApiClient } from './core_sdk.js';
@@ -150,9 +155,12 @@ on the client (the dashboard does this automatically at login),
 account-level `apiKey` is required in ChainSecured mode.
 
 Call `GET /get_node_chain_config` (no auth required) for the live
-`contract_address` and `chain_id`. The RPC URL is not returned by the API —
-supply your own Base RPC endpoint (any public Base RPC works, e.g.
-`https://mainnet.base.org` or `https://base-rpc.publicnode.com`).
+`contract_address` and `chain_id`. The RPC URL is not returned by the API
+— supply your own Base RPC endpoint as the `rpcUrl` fallback (any public
+Base RPC works, e.g. `https://mainnet.base.org` or
+`https://base-rpc.publicnode.com`). Once your signer is attached the SDK
+prefers the wallet's RPC, so this fallback only matters for the brief
+window before `connectSigner(signer)` runs.
 
 ## Using the dashboard
 
