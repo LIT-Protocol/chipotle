@@ -3,7 +3,7 @@
  * Imports all feature modules and orchestrates initialization.
  */
 
-import { isAuthenticated, setTheme, getTheme, logOut, setOnAuthReady, updateStatCards, initLogin, setUsageKeyOverride, toggleOverrideEnabled, updateUsageKeyOverrideUI, setChainSecuredRpcUrl, toggleChainSecuredRpcPanel, updateChainSecuredRpcUrlUI } from './auth.js';
+import { isAuthenticated, setTheme, getTheme, logOut, setOnAuthReady, updateStatCards, initLogin, setUsageKeyOverride, toggleOverrideEnabled, updateUsageKeyOverrideUI, setChainSecuredRpcUrl, toggleChainSecuredRpcPanel, updateChainSecuredRpcUrlUI, getMode, getApiKey, convertToChainSecured } from './auth.js';
 import { initModalClose, initConfirmClose, showStatus, hideStatus, logError } from './ui-utils.js';
 import { initBilling } from './billing.js';
 import { initGroups, loadGroups } from './groups.js';
@@ -211,6 +211,15 @@ function initHeader() {
     });
   }
 
+  const convertBtn = document.getElementById('convert-to-chainsecured-btn');
+  if (convertBtn) {
+    convertBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAccountDropdown();
+      convertToChainSecured();
+    });
+  }
+
   const toggleRpcBtn = document.getElementById('toggle-chainsecured-rpc-btn');
   if (toggleRpcBtn) {
     toggleRpcBtn.addEventListener('click', (e) => {
@@ -230,12 +239,24 @@ function initHeader() {
   }
 }
 
+/**
+ * Toggle the Convert-to-ChainSecured dropdown item. Only visible while signed
+ * in with an API key (i.e. mode === 'api' AND a key is present).
+ */
+function refreshConvertVisibility() {
+  const btn = document.getElementById('convert-to-chainsecured-btn');
+  if (!btn) return;
+  const showConvert = isAuthenticated() && getMode() === 'api' && !!getApiKey();
+  btn.hidden = !showConvert;
+}
+
 // ----- Auth ready callback -----
 
 setOnAuthReady(() => {
   updateStatCards();
   preloadAllTables();
   updateUsageKeyOverrideUI();
+  refreshConvertVisibility();
   updateChainSecuredRpcUrlUI();
 });
 

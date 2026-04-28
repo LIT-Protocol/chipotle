@@ -6,10 +6,10 @@ use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
-    AddUsageApiKeyRequest, CreateWalletWithSignatureRequest, DeleteActionRequest,
-    NewAccountRequest, RemoveActionFromGroupRequest, RemoveGroupRequest, RemovePkpFromGroupRequest,
-    RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
-    UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
+    AddUsageApiKeyRequest, ConvertToChainSecuredAccountRequest, CreateWalletWithSignatureRequest,
+    DeleteActionRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemoveGroupRequest,
+    RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest, UpdateActionMetadataRequest,
+    UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
     AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse, ApiKeyItem,
@@ -314,6 +314,98 @@ pub async fn create_wallet_with_signature(
         wallet_address: bytes_to_0x_hex(wallet_address.as_bytes()),
         derivation_path: format!("0x{:x}", derivation_u256),
     })
+}
+
+/// Convert a managed (API-mode) account into a ChainSecured (sovereign) account by
+/// reassigning its admin wallet to a user-controlled address. The user proves
+/// ownership of `new_admin_wallet_address` with a SIWE-style EIP-191 signature
+/// (same format as `create_wallet_with_signature`). The api_payer signs the
+/// on-chain `convertToChainSecuredAccount` call.
+///
+/// Irreversible: the contract reverts if the account is already ChainSecured.
+pub async fn convert_to_chain_secured_account(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    req: Json<ConvertToChainSecuredAccountRequest>,
+) -> Result<AccountOpResponse, ApiStatus> {
+    let claimed_address_bytes = hex_to_bytes(req.new_admin_wallet_address.trim_start_matches("0x"))
+        .map_err(|_| {
+            ApiStatus::bad_request(
+                anyhow::anyhow!("new_admin_wallet_address is not valid hex"),
+                "new_admin_wallet_address is not valid hex",
+            )
+        })?;
+    if claimed_address_bytes.len() != 20 {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("new_admin_wallet_address must be 20 bytes"),
+            "new_admin_wallet_address must be 20 bytes",
+        ));
+    }
+    let claimed_address = H160::from_slice(&claimed_address_bytes);
+    if claimed_address == H160::zero() {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("new_admin_wallet_address must be non-zero"),
+            "new_admin_wallet_address must be non-zero",
+        ));
+    }
+
+    let parsed = parse_create_wallet_siwe(&req.message)?;
+    if parsed.address != claimed_address {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Signed Address does not match new_admin_wallet_address"),
+            "Signed Address does not match new_admin_wallet_address",
+        ));
+    }
+    let signer = recover_eip191_signer(&req.message, &req.signature)?;
+    if signer != claimed_address {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Signature does not match new_admin_wallet_address"),
+            "Signature does not match new_admin_wallet_address",
+        ));
+    }
+
+    let node_config = GLOBAL_NODE_CONFIG
+        .get()
+        .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))
+        .map_err(|e| ApiStatus::internal_server_error(e, "GLOBAL_NODE_CONFIG missing"))?;
+    let expected_chain_id = node_config.chain.info().chain_id;
+    if parsed.chain_id != expected_chain_id {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!(
+                "Chain ID mismatch: message says {}, server is on {}",
+                parsed.chain_id,
+                expected_chain_id
+            ),
+            "Chain ID mismatch",
+        ));
+    }
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| {
+            ApiStatus::internal_server_error(
+                anyhow::anyhow!(e),
+                "System clock is before the Unix epoch",
+            )
+        })?
+        .as_secs() as i64;
+    if (now - parsed.issued_at).abs() > SIWE_TIMESTAMP_SKEW_SECONDS {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!(
+                "Issued At {} is outside the ±{}s window from now ({})",
+                parsed.issued_at,
+                SIWE_TIMESTAMP_SKEW_SECONDS,
+                now
+            ),
+            "Signed message timestamp is too old or too far in the future",
+        ));
+    }
+
+    accounts::convert_to_chain_secured_account(signer_pool, api_key, claimed_address)
+        .await
+        .map_err(|e| map_contract_error(e, "convert_to_chain_secured_account failed"))?;
+
+    Ok(AccountOpResponse { success: true })
 }
 
 pub async fn get_lit_action_ipfs_id(code: String) -> Result<String, ApiStatus> {

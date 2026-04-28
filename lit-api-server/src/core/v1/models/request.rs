@@ -10,6 +10,22 @@ pub struct NewAccountRequest {
     pub email: Option<String>,
 }
 
+/// Body for `convert_to_chain_secured_account`. The caller is authenticated by their
+/// existing API key (header). The supplied wallet becomes the on-chain admin and the
+/// account flips from managed to ChainSecured. The conversion is irreversible.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ConvertToChainSecuredAccountRequest {
+    /// Hex-encoded EVM address (with or without 0x prefix). Must be the wallet
+    /// the user controls; verified by an EIP-191 personal_sign signature.
+    pub new_admin_wallet_address: String,
+    /// SIWE-style message that was signed by `new_admin_wallet_address`. Must
+    /// include `Address:`, `Chain ID:`, and `Issued At:` lines (same format as
+    /// `create_wallet_with_signature`).
+    pub message: String,
+    /// EIP-191 signature of `message` produced by `new_admin_wallet_address`.
+    pub signature: String,
+}
+
 /// Request for add_group. permitted_actions and pkps are keccak256 hashes as hex strings (with or without 0x). API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AddGroupRequest {
