@@ -5,7 +5,7 @@
 
 import { isAuthenticated, setTheme, getTheme, logOut, setOnAuthReady, updateStatCards, initLogin, setUsageKeyOverride, toggleOverrideEnabled, updateUsageKeyOverrideUI, setChainSecuredRpcUrl, toggleChainSecuredRpcPanel, updateChainSecuredRpcUrlUI, getMode, getApiKey, convertToChainSecured } from './auth.js';
 import { initModalClose, initConfirmClose, showStatus, hideStatus, logError } from './ui-utils.js';
-import { initBilling } from './billing.js';
+import { initBilling, handleBillingReturn } from './billing.js';
 import { initGroups, loadGroups } from './groups.js';
 import { initKeys, loadUsageKeys } from './keys.js';
 import { initActions, loadActions } from './actions.js';
@@ -258,6 +258,7 @@ setOnAuthReady(() => {
   updateUsageKeyOverrideUI();
   refreshConvertVisibility();
   updateChainSecuredRpcUrlUI();
+  handleBillingReturn();
 });
 
 // ----- Init -----
