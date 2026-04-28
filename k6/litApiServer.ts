@@ -47,6 +47,25 @@ export interface NewAccountRequest {
   email?: string | null;
 }
 
+/**
+ * Response for account config operations (add_pkp_to_group, remove_pkp_from_group, add_usage_api_key, remove_usage_api_key).
+ */
+export interface AccountOpResponse {
+  success: boolean;
+}
+
+/**
+ * Body for `convert_to_chain_secured_account`. The caller is authenticated by their existing API key (header). The supplied wallet becomes the on-chain admin and the account flips from managed to ChainSecured. The conversion is irreversible.
+ */
+export interface ConvertToChainSecuredAccountRequest {
+  /** Hex-encoded EVM address (with or without 0x prefix). Must be the wallet the user controls; verified by an EIP-191 personal_sign signature. */
+  new_admin_wallet_address: string;
+  /** SIWE-style message that was signed by `new_admin_wallet_address`. Must include `Address:`, `Chain ID:`, and `Issued At:` lines (same format as `create_wallet_with_signature`). */
+  message: string;
+  /** EIP-191 signature of `message` produced by `new_admin_wallet_address`. */
+  signature: string;
+}
+
 export interface CreateWalletResponse {
   wallet_address: string;
 }
@@ -123,13 +142,6 @@ export interface AddGroupRequest {
   pkp_ids_permitted: string[];
   /** Actions permitted to use the group (AccountConfig.sol Group.cidHash). */
   cid_hashes_permitted: string[];
-}
-
-/**
- * Response for account config operations (add_pkp_to_group, remove_pkp_from_group, add_usage_api_key, remove_usage_api_key).
- */
-export interface AccountOpResponse {
-  success: boolean;
 }
 
 export interface RemoveGroupRequest {
@@ -401,6 +413,17 @@ export type ListApiKeysHeaders = {
 export type ListApiKeysDefault = ApiKeyItem[] | ErrMessage;
 
 export type NewAccountDefault = NewAccountResponse | ErrMessage;
+
+export type ConvertToChainSecuredAccountHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type ConvertToChainSecuredAccountDefault =
+  | AccountOpResponse
+  | ErrMessage;
 
 export type AccountExistsHeaders = {
   /**
@@ -791,6 +814,55 @@ export class LitApiServerClient {
       response,
       data,
       operationId: "new_account",
+    };
+  }
+
+  convertToChainSecuredAccount(
+    convertToChainSecuredAccountRequest: ConvertToChainSecuredAccountRequest,
+    headers: ConvertToChainSecuredAccountHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: ConvertToChainSecuredAccountDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(
+      this.cleanBaseUrl + `/convert_to_chain_secured_account`,
+    );
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      JSON.stringify(convertToChainSecuredAccountRequest),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
+        },
+      },
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "convert_to_chain_secured_account",
     };
   }
 

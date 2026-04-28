@@ -17,6 +17,7 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
     openapi_get_routes_spec![
         list_api_keys,
         new_account,
+        convert_to_chain_secured_account,
         account_exists,
         create_wallet,
         create_wallet_with_signature,

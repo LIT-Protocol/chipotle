@@ -2,7 +2,7 @@
  * Authentication — session state, API client, theme, stat cards.
  */
 
-import { showStatus, hideStatus, formatError, logError, showActionProgress, closeActionProgress, escapeHtml } from './ui-utils.js';
+import { showStatus, hideStatus, formatError, logError, showActionProgress, closeActionProgress, escapeHtml, confirmDelete } from './ui-utils.js';
 
 const STORAGE_KEY_API = 'accountconfig_api_key';
 const STORAGE_KEY_THEME = 'accountconfig_theme';
@@ -777,6 +777,76 @@ async function createChainSecuredAccount(btn) {
     showStatus('login-status', 'Error: ' + formatError(e), 'error');
   } finally {
     btn.disabled = false;
+  }
+}
+
+/**
+ * Account-dropdown handler. Converts the currently signed-in API account into a
+ * ChainSecured account by reassigning its admin wallet. Flow:
+ *   1. Confirm (irreversible).
+ *   2. Connect wallet (sign-in EOA, enforce chain match).
+ *   3. POST /core/v1/convert_to_chain_secured_account (api_payer signs the
+ *      on-chain `convertToChainSecuredAccount` call).
+ *   4. Switch dashboard mode to sovereign and reload.
+ *
+ * The on-chain apiKeyHash is preserved across conversion, so groups, actions,
+ * PKPs, and usage keys remain attached to the same account.
+ */
+export async function convertToChainSecured() {
+  const apiKey = getApiKey();
+  if (!apiKey || getMode() !== 'api') {
+    showStatus('login-status', 'Convert is only available while signed in with an API key.', 'error');
+    return;
+  }
+  const ok = await confirmDelete(
+    "Convert this account to ChainSecured?\n\nYour connected wallet becomes the on-chain admin and your API key's write authority is removed permanently. This cannot be undone.\n\nYou will be signed in as the wallet after conversion.",
+  );
+  if (!ok) return;
+
+  showActionProgress('Convert to ChainSecured', 'Connect a wallet to take over admin ownership.');
+  try {
+    const client = await getClient();
+    // API-mode clients don't bootstrap chain config; fetch it now so we can
+    // enforce a wallet-chain match before signing AND pass `chainId` to the
+    // SDK (which would otherwise throw "chainId is unknown").
+    const cfg = await client.getNodeChainConfig();
+    const expectedChainId = cfg && cfg.chain_id != null ? Number(cfg.chain_id) : null;
+    if (expectedChainId == null) {
+      throw new Error('Server did not report a chain id; cannot convert.');
+    }
+    const { connectEoa, switchChain } = await import('../../wallet_connect.js');
+    let { signer, chainId } = await connectEoa();
+    if (chainId !== expectedChainId) {
+      try {
+        await switchChain(expectedChainId);
+      } catch {
+        throw new Error(
+          `Your wallet is on chain ${chainId} but this dashboard expects chain ${expectedChainId}. Switch network in your wallet and retry.`,
+        );
+      }
+      ({ signer } = await connectEoa());
+    }
+    // The SDK call is one opaque await: wallet sign → server signs+broadcasts
+    // the on-chain tx → server awaits inclusion → returns. By the time it
+    // resolves the conversion is already on-chain, so the progress text
+    // covers both phases (sign + submit) before the await rather than
+    // claiming a phase that has already happened after.
+    showActionProgress(
+      'Convert to ChainSecured',
+      'Sign in your wallet, then we submit the conversion on-chain (this may take ~10–30 seconds)…',
+    );
+    const res = await client.convertToChainSecuredAccount({ apiKey, signer, chainId: expectedChainId });
+    showActionProgress('Convert to ChainSecured', 'Conversion confirmed. Switching to ChainSecured mode…');
+    setMode('sovereign');
+    setApiKey('');
+    await setChainSecuredSession({ walletAddress: res.wallet_address, apiKeyHash: res.api_key_hash });
+    closeActionProgress();
+    showStatus('login-status', 'Account converted. Reloading as ChainSecured…', 'success');
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    closeActionProgress();
+    logError('convert-to-chainsecured', e);
+    showStatus('login-status', 'Convert failed: ' + formatError(e), 'error');
   }
 }
 
