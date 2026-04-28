@@ -248,7 +248,7 @@
                 <h3 class="card-title">ChainSecured RPC URL</h3>
               </div>
               <div class="card-body">
-                <p class="form-hint" style="margin-bottom: 0.75rem;">Default: <code class="mono" id="chainsecured-rpc-default">https://base-rpc.publicnode.com</code>. Point the dashboard at your own RPC if you'd prefer.</p>
+                <p class="form-hint" style="margin-bottom: 0.75rem;">Once your wallet is connected the dashboard reads through your wallet's RPC. This URL is the fallback for reads that happen before the wallet attaches (e.g. right after page reload). Default: <code class="mono" id="chainsecured-rpc-default">https://base-rpc.publicnode.com</code>.</p>
                 <div style="display:flex;align-items:center;gap:0.5rem;">
                   <input type="text" id="chainsecured-rpc-input" class="input" style="flex:1;font-family:'JetBrains Mono',monospace;font-size:0.8125rem;" placeholder="https://base-rpc.publicnode.com" aria-label="ChainSecured RPC URL">
                   <button type="button" id="chainsecured-rpc-apply" class="btn btn-primary btn-sm">Apply</button>

@@ -356,11 +356,11 @@ export class LitNodeSimpleApiClient {
    * @param {Object} options
    * @param {string} [options.baseUrl='http://localhost:8000'] - Base URL of the API
    * @param {'api'|'sovereign'} [options.mode='api'] - Read-path mode. See module docblock.
-   * @param {string} [options.rpcUrl] - RPC URL for sovereign reads. Required when mode === 'sovereign'.
+   * @param {string} [options.rpcUrl] - RPC URL fallback for sovereign reads when no signer-with-provider is attached. Required when mode === 'sovereign'.
    * @param {string} [options.contractAddress] - AccountConfig contract address. Required when mode === 'sovereign'.
    * @param {number} [options.chainId] - Expected chain ID. Used for drift pinning + wallet chain guard. Optional; auto-detected from RPC when omitted.
    * @param {Object} [options.deployments] - Optional override map `{ "<chainId>:<address>": { runtimeBytecodeKeccak } }` for drift pinning.
-   * @param {import('ethers').Signer} [options.signer] - Pre-connected signer for sovereign writes. May be set later via connectSigner().
+   * @param {import('ethers').Signer} [options.signer] - Pre-connected signer for sovereign writes. May be set later via connectSigner(). When the signer carries its own provider (e.g. ethers.BrowserProvider), reads use it instead of `rpcUrl` (CPL-283).
    */
   constructor({ baseUrl = 'http://localhost:8000', mode = 'api', rpcUrl, contractAddress, chainId, deployments, signer, adminHashOverride } = {}) {
     if (typeof baseUrl !== 'string') {
@@ -376,6 +376,11 @@ export class LitNodeSimpleApiClient {
     this.chainId = chainId ?? null;
     this.deployments = mergeDeployments(deployments);
     this.signer = signer ?? null;
+    // ChainSecured-mode read provider. Populated from `signer.provider` when
+    // a wallet signer is attached (CPL-283), so reads route through the
+    // wallet's RPC instead of `this.rpcUrl`. Falls back to a JsonRpcProvider
+    // built from `this.rpcUrl` when no wallet is connected yet.
+    this.provider = signer?.provider ?? null;
     // When set (e.g. ChainSecured login: keccak256(abi.encodePacked(address))),
     // `_adminHash(apiKey)` returns this and ignores the apiKey argument.
     // Leave null for API-mode and legacy sovereign API-key sessions, which
@@ -385,9 +390,12 @@ export class LitNodeSimpleApiClient {
     this._writeContract = null;
     this._driftCheckPromise = null;
 
-    if (mode === 'sovereign' && (!rpcUrl || !contractAddress)) {
+    if (mode === 'sovereign' && !contractAddress) {
+      throw new Error('LitNodeSimpleApiClient: sovereign mode requires contractAddress');
+    }
+    if (mode === 'sovereign' && !rpcUrl && !this.provider) {
       throw new Error(
-        'LitNodeSimpleApiClient: sovereign mode requires rpcUrl and contractAddress',
+        'LitNodeSimpleApiClient: sovereign mode requires rpcUrl, or a signer whose provider can be used for reads (CPL-283)',
       );
     }
   }
@@ -400,6 +408,14 @@ export class LitNodeSimpleApiClient {
   connectSigner(signer) {
     this.signer = signer;
     this._writeContract = null;
+    // Adopt the wallet's provider for reads (CPL-283). Drop cached read
+    // artifacts so the next read rebinds to the new provider instead of the
+    // stale JsonRpcProvider built from `this.rpcUrl`.
+    if (signer?.provider) {
+      this.provider = signer.provider;
+      this._viewContractPromise = null;
+      this._driftCheckPromise = null;
+    }
   }
 
   /**
@@ -430,7 +446,7 @@ export class LitNodeSimpleApiClient {
     if (!this._driftCheckPromise) {
       this._driftCheckPromise = (async () => {
         const ethers = await loadEthers();
-        const provider = new ethers.JsonRpcProvider(this.rpcUrl);
+        const provider = this.provider ?? new ethers.JsonRpcProvider(this.rpcUrl);
         const [code, network] = await Promise.all([
           provider.getCode(this.contractAddress),
           provider.getNetwork(),
@@ -501,7 +517,7 @@ export class LitNodeSimpleApiClient {
     if (!this._viewContractPromise) {
       this._viewContractPromise = (async () => {
         const ethers = await loadEthers();
-        const provider = new ethers.JsonRpcProvider(this.rpcUrl);
+        const provider = this.provider ?? new ethers.JsonRpcProvider(this.rpcUrl);
         return new ethers.Contract(this.contractAddress, ACCOUNT_CONFIG_VIEW_ABI, provider);
       })();
     }
