@@ -52,19 +52,30 @@ pub(super) async fn new_account(
 )]
 pub(super) async fn convert_to_chain_secured_account(
     signer_pool: &State<Arc<SignerPool>>,
+    stripe_state: &State<Option<Arc<StripeState>>>,
     api_key: BilledManagementApiKey,
     req: Json<ConvertToChainSecuredAccountRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    let api_key_str = api_key.0.clone();
+    let result = account_management::convert_to_chain_secured_account(
+        signer_pool.inner().clone(),
+        api_key_str.as_str(),
+        req,
+    )
+    .await;
+
+    // Conversion changes the account's admin wallet on-chain. The Stripe
+    // wallet_cache maps api_key_hash → wallet_address with a 1-hour TTL, so
+    // without invalidation, billing/credit lookups would resolve to the old
+    // api_payer-generated wallet for up to an hour after conversion.
+    if result.is_ok()
+        && let Some(stripe) = stripe_state.as_ref()
+    {
+        crate::stripe::invalidate_wallet_cache(api_key_str.as_str(), stripe).await;
+    }
+
     OpenApiResponse {
-        response: ApiResult(
-            account_management::convert_to_chain_secured_account(
-                signer_pool.inner().clone(),
-                api_key.0.as_str(),
-                req,
-            )
-            .await,
-        )
-        .into(),
+        response: ApiResult(result).into(),
     }
 }
 
