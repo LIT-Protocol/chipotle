@@ -602,6 +602,52 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
+   * POST /core/v1/convert_to_chain_secured_account
+   * Hand the account's admin role over to a user-controlled wallet and flip
+   * `managed` from true to false. The user proves wallet ownership with an
+   * EIP-191 personal_sign (same SIWE-lite shape as create_wallet_with_signature).
+   * The api_payer signs the on-chain `convertToChainSecuredAccount` call.
+   *
+   * API mode only. Irreversible: the contract reverts if the account is
+   * already ChainSecured.
+   *
+   * @param {Object} options
+   * @param {string} options.apiKey       - existing API key (admin authority).
+   * @param {Object} options.signer       - ethers Signer for the new admin wallet.
+   * @param {number} [options.chainId]    - expected chain id; defaults to this.chainId.
+   * @returns {Promise<{wallet_address: string, api_key_hash: string}>}
+   */
+  async convertToChainSecuredAccount({ apiKey, signer, chainId } = {}) {
+    if (this.mode !== 'api') {
+      throw new Error('convertToChainSecuredAccount requires api mode');
+    }
+    if (!apiKey) throw new Error('convertToChainSecuredAccount requires apiKey');
+    if (!signer) throw new Error('convertToChainSecuredAccount requires a connected signer');
+    const ethers = await loadEthers();
+    const newAdminAddress = await signer.getAddress();
+    const targetChainId = chainId ?? this.chainId;
+    if (targetChainId == null) {
+      throw new Error('convertToChainSecuredAccount: chainId is unknown — call getNodeChainConfig first');
+    }
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const host = (typeof location !== 'undefined' && location.host) ? location.host : 'lit';
+    const message = `${host} wants you to take admin ownership of this account.\n\nAddress: ${newAdminAddress}\nChain ID: ${targetChainId}\nIssued At: ${issuedAt}`;
+    const signature = await signer.signMessage(message);
+    const res = await fetch(`${this.baseUrl}/convert_to_chain_secured_account`, {
+      method: 'POST',
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        new_admin_wallet_address: newAdminAddress,
+        message,
+        signature,
+      }),
+    });
+    await parseResponse(res, 'convert_to_chain_secured_account');
+    const apiKeyHash = ethers.keccak256(ethers.toUtf8Bytes(apiKey));
+    return { wallet_address: newAdminAddress, api_key_hash: apiKeyHash };
+  }
+
+  /**
    * GET /core/v1/account_exists
    * Checks whether an account exists and is mutable for the given API key (contract: accountExistsAndIsMutable).
    * API key via X-Api-Key or Authorization: Bearer header.
