@@ -421,55 +421,11 @@ pub async fn convert_to_chain_secured_account(
         ));
     }
 
-    let parsed = parse_chainsecured_siwe(&req.message)?;
-    if parsed.address != claimed_address {
-        return Err(ApiStatus::bad_request(
-            anyhow::anyhow!("Signed Address does not match new_admin_wallet_address"),
-            "Signed Address does not match new_admin_wallet_address",
-        ));
-    }
-    let signer = recover_eip191_signer(&req.message, &req.signature)?;
+    let signer = verify_chainsecured_siwe(&req.message, &req.signature)?;
     if signer != claimed_address {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!("Signature does not match new_admin_wallet_address"),
             "Signature does not match new_admin_wallet_address",
-        ));
-    }
-
-    let node_config = GLOBAL_NODE_CONFIG
-        .get()
-        .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))
-        .map_err(|e| ApiStatus::internal_server_error(e, "GLOBAL_NODE_CONFIG missing"))?;
-    let expected_chain_id = node_config.chain.info().chain_id;
-    if parsed.chain_id != expected_chain_id {
-        return Err(ApiStatus::bad_request(
-            anyhow::anyhow!(
-                "Chain ID mismatch: message says {}, server is on {}",
-                parsed.chain_id,
-                expected_chain_id
-            ),
-            "Chain ID mismatch",
-        ));
-    }
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| {
-            ApiStatus::internal_server_error(
-                anyhow::anyhow!(e),
-                "System clock is before the Unix epoch",
-            )
-        })?
-        .as_secs() as i64;
-    if (now - parsed.issued_at).abs() > SIWE_TIMESTAMP_SKEW_SECONDS {
-        return Err(ApiStatus::bad_request(
-            anyhow::anyhow!(
-                "Issued At {} is outside the ±{}s window from now ({})",
-                parsed.issued_at,
-                SIWE_TIMESTAMP_SKEW_SECONDS,
-                now
-            ),
-            "Signed message timestamp is too old or too far in the future",
         ));
     }
 
