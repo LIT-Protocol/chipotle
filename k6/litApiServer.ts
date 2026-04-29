@@ -688,7 +688,7 @@ export type BillingStripeConfigDefault = StripeConfigResponse | ErrMessage;
 
 export type BillingBalanceHeaders = {
   /**
-   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   * Account or usage API key (legacy), OR send X-Wallet-Auth: base64(JSON{message, signature}) for SIWE-style ChainSecured authentication.
    */
   "X-Api-Key": string;
 };
@@ -697,7 +697,7 @@ export type BillingBalanceDefault = BillingBalanceResponse | ErrMessage;
 
 export type BillingCreatePaymentIntentHeaders = {
   /**
-   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   * Account or usage API key (legacy), OR send X-Wallet-Auth: base64(JSON{message, signature}) for SIWE-style ChainSecured authentication.
    */
   "X-Api-Key": string;
 };
@@ -708,7 +708,7 @@ export type BillingCreatePaymentIntentDefault =
 
 export type BillingConfirmPaymentHeaders = {
   /**
-   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   * Account or usage API key (legacy), OR send X-Wallet-Auth: base64(JSON{message, signature}) for SIWE-style ChainSecured authentication.
    */
   "X-Api-Key": string;
 };
