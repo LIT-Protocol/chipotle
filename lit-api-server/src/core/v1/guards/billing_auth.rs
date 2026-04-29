@@ -29,6 +29,7 @@ use rocket_okapi::request::{OpenApiFromRequest, RequestHeaderInput};
 use serde::Deserialize;
 
 use crate::core::account_management::{SIWE_PURPOSE_BILLING_AUTH, verify_siwe_signature};
+use crate::utils::parse_with_hash::is_precomputed_hash_shape;
 
 /// Identity proven by an inbound billing request.
 #[derive(Clone, Debug)]
@@ -107,7 +108,11 @@ impl<'r> FromRequest<'r> for BillingAuth {
             );
         }
 
-        // Legacy API-key path — same logic as `apikey::ApiKey`.
+        // Legacy API-key path — same logic as `apikey::ApiKey`. Reject any
+        // string shaped like a precomputed account hash here — those must
+        // come through the verified WalletSigned path only. Otherwise an
+        // attacker could send `X-Api-Key: 0x{keccak256(walletAddress)}` and
+        // bypass SIWE entirely (CPL-285 hardening).
         let auth = request.headers().get_one("Authorization");
         if let Some(v) = auth {
             let v = v.trim();
@@ -117,6 +122,13 @@ impl<'r> FromRequest<'r> for BillingAuth {
             {
                 let key = key_part.trim();
                 if !key.is_empty() {
+                    if is_precomputed_hash_shape(key) {
+                        tracing::warn!(
+                            "rejecting Authorization Bearer that looks like a precomputed account hash; \
+                             ChainSecured callers must use X-Wallet-Auth"
+                        );
+                        return Outcome::Error((Status::Unauthorized, ()));
+                    }
                     return Outcome::Success(BillingAuth::ApiKey(key.to_string()));
                 }
             }
@@ -124,6 +136,13 @@ impl<'r> FromRequest<'r> for BillingAuth {
         if let Some(key) = request.headers().get_one("X-Api-Key") {
             let key = key.trim();
             if !key.is_empty() {
+                if is_precomputed_hash_shape(key) {
+                    tracing::warn!(
+                        "rejecting X-Api-Key that looks like a precomputed account hash; \
+                         ChainSecured callers must use X-Wallet-Auth"
+                    );
+                    return Outcome::Error((Status::Unauthorized, ()));
+                }
                 return Outcome::Success(BillingAuth::ApiKey(key.to_string()));
             }
         }
@@ -135,19 +154,31 @@ impl<'r> OpenApiFromRequest<'r> for BillingAuth {
     fn from_request_input(
         generator: &mut OpenApiGenerator,
         _name: String,
-        required: bool,
+        _required: bool,
     ) -> RocketOkapiResult<RequestHeaderInput> {
+        // BillingAuth accepts EITHER X-Api-Key OR X-Wallet-Auth — neither is
+        // strictly required on its own. rocket_okapi 0.9 only supports
+        // emitting one Parameter per guard, so we mark X-Api-Key as
+        // optional and document the X-Wallet-Auth alternative in the
+        // description. This prevents codegen (k6/openapi-to-k6) from
+        // declaring `X-Api-Key: string` as a required field on
+        // ChainSecured callers who never send it (CPL-285 review feedback).
         let schema = generator.json_schema::<String>();
         Ok(RequestHeaderInput::Parameter(Parameter {
             name: "X-Api-Key".to_owned(),
             location: "header".to_owned(),
             description: Some(
-                "Account or usage API key (legacy), OR send X-Wallet-Auth: \
-                 base64(JSON{message, signature}) for SIWE-style ChainSecured \
-                 authentication."
+                "API-mode auth: account or usage API key (alternatively \
+                 `Authorization: Bearer <key>`). OR — for ChainSecured \
+                 callers — omit X-Api-Key entirely and send \
+                 `X-Wallet-Auth: <base64(JSON{message, signature})>` where \
+                 the message is a SIWE-lite EIP-191 payload with a \
+                 `Purpose: lit-billing-auth-v1` line. The signature proves \
+                 wallet possession; the signed message must include \
+                 Address, Chain ID, and Issued At within ±5 minutes."
                     .to_owned(),
             ),
-            required,
+            required: false,
             deprecated: false,
             allow_empty_value: false,
             value: ParameterValue::Schema {
@@ -184,5 +215,21 @@ mod tests {
             auth.identity_string(),
             "0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
         );
+    }
+
+    /// CPL-285: a public wallet hash sent in `X-Api-Key` would have bypassed
+    /// SIWE entirely after `usage_api_key_to_hash` started accepting the
+    /// precomputed-hash form. The shape check is what blocks it. This test
+    /// pins that decision so a future refactor can't silently undo it.
+    #[test]
+    fn precomputed_hash_strings_are_recognized() {
+        // A 0x-prefixed 66-char keccak hash must be detectable. The actual
+        // rejection happens in FromRequest::from_request, but the building
+        // block is is_precomputed_hash_shape — verify it discriminates.
+        let wallet_hash = "0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+        assert!(is_precomputed_hash_shape(wallet_hash));
+        // A real base64 API key (44 chars, base64 alphabet) does not match.
+        let api_key = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXowMTIzNDU2Nzg5";
+        assert!(!is_precomputed_hash_shape(api_key));
     }
 }

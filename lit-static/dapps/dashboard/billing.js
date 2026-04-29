@@ -40,6 +40,19 @@ let _abortController = null;
 // timestamp window. { headerValue, expiresAtMs, walletAddress }
 let _walletAuthCache = null;
 
+/**
+ * True when we have a valid (unexpired, current-wallet) SIWE auth header.
+ * Used to decide whether to load the balance silently vs. wait for the user
+ * to click Add Funds — we never want to auto-trigger a wallet popup just to
+ * render the topbar balance (CPL-285 review feedback).
+ */
+function hasValidWalletAuthCache() {
+  if (!_walletAuthCache) return false;
+  const wallet = getChainSecuredWallet();
+  if (!wallet || _walletAuthCache.walletAddress.toLowerCase() !== wallet.toLowerCase()) return false;
+  return _walletAuthCache.expiresAtMs > Date.now() + 10_000;
+}
+
 // Server's SIWE_TIMESTAMP_SKEW_SECONDS is 300; we cache for 4 min to leave a
 // 1-min safety buffer against clock skew + in-flight latency.
 const WALLET_AUTH_TTL_MS = 4 * 60 * 1000;
@@ -206,11 +219,17 @@ export function refreshBillingUI() {
       if (addFundsBtn) addFundsBtn.style.display = '';
       if (notRequiredEl) notRequiredEl.style.display = 'none';
       if (billingBanner) billingBanner.style.display = 'none';
-      // Don't auto-trigger a wallet popup just to render the balance — the
-      // ChainSecured user signs once when they explicitly click Add Funds.
-      // Display "—" until they do.
-      if (getMode() === 'sovereign' && balanceEl && !balanceEl.textContent) {
-        balanceEl.textContent = '—';
+      // In sovereign mode never auto-trigger a wallet popup just to render
+      // the topbar balance. Only load the balance when we already hold a
+      // valid SIWE cache (e.g. immediately after the user funded). Otherwise
+      // the user explicitly opts in by clicking Add Funds — `openAddFundsModal`
+      // primes the auth and refreshes the balance after a successful payment.
+      if (getMode() === 'sovereign') {
+        if (hasValidWalletAuthCache()) {
+          loadBillingBalance();
+        } else if (balanceEl && !balanceEl.textContent) {
+          balanceEl.textContent = '—';
+        }
       } else {
         loadBillingBalance();
       }
@@ -289,6 +308,32 @@ async function openAddFundsModal() {
       }
       return;
     }
+  }
+
+  // Sovereign mode: prime the SIWE cache now (one wallet popup) so the
+  // user's later Pay click — and the balance refresh that follows — flows
+  // without a second prompt. If they cancel the signature, surface that in
+  // the modal status and leave the modal open so they can retry.
+  if (getMode() === 'sovereign' && !hasValidWalletAuthCache()) {
+    if (statusEl) {
+      statusEl.textContent = 'Approve the wallet signature to enable billing for this session…';
+      statusEl.className = 'status info';
+      statusEl.style.display = 'block';
+    }
+    try {
+      await getWalletAuthHeader();
+      if (statusEl) statusEl.style.display = 'none';
+    } catch (e) {
+      logError('siwe-prime', e);
+      if (statusEl) {
+        statusEl.textContent = 'Wallet signature required to fund a ChainSecured account: ' + formatError(e);
+        statusEl.className = 'status error';
+        statusEl.style.display = 'block';
+      }
+      return;
+    }
+    // Now that we have a valid cache, surface the actual balance.
+    loadBillingBalance();
   }
 
   if (payBtn) payBtn.disabled = false;
