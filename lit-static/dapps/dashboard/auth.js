@@ -56,7 +56,11 @@ export function getApiKey() {
 export function setApiKey(v) {
   if (v) sessionStorage.setItem(STORAGE_KEY_API, v);
   else sessionStorage.removeItem(STORAGE_KEY_API);
-  import('./billing.js').then((m) => m.resetBillingAvailability()).catch(() => {});
+  import('./billing.js').then((m) => {
+    m.resetBillingAvailability();
+    // Abort any in-flight billing requests under the prior identity (CPL-285).
+    if (typeof m.clearBillingSession === 'function') m.clearBillingSession();
+  }).catch(() => {});
   updateAuthUI();
 }
 
@@ -89,6 +93,10 @@ export async function setChainSecuredSession({ walletAddress, apiKeyHash }) {
 export function clearChainSecuredSession() {
   sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_WALLET);
   sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_HASH);
+  // Abort any in-flight billing requests under the prior wallet (CPL-285).
+  import('./billing.js').then((m) => {
+    if (typeof m.clearBillingSession === 'function') m.clearBillingSession();
+  }).catch(() => {});
   resetClient();
 }
 
@@ -113,6 +121,11 @@ export function logOut() {
   sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_WALLET);
   sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_HASH);
   clearOverrideState();
+  // Abort any in-flight billing requests under the prior identity (CPL-285).
+  import('./billing.js').then((m) => {
+    m.resetBillingAvailability();
+    if (typeof m.clearBillingSession === 'function') m.clearBillingSession();
+  }).catch(() => {});
   resetClient();
   updateAuthUI();
 }

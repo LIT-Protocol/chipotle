@@ -9,15 +9,32 @@ pub fn api_key_hash(api_key_base_64: &str) -> U256 {
     U256::from_big_endian(&keccak256(api_key_base_64.as_bytes()))
 }
 
+/// True when `s` is shaped like a precomputed 32-byte keccak256 hash:
+/// lowercase 0x-prefixed, exactly 66 chars, body all hex. (`hex_to_bytes`
+/// does not accept the uppercase `0X` prefix, so we don't either — the prior
+/// `|| starts_with("0X")` clause was dead code.)
+///
+/// `usage_api_key_to_hash` interprets these strings as already-hashed identities
+/// instead of raw API keys (CPL-285). Any raw API key that happened to match
+/// this shape would silently route to the wrong on-chain account, so issuance
+/// rejects keys of this shape — see `core::account_management::new_account`.
+pub fn is_precomputed_hash_shape(s: &str) -> bool {
+    let trimmed = s.trim();
+    if !(trimmed.starts_with("0x") && trimmed.len() == 66) {
+        return false;
+    }
+    matches!(hex_to_bytes(trimmed), Ok(bytes) if bytes.len() == 32)
+}
+
 /// Hash a usage API key string, OR pass through a pre-computed keccak256 hash.
-/// If `s` is a 0x-prefixed 66-character hex string (32 bytes), it is treated as
-/// an already-computed hash and parsed directly. Otherwise it is keccak256-hashed.
+/// If `s` is a lowercase 0x-prefixed 66-character hex string (32 bytes), it is
+/// treated as an already-computed hash and parsed directly. Otherwise it is
+/// keccak256-hashed. `s.trim()` removes surrounding whitespace.
 pub fn usage_api_key_to_hash(s: &str) -> U256 {
     let trimmed = s.trim();
-    if ((trimmed.starts_with("0x") || trimmed.starts_with("0X")) && trimmed.len() == 66)
-        && let Ok(bytes) = hex_to_bytes(trimmed)
-        && bytes.len() == 32
-    {
+    if is_precomputed_hash_shape(trimmed) {
+        // `is_precomputed_hash_shape` already validated 32-byte hex.
+        let bytes = hex_to_bytes(trimmed).expect("validated above");
         return U256::from_big_endian(&bytes);
     }
     api_key_hash(trimmed)
@@ -198,6 +215,63 @@ mod tests {
         // A short 0x string is not a precomputed hash; it should be keccak256-hashed.
         let result = usage_api_key_to_hash("0xabcd");
         assert_eq!(result, api_key_hash("0xabcd"));
+    }
+
+    // ── is_precomputed_hash_shape (CPL-285) ─────────────────────────────
+    #[test]
+    fn is_precomputed_hash_shape_accepts_canonical_hash() {
+        assert!(is_precomputed_hash_shape(
+            "0x0000000000000000000000000000000000000000000000000000000000000001"
+        ));
+        assert!(is_precomputed_hash_shape(
+            "0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789"
+        ));
+    }
+
+    #[test]
+    fn is_precomputed_hash_shape_rejects_uppercase_prefix() {
+        // `hex_to_bytes` doesn't accept `0X`, so neither do we.
+        assert!(!is_precomputed_hash_shape(
+            "0X0000000000000000000000000000000000000000000000000000000000000001"
+        ));
+    }
+
+    #[test]
+    fn is_precomputed_hash_shape_rejects_short_strings() {
+        assert!(!is_precomputed_hash_shape("0xabcd"));
+        assert!(!is_precomputed_hash_shape("0x"));
+        assert!(!is_precomputed_hash_shape(""));
+    }
+
+    #[test]
+    fn is_precomputed_hash_shape_rejects_long_strings() {
+        // 67 chars — one too many.
+        assert!(!is_precomputed_hash_shape(
+            "0x00000000000000000000000000000000000000000000000000000000000000010"
+        ));
+    }
+
+    #[test]
+    fn is_precomputed_hash_shape_rejects_no_prefix() {
+        // 64 hex chars without 0x — would have to be exactly 66 with prefix.
+        assert!(!is_precomputed_hash_shape(
+            "0000000000000000000000000000000000000000000000000000000000000001"
+        ));
+    }
+
+    #[test]
+    fn is_precomputed_hash_shape_rejects_non_hex_body() {
+        // 66 chars, 0x prefix, but body has a non-hex char.
+        assert!(!is_precomputed_hash_shape(
+            "0xZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ"
+        ));
+    }
+
+    #[test]
+    fn is_precomputed_hash_shape_rejects_typical_base64_api_key() {
+        // Base64 of 32 random bytes is 44 chars — never matches.
+        let synthetic_api_key = "YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXowMTIzNDU2Nzg5";
+        assert!(!is_precomputed_hash_shape(synthetic_api_key));
     }
 
     // ── parse_u256 (via string_to_hashed_u256 / hashed_cid_to_u256) ────
