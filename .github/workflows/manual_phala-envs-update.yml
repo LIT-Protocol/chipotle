@@ -1,0 +1,101 @@
+# Push sealed environment variables to a specific Phala CVM and start it.
+#
+# Used during CVM migrations (e.g. prod5 → prod6) to bootstrap a freshly-
+# provisioned instance with the same env vars CI would normally push during
+# `phala deploy`. The encrypted env blob is per-app on the Phala side, but
+# `phala envs update` is the documented way to populate the values for an
+# instance — they cannot be copied or read from the source CVM.
+#
+# Mirrors the env block in deploy-staging.yml:255-316 for the next branch.
+# Stripe sandbox keys are used (matching the next/main staging behavior).
+#
+# Required secrets:
+#   PHALA_CLOUD_API_KEY            - Phala Cloud API key
+#   PHALA_DSTACKAPP_PRIVATE_KEY    - DstackApp owner key (for envs update on-chain step, if any)
+#   BASE_CHAIN_RPC                 - Base mainnet RPC URL
+#   GCP_SERVICE_ACCOUNT_JSON       - GCP service account key
+#   STRIPE_SANDBOX_SECRET_KEY      - Stripe sandbox secret key
+#   STRIPE_SANDBOX_PUBLISHABLE_KEY - Stripe sandbox publishable key
+#   CERTBOT_AWS_ACCESS_KEY_ID      - Route 53 IAM access key
+#   CERTBOT_AWS_SECRET_ACCESS_KEY  - Route 53 IAM secret key
+#   CERTBOT_AWS_ROLE_ARN           - IAM role ARN for STS assumption
+#
+# Required vars:
+#   CERTBOT_AWS_REGION             - AWS region for STS endpoint
+
+name: Phala Envs Update + Start (manual)
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      cvm_id:
+        description: "Target CVM (UUID, app_id, instance_id, or name) — e.g. cvm_yZQnD863"
+        required: true
+        type: string
+      certbot_domain:
+        description: "CERTBOT_DOMAIN for dstack-ingress. Leave blank to skip ingress cert acquisition."
+        required: false
+        type: string
+        default: "test.chipotle.litprotocol.com"
+      gcp_project_id:
+        description: "GCP_PROJECT_ID for otel-collector"
+        required: false
+        type: string
+        default: "chipotle-next"
+      start:
+        description: "Start the CVM after pushing envs"
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  envs-update:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Phala CLI
+        run: npm install -g phala
+
+      - name: Push sealed envs to CVM
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          PRIVATE_KEY: ${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}
+          ETH_RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
+          BASE_CHAIN_RPC: ${{ secrets.BASE_CHAIN_RPC }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SANDBOX_SECRET_KEY }}
+          STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_SANDBOX_PUBLISHABLE_KEY }}
+          GCP_SERVICE_ACCOUNT_JSON: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+          CERTBOT_AWS_ACCESS_KEY_ID: ${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}
+          CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
+          CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
+        run: |
+          phala envs update "${{ inputs.cvm_id }}" \
+            -e "STRIPE_SECRET_KEY=$STRIPE_SECRET_KEY" \
+            -e "STRIPE_PUBLISHABLE_KEY=$STRIPE_PUBLISHABLE_KEY" \
+            -e "GCP_SERVICE_ACCOUNT_JSON=$GCP_SERVICE_ACCOUNT_JSON" \
+            -e "GCP_PROJECT_ID=${{ inputs.gcp_project_id }}" \
+            -e "BASE_CHAIN_RPC=$BASE_CHAIN_RPC" \
+            -e "CERTBOT_DOMAIN=${{ inputs.certbot_domain }}" \
+            -e "CERTBOT_AWS_ACCESS_KEY_ID=$CERTBOT_AWS_ACCESS_KEY_ID" \
+            -e "CERTBOT_AWS_SECRET_ACCESS_KEY=$CERTBOT_AWS_SECRET_ACCESS_KEY" \
+            -e "CERTBOT_AWS_ROLE_ARN=$CERTBOT_AWS_ROLE_ARN" \
+            -e "CERTBOT_AWS_REGION=${{ vars.CERTBOT_AWS_REGION }}"
+
+      - name: Start CVM
+        if: inputs.start
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+        run: |
+          phala cvms start "${{ inputs.cvm_id }}"
+
+      - name: Show CVM status
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+        run: |
+          phala cvms get "${{ inputs.cvm_id }}"
