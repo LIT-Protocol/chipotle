@@ -8,15 +8,17 @@ use crate::core::v1::helpers::api_status::{ApiResult, ErrMessage};
 use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
-    AddUsageApiKeyRequest, ConvertToChainSecuredAccountRequest, CreateWalletWithSignatureRequest,
-    DeleteActionRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemoveGroupRequest,
-    RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest, UpdateActionMetadataRequest,
-    UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
+    AddUsageApiKeyRequest, AddUsageApiKeyWithSignatureRequest, ConvertToChainSecuredAccountRequest,
+    CreateWalletWithSignatureRequest, DeleteActionRequest, NewAccountRequest,
+    RemoveActionFromGroupRequest, RemoveGroupRequest, RemovePkpFromGroupRequest,
+    RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
+    UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
-    AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse, ApiKeyItem,
-    ChainConfigKeysResponse, CreateWalletResponse, CreateWalletWithSignatureResponse,
-    ListMetadataItem, NewAccountResponse, NodeChainConfigResponse, WalletItem,
+    AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse,
+    AddUsageApiKeyWithSignatureResponse, ApiKeyItem, ChainConfigKeysResponse, CreateWalletResponse,
+    CreateWalletWithSignatureResponse, ListMetadataItem, NewAccountResponse,
+    NodeChainConfigResponse, WalletItem,
 };
 use crate::stripe::StripeState;
 use rocket::State;
@@ -347,6 +349,16 @@ pub(super) async fn remove_pkp_from_group(
             .await,
         )
         .into(),
+    }
+}
+
+#[openapi(tag = "Account Management")]
+#[post("/add_usage_api_key_with_signature", format = "json", data = "<req>")]
+pub(super) async fn add_usage_api_key_with_signature(
+    req: Json<AddUsageApiKeyWithSignatureRequest>,
+) -> OpenApiResponse<AddUsageApiKeyWithSignatureResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(account_management::add_usage_api_key_with_signature(req).await).into(),
     }
 }
 

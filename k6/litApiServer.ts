@@ -213,6 +213,28 @@ export interface AddUsageApiKeyRequest {
 }
 
 /**
+ * Returned by `/add_usage_api_key_with_signature`. The client must follow up with on-chain `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` and `setUsageApiKey(adminHash, keccak256(usage_api_key), …)` — both signed by the admin wallet — to attach the usage key to the ChainSecured account.
+ */
+export interface AddUsageApiKeyWithSignatureResponse {
+  /** Base64-encoded 32-byte secret. Send as `X-Api-Key` / `Authorization: Bearer …` for usage requests; pass `keccak256(this)` to `setUsageApiKey`. */
+  usage_api_key: string;
+  /** 0x-prefixed lowercase hex EVM address of the minted PKP wallet. */
+  wallet_address: string;
+  /** 0x-prefixed lowercase hex (uint256). Pass through verbatim to `registerWalletDerivation`'s `derivationPath` arg. */
+  derivation_path: string;
+}
+
+/**
+ * ChainSecured usage-key minting. Mirrors `CreateWalletWithSignatureRequest`: the user proves wallet ownership with an EIP-191 personal_sign signature, the server mints a usage-key wallet via DStack MPC and returns the secret (as the usage API key) plus address + derivation path. The client follows up with on-chain `registerWalletDerivation` and `setUsageApiKey` signed by their admin wallet — only the admin wallet of a ChainSecured account can call `setUsageApiKey` (see AppStorage.accountExistsAndIsMutable).
+ */
+export interface AddUsageApiKeyWithSignatureRequest {
+  /** EIP-191 plaintext message that was signed. Same format as `create_wallet_with_signature`: `Address: 0x…`, `Chain ID: <u64>`, `Issued At: <unix-seconds>` (case-sensitive prefixes). */
+  message: string;
+  /** 0x-prefixed hex signature (65 bytes — r||s||v, EIP-191 personal-sign). */
+  signature: string;
+}
+
+/**
  * Request for update_usage_api_key. Updates all permissions and metadata on an existing usage API key. API key via header.
  */
 export interface UpdateUsageApiKeyRequest {
@@ -529,6 +551,10 @@ export type AddUsageApiKeyHeaders = {
 };
 
 export type AddUsageApiKeyDefault = AddUsageApiKeyResponse | ErrMessage;
+
+export type AddUsageApiKeyWithSignatureDefault =
+  | AddUsageApiKeyWithSignatureResponse
+  | ErrMessage;
 
 export type UpdateUsageApiKeyHeaders = {
   /**
@@ -1444,6 +1470,47 @@ export class LitApiServerClient {
       response,
       data,
       operationId: "add_usage_api_key",
+    };
+  }
+
+  addUsageApiKeyWithSignature(
+    addUsageApiKeyWithSignatureRequest: AddUsageApiKeyWithSignatureRequest,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: AddUsageApiKeyWithSignatureDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(
+      this.cleanBaseUrl + `/add_usage_api_key_with_signature`,
+    );
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      JSON.stringify(addUsageApiKeyWithSignatureRequest),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "add_usage_api_key_with_signature",
     };
   }
 
