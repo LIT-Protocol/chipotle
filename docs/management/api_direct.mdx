@@ -282,7 +282,7 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
 
 ### ChainSecured-mode HTTP endpoints
 
-Two HTTP endpoints back the ChainSecured (sovereign) flow. They sit alongside the on-chain writes — see [API mode vs ChainSecured mode](/management/account_modes) for the full SDK-side workflow and when to choose each mode.
+Three HTTP endpoints back the ChainSecured (sovereign) flow. They sit alongside the on-chain writes — see [API mode vs ChainSecured mode](/management/account_modes) for the full SDK-side workflow and when to choose each mode.
 
 #### `POST /create_wallet_with_signature`
 
@@ -342,6 +342,46 @@ curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/convert_to_chain_s
 ```
 
 See [API mode vs ChainSecured mode → Converting an API account to ChainSecured](/management/account_modes#converting-an-api-account-to-chainsecured) for the dashboard flow, the SDK wrapper (`client.convertToChainSecuredAccount`), and the post-conversion verification checklist.
+
+#### `POST /add_usage_api_key_with_signature`
+
+The ChainSecured counterpart to `/add_usage_api_key`. Mirrors `create_wallet_with_signature`: the server mints a usage-key wallet via DStack MPC after verifying a wallet-ownership signature, then returns the secret (base64-encoded) plus the wallet address and derivation path. The client follows up on-chain — only the admin wallet of a ChainSecured account can call `setUsageApiKey`, so the server cannot complete the attach for you.
+
+No API key required. Same ±5-minute `Issued At` window as `create_wallet_with_signature`. Worst-case replay just returns a fresh secret for an unattached wallet — equivalent to a freshly generated keypair until the admin wallet calls the on-chain follow-ups, so compute cost only.
+
+**Request body:**
+
+```json
+{
+  "message": "<EIP-191 plaintext>",
+  "signature": "0x<65-byte hex>"
+}
+```
+
+Same SIWE-lite shape as `create_wallet_with_signature`: `Address: 0x…`, `Chain ID: <u64>`, and `Issued At: <unix-seconds>` (case-sensitive, exactly one of each — duplicates are rejected). Other lines are ignored. Messages longer than 4 KiB are rejected.
+
+**Response:**
+
+```json
+{
+  "usage_api_key": "<base64 of 32 secret bytes>",
+  "wallet_address": "0x...",
+  "derivation_path": "0x..."
+}
+```
+
+The client must do two on-chain calls signed by the admin wallet to attach the new usage key:
+
+1. `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` — registers the PKP to the account.
+2. `setUsageApiKey(adminHash, keccak256(usage_api_key_bytes), expiration, balance, name, description, …permissions)` — attaches the usage key with its permission set.
+
+Until both land, the secret in `usage_api_key` is just a freshly minted keypair with no on-chain identity.
+
+```bash
+curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/add_usage_api_key_with_signature" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"chipotle.dev wants you to mint a usage API key for ChainSecured account.\n\nAddress: 0xabc...\nChain ID: 8453\nIssued At: 1745798400","signature":"0x..."}'
+```
 
 ---
 
