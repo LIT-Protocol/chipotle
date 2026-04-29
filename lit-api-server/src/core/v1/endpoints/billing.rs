@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::core::v1::guards::apikey::ApiKey;
+use crate::core::v1::guards::billing_auth::BillingAuth;
 use crate::core::v1::helpers::api_status::{ApiResult, ApiStatus, ErrMessage};
 use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{ConfirmPaymentRequest, CreatePaymentIntentRequest};
@@ -63,10 +63,10 @@ pub(super) async fn billing_stripe_config(
 #[openapi(tag = "Billing")]
 #[get("/billing/balance")]
 pub(super) async fn billing_balance(
-    api_key: ApiKey,
+    auth: BillingAuth,
     stripe_state: &State<Option<Arc<StripeState>>>,
 ) -> OpenApiResponse<BillingBalanceResponse, ErrMessage> {
-    let result = billing_balance_impl(api_key.0.as_str(), stripe_state.inner()).await;
+    let result = billing_balance_impl(auth.identity_string(), stripe_state.inner()).await;
     OpenApiResponse {
         response: ApiResult(result).into(),
     }
@@ -103,12 +103,12 @@ async fn billing_balance_impl(
 #[openapi(tag = "Billing")]
 #[post("/billing/create_payment_intent", format = "json", data = "<req>")]
 pub(super) async fn billing_create_payment_intent(
-    api_key: ApiKey,
+    auth: BillingAuth,
     stripe_state: &State<Option<Arc<StripeState>>>,
     req: Json<CreatePaymentIntentRequest>,
 ) -> OpenApiResponse<CreatePaymentIntentResponse, ErrMessage> {
     let result =
-        billing_create_payment_intent_impl(api_key.0.as_str(), stripe_state.inner(), req).await;
+        billing_create_payment_intent_impl(auth.identity_string(), stripe_state.inner(), req).await;
     OpenApiResponse {
         response: ApiResult(result).into(),
     }
@@ -137,11 +137,12 @@ async fn billing_create_payment_intent_impl(
 #[openapi(tag = "Billing")]
 #[post("/billing/confirm_payment", format = "json", data = "<req>")]
 pub(super) async fn billing_confirm_payment(
-    api_key: ApiKey,
+    auth: BillingAuth,
     stripe_state: &State<Option<Arc<StripeState>>>,
     req: Json<ConfirmPaymentRequest>,
 ) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
-    let result = billing_confirm_payment_impl(api_key.0.as_str(), stripe_state.inner(), req).await;
+    let result =
+        billing_confirm_payment_impl(auth.identity_string(), stripe_state.inner(), req).await;
     OpenApiResponse {
         response: ApiResult(result).into(),
     }

@@ -688,18 +688,18 @@ export type BillingStripeConfigDefault = StripeConfigResponse | ErrMessage;
 
 export type BillingBalanceHeaders = {
   /**
-   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   * API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{message, signature})>` where the message is a SIWE-lite EIP-191 payload with a `Purpose: lit-billing-auth-v1` line. The signature proves wallet possession; the signed message must include Address, Chain ID, and Issued At within ±5 minutes.
    */
-  "X-Api-Key": string;
+  "X-Api-Key"?: string;
 };
 
 export type BillingBalanceDefault = BillingBalanceResponse | ErrMessage;
 
 export type BillingCreatePaymentIntentHeaders = {
   /**
-   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   * API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{message, signature})>` where the message is a SIWE-lite EIP-191 payload with a `Purpose: lit-billing-auth-v1` line. The signature proves wallet possession; the signed message must include Address, Chain ID, and Issued At within ±5 minutes.
    */
-  "X-Api-Key": string;
+  "X-Api-Key"?: string;
 };
 
 export type BillingCreatePaymentIntentDefault =
@@ -708,9 +708,9 @@ export type BillingCreatePaymentIntentDefault =
 
 export type BillingConfirmPaymentHeaders = {
   /**
-   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   * API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{message, signature})>` where the message is a SIWE-lite EIP-191 payload with a `Purpose: lit-billing-auth-v1` line. The signature proves wallet possession; the signed message must include Address, Chain ID, and Issued At within ±5 minutes.
    */
-  "X-Api-Key": string;
+  "X-Api-Key"?: string;
 };
 
 export type BillingConfirmPaymentDefault = AccountOpResponse | ErrMessage;
@@ -2096,7 +2096,7 @@ export class LitApiServerClient {
    * GET /billing/balance — returns the current credit balance for the authenticated user.
    */
   billingBalance(
-    headers: BillingBalanceHeaders,
+    headers?: BillingBalanceHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -2140,7 +2140,7 @@ export class LitApiServerClient {
    */
   billingCreatePaymentIntent(
     createPaymentIntentRequest: CreatePaymentIntentRequest,
-    headers: BillingCreatePaymentIntentHeaders,
+    headers?: BillingCreatePaymentIntentHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -2190,7 +2190,7 @@ export class LitApiServerClient {
    */
   billingConfirmPayment(
     confirmPaymentRequest: ConfirmPaymentRequest,
-    headers: BillingConfirmPaymentHeaders,
+    headers?: BillingConfirmPaymentHeaders,
     requestParameters?: Params,
   ): {
     response: Response;

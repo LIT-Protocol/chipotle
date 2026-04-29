@@ -154,7 +154,12 @@ Lit Actions by pasting a usage API key they minted from the contract.
 Billing (balance, Add Funds, no-funds warning, billing banners) is **not**
 mode-conditional. Stripe credit funds action runs in both modes. ChainSecured
 only changes how admin writes are authorized (wallet vs API key), not how
-runs are paid for.
+runs are paid for. ChainSecured users authenticate billing requests via a
+SIWE-style EIP-191 signed message (cached ~4 minutes per session) sent in
+the `X-Wallet-Auth` header — the dashboard's `getWalletAuthHeader()` builds
+the message and `BillingAuth` verifies it server-side. The signature pins
+the `Purpose: lit-billing-auth-v1` line to prevent cross-flow replay
+against `/create_wallet_with_signature` or `/convert_to_chain_secured_account`.
 
 Validation guards must use `isAuthenticated()`, not `!apiKey` — ChainSecured
 users authenticate via wallet and have no account-level api key.
