@@ -328,7 +328,12 @@ fn verify_chainsecured_siwe(message: &str, signature: &str) -> Result<H160, ApiS
             )
         })?
         .as_secs() as i64;
-    if (now - parsed.issued_at).abs() > SIWE_TIMESTAMP_SKEW_SECONDS {
+    // i128 subtraction: two i64s can never overflow into i128, and i128::abs
+    // is safe for any value produced by an i64 subtraction. Without this, a
+    // crafted `Issued At: i64::MIN` would wrap `(now - issued_at).abs()` back
+    // to a small/negative value and bypass the skew check in release builds.
+    let delta = (now as i128) - (parsed.issued_at as i128);
+    if delta.abs() > SIWE_TIMESTAMP_SKEW_SECONDS as i128 {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!(
                 "Issued At {} is outside the ±{}s window from now ({})",
