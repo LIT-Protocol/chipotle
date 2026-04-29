@@ -8,8 +8,7 @@
 //!    the on-chain account.
 //!
 //! 2. **Wallet-signed** (ChainSecured): a SIWE-lite EIP-191 signed message in
-//!    a single header:
-//!      `X-Wallet-Auth: <base64(JSON{message, signature})>`
+//!    a single header `X-Wallet-Auth: <base64(JSON{message, signature})>`.
 //!    The guard verifies the signature using the same security envelope as
 //!    `create_wallet_with_signature` (chain-id match, ±5-minute timestamp
 //!    skew). On success the wallet-derived `keccak256(walletAddress)` hex hash
