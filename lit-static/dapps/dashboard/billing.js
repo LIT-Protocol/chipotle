@@ -1,10 +1,13 @@
 /**
  * Billing — Stripe integration, payment flow.
  *
- * ChainSecured callers (CPL-285) authenticate to /billing/* with a SIWE-lite
- * EIP-191 signed message proving they hold the wallet's private key. The
- * signed payload is cached for ~4 minutes (server allows ±5min skew, we leave
- * a buffer) so the user only sees one wallet popup per billing session.
+ * ChainSecured callers (CPL-285, CPL-286) authenticate to /billing/* with an
+ * EIP-712 typed-data signature proving they hold the wallet's private key.
+ * The wallet UI surfaces `primaryType: BillingAuth` and labelled fields so a
+ * phishing dApp can't disguise the request as a generic message and replay
+ * it against the secret-emitting endpoints. The signed payload is cached
+ * for ~4 minutes (server allows ±5min skew, we leave a buffer) so the user
+ * only sees one wallet popup per billing session.
  *
  * All in-flight billing requests are tied to a module AbortController and a
  * captured-credential snapshot — `clearBillingSession()` is called on logout
@@ -14,6 +17,11 @@
  * the prior account.
  */
 
+import {
+  PRIMARY_TYPE_BILLING_AUTH,
+  buildChainSecuredTypedData,
+  signChainSecuredTypedData,
+} from '../../core_sdk.js';
 import {
   getApiKey,
   getChainSecuredHash,
@@ -36,12 +44,12 @@ const BILLING_RETRY_MS = 30000;
 // session change via clearBillingSession().
 let _abortController = null;
 
-// Cached SIWE auth payload. Re-used across billing requests within the
+// Cached wallet-auth payload. Re-used across billing requests within the
 // timestamp window. { headerValue, expiresAtMs, walletAddress }
 let _walletAuthCache = null;
 
 /**
- * True when we have a valid (unexpired, current-wallet) SIWE auth header.
+ * True when we have a valid (unexpired, current-wallet) wallet-auth header.
  * Used to decide whether to load the balance silently vs. wait for the user
  * to click Add Funds — we never want to auto-trigger a wallet popup just to
  * render the topbar balance (CPL-285 review feedback).
@@ -53,8 +61,9 @@ function hasValidWalletAuthCache() {
   return _walletAuthCache.expiresAtMs > Date.now() + 10_000;
 }
 
-// Server's SIWE_TIMESTAMP_SKEW_SECONDS is 300; we cache for 4 min to leave a
-// 1-min safety buffer against clock skew + in-flight latency.
+// Server's TIMESTAMP_SKEW_SECONDS is 300 (lit-api-server/src/core/eip712.rs);
+// we cache for 4 min to leave a 1-min safety buffer against clock skew +
+// in-flight latency.
 const WALLET_AUTH_TTL_MS = 4 * 60 * 1000;
 
 /**
@@ -73,7 +82,7 @@ function ensureAbortController() {
 }
 
 /**
- * Abort any in-flight billing requests and clear the cached SIWE auth
+ * Abort any in-flight billing requests and clear the cached wallet-auth
  * payload. Called on logout, mode switch, and wallet change so a mid-flight
  * fetch can't credit the prior account.
  */
@@ -128,30 +137,10 @@ export function resetBillingAvailability() {
 }
 
 /**
- * Build the SIWE-lite message body the server's `parse_create_wallet_siwe`
- * expects. Required lines (case-sensitive): `Address:`, `Chain ID:`,
- * `Issued At:`, `Purpose:`. The `Purpose` line pins this signature to the
- * billing-auth flow only — prevents cross-flow replay against
- * /create_wallet_with_signature or /convert_to_chain_secured_account (CPL-285).
- */
-function buildSiweMessage(wallet, chainId, issuedAt) {
-  const host = (typeof location !== 'undefined' && location.host) ? location.host : 'lit-dashboard';
-  return [
-    `${host} wants you to sign in to billing.`,
-    '',
-    'This signature lets the dashboard authenticate billing requests on your',
-    "behalf for ~5 minutes. It is not a transaction and won't be broadcast.",
-    '',
-    `Address: ${wallet}`,
-    `Chain ID: ${chainId}`,
-    `Issued At: ${issuedAt}`,
-    'Purpose: lit-billing-auth-v1',
-  ].join('\n');
-}
-
-/**
- * Get a cached SIWE auth header, or prompt the wallet to sign a fresh one.
- * Returns base64(JSON{message, signature}) for the X-Wallet-Auth header.
+ * Get a cached wallet-auth header, or prompt the wallet to sign a fresh one.
+ * Returns base64(JSON{typed_data, signature}) for the X-Wallet-Auth header.
+ * Server validates `primaryType: "BillingAuth"` against the canonical schema
+ * in `lit-api-server/src/core/eip712.rs` (CPL-286).
  */
 async function getWalletAuthHeader() {
   const wallet = getChainSecuredWallet();
@@ -169,13 +158,18 @@ async function getWalletAuthHeader() {
     ? Number(client.chainId)
     : Number((await client.getNodeChainConfig()).chain_id);
   const issuedAt = Math.floor(Date.now() / 1000);
-  const message = buildSiweMessage(wallet, chainIdNum, issuedAt);
+  const typedData = buildChainSecuredTypedData({
+    primaryType: PRIMARY_TYPE_BILLING_AUTH,
+    address: wallet,
+    chainId: chainIdNum,
+    issuedAt,
+  });
 
   const { connectEoa } = await import('../../wallet_connect.js');
   const { signer } = await connectEoa();
-  const signature = await signer.signMessage(message);
+  const { typed_data, signature } = await signChainSecuredTypedData(signer, typedData);
 
-  const headerValue = btoa(JSON.stringify({ message, signature }));
+  const headerValue = btoa(JSON.stringify({ typed_data, signature }));
   _walletAuthCache = {
     headerValue,
     expiresAtMs: Date.now() + WALLET_AUTH_TTL_MS,
@@ -187,7 +181,7 @@ async function getWalletAuthHeader() {
 /**
  * Resolve the SDK options for the current mode: { walletAuthHeader?, signal }.
  * In API mode we just attach the abort signal; in sovereign mode we also
- * obtain the SIWE header (prompting the wallet on cache miss).
+ * obtain the EIP-712 wallet-auth header (prompting the wallet on cache miss).
  */
 async function billingRequestOptions(signal) {
   const opts = { signal };
@@ -221,9 +215,10 @@ export function refreshBillingUI() {
       if (billingBanner) billingBanner.style.display = 'none';
       // In sovereign mode never auto-trigger a wallet popup just to render
       // the topbar balance. Only load the balance when we already hold a
-      // valid SIWE cache (e.g. immediately after the user funded). Otherwise
-      // the user explicitly opts in by clicking Add Funds — `openAddFundsModal`
-      // primes the auth and refreshes the balance after a successful payment.
+      // valid wallet-auth cache (e.g. immediately after the user funded).
+      // Otherwise the user explicitly opts in by clicking Add Funds —
+      // `openAddFundsModal` primes the auth and refreshes the balance after
+      // a successful payment.
       if (getMode() === 'sovereign') {
         if (hasValidWalletAuthCache()) {
           loadBillingBalance();
@@ -310,10 +305,10 @@ async function openAddFundsModal() {
     }
   }
 
-  // Sovereign mode: prime the SIWE cache now (one wallet popup) so the
-  // user's later Pay click — and the balance refresh that follows — flows
-  // without a second prompt. If they cancel the signature, surface that in
-  // the modal status and leave the modal open so they can retry.
+  // Sovereign mode: prime the wallet-auth cache now (one EIP-712 typed-data
+  // popup) so the user's later Pay click — and the balance refresh that
+  // follows — flows without a second prompt. If they cancel the signature,
+  // surface that in the modal status and leave the modal open so they can retry.
   if (getMode() === 'sovereign' && !hasValidWalletAuthCache()) {
     if (statusEl) {
       statusEl.textContent = 'Approve the wallet signature to enable billing for this session…';
@@ -324,7 +319,7 @@ async function openAddFundsModal() {
       await getWalletAuthHeader();
       if (statusEl) statusEl.style.display = 'none';
     } catch (e) {
-      logError('siwe-prime', e);
+      logError('wallet-auth-prime', e);
       if (statusEl) {
         statusEl.textContent = 'Wallet signature required to fund a ChainSecured account: ' + formatError(e);
         statusEl.className = 'status error';
@@ -419,7 +414,7 @@ export function initBilling() {
 
         // Separate try for confirmPayment — card is already charged at this point
         try {
-          // Re-fetch options in case the cached SIWE expired during Stripe.js round-trip.
+          // Re-fetch options in case the cached wallet-auth header expired during the Stripe.js round-trip.
           const opts2 = await billingRequestOptions(ctrl.signal);
           if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
           await client.confirmPayment(apiKey, intent.payment_intent_id, opts2);

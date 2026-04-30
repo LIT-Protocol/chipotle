@@ -1,4 +1,4 @@
-//! Request guard for billing endpoints (CPL-285).
+//! Request guard for billing endpoints (CPL-285, CPL-286).
 //!
 //! Accepts either form of authentication:
 //!
@@ -7,12 +7,17 @@
 //!    downstream `stripe::resolve_wallet_address` keccak256-hashes to derive
 //!    the on-chain account.
 //!
-//! 2. **Wallet-signed** (ChainSecured): a SIWE-lite EIP-191 signed message in
-//!    a single header `X-Wallet-Auth: <base64(JSON{message, signature})>`.
-//!    The guard verifies the signature using the same security envelope as
-//!    `create_wallet_with_signature` (chain-id match, ±5-minute timestamp
-//!    skew). On success the wallet-derived `keccak256(walletAddress)` hex hash
-//!    is the identity passed to `resolve_wallet_address`.
+//! 2. **Wallet-signed** (ChainSecured): EIP-712 typed-data signature in a
+//!    single header `X-Wallet-Auth: <base64(JSON{typed_data, signature})>`
+//!    with `primaryType: "BillingAuth"` and the canonical schema (see
+//!    `core::eip712`). Wallet UIs render the typed struct so the user can
+//!    see they're signing a billing-auth payload, not a generic message
+//!    a phishing dApp could replay against the secret-emitting
+//!    `add_usage_api_key_with_signature` endpoint. Same security envelope
+//!    as `create_wallet_with_signature` (chain-id match, ±5-minute
+//!    timestamp skew). On success the wallet-derived
+//!    `keccak256(walletAddress)` hex hash is the identity passed to
+//!    `resolve_wallet_address`.
 //!
 //! This prevents the original CPL-285 weakness where the public wallet hash
 //! alone was a bearer credential — anyone who knew the wallet address could
@@ -28,7 +33,7 @@ use rocket_okapi::okapi::openapi3::{Object, Parameter, ParameterValue};
 use rocket_okapi::request::{OpenApiFromRequest, RequestHeaderInput};
 use serde::Deserialize;
 
-use crate::core::account_management::{SIWE_PURPOSE_BILLING_AUTH, verify_siwe_signature};
+use crate::core::eip712::{PRIMARY_TYPE_BILLING_AUTH, verify_eip712_signature};
 use crate::utils::parse_with_hash::is_precomputed_hash_shape;
 
 /// Identity proven by an inbound billing request.
@@ -61,9 +66,11 @@ impl BillingAuth {
     }
 }
 
+/// Inner JSON of `X-Wallet-Auth`: an EIP-712 typed-data payload signed by
+/// the wallet, with `primaryType: "BillingAuth"`.
 #[derive(Deserialize)]
 struct WalletAuthPayload {
-    message: String,
+    typed_data: serde_json::Value,
     signature: String,
 }
 
@@ -83,10 +90,10 @@ impl<'r> FromRequest<'r> for BillingAuth {
             if !bytes.is_empty()
                 && let Ok(payload) = serde_json::from_slice::<WalletAuthPayload>(&bytes)
             {
-                match verify_siwe_signature(
-                    &payload.message,
+                match verify_eip712_signature(
+                    &payload.typed_data,
                     &payload.signature,
-                    SIWE_PURPOSE_BILLING_AUTH,
+                    PRIMARY_TYPE_BILLING_AUTH,
                 ) {
                     Ok(wallet) => {
                         let wallet_hex = format!("0x{:x}", wallet);
@@ -112,7 +119,8 @@ impl<'r> FromRequest<'r> for BillingAuth {
         // string shaped like a precomputed account hash here — those must
         // come through the verified WalletSigned path only. Otherwise an
         // attacker could send `X-Api-Key: 0x{keccak256(walletAddress)}` and
-        // bypass SIWE entirely (CPL-285 hardening).
+        // bypass the wallet-signed EIP-712 path entirely (CPL-285, CPL-286
+        // hardening).
         let auth = request.headers().get_one("Authorization");
         if let Some(v) = auth {
             let v = v.trim();
@@ -171,11 +179,12 @@ impl<'r> OpenApiFromRequest<'r> for BillingAuth {
                 "API-mode auth: account or usage API key (alternatively \
                  `Authorization: Bearer <key>`). OR — for ChainSecured \
                  callers — omit X-Api-Key entirely and send \
-                 `X-Wallet-Auth: <base64(JSON{message, signature})>` where \
-                 the message is a SIWE-lite EIP-191 payload with a \
-                 `Purpose: lit-billing-auth-v1` line. The signature proves \
-                 wallet possession; the signed message must include \
-                 Address, Chain ID, and Issued At within ±5 minutes."
+                 `X-Wallet-Auth: <base64(JSON{typed_data, signature})>` \
+                 where `typed_data` is EIP-712 with \
+                 `primaryType: \"BillingAuth\"`. The signature proves \
+                 wallet possession; the typed data must include the \
+                 connected wallet address and an issuedAt timestamp \
+                 within ±5 minutes."
                     .to_owned(),
             ),
             required: false,
@@ -218,9 +227,10 @@ mod tests {
     }
 
     /// CPL-285: a public wallet hash sent in `X-Api-Key` would have bypassed
-    /// SIWE entirely after `usage_api_key_to_hash` started accepting the
-    /// precomputed-hash form. The shape check is what blocks it. This test
-    /// pins that decision so a future refactor can't silently undo it.
+    /// the wallet-signed path entirely after `usage_api_key_to_hash` started
+    /// accepting the precomputed-hash form. The shape check is what blocks
+    /// it. This test pins that decision so a future refactor can't silently
+    /// undo it.
     #[test]
     fn precomputed_hash_strings_are_recognized() {
         // A 0x-prefixed 66-char keccak hash must be detectable. The actual

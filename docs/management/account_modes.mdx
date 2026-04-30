@@ -146,11 +146,12 @@ const apiKeyHash = ethers.solidityPackedKeccak256(
 const exists = await client.accountExistsByHash(apiKeyHash);
 ```
 
-PKP minting in ChainSecured mode uses a SIWE-style message that the server
-verifies before deriving key material via the TEE; the client then
-registers the derivation path on-chain in a second wallet-signed tx. Once
-the signer is connected and the address-derived `adminHashOverride` is set
-on the client (the dashboard does this automatically at login),
+PKP minting in ChainSecured mode uses an EIP-712 typed-data signature
+(`primaryType: "CreateWallet"`) that the server verifies before deriving
+key material via the TEE; the client then registers the derivation path
+on-chain in a second wallet-signed tx. Once the signer is connected and
+the address-derived `adminHashOverride` is set on the client (the
+dashboard does this automatically at login),
 `createWallet({ name, description })` does both steps for you — no
 account-level `apiKey` is required in ChainSecured mode.
 
@@ -226,20 +227,24 @@ the server's api\_payer signs the on-chain conversion on their behalf.
 3. **Connect the wallet** that will become the new admin (EOA, Safe, or
    any contract account on Base). The dashboard prompts a chain switch if
    your wallet isn't on the chain reported by `GET /get_node_chain_config`.
-4. **Sign the SIWE-style ownership-transfer message.** The dashboard
-   composes:
+4. **Sign the EIP-712 ownership-transfer typed data.** The dashboard
+   composes a typed-data envelope with `primaryType: "ConvertAccount"` —
+   wallet UIs surface it as a labelled struct (`address`, `issuedAt`)
+   under the `Lit ChainSecured` domain rather than a free-form message:
+   ```json
+   {
+     "primaryType": "ConvertAccount",
+     "domain":  { "name": "Lit ChainSecured", "version": "1", "chainId": "<chain id>" },
+     "message": { "address":  "<new admin address>", "issuedAt": "<unix seconds>" }
+   }
    ```
-   <host> wants you to take admin ownership of this account.
-
-   Address: <new admin address>
-   Chain ID: <chain id>
-   Issued At: <unix seconds>
-   ```
-   Your wallet produces an EIP-191 `personal_sign` signature.
+   Your wallet produces an EIP-712 signature (`eth_signTypedData_v4`).
 5. The dashboard `POST`s `/core/v1/convert_to_chain_secured_account` with
-   `{ new_admin_wallet_address, message, signature }` and your existing
-   API key in the header. The server verifies the address matches the
-   recovered signer, the chain ID matches the node, and the `Issued At`
+   `{ new_admin_wallet_address, typed_data, signature }` and your existing
+   API key in the header. The server verifies the typed-data digest
+   recovers to the new admin address, the `chainId` matches the node,
+   the `primaryType` matches `ConvertAccount` (preventing cross-flow
+   replay against the secret-emitting endpoints), and the `issuedAt`
    timestamp is within ±300 seconds, then has the api\_payer submit the
    on-chain conversion.
 6. On success, the dashboard switches mode to `sovereign`, clears the
@@ -259,7 +264,7 @@ const client = createClient('https://api.chipotle.litprotocol.com');
 const provider = new ethers.BrowserProvider(window.ethereum);
 const signer = await provider.getSigner();
 
-// Look up the chain id the server expects so the SIWE message matches.
+// Look up the chain id the server expects so the EIP-712 domain matches.
 const cfg = await client.getNodeChainConfig();
 
 const res = await client.convertToChainSecuredAccount({
