@@ -743,19 +743,23 @@ pub async fn can_execute_action_and_use_wallet(
     Ok(result)
 }
 
-/// Resolve any API key (master or usage) to the creator wallet address of its parent account.
+/// Resolve any account identity to the admin wallet address of its parent account.
 ///
-/// This is the authoritative wallet address for billing: both master and usage keys resolve
-/// to the same account wallet, ensuring charges hit the correct Stripe customer.
+/// `key_or_hash` accepts either a raw API key (master or usage, hashed via
+/// keccak256 to derive the on-chain account hash) or a precomputed 0x-prefixed
+/// 32-byte hex hash. The hash form is used by ChainSecured callers, whose
+/// on-chain identity is `keccak256(walletAddress)` — there is no raw key to
+/// send. Both master and usage keys resolve to the same account wallet,
+/// ensuring charges hit the correct Stripe customer.
 #[instrument(
     name = "accounts::get_account_wallet_address",
     level = "debug",
     skip_all,
     err
 )]
-pub async fn get_account_wallet_address(api_key: &str) -> Result<String> {
+pub async fn get_account_wallet_address(key_or_hash: &str) -> Result<String> {
     let contract = get_read_only_account_config_contract().await?;
-    let key_hash = api_key_hash(api_key);
+    let key_hash = usage_api_key_to_hash(key_or_hash);
     let wallet_address = contract.get_account_wallet_address(key_hash).call().await?;
     if wallet_address == H160::zero() {
         anyhow::bail!("account has no wallet address");

@@ -23,7 +23,7 @@ use crate::stripe::StripeState;
 use crate::utils::generate_unique_derivation_path;
 use crate::utils::parse_with_hash::{
     hashed_cid_to_u256, hex_array_to_h160_array, hex_array_to_u256_array, ipfs_cid_to_u256,
-    string_group_id_to_u256,
+    is_precomputed_hash_shape, string_group_id_to_u256,
 };
 use crate::{accounts, dstack};
 use elliptic_curve::group::GroupEncoding;
@@ -54,6 +54,30 @@ fn map_contract_error(e: anyhow::Error, context: &str) -> ApiStatus {
     } else {
         ApiStatus::internal_server_error(e, context)
     }
+}
+
+/// Encode a 32-byte secret into the base64 form used for raw API keys, and
+/// reject anything shaped like a precomputed account hash (CPL-285).
+///
+/// Standard base64 of 32 bytes is 44 chars, so the 66-char hash shape is
+/// arithmetically unreachable today. The check is defense-in-depth against a
+/// future format change (e.g. switching to 0x-prefixed hex) that would create a
+/// confused-deputy collision with `usage_api_key_to_hash`. `debug_assert!`
+/// fires in dev/test, the runtime branch returns 500 in release.
+fn encode_api_key_from_secret(secret: &[u8; 32]) -> Result<String, ApiStatus> {
+    let encoded = base64_light::base64_encode_bytes(secret);
+    debug_assert!(
+        !is_precomputed_hash_shape(&encoded),
+        "API key generator produced a value shaped like a precomputed account hash; \
+         this would collide with usage_api_key_to_hash and route to the wrong on-chain account"
+    );
+    if is_precomputed_hash_shape(&encoded) {
+        return Err(ApiStatus::internal_server_error(
+            anyhow::anyhow!("generated api_key matched precomputed-hash shape"),
+            "Internal key generation invariant violated",
+        ));
+    }
+    Ok(encoded)
 }
 
 // Create a new wallet and return the public key, wallet address, and secret.
@@ -87,7 +111,7 @@ pub async fn new_account(
     let email = new_account_request.email.clone().unwrap_or_default();
 
     let (_public_key, wallet_address, secret, derivation_path) = create_new_wallet().await?;
-    let api_key = base64_light::base64_encode_bytes(&secret);
+    let api_key = encode_api_key_from_secret(&secret)?;
 
     if let Err(e) = accounts::new_account(
         signer_pool.clone(),
@@ -182,28 +206,42 @@ const SIWE_TIMESTAMP_SKEW_SECONDS: i64 = 300;
 
 /// Hard cap on the SIWE-lite message size to prevent unauthenticated callers
 /// from forcing the server to allocate / hash large strings before any cheap
-/// reject. 4 KiB is far above any legitimate three-line message.
+/// reject. 4 KiB is far above any legitimate four-line message.
 const MAX_SIWE_MESSAGE_LEN: usize = 4096;
 
-/// Parsed shape of a ChainSecured SIWE-lite message.
-struct ParsedChainsecuredSiwe {
+/// Parsed shape of a SIWE-lite message. Each flow that uses these signatures
+/// pins a specific `purpose` value to prevent cross-flow replay (CPL-285).
+struct ParsedCreateWalletSiwe {
     address: H160,
     chain_id: u64,
     issued_at: i64,
+    purpose: String,
 }
 
-/// Parses a ChainSecured SIWE-lite message. Required lines (case-sensitive),
-/// each must appear exactly once:
+/// Stable purpose tags for each SIWE flow. The signature parser requires a
+/// `Purpose:` line that exactly matches one of these and individual callers
+/// verify the parsed purpose matches their flow — a billing-auth signature
+/// can't be replayed against `/create_wallet_with_signature` and vice versa
+/// (CPL-285 cross-flow replay).
+pub(crate) const SIWE_PURPOSE_BILLING_AUTH: &str = "lit-billing-auth-v1";
+pub(crate) const SIWE_PURPOSE_CREATE_WALLET: &str = "lit-create-wallet-v1";
+pub(crate) const SIWE_PURPOSE_CONVERT_ACCOUNT: &str = "lit-convert-account-v1";
+pub(crate) const SIWE_PURPOSE_ADD_USAGE_API_KEY: &str = "lit-add-usage-api-key-v1";
+
+/// Parses a SIWE-lite message. Required lines (case-sensitive), each must
+/// appear exactly once:
 ///   `Address: 0x…`
 ///   `Chain ID: <u64>`
 ///   `Issued At: <unix-seconds>`
+///   `Purpose: <purpose-tag>`
 /// Other lines are ignored so callers can include domain/statement framing.
 /// Duplicate required lines are rejected (last-wins parsing would let a
 /// crafted message show one value to the wallet UI and another to the server).
-fn parse_chainsecured_siwe(message: &str) -> Result<ParsedChainsecuredSiwe, ApiStatus> {
+fn parse_create_wallet_siwe(message: &str) -> Result<ParsedCreateWalletSiwe, ApiStatus> {
     let mut address: Option<H160> = None;
     let mut chain_id: Option<u64> = None;
     let mut issued_at: Option<i64> = None;
+    let mut purpose: Option<String> = None;
     for line in message.lines() {
         if let Some(v) = line.strip_prefix("Address:") {
             if address.is_some() {
@@ -252,9 +290,17 @@ fn parse_chainsecured_siwe(message: &str) -> Result<ParsedChainsecuredSiwe, ApiS
                     "Issued At line not a unix timestamp",
                 )
             })?);
+        } else if let Some(v) = line.strip_prefix("Purpose:") {
+            if purpose.is_some() {
+                return Err(ApiStatus::bad_request(
+                    anyhow::anyhow!("Duplicate Purpose line"),
+                    "Duplicate Purpose line",
+                ));
+            }
+            purpose = Some(v.trim().to_string());
         }
     }
-    Ok(ParsedChainsecuredSiwe {
+    Ok(ParsedCreateWalletSiwe {
         address: address.ok_or_else(|| {
             ApiStatus::bad_request(
                 anyhow::anyhow!("Missing Address line"),
@@ -273,6 +319,12 @@ fn parse_chainsecured_siwe(message: &str) -> Result<ParsedChainsecuredSiwe, ApiS
                 "Missing Issued At line",
             )
         })?,
+        purpose: purpose.ok_or_else(|| {
+            ApiStatus::bad_request(
+                anyhow::anyhow!("Missing Purpose line"),
+                "Missing Purpose line",
+            )
+        })?,
     })
 }
 
@@ -289,20 +341,42 @@ fn recover_eip191_signer(message: &str, signature_hex: &str) -> Result<H160, Api
         .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "Signature recovery failed"))
 }
 
-/// Parses + verifies a ChainSecured SIWE-lite message and returns the recovered
-/// signer. Cheap rejects (length cap, parse, chain ID, timestamp window) run
-/// before the expensive ECDSA recovery so attacker traffic with stale or
-/// wrong-chain messages is dropped without doing crypto.
-fn verify_chainsecured_siwe(message: &str, signature: &str) -> Result<H160, ApiStatus> {
+/// Verify a SIWE-lite message + EIP-191 signature for a specific flow and
+/// return the verified wallet address. Centralises the parse → purpose →
+/// chain-id → timestamp → recover pipeline so every ChainSecured flow
+/// (`create_wallet_with_signature`, `convert_to_chain_secured_account`,
+/// `add_usage_api_key_with_signature`, billing-auth guard) reuses the same
+/// security envelope.
+///
+/// `expected_purpose` MUST be one of the `SIWE_PURPOSE_*` constants. Each
+/// flow pins its own value so a signature minted for one flow cannot be
+/// replayed against another (CPL-285).
+///
+/// Cheap rejects (length cap, parse, purpose, chain ID, timestamp window)
+/// run before the expensive ECDSA recovery so attacker traffic with stale,
+/// wrong-purpose, or wrong-chain messages is dropped without doing crypto.
+pub(crate) fn verify_siwe_signature(
+    message: &str,
+    signature: &str,
+    expected_purpose: &str,
+) -> Result<H160, ApiStatus> {
     if message.len() > MAX_SIWE_MESSAGE_LEN {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!("Message exceeds {}-byte cap", MAX_SIWE_MESSAGE_LEN),
             "Message too large",
         ));
     }
-
-    let parsed = parse_chainsecured_siwe(message)?;
-
+    let parsed = parse_create_wallet_siwe(message)?;
+    if parsed.purpose != expected_purpose {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!(
+                "Purpose mismatch: message says {:?}, this endpoint expects {:?}",
+                parsed.purpose,
+                expected_purpose
+            ),
+            "Purpose mismatch — signature was minted for a different flow",
+        ));
+    }
     let node_config = GLOBAL_NODE_CONFIG
         .get()
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))
@@ -318,7 +392,6 @@ fn verify_chainsecured_siwe(message: &str, signature: &str) -> Result<H160, ApiS
             "Chain ID mismatch",
         ));
     }
-
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| {
@@ -344,7 +417,6 @@ fn verify_chainsecured_siwe(message: &str, signature: &str) -> Result<H160, ApiS
             "Signed message timestamp is too old or too far in the future",
         ));
     }
-
     let signer = recover_eip191_signer(message, signature)?;
     if signer != parsed.address {
         return Err(ApiStatus::bad_request(
@@ -352,14 +424,13 @@ fn verify_chainsecured_siwe(message: &str, signature: &str) -> Result<H160, ApiS
             "Signature does not match claimed address",
         ));
     }
-
-    Ok(signer)
+    Ok(parsed.address)
 }
 
 pub async fn create_wallet_with_signature(
     req: Json<CreateWalletWithSignatureRequest>,
 ) -> Result<CreateWalletWithSignatureResponse, ApiStatus> {
-    let signer = verify_chainsecured_siwe(&req.message, &req.signature)?;
+    let signer = verify_siwe_signature(&req.message, &req.signature, SIWE_PURPOSE_CREATE_WALLET)?;
     tracing::info!(
         "create_wallet_with_signature: minting PKP for ChainSecured signer {:?}",
         signer
@@ -379,13 +450,14 @@ pub async fn create_wallet_with_signature(
 pub async fn add_usage_api_key_with_signature(
     req: Json<AddUsageApiKeyWithSignatureRequest>,
 ) -> Result<AddUsageApiKeyWithSignatureResponse, ApiStatus> {
-    let signer = verify_chainsecured_siwe(&req.message, &req.signature)?;
+    let signer =
+        verify_siwe_signature(&req.message, &req.signature, SIWE_PURPOSE_ADD_USAGE_API_KEY)?;
     tracing::info!(
         "add_usage_api_key_with_signature: minting usage-key PKP for ChainSecured signer {:?}",
         signer
     );
     let (_public_key, wallet_address, secret, derivation_u256) = create_new_wallet().await?;
-    let usage_api_key = base64_light::base64_encode_bytes(&secret);
+    let usage_api_key = encode_api_key_from_secret(&secret)?;
     Ok(AddUsageApiKeyWithSignatureResponse {
         usage_api_key,
         wallet_address: bytes_to_0x_hex(wallet_address.as_bytes()),
@@ -426,7 +498,7 @@ pub async fn convert_to_chain_secured_account(
         ));
     }
 
-    let signer = verify_chainsecured_siwe(&req.message, &req.signature)?;
+    let signer = verify_siwe_signature(&req.message, &req.signature, SIWE_PURPOSE_CONVERT_ACCOUNT)?;
     if signer != claimed_address {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!("Signature does not match new_admin_wallet_address"),
@@ -590,7 +662,7 @@ pub async fn add_usage_api_key(
     )
     .await?;
 
-    let usage_api_key = base64_light::base64_encode_bytes(&secret);
+    let usage_api_key = encode_api_key_from_secret(&secret)?;
 
     accounts::add_usage_api_key(
         signer_pool,
@@ -988,4 +1060,40 @@ pub async fn get_admin_api_payer() -> Result<String, ApiStatus> {
     })?;
     let wallet_address = local_wallet.address();
     Ok(bytes_to_0x_hex(wallet_address.as_bytes()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Base64 of 32 bytes is always 44 chars, so it can never collide with the
+    /// 66-char `0x[hex]{64}` precomputed-hash shape (CPL-285). This test pins
+    /// that property so a future change to the encoding is forced to confront it.
+    #[test]
+    fn encode_api_key_from_secret_never_matches_hash_shape() {
+        // Sample a few representative byte patterns: zeros, all-ones, a hash-like
+        // pattern, and a typical random secret.
+        for secret in &[
+            [0u8; 32],
+            [0xffu8; 32],
+            // hex digits 0-9 a-f then repeated
+            [
+                0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
+                0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
+                0x89, 0xab, 0xcd, 0xef,
+            ],
+            [
+                0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xba, 0xbe, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+                0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x12, 0x34, 0x56, 0x78,
+                0x9a, 0xbc, 0xde, 0xf0,
+            ],
+        ] {
+            let encoded = encode_api_key_from_secret(secret).expect("happy path must succeed");
+            assert_eq!(encoded.len(), 44, "base64 of 32 bytes is always 44 chars");
+            assert!(
+                !crate::utils::parse_with_hash::is_precomputed_hash_shape(&encoded),
+                "encoded API key {encoded:?} unexpectedly matched precomputed-hash shape",
+            );
+        }
+    }
 }

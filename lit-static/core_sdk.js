@@ -294,7 +294,11 @@ async function parseResponse(res, context) {
     const message = bodyMessage
       ? `${context}: ${bodyMessage}`
       : `${context}: ${res.status} ${res.statusText}`;
-    throw new Error(message);
+    const err = new Error(message);
+    // Surface the HTTP status so callers can react to auth failures (401/400)
+    // distinctly from network/5xx without parsing the message string.
+    err.status = res.status;
+    throw err;
   }
   try {
     return text ? JSON.parse(text) : null;
@@ -639,7 +643,9 @@ export class LitNodeSimpleApiClient {
     }
     const issuedAt = Math.floor(Date.now() / 1000);
     const host = (typeof location !== 'undefined' && location.host) ? location.host : 'lit';
-    const message = `${host} wants you to take admin ownership of this account.\n\nAddress: ${newAdminAddress}\nChain ID: ${targetChainId}\nIssued At: ${issuedAt}`;
+    // Purpose pins this signature to the convert-account flow only — prevents
+    // cross-flow replay against /create_wallet_with_signature or /billing/* (CPL-285).
+    const message = `${host} wants you to take admin ownership of this account.\n\nAddress: ${newAdminAddress}\nChain ID: ${targetChainId}\nIssued At: ${issuedAt}\nPurpose: lit-convert-account-v1`;
     const signature = await signer.signMessage(message);
     const res = await fetch(`${this.baseUrl}/convert_to_chain_secured_account`, {
       method: 'POST',
@@ -785,7 +791,9 @@ export class LitNodeSimpleApiClient {
       const signerAddress = await this.signer.getAddress();
       const issuedAt = Math.floor(Date.now() / 1000);
       const host = (typeof location !== 'undefined' && location.host) ? location.host : 'lit';
-      const message = `${host} wants you to create a new wallet for ChainSecured account.\n\nAddress: ${signerAddress}\nChain ID: ${this.chainId}\nIssued At: ${issuedAt}`;
+      // Purpose pins this signature to the create-wallet flow only — prevents
+      // cross-flow replay against /convert_to_chain_secured_account or /billing/* (CPL-285).
+      const message = `${host} wants you to create a new wallet for ChainSecured account.\n\nAddress: ${signerAddress}\nChain ID: ${this.chainId}\nIssued At: ${issuedAt}\nPurpose: lit-create-wallet-v1`;
       const signature = await this.signer.signMessage(message);
       const res = await fetch(`${this.baseUrl}/create_wallet_with_signature`, {
         method: 'POST',
@@ -1564,13 +1572,17 @@ export class LitNodeSimpleApiClient {
 
   /**
    * GET /core/v1/billing/balance
-   * Returns the current credit balance for the authenticated API key.
-   * @param {string} apiKey
+   * Returns the current credit balance for the authenticated user.
+   * @param {string} apiKey - Raw API key. Ignored when `options.walletAuthHeader` is set.
+   * @param {{walletAuthHeader?: string, signal?: AbortSignal}} [options]
+   *   walletAuthHeader: base64(JSON{message, signature}) for SIWE-style ChainSecured auth (CPL-285).
+   *   signal: AbortController signal to cancel the request mid-flight.
    * @returns {Promise<{balance_cents: number, balance_display: string}>}
    */
-  async getBillingBalance(apiKey) {
+  async getBillingBalance(apiKey, options = {}) {
     const res = await fetch(`${this.baseUrl}/billing/balance`, {
-      headers: headersWithApiKey(apiKey),
+      headers: billingHeaders(apiKey, options.walletAuthHeader),
+      signal: options.signal,
     });
     return parseResponse(res, 'billing/balance');
   }
@@ -1578,15 +1590,17 @@ export class LitNodeSimpleApiClient {
   /**
    * POST /core/v1/billing/create_payment_intent
    * Creates a Stripe PaymentIntent; returns client_secret and payment_intent_id.
-   * @param {string} apiKey
+   * @param {string} apiKey - Ignored when `options.walletAuthHeader` is set.
    * @param {number} amountCents - Amount in US cents (minimum 500)
+   * @param {{walletAuthHeader?: string, signal?: AbortSignal}} [options]
    * @returns {Promise<{client_secret: string, payment_intent_id: string}>}
    */
-  async createPaymentIntent(apiKey, amountCents) {
+  async createPaymentIntent(apiKey, amountCents, options = {}) {
     const res = await fetch(`${this.baseUrl}/billing/create_payment_intent`, {
       method: 'POST',
-      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      headers: billingHeaders(apiKey, options.walletAuthHeader, { 'Content-Type': 'application/json' }),
       body: JSON.stringify({ amount_cents: amountCents }),
+      signal: options.signal,
     });
     return parseResponse(res, 'billing/create_payment_intent');
   }
@@ -1594,18 +1608,33 @@ export class LitNodeSimpleApiClient {
   /**
    * POST /core/v1/billing/confirm_payment
    * Verifies a succeeded PaymentIntent and credits the account.
-   * @param {string} apiKey
+   * @param {string} apiKey - Ignored when `options.walletAuthHeader` is set.
    * @param {string} paymentIntentId
+   * @param {{walletAuthHeader?: string, signal?: AbortSignal}} [options]
    * @returns {Promise<void>}
    */
-  async confirmPayment(apiKey, paymentIntentId) {
+  async confirmPayment(apiKey, paymentIntentId, options = {}) {
     const res = await fetch(`${this.baseUrl}/billing/confirm_payment`, {
       method: 'POST',
-      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      headers: billingHeaders(apiKey, options.walletAuthHeader, { 'Content-Type': 'application/json' }),
       body: JSON.stringify({ payment_intent_id: paymentIntentId }),
+      signal: options.signal,
     });
     return parseResponse(res, 'billing/confirm_payment');
   }
+}
+
+/**
+ * Build headers for billing endpoints. ChainSecured callers send an
+ * X-Wallet-Auth header (base64(JSON{message, signature})); API-mode callers
+ * send X-Api-Key. The server's BillingAuth guard prefers the wallet header
+ * when both are present (CPL-285).
+ */
+function billingHeaders(apiKey, walletAuthHeader, extra = {}) {
+  if (walletAuthHeader) {
+    return { 'X-Wallet-Auth': walletAuthHeader, ...extra };
+  }
+  return { 'X-Api-Key': apiKey, ...extra };
 }
 
 /**
