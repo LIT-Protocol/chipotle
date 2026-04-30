@@ -107,7 +107,11 @@ jobs:
             echo "node_config=NodeConfig.main.toml" >> "$GITHUB_OUTPUT"
             DOMAIN="api.dev.litprotocol.com"
           elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
-            echo "phala_app_name=chipotle-next" >> "$GITHUB_OUTPUT"
+            # Targets the prod6 instance provisioned via `phala instances add`
+            # during the prod5→prod6 migration. Shares the same app_id
+            # (0x969a8c14...) and derived keys as the legacy chipotle-next
+            # instance on prod5.
+            echo "phala_app_name=chipotle-next-rep-z1nz6" >> "$GITHUB_OUTPUT"
             echo "instance_type=tdx.small" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-next" >> "$GITHUB_OUTPUT"
             echo "node_config=NodeConfig.next.toml" >> "$GITHUB_OUTPUT"
