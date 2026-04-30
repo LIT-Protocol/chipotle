@@ -208,6 +208,23 @@ pub struct CreateWalletWithSignatureRequest {
     pub signature: String,
 }
 
+/// ChainSecured usage-key minting. Mirrors `CreateWalletWithSignatureRequest`:
+/// the user proves wallet ownership with an EIP-191 personal_sign signature,
+/// the server mints a usage-key wallet via DStack MPC and returns the secret
+/// (as the usage API key) plus address + derivation path. The client follows
+/// up with on-chain `registerWalletDerivation` and `setUsageApiKey` signed by
+/// their admin wallet — only the admin wallet of a ChainSecured account can
+/// call `setUsageApiKey` (see AppStorage.accountExistsAndIsMutable).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AddUsageApiKeyWithSignatureRequest {
+    /// EIP-191 plaintext message that was signed. Same format as
+    /// `create_wallet_with_signature`: `Address: 0x…`, `Chain ID: <u64>`,
+    /// `Issued At: <unix-seconds>` (case-sensitive prefixes).
+    pub message: String,
+    /// 0x-prefixed hex signature (65 bytes — r||s||v, EIP-191 personal-sign).
+    pub signature: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct EncryptRequest {
     pub api_key: String,

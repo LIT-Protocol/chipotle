@@ -6,15 +6,17 @@ use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
-    AddUsageApiKeyRequest, ConvertToChainSecuredAccountRequest, CreateWalletWithSignatureRequest,
-    DeleteActionRequest, NewAccountRequest, RemoveActionFromGroupRequest, RemoveGroupRequest,
-    RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest, UpdateActionMetadataRequest,
-    UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
+    AddUsageApiKeyRequest, AddUsageApiKeyWithSignatureRequest, ConvertToChainSecuredAccountRequest,
+    CreateWalletWithSignatureRequest, DeleteActionRequest, NewAccountRequest,
+    RemoveActionFromGroupRequest, RemoveGroupRequest, RemovePkpFromGroupRequest,
+    RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
+    UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
-    AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse, ApiKeyItem,
-    ChainConfigKeysResponse, CreateWalletResponse, CreateWalletWithSignatureResponse,
-    ListMetadataItem, NewAccountResponse, NodeChainConfigResponse, WalletItem,
+    AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse,
+    AddUsageApiKeyWithSignatureResponse, ApiKeyItem, ChainConfigKeysResponse, CreateWalletResponse,
+    CreateWalletWithSignatureResponse, ListMetadataItem, NewAccountResponse,
+    NodeChainConfigResponse, WalletItem,
 };
 use crate::dstack::v1::get_client_key;
 use crate::stripe::StripeState;
@@ -188,14 +190,24 @@ pub async fn create_wallet(
     })
 }
 
-/// V1 SIWE-lite. ChainSecured users have no api key, so we authenticate
-/// PKP minting with a wallet signature instead. The server only mints —
-/// the client follows up with `registerWalletDerivation` signed by the
-/// same wallet to register the PKP on-chain.
+/// V1 SIWE-lite. Shared by `create_wallet_with_signature` and
+/// `add_usage_api_key_with_signature` — both authenticate PKP minting
+/// with a wallet signature because ChainSecured users have no api key.
+/// The server only mints — the client follows up on-chain with
+/// `registerWalletDerivation` (and, for usage keys, `setUsageApiKey`)
+/// signed by the admin wallet (which may differ from the SIWE signer).
 ///
-/// Replay: ±5-minute timestamp window, no nonce store. Worst case is an
-/// extra unregistered PKP (compute cost only).
+/// Replay: ±5-minute timestamp window, no nonce store. Worst case on
+/// either endpoint is an extra unregistered PKP — the bytes the server
+/// returns are unattached on-chain until the admin wallet calls the
+/// follow-up txns, so they are equivalent to a freshly generated keypair
+/// until then. Compute cost only.
 const SIWE_TIMESTAMP_SKEW_SECONDS: i64 = 300;
+
+/// Hard cap on the SIWE-lite message size to prevent unauthenticated callers
+/// from forcing the server to allocate / hash large strings before any cheap
+/// reject. 4 KiB is far above any legitimate four-line message.
+const MAX_SIWE_MESSAGE_LEN: usize = 4096;
 
 /// Parsed shape of a SIWE-lite message. Each flow that uses these signatures
 /// pins a specific `purpose` value to prevent cross-flow replay (CPL-285).
@@ -214,13 +226,17 @@ struct ParsedCreateWalletSiwe {
 pub(crate) const SIWE_PURPOSE_BILLING_AUTH: &str = "lit-billing-auth-v1";
 pub(crate) const SIWE_PURPOSE_CREATE_WALLET: &str = "lit-create-wallet-v1";
 pub(crate) const SIWE_PURPOSE_CONVERT_ACCOUNT: &str = "lit-convert-account-v1";
+pub(crate) const SIWE_PURPOSE_ADD_USAGE_API_KEY: &str = "lit-add-usage-api-key-v1";
 
-/// Parses a SIWE-lite message. Required lines (case-sensitive):
+/// Parses a SIWE-lite message. Required lines (case-sensitive), each must
+/// appear exactly once:
 ///   `Address: 0x…`
 ///   `Chain ID: <u64>`
 ///   `Issued At: <unix-seconds>`
 ///   `Purpose: <purpose-tag>`
 /// Other lines are ignored so callers can include domain/statement framing.
+/// Duplicate required lines are rejected (last-wins parsing would let a
+/// crafted message show one value to the wallet UI and another to the server).
 fn parse_create_wallet_siwe(message: &str) -> Result<ParsedCreateWalletSiwe, ApiStatus> {
     let mut address: Option<H160> = None;
     let mut chain_id: Option<u64> = None;
@@ -228,6 +244,12 @@ fn parse_create_wallet_siwe(message: &str) -> Result<ParsedCreateWalletSiwe, Api
     let mut purpose: Option<String> = None;
     for line in message.lines() {
         if let Some(v) = line.strip_prefix("Address:") {
+            if address.is_some() {
+                return Err(ApiStatus::bad_request(
+                    anyhow::anyhow!("Duplicate Address line"),
+                    "Duplicate Address line",
+                ));
+            }
             let trimmed = v.trim();
             let bytes = hex_to_bytes(trimmed.trim_start_matches("0x")).map_err(|_| {
                 ApiStatus::bad_request(
@@ -243,6 +265,12 @@ fn parse_create_wallet_siwe(message: &str) -> Result<ParsedCreateWalletSiwe, Api
             }
             address = Some(H160::from_slice(&bytes));
         } else if let Some(v) = line.strip_prefix("Chain ID:") {
+            if chain_id.is_some() {
+                return Err(ApiStatus::bad_request(
+                    anyhow::anyhow!("Duplicate Chain ID line"),
+                    "Duplicate Chain ID line",
+                ));
+            }
             chain_id = Some(v.trim().parse::<u64>().map_err(|_| {
                 ApiStatus::bad_request(
                     anyhow::anyhow!("Chain ID line not a u64"),
@@ -250,6 +278,12 @@ fn parse_create_wallet_siwe(message: &str) -> Result<ParsedCreateWalletSiwe, Api
                 )
             })?);
         } else if let Some(v) = line.strip_prefix("Issued At:") {
+            if issued_at.is_some() {
+                return Err(ApiStatus::bad_request(
+                    anyhow::anyhow!("Duplicate Issued At line"),
+                    "Duplicate Issued At line",
+                ));
+            }
             issued_at = Some(v.trim().parse::<i64>().map_err(|_| {
                 ApiStatus::bad_request(
                     anyhow::anyhow!("Issued At line not a unix timestamp"),
@@ -257,6 +291,12 @@ fn parse_create_wallet_siwe(message: &str) -> Result<ParsedCreateWalletSiwe, Api
                 )
             })?);
         } else if let Some(v) = line.strip_prefix("Purpose:") {
+            if purpose.is_some() {
+                return Err(ApiStatus::bad_request(
+                    anyhow::anyhow!("Duplicate Purpose line"),
+                    "Duplicate Purpose line",
+                ));
+            }
             purpose = Some(v.trim().to_string());
         }
     }
@@ -302,19 +342,30 @@ fn recover_eip191_signer(message: &str, signature_hex: &str) -> Result<H160, Api
 }
 
 /// Verify a SIWE-lite message + EIP-191 signature for a specific flow and
-/// return the verified wallet address. Centralises the parse → recover →
-/// purpose → chain-id → timestamp pipeline so the billing-auth guard reuses
-/// the same security envelope as `create_wallet_with_signature` /
-/// `convert_to_chain_secured_account`.
+/// return the verified wallet address. Centralises the parse → purpose →
+/// chain-id → timestamp → recover pipeline so every ChainSecured flow
+/// (`create_wallet_with_signature`, `convert_to_chain_secured_account`,
+/// `add_usage_api_key_with_signature`, billing-auth guard) reuses the same
+/// security envelope.
 ///
 /// `expected_purpose` MUST be one of the `SIWE_PURPOSE_*` constants. Each
 /// flow pins its own value so a signature minted for one flow cannot be
 /// replayed against another (CPL-285).
+///
+/// Cheap rejects (length cap, parse, purpose, chain ID, timestamp window)
+/// run before the expensive ECDSA recovery so attacker traffic with stale,
+/// wrong-purpose, or wrong-chain messages is dropped without doing crypto.
 pub(crate) fn verify_siwe_signature(
     message: &str,
     signature: &str,
     expected_purpose: &str,
 ) -> Result<H160, ApiStatus> {
+    if message.len() > MAX_SIWE_MESSAGE_LEN {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Message exceeds {}-byte cap", MAX_SIWE_MESSAGE_LEN),
+            "Message too large",
+        ));
+    }
     let parsed = parse_create_wallet_siwe(message)?;
     if parsed.purpose != expected_purpose {
         return Err(ApiStatus::bad_request(
@@ -326,13 +377,6 @@ pub(crate) fn verify_siwe_signature(
             "Purpose mismatch — signature was minted for a different flow",
         ));
     }
-    let signer = recover_eip191_signer(message, signature)?;
-    if signer != parsed.address {
-        return Err(ApiStatus::bad_request(
-            anyhow::anyhow!("Signature does not match claimed address"),
-            "Signature does not match claimed address",
-        ));
-    }
     let node_config = GLOBAL_NODE_CONFIG
         .get()
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))
@@ -357,7 +401,12 @@ pub(crate) fn verify_siwe_signature(
             )
         })?
         .as_secs() as i64;
-    if (now - parsed.issued_at).abs() > SIWE_TIMESTAMP_SKEW_SECONDS {
+    // i128 subtraction: two i64s can never overflow into i128, and i128::abs
+    // is safe for any value produced by an i64 subtraction. Without this, a
+    // crafted `Issued At: i64::MIN` would wrap `(now - issued_at).abs()` back
+    // to a small/negative value and bypass the skew check in release builds.
+    let delta = (now as i128) - (parsed.issued_at as i128);
+    if delta.abs() > SIWE_TIMESTAMP_SKEW_SECONDS as i128 {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!(
                 "Issued At {} is outside the ±{}s window from now ({})",
@@ -366,6 +415,13 @@ pub(crate) fn verify_siwe_signature(
                 now
             ),
             "Signed message timestamp is too old or too far in the future",
+        ));
+    }
+    let signer = recover_eip191_signer(message, signature)?;
+    if signer != parsed.address {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Signature does not match claimed address"),
+            "Signature does not match claimed address",
         ));
     }
     Ok(parsed.address)
@@ -374,68 +430,36 @@ pub(crate) fn verify_siwe_signature(
 pub async fn create_wallet_with_signature(
     req: Json<CreateWalletWithSignatureRequest>,
 ) -> Result<CreateWalletWithSignatureResponse, ApiStatus> {
-    let parsed = parse_create_wallet_siwe(&req.message)?;
-    if parsed.purpose != SIWE_PURPOSE_CREATE_WALLET {
-        return Err(ApiStatus::bad_request(
-            anyhow::anyhow!(
-                "Purpose mismatch: message says {:?}, this endpoint expects {:?}",
-                parsed.purpose,
-                SIWE_PURPOSE_CREATE_WALLET
-            ),
-            "Purpose mismatch — signature was minted for a different flow",
-        ));
-    }
-    let signer = recover_eip191_signer(&req.message, &req.signature)?;
-    if signer != parsed.address {
-        return Err(ApiStatus::bad_request(
-            anyhow::anyhow!("Signature does not match claimed address"),
-            "Signature does not match claimed address",
-        ));
-    }
-
-    let node_config = GLOBAL_NODE_CONFIG
-        .get()
-        .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))
-        .map_err(|e| ApiStatus::internal_server_error(e, "GLOBAL_NODE_CONFIG missing"))?;
-    let expected_chain_id = node_config.chain.info().chain_id;
-    if parsed.chain_id != expected_chain_id {
-        return Err(ApiStatus::bad_request(
-            anyhow::anyhow!(
-                "Chain ID mismatch: message says {}, server is on {}",
-                parsed.chain_id,
-                expected_chain_id
-            ),
-            "Chain ID mismatch",
-        ));
-    }
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| {
-            ApiStatus::internal_server_error(
-                anyhow::anyhow!(e),
-                "System clock is before the Unix epoch",
-            )
-        })?
-        .as_secs() as i64;
-    if (now - parsed.issued_at).abs() > SIWE_TIMESTAMP_SKEW_SECONDS {
-        return Err(ApiStatus::bad_request(
-            anyhow::anyhow!(
-                "Issued At {} is outside the ±{}s window from now ({})",
-                parsed.issued_at,
-                SIWE_TIMESTAMP_SKEW_SECONDS,
-                now
-            ),
-            "Signed message timestamp is too old or too far in the future",
-        ));
-    }
-
+    let signer = verify_siwe_signature(&req.message, &req.signature, SIWE_PURPOSE_CREATE_WALLET)?;
     tracing::info!(
         "create_wallet_with_signature: minting PKP for ChainSecured signer {:?}",
         signer
     );
     let (_public_key, wallet_address, _secret, derivation_u256) = create_new_wallet().await?;
     Ok(CreateWalletWithSignatureResponse {
+        wallet_address: bytes_to_0x_hex(wallet_address.as_bytes()),
+        derivation_path: format!("0x{:x}", derivation_u256),
+    })
+}
+
+/// ChainSecured usage API key: server only mints the wallet (PKP) gated by an
+/// EIP-191 wallet signature; the client follows up with on-chain
+/// `registerWalletDerivation` and `setUsageApiKey` signed by their admin
+/// wallet (api_payer cannot call setUsageApiKey for ChainSecured accounts —
+/// see AppStorage.accountExistsAndIsMutable).
+pub async fn add_usage_api_key_with_signature(
+    req: Json<AddUsageApiKeyWithSignatureRequest>,
+) -> Result<AddUsageApiKeyWithSignatureResponse, ApiStatus> {
+    let signer =
+        verify_siwe_signature(&req.message, &req.signature, SIWE_PURPOSE_ADD_USAGE_API_KEY)?;
+    tracing::info!(
+        "add_usage_api_key_with_signature: minting usage-key PKP for ChainSecured signer {:?}",
+        signer
+    );
+    let (_public_key, wallet_address, secret, derivation_u256) = create_new_wallet().await?;
+    let usage_api_key = encode_api_key_from_secret(&secret)?;
+    Ok(AddUsageApiKeyWithSignatureResponse {
+        usage_api_key,
         wallet_address: bytes_to_0x_hex(wallet_address.as_bytes()),
         derivation_path: format!("0x{:x}", derivation_u256),
     })
@@ -474,65 +498,11 @@ pub async fn convert_to_chain_secured_account(
         ));
     }
 
-    let parsed = parse_create_wallet_siwe(&req.message)?;
-    if parsed.purpose != SIWE_PURPOSE_CONVERT_ACCOUNT {
-        return Err(ApiStatus::bad_request(
-            anyhow::anyhow!(
-                "Purpose mismatch: message says {:?}, this endpoint expects {:?}",
-                parsed.purpose,
-                SIWE_PURPOSE_CONVERT_ACCOUNT
-            ),
-            "Purpose mismatch — signature was minted for a different flow",
-        ));
-    }
-    if parsed.address != claimed_address {
-        return Err(ApiStatus::bad_request(
-            anyhow::anyhow!("Signed Address does not match new_admin_wallet_address"),
-            "Signed Address does not match new_admin_wallet_address",
-        ));
-    }
-    let signer = recover_eip191_signer(&req.message, &req.signature)?;
+    let signer = verify_siwe_signature(&req.message, &req.signature, SIWE_PURPOSE_CONVERT_ACCOUNT)?;
     if signer != claimed_address {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!("Signature does not match new_admin_wallet_address"),
             "Signature does not match new_admin_wallet_address",
-        ));
-    }
-
-    let node_config = GLOBAL_NODE_CONFIG
-        .get()
-        .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))
-        .map_err(|e| ApiStatus::internal_server_error(e, "GLOBAL_NODE_CONFIG missing"))?;
-    let expected_chain_id = node_config.chain.info().chain_id;
-    if parsed.chain_id != expected_chain_id {
-        return Err(ApiStatus::bad_request(
-            anyhow::anyhow!(
-                "Chain ID mismatch: message says {}, server is on {}",
-                parsed.chain_id,
-                expected_chain_id
-            ),
-            "Chain ID mismatch",
-        ));
-    }
-
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| {
-            ApiStatus::internal_server_error(
-                anyhow::anyhow!(e),
-                "System clock is before the Unix epoch",
-            )
-        })?
-        .as_secs() as i64;
-    if (now - parsed.issued_at).abs() > SIWE_TIMESTAMP_SKEW_SECONDS {
-        return Err(ApiStatus::bad_request(
-            anyhow::anyhow!(
-                "Issued At {} is outside the ±{}s window from now ({})",
-                parsed.issued_at,
-                SIWE_TIMESTAMP_SKEW_SECONDS,
-                now
-            ),
-            "Signed message timestamp is too old or too far in the future",
         ));
     }
 

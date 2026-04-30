@@ -31,6 +31,7 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         add_pkp_to_group,
         remove_pkp_from_group,
         add_usage_api_key,
+        add_usage_api_key_with_signature,
         update_usage_api_key,
         remove_usage_api_key,
         update_group,
