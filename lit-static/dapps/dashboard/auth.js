@@ -614,6 +614,42 @@ export function initLogin() {
 
   ensureWalletWatch();
 
+  // CPL-288 — Auth mode toggle (API vs ChainSecured). Drives which login card
+  // is visible via `body.login-mode-chainsecured` (CSS in styles.css). Persists
+  // through setMode() so the same sessionStorage-backed mode the dashboard uses
+  // post-login is also primed before login. Implements the WAI-ARIA radiogroup
+  // pattern: roving tabindex (only the checked radio is tabbable) + arrow-key
+  // navigation that selects-on-move.
+  const authModeApi = document.getElementById('login-auth-mode-api');
+  const authModeChainSecured = document.getElementById('login-auth-mode-chainsecured');
+  function applyLoginAuthMode(mode, focusActive = false) {
+    const isSovereign = mode === 'sovereign';
+    setMode(isSovereign ? 'sovereign' : 'api');
+    document.body.classList.toggle('login-mode-chainsecured', isSovereign);
+    if (authModeApi) {
+      authModeApi.classList.toggle('is-active', !isSovereign);
+      authModeApi.setAttribute('aria-checked', !isSovereign ? 'true' : 'false');
+      authModeApi.setAttribute('tabindex', !isSovereign ? '0' : '-1');
+    }
+    if (authModeChainSecured) {
+      authModeChainSecured.classList.toggle('is-active', isSovereign);
+      authModeChainSecured.setAttribute('aria-checked', isSovereign ? 'true' : 'false');
+      authModeChainSecured.setAttribute('tabindex', isSovereign ? '0' : '-1');
+    }
+    if (focusActive) (isSovereign ? authModeChainSecured : authModeApi)?.focus();
+    hideStatus('login-status');
+  }
+  authModeApi?.addEventListener('click', () => applyLoginAuthMode('api'));
+  authModeChainSecured?.addEventListener('click', () => applyLoginAuthMode('sovereign'));
+  function onAuthModeKey(e) {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+    e.preventDefault();
+    applyLoginAuthMode(getMode() === 'sovereign' ? 'api' : 'sovereign', true);
+  }
+  authModeApi?.addEventListener('keydown', onAuthModeKey);
+  authModeChainSecured?.addEventListener('keydown', onAuthModeKey);
+  applyLoginAuthMode(getMode());
+
   const tabExisting = document.getElementById('login-tab-existing');
   const tabNew = document.getElementById('login-tab-new');
   const panelExisting = document.getElementById('login-panel-existing');

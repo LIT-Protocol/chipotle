@@ -20,6 +20,19 @@
         <p class="login-subtitle">Sign in to manage your account, or create a new one to get started.</p>
         <div id="login-status" class="status info" style="display: none;"></div>
         <div class="login-mode">
+          <span class="login-mode-label" id="login-auth-mode-label">Authentication mode:</span>
+          <div class="login-tabs" role="radiogroup" aria-labelledby="login-auth-mode-label">
+            <button type="button" class="login-tab is-active" role="radio" id="login-auth-mode-api" aria-checked="true" data-auth-mode="api">
+              <svg class="login-tab-check" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+              <span>API mode</span>
+            </button>
+            <button type="button" class="login-tab" role="radio" id="login-auth-mode-chainsecured" aria-checked="false" data-auth-mode="sovereign">
+              <svg class="login-tab-check" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
+              <span>ChainSecured mode</span>
+            </button>
+          </div>
+        </div>
+        <div class="login-mode">
           <span class="login-mode-label" id="login-mode-label">I would like to:</span>
           <div class="login-tabs" role="tablist" aria-labelledby="login-mode-label">
             <button type="button" class="login-tab is-active" role="tab" id="login-tab-existing" aria-selected="true" aria-controls="login-panel-existing" data-tab="existing">
@@ -34,7 +47,7 @@
         </div>
         <div id="login-panel-existing" class="login-tab-panel is-active" role="tabpanel" aria-labelledby="login-tab-existing">
           <div class="login-cards">
-            <div class="login-card login-card-recommended">
+            <div class="login-card login-card-recommended login-card-api">
               <span class="login-card-recommended-badge">Recommended</span>
               <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-3 3"/><path d="m18 5 3 3"/></svg></div>
               <h3 class="login-card-title">API mode</h3>
@@ -46,7 +59,7 @@
               </div>
               <button type="button" id="btn-login" class="btn btn-primary btn-block">Log in</button>
             </div>
-            <div class="login-card">
+            <div class="login-card login-card-chainsecured">
               <span class="login-card-required-badge">Wallet required</span>
               <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div>
               <h3 class="login-card-title">ChainSecured mode <button type="button" class="login-card-help" aria-label="What is ChainSecured? Your wallet is the key. Writes are signed on-chain — no API key shared." data-tooltip="Your wallet is the key. Writes are signed on-chain — no API key shared.">?</button></h3>
@@ -58,7 +71,7 @@
         </div>
         <div id="login-panel-new" class="login-tab-panel" role="tabpanel" aria-labelledby="login-tab-new" hidden>
           <div class="login-cards">
-            <div class="login-card login-card-recommended">
+            <div class="login-card login-card-recommended login-card-api">
               <span class="login-card-recommended-badge">Recommended</span>
               <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21 2-9.6 9.6"/><circle cx="7.5" cy="15.5" r="5.5"/><path d="m21 2-3 3"/><path d="m18 5 3 3"/></svg></div>
               <h3 class="login-card-title">API mode</h3>
@@ -78,7 +91,7 @@
               </div>
               <button type="button" id="btn-create-account" class="btn btn-primary btn-block">Create account</button>
             </div>
-            <div class="login-card">
+            <div class="login-card login-card-chainsecured">
               <span class="login-card-required-badge">Wallet required</span>
               <div class="login-card-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></svg></div>
               <h3 class="login-card-title">ChainSecured mode <button type="button" class="login-card-help" aria-label="What is ChainSecured? Your wallet is the key. Writes are signed on-chain — no API key shared." data-tooltip="Your wallet is the key. Writes are signed on-chain — no API key shared.">?</button></h3>
