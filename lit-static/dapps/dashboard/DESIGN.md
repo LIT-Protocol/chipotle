@@ -113,10 +113,11 @@ Radii:
 
 - Single card visible at a time. The "Authentication mode" pill toggle above
   the "I would like to" tabs picks API mode vs ChainSecured mode; only the
-  matching card is rendered (CSS gates `.login-card-api` and
-  `.login-card-chainsecured` on `body.login-mode-chainsecured`). The choice
-  persists via `setMode()`/sessionStorage so it survives a tab refresh and
-  matches the dashboard's post-login mode.
+  matching card is shown (CSS gates `.login-card-api` and
+  `.login-card-chainsecured` on `body.login-mode-chainsecured` via
+  `display: none`; both cards stay in the DOM). The choice persists via
+  `setMode()`/sessionStorage so it survives a tab refresh and matches the
+  dashboard's post-login mode.
 - API mode card carries the `RECOMMENDED` badge (filled primary) — primary path.
 - ChainSecured card carries the `WALLET REQUIRED` badge (muted, neutral fill)
   to set expectation.

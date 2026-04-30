@@ -21,12 +21,12 @@
         <div id="login-status" class="status info" style="display: none;"></div>
         <div class="login-mode">
           <span class="login-mode-label" id="login-auth-mode-label">Authentication mode:</span>
-          <div class="login-tabs" role="group" aria-labelledby="login-auth-mode-label">
-            <button type="button" class="login-tab is-active" id="login-auth-mode-api" aria-pressed="true" data-auth-mode="api">
+          <div class="login-tabs" role="radiogroup" aria-labelledby="login-auth-mode-label">
+            <button type="button" class="login-tab is-active" role="radio" id="login-auth-mode-api" aria-checked="true" data-auth-mode="api">
               <svg class="login-tab-check" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
               <span>API mode</span>
             </button>
-            <button type="button" class="login-tab" id="login-auth-mode-chainsecured" aria-pressed="false" data-auth-mode="sovereign">
+            <button type="button" class="login-tab" role="radio" id="login-auth-mode-chainsecured" aria-checked="false" data-auth-mode="sovereign">
               <svg class="login-tab-check" xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="20 6 9 17 4 12"/></svg>
               <span>ChainSecured mode</span>
             </button>
