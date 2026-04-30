@@ -58,11 +58,11 @@ export interface AccountOpResponse {
  * Body for `convert_to_chain_secured_account`. The caller is authenticated by their existing API key (header). The supplied wallet becomes the on-chain admin and the account flips from managed to ChainSecured. The conversion is irreversible.
  */
 export interface ConvertToChainSecuredAccountRequest {
-  /** Hex-encoded EVM address (with or without 0x prefix). Must be the wallet the user controls; verified by an EIP-191 personal_sign signature. */
+  /** Hex-encoded EVM address (with or without 0x prefix). Must be the wallet the user controls; verified by an EIP-712 typed-data signature. */
   new_admin_wallet_address: string;
-  /** SIWE-style message that was signed by `new_admin_wallet_address`. Must include `Address:`, `Chain ID:`, and `Issued At:` lines (same format as `create_wallet_with_signature`). */
-  message: string;
-  /** EIP-191 signature of `message` produced by `new_admin_wallet_address`. */
+  /** EIP-712 typed-data object the wallet signed. Must use `primaryType: "ConvertAccount"` and the canonical schema (see `core::eip712`). */
+  typed_data: unknown;
+  /** 65-byte 0x-prefixed signature (r||s||v) over the EIP-712 digest of `typed_data`. */
   signature: string;
 }
 
@@ -80,14 +80,14 @@ export interface CreateWalletWithSignatureResponse {
 }
 
 /**
- * ChainSecured wallet creation. The client builds a SIWE-style message and signs it with their wallet; the server verifies the signature, mints a PKP via DStack MPC, and returns the new wallet address + derivation path so the client can register it on-chain via `registerWalletDerivation`.
+ * ChainSecured wallet creation. The client signs EIP-712 typed data with their wallet; the server verifies the signature, mints a PKP via DStack MPC, and returns the new wallet address + derivation path so the client can register it on-chain via `registerWalletDerivation`.
 
-V1 does not maintain a server-side nonce store. The server enforces a ±5-minute window on the message's `Issued At` timestamp, which is the only replay protection. Worst-case replay just mints an extra PKP (compute cost only — registration still requires a separate wallet signature on-chain).
+The server does not maintain a nonce store. Replay protection is a ±5-minute window on the `issuedAt` field plus the per-flow primaryType binding — worst-case replay still just mints an extra unregistered PKP (compute cost only; registration requires a separate wallet signature on-chain).
  */
 export interface CreateWalletWithSignatureRequest {
-  /** EIP-191 plaintext message that was signed. Must contain `Address: 0x…`, `Chain ID: <u64>`, and `Issued At: <unix-seconds>` lines (case-sensitive prefixes). */
-  message: string;
-  /** 0x-prefixed hex signature (65 bytes — r||s||v, EIP-191 personal-sign). */
+  /** EIP-712 typed-data object the wallet signed. Must use `primaryType: "CreateWallet"` and the canonical schema (see `core::eip712`). */
+  typed_data: unknown;
+  /** 65-byte 0x-prefixed signature (r||s||v) over the EIP-712 digest of `typed_data`. */
   signature: string;
 }
 
@@ -225,12 +225,12 @@ export interface AddUsageApiKeyWithSignatureResponse {
 }
 
 /**
- * ChainSecured usage-key minting. Mirrors `CreateWalletWithSignatureRequest`: the user proves wallet ownership with an EIP-191 personal_sign signature, the server mints a usage-key wallet via DStack MPC and returns the secret (as the usage API key) plus address + derivation path. The client follows up with on-chain `registerWalletDerivation` and `setUsageApiKey` signed by their admin wallet — only the admin wallet of a ChainSecured account can call `setUsageApiKey` (see AppStorage.accountExistsAndIsMutable).
+ * ChainSecured usage-key minting. Mirrors `CreateWalletWithSignatureRequest`: the user proves wallet ownership with an EIP-712 typed-data signature, the server mints a usage-key wallet via DStack MPC and returns the secret (as the usage API key) plus address + derivation path. The client follows up with on-chain `registerWalletDerivation` and `setUsageApiKey` signed by their admin wallet — only the admin wallet of a ChainSecured account can call `setUsageApiKey` (see AppStorage.accountExistsAndIsMutable).
  */
 export interface AddUsageApiKeyWithSignatureRequest {
-  /** EIP-191 plaintext message that was signed. Same format as `create_wallet_with_signature`: `Address: 0x…`, `Chain ID: <u64>`, `Issued At: <unix-seconds>` (case-sensitive prefixes). */
-  message: string;
-  /** 0x-prefixed hex signature (65 bytes — r||s||v, EIP-191 personal-sign). */
+  /** EIP-712 typed-data object the wallet signed. Must use `primaryType: "AddUsageApiKey"` and the canonical schema (see `core::eip712`). */
+  typed_data: unknown;
+  /** 65-byte 0x-prefixed signature (r||s||v) over the EIP-712 digest of `typed_data`. */
   signature: string;
 }
 
@@ -714,7 +714,7 @@ export type BillingStripeConfigDefault = StripeConfigResponse | ErrMessage;
 
 export type BillingBalanceHeaders = {
   /**
-   * API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{message, signature})>` where the message is a SIWE-lite EIP-191 payload with a `Purpose: lit-billing-auth-v1` line. The signature proves wallet possession; the signed message must include Address, Chain ID, and Issued At within ±5 minutes.
+   * API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{typed_data, signature})>` where `typed_data` is EIP-712 with `primaryType: "BillingAuth"`. The signature proves wallet possession; the typed data must include the connected wallet address and an issuedAt timestamp within ±5 minutes.
    */
   "X-Api-Key"?: string;
 };
@@ -723,7 +723,7 @@ export type BillingBalanceDefault = BillingBalanceResponse | ErrMessage;
 
 export type BillingCreatePaymentIntentHeaders = {
   /**
-   * API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{message, signature})>` where the message is a SIWE-lite EIP-191 payload with a `Purpose: lit-billing-auth-v1` line. The signature proves wallet possession; the signed message must include Address, Chain ID, and Issued At within ±5 minutes.
+   * API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{typed_data, signature})>` where `typed_data` is EIP-712 with `primaryType: "BillingAuth"`. The signature proves wallet possession; the typed data must include the connected wallet address and an issuedAt timestamp within ±5 minutes.
    */
   "X-Api-Key"?: string;
 };
@@ -734,7 +734,7 @@ export type BillingCreatePaymentIntentDefault =
 
 export type BillingConfirmPaymentHeaders = {
   /**
-   * API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{message, signature})>` where the message is a SIWE-lite EIP-191 payload with a `Purpose: lit-billing-auth-v1` line. The signature proves wallet possession; the signed message must include Address, Chain ID, and Issued At within ±5 minutes.
+   * API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{typed_data, signature})>` where `typed_data` is EIP-712 with `primaryType: "BillingAuth"`. The signature proves wallet possession; the typed data must include the connected wallet address and an issuedAt timestamp within ±5 minutes.
    */
   "X-Api-Key"?: string;
 };

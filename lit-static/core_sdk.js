@@ -324,6 +324,74 @@ export function rpcUrlForChainId(chainId) {
   return KNOWN_RPC_URLS[Number(chainId)] ?? null;
 }
 
+// --- ChainSecured EIP-712 envelope (CPL-286) ---
+//
+// All four ChainSecured signing flows share a single typed-data shape:
+// `{ address, issuedAt }` under a `(name, version, chainId)` domain. The
+// `primaryType` distinguishes the flow and is what the wallet UI labels
+// for the user — replacing the SIWE-lite plaintext envelope where a
+// phishing dApp could hide the `Purpose:` line in a long string.
+//
+// Server-side schema lives in `lit-api-server/src/core/eip712.rs`. Field
+// names, types, and ORDER must match exactly: the EIP-712 type hash is
+// derived from declared order, so any reordering produces a different
+// digest and the server's `validate_type_schema` rejects it.
+const CHAINSECURED_DOMAIN_NAME = 'Lit ChainSecured';
+const CHAINSECURED_DOMAIN_VERSION = '1';
+
+export const PRIMARY_TYPE_CREATE_WALLET = 'CreateWallet';
+export const PRIMARY_TYPE_CONVERT_ACCOUNT = 'ConvertAccount';
+export const PRIMARY_TYPE_ADD_USAGE_API_KEY = 'AddUsageApiKey';
+export const PRIMARY_TYPE_BILLING_AUTH = 'BillingAuth';
+
+/**
+ * Build the canonical EIP-712 typed data the server expects for a
+ * ChainSecured flow. Returns the full TypedData JSON (with EIP712Domain in
+ * `types`) ready to POST to the server. The same object is used to derive
+ * the wallet `signTypedData` arguments — keeping a single source of truth
+ * means the bytes the user sees in the wallet popup are bit-identical to
+ * what the server hashes.
+ */
+export function buildChainSecuredTypedData({ primaryType, address, chainId, issuedAt }) {
+  return {
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'version', type: 'string' },
+        { name: 'chainId', type: 'uint256' },
+      ],
+      [primaryType]: [
+        { name: 'address', type: 'address' },
+        { name: 'issuedAt', type: 'uint256' },
+      ],
+    },
+    primaryType,
+    domain: {
+      name: CHAINSECURED_DOMAIN_NAME,
+      version: CHAINSECURED_DOMAIN_VERSION,
+      chainId: String(chainId),
+    },
+    message: {
+      address,
+      issuedAt: String(issuedAt),
+    },
+  };
+}
+
+/**
+ * Sign canonical typed data with `signer` (any ethers v6 Signer). ethers
+ * strips `EIP712Domain` from the `types` arg automatically, so we pass the
+ * payload-only types and let it handle the rest.
+ *
+ * @returns {Promise<{typed_data: object, signature: string}>}
+ */
+export async function signChainSecuredTypedData(signer, typedData) {
+  const { primaryType, domain, message } = typedData;
+  const payloadTypes = { [primaryType]: typedData.types[primaryType] };
+  const signature = await signer.signTypedData(domain, payloadTypes, message);
+  return { typed_data: typedData, signature };
+}
+
 const ETHERS_CDN_URL = 'https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.min.js';
 
 let _ethersPromise = null;
@@ -618,8 +686,9 @@ export class LitNodeSimpleApiClient {
    * POST /core/v1/convert_to_chain_secured_account
    * Hand the account's admin role over to a user-controlled wallet and flip
    * `managed` from true to false. The user proves wallet ownership with an
-   * EIP-191 personal_sign (same SIWE-lite shape as create_wallet_with_signature).
-   * The api_payer signs the on-chain `convertToChainSecuredAccount` call.
+   * EIP-712 typed-data signature (`primaryType: "ConvertAccount"`, same
+   * canonical envelope as create_wallet_with_signature). The api_payer
+   * signs the on-chain `convertToChainSecuredAccount` call.
    *
    * API mode only. Irreversible: the contract reverts if the account is
    * already ChainSecured.
@@ -642,17 +711,24 @@ export class LitNodeSimpleApiClient {
       throw new Error('convertToChainSecuredAccount: chainId is unknown — call getNodeChainConfig first');
     }
     const issuedAt = Math.floor(Date.now() / 1000);
-    const host = (typeof location !== 'undefined' && location.host) ? location.host : 'lit';
-    // Purpose pins this signature to the convert-account flow only — prevents
-    // cross-flow replay against /create_wallet_with_signature or /billing/* (CPL-285).
-    const message = `${host} wants you to take admin ownership of this account.\n\nAddress: ${newAdminAddress}\nChain ID: ${targetChainId}\nIssued At: ${issuedAt}\nPurpose: lit-convert-account-v1`;
-    const signature = await signer.signMessage(message);
+    // EIP-712 typed data — the wallet UI surfaces `primaryType: ConvertAccount`
+    // and the (address, issuedAt) fields by name, so a phishing dApp can't
+    // disguise the request as a generic message and replay it against the
+    // secret-emitting endpoints (CPL-286). primaryType is part of the type
+    // hash, so the server rejects cross-flow replay at the digest level.
+    const typedData = buildChainSecuredTypedData({
+      primaryType: PRIMARY_TYPE_CONVERT_ACCOUNT,
+      address: newAdminAddress,
+      chainId: targetChainId,
+      issuedAt,
+    });
+    const { typed_data, signature } = await signChainSecuredTypedData(signer, typedData);
     const res = await fetch(`${this.baseUrl}/convert_to_chain_secured_account`, {
       method: 'POST',
       headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
       body: JSON.stringify({
         new_admin_wallet_address: newAdminAddress,
-        message,
+        typed_data,
         signature,
       }),
     });
@@ -756,8 +832,9 @@ export class LitNodeSimpleApiClient {
    * the PKP on-chain (api_payer pays gas, account is billed $0.01).
    *
    * ChainSecured mode: two wallet popups.
-   *   1. Sign a SIWE-style message proving wallet ownership; server verifies
-   *      and mints the PKP via DStack MPC (no on-chain write).
+   *   1. Sign EIP-712 typed data (`primaryType: CreateWallet`) proving wallet
+   *      ownership; server verifies and mints the PKP via DStack MPC (no
+   *      on-chain write).
    *   2. Wallet calls `registerWalletDerivation(adminHash, pkpAddress,
    *      derivationPath, name, description)` to register the PKP on-chain.
    *
@@ -781,24 +858,30 @@ export class LitNodeSimpleApiClient {
         throw new Error('createWallet (sovereign): wallet signer not connected');
       }
       // _verifyAbiIntegrity populates this.chainId from the RPC if it wasn't
-      // passed at construction. Run it before composing the SIWE message so
-      // the server sees a real "Chain ID:" line instead of "null" — the
-      // registerWalletDerivation step does the same verify, so this is free.
+      // passed at construction. Run it before building the EIP-712 typed
+      // data so domain.chainId is a real number — the registerWalletDerivation
+      // step does the same verify, so this is free.
       await this._verifyAbiIntegrity();
       if (this.chainId == null) {
         throw new Error('createWallet (sovereign): chainId could not be resolved from RPC');
       }
       const signerAddress = await this.signer.getAddress();
       const issuedAt = Math.floor(Date.now() / 1000);
-      const host = (typeof location !== 'undefined' && location.host) ? location.host : 'lit';
-      // Purpose pins this signature to the create-wallet flow only — prevents
-      // cross-flow replay against /convert_to_chain_secured_account or /billing/* (CPL-285).
-      const message = `${host} wants you to create a new wallet for ChainSecured account.\n\nAddress: ${signerAddress}\nChain ID: ${this.chainId}\nIssued At: ${issuedAt}\nPurpose: lit-create-wallet-v1`;
-      const signature = await this.signer.signMessage(message);
+      // EIP-712 typed data — wallet UI surfaces `primaryType: CreateWallet`
+      // and labelled fields. primaryType is part of the type hash, so a
+      // signature minted here cannot be replayed against the secret-emitting
+      // /add_usage_api_key_with_signature endpoint (CPL-286).
+      const typedData = buildChainSecuredTypedData({
+        primaryType: PRIMARY_TYPE_CREATE_WALLET,
+        address: signerAddress,
+        chainId: this.chainId,
+        issuedAt,
+      });
+      const { typed_data, signature } = await signChainSecuredTypedData(this.signer, typedData);
       const res = await fetch(`${this.baseUrl}/create_wallet_with_signature`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message, signature }),
+        body: JSON.stringify({ typed_data, signature }),
       });
       const minted = await parseResponse(res, 'create_wallet_with_signature');
       const { wallet_address, derivation_path } = minted;
@@ -1575,7 +1658,7 @@ export class LitNodeSimpleApiClient {
    * Returns the current credit balance for the authenticated user.
    * @param {string} apiKey - Raw API key. Ignored when `options.walletAuthHeader` is set.
    * @param {{walletAuthHeader?: string, signal?: AbortSignal}} [options]
-   *   walletAuthHeader: base64(JSON{message, signature}) for SIWE-style ChainSecured auth (CPL-285).
+   *   walletAuthHeader: base64(JSON{typed_data, signature}) for EIP-712 ChainSecured auth (CPL-285, CPL-286).
    *   signal: AbortController signal to cancel the request mid-flight.
    * @returns {Promise<{balance_cents: number, balance_display: string}>}
    */
@@ -1626,9 +1709,9 @@ export class LitNodeSimpleApiClient {
 
 /**
  * Build headers for billing endpoints. ChainSecured callers send an
- * X-Wallet-Auth header (base64(JSON{message, signature})); API-mode callers
- * send X-Api-Key. The server's BillingAuth guard prefers the wallet header
- * when both are present (CPL-285).
+ * X-Wallet-Auth header (base64(JSON{typed_data, signature})); API-mode
+ * callers send X-Api-Key. The server's BillingAuth guard prefers the
+ * wallet header when both are present (CPL-285, CPL-286).
  */
 function billingHeaders(apiKey, walletAuthHeader, extra = {}) {
   if (walletAuthHeader) {
