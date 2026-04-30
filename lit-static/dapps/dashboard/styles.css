@@ -113,8 +113,10 @@ select:focus-visible {
 
 .login-cards {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr;
   gap: 1.5rem;
+  max-width: 460px;
+  margin: 0 auto;
 }
 
 .login-cards > .login-card {
@@ -128,10 +130,12 @@ select:focus-visible {
   flex-direction: column;
 }
 
-@media (max-width: 640px) {
-  .login-cards {
-    grid-template-columns: 1fr;
-  }
+/* CPL-288 — Single-card login: the auth-mode toggle (API mode / ChainSecured)
+   shows exactly one card at a time. body class set in initLogin() via
+   getMode(); 'api' is the default. */
+body:not(.login-mode-chainsecured) .login-card-chainsecured,
+body.login-mode-chainsecured .login-card-api {
+  display: none;
 }
 
 .login-title {

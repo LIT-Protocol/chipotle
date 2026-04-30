@@ -111,15 +111,18 @@ Radii:
 
 ### Login mode cards
 
-- Side-by-side on desktop, stacked on mobile.
+- Single card visible at a time. The "Authentication mode" pill toggle above
+  the "I would like to" tabs picks API mode vs ChainSecured mode; only the
+  matching card is rendered (CSS gates `.login-card-api` and
+  `.login-card-chainsecured` on `body.login-mode-chainsecured`). The choice
+  persists via `setMode()`/sessionStorage so it survives a tab refresh and
+  matches the dashboard's post-login mode.
 - API mode card carries the `RECOMMENDED` badge (filled primary) — primary path.
 - ChainSecured card carries the `WALLET REQUIRED` badge (muted, neutral fill)
   to set expectation.
-- Neither card has a default highlight; both start with the same neutral
-  `--border` ring. Hover or focus-within either card → that card gets the
-  primary ring while the sibling stays neutral. The badges carry which is
-  recommended vs which requires a wallet, so the highlight follows intent
-  instead of pre-selecting one.
+- The visible card uses a neutral `--border` ring; hover or focus-within
+  promotes it to the primary ring. The badges carry which is recommended vs
+  which requires a wallet.
 - Each card's CTA (Log in / Create account / Connect wallet / Connect wallet
   & create) shares the same shape (full-width, btn-block padding) but its
   color follows the card's selected state: neutral outlined at rest, primary

@@ -614,6 +614,30 @@ export function initLogin() {
 
   ensureWalletWatch();
 
+  // CPL-288 — Auth mode toggle (API vs ChainSecured). Drives which login card
+  // is visible via `body.login-mode-chainsecured` (CSS in styles.css). Persists
+  // through setMode() so the same sessionStorage-backed mode the dashboard uses
+  // post-login is also primed before login.
+  const authModeApi = document.getElementById('login-auth-mode-api');
+  const authModeChainSecured = document.getElementById('login-auth-mode-chainsecured');
+  function applyLoginAuthMode(mode) {
+    const isSovereign = mode === 'sovereign';
+    setMode(isSovereign ? 'sovereign' : 'api');
+    document.body.classList.toggle('login-mode-chainsecured', isSovereign);
+    if (authModeApi) {
+      authModeApi.classList.toggle('is-active', !isSovereign);
+      authModeApi.setAttribute('aria-pressed', !isSovereign ? 'true' : 'false');
+    }
+    if (authModeChainSecured) {
+      authModeChainSecured.classList.toggle('is-active', isSovereign);
+      authModeChainSecured.setAttribute('aria-pressed', isSovereign ? 'true' : 'false');
+    }
+    hideStatus('login-status');
+  }
+  authModeApi?.addEventListener('click', () => applyLoginAuthMode('api'));
+  authModeChainSecured?.addEventListener('click', () => applyLoginAuthMode('sovereign'));
+  applyLoginAuthMode(getMode());
+
   const tabExisting = document.getElementById('login-tab-existing');
   const tabNew = document.getElementById('login-tab-new');
   const panelExisting = document.getElementById('login-panel-existing');
