@@ -224,21 +224,39 @@ the server's api\_payer signs the on-chain conversion on their behalf.
    key.
 2. Open the account dropdown and click **Convert to ChainSecured**.
    Confirm the irreversible-action prompt.
-3. **Connect the wallet** that will become the new admin (EOA, Safe, or
-   any contract account on Base). The dashboard prompts a chain switch if
-   your wallet isn't on the chain reported by `GET /get_node_chain_config`.
+3. **Connect the wallet** that will become the new admin. **EOA only —
+   the server verifies the EIP-712 signature via plain ECDSA `recover()`
+   and does not yet validate ERC-1271 contract-account signatures**, so
+   Safes and other contract wallets are not supported in this flow today.
+   The dashboard prompts a chain switch if your wallet isn't on the chain
+   reported by `GET /get_node_chain_config`.
 4. **Sign the EIP-712 ownership-transfer typed data.** The dashboard
    composes a typed-data envelope with `primaryType: "ConvertAccount"` —
    wallet UIs surface it as a labelled struct (`address`, `issuedAt`)
-   under the `Lit ChainSecured` domain rather than a free-form message:
+   under the `Lit ChainSecured` domain rather than a free-form message.
+   The full canonical envelope is:
    ```json
    {
+     "types": {
+       "EIP712Domain": [
+         { "name": "name",    "type": "string"  },
+         { "name": "version", "type": "string"  },
+         { "name": "chainId", "type": "uint256" }
+       ],
+       "ConvertAccount": [
+         { "name": "address",  "type": "address" },
+         { "name": "issuedAt", "type": "uint256" }
+       ]
+     },
      "primaryType": "ConvertAccount",
      "domain":  { "name": "Lit ChainSecured", "version": "1", "chainId": "<chain id>" },
      "message": { "address":  "<new admin address>", "issuedAt": "<unix seconds>" }
    }
    ```
-   Your wallet produces an EIP-712 signature (`eth_signTypedData_v4`).
+   `types` is part of the EIP-712 type hash and the server schema
+   validator rejects payloads where it differs by even one field —
+   field declaration order matters. Your wallet produces an EIP-712
+   signature (`eth_signTypedData_v4`).
 5. The dashboard `POST`s `/core/v1/convert_to_chain_secured_account` with
    `{ new_admin_wallet_address, typed_data, signature }` and your existing
    API key in the header. The server verifies the typed-data digest
