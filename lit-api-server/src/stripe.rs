@@ -47,6 +47,11 @@ pub struct StripeState {
     /// for 60 seconds, so each customer triggers at most one Stripe GET per minute
     /// regardless of request rate.
     balance_refresh_in_flight: Cache<String, ()>,
+    /// Per-PaymentIntent mutexes that serialize concurrent
+    /// `confirm_payment_and_credit` calls for the same intent.  Idempotency keys
+    /// on the Stripe POSTs are the authoritative defence against double-credit;
+    /// this lock just short-circuits racers locally before they reach the network.
+    confirm_payment_locks: Cache<String, Arc<tokio::sync::Mutex<()>>>,
 }
 
 impl std::fmt::Debug for StripeState {
@@ -87,6 +92,10 @@ pub fn init() -> Option<Arc<StripeState>> {
         .max_capacity(10_000)
         .time_to_live(Duration::from_secs(60)) // cooldown: max 1 refresh per customer per minute
         .build();
+    let confirm_payment_locks = Cache::builder()
+        .max_capacity(10_000)
+        .time_to_idle(Duration::from_secs(120))
+        .build();
     tracing::info!("stripe: billing enabled");
     Some(Arc::new(StripeState {
         publishable_key,
@@ -96,6 +105,7 @@ pub fn init() -> Option<Arc<StripeState>> {
         wallet_cache,
         balance_cache,
         balance_refresh_in_flight,
+        confirm_payment_locks,
     }))
 }
 
@@ -558,17 +568,31 @@ pub async fn create_payment_intent(
 /// Verify a PaymentIntent succeeded and credit the customer's account.
 ///
 /// Replay protection:
-/// 1. Checks `metadata.credited == "true"` on the PaymentIntent — rejects if already applied.
-/// 2. Verifies the PaymentIntent's `customer` field matches the caller's Stripe customer —
+/// 1. A per-PaymentIntent local mutex serializes concurrent calls so the
+///    check-then-act below can't race with itself in this process.
+/// 2. Both Stripe POSTs use deterministic `Idempotency-Key`s derived from the
+///    PaymentIntent ID, so even if the local lock is bypassed (eviction,
+///    multi-process) Stripe's 24h idempotency window collapses duplicates
+///    server-side.
+/// 3. Checks `metadata.credited == "true"` on the PaymentIntent — rejects if already applied.
+/// 4. Verifies the PaymentIntent's `customer` field matches the caller's Stripe customer —
 ///    prevents one account from claiming another account's payment.
-/// 3. Marks the PaymentIntent as credited (`metadata[credited]=true`) **before** creating
+/// 5. Marks the PaymentIntent as credited (`metadata[credited]=true`) **before** creating
 ///    the balance transaction, so a crash or retry after this point is safe (the second call
-///    will be rejected by check 1).
+///    will be rejected by check 3).
 pub async fn confirm_payment_and_credit(
     payment_intent_id: &str,
     wallet_address: &str,
     state: &StripeState,
 ) -> Result<()> {
+    let lock = state
+        .confirm_payment_locks
+        .get_with(payment_intent_id.to_string(), async {
+            Arc::new(tokio::sync::Mutex::new(()))
+        })
+        .await;
+    let _guard = lock.lock().await;
+
     let resp = stripe_get(state, &format!("payment_intents/{payment_intent_id}"), &[]).await?;
 
     let pi_status = resp
@@ -614,15 +638,16 @@ pub async fn confirm_payment_and_credit(
 
     // Mark as credited before creating the balance transaction so that any subsequent
     // call with the same intent ID is rejected even if the process crashes after this point.
-    stripe_post(
+    stripe_post_with_idempotency(
         state,
         &format!("payment_intents/{payment_intent_id}"),
         &[("metadata[credited]", "true")],
+        &format!("credit-mark:{payment_intent_id}"),
     )
     .await?;
 
     let credit = (-amount).to_string(); // negative = credit to customer
-    stripe_post(
+    stripe_post_with_idempotency(
         state,
         &format!("customers/{customer_id}/balance_transactions"),
         &[
@@ -630,6 +655,7 @@ pub async fn confirm_payment_and_credit(
             ("currency", "usd"),
             ("description", &format!("Top-up via {payment_intent_id}")),
         ],
+        &format!("credit-tx:{payment_intent_id}"),
     )
     .await?;
 
