@@ -10,6 +10,23 @@ pub struct NewAccountRequest {
     pub email: Option<String>,
 }
 
+/// Body for `convert_to_chain_secured_account`. The caller is authenticated by their
+/// existing API key (header). The supplied wallet becomes the on-chain admin and the
+/// account flips from managed to ChainSecured. The conversion is irreversible.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ConvertToChainSecuredAccountRequest {
+    /// Hex-encoded EVM address (with or without 0x prefix). Must be the wallet
+    /// the user controls; verified by an EIP-712 typed-data signature.
+    pub new_admin_wallet_address: String,
+    /// EIP-712 typed-data object the wallet signed. Must use
+    /// `primaryType: "ConvertAccount"` and the canonical schema (see
+    /// `core::eip712`).
+    pub typed_data: serde_json::Value,
+    /// 65-byte 0x-prefixed signature (r||s||v) over the EIP-712 digest of
+    /// `typed_data`.
+    pub signature: String,
+}
+
 /// Request for add_group. permitted_actions and pkps are keccak256 hashes as hex strings (with or without 0x). API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct AddGroupRequest {
@@ -170,6 +187,46 @@ pub struct CreatePaymentIntentRequest {
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ConfirmPaymentRequest {
     pub payment_intent_id: String,
+}
+
+/// ChainSecured wallet creation. The client signs EIP-712 typed data with
+/// their wallet; the server verifies the signature, mints a PKP via DStack
+/// MPC, and returns the new wallet address + derivation path so the client
+/// can register it on-chain via `registerWalletDerivation`.
+///
+/// The server does not maintain a nonce store. Replay protection is a
+/// ±5-minute window on the `issuedAt` field plus the per-flow primaryType
+/// binding — worst-case replay still just mints an extra unregistered PKP
+/// (compute cost only; registration requires a separate wallet signature
+/// on-chain).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CreateWalletWithSignatureRequest {
+    /// EIP-712 typed-data object the wallet signed. Must use
+    /// `primaryType: "CreateWallet"` and the canonical schema (see
+    /// `core::eip712`).
+    pub typed_data: serde_json::Value,
+    /// 65-byte 0x-prefixed signature (r||s||v) over the EIP-712 digest of
+    /// `typed_data`.
+    pub signature: String,
+}
+
+/// ChainSecured usage-key minting. Mirrors `CreateWalletWithSignatureRequest`:
+/// the user proves wallet ownership with an EIP-712 typed-data signature,
+/// the server mints a usage-key wallet via DStack MPC and returns the
+/// secret (as the usage API key) plus address + derivation path. The
+/// client follows up with on-chain `registerWalletDerivation` and
+/// `setUsageApiKey` signed by their admin wallet — only the admin wallet
+/// of a ChainSecured account can call `setUsageApiKey` (see
+/// AppStorage.accountExistsAndIsMutable).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct AddUsageApiKeyWithSignatureRequest {
+    /// EIP-712 typed-data object the wallet signed. Must use
+    /// `primaryType: "AddUsageApiKey"` and the canonical schema (see
+    /// `core::eip712`).
+    pub typed_data: serde_json::Value,
+    /// 65-byte 0x-prefixed signature (r||s||v) over the EIP-712 digest of
+    /// `typed_data`.
+    pub signature: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]

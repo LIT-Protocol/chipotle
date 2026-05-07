@@ -115,6 +115,22 @@ pub async fn send_transaction<T: ethers::abi::Detokenize>(
     signer_address: H160,
     client: Arc<SigningClient>,
 ) -> Result<bool> {
+    // Call-before-send: dry-run via eth_call so any revert surfaces as a
+    // decoded, human-readable error before we broadcast. No nonce is
+    // consumed and no gas is spent on a failed simulation — callers upstream
+    // get e.g. `Contract error: NotGroupOwner(...)` instead of a generic
+    // post-broadcast failure.
+    if let Err(sim_err) = function_call.call().await {
+        let decoded = decode_contract_revert(&sim_err);
+        // Log-and-ignore release errors so the decoded revert is always the
+        // message the caller sees; the stale-lease sweep will reclaim the
+        // signer if the release channel is dead.
+        if let Err(release_err) = signer_pool.release(signer_address).await {
+            tracing::warn!("signer release after sim failure failed: {release_err}");
+        }
+        return Err(anyhow::anyhow!("Simulation failed: {decoded}"));
+    }
+
     // First attempt.  The Ok arm returns early so the PendingTransaction's borrow of
     // `function_call` is fully consumed before we ever reach the nonce-resync path below;
     // this lets the borrow checker accept the later mutable borrow of `function_call.tx`.

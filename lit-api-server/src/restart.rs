@@ -107,7 +107,10 @@ async fn run_event_listener(restart_handle: RestartHandle) -> anyhow::Result<()>
         "Server trigger event listener started"
     );
 
-    let mut last_checked_block = start_block;
+    // Start one block before `start_block` so the first query range
+    // (`last_checked_block + 1 ..= latest`) actually includes `start_block`.
+    // Otherwise an event emitted in the block we observed at startup would be missed.
+    let mut last_checked_block = start_block.saturating_sub(1);
     let mut interval = tokio::time::interval(EVENT_POLL_INTERVAL);
     interval.tick().await; // discard the immediate first tick
 

@@ -47,8 +47,48 @@ export interface NewAccountRequest {
   email?: string | null;
 }
 
+/**
+ * Response for account config operations (add_pkp_to_group, remove_pkp_from_group, add_usage_api_key, remove_usage_api_key).
+ */
+export interface AccountOpResponse {
+  success: boolean;
+}
+
+/**
+ * Body for `convert_to_chain_secured_account`. The caller is authenticated by their existing API key (header). The supplied wallet becomes the on-chain admin and the account flips from managed to ChainSecured. The conversion is irreversible.
+ */
+export interface ConvertToChainSecuredAccountRequest {
+  /** Hex-encoded EVM address (with or without 0x prefix). Must be the wallet the user controls; verified by an EIP-712 typed-data signature. */
+  new_admin_wallet_address: string;
+  /** EIP-712 typed-data object the wallet signed. Must use `primaryType: "ConvertAccount"` and the canonical schema (see `core::eip712`). */
+  typed_data: unknown;
+  /** 65-byte 0x-prefixed signature (r||s||v) over the EIP-712 digest of `typed_data`. */
+  signature: string;
+}
+
 export interface CreateWalletResponse {
   wallet_address: string;
+}
+
+/**
+ * Returned by `/create_wallet_with_signature`. The client must follow up with an on-chain `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` call signed by the same wallet — until that lands, the PKP exists in MPC but is not registered to any account.
+ */
+export interface CreateWalletWithSignatureResponse {
+  wallet_address: string;
+  /** 0x-prefixed lowercase hex (uint256). Pass through verbatim to `registerWalletDerivation`'s `derivationPath` arg. */
+  derivation_path: string;
+}
+
+/**
+ * ChainSecured wallet creation. The client signs EIP-712 typed data with their wallet; the server verifies the signature, mints a PKP via DStack MPC, and returns the new wallet address + derivation path so the client can register it on-chain via `registerWalletDerivation`.
+
+The server does not maintain a nonce store. Replay protection is a ±5-minute window on the `issuedAt` field plus the per-flow primaryType binding — worst-case replay still just mints an extra unregistered PKP (compute cost only; registration requires a separate wallet signature on-chain).
+ */
+export interface CreateWalletWithSignatureRequest {
+  /** EIP-712 typed-data object the wallet signed. Must use `primaryType: "CreateWallet"` and the canonical schema (see `core::eip712`). */
+  typed_data: unknown;
+  /** 65-byte 0x-prefixed signature (r||s||v) over the EIP-712 digest of `typed_data`. */
+  signature: string;
 }
 
 export interface LitActionResponse {
@@ -102,13 +142,6 @@ export interface AddGroupRequest {
   pkp_ids_permitted: string[];
   /** Actions permitted to use the group (AccountConfig.sol Group.cidHash). */
   cid_hashes_permitted: string[];
-}
-
-/**
- * Response for account config operations (add_pkp_to_group, remove_pkp_from_group, add_usage_api_key, remove_usage_api_key).
- */
-export interface AccountOpResponse {
-  success: boolean;
 }
 
 export interface RemoveGroupRequest {
@@ -177,6 +210,28 @@ export interface AddUsageApiKeyRequest {
   remove_pkp_from_groups: number[];
   /** Group IDs to grant execute permission. 0 is wildcard for all groups. */
   execute_in_groups: number[];
+}
+
+/**
+ * Returned by `/add_usage_api_key_with_signature`. The client must follow up with on-chain `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` and `setUsageApiKey(adminHash, keccak256(usage_api_key), …)` — both signed by the admin wallet — to attach the usage key to the ChainSecured account.
+ */
+export interface AddUsageApiKeyWithSignatureResponse {
+  /** Base64-encoded 32-byte secret. Send as `X-Api-Key` / `Authorization: Bearer …` for usage requests; pass `keccak256(this)` to `setUsageApiKey`. */
+  usage_api_key: string;
+  /** 0x-prefixed lowercase hex EVM address of the minted PKP wallet. */
+  wallet_address: string;
+  /** 0x-prefixed lowercase hex (uint256). Pass through verbatim to `registerWalletDerivation`'s `derivationPath` arg. */
+  derivation_path: string;
+}
+
+/**
+ * ChainSecured usage-key minting. Mirrors `CreateWalletWithSignatureRequest`: the user proves wallet ownership with an EIP-712 typed-data signature, the server mints a usage-key wallet via DStack MPC and returns the secret (as the usage API key) plus address + derivation path. The client follows up with on-chain `registerWalletDerivation` and `setUsageApiKey` signed by their admin wallet — only the admin wallet of a ChainSecured account can call `setUsageApiKey` (see AppStorage.accountExistsAndIsMutable).
+ */
+export interface AddUsageApiKeyWithSignatureRequest {
+  /** EIP-712 typed-data object the wallet signed. Must use `primaryType: "AddUsageApiKey"` and the canonical schema (see `core::eip712`). */
+  typed_data: unknown;
+  /** 65-byte 0x-prefixed signature (r||s||v) over the EIP-712 digest of `typed_data`. */
+  signature: string;
 }
 
 /**
@@ -381,6 +436,17 @@ export type ListApiKeysDefault = ApiKeyItem[] | ErrMessage;
 
 export type NewAccountDefault = NewAccountResponse | ErrMessage;
 
+export type ConvertToChainSecuredAccountHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type ConvertToChainSecuredAccountDefault =
+  | AccountOpResponse
+  | ErrMessage;
+
 export type AccountExistsHeaders = {
   /**
    * Account or usage API key. Alternatively use Authorization: Bearer <key>.
@@ -398,6 +464,10 @@ export type CreateWalletHeaders = {
 };
 
 export type CreateWalletDefault = CreateWalletResponse | ErrMessage;
+
+export type CreateWalletWithSignatureDefault =
+  | CreateWalletWithSignatureResponse
+  | ErrMessage;
 
 export type LitActionHeaders = {
   /**
@@ -481,6 +551,10 @@ export type AddUsageApiKeyHeaders = {
 };
 
 export type AddUsageApiKeyDefault = AddUsageApiKeyResponse | ErrMessage;
+
+export type AddUsageApiKeyWithSignatureDefault =
+  | AddUsageApiKeyWithSignatureResponse
+  | ErrMessage;
 
 export type UpdateUsageApiKeyHeaders = {
   /**
@@ -640,18 +714,18 @@ export type BillingStripeConfigDefault = StripeConfigResponse | ErrMessage;
 
 export type BillingBalanceHeaders = {
   /**
-   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   * API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{typed_data, signature})>` where `typed_data` is EIP-712 with `primaryType: "BillingAuth"`. The signature proves wallet possession; the typed data must include the connected wallet address and an issuedAt timestamp within ±5 minutes.
    */
-  "X-Api-Key": string;
+  "X-Api-Key"?: string;
 };
 
 export type BillingBalanceDefault = BillingBalanceResponse | ErrMessage;
 
 export type BillingCreatePaymentIntentHeaders = {
   /**
-   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   * API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{typed_data, signature})>` where `typed_data` is EIP-712 with `primaryType: "BillingAuth"`. The signature proves wallet possession; the typed data must include the connected wallet address and an issuedAt timestamp within ±5 minutes.
    */
-  "X-Api-Key": string;
+  "X-Api-Key"?: string;
 };
 
 export type BillingCreatePaymentIntentDefault =
@@ -660,9 +734,9 @@ export type BillingCreatePaymentIntentDefault =
 
 export type BillingConfirmPaymentHeaders = {
   /**
-   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   * API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{typed_data, signature})>` where `typed_data` is EIP-712 with `primaryType: "BillingAuth"`. The signature proves wallet possession; the typed data must include the connected wallet address and an issuedAt timestamp within ±5 minutes.
    */
-  "X-Api-Key": string;
+  "X-Api-Key"?: string;
 };
 
 export type BillingConfirmPaymentDefault = AccountOpResponse | ErrMessage;
@@ -769,6 +843,55 @@ export class LitApiServerClient {
     };
   }
 
+  convertToChainSecuredAccount(
+    convertToChainSecuredAccountRequest: ConvertToChainSecuredAccountRequest,
+    headers: ConvertToChainSecuredAccountHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: ConvertToChainSecuredAccountDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(
+      this.cleanBaseUrl + `/convert_to_chain_secured_account`,
+    );
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      JSON.stringify(convertToChainSecuredAccountRequest),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
+        },
+      },
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "convert_to_chain_secured_account",
+    };
+  }
+
   accountExists(
     headers: AccountExistsHeaders,
     requestParameters?: Params,
@@ -846,6 +969,45 @@ export class LitApiServerClient {
       response,
       data,
       operationId: "create_wallet",
+    };
+  }
+
+  createWalletWithSignature(
+    createWalletWithSignatureRequest: CreateWalletWithSignatureRequest,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: CreateWalletWithSignatureDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/create_wallet_with_signature`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      JSON.stringify(createWalletWithSignatureRequest),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "create_wallet_with_signature",
     };
   }
 
@@ -1308,6 +1470,47 @@ export class LitApiServerClient {
       response,
       data,
       operationId: "add_usage_api_key",
+    };
+  }
+
+  addUsageApiKeyWithSignature(
+    addUsageApiKeyWithSignatureRequest: AddUsageApiKeyWithSignatureRequest,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: AddUsageApiKeyWithSignatureDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(
+      this.cleanBaseUrl + `/add_usage_api_key_with_signature`,
+    );
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      JSON.stringify(addUsageApiKeyWithSignatureRequest),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+        },
+      },
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "add_usage_api_key_with_signature",
     };
   }
 
@@ -1960,7 +2163,7 @@ export class LitApiServerClient {
    * GET /billing/balance — returns the current credit balance for the authenticated user.
    */
   billingBalance(
-    headers: BillingBalanceHeaders,
+    headers?: BillingBalanceHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -2004,7 +2207,7 @@ export class LitApiServerClient {
    */
   billingCreatePaymentIntent(
     createPaymentIntentRequest: CreatePaymentIntentRequest,
-    headers: BillingCreatePaymentIntentHeaders,
+    headers?: BillingCreatePaymentIntentHeaders,
     requestParameters?: Params,
   ): {
     response: Response;
@@ -2054,7 +2257,7 @@ export class LitApiServerClient {
    */
   billingConfirmPayment(
     confirmPaymentRequest: ConfirmPaymentRequest,
-    headers: BillingConfirmPaymentHeaders,
+    headers?: BillingConfirmPaymentHeaders,
     requestParameters?: Params,
   ): {
     response: Response;

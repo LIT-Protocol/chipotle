@@ -6,14 +6,16 @@ use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
-    AddUsageApiKeyRequest, DeleteActionRequest, NewAccountRequest, RemoveActionFromGroupRequest,
-    RemoveGroupRequest, RemovePkpFromGroupRequest, RemoveUsageApiKeyRequest,
-    UpdateActionMetadataRequest, UpdateGroupRequest, UpdateUsageApiKeyMetadataRequest,
-    UpdateUsageApiKeyRequest,
+    AddUsageApiKeyRequest, AddUsageApiKeyWithSignatureRequest, ConvertToChainSecuredAccountRequest,
+    CreateWalletWithSignatureRequest, DeleteActionRequest, NewAccountRequest,
+    RemoveActionFromGroupRequest, RemoveGroupRequest, RemovePkpFromGroupRequest,
+    RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
+    UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
 };
 use crate::core::v1::models::response::{
-    AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse, ApiKeyItem,
-    ChainConfigKeysResponse, CreateWalletResponse, ListMetadataItem, NewAccountResponse,
+    AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse,
+    AddUsageApiKeyWithSignatureResponse, ApiKeyItem, ChainConfigKeysResponse, CreateWalletResponse,
+    CreateWalletWithSignatureResponse, ListMetadataItem, NewAccountResponse,
     NodeChainConfigResponse, WalletItem,
 };
 use crate::dstack::v1::get_client_key;
@@ -21,7 +23,7 @@ use crate::stripe::StripeState;
 use crate::utils::generate_unique_derivation_path;
 use crate::utils::parse_with_hash::{
     hashed_cid_to_u256, hex_array_to_h160_array, hex_array_to_u256_array, ipfs_cid_to_u256,
-    string_group_id_to_u256,
+    is_precomputed_hash_shape, string_group_id_to_u256,
 };
 use crate::{accounts, dstack};
 use elliptic_curve::group::GroupEncoding;
@@ -51,6 +53,30 @@ fn map_contract_error(e: anyhow::Error, context: &str) -> ApiStatus {
     } else {
         ApiStatus::internal_server_error(e, context)
     }
+}
+
+/// Encode a 32-byte secret into the base64 form used for raw API keys, and
+/// reject anything shaped like a precomputed account hash (CPL-285).
+///
+/// Standard base64 of 32 bytes is 44 chars, so the 66-char hash shape is
+/// arithmetically unreachable today. The check is defense-in-depth against a
+/// future format change (e.g. switching to 0x-prefixed hex) that would create a
+/// confused-deputy collision with `usage_api_key_to_hash`. `debug_assert!`
+/// fires in dev/test, the runtime branch returns 500 in release.
+fn encode_api_key_from_secret(secret: &[u8; 32]) -> Result<String, ApiStatus> {
+    let encoded = base64_light::base64_encode_bytes(secret);
+    debug_assert!(
+        !is_precomputed_hash_shape(&encoded),
+        "API key generator produced a value shaped like a precomputed account hash; \
+         this would collide with usage_api_key_to_hash and route to the wrong on-chain account"
+    );
+    if is_precomputed_hash_shape(&encoded) {
+        return Err(ApiStatus::internal_server_error(
+            anyhow::anyhow!("generated api_key matched precomputed-hash shape"),
+            "Internal key generation invariant violated",
+        ));
+    }
+    Ok(encoded)
 }
 
 // Create a new wallet and return the public key, wallet address, and secret.
@@ -84,7 +110,7 @@ pub async fn new_account(
     let email = new_account_request.email.clone().unwrap_or_default();
 
     let (_public_key, wallet_address, secret, derivation_path) = create_new_wallet().await?;
-    let api_key = base64_light::base64_encode_bytes(&secret);
+    let api_key = encode_api_key_from_secret(&secret)?;
 
     if let Err(e) = accounts::new_account(
         signer_pool.clone(),
@@ -161,6 +187,103 @@ pub async fn create_wallet(
     Ok(CreateWalletResponse {
         wallet_address: bytes_to_0x_hex(wallet_address.as_bytes()),
     })
+}
+
+pub async fn create_wallet_with_signature(
+    req: Json<CreateWalletWithSignatureRequest>,
+) -> Result<CreateWalletWithSignatureResponse, ApiStatus> {
+    let signer = crate::core::eip712::verify_eip712_signature(
+        &req.typed_data,
+        &req.signature,
+        crate::core::eip712::PRIMARY_TYPE_CREATE_WALLET,
+    )?;
+    tracing::info!(
+        "create_wallet_with_signature: minting PKP for ChainSecured signer {:?}",
+        signer
+    );
+    let (_public_key, wallet_address, _secret, derivation_u256) = create_new_wallet().await?;
+    Ok(CreateWalletWithSignatureResponse {
+        wallet_address: bytes_to_0x_hex(wallet_address.as_bytes()),
+        derivation_path: format!("0x{:x}", derivation_u256),
+    })
+}
+
+/// ChainSecured usage API key: server only mints the wallet (PKP) gated by an
+/// EIP-712 wallet signature (`primaryType: "AddUsageApiKey"`); the client
+/// follows up with on-chain `registerWalletDerivation` and `setUsageApiKey`
+/// signed by their admin wallet (api_payer cannot call setUsageApiKey for
+/// ChainSecured accounts — see AppStorage.accountExistsAndIsMutable).
+pub async fn add_usage_api_key_with_signature(
+    req: Json<AddUsageApiKeyWithSignatureRequest>,
+) -> Result<AddUsageApiKeyWithSignatureResponse, ApiStatus> {
+    let signer = crate::core::eip712::verify_eip712_signature(
+        &req.typed_data,
+        &req.signature,
+        crate::core::eip712::PRIMARY_TYPE_ADD_USAGE_API_KEY,
+    )?;
+    tracing::info!(
+        "add_usage_api_key_with_signature: minting usage-key PKP for ChainSecured signer {:?}",
+        signer
+    );
+    let (_public_key, wallet_address, secret, derivation_u256) = create_new_wallet().await?;
+    let usage_api_key = encode_api_key_from_secret(&secret)?;
+    Ok(AddUsageApiKeyWithSignatureResponse {
+        usage_api_key,
+        wallet_address: bytes_to_0x_hex(wallet_address.as_bytes()),
+        derivation_path: format!("0x{:x}", derivation_u256),
+    })
+}
+
+/// Convert a managed (API-mode) account into a ChainSecured (sovereign) account by
+/// reassigning its admin wallet to a user-controlled address. The user proves
+/// ownership of `new_admin_wallet_address` with an EIP-712 typed-data signature
+/// (`primaryType: "ConvertAccount"`). The api_payer signs the on-chain
+/// `convertToChainSecuredAccount` call.
+///
+/// Irreversible: the contract reverts if the account is already ChainSecured.
+pub async fn convert_to_chain_secured_account(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    req: Json<ConvertToChainSecuredAccountRequest>,
+) -> Result<AccountOpResponse, ApiStatus> {
+    let claimed_address_bytes = hex_to_bytes(req.new_admin_wallet_address.trim_start_matches("0x"))
+        .map_err(|_| {
+            ApiStatus::bad_request(
+                anyhow::anyhow!("new_admin_wallet_address is not valid hex"),
+                "new_admin_wallet_address is not valid hex",
+            )
+        })?;
+    if claimed_address_bytes.len() != 20 {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("new_admin_wallet_address must be 20 bytes"),
+            "new_admin_wallet_address must be 20 bytes",
+        ));
+    }
+    let claimed_address = H160::from_slice(&claimed_address_bytes);
+    if claimed_address == H160::zero() {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("new_admin_wallet_address must be non-zero"),
+            "new_admin_wallet_address must be non-zero",
+        ));
+    }
+
+    let signer = crate::core::eip712::verify_eip712_signature(
+        &req.typed_data,
+        &req.signature,
+        crate::core::eip712::PRIMARY_TYPE_CONVERT_ACCOUNT,
+    )?;
+    if signer != claimed_address {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Signature does not match new_admin_wallet_address"),
+            "Signature does not match new_admin_wallet_address",
+        ));
+    }
+
+    accounts::convert_to_chain_secured_account(signer_pool, api_key, claimed_address)
+        .await
+        .map_err(|e| map_contract_error(e, "convert_to_chain_secured_account failed"))?;
+
+    Ok(AccountOpResponse { success: true })
 }
 
 pub async fn get_lit_action_ipfs_id(code: String) -> Result<String, ApiStatus> {
@@ -312,7 +435,7 @@ pub async fn add_usage_api_key(
     )
     .await?;
 
-    let usage_api_key = base64_light::base64_encode_bytes(&secret);
+    let usage_api_key = encode_api_key_from_secret(&secret)?;
 
     accounts::add_usage_api_key(
         signer_pool,
@@ -710,4 +833,40 @@ pub async fn get_admin_api_payer() -> Result<String, ApiStatus> {
     })?;
     let wallet_address = local_wallet.address();
     Ok(bytes_to_0x_hex(wallet_address.as_bytes()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Base64 of 32 bytes is always 44 chars, so it can never collide with the
+    /// 66-char `0x[hex]{64}` precomputed-hash shape (CPL-285). This test pins
+    /// that property so a future change to the encoding is forced to confront it.
+    #[test]
+    fn encode_api_key_from_secret_never_matches_hash_shape() {
+        // Sample a few representative byte patterns: zeros, all-ones, a hash-like
+        // pattern, and a typical random secret.
+        for secret in &[
+            [0u8; 32],
+            [0xffu8; 32],
+            // hex digits 0-9 a-f then repeated
+            [
+                0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab,
+                0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67,
+                0x89, 0xab, 0xcd, 0xef,
+            ],
+            [
+                0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0xba, 0xbe, 0x00, 0x11, 0x22, 0x33, 0x44, 0x55,
+                0x66, 0x77, 0x88, 0x99, 0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x12, 0x34, 0x56, 0x78,
+                0x9a, 0xbc, 0xde, 0xf0,
+            ],
+        ] {
+            let encoded = encode_api_key_from_secret(secret).expect("happy path must succeed");
+            assert_eq!(encoded.len(), 44, "base64 of 32 bytes is always 44 chars");
+            assert!(
+                !crate::utils::parse_with_hash::is_precomputed_hash_shape(&encoded),
+                "encoded API key {encoded:?} unexpectedly matched precomputed-hash shape",
+            );
+        }
+    }
 }

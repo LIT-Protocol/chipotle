@@ -1,0 +1,61 @@
+# Add a Phala TEE device to a DstackApp's on-chain allowlist.
+#
+# Used when migrating a CVM to a new node (e.g. prod5 → prod6): each Phala
+# node has a distinct device_id, and the DstackApp contract on Base only
+# releases keys to allowlisted devices. This workflow signs the addDevice
+# transaction with the GitHub-stored DstackApp owner key.
+#
+# Scope: single-key (EOA) DstackApp owners — i.e. chipotle-next / chipotle-dev.
+# chipotle-prod is owned by a Safe multisig and uses a different flow
+# (propose-add-device Hardhat task → Safe signers approve → execute).
+#
+# Required secrets:
+#   PHALA_DSTACKAPP_PRIVATE_KEY - DstackApp owner key (Base mainnet)
+#   PHALA_CLOUD_API_KEY         - Phala Cloud API key
+#   BASE_CHAIN_RPC              - Base mainnet RPC URL
+
+name: Phala Add Device (manual)
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_id:
+        description: "DstackApp ID (e.g. app_969a8c14... or 0x969a8c14...)"
+        required: true
+        type: string
+      device_id:
+        description: "Device ID (0x... bytes32) or Phala node name (e.g. prod6)"
+        required: true
+        type: string
+
+jobs:
+  add-device:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install Phala CLI
+        run: npm install -g phala
+
+      - name: Add device to DstackApp allowlist
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          PRIVATE_KEY: ${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}
+          ETH_RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
+        run: |
+          phala allow-devices add \
+            "${{ inputs.app_id }}" \
+            "${{ inputs.device_id }}" \
+            --wait
+
+      - name: Show updated allowlist
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          ETH_RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
+        run: |
+          phala allow-devices list "${{ inputs.app_id }}"
