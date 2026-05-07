@@ -670,6 +670,12 @@ body.has-api-key .dashboard-wrap {
   font-family: inherit;
 }
 
+/* `.account-dropdown-item { display: block }` beats the UA `[hidden]` rule on
+   specificity, so the `hidden` attribute alone won't hide the button. */
+.account-dropdown-item[hidden] {
+  display: none;
+}
+
 .account-dropdown-item:hover {
   background: rgba(0, 0, 0, 0.05);
 }
