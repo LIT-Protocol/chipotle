@@ -150,12 +150,16 @@ export function initModalClose() {
 
 let _confirmResolve = null;
 
-export function confirmDelete(message) {
+export function confirmDelete(message, opts) {
   return new Promise((resolve) => {
     _confirmResolve = resolve;
     const overlay = document.getElementById('confirm-overlay');
     const msgEl = document.getElementById('confirm-message');
+    const titleEl = overlay?.querySelector('.modal-title');
+    const confirmBtn = document.getElementById('confirm-delete-btn');
     if (msgEl) msgEl.textContent = message || 'Are you sure you want to delete this item?';
+    if (titleEl) titleEl.textContent = opts?.title || 'Confirm delete';
+    if (confirmBtn) confirmBtn.textContent = opts?.confirmLabel || 'Delete';
     if (overlay) {
       overlay.classList.add('is-open');
       overlay.setAttribute('aria-hidden', 'false');

@@ -851,7 +851,8 @@ export async function convertToChainSecured() {
     return;
   }
   const ok = await confirmDelete(
-    "Convert this account to ChainSecured?\n\nYour connected wallet becomes the on-chain admin and your API key's write authority is removed permanently. This cannot be undone.\n\nYou will be signed in as the wallet after conversion.",
+    "Convert this account to ChainSecured?\n\nYour connected wallet becomes the on-chain admin and your API key's write authority is removed permanently. This cannot be undone.\n\nYou will be asked to sign a message with your wallet to prove ownership, and will be signed in as the wallet after conversion.",
+    { title: 'Confirm ownership change', confirmLabel: 'Convert' },
   );
   if (!ok) return;
 
