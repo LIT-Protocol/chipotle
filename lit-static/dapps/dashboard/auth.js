@@ -847,7 +847,7 @@ async function createChainSecuredAccount(btn) {
 export async function convertToChainSecured() {
   const apiKey = getApiKey();
   if (!apiKey || getMode() !== 'api') {
-    showStatus('login-status', 'Convert is only available while signed in with an API key.', 'error');
+    showStatus('dashboard-status', 'Convert is only available while signed in with an API key.', 'error');
     return;
   }
   const ok = await confirmDelete(
@@ -894,12 +894,12 @@ export async function convertToChainSecured() {
     setApiKey('');
     await setChainSecuredSession({ walletAddress: res.wallet_address, apiKeyHash: res.api_key_hash });
     closeActionProgress();
-    showStatus('login-status', 'Account converted. Reloading as ChainSecured…', 'success');
+    showStatus('dashboard-status', 'Account converted. Reloading as ChainSecured…', 'success');
     setTimeout(() => location.reload(), 600);
   } catch (e) {
     closeActionProgress();
     logError('convert-to-chainsecured', e);
-    showStatus('login-status', 'Convert failed: ' + formatError(e), 'error');
+    showStatus('dashboard-status', 'Convert failed: ' + formatError(e), 'error');
   }
 }
 
