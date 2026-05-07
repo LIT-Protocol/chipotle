@@ -124,7 +124,10 @@ contract ViewsFacet {
     /// @notice Return the admin/owner wallet address for the account that owns the given API key.
     /// @dev Works with both master and usage API key hashes (resolves via allApiKeyHashesToMaster).
     ///      The admin wallet is set at account creation and is not necessarily the transaction creator.
-    /// @param apiKeyHash keccak256 of a master or usage API key (base64-encoded).
+    /// @param apiKeyHash Account identity hash. Accepts either keccak256 of a master or usage
+    ///        API key (base64-encoded) — the API-key flow — or keccak256(walletAddress) for
+    ///        ChainSecured callers, whose on-chain identity is derived from their wallet rather
+    ///        than a secret API key.
     /// @return The admin/owner wallet address stored on the resolved master account.
     function getAccountWalletAddress(
         uint256 apiKeyHash
@@ -136,7 +139,10 @@ contract ViewsFacet {
     /// @notice Return the billing wallet address for the account that owns the given API key.
     /// @dev Works with both master and usage API key hashes (resolves via allApiKeyHashesToMaster).
     ///      The billing wallet is set at account creation and is not necessarily the transaction creator.
-    /// @param apiKeyHash keccak256 of a master or usage API key (base64-encoded).
+    /// @param apiKeyHash Account identity hash. Accepts either keccak256 of a master or usage
+    ///        API key (base64-encoded) — the API-key flow — or keccak256(walletAddress) for
+    ///        ChainSecured callers, whose on-chain identity is derived from their wallet rather
+    ///        than a secret API key.
     /// @return The billing wallet address stored on the resolved master account.
     function getBillingWalletAddress(
         uint256 apiKeyHash
