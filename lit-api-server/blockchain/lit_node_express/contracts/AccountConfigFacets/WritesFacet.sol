@@ -155,7 +155,13 @@ contract WritesFacet {
                 "newAdminWalletAddress must be non-zero"
             );
         }
+        uint256 newApiKeyHash = uint256(
+            keccak256(abi.encodePacked(newAdminWalletAddress))
+        );
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        if (s.allApiKeyHashesToMaster[newApiKeyHash] != 0) {
+            revert AppStorage.AccountAlreadyExists(newApiKeyHash);
+        }
         if (s.allApiKeyHashesToMaster[apiKeyHash] != apiKeyHash) {
             revert AppStorage.AccountDoesNotExist(apiKeyHash);
         }
@@ -165,6 +171,7 @@ contract WritesFacet {
                 "Account is already ChainSecured."
             );
         }
+        s.allApiKeyHashesToMaster[newApiKeyHash] = apiKeyHash; // effectively map the new admin wallet to the existing account, without removing the old one.
         account.managed = false;
         if (account.billingWalletAddress == address(0)) {
             account.billingWalletAddress = account.adminWalletAddress;
