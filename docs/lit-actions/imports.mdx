@@ -5,7 +5,7 @@ description: "Lit Actions can now import third-party ESM packages directly from 
 
 ## What Changed
 
-Until now, the only JavaScript available inside a Lit Action was what shipped with the runtime: `ethers` (v5) and the `Lit.Actions` SDK. If you needed anything else, you had to inline it or bundle it into your action code before uploading to IPFS.
+Until now, the only JavaScript available inside a Lit Action was what shipped with the runtime: `ethers` (the v5 version) and the `Lit.Actions` SDK. If you needed anything else, you had to inline it or bundle it into your action code before uploading to IPFS.
 
 That limitation is gone. Lit Actions can now **import ES modules at runtime** from [jsDelivr](https://www.jsdelivr.com/), a public CDN that serves npm packages as ready-to-run ESM. You write a standard `import` statement with a version-pinned package specifier and the runtime resolves it to jsDelivr, fetches, verifies, caches, and executes it.
 

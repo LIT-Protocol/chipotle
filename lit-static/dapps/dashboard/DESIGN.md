@@ -111,25 +111,25 @@ Radii:
 
 ### Login mode cards
 
-- Single card visible at a time. The "Authentication mode" pill toggle above
-  the "I would like to" tabs picks API mode vs ChainSecured mode; only the
-  matching card is shown (CSS gates `.login-card-api` and
+- One card hosts everything: Sign in / Create account tabs across the top,
+  the active form panel in the middle, and the "Authentication mode" pill
+  toggle (API mode / ChainSecured) along the bottom. The auth-mode toggle
+  picks which inner card is shown (CSS gates `.login-card-api` and
   `.login-card-chainsecured` on `body.login-mode-chainsecured` via
   `display: none`; both cards stay in the DOM). The choice persists via
   `setMode()`/sessionStorage so it survives a tab refresh and matches the
   dashboard's post-login mode.
-- API mode card carries the `RECOMMENDED` badge (filled primary) — primary path.
 - ChainSecured card carries the `WALLET REQUIRED` badge (muted, neutral fill)
-  to set expectation.
+  to set expectation. API mode card has no badge.
 - The visible card uses a neutral `--border` ring; hover or focus-within
-  promotes it to the primary ring. The badges carry which is recommended vs
-  which requires a wallet.
+  promotes it to the primary ring. The "Wallet required" badge is the only
+  differentiator between modes.
 - Each card's CTA (Log in / Create account / Connect wallet / Connect wallet
   & create) shares the same shape (full-width, btn-block padding) but its
   color follows the card's selected state: neutral outlined at rest, primary
   blue when the card is hovered or focus-within. The btn-primary vs
   btn-outline class no longer drives color here — the parent card does.
-- Each card: badge, icon, title, tagline, body, CTA.
+- Each card: optional badge, icon, title, tagline, body, CTA.
 - Help glyph next to "ChainSecured" → tooltip defining the term.
 
 ### Help disclosure (`details.help-details`)
