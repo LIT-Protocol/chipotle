@@ -835,8 +835,10 @@ async function createChainSecuredAccount(btn) {
 /**
  * Account-dropdown handler. Converts the currently signed-in API account into a
  * ChainSecured account by reassigning its admin wallet. Flow:
- *   1. Confirm (irreversible).
- *   2. Connect wallet (sign-in EOA, enforce chain match).
+ *   1. Connect wallet (sign-in EOA, enforce chain match) — forced *before* the
+ *      confirmation modal so the user can't commit to the irreversible action
+ *      without a working signer in hand (CPL-320).
+ *   2. Confirm (irreversible).
  *   3. POST /core/v1/convert_to_chain_secured_account (api_payer signs the
  *      on-chain `convertToChainSecuredAccount` call).
  *   4. Switch dashboard mode to sovereign and reload.
@@ -850,25 +852,24 @@ export async function convertToChainSecured() {
     showStatus('login-status', 'Convert is only available while signed in with an API key.', 'error');
     return;
   }
-  const ok = await confirmDelete(
-    "Convert this account to ChainSecured?\n\nYour connected wallet becomes the on-chain admin and your API key's write authority is removed permanently. This cannot be undone.\n\nYou will be asked to sign a message with your wallet to prove ownership, and will be signed in as the wallet after conversion.",
-    { title: 'Confirm ownership change', confirmLabel: 'Convert' },
-  );
-  if (!ok) return;
 
-  showActionProgress('Convert to ChainSecured', 'Connect a wallet to take over admin ownership.');
+  let signer;
+  let expectedChainId;
+  let client;
   try {
-    const client = await getClient();
+    showActionProgress('Convert to ChainSecured', 'Connect a wallet to take over admin ownership.');
+    client = await getClient();
     // API-mode clients don't bootstrap chain config; fetch it now so we can
     // enforce a wallet-chain match before signing AND pass `chainId` to the
     // SDK (which would otherwise throw "chainId is unknown").
     const cfg = await client.getNodeChainConfig();
-    const expectedChainId = cfg && cfg.chain_id != null ? Number(cfg.chain_id) : null;
+    expectedChainId = cfg && cfg.chain_id != null ? Number(cfg.chain_id) : null;
     if (expectedChainId == null) {
       throw new Error('Server did not report a chain id; cannot convert.');
     }
     const { connectEoa, switchChain } = await import('../../wallet_connect.js');
-    let { signer, chainId } = await connectEoa();
+    let chainId;
+    ({ signer, chainId } = await connectEoa());
     if (chainId !== expectedChainId) {
       try {
         await switchChain(expectedChainId);
@@ -879,15 +880,30 @@ export async function convertToChainSecured() {
       }
       ({ signer } = await connectEoa());
     }
-    // The SDK call is one opaque await: wallet sign → server signs+broadcasts
-    // the on-chain tx → server awaits inclusion → returns. By the time it
-    // resolves the conversion is already on-chain, so the progress text
-    // covers both phases (sign + submit) before the await rather than
-    // claiming a phase that has already happened after.
-    showActionProgress(
-      'Convert to ChainSecured',
-      'Sign in your wallet, then we submit the conversion on-chain (this may take ~10–30 seconds)…',
-    );
+  } catch (e) {
+    closeActionProgress();
+    logError('convert-to-chainsecured', e);
+    showStatus('login-status', 'Convert canceled: ' + formatError(e), 'error');
+    return;
+  }
+  closeActionProgress();
+
+  const ok = await confirmDelete(
+    "Convert this account to ChainSecured?\n\nYour connected wallet becomes the on-chain admin and your API key's write authority is removed permanently. This cannot be undone.\n\nYou will be asked to sign a message with your wallet to prove ownership, and will be signed in as the wallet after conversion.",
+    { title: 'Confirm ownership change', confirmLabel: 'Convert' },
+  );
+  if (!ok) return;
+
+  // The SDK call is one opaque await: wallet sign → server signs+broadcasts
+  // the on-chain tx → server awaits inclusion → returns. By the time it
+  // resolves the conversion is already on-chain, so the progress text
+  // covers both phases (sign + submit) before the await rather than
+  // claiming a phase that has already happened after.
+  showActionProgress(
+    'Convert to ChainSecured',
+    'Sign in your wallet, then we submit the conversion on-chain (this may take ~10–30 seconds)…',
+  );
+  try {
     const res = await client.convertToChainSecuredAccount({ apiKey, signer, chainId: expectedChainId });
     showActionProgress('Convert to ChainSecured', 'Conversion confirmed. Switching to ChainSecured mode…');
     setMode('sovereign');
