@@ -16,6 +16,7 @@ import { initActionRunner } from './runner.js';
 
 async function preloadAllTables() {
   if (!isAuthenticated()) return;
+  hideStatus('dashboard-status');
   const results = await Promise.allSettled([
     loadGroups(),
     loadWallets(),
@@ -25,7 +26,7 @@ async function preloadAllTables() {
   const failures = results.filter((r) => r.status === 'rejected');
   if (failures.length > 0) {
     failures.forEach((f) => logError('preload', f.reason));
-    showStatus('login-status', 'Some data failed to load. Check individual sections for details.', 'error');
+    showStatus('dashboard-status', 'Some data failed to load. Check individual sections for details.', 'error');
   }
 }
 
