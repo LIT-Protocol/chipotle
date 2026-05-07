@@ -670,6 +670,12 @@ body.has-api-key .dashboard-wrap {
   font-family: inherit;
 }
 
+/* `.account-dropdown-item { display: block }` overrides the UA `[hidden]`
+   mapping, so this rule restores `display: none` when `hidden` is present. */
+.account-dropdown-item[hidden] {
+  display: none;
+}
+
 .account-dropdown-item:hover {
   background: rgba(0, 0, 0, 0.05);
 }
