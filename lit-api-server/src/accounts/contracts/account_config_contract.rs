@@ -627,6 +627,28 @@ pub mod account_config {
                     },],
                 ),
                 (
+                    ::std::borrow::ToOwned::to_owned("getBillingWalletAddress"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned("getBillingWalletAddress",),
+                        inputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("uint256"),
+                            ),
+                        },],
+                        outputs: ::std::vec![::ethers::core::abi::ethabi::Param {
+                            name: ::std::string::String::new(),
+                            kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                            internal_type: ::core::option::Option::Some(
+                                ::std::borrow::ToOwned::to_owned("address"),
+                            ),
+                        },],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::View,
+                    },],
+                ),
+                (
                     ::std::borrow::ToOwned::to_owned("getPricing"),
                     ::std::vec![::ethers::core::abi::ethabi::Function {
                         name: ::std::borrow::ToOwned::to_owned("getPricing"),
@@ -3108,6 +3130,15 @@ pub mod account_config {
         ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::Address> {
             self.0
                 .method_hash([80, 237, 91, 184], api_key_hash)
+                .expect("method not found (this should never happen)")
+        }
+        ///Calls the contract's `getBillingWalletAddress` (0x7249a9b6) function
+        pub fn get_billing_wallet_address(
+            &self,
+            api_key_hash: ::ethers::core::types::U256,
+        ) -> ::ethers::contract::builders::ContractCall<M, ::ethers::core::types::Address> {
+            self.0
+                .method_hash([114, 73, 169, 182], api_key_hash)
                 .expect("method not found (this should never happen)")
         }
         ///Calls the contract's `getPricing` (0xc12f1a42) function
@@ -5788,6 +5819,26 @@ pub mod account_config {
     pub struct GetAccountWalletAddressCall {
         pub api_key_hash: ::ethers::core::types::U256,
     }
+    ///Container type for all input parameters for the `getBillingWalletAddress` function with signature `getBillingWalletAddress(uint256)` and selector `0x7249a9b6`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(
+        name = "getBillingWalletAddress",
+        abi = "getBillingWalletAddress(uint256)"
+    )]
+    pub struct GetBillingWalletAddressCall {
+        pub api_key_hash: ::ethers::core::types::U256,
+    }
     ///Container type for all input parameters for the `getPricing` function with signature `getPricing(uint256)` and selector `0xc12f1a42`
     #[derive(
         Clone,
@@ -6641,6 +6692,7 @@ pub mod account_config {
         CreditApiKey(CreditApiKeyCall),
         DebitApiKey(DebitApiKeyCall),
         GetAccountWalletAddress(GetAccountWalletAddressCall),
+        GetBillingWalletAddress(GetBillingWalletAddressCall),
         GetPricing(GetPricingCall),
         GetWalletDerivation(GetWalletDerivationCall),
         GroupIdsForAction(GroupIdsForActionCall),
@@ -6779,6 +6831,11 @@ pub mod account_config {
                 <GetAccountWalletAddressCall as ::ethers::core::abi::AbiDecode>::decode(data)
             {
                 return Ok(Self::GetAccountWalletAddress(decoded));
+            }
+            if let Ok(decoded) =
+                <GetBillingWalletAddressCall as ::ethers::core::abi::AbiDecode>::decode(data)
+            {
+                return Ok(Self::GetBillingWalletAddress(decoded));
             }
             if let Ok(decoded) = <GetPricingCall as ::ethers::core::abi::AbiDecode>::decode(data) {
                 return Ok(Self::GetPricing(decoded));
@@ -7010,6 +7067,9 @@ pub mod account_config {
                 Self::GetAccountWalletAddress(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
+                Self::GetBillingWalletAddress(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
                 Self::GetPricing(element) => ::ethers::core::abi::AbiEncode::encode(element),
                 Self::GetWalletDerivation(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
@@ -7125,6 +7185,7 @@ pub mod account_config {
                 Self::CreditApiKey(element) => ::core::fmt::Display::fmt(element, f),
                 Self::DebitApiKey(element) => ::core::fmt::Display::fmt(element, f),
                 Self::GetAccountWalletAddress(element) => ::core::fmt::Display::fmt(element, f),
+                Self::GetBillingWalletAddress(element) => ::core::fmt::Display::fmt(element, f),
                 Self::GetPricing(element) => ::core::fmt::Display::fmt(element, f),
                 Self::GetWalletDerivation(element) => ::core::fmt::Display::fmt(element, f),
                 Self::GroupIdsForAction(element) => ::core::fmt::Display::fmt(element, f),
@@ -7273,6 +7334,11 @@ pub mod account_config {
     impl ::core::convert::From<GetAccountWalletAddressCall> for AccountConfigCalls {
         fn from(value: GetAccountWalletAddressCall) -> Self {
             Self::GetAccountWalletAddress(value)
+        }
+    }
+    impl ::core::convert::From<GetBillingWalletAddressCall> for AccountConfigCalls {
+        fn from(value: GetBillingWalletAddressCall) -> Self {
+            Self::GetBillingWalletAddress(value)
         }
     }
     impl ::core::convert::From<GetPricingCall> for AccountConfigCalls {
@@ -7698,6 +7764,20 @@ pub mod account_config {
         Hash,
     )]
     pub struct GetAccountWalletAddressReturn(pub ::ethers::core::types::Address);
+    ///Container type for all return fields from the `getBillingWalletAddress` function with signature `getBillingWalletAddress(uint256)` and selector `0x7249a9b6`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthAbiType,
+        ::ethers::contract::EthAbiCodec,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    pub struct GetBillingWalletAddressReturn(pub ::ethers::core::types::Address);
     ///Container type for all return fields from the `getPricing` function with signature `getPricing(uint256)` and selector `0xc12f1a42`
     #[derive(
         Clone,

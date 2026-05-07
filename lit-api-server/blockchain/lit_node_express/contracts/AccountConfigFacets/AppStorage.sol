@@ -98,6 +98,7 @@ library AppStorage {
         uint256 pkpCount; // counter for creating unique pkp ids
         uint256 actionCount; // count of unique actions registered to this account
         uint256 groupCount; // counter for creating unique group ids
+        address billingWalletAddress; // wallet address that is used to bill the api key
     }
 
     /// @notice Root storage for AccountConfig. Stored at a fixed slot so all facets share the same state.
