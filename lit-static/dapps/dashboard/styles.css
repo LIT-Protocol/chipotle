@@ -670,8 +670,8 @@ body.has-api-key .dashboard-wrap {
   font-family: inherit;
 }
 
-/* `.account-dropdown-item { display: block }` beats the UA `[hidden]` rule on
-   specificity, so the `hidden` attribute alone won't hide the button. */
+/* `.account-dropdown-item { display: block }` overrides the UA `[hidden]`
+   mapping, so this rule restores `display: none` when `hidden` is present. */
 .account-dropdown-item[hidden] {
   display: none;
 }
