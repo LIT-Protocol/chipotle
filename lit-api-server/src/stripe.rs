@@ -34,9 +34,10 @@ pub struct StripeState {
     /// Avoids duplicate customer creation caused by Stripe Search API indexing lag.
     /// Uses `time_to_idle` so frequently accessed entries stay warm.
     customer_cache: Cache<String, String>,
-    /// api_key → wallet_address cache.
-    /// Resolves both master and usage API keys to the account's creator wallet address
-    /// via the on-chain `allApiKeyHashesToMaster` mapping, avoiding a contract call per charge.
+    /// api_key → billing wallet address cache.
+    /// Resolves both master and usage API keys to the account's billing wallet address
+    /// (the wallet used to identify the Stripe customer) via the on-chain
+    /// `allApiKeyHashesToMaster` mapping, avoiding a contract call per charge.
     wallet_cache: Cache<String, String>,
     /// customer_id → credit balance cache (10-min TTL).
     /// Avoids a Stripe API call on every charge; stale reads may allow some
@@ -215,14 +216,17 @@ pub async fn invalidate_wallet_cache(api_key: &str, state: &StripeState) {
     state.wallet_cache.invalidate(&cache_key(api_key)).await;
 }
 
-/// Resolve any account identity to its admin wallet address.
+/// Resolve any account identity to its billing wallet address.
 ///
 /// Accepts a raw API key (master or usage) or — for ChainSecured callers — a
 /// precomputed 0x-prefixed 32-byte hex hash (the wallet-derived
 /// `keccak256(walletAddress)`). Uses the on-chain `allApiKeyHashesToMaster`
 /// mapping so that usage API keys resolve to the same wallet (and therefore
-/// same Stripe customer) as their parent account key. Results are cached for
-/// 1 hour.
+/// same Stripe customer) as their parent account key. The billing wallet is
+/// set at account creation and preserved across conversion to ChainSecured,
+/// so charges keep hitting the same Stripe customer after the admin wallet
+/// rotates (CPL-313). Legacy accounts without a billing wallet fall back to
+/// the admin wallet on-chain. Results are cached for 1 hour.
 ///
 /// The cache is keyed by the keccak256 hash of the input (not the raw key)
 /// to avoid holding secret material in memory.
@@ -234,7 +238,7 @@ pub async fn resolve_wallet_address(api_key: &str, state: &StripeState) -> Resul
         .wallet_cache
         .try_get_with(key, async {
             tracing::debug!("stripe::resolve_wallet_address: cache miss, calling contract");
-            crate::accounts::get_account_wallet_address(api_key).await
+            crate::accounts::get_billing_wallet_address(api_key).await
         })
         .await
         .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e}"));

@@ -767,6 +767,31 @@ pub async fn get_account_wallet_address(key_or_hash: &str) -> Result<String> {
     Ok(format!("{:?}", wallet_address))
 }
 
+/// Resolve any account identity to the billing wallet address of its parent account.
+///
+/// Same input shape as [`get_account_wallet_address`]. Differs in that the
+/// returned wallet is the one used to identify the Stripe customer for billing,
+/// which is set at account creation and is preserved across conversion to
+/// ChainSecured — so converting a managed account does not strand its existing
+/// Stripe credits behind a new admin wallet (CPL-313). The contract's
+/// `getBillingWalletAddress` falls back to the admin wallet for legacy accounts
+/// that pre-date the billing-wallet field, keeping behaviour unchanged for them.
+#[instrument(
+    name = "accounts::get_billing_wallet_address",
+    level = "debug",
+    skip_all,
+    err
+)]
+pub async fn get_billing_wallet_address(key_or_hash: &str) -> Result<String> {
+    let contract = get_read_only_account_config_contract().await?;
+    let key_hash = usage_api_key_to_hash(key_or_hash);
+    let wallet_address = contract.get_billing_wallet_address(key_hash).call().await?;
+    if wallet_address == H160::zero() {
+        anyhow::bail!("account has no wallet address");
+    }
+    Ok(format!("{:?}", wallet_address))
+}
+
 pub async fn get_node_configuration_values() -> Result<Vec<KeyValueReturn>> {
     let contract = get_read_only_account_config_contract().await?;
     let values = contract.node_configuration_values().call().await?;

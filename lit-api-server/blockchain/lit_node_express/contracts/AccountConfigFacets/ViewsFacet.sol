@@ -133,6 +133,22 @@ contract ViewsFacet {
         return account.adminWalletAddress;
     }
 
+    /// @notice Return the billing wallet address for the account that owns the given API key.
+    /// @dev Works with both master and usage API key hashes (resolves via allApiKeyHashesToMaster).
+    ///      The billing wallet is set at account creation and is not necessarily the transaction creator.
+    /// @param apiKeyHash keccak256 of a master or usage API key (base64-encoded).
+    /// @return The billing wallet address stored on the resolved master account.
+    function getBillingWalletAddress(
+        uint256 apiKeyHash
+    ) public view returns (address) {
+        AppStorage.Account storage account = getReadOnlyAccount(apiKeyHash);
+        if (account.billingWalletAddress == address(0)) {
+            // older accounts may not have a billing wallet address
+            return account.adminWalletAddress;
+        }
+        return account.billingWalletAddress;
+    }
+
     function getWalletDerivation(
         uint256 apiKeyHash,
         address walletAddress

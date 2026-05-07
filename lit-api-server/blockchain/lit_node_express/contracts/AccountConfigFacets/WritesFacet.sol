@@ -81,7 +81,13 @@ contract WritesFacet {
         uint256 apiKeyHash = uint256(
             keccak256(abi.encodePacked(adminWalletAddress))
         );
-        newAccount(apiKeyHash, false, accountName, accountDescription, adminWalletAddress);
+        newAccount(
+            apiKeyHash,
+            false,
+            accountName,
+            accountDescription,
+            adminWalletAddress
+        );
     }
 
     function newAccount(
@@ -99,8 +105,7 @@ contract WritesFacet {
                 );
             }
             if (
-                apiKeyHash !=
-                uint256(keccak256(abi.encodePacked(msg.sender)))
+                apiKeyHash != uint256(keccak256(abi.encodePacked(msg.sender)))
             ) {
                 revert AppStorage.InvalidRequest(
                     "ChainSecured apiKeyHash must equal the keccak256 of the sender."
@@ -118,6 +123,7 @@ contract WritesFacet {
         AppStorage.Account storage account = s.accounts[apiKeyHash];
         account.managed = managed;
         account.adminWalletAddress = adminWalletAddress;
+        account.billingWalletAddress = adminWalletAddress;
         account.accountApiKey.metadata.id = apiKeyHash;
         account.accountApiKey.metadata.name = accountName;
         account.accountApiKey.metadata.description = accountDescription;
@@ -160,6 +166,9 @@ contract WritesFacet {
             );
         }
         account.managed = false;
+        if (account.billingWalletAddress == address(0)) {
+            account.billingWalletAddress = account.adminWalletAddress;
+        } // otherwise, keep the existing billing wallet address
         account.adminWalletAddress = newAdminWalletAddress;
         emit AccountConvertedToChainSecured(apiKeyHash, newAdminWalletAddress);
     }
