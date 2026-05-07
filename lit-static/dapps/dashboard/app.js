@@ -16,6 +16,7 @@ import { initActionRunner } from './runner.js';
 
 async function preloadAllTables() {
   if (!isAuthenticated()) return;
+  hideStatus('dashboard-status');
   const results = await Promise.allSettled([
     loadGroups(),
     loadWallets(),
