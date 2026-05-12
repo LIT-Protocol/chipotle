@@ -216,8 +216,8 @@ jobs:
             }' > "$PROVISION_FILE"
           echo "Request payload size: $(wc -c < "$PROVISION_FILE") bytes"
 
-          echo "Calling POST /cvms/chipotle-prod/compose_file/provision ..."
-          OUTPUT=$(phala api /cvms/chipotle-prod/compose_file/provision \
+          echo "Calling POST /cvms/chipotle-prod-rep-r68r6/compose_file/provision ..."
+          OUTPUT=$(phala api /cvms/chipotle-prod-rep-r68r6/compose_file/provision \
             -X POST \
             --input "$PROVISION_FILE" \
             2>&1) || {
@@ -247,7 +247,7 @@ jobs:
 
           # Extract the AppAuth (dstack_app) address from the CVM's KMS info.
           # This is the per-app contract that controls compose-hash whitelisting.
-          CVM_INFO=$(phala api /cvms/chipotle-prod --json 2>&1) || true
+          CVM_INFO=$(phala api /cvms/chipotle-prod-rep-r68r6 --json 2>&1) || true
           echo "CVM info (kms): $(echo "$CVM_INFO" | jq '.kms_info // .detail' 2>/dev/null)"
           APP_AUTH=$(echo "$CVM_INFO" | jq -r '.kms_info.dstack_app_address // empty')
           if [ -z "$APP_AUTH" ]; then
@@ -268,7 +268,7 @@ jobs:
           # using the @phala/cloud SDK so the Safe proposal uses the correct
           # value that the KMS will check via allowedComposeHashes.
           echo "Fetching full app_compose from Phala API..."
-          FULL_COMPOSE=$(phala api /cvms/chipotle-prod/compose_file --json 2>&1) || {
+          FULL_COMPOSE=$(phala api /cvms/chipotle-prod-rep-r68r6/compose_file --json 2>&1) || {
             echo "::error::Failed to fetch compose file: $FULL_COMPOSE"
             exit 1
           }
@@ -436,7 +436,7 @@ jobs:
           jq -n \
             --arg compose_hash "${{ needs.prepare-deploy.outputs.compose_hash }}" \
             --arg safe_tx_hash "${{ needs.propose-compose-hash.outputs.safe_tx_hash }}" \
-            --arg phala_app_name "chipotle-prod" \
+            --arg phala_app_name "chipotle-prod-rep-r68r6" \
             --arg base_url "https://api.chipotle.litprotocol.com" \
             --arg api_root_url "https://api.chipotle.litprotocol.com/core/v1" \
             --arg safe_address "${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" \
