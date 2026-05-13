@@ -74,6 +74,35 @@ describe("WritesFacet.transferChainSecuredAccountOwnership", () => {
     );
   });
 
+  it("allows a follow-up transfer by the new admin using their own keccak256(address) hash", async () => {
+    const masterHash = await createChainSecuredAs(admin);
+    const newAdminAddress = await newAdmin.getAddress();
+    const thirdAddress = await stranger.getAddress();
+
+    // First hop: admin → newAdmin (caller passes master hash).
+    await (
+      await (await writes(admin)).transferChainSecuredAccountOwnership(
+        masterHash,
+        newAdminAddress,
+      )
+    ).wait();
+
+    // Second hop: newAdmin → stranger, caller passes keccak256(newAdmin) which
+    // resolves to the master hash via allApiKeyHashesToMaster. This exercises
+    // the non-master resolution path the previous admin couldn't hit.
+    const newAdminHash = apiKeyHashFor(newAdminAddress);
+    const w = await writes(newAdmin);
+    await expect(
+      w.transferChainSecuredAccountOwnership(newAdminHash, thirdAddress),
+    )
+      .to.emit(w, "ChainSecuredAccountOwnershipTransferred")
+      .withArgs(masterHash, newAdminAddress, thirdAddress);
+
+    expect(
+      await (await views(stranger)).getAccountWalletAddress(masterHash),
+    ).to.equal(thirdAddress);
+  });
+
   it("reverts when a non-admin caller tries to transfer", async () => {
     const apiKeyHash = await createChainSecuredAs(admin);
     const w = await writes(stranger);

@@ -188,12 +188,18 @@ contract WritesFacet {
     /// @notice Transfer ownership of a ChainSecured (unmanaged) account from the
     ///         current admin wallet to a new wallet. Only the current admin may
     ///         call this; the api_payer has no authority over ChainSecured
-    ///         accounts. The apiKeyHash and billing wallet are preserved so
-    ///         groups, actions, PKPs, usage keys, and billing remain attached.
-    /// @dev    The old `allApiKeyHashesToMaster[keccak256(prevAdmin)]` entry is
-    ///         left in place intentionally — for an account originally created
-    ///         via `newChainSecuredAccount` it equals the apiKeyHash itself and
-    ///         removing it would orphan the account storage.
+    ///         accounts. The master apiKeyHash and billing wallet are preserved
+    ///         so groups, actions, PKPs, usage keys, and billing remain
+    ///         attached.
+    /// @dev    Accepts either the master apiKeyHash or any hash that resolves
+    ///         to it (e.g. keccak256(currentAdminWalletAddress) for accounts
+    ///         that have already been transferred once). The previous admin's
+    ///         `allApiKeyHashesToMaster` entry is left in place intentionally
+    ///         — for an account originally created via `newChainSecuredAccount`
+    ///         it equals the master hash itself, so removing it would orphan
+    ///         the account storage. A side-effect is that ownership can't be
+    ///         transferred back to a wallet that has ever been admin of any
+    ///         account, even after a forward transfer.
     function transferChainSecuredAccountOwnership(
         uint256 apiKeyHash,
         address newAdminWalletAddress
@@ -204,10 +210,11 @@ contract WritesFacet {
             );
         }
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
-        if (s.allApiKeyHashesToMaster[apiKeyHash] != apiKeyHash) {
+        uint256 masterApiKeyHash = s.allApiKeyHashesToMaster[apiKeyHash];
+        if (masterApiKeyHash == 0) {
             revert AppStorage.AccountDoesNotExist(apiKeyHash);
         }
-        AppStorage.Account storage account = s.accounts[apiKeyHash];
+        AppStorage.Account storage account = s.accounts[masterApiKeyHash];
         if (account.managed) {
             revert AppStorage.InvalidRequest(
                 "Account is not ChainSecured; use convertToChainSecuredAccount instead."
@@ -227,11 +234,11 @@ contract WritesFacet {
         if (s.allApiKeyHashesToMaster[newApiKeyHash] != 0) {
             revert AppStorage.AccountAlreadyExists(newApiKeyHash);
         }
-        s.allApiKeyHashesToMaster[newApiKeyHash] = apiKeyHash;
+        s.allApiKeyHashesToMaster[newApiKeyHash] = masterApiKeyHash;
         address previousAdminWalletAddress = account.adminWalletAddress;
         account.adminWalletAddress = newAdminWalletAddress;
         emit ChainSecuredAccountOwnershipTransferred(
-            apiKeyHash,
+            masterApiKeyHash,
             previousAdminWalletAddress,
             newAdminWalletAddress
         );

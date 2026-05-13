@@ -2,7 +2,7 @@
   "name": "contracts",
   "version": "1.0.0",
   "scripts": {
-    "test": "hardhat test"
+    "test": "hardhat clean && hardhat test"
   },
   "devDependencies": {
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",
