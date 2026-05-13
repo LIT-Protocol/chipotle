@@ -343,20 +343,16 @@ export async function getClient() {
  */
 async function ensureSovereignSigner(client) {
   if (client.signer) return;
-  const { connectEoa, switchChain } = await import('../../wallet_connect.js');
-  let { signer, chainId } = await connectEoa();
+  const { connectWallet, switchChain } = await import('../../wallet_connect.js');
+  let { signer, chainId } = await connectWallet({ chainId: client.chainId, rpcUrl: client.rpcUrl });
   if (client.chainId != null && chainId !== client.chainId) {
     try {
-      await switchChain(client.chainId);
+      ({ signer } = await switchChain(client.chainId));
     } catch (err) {
       throw new Error(
         `Your wallet is on chain ${chainId} but this dashboard expects chain ${client.chainId}. Switch network in your wallet and retry.`,
       );
     }
-    // switchChain rebinds window.ethereum to the new network; re-derive the
-    // signer from a fresh BrowserProvider so ethers caches the new chainId
-    // instead of signing against the previous network.
-    ({ signer } = await connectEoa());
   }
   client.connectSigner(signer);
 }
@@ -766,9 +762,9 @@ async function loginWithWallet(btn) {
     // Prefetch chain config via getClient() sovereign bootstrap — throws
     // BEFORE wallet popup on unreachable API server.
     const client = await getClient();
-    const { connectEoa } = await import('../../wallet_connect.js');
+    const { connectWallet } = await import('../../wallet_connect.js');
     const ethers = await loadEthersLocal();
-    const { signer, address } = await connectEoa();
+    const { signer, address } = await connectWallet({ chainId: client.chainId, rpcUrl: client.rpcUrl });
     // Attach the signer before the existence check: accountExistsAndIsMutable
     // is msg.sender-gated and only the wallet that owns an unmanaged
     // (ChainSecured) account passes. Without this, the SDK falls back to
@@ -868,18 +864,17 @@ export async function convertToChainSecured() {
     if (expectedChainId == null) {
       throw new Error('Server did not report a chain id; cannot convert.');
     }
-    const { connectEoa, switchChain } = await import('../../wallet_connect.js');
+    const { connectWallet, switchChain } = await import('../../wallet_connect.js');
     let chainId;
-    ({ signer, chainId } = await connectEoa());
+    ({ signer, chainId } = await connectWallet({ chainId: expectedChainId, rpcUrl: getChainSecuredRpcUrl() }));
     if (chainId !== expectedChainId) {
       try {
-        await switchChain(expectedChainId);
+        ({ signer } = await switchChain(expectedChainId));
       } catch {
         throw new Error(
           `Your wallet is on chain ${chainId} but this dashboard expects chain ${expectedChainId}. Switch network in your wallet and retry.`,
         );
       }
-      ({ signer } = await connectEoa());
     }
   } catch (e) {
     closeActionProgress();
