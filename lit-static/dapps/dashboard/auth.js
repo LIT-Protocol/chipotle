@@ -2,7 +2,7 @@
  * Authentication — session state, API client, theme, stat cards.
  */
 
-import { showStatus, hideStatus, formatError, logError, showActionProgress, closeActionProgress, escapeHtml, confirmDelete } from './ui-utils.js';
+import { showStatus, hideStatus, formatError, logError, showActionProgress, closeActionProgress, escapeHtml, confirmDelete, openModal, closeModal } from './ui-utils.js';
 
 const STORAGE_KEY_API = 'accountconfig_api_key';
 const STORAGE_KEY_THEME = 'accountconfig_theme';
@@ -31,6 +31,7 @@ const SOVEREIGN_WRITE_METHODS = new Set([
   'addAction', 'deleteAction', 'addActionToGroup', 'removeActionFromGroup', 'updateActionMetadata',
   'addPkpToGroup', 'removePkpFromGroup',
   'addUsageApiKey', 'updateUsageApiKey', 'removeUsageApiKey', 'updateUsageApiKeyMetadata',
+  'transferChainSecuredAccountOwnership',
 ]);
 
 // ----- Mode (api | sovereign) -----
@@ -917,6 +918,111 @@ export async function convertToChainSecured() {
     logError('convert-to-chainsecured', e);
     showStatus('dashboard-status', 'Convert failed: ' + formatError(e), 'error');
   }
+}
+
+/**
+ * Account-dropdown handler. Transfers ownership of the currently-signed-in
+ * ChainSecured account to a new wallet. Flow:
+ *   1. Prompt for the new admin address (must be a valid checksummed or
+ *      lowercase 0x address).
+ *   2. Confirm (irreversible — the current wallet loses access).
+ *   3. Submit the on-chain `transferChainSecuredAccountOwnership` via the
+ *      sovereign-write path: SDK Proxy wires up wallet-connect, preview
+ *      modal, and tx-status banner automatically.
+ *   4. Sign the user out — their wallet is no longer the admin.
+ *
+ * ChainSecured mode only; the dropdown button is hidden in API mode.
+ */
+export async function changeChainSecuredOwnership() {
+  if (getMode() !== 'sovereign') {
+    showStatus('dashboard-status', 'Change ownership is only available for ChainSecured accounts.', 'error');
+    return;
+  }
+  const newAdmin = await promptForNewAdminAddress();
+  if (!newAdmin) return;
+
+  const ok = await confirmDelete(
+    `Transfer ownership to ${newAdmin}?\n\nYour connected wallet will lose admin access immediately and the new wallet becomes the sole on-chain admin. This cannot be undone — there is no way to recover access from the previous wallet.\n\nYou will be asked to sign the transaction with your current wallet, and signed out after it confirms.`,
+    { title: 'Confirm ownership change', confirmLabel: 'Transfer' },
+  );
+  if (!ok) return;
+
+  try {
+    const client = await getClient();
+    const res = await client.transferChainSecuredAccountOwnership({ newAdminWalletAddress: newAdmin });
+    showStatus(
+      'dashboard-status',
+      `Ownership transferred to ${res.new_admin}. Signing out — log in with the new wallet to continue.`,
+      'success',
+    );
+    setTimeout(() => {
+      logOut();
+      location.reload();
+    }, 1500);
+  } catch (e) {
+    logError('change-chainsecured-ownership', e);
+    showStatus('dashboard-status', 'Ownership transfer failed: ' + formatError(e), 'error');
+  }
+}
+
+/**
+ * Open a modal asking for the new admin wallet address. Resolves with a
+ * checksummed 0x address on Accept, or null on Cancel / invalid input.
+ */
+async function promptForNewAdminAddress() {
+  const ethers = await loadEthersLocal();
+  return new Promise((resolve) => {
+    let resolved = false;
+    const settle = (v) => {
+      if (resolved) return;
+      resolved = true;
+      closeModal();
+      resolve(v);
+    };
+    openModal(
+      'Change account ownership',
+      `<p>Enter the Ethereum address of the wallet that should become the new admin for this ChainSecured account.</p>
+       <label class="form-label" for="change-ownership-address-input">New admin wallet address</label>
+       <input type="text" id="change-ownership-address-input" class="form-input" placeholder="0x…" autocomplete="off" spellcheck="false" />
+       <div id="change-ownership-error" class="status error" style="display:none; margin-top:0.5rem;"></div>`,
+      `<button type="button" class="btn btn-secondary" id="change-ownership-cancel-btn">Cancel</button>
+       <button type="button" class="btn btn-primary" id="change-ownership-accept-btn">Accept</button>`,
+    );
+    const input = document.getElementById('change-ownership-address-input');
+    const err = document.getElementById('change-ownership-error');
+    const accept = document.getElementById('change-ownership-accept-btn');
+    const cancel = document.getElementById('change-ownership-cancel-btn');
+    const tryAccept = () => {
+      const raw = (input?.value || '').trim();
+      if (!ethers.isAddress(raw)) {
+        if (err) {
+          err.textContent = 'Please enter a valid Ethereum address.';
+          err.style.display = 'block';
+        }
+        input?.focus();
+        return;
+      }
+      settle(ethers.getAddress(raw));
+    };
+    accept?.addEventListener('click', tryAccept);
+    cancel?.addEventListener('click', () => settle(null));
+    input?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); tryAccept(); }
+      if (e.key === 'Escape') { e.preventDefault(); settle(null); }
+    });
+    // If the user dismisses the modal via the X / overlay click, the existing
+    // `initModalClose()` handler runs `closeModal()` directly without going
+    // through `settle()` — observe that and resolve null.
+    const overlay = document.getElementById('modal-overlay');
+    const observer = new MutationObserver(() => {
+      if (overlay && !overlay.classList.contains('is-open')) {
+        observer.disconnect();
+        settle(null);
+      }
+    });
+    if (overlay) observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+    setTimeout(() => input?.focus(), 0);
+  });
 }
 
 async function loadEthersLocal() {

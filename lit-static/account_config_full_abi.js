@@ -28,7 +28,7 @@
 
 import { ACCOUNT_CONFIG_VIEW_ABI } from './account_config_view_abi.js';
 
-export const ACCOUNT_CONFIG_ABI_VERSION = '2026-04-28.1';
+export const ACCOUNT_CONFIG_ABI_VERSION = '2026-05-13.1';
 
 const WRITE_FUNCTIONS = [
   {
@@ -234,6 +234,16 @@ const WRITE_FUNCTIONS = [
       { internalType: 'string', name: 'description', type: 'string' },
     ],
     name: 'registerWalletDerivation',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'uint256', name: 'apiKeyHash', type: 'uint256' },
+      { internalType: 'address', name: 'newAdminWalletAddress', type: 'address' },
+    ],
+    name: 'transferChainSecuredAccountOwnership',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
