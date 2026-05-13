@@ -72,6 +72,11 @@ contract WritesFacet {
         uint256 indexed apiKeyHash,
         address indexed newAdminWalletAddress
     );
+    event ChainSecuredAccountOwnershipTransferred(
+        uint256 indexed apiKeyHash,
+        address indexed previousAdminWalletAddress,
+        address indexed newAdminWalletAddress
+    );
 
     function newChainSecuredAccount(
         string memory accountName,
@@ -178,6 +183,58 @@ contract WritesFacet {
         } // otherwise, keep the existing billing wallet address
         account.adminWalletAddress = newAdminWalletAddress;
         emit AccountConvertedToChainSecured(apiKeyHash, newAdminWalletAddress);
+    }
+
+    /// @notice Transfer ownership of a ChainSecured (unmanaged) account from the
+    ///         current admin wallet to a new wallet. Only the current admin may
+    ///         call this; the api_payer has no authority over ChainSecured
+    ///         accounts. The apiKeyHash and billing wallet are preserved so
+    ///         groups, actions, PKPs, usage keys, and billing remain attached.
+    /// @dev    The old `allApiKeyHashesToMaster[keccak256(prevAdmin)]` entry is
+    ///         left in place intentionally — for an account originally created
+    ///         via `newChainSecuredAccount` it equals the apiKeyHash itself and
+    ///         removing it would orphan the account storage.
+    function transferChainSecuredAccountOwnership(
+        uint256 apiKeyHash,
+        address newAdminWalletAddress
+    ) public {
+        if (newAdminWalletAddress == address(0)) {
+            revert AppStorage.InvalidRequest(
+                "newAdminWalletAddress must be non-zero"
+            );
+        }
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        if (s.allApiKeyHashesToMaster[apiKeyHash] != apiKeyHash) {
+            revert AppStorage.AccountDoesNotExist(apiKeyHash);
+        }
+        AppStorage.Account storage account = s.accounts[apiKeyHash];
+        if (account.managed) {
+            revert AppStorage.InvalidRequest(
+                "Account is not ChainSecured; use convertToChainSecuredAccount instead."
+            );
+        }
+        if (msg.sender != account.adminWalletAddress) {
+            revert AppStorage.NoAccountAccess(apiKeyHash, msg.sender);
+        }
+        if (newAdminWalletAddress == account.adminWalletAddress) {
+            revert AppStorage.InvalidRequest(
+                "newAdminWalletAddress must differ from current admin"
+            );
+        }
+        uint256 newApiKeyHash = uint256(
+            keccak256(abi.encodePacked(newAdminWalletAddress))
+        );
+        if (s.allApiKeyHashesToMaster[newApiKeyHash] != 0) {
+            revert AppStorage.AccountAlreadyExists(newApiKeyHash);
+        }
+        s.allApiKeyHashesToMaster[newApiKeyHash] = apiKeyHash;
+        address previousAdminWalletAddress = account.adminWalletAddress;
+        account.adminWalletAddress = newAdminWalletAddress;
+        emit ChainSecuredAccountOwnershipTransferred(
+            apiKeyHash,
+            previousAdminWalletAddress,
+            newAdminWalletAddress
+        );
     }
 
     function setUsageApiKey(
