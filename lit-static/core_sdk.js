@@ -683,6 +683,44 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
+   * On-chain `WritesFacet.transferChainSecuredAccountOwnership` — reassign the
+   * admin wallet of a ChainSecured account to a different address. The current
+   * admin signs the transaction directly with their wallet (no api_payer
+   * involvement). After this call resolves the connected signer is no longer
+   * authorized for the account.
+   *
+   * Sovereign mode only.
+   *
+   * @param {Object} options
+   * @param {string} options.newAdminWalletAddress - 0x-prefixed Ethereum address.
+   * @param {Object} [options.sovereignLifecycle]  - injected by the dashboard Proxy.
+   * @returns {Promise<{previous_admin: string, new_admin: string, transaction_hash: string}>}
+   */
+  async transferChainSecuredAccountOwnership({ newAdminWalletAddress, sovereignLifecycle } = {}) {
+    if (this.mode !== 'sovereign') {
+      throw new Error('transferChainSecuredAccountOwnership requires sovereign mode');
+    }
+    const ethers = await loadEthers();
+    if (!newAdminWalletAddress || !ethers.isAddress(newAdminWalletAddress)) {
+      throw new Error('transferChainSecuredAccountOwnership: newAdminWalletAddress must be a valid Ethereum address');
+    }
+    const checksummed = ethers.getAddress(newAdminWalletAddress);
+    const contract = await this._getWriteContract();
+    const previousAdmin = await this.signer.getAddress();
+    // Identity hash for the *current* admin — the contract resolves this to
+    // the master apiKeyHash via allApiKeyHashesToMaster, so this works whether
+    // the account was originally created via newChainSecuredAccount or arrived
+    // here through a prior conversion/transfer.
+    const apiKeyHash = await this._adminHash('');
+    const { txHash } = await runContractWrite({
+      contract, method: 'transferChainSecuredAccountOwnership',
+      args: [apiKeyHash, checksummed],
+      ...(sovereignLifecycle ?? {}),
+    });
+    return { previous_admin: previousAdmin, new_admin: checksummed, transaction_hash: txHash };
+  }
+
+  /**
    * POST /core/v1/convert_to_chain_secured_account
    * Hand the account's admin role over to a user-controlled wallet and flip
    * `managed` from true to false. The user proves wallet ownership with an
