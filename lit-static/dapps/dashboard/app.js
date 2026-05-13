@@ -3,7 +3,7 @@
  * Imports all feature modules and orchestrates initialization.
  */
 
-import { isAuthenticated, setTheme, getTheme, logOut, setOnAuthReady, updateStatCards, initLogin, setUsageKeyOverride, toggleOverrideEnabled, updateUsageKeyOverrideUI, setChainSecuredRpcUrl, toggleChainSecuredRpcPanel, updateChainSecuredRpcUrlUI, getMode, getApiKey, convertToChainSecured } from './auth.js';
+import { isAuthenticated, setTheme, getTheme, logOut, setOnAuthReady, updateStatCards, initLogin, setUsageKeyOverride, toggleOverrideEnabled, updateUsageKeyOverrideUI, setChainSecuredRpcUrl, toggleChainSecuredRpcPanel, updateChainSecuredRpcUrlUI, getMode, getApiKey, convertToChainSecured, changeChainSecuredOwnership } from './auth.js';
 import { initModalClose, initConfirmClose, showStatus, hideStatus, logError } from './ui-utils.js';
 import { initBilling } from './billing.js';
 import { initGroups, loadGroups } from './groups.js';
@@ -16,6 +16,7 @@ import { initActionRunner } from './runner.js';
 
 async function preloadAllTables() {
   if (!isAuthenticated()) return;
+  hideStatus('dashboard-status');
   const results = await Promise.allSettled([
     loadGroups(),
     loadWallets(),
@@ -25,7 +26,7 @@ async function preloadAllTables() {
   const failures = results.filter((r) => r.status === 'rejected');
   if (failures.length > 0) {
     failures.forEach((f) => logError('preload', f.reason));
-    showStatus('login-status', 'Some data failed to load. Check individual sections for details.', 'error');
+    showStatus('dashboard-status', 'Some data failed to load. Check individual sections for details.', 'error');
   }
 }
 
@@ -220,6 +221,15 @@ function initHeader() {
     });
   }
 
+  const changeOwnershipBtn = document.getElementById('change-ownership-btn');
+  if (changeOwnershipBtn) {
+    changeOwnershipBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAccountDropdown();
+      changeChainSecuredOwnership();
+    });
+  }
+
   const toggleRpcBtn = document.getElementById('toggle-chainsecured-rpc-btn');
   if (toggleRpcBtn) {
     toggleRpcBtn.addEventListener('click', (e) => {
@@ -250,6 +260,18 @@ function refreshConvertVisibility() {
   btn.hidden = !showConvert;
 }
 
+/**
+ * Toggle the Change-Ownership dropdown item. Only visible while signed in as a
+ * ChainSecured account (sovereign mode) — the function reassigns the on-chain
+ * admin wallet and is called directly by the current admin's signer.
+ */
+function refreshChangeOwnershipVisibility() {
+  const btn = document.getElementById('change-ownership-btn');
+  if (!btn) return;
+  const show = isAuthenticated() && getMode() === 'sovereign';
+  btn.hidden = !show;
+}
+
 // ----- Auth ready callback -----
 
 setOnAuthReady(() => {
@@ -257,6 +279,7 @@ setOnAuthReady(() => {
   preloadAllTables();
   updateUsageKeyOverrideUI();
   refreshConvertVisibility();
+  refreshChangeOwnershipVisibility();
   updateChainSecuredRpcUrlUI();
 });
 

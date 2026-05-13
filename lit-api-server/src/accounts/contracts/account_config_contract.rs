@@ -1871,6 +1871,33 @@ pub mod account_config {
                     },],
                 ),
                 (
+                    ::std::borrow::ToOwned::to_owned("transferChainSecuredAccountOwnership"),
+                    ::std::vec![::ethers::core::abi::ethabi::Function {
+                        name: ::std::borrow::ToOwned::to_owned(
+                            "transferChainSecuredAccountOwnership",
+                        ),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("uint256"),
+                                ),
+                            },
+                            ::ethers::core::abi::ethabi::Param {
+                                name: ::std::borrow::ToOwned::to_owned("newAdminWalletAddress",),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                internal_type: ::core::option::Option::Some(
+                                    ::std::borrow::ToOwned::to_owned("address"),
+                                ),
+                            },
+                        ],
+                        outputs: ::std::vec![],
+                        constant: ::core::option::Option::None,
+                        state_mutability: ::ethers::core::abi::ethabi::StateMutability::NonPayable,
+                    },],
+                ),
+                (
                     ::std::borrow::ToOwned::to_owned("updateActionMetadata"),
                     ::std::vec![::ethers::core::abi::ethabi::Function {
                         name: ::std::borrow::ToOwned::to_owned("updateActionMetadata",),
@@ -2249,6 +2276,34 @@ pub mod account_config {
                             ),
                             indexed: false,
                         },],
+                        anonymous: false,
+                    },],
+                ),
+                (
+                    ::std::borrow::ToOwned::to_owned("ChainSecuredAccountOwnershipTransferred"),
+                    ::std::vec![::ethers::core::abi::ethabi::Event {
+                        name: ::std::borrow::ToOwned::to_owned(
+                            "ChainSecuredAccountOwnershipTransferred",
+                        ),
+                        inputs: ::std::vec![
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("apiKeyHash"),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Uint(256usize,),
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned(
+                                    "previousAdminWalletAddress",
+                                ),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                indexed: true,
+                            },
+                            ::ethers::core::abi::ethabi::EventParam {
+                                name: ::std::borrow::ToOwned::to_owned("newAdminWalletAddress",),
+                                kind: ::ethers::core::abi::ethabi::ParamType::Address,
+                                indexed: true,
+                            },
+                        ],
                         anonymous: false,
                     },],
                 ),
@@ -3588,6 +3643,16 @@ pub mod account_config {
                 )
                 .expect("method not found (this should never happen)")
         }
+        ///Calls the contract's `transferChainSecuredAccountOwnership` (0x1a1a059f) function
+        pub fn transfer_chain_secured_account_ownership(
+            &self,
+            api_key_hash: ::ethers::core::types::U256,
+            new_admin_wallet_address: ::ethers::core::types::Address,
+        ) -> ::ethers::contract::builders::ContractCall<M, ()> {
+            self.0
+                .method_hash([26, 26, 5, 159], (api_key_hash, new_admin_wallet_address))
+                .expect("method not found (this should never happen)")
+        }
         ///Calls the contract's `updateActionMetadata` (0xa6b6b672) function
         pub fn update_action_metadata(
             &self,
@@ -3735,6 +3800,16 @@ pub mod account_config {
             &self,
         ) -> ::ethers::contract::builders::Event<::std::sync::Arc<M>, M, ApiPayersUpdatedFilter>
         {
+            self.0.event()
+        }
+        ///Gets the contract's `ChainSecuredAccountOwnershipTransferred` event
+        pub fn chain_secured_account_ownership_transferred_filter(
+            &self,
+        ) -> ::ethers::contract::builders::Event<
+            ::std::sync::Arc<M>,
+            M,
+            ChainSecuredAccountOwnershipTransferredFilter,
+        > {
             self.0.event()
         }
         ///Gets the contract's `ConfigOperatorUpdated` event
@@ -4869,6 +4944,30 @@ pub mod account_config {
         Eq,
         Hash,
     )]
+    #[ethevent(
+        name = "ChainSecuredAccountOwnershipTransferred",
+        abi = "ChainSecuredAccountOwnershipTransferred(uint256,address,address)"
+    )]
+    pub struct ChainSecuredAccountOwnershipTransferredFilter {
+        #[ethevent(indexed)]
+        pub api_key_hash: ::ethers::core::types::U256,
+        #[ethevent(indexed)]
+        pub previous_admin_wallet_address: ::ethers::core::types::Address,
+        #[ethevent(indexed)]
+        pub new_admin_wallet_address: ::ethers::core::types::Address,
+    }
+    #[derive(
+        Clone,
+        ::ethers::contract::EthEvent,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
     #[ethevent(name = "ConfigOperatorUpdated", abi = "ConfigOperatorUpdated(address)")]
     pub struct ConfigOperatorUpdatedFilter {
         #[ethevent(indexed)]
@@ -5157,6 +5256,9 @@ pub mod account_config {
         ApiKeyCreditedFilter(ApiKeyCreditedFilter),
         ApiKeyDebitedFilter(ApiKeyDebitedFilter),
         ApiPayersUpdatedFilter(ApiPayersUpdatedFilter),
+        ChainSecuredAccountOwnershipTransferredFilter(
+            ChainSecuredAccountOwnershipTransferredFilter,
+        ),
         ConfigOperatorUpdatedFilter(ConfigOperatorUpdatedFilter),
         GroupAddedFilter(GroupAddedFilter),
         GroupRemovedFilter(GroupRemovedFilter),
@@ -5207,6 +5309,11 @@ pub mod account_config {
             }
             if let Ok(decoded) = ApiPayersUpdatedFilter::decode_log(log) {
                 return Ok(AccountConfigEvents::ApiPayersUpdatedFilter(decoded));
+            }
+            if let Ok(decoded) = ChainSecuredAccountOwnershipTransferredFilter::decode_log(log) {
+                return Ok(
+                    AccountConfigEvents::ChainSecuredAccountOwnershipTransferredFilter(decoded),
+                );
             }
             if let Ok(decoded) = ConfigOperatorUpdatedFilter::decode_log(log) {
                 return Ok(AccountConfigEvents::ConfigOperatorUpdatedFilter(decoded));
@@ -5274,6 +5381,9 @@ pub mod account_config {
                 Self::ApiKeyCreditedFilter(element) => ::core::fmt::Display::fmt(element, f),
                 Self::ApiKeyDebitedFilter(element) => ::core::fmt::Display::fmt(element, f),
                 Self::ApiPayersUpdatedFilter(element) => ::core::fmt::Display::fmt(element, f),
+                Self::ChainSecuredAccountOwnershipTransferredFilter(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
                 Self::ConfigOperatorUpdatedFilter(element) => ::core::fmt::Display::fmt(element, f),
                 Self::GroupAddedFilter(element) => ::core::fmt::Display::fmt(element, f),
                 Self::GroupRemovedFilter(element) => ::core::fmt::Display::fmt(element, f),
@@ -5347,6 +5457,11 @@ pub mod account_config {
     impl ::core::convert::From<ApiPayersUpdatedFilter> for AccountConfigEvents {
         fn from(value: ApiPayersUpdatedFilter) -> Self {
             Self::ApiPayersUpdatedFilter(value)
+        }
+    }
+    impl ::core::convert::From<ChainSecuredAccountOwnershipTransferredFilter> for AccountConfigEvents {
+        fn from(value: ChainSecuredAccountOwnershipTransferredFilter) -> Self {
+            Self::ChainSecuredAccountOwnershipTransferredFilter(value)
         }
     }
     impl ::core::convert::From<ConfigOperatorUpdatedFilter> for AccountConfigEvents {
@@ -6564,6 +6679,27 @@ pub mod account_config {
         pub remove_pkp_from_groups: ::std::vec::Vec<::ethers::core::types::U256>,
         pub execute_in_groups: ::std::vec::Vec<::ethers::core::types::U256>,
     }
+    ///Container type for all input parameters for the `transferChainSecuredAccountOwnership` function with signature `transferChainSecuredAccountOwnership(uint256,address)` and selector `0x1a1a059f`
+    #[derive(
+        Clone,
+        ::ethers::contract::EthCall,
+        ::ethers::contract::EthDisplay,
+        serde::Serialize,
+        serde::Deserialize,
+        Default,
+        Debug,
+        PartialEq,
+        Eq,
+        Hash,
+    )]
+    #[ethcall(
+        name = "transferChainSecuredAccountOwnership",
+        abi = "transferChainSecuredAccountOwnership(uint256,address)"
+    )]
+    pub struct TransferChainSecuredAccountOwnershipCall {
+        pub api_key_hash: ::ethers::core::types::U256,
+        pub new_admin_wallet_address: ::ethers::core::types::Address,
+    }
     ///Container type for all input parameters for the `updateActionMetadata` function with signature `updateActionMetadata(uint256,uint256,uint256,string,string)` and selector `0xa6b6b672`
     #[derive(
         Clone,
@@ -6731,6 +6867,7 @@ pub mod account_config {
         SetRebalanceAmount(SetRebalanceAmountCall),
         SetRequestedApiPayerCount(SetRequestedApiPayerCountCall),
         SetUsageApiKey(SetUsageApiKeyCall),
+        TransferChainSecuredAccountOwnership(TransferChainSecuredAccountOwnershipCall),
         UpdateActionMetadata(UpdateActionMetadataCall),
         UpdateGroup(UpdateGroupCall),
         UpdateGroupMetadata(UpdateGroupMetadataCall),
@@ -7005,6 +7142,13 @@ pub mod account_config {
                 return Ok(Self::SetUsageApiKey(decoded));
             }
             if let Ok(decoded) =
+                <TransferChainSecuredAccountOwnershipCall as ::ethers::core::abi::AbiDecode>::decode(
+                    data,
+                )
+            {
+                return Ok(Self::TransferChainSecuredAccountOwnership(decoded));
+            }
+            if let Ok(decoded) =
                 <UpdateActionMetadataCall as ::ethers::core::abi::AbiDecode>::decode(data)
             {
                 return Ok(Self::UpdateActionMetadata(decoded));
@@ -7144,6 +7288,9 @@ pub mod account_config {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
                 Self::SetUsageApiKey(element) => ::ethers::core::abi::AbiEncode::encode(element),
+                Self::TransferChainSecuredAccountOwnership(element) => {
+                    ::ethers::core::abi::AbiEncode::encode(element)
+                }
                 Self::UpdateActionMetadata(element) => {
                     ::ethers::core::abi::AbiEncode::encode(element)
                 }
@@ -7224,6 +7371,9 @@ pub mod account_config {
                 Self::SetRebalanceAmount(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetRequestedApiPayerCount(element) => ::core::fmt::Display::fmt(element, f),
                 Self::SetUsageApiKey(element) => ::core::fmt::Display::fmt(element, f),
+                Self::TransferChainSecuredAccountOwnership(element) => {
+                    ::core::fmt::Display::fmt(element, f)
+                }
                 Self::UpdateActionMetadata(element) => ::core::fmt::Display::fmt(element, f),
                 Self::UpdateGroup(element) => ::core::fmt::Display::fmt(element, f),
                 Self::UpdateGroupMetadata(element) => ::core::fmt::Display::fmt(element, f),
@@ -7529,6 +7679,11 @@ pub mod account_config {
     impl ::core::convert::From<SetUsageApiKeyCall> for AccountConfigCalls {
         fn from(value: SetUsageApiKeyCall) -> Self {
             Self::SetUsageApiKey(value)
+        }
+    }
+    impl ::core::convert::From<TransferChainSecuredAccountOwnershipCall> for AccountConfigCalls {
+        fn from(value: TransferChainSecuredAccountOwnershipCall) -> Self {
+            Self::TransferChainSecuredAccountOwnership(value)
         }
     }
     impl ::core::convert::From<UpdateActionMetadataCall> for AccountConfigCalls {

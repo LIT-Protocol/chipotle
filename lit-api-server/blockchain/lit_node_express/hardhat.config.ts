@@ -1,6 +1,7 @@
 import { HardhatUserConfig } from "hardhat/config";
 import "hardhat-diamond-abi"; // Import the plugin
 import "@nomicfoundation/hardhat-ethers";
+import "@nomicfoundation/hardhat-chai-matchers";
 import "dotenv/config";
 
 import "./tasks/propose-diamond-cut";
