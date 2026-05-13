@@ -84,7 +84,7 @@ export async function connectWallet(opts = {}) {
   if (!opts.force && _state.signer) {
     return { signer: _state.signer, address: _state.address, chainId: _state.chainId, source: _state.source };
   }
-  const choice = await showWalletPicker();
+  const choice = await showWalletPicker({ allowWalletConnect: !!opts.chainId });
   if (choice === 'cancel') {
     const err = new Error('Wallet connection cancelled.');
     err.cancelled = true;
@@ -111,6 +111,17 @@ async function _connectInjected() {
   const ethers = getEthers();
   if (!window.ethereum) {
     throw new Error('No browser wallet found. Install MetaMask (or another EIP-1193 wallet) and reload, or use WalletConnect.');
+  }
+  // If a WalletConnect session is currently active, tear it down before
+  // switching to the injected provider so we don't leak an open relay session.
+  if (_wcProvider) {
+    try {
+      await Promise.race([
+        _wcProvider.disconnect(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000)),
+      ]);
+    } catch {}
+    _wcProvider = null;
   }
   const eth = window.ethereum;
   const provider = new ethers.BrowserProvider(eth);
@@ -235,10 +246,13 @@ export async function switchChain(targetChainId, addParams) {
     }
   }
 
-  // Refresh state to pick up the new chain / signer.
+  // Refresh state to pick up the new chain / signer. Re-derive the address
+  // too in case the active account changed during the switch (the wallet may
+  // surface a different account on the new network).
   const ethers = getEthers();
   const provider = new ethers.BrowserProvider(eth);
   const signer = await provider.getSigner();
+  const address = await signer.getAddress();
   const network = await provider.getNetwork();
   const activeChainId = Number(network.chainId);
   if (activeChainId !== Number(targetChainId)) {
@@ -253,10 +267,11 @@ export async function switchChain(targetChainId, addParams) {
     ..._state,
     provider,
     signer,
+    address,
     chainId: activeChainId,
   };
   emit();
-  return { signer, address: _state.address, chainId: activeChainId, source: _state.source };
+  return { signer, address, chainId: activeChainId, source: _state.source };
 }
 
 /**
@@ -420,10 +435,21 @@ function ensurePickerDialog() {
   return dialog;
 }
 
-function showWalletPicker() {
+function showWalletPicker({ allowWalletConnect = true } = {}) {
   return new Promise((resolve) => {
     const dialog = ensurePickerDialog();
-    if (typeof dialog.showModal !== 'function') { resolve('metamask'); return; }
+    // Toggle the WalletConnect option based on whether the caller provided
+    // chain context. Without a chainId, EthereumProvider.init() can't pick a
+    // chain so we hide the option rather than throw after the click.
+    const wcBtn = dialog.querySelector('button[data-wallet="walletconnect"]');
+    if (wcBtn) wcBtn.style.display = allowWalletConnect ? '' : 'none';
+
+    if (typeof dialog.showModal !== 'function') {
+      // Pre-2022 browsers without <dialog>. Auto-pick the only viable
+      // connector instead of forcing the user into a dead end.
+      resolve(window.ethereum ? 'metamask' : (allowWalletConnect ? 'walletconnect' : 'metamask'));
+      return;
+    }
 
     const cleanup = () => {
       dialog.removeEventListener('click', onClick);
