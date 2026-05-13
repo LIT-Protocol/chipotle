@@ -165,8 +165,8 @@ async function getWalletAuthHeader() {
     issuedAt,
   });
 
-  const { connectEoa } = await import('../../wallet_connect.js');
-  const { signer } = await connectEoa();
+  const { connectWallet } = await import('../../wallet_connect.js');
+  const { signer } = await connectWallet({ chainId: chainIdNum, rpcUrl: client.rpcUrl });
   const { typed_data, signature } = await signChainSecuredTypedData(signer, typedData);
 
   const headerValue = btoa(JSON.stringify({ typed_data, signature }));
