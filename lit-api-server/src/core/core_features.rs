@@ -352,6 +352,22 @@ mod tests {
     }
 
     #[test]
+    fn parse_config_value_max_response_length_capped_at_default() {
+        let mut snapshot = HashMap::new();
+        snapshot.insert(
+            ConfigKeys::LIT_ACTION_DEFAULT_MAX_RESPONSE_LENGTH.to_string(),
+            (DEFAULT_MAX_RESPONSE_LENGTH + 1).to_string(),
+        );
+        let result = parse_config_value::<u64>(
+            &snapshot,
+            &ConfigKeys::LIT_ACTION_DEFAULT_MAX_RESPONSE_LENGTH,
+            0,
+            DEFAULT_MAX_RESPONSE_LENGTH,
+        );
+        assert_eq!(result, None);
+    }
+
+    #[test]
     fn parse_config_value_exceeds_max() {
         let mut snapshot = HashMap::new();
         snapshot.insert(

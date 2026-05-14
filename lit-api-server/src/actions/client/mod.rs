@@ -29,6 +29,8 @@ pub(crate) const DEFAULT_MAX_GET_KEYS_COUNT: u32 = 10; // 10 signature requests 
 pub(crate) const DEFAULT_MAX_RETRIES: u32 = 3;
 
 // Upper-bound constants (10x default) — chain config values beyond these are rejected.
+// Note: MAX_MAX_RESPONSE_LENGTH is intentionally omitted; the response cap is fixed at
+// DEFAULT_MAX_RESPONSE_LENGTH and chain config can only lower it.
 pub(crate) const MAX_TIMEOUT_MS: u64 = DEFAULT_TIMEOUT_MS * 10;
 pub(crate) const MAX_ASYNC_TIMEOUT_MS: u64 = DEFAULT_ASYNC_TIMEOUT_MS * 10;
 pub(crate) const MAX_CLIENT_TIMEOUT_MS_BUFFER: u64 = DEFAULT_CLIENT_TIMEOUT_MS_BUFFER * 10;
