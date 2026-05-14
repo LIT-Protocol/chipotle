@@ -3,9 +3,9 @@ use crate::accounts::chain_config::{ChainConfig, ConfigKeys};
 use crate::actions::client::ClientBuilder;
 use crate::actions::client::models::DenoExecutionEnv;
 use crate::actions::client::{
-    MAX_ASYNC_TIMEOUT_MS, MAX_CLIENT_TIMEOUT_MS_BUFFER, MAX_MAX_CODE_LENGTH,
-    MAX_MAX_CONSOLE_LOG_LENGTH, MAX_MAX_FETCH_COUNT, MAX_MAX_GET_KEYS_COUNT,
-    MAX_MAX_RESPONSE_LENGTH, MAX_MAX_RETRIES, MAX_MEMORY_LIMIT_MB, MAX_TIMEOUT_MS,
+    DEFAULT_MAX_RESPONSE_LENGTH, MAX_ASYNC_TIMEOUT_MS, MAX_CLIENT_TIMEOUT_MS_BUFFER,
+    MAX_MAX_CODE_LENGTH, MAX_MAX_CONSOLE_LOG_LENGTH, MAX_MAX_FETCH_COUNT, MAX_MAX_GET_KEYS_COUNT,
+    MAX_MAX_RETRIES, MAX_MEMORY_LIMIT_MB, MAX_TIMEOUT_MS,
 };
 use crate::actions::grpc::GrpcClientPool;
 use crate::core::v1::helpers::api_status::ApiStatus;
@@ -283,7 +283,7 @@ async fn get_lit_action_client_builder(chain_config: Arc<ChainConfig>) -> Client
         &snapshot,
         &ConfigKeys::LIT_ACTION_DEFAULT_MAX_RESPONSE_LENGTH,
         0,
-        MAX_MAX_RESPONSE_LENGTH,
+        DEFAULT_MAX_RESPONSE_LENGTH,
     ) {
         builder.max_response_length(v);
     }
