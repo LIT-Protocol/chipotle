@@ -255,14 +255,14 @@ The CAA records on the gateway domain restrict certificate issuance to specific 
 
 **What this checks:** Was the code running in the TEE authorized through on-chain governance? The compose-hash (a fingerprint of the entire application configuration) must be registered in a smart contract on Base before the CVM will accept it. This means deploying new code requires an on-chain transaction — you can audit the full history on Basescan.
 
-The compose-hash must be registered in the **DstackApp** smart contract on Base before the CVM will accept it. A separate **KMS Phala app** contract whitelists allowed OS images and KMS instances. You can inspect both on [Basescan](https://basescan.org).
+The compose-hash must be registered in the **DstackApp** smart contract on Base before the CVM will accept it. A separate **Phala KMS** contract whitelists allowed OS images and KMS instances. You can inspect both on [Basescan](https://basescan.org).
 
 **Finding the DstackApp contract address:** The DstackApp contract is the on-chain governance contract that authorizes what code the CVM can run. To find the correct address for a given CVM:
 
 1. Go to the [Phala Cloud dashboard](https://cloud.phala.network) and look up the application by its `app_id` (available from `GET /info`). The dashboard shows the associated DstackApp contract address.
 2. Verify the contract is the one your CVM is attached to by checking the `app_id` in the `/info` response matches the app registered in the contract on Basescan.
 
-For Lit Chipotle production, the DstackApp contract is [`0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C`](https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C). The KMS Phala app contract is [`0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC`](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC).
+For Lit Chipotle production, the DstackApp contract is [`0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC`](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC) (matches the `app_id` returned by `GET /info`). The Phala KMS contract is [`0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C`](https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C).
 
 ```bash
 # Requires `cast` from Foundry (https://book.getfoundry.sh)
@@ -282,8 +282,8 @@ cast call "$DSTACK_APP" "allowedComposeHashes(bytes32)" "$COMPOSE_HASH" --rpc-ur
 
 **Governance via Safe multisig:** All on-chain governance actions are controlled by a 2/3 Safe multisig ([`0xF688411c0FFc300cAb33EB1dA651DBb3E6891098`](https://basescan.org/address/0xF688411c0FFc300cAb33EB1dA651DBb3E6891098)) on Base. This Safe administers:
 
-- **DstackApp** ([`0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C`](https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C)) — compose-hash whitelisting for the Lit Chipotle CVM
-- **KMS Phala app** ([`0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC`](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC)) — KMS configuration and allowed OS images
+- **DstackApp** ([`0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC`](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC)) — compose-hash whitelisting for the Lit Chipotle CVM
+- **Phala KMS** ([`0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C`](https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C)) — KMS configuration and allowed OS images
 - **AccountConfig** — _details coming soon_
 
 Any governance action (e.g., whitelisting a new compose-hash, updating allowed OS images, or upgrading the AccountConfig Diamond) requires at least 2 of 3 signers. Production deployments use a two-phase workflow: CI proposes the transaction to the Safe, and signers approve it through the Safe UI before the deployment can proceed.

@@ -1,0 +1,106 @@
+---
+title: "Verify in 30 Seconds"
+description: "One click to confirm the Lit Chipotle API server is running unmodified code inside a genuine Intel TDX enclave — plus three commands to verify it yourself."
+---
+
+When you call `api.chipotle.litprotocol.com`, your request terminates inside an Intel TDX [Trusted Execution Environment](https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html) (TEE) operated by [Phala Cloud](https://phala.com/). The TEE generates a hardware-signed attestation quote on every boot, and the code it's allowed to run is gated by smart contracts on Base — not by Lit Protocol or any Phala employee.
+
+The fastest way to verify this is to view the Phala Trust Center report for our production app. It runs every check on this page automatically and shows you the result in a browser.
+
+<Card
+  title="View the Lit Chipotle Trust Center Report"
+  icon="shield-check"
+  href="https://trust.phala.com/app/3f91deaf16ff7c823ee65081d6bafa1ceea05ffc"
+>
+  Phala's public Trust Center verifies the Intel TDX hardware quote, the Docker compose hash, the OS measurements, the TLS certificate, and the on-chain KMS configuration — all automatically, no install required.
+</Card>
+
+The Trust Center URL contains our `app_id` (`3f91deaf16ff7c823ee65081d6bafa1ceea05ffc`). This same value is returned by `GET /info` on the live API and is the address of the on-chain [DstackApp contract](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC) that governs which code the enclave is allowed to run.
+
+## What you should expect to see
+
+A passing Trust Center report confirms four independent properties:
+
+| Property | Why it matters |
+|---|---|
+| **Hardware quote verified** | Intel's TDX hardware root of trust signed a statement about what code is running. Anyone can verify the signature against Intel's published root CAs. |
+| **Compose hash matches** | The SHA-256 of `app-compose.json` (the docker-compose config + metadata) recorded in the TDX quote matches what's whitelisted in the on-chain DstackApp contract. |
+| **OS measurements match** | The boot-time measurements (firmware, kernel, initrd) match a known-good dstack OS release whitelisted in the Phala KMS contract. |
+| **TLS terminates in TEE** | The HTTPS certificate served by `api.chipotle.litprotocol.com` was generated inside the TEE itself. No proxy, load balancer, or CDN can see your traffic. |
+
+If any of these fail, the report will show it.
+
+## Verify it yourself in three commands
+
+The Trust Center is convenient, but the whole point of attestation is that you don't have to trust *anyone* — including Phala. Here's the minimum-viable manual check:
+
+```bash
+# 1. What is the live API attesting to right now?
+curl -sf https://api.chipotle.litprotocol.com/info \
+  | python3 -m json.tool | head -20
+
+# 2. Is the compose hash whitelisted on Base?
+#    (Requires `cast` from Foundry — https://book.getfoundry.sh)
+COMPOSE_HASH=0x$(curl -sf https://api.chipotle.litprotocol.com/info \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["compose_hash"])')
+cast call 0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC \
+  "allowedComposeHashes(bytes32)(bool)" "$COMPOSE_HASH" \
+  --rpc-url https://mainnet.base.org
+# Expect: true
+
+# 3. Is the TLS cert pinned to the TEE-attested cert?
+LIVE=$(openssl s_client -connect api.chipotle.litprotocol.com:443 \
+  -servername api.chipotle.litprotocol.com </dev/null 2>/dev/null \
+  | openssl x509 -outform DER 2>/dev/null \
+  | openssl dgst -sha256 -hex | awk '{print $NF}')
+ATTESTED=$(curl -sf "https://api.chipotle.litprotocol.com/evidences/$(
+  curl -sf https://api.chipotle.litprotocol.com/evidences/ \
+    | grep -o 'href="cert-[^"]*\.pem"' | sed 's/href="//;s/"//')" \
+  | openssl x509 -outform DER 2>/dev/null \
+  | openssl dgst -sha256 -hex | awk '{print $NF}')
+[ "$LIVE" = "$ATTESTED" ] && echo "TLS cert matches TEE evidence" || echo "MISMATCH"
+```
+
+For the full end-to-end verification — including replaying the RTMR3 event log, verifying image signatures with Sigstore, and walking the on-chain governance Safe — see the [Full Verification Guide](/architecture/verification/full-verification).
+
+## On-chain governance you can audit
+
+Three smart contracts on Base together define what Lit Chipotle is allowed to do. All three are administered by a 2/3 Safe multisig — no single party can change them.
+
+<CardGroup cols={2}>
+  <Card
+    title="DstackApp"
+    icon="cube"
+    href="https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC"
+  >
+    `0x3F91…05FfC` — whitelists the compose hashes (i.e. the docker-compose configurations) the Lit Chipotle CVM is allowed to boot.
+  </Card>
+  <Card
+    title="Phala KMS"
+    icon="key"
+    href="https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C"
+  >
+    `0x2f83…Ba9C` — whitelists allowed dstack OS images and KMS instance measurements. Gatekeeps key release to the CVM.
+  </Card>
+  <Card
+    title="Safe Multisig (2/3)"
+    icon="users"
+    href="https://basescan.org/address/0xF688411c0FFc300cAb33EB1dA651DBb3E6891098"
+  >
+    `0xF688…1098` — owns both contracts above. Any deployment or config change requires at least 2 of 3 Lit signers.
+  </Card>
+  <Card
+    title="On-Chain KMS Deep Dive"
+    icon="book-open"
+    href="/architecture/verification/onchain-kms"
+  >
+    What KmsAuth and DstackApp actually do, what "active" looks like on Basescan, and how key release is gated.
+  </Card>
+</CardGroup>
+
+## What's next
+
+- [On-Chain KMS](/architecture/verification/onchain-kms) — how the KMS contracts gate key release and what to look for on Basescan
+- [Full Verification Guide](/architecture/verification/full-verification) — step-by-step manual verification of every layer
+- [Chain of Trust Reference](/architecture/verification/chain-of-trust) — what each layer checks and why
+- [Security & Verification Overview](/architecture/verification/index) — Zero-Trust TLS and the trust model

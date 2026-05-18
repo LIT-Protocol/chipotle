@@ -51,7 +51,9 @@
               {
                 "group": "Security & Verification",
                 "pages": [
+                  "architecture/verification/quick-verify",
                   "architecture/verification/index",
+                  "architecture/verification/onchain-kms",
                   "architecture/verification/full-verification",
                   "architecture/verification/chain-of-trust"
                 ]
