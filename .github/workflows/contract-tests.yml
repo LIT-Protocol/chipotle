@@ -1,0 +1,49 @@
+name: Contract Tests
+
+on:
+  push:
+    branches: [main, next]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  forge-test:
+    if: >
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    name: forge-test
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Reset workspace to HEAD
+        run: git checkout HEAD -- .
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install contract dependencies
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npm ci
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - name: Build contracts
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: forge build --sizes
+
+      - name: Run forge tests
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: forge test -vv
