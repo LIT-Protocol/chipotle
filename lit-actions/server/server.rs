@@ -7,6 +7,7 @@ use crate::cdn_module_loader::{CdnModuleLoader, ModuleCache};
 use crate::runtime::{
     ActionCodeCache, DEFAULT_MEMORY_LIMIT_MB, PoolSharedState, new_action_code_cache,
 };
+use crate::v8_code_cache::{SharedV8CodeCache, new_v8_code_cache};
 use crate::worker_pool::{WorkItem, WorkerPool};
 
 use anyhow::Result;
@@ -48,6 +49,9 @@ pub struct Server {
     module_cache: ModuleCache,
     /// Shared cache for action code prepared from the incoming code CID.
     action_code_cache: ActionCodeCache,
+    /// Shared V8 code cache: handed to each MainWorker so compiled bytecode
+    /// for cached actions is reused instead of being recompiled every run.
+    v8_code_cache: SharedV8CodeCache,
     /// Path to integrity.lock file for TOFU auto-pinning.
     lockfile_path: Option<PathBuf>,
     /// Shared HTTP client for CDN fetches (connection pooling across executions).
@@ -73,6 +77,7 @@ impl Server {
         module_cache: ModuleCache,
         lockfile_path: Option<PathBuf>,
         http_client: Arc<reqwest::Client>,
+        v8_code_cache: SharedV8CodeCache,
     ) -> Arc<WorkerPool> {
         let shared = Arc::new(PoolSharedState {
             integrity_manifest,
@@ -81,6 +86,7 @@ impl Server {
             lockfile_path,
             http_client,
             memory_limit_mb: DEFAULT_MEMORY_LIMIT_MB,
+            v8_code_cache,
         });
         WorkerPool::new(pool_size_from_env(), shared)
     }
@@ -93,12 +99,14 @@ impl Server {
     ) -> Self {
         let module_cache: ModuleCache = Arc::new(RwLock::new(HashMap::new()));
         let http_client = CdnModuleLoader::build_http_client();
+        let v8_code_cache = new_v8_code_cache();
         let pool = Self::build_pool(
             integrity_manifest.clone(),
             strict_imports,
             module_cache.clone(),
             lockfile_path.clone(),
             http_client.clone(),
+            v8_code_cache.clone(),
         );
         Self {
             server_type: ServerType::Production,
@@ -106,6 +114,7 @@ impl Server {
             strict_imports,
             module_cache,
             action_code_cache: new_action_code_cache(),
+            v8_code_cache,
             lockfile_path,
             http_client,
             pool,
@@ -116,12 +125,14 @@ impl Server {
         let module_cache: ModuleCache = Arc::new(RwLock::new(HashMap::new()));
         let http_client = CdnModuleLoader::build_http_client();
         let integrity_manifest = Arc::new(RwLock::new(HashMap::new()));
+        let v8_code_cache = new_v8_code_cache();
         let pool = Self::build_pool(
             integrity_manifest.clone(),
             false,
             module_cache.clone(),
             None,
             http_client.clone(),
+            v8_code_cache.clone(),
         );
         Self {
             server_type: ServerType::Test,
@@ -129,6 +140,7 @@ impl Server {
             strict_imports: false,
             module_cache,
             action_code_cache: new_action_code_cache(),
+            v8_code_cache,
             lockfile_path: None,
             http_client,
             pool,
@@ -147,6 +159,7 @@ struct DispatchState {
     strict_imports: bool,
     module_cache: ModuleCache,
     action_code_cache: ActionCodeCache,
+    v8_code_cache: SharedV8CodeCache,
     lockfile_path: Option<PathBuf>,
     http_client: Arc<reqwest::Client>,
 }
@@ -160,6 +173,7 @@ impl DispatchState {
             strict_imports: server.strict_imports,
             module_cache: server.module_cache.clone(),
             action_code_cache: server.action_code_cache.clone(),
+            v8_code_cache: server.v8_code_cache.clone(),
             lockfile_path: server.lockfile_path.clone(),
             http_client: server.http_client.clone(),
         }
@@ -356,6 +370,7 @@ fn spawn_legacy(dispatch: &DispatchState, work: WorkItem, memory_limit_mb: Optio
     let module_cache = dispatch.module_cache.clone();
     let lockfile_path = dispatch.lockfile_path.clone();
     let http_client = dispatch.http_client.clone();
+    let v8_code_cache = dispatch.v8_code_cache.clone();
 
     std::thread::spawn(move || {
         if work.request_id.is_some() || work.correlation_id.is_some() {
@@ -393,6 +408,7 @@ fn spawn_legacy(dispatch: &DispatchState, work: WorkItem, memory_limit_mb: Optio
                     strict_imports,
                     module_cache,
                     action_code_cache,
+                    v8_code_cache,
                     lockfile_path,
                     http_client,
                 )

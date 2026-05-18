@@ -33,10 +33,12 @@ pub(crate) struct ParsedImport {
 
 /// Result of rewriting imports in user code.
 pub(crate) struct RewriteResult {
-    /// The user code with import statements removed. Non-test callers currently
-    /// ignore this (the bundler consumes the original code with imports intact),
-    /// but tests assert on the stripped form to pin the scanner's behavior.
-    #[allow(dead_code)]
+    /// The user code with import statements removed. Populated only under
+    /// `#[cfg(test)]` to pin the scanner's stripping behavior; production
+    /// callers consume the original code (the bundler keeps `import`s intact
+    /// so SWC can map bindings to inlined definitions), so we skip the
+    /// per-miss rebuild on the hot path.
+    #[cfg(test)]
     pub code: String,
     /// The parsed imports in order of appearance.
     pub imports: Vec<ParsedImport>,
@@ -57,6 +59,7 @@ pub(crate) fn rewrite_imports(code: &str) -> RewriteResult {
     let bytes = preamble.as_bytes();
 
     let mut imports = Vec::new();
+    #[cfg(test)]
     let mut ranges_to_remove: Vec<(usize, usize)> = Vec::new();
     let mut pos = 0;
 
@@ -119,7 +122,10 @@ pub(crate) fn rewrite_imports(code: &str) -> RewriteResult {
             if bytes.get(end) == Some(&b'\n') {
                 end += 1;
             }
+            #[cfg(test)]
             ranges_to_remove.push((start, end));
+            #[cfg(not(test))]
+            let _ = start;
             imports.push(imp);
             pos = end;
             continue;
@@ -128,16 +134,22 @@ pub(crate) fn rewrite_imports(code: &str) -> RewriteResult {
         pos += 1;
     }
 
-    // Rebuild code with import statements removed
-    let mut result = String::with_capacity(code.len());
-    let mut last = 0;
-    for &(start, end) in &ranges_to_remove {
-        result.push_str(&code[last..start]);
-        last = end;
-    }
-    result.push_str(&code[last..]);
+    #[cfg(test)]
+    let result = {
+        // Rebuild code with import statements removed (test-only; production
+        // callers do not consume the stripped form).
+        let mut result = String::with_capacity(code.len());
+        let mut last = 0;
+        for &(start, end) in &ranges_to_remove {
+            result.push_str(&code[last..start]);
+            last = end;
+        }
+        result.push_str(&code[last..]);
+        result
+    };
 
     RewriteResult {
+        #[cfg(test)]
         code: result,
         imports,
     }
