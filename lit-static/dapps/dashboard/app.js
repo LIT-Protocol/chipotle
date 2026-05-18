@@ -3,7 +3,7 @@
  * Imports all feature modules and orchestrates initialization.
  */
 
-import { getApiKey, setTheme, getTheme, setApiKey, setOnAuthReady, updateStatCards, initLogin, setUsageKeyOverride, toggleOverrideEnabled, updateUsageKeyOverrideUI, clearOverrideState } from './auth.js';
+import { isAuthenticated, setTheme, getTheme, logOut, setOnAuthReady, updateStatCards, initLogin, setUsageKeyOverride, toggleOverrideEnabled, updateUsageKeyOverrideUI, setChainSecuredRpcUrl, toggleChainSecuredRpcPanel, updateChainSecuredRpcUrlUI, getMode, getApiKey, convertToChainSecured, changeChainSecuredOwnership } from './auth.js';
 import { initModalClose, initConfirmClose, showStatus, hideStatus, logError } from './ui-utils.js';
 import { initBilling } from './billing.js';
 import { initGroups, loadGroups } from './groups.js';
@@ -15,8 +15,8 @@ import { initActionRunner } from './runner.js';
 // ----- Preload all tables (with error visibility) -----
 
 async function preloadAllTables() {
-  const apiKey = getApiKey();
-  if (!apiKey) return;
+  if (!isAuthenticated()) return;
+  hideStatus('dashboard-status');
   const results = await Promise.allSettled([
     loadGroups(),
     loadWallets(),
@@ -26,7 +26,7 @@ async function preloadAllTables() {
   const failures = results.filter((r) => r.status === 'rejected');
   if (failures.length > 0) {
     failures.forEach((f) => logError('preload', f.reason));
-    showStatus('login-status', 'Some data failed to load. Check individual sections for details.', 'error');
+    showStatus('dashboard-status', 'Some data failed to load. Check individual sections for details.', 'error');
   }
 }
 
@@ -60,6 +60,43 @@ function initUsageKeyOverride() {
   updateUsageKeyOverrideUI();
 }
 
+// ----- ChainSecured RPC URL UI (CPL-276) -----
+
+function initChainSecuredRpc() {
+  const input = document.getElementById('chainsecured-rpc-input');
+  const applyBtn = document.getElementById('chainsecured-rpc-apply');
+  const resetBtn = document.getElementById('chainsecured-rpc-reset');
+  if (applyBtn) {
+    applyBtn.addEventListener('click', () => {
+      const val = (input?.value || '').trim();
+      if (!val) {
+        showStatus('overview-status', 'Enter an RPC URL.', 'error');
+        return;
+      }
+      try {
+        const u = new URL(val);
+        if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error('not http');
+      } catch {
+        showStatus('overview-status', 'Enter a valid http(s) RPC URL.', 'error');
+        return;
+      }
+      setChainSecuredRpcUrl(val);
+      hideStatus('overview-status');
+      showStatus('overview-status', 'RPC URL updated. Dashboard will use this RPC for ChainSecured reads and writes.', 'success');
+      preloadAllTables();
+    });
+  }
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      setChainSecuredRpcUrl('');
+      hideStatus('overview-status');
+      showStatus('overview-status', 'RPC URL reset to default.', 'success');
+      preloadAllTables();
+    });
+  }
+  updateChainSecuredRpcUrlUI();
+}
+
 // ----- Sidebar scroll -----
 
 const ACTION_RUNNER_ID = 'action-runner';
@@ -74,22 +111,60 @@ function setActionRunnerVisible(visible) {
   });
 }
 
-function initSidebar() {
+function setActiveSidebarLink(id) {
   document.querySelectorAll('.sidebar-link[data-scroll]').forEach((a) => {
+    a.classList.toggle('is-active', a.getAttribute('data-scroll') === id);
+  });
+}
+
+function initSidebar() {
+  // Bind to any element with data-scroll (sidebar links, stat cards, empty-state CTAs).
+  // Active-link styling stays sidebar-only via setActiveSidebarLink's selector.
+  document.querySelectorAll('[data-scroll]').forEach((a) => {
     a.addEventListener('click', (e) => {
       e.preventDefault();
       const id = a.getAttribute('data-scroll');
       if (id === ACTION_RUNNER_ID) {
         setActionRunnerVisible(true);
-        const el = document.getElementById('section-' + id);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       } else {
         setActionRunnerVisible(false);
-        const el = document.getElementById('section-' + id);
-        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
+      const el = document.getElementById('section-' + id);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      setActiveSidebarLink(id);
     });
   });
+
+  // Scroll-spy: highlight sidebar link for whichever section is in view.
+  const sections = MAIN_SECTION_IDS
+    .map((id) => document.getElementById('section-' + id))
+    .filter(Boolean);
+  if (sections.length === 0 || !('IntersectionObserver' in window)) return;
+
+  const visible = new Map();
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        visible.set(entry.target.id, entry.intersectionRatio);
+      } else {
+        visible.delete(entry.target.id);
+      }
+    });
+    if (visible.size === 0) return;
+    let bestId = null;
+    let bestRatio = -1;
+    visible.forEach((ratio, sectionId) => {
+      if (ratio > bestRatio) {
+        bestRatio = ratio;
+        bestId = sectionId;
+      }
+    });
+    if (bestId) setActiveSidebarLink(bestId.replace(/^section-/, ''));
+  }, {
+    rootMargin: '-80px 0px -55% 0px',
+    threshold: [0, 0.1, 0.25, 0.5, 0.75, 1],
+  });
+  sections.forEach((el) => observer.observe(el));
 }
 
 // ----- Header (theme toggle, account dropdown, sign out) -----
@@ -137,15 +212,64 @@ function initHeader() {
     });
   }
 
+  const convertBtn = document.getElementById('convert-to-chainsecured-btn');
+  if (convertBtn) {
+    convertBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAccountDropdown();
+      convertToChainSecured();
+    });
+  }
+
+  const changeOwnershipBtn = document.getElementById('change-ownership-btn');
+  if (changeOwnershipBtn) {
+    changeOwnershipBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAccountDropdown();
+      changeChainSecuredOwnership();
+    });
+  }
+
+  const toggleRpcBtn = document.getElementById('toggle-chainsecured-rpc-btn');
+  if (toggleRpcBtn) {
+    toggleRpcBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeAccountDropdown();
+      toggleChainSecuredRpcPanel();
+    });
+  }
+
   const signoutBtn = document.getElementById('account-signout-btn');
   if (signoutBtn) {
     signoutBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       closeAccountDropdown();
-      clearOverrideState();
-      setApiKey('');
+      logOut();
     });
   }
+}
+
+/**
+ * Toggle the Convert-to-ChainSecured dropdown item. Only visible while signed
+ * in with an API key (i.e. mode === 'api' AND a key is present).
+ */
+function refreshConvertVisibility() {
+  const btn = document.getElementById('convert-to-chainsecured-btn');
+  if (!btn) return;
+  const showConvert = isAuthenticated() && getMode() === 'api' && !!getApiKey();
+  btn.hidden = !showConvert;
+}
+
+/**
+ * Toggle the Change-Ownership dropdown item. Only visible while signed in as a
+ * ChainSecured account (sovereign mode) — the function reassigns the on-chain
+ * admin wallet and is called directly by the current admin's signer.
+ */
+function refreshChangeOwnershipVisibility() {
+  const btn = document.getElementById('change-ownership-btn');
+  if (!btn) return;
+  const show = isAuthenticated() && getMode() === 'sovereign';
+  btn.hidden = !show;
 }
 
 // ----- Auth ready callback -----
@@ -154,6 +278,9 @@ setOnAuthReady(() => {
   updateStatCards();
   preloadAllTables();
   updateUsageKeyOverrideUI();
+  refreshConvertVisibility();
+  refreshChangeOwnershipVisibility();
+  updateChainSecuredRpcUrlUI();
 });
 
 // ----- Init -----
@@ -185,6 +312,7 @@ function init() {
   initHeader();
   initBilling();
   initUsageKeyOverride();
+  initChainSecuredRpc();
 }
 
 init();

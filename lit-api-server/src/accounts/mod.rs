@@ -26,6 +26,7 @@ use ethers::types::{Address, H160, U256};
 use tracing::instrument;
 
 /// Create a new account. `initial_balance` is stored on the account's apiKey (AccountConfig.accountApiKey.balance).
+#[instrument(name = "accounts::new_account", level = "debug", skip_all, err)]
 pub async fn new_account(
     signer_pool: Arc<SignerPool>,
     api_key: &str,
@@ -47,9 +48,34 @@ pub async fn new_account(
     send_transaction(function_call, signer_pool, signer_address, client).await
 }
 
+/// Reassign a managed account's admin wallet to a user-controlled address and flip it
+/// to ChainSecured (unmanaged). One-way: the contract reverts if the account is already
+/// unmanaged. Caller must be an api_payer.
+#[instrument(
+    name = "accounts::convert_to_chain_secured_account",
+    level = "debug",
+    skip_all,
+    err
+)]
+pub async fn convert_to_chain_secured_account(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    new_admin_wallet_address: H160,
+) -> Result<bool> {
+    let (contract, signer_address, client) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
+    let api_key_hash = api_key_hash(api_key);
+    let function_call =
+        contract.convert_to_chain_secured_account(api_key_hash, new_admin_wallet_address);
+    let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
+    blockchain_cache::invalidate_for_account(api_key).await;
+    Ok(result)
+}
+
 /// Check whether an account exists and is mutable. Uses an api_payer address as the
 /// simulated caller (msg.sender) because accountExistsAndIsMutable requires the
 /// caller to be an api_payer (for managed accounts) or the creator.
+#[instrument(name = "accounts::account_exists", level = "debug", skip_all, err)]
 pub async fn account_exists(api_key: &str) -> Result<bool> {
     let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = api_key_hash(api_key);
@@ -69,6 +95,7 @@ pub async fn account_exists(api_key: &str) -> Result<bool> {
 /// `permitted_actions` and `wallets` are keccak256 hashes (U256). Use `keccak256(action_ipfs_cid)` and `keccak256(pkp_public_key)` to produce them.
 /// `all_wallets_permitted` and `all_actions_permitted` match AccountConfig.sol Group fields.
 #[allow(clippy::too_many_arguments)]
+#[instrument(name = "accounts::add_group", level = "debug", skip_all, err)]
 pub async fn add_group(
     signer_pool: Arc<SignerPool>,
     api_key: &str,
@@ -112,6 +139,7 @@ pub async fn add_group(
 }
 
 /// Create a new action entry with name, description, and IPFS CID hash in the account's actionMetadata mapping.
+#[instrument(name = "accounts::add_action", level = "debug", skip_all, err)]
 pub async fn add_action(
     signer_pool: Arc<SignerPool>,
     api_key: &str,
@@ -715,20 +743,49 @@ pub async fn can_execute_action_and_use_wallet(
     Ok(result)
 }
 
-/// Resolve any API key (master or usage) to the creator wallet address of its parent account.
+/// Resolve any account identity to the admin wallet address of its parent account.
 ///
-/// This is the authoritative wallet address for billing: both master and usage keys resolve
-/// to the same account wallet, ensuring charges hit the correct Stripe customer.
+/// `key_or_hash` accepts either a raw API key (master or usage, hashed via
+/// keccak256 to derive the on-chain account hash) or a precomputed 0x-prefixed
+/// 32-byte hex hash. The hash form is used by ChainSecured callers, whose
+/// on-chain identity is `keccak256(walletAddress)` — there is no raw key to
+/// send. Both master and usage keys resolve to the same account wallet,
+/// ensuring charges hit the correct Stripe customer.
 #[instrument(
     name = "accounts::get_account_wallet_address",
     level = "debug",
     skip_all,
     err
 )]
-pub async fn get_account_wallet_address(api_key: &str) -> Result<String> {
+pub async fn get_account_wallet_address(key_or_hash: &str) -> Result<String> {
     let contract = get_read_only_account_config_contract().await?;
-    let key_hash = api_key_hash(api_key);
+    let key_hash = usage_api_key_to_hash(key_or_hash);
     let wallet_address = contract.get_account_wallet_address(key_hash).call().await?;
+    if wallet_address == H160::zero() {
+        anyhow::bail!("account has no wallet address");
+    }
+    Ok(format!("{:?}", wallet_address))
+}
+
+/// Resolve any account identity to the billing wallet address of its parent account.
+///
+/// Same input shape as [`get_account_wallet_address`]. Differs in that the
+/// returned wallet is the one used to identify the Stripe customer for billing,
+/// which is set at account creation and is preserved across conversion to
+/// ChainSecured — so converting a managed account does not strand its existing
+/// Stripe credits behind a new admin wallet (CPL-313). The contract's
+/// `getBillingWalletAddress` falls back to the admin wallet for legacy accounts
+/// that pre-date the billing-wallet field, keeping behaviour unchanged for them.
+#[instrument(
+    name = "accounts::get_billing_wallet_address",
+    level = "debug",
+    skip_all,
+    err
+)]
+pub async fn get_billing_wallet_address(key_or_hash: &str) -> Result<String> {
+    let contract = get_read_only_account_config_contract().await?;
+    let key_hash = usage_api_key_to_hash(key_or_hash);
+    let wallet_address = contract.get_billing_wallet_address(key_hash).call().await?;
     if wallet_address == H160::zero() {
         anyhow::bail!("account has no wallet address");
     }

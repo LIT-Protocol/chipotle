@@ -164,6 +164,16 @@ library SecurityLib {
         }
     }
 
+    /// @notice Non-reverting predicate: true if caller is an api payer, the
+    ///         diamond owner, or the admin api payer account.
+    function isApiPayerOrOwner(address caller) internal view returns (bool) {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        return
+            s.api_payers.contains(caller) ||
+            caller == LibDiamond.contractOwner() ||
+            caller == s.adminApiPayerAccount;
+    }
+
     /// @notice Resolve any API key hash (master or usage) to the master account hash.
     function resolveToMaster(uint256 apiKeyHash) internal view returns (uint256) {
         AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();

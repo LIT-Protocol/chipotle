@@ -4,6 +4,9 @@
  *
  * States (monotonic, with only `confirmed|failed|reorged` as terminal):
  *   preparing    → building calldata, validating mode/signer/chain
+ *   simulating   → eth_call dry-run (call-before-send) to surface reverts
+ *                  with a decoded, human-readable reason before the wallet
+ *                  popup is shown. No gas is spent on a failed simulation.
  *   previewing   → awaiting user's in-dashboard preview/confirm click
  *   signing      → wallet popup is open (user must confirm in wallet)
  *   pending      → tx broadcast to mempool; hash known; waiting for 1 conf
@@ -22,6 +25,7 @@ import { ACCOUNT_CONFIG_ERROR_ABI } from './account_config_full_abi.js';
 
 export const TX_STATES = Object.freeze({
   PREPARING: 'preparing',
+  SIMULATING: 'simulating',
   PREVIEWING: 'previewing',
   SIGNING: 'signing',
   PENDING: 'pending',
@@ -148,8 +152,11 @@ function extractRevertData(err) {
  * @param {Object} [options.overrides] - ethers tx overrides (gasLimit, value, etc.)
  * @param {number} [options.confirmations=1] - confirmations to wait for before marking confirmed
  * @param {(state: string, payload?: Object) => void} [options.onState] - called on every state transition
- * @param {() => Promise<boolean>} [options.onPreview] - user-preview gate; must resolve true to proceed
- * @returns {Promise<{receipt: Object, txHash: string}>}
+ * @param {(method: string, args: any[]) => Promise<boolean>} [options.onPreview] - user-preview gate; must resolve true to proceed
+ * @returns {Promise<{receipt: Object, txHash: string, simulatedResult: any}>}
+ *   `simulatedResult` is the eth_call return value from the pre-send
+ *   simulation — useful for write methods that return a value that is not
+ *   emitted in logs (e.g. `addGroup` returning the new group_id).
  * @throws {Error} with { state: 'failed'|'reorged', cause, decoded } on failure
  */
 export async function runContractWrite({
@@ -178,6 +185,13 @@ export async function runContractWrite({
       throw new Error(`tx_lifecycle: contract has no method "${method}"`);
     }
 
+    // Call-before-send: dry-run via eth_call so any revert surfaces as a
+    // decoded, human-readable error before we show the preview modal or open
+    // the wallet. A failure here throws into the catch below with no gas
+    // spent and no signature prompt.
+    emit(TX_STATES.SIMULATING, { method, args });
+    const simulatedResult = await contract[method].staticCall(...args, overrides);
+
     if (onPreview) {
       emit(TX_STATES.PREVIEWING, { method, args });
       const ok = await onPreview(method, args);
@@ -202,7 +216,7 @@ export async function runContractWrite({
     }
 
     emit(TX_STATES.CONFIRMED, { txHash: tx.hash, receipt });
-    return { receipt, txHash: tx.hash };
+    return { receipt, txHash: tx.hash, simulatedResult };
   } catch (err) {
     const decoded = decodeContractRevert(err);
     const finalState = err?.reorg ? TX_STATES.REORGED : TX_STATES.FAILED;
@@ -222,6 +236,7 @@ export async function runContractWrite({
 export function describeState(state) {
   switch (state) {
     case TX_STATES.PREPARING: return 'Preparing transaction…';
+    case TX_STATES.SIMULATING: return 'Simulating transaction…';
     case TX_STATES.PREVIEWING: return 'Awaiting your confirmation…';
     case TX_STATES.SIGNING: return 'Awaiting wallet signature…';
     case TX_STATES.PENDING: return 'Broadcast — waiting for inclusion…';

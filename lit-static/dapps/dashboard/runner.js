@@ -2,7 +2,7 @@
  * Action Runner — CodeJar editor, execute Lit Actions, get IPFS CID.
  */
 
-import { getApiKey, getEffectiveApiKey, getClient, getBaseUrl } from './auth.js';
+import { getEffectiveApiKey, getClient, getBaseUrl, isAuthenticated } from './auth.js';
 import { hideStatus, formatError, logError } from './ui-utils.js';
 
 let _codeJarEditor = null;
@@ -42,16 +42,23 @@ export async function initActionRunner() {
   }
 
   btn.addEventListener('click', async () => {
-    const accountKey = getApiKey();
     const usageKeyEl = document.getElementById('action-runner-usage-key');
     const usageKey = usageKeyEl?.value?.trim() ?? '';
     const apiKey = usageKey || getEffectiveApiKey();
     const code = (getCode ? getCode() : (codeEl?.textContent ?? '')).trim();
     const paramsRaw = (getParams ? getParams() : (paramsEl?.textContent ?? '')).trim();
 
-    if (!accountKey) {
+    if (!isAuthenticated()) {
       hideStatus('action-runner-status');
       outputEl.textContent = 'Log in first to execute Lit Actions.';
+      outputEl.className = 'action-runner-output error';
+      return;
+    }
+    // ChainSecured has no account-level api key; users execute via a usage key
+    // they minted from the contract. API mode falls back to the account key.
+    if (!apiKey) {
+      hideStatus('action-runner-status');
+      outputEl.textContent = 'Paste a Usage API Key above to execute Lit Actions.';
       outputEl.className = 'action-runner-output error';
       return;
     }

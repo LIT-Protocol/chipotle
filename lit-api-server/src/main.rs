@@ -358,7 +358,10 @@ fn build_rocket(
         .manage(signer_pool)
         .manage(chain_config)
         .manage(cpu_monitor)
-        .manage(stripe_state);
+        .manage(stripe_state)
+        .manage(core::v1::health::LitActionsSocketPath(
+            std::path::PathBuf::from(core::v1::health::LIT_ACTIONS_SOCKET),
+        ));
 
     // /attestation at root — per Phala Get Attestation
     r = r

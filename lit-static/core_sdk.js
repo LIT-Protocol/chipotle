@@ -13,8 +13,10 @@
  *                           `connectSigner(signer)` has been called; without a
  *                           signer, write methods throw.
  *
- * In sovereign mode the constructor requires `rpcUrl` + `contractAddress`, or
- * the dashboard can call `getNodeChainConfig()` first and pass the values in.
+ * In sovereign mode the constructor requires `contractAddress` plus either
+ * `rpcUrl` or a signer that carries its own provider (any ethers v6 signer
+ * with `signer.provider` set). The dashboard typically calls
+ * `getNodeChainConfig()` first and passes the values in.
  */
 
 import { ACCOUNT_CONFIG_VIEW_ABI } from './account_config_view_abi.js';
@@ -208,7 +210,7 @@ import { runContractWrite, TX_STATES } from './tx_lifecycle.js';
  * @property {boolean} is_evm - Whether the chain is EVM
  * @property {boolean} testnet - Whether the chain is a testnet
  * @property {string} token - Native token symbol
- * @property {string} [rpc_url] - RPC URL (resolved from chainlist when not in API response)
+ * @property {string} [rpc_url] - RPC URL (filled in from the known-chain map when omitted by the API)
  * @property {string} contract_address - AccountConfig contract address
  */
 
@@ -292,7 +294,11 @@ async function parseResponse(res, context) {
     const message = bodyMessage
       ? `${context}: ${bodyMessage}`
       : `${context}: ${res.status} ${res.statusText}`;
-    throw new Error(message);
+    const err = new Error(message);
+    // Surface the HTTP status so callers can react to auth failures (401/400)
+    // distinctly from network/5xx without parsing the message string.
+    err.status = res.status;
+    throw err;
   }
   try {
     return text ? JSON.parse(text) : null;
@@ -301,33 +307,89 @@ async function parseResponse(res, context) {
   }
 }
 
-const CHAINLIST_API = 'https://chainlistapi.com';
-const CORS_PROXY = 'https://whateverorigin.org/get?url=';
+// The dashboard and monitor support anvil for local dev and Base for everything else.
+const KNOWN_RPC_URLS = {
+  31337: 'http://127.0.0.1:8545',
+  8453: 'https://mainnet.base.org',
+  84532: 'https://sepolia.base.org',
+};
 
 /**
- * Resolve a public RPC URL for the given chain ID from chainlistapi.com.
- * Uses Whatever Origin CORS proxy (free, no domain whitelist) to avoid cross-origin restrictions.
- * @param {number} chainId - EVM chain ID
- * @returns {Promise<string|null>} First HTTP RPC URL, or null if not found
+ * Look up the public RPC URL for a known chain ID.
+ * @param {number|string} chainId - EVM chain ID
+ * @returns {string|null} RPC URL, or null if the chain is unknown
  */
-export async function resolveRpcUrlFromChainlist(chainId) {
+export function rpcUrlForChainId(chainId) {
   if (chainId == null || chainId === '') return null;
-  try {
-    const url = `${CORS_PROXY}${encodeURIComponent(`${CHAINLIST_API}/chains/${chainId}`)}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const wrapper = await res.json();
-    const data = typeof wrapper?.contents === 'string' ? JSON.parse(wrapper.contents) : wrapper;
-    const rpcs = data?.rpc;
-    if (!Array.isArray(rpcs)) return null;
-    const entry = rpcs.find((r) => {
-      const u = typeof r === 'string' ? r : r?.url;
-      return typeof u === 'string' && u.startsWith('https://');
-    });
-    return entry ? (typeof entry === 'string' ? entry : entry.url) : null;
-  } catch (_) {
-    return null;
-  }
+  return KNOWN_RPC_URLS[Number(chainId)] ?? null;
+}
+
+// --- ChainSecured EIP-712 envelope (CPL-286) ---
+//
+// All four ChainSecured signing flows share a single typed-data shape:
+// `{ address, issuedAt }` under a `(name, version, chainId)` domain. The
+// `primaryType` distinguishes the flow and is what the wallet UI labels
+// for the user — replacing the SIWE-lite plaintext envelope where a
+// phishing dApp could hide the `Purpose:` line in a long string.
+//
+// Server-side schema lives in `lit-api-server/src/core/eip712.rs`. Field
+// names, types, and ORDER must match exactly: the EIP-712 type hash is
+// derived from declared order, so any reordering produces a different
+// digest and the server's `validate_type_schema` rejects it.
+const CHAINSECURED_DOMAIN_NAME = 'Lit ChainSecured';
+const CHAINSECURED_DOMAIN_VERSION = '1';
+
+export const PRIMARY_TYPE_CREATE_WALLET = 'CreateWallet';
+export const PRIMARY_TYPE_CONVERT_ACCOUNT = 'ConvertAccount';
+export const PRIMARY_TYPE_ADD_USAGE_API_KEY = 'AddUsageApiKey';
+export const PRIMARY_TYPE_BILLING_AUTH = 'BillingAuth';
+
+/**
+ * Build the canonical EIP-712 typed data the server expects for a
+ * ChainSecured flow. Returns the full TypedData JSON (with EIP712Domain in
+ * `types`) ready to POST to the server. The same object is used to derive
+ * the wallet `signTypedData` arguments — keeping a single source of truth
+ * means the bytes the user sees in the wallet popup are bit-identical to
+ * what the server hashes.
+ */
+export function buildChainSecuredTypedData({ primaryType, address, chainId, issuedAt }) {
+  return {
+    types: {
+      EIP712Domain: [
+        { name: 'name', type: 'string' },
+        { name: 'version', type: 'string' },
+        { name: 'chainId', type: 'uint256' },
+      ],
+      [primaryType]: [
+        { name: 'address', type: 'address' },
+        { name: 'issuedAt', type: 'uint256' },
+      ],
+    },
+    primaryType,
+    domain: {
+      name: CHAINSECURED_DOMAIN_NAME,
+      version: CHAINSECURED_DOMAIN_VERSION,
+      chainId: String(chainId),
+    },
+    message: {
+      address,
+      issuedAt: String(issuedAt),
+    },
+  };
+}
+
+/**
+ * Sign canonical typed data with `signer` (any ethers v6 Signer). ethers
+ * strips `EIP712Domain` from the `types` arg automatically, so we pass the
+ * payload-only types and let it handle the rest.
+ *
+ * @returns {Promise<{typed_data: object, signature: string}>}
+ */
+export async function signChainSecuredTypedData(signer, typedData) {
+  const { primaryType, domain, message } = typedData;
+  const payloadTypes = { [primaryType]: typedData.types[primaryType] };
+  const signature = await signer.signTypedData(domain, payloadTypes, message);
+  return { typed_data: typedData, signature };
 }
 
 const ETHERS_CDN_URL = 'https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.min.js';
@@ -356,13 +418,18 @@ export class LitNodeSimpleApiClient {
    * @param {Object} options
    * @param {string} [options.baseUrl='http://localhost:8000'] - Base URL of the API
    * @param {'api'|'sovereign'} [options.mode='api'] - Read-path mode. See module docblock.
-   * @param {string} [options.rpcUrl] - RPC URL for sovereign reads. Required when mode === 'sovereign'.
+   * @param {string} [options.rpcUrl] - RPC URL fallback for sovereign reads when no signer-with-provider is attached. Required for sovereign mode unless `signer` (or a later `connectSigner()` call) supplies a provider.
    * @param {string} [options.contractAddress] - AccountConfig contract address. Required when mode === 'sovereign'.
    * @param {number} [options.chainId] - Expected chain ID. Used for drift pinning + wallet chain guard. Optional; auto-detected from RPC when omitted.
    * @param {Object} [options.deployments] - Optional override map `{ "<chainId>:<address>": { runtimeBytecodeKeccak } }` for drift pinning.
-   * @param {import('ethers').Signer} [options.signer] - Pre-connected signer for sovereign writes. May be set later via connectSigner().
+   * @param {import('ethers').Signer} [options.signer] - Pre-connected signer for sovereign writes. May be set later via connectSigner(). When the signer carries its own provider (e.g. ethers.BrowserProvider), reads use it instead of `rpcUrl` (CPL-283).
    */
-  constructor({ baseUrl = 'http://localhost:8000', mode = 'api', rpcUrl, contractAddress, chainId, deployments, signer } = {}) {
+  constructor({ baseUrl = 'http://localhost:8000', mode = 'api', rpcUrl, contractAddress, chainId, deployments, signer, adminHashOverride } = {}) {
+    if (typeof baseUrl !== 'string') {
+      throw new Error(
+        `LitNodeSimpleApiClient: baseUrl must be a string, got ${typeof baseUrl} (${JSON.stringify(baseUrl)})`,
+      );
+    }
     const base = baseUrl.replace(/\/$/, '');
     this.baseUrl = `${base}/core/v1`;
     this.mode = mode;
@@ -371,13 +438,26 @@ export class LitNodeSimpleApiClient {
     this.chainId = chainId ?? null;
     this.deployments = mergeDeployments(deployments);
     this.signer = signer ?? null;
+    // ChainSecured-mode read provider. Populated from `signer.provider` when
+    // a wallet signer is attached (CPL-283), so reads route through the
+    // wallet's RPC instead of `this.rpcUrl`. Falls back to a JsonRpcProvider
+    // built from `this.rpcUrl` when no wallet is connected yet.
+    this.provider = signer?.provider ?? null;
+    // When set (e.g. ChainSecured login: keccak256(abi.encodePacked(address))),
+    // `_adminHash(apiKey)` returns this and ignores the apiKey argument.
+    // Leave null for API-mode and legacy sovereign API-key sessions, which
+    // still derive the identity hash from the api key string itself.
+    this.adminHashOverride = adminHashOverride ?? null;
     this._viewContractPromise = null;
     this._writeContract = null;
     this._driftCheckPromise = null;
 
-    if (mode === 'sovereign' && (!rpcUrl || !contractAddress)) {
+    if (mode === 'sovereign' && !contractAddress) {
+      throw new Error('LitNodeSimpleApiClient: sovereign mode requires contractAddress');
+    }
+    if (mode === 'sovereign' && !rpcUrl && !this.provider) {
       throw new Error(
-        'LitNodeSimpleApiClient: sovereign mode requires rpcUrl and contractAddress',
+        'LitNodeSimpleApiClient: sovereign mode requires rpcUrl, or a signer whose provider can be used for reads',
       );
     }
   }
@@ -388,8 +468,19 @@ export class LitNodeSimpleApiClient {
    * @param {import('ethers').Signer} signer - ethers v6 Signer
    */
   connectSigner(signer) {
+    const nextProvider = signer?.provider ?? null;
+    const providerChanged = nextProvider !== this.provider;
     this.signer = signer;
     this._writeContract = null;
+    // Adopt the wallet's provider for reads (CPL-283), or fall back to the
+    // `rpcUrl` JsonRpcProvider when the new signer has none / signer is null.
+    // Reset cached read artifacts on any provider change so the next read
+    // rebinds rather than keeping the previous wallet's provider.
+    if (providerChanged) {
+      this.provider = nextProvider;
+      this._viewContractPromise = null;
+      this._driftCheckPromise = null;
+    }
   }
 
   /**
@@ -420,7 +511,7 @@ export class LitNodeSimpleApiClient {
     if (!this._driftCheckPromise) {
       this._driftCheckPromise = (async () => {
         const ethers = await loadEthers();
-        const provider = new ethers.JsonRpcProvider(this.rpcUrl);
+        const provider = this.provider ?? new ethers.JsonRpcProvider(this.rpcUrl);
         const [code, network] = await Promise.all([
           provider.getCode(this.contractAddress),
           provider.getNetwork(),
@@ -491,7 +582,7 @@ export class LitNodeSimpleApiClient {
     if (!this._viewContractPromise) {
       this._viewContractPromise = (async () => {
         const ethers = await loadEthers();
-        const provider = new ethers.JsonRpcProvider(this.rpcUrl);
+        const provider = this.provider ?? new ethers.JsonRpcProvider(this.rpcUrl);
         return new ethers.Contract(this.contractAddress, ACCOUNT_CONFIG_VIEW_ABI, provider);
       })();
     }
@@ -507,6 +598,25 @@ export class LitNodeSimpleApiClient {
   async _apiKeyHash(apiKey) {
     const ethers = await loadEthers();
     return ethers.keccak256(ethers.toUtf8Bytes(apiKey));
+  }
+
+  /**
+   * Resolve the 32-byte `apiKeyHash` used as the account identity on-chain.
+   * ChainSecured sessions set `adminHashOverride = keccak256(abi.encodePacked(address))`
+   * at login; API-key sessions (API mode or legacy sovereign) leave it null
+   * and this falls through to `_apiKeyHash(apiKey)`.
+   *
+   * IMPORTANT: only call this at identity sites (the "whose account is it"
+   * hash). Content hashes for actionIpfsCid and pkp addresses must keep
+   * calling `_apiKeyHash(value)` directly so the override does not corrupt
+   * them.
+   *
+   * @param {string} apiKey - apiKey string; may be empty for ChainSecured sessions.
+   * @returns {Promise<string>} 0x-prefixed 32-byte hex.
+   */
+  async _adminHash(apiKey) {
+    if (this.adminHashOverride) return this.adminHashOverride;
+    return this._apiKeyHash(apiKey);
   }
 
   /**
@@ -530,6 +640,144 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
+   * Contract: WritesFacet.newChainSecuredAccount(string, string).
+   * Creates a ChainSecured (unmanaged, wallet-signed) account. The connected
+   * signer address IS the admin; on-chain, apiKeyHash = keccak256(abi.encodePacked(msg.sender)).
+   *
+   * Sovereign mode only. Requires a connected signer + the chain drift check
+   * to pass. Reverts on collision (existing account for this wallet).
+   *
+   * @param {Object} options
+   * @param {string} options.accountName
+   * @param {string} options.accountDescription
+   * @param {Object} [options.sovereignLifecycle] - injected by the dashboard Proxy
+   * @returns {Promise<{wallet_address: string, api_key_hash: string, transaction_hash: string}>}
+   */
+  async newChainSecuredAccount({ accountName, accountDescription, sovereignLifecycle } = {}) {
+    if (this.mode !== 'sovereign') {
+      throw new Error('newChainSecuredAccount requires sovereign mode');
+    }
+    const contract = await this._getWriteContract();
+    const ethers = await loadEthers();
+    const signerAddress = await this.signer.getAddress();
+    const apiKeyHash = ethers.solidityPackedKeccak256(['address'], [signerAddress]);
+    try {
+      const { txHash } = await runContractWrite({
+        contract, method: 'newChainSecuredAccount',
+        args: [accountName ?? '', accountDescription ?? ''],
+        ...(sovereignLifecycle ?? {}),
+      });
+      return { wallet_address: signerAddress, api_key_hash: apiKeyHash, transaction_hash: txHash };
+    } catch (err) {
+      const msg = err?.decoded || err?.message || '';
+      if (msg.includes('AccountAlreadyExists')) {
+        const friendly = new Error(
+          'An account already exists for this wallet address. Connect a different wallet or log in with your existing account.',
+        );
+        friendly.cause = err;
+        friendly.accountAlreadyExists = true;
+        throw friendly;
+      }
+      throw err;
+    }
+  }
+
+  /**
+   * On-chain `WritesFacet.transferChainSecuredAccountOwnership` — reassign the
+   * admin wallet of a ChainSecured account to a different address. The current
+   * admin signs the transaction directly with their wallet (no api_payer
+   * involvement). After this call resolves the connected signer is no longer
+   * authorized for the account.
+   *
+   * Sovereign mode only.
+   *
+   * @param {Object} options
+   * @param {string} options.newAdminWalletAddress - 0x-prefixed Ethereum address.
+   * @param {Object} [options.sovereignLifecycle]  - injected by the dashboard Proxy.
+   * @returns {Promise<{previous_admin: string, new_admin: string, transaction_hash: string}>}
+   */
+  async transferChainSecuredAccountOwnership({ newAdminWalletAddress, sovereignLifecycle } = {}) {
+    if (this.mode !== 'sovereign') {
+      throw new Error('transferChainSecuredAccountOwnership requires sovereign mode');
+    }
+    const ethers = await loadEthers();
+    if (!newAdminWalletAddress || !ethers.isAddress(newAdminWalletAddress)) {
+      throw new Error('transferChainSecuredAccountOwnership: newAdminWalletAddress must be a valid Ethereum address');
+    }
+    const checksummed = ethers.getAddress(newAdminWalletAddress);
+    const contract = await this._getWriteContract();
+    const previousAdmin = await this.signer.getAddress();
+    // Identity hash for the *current* admin — the contract resolves this to
+    // the master apiKeyHash via allApiKeyHashesToMaster, so this works whether
+    // the account was originally created via newChainSecuredAccount or arrived
+    // here through a prior conversion/transfer.
+    const apiKeyHash = await this._adminHash('');
+    const { txHash } = await runContractWrite({
+      contract, method: 'transferChainSecuredAccountOwnership',
+      args: [apiKeyHash, checksummed],
+      ...(sovereignLifecycle ?? {}),
+    });
+    return { previous_admin: previousAdmin, new_admin: checksummed, transaction_hash: txHash };
+  }
+
+  /**
+   * POST /core/v1/convert_to_chain_secured_account
+   * Hand the account's admin role over to a user-controlled wallet and flip
+   * `managed` from true to false. The user proves wallet ownership with an
+   * EIP-712 typed-data signature (`primaryType: "ConvertAccount"`, same
+   * canonical envelope as create_wallet_with_signature). The api_payer
+   * signs the on-chain `convertToChainSecuredAccount` call.
+   *
+   * API mode only. Irreversible: the contract reverts if the account is
+   * already ChainSecured.
+   *
+   * @param {Object} options
+   * @param {string} options.apiKey       - existing API key (admin authority).
+   * @param {Object} options.signer       - ethers Signer for the new admin wallet.
+   * @param {number} [options.chainId]    - expected chain id; defaults to this.chainId.
+   * @returns {Promise<{wallet_address: string, api_key_hash: string}>}
+   */
+  async convertToChainSecuredAccount({ apiKey, signer, chainId } = {}) {
+    if (this.mode !== 'api') {
+      throw new Error('convertToChainSecuredAccount requires api mode');
+    }
+    if (!apiKey) throw new Error('convertToChainSecuredAccount requires apiKey');
+    if (!signer) throw new Error('convertToChainSecuredAccount requires a connected signer');
+    const newAdminAddress = await signer.getAddress();
+    const targetChainId = chainId ?? this.chainId;
+    if (targetChainId == null) {
+      throw new Error('convertToChainSecuredAccount: chainId is unknown — call getNodeChainConfig first');
+    }
+    const issuedAt = Math.floor(Date.now() / 1000);
+    // EIP-712 typed data — the wallet UI surfaces `primaryType: ConvertAccount`
+    // and the (address, issuedAt) fields by name, so a phishing dApp can't
+    // disguise the request as a generic message and replay it against the
+    // secret-emitting endpoints (CPL-286). primaryType is part of the type
+    // hash, so the server rejects cross-flow replay at the digest level.
+    const typedData = buildChainSecuredTypedData({
+      primaryType: PRIMARY_TYPE_CONVERT_ACCOUNT,
+      address: newAdminAddress,
+      chainId: targetChainId,
+      issuedAt,
+    });
+    const { typed_data, signature } = await signChainSecuredTypedData(signer, typedData);
+    const res = await fetch(`${this.baseUrl}/convert_to_chain_secured_account`, {
+      method: 'POST',
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        new_admin_wallet_address: newAdminAddress,
+        typed_data,
+        signature,
+      }),
+    });
+    await parseResponse(res, 'convert_to_chain_secured_account');
+    // Reuse the canonical hash helper so this stays in sync with the
+    // server-side `api_key_hash` if the convention ever changes.
+    const apiKeyHash = await this._apiKeyHash(apiKey);
+    return { wallet_address: newAdminAddress, api_key_hash: apiKeyHash };
+  }
+
+  /**
    * GET /core/v1/account_exists
    * Checks whether an account exists and is mutable for the given API key (contract: accountExistsAndIsMutable).
    * API key via X-Api-Key or Authorization: Bearer header.
@@ -539,16 +787,22 @@ export class LitNodeSimpleApiClient {
   async accountExists(apiKey) {
     if (this.mode === 'sovereign') {
       const contract = await this._getViewContract();
-      const hash = await this._apiKeyHash(apiKey);
-      // accountExistsAndIsMutable has an msg.sender check (caller must be an
-      // api_payer). The server-side path spoofs this by setting `.from(api_payer)`
-      // on the eth_call. For sovereign reads we take the same approach: fetch
-      // api_payers via the same contract and use the first one as the from address.
-      const payers = await contract.api_payers();
-      if (!payers || payers.length === 0) {
-        throw new Error('account_exists (sovereign): no api_payers configured on contract');
+      const hash = await this._adminHash(apiKey);
+      // accountExistsAndIsMutable is msg.sender-gated. For unmanaged
+      // (ChainSecured) accounts only the wallet that owns the account passes;
+      // for managed accounts an api_payer passes. Use the connected signer
+      // when available (covers ChainSecured), fall back to api_payer.
+      let from;
+      if (this.signer) {
+        from = await this.signer.getAddress();
+      } else {
+        const payers = await contract.api_payers();
+        if (!payers || payers.length === 0) {
+          throw new Error('account_exists (sovereign): no api_payers configured on contract');
+        }
+        from = payers[0];
       }
-      return await contract.accountExistsAndIsMutable.staticCall(hash, { from: payers[0] });
+      return await contract.accountExistsAndIsMutable.staticCall(hash, { from });
     }
     const res = await fetch(`${this.baseUrl}/account_exists`, {
       headers: headersWithApiKey(apiKey),
@@ -557,13 +811,129 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
-   * GET /core/v1/create_wallet
-   * Creates a wallet for the given API key and returns the wallet address.
-   * API key via X-Api-Key or Authorization: Bearer header.
-   * @param {string} apiKey - API key (from getApiKey)
+   * Sovereign-only variant of `accountExists` that takes a pre-computed
+   * apiKeyHash (0x-prefixed uint256 hex). Used by the ChainSecured login
+   * flow where the dashboard computes `keccak256(abi.encodePacked(address))`
+   * before it has (or needs) an apiKey string.
+   *
+   * `accountExistsAndIsMutable` is gated by msg.sender. For unmanaged
+   * (ChainSecured) accounts the contract requires `msg.sender ==
+   * account.adminWalletAddress` — i.e., the user's own wallet. Spoofing
+   * api_payer here would falsely return false for ChainSecured accounts.
+   * If a signer is connected we use its address; otherwise we fall back to
+   * api_payer for the managed-account case.
+   *
+   * @param {string} apiKeyHashHex - 0x-prefixed 32-byte hex
+   * @returns {Promise<boolean>}
+   */
+  async accountExistsByHash(apiKeyHashHex) {
+    if (this.mode !== 'sovereign') {
+      throw new Error('accountExistsByHash requires sovereign mode');
+    }
+    const contract = await this._getViewContract();
+    let from;
+    if (this.signer) {
+      from = await this.signer.getAddress();
+    } else {
+      const payers = await contract.api_payers();
+      if (!payers || payers.length === 0) {
+        throw new Error('accountExistsByHash: no api_payers configured on contract');
+      }
+      from = payers[0];
+    }
+    return await contract.accountExistsAndIsMutable.staticCall(apiKeyHashHex, { from });
+  }
+
+  /**
+   * Public wrapper around `_verifyAbiIntegrity` that uses a read-only provider
+   * (no wallet required) and returns a non-throwing result. Safe to call
+   * post-wallet-connect to drive the drift banner.
+   *
+   * @returns {Promise<{ok: true} | {ok: false, reason: string}>}
+   */
+  async checkAbiDrift() {
+    if (this.mode !== 'sovereign') {
+      return { ok: true };
+    }
+    try {
+      await this._verifyAbiIntegrity();
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, reason: err?.message || String(err) };
+    }
+  }
+
+  /**
+   * Creates a wallet for the given account.
+   *
+   * API mode (default): GET /core/v1/create_wallet — server mints + registers
+   * the PKP on-chain (api_payer pays gas, account is billed $0.01).
+   *
+   * ChainSecured mode: two wallet popups.
+   *   1. Sign EIP-712 typed data (`primaryType: CreateWallet`) proving wallet
+   *      ownership; server verifies and mints the PKP via DStack MPC (no
+   *      on-chain write).
+   *   2. Wallet calls `registerWalletDerivation(adminHash, pkpAddress,
+   *      derivationPath, name, description)` to register the PKP on-chain.
+   *
+   * Backward-compat: legacy `createWallet(apiKey)` (bare string) still works.
+   *
+   * @param {string|Object} options - apiKey string (legacy) or options bag.
+   * @param {string} [options.apiKey]
+   * @param {string} [options.name='Wallet']
+   * @param {string} [options.description='Wallet']
+   * @param {Object} [options.sovereignLifecycle] - injected by the dashboard Proxy
    * @returns {Promise<CreateWalletResponse>}
    */
-  async createWallet(apiKey) {
+  async createWallet(options = {}) {
+    if (typeof options === 'string') {
+      options = { apiKey: options };
+    }
+    const { apiKey, name = 'Wallet', description = 'Wallet', sovereignLifecycle } = options;
+
+    if (this.mode === 'sovereign') {
+      if (!this.signer) {
+        throw new Error('createWallet (sovereign): wallet signer not connected');
+      }
+      // _verifyAbiIntegrity populates this.chainId from the RPC if it wasn't
+      // passed at construction. Run it before building the EIP-712 typed
+      // data so domain.chainId is a real number — the registerWalletDerivation
+      // step does the same verify, so this is free.
+      await this._verifyAbiIntegrity();
+      if (this.chainId == null) {
+        throw new Error('createWallet (sovereign): chainId could not be resolved from RPC');
+      }
+      const signerAddress = await this.signer.getAddress();
+      const issuedAt = Math.floor(Date.now() / 1000);
+      // EIP-712 typed data — wallet UI surfaces `primaryType: CreateWallet`
+      // and labelled fields. primaryType is part of the type hash, so a
+      // signature minted here cannot be replayed against the secret-emitting
+      // /add_usage_api_key_with_signature endpoint (CPL-286).
+      const typedData = buildChainSecuredTypedData({
+        primaryType: PRIMARY_TYPE_CREATE_WALLET,
+        address: signerAddress,
+        chainId: this.chainId,
+        issuedAt,
+      });
+      const { typed_data, signature } = await signChainSecuredTypedData(this.signer, typedData);
+      const res = await fetch(`${this.baseUrl}/create_wallet_with_signature`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ typed_data, signature }),
+      });
+      const minted = await parseResponse(res, 'create_wallet_with_signature');
+      const { wallet_address, derivation_path } = minted;
+
+      const contract = await this._getWriteContract();
+      const adminHash = await this._adminHash(apiKey);
+      const { txHash } = await runContractWrite({
+        contract, method: 'registerWalletDerivation',
+        args: [adminHash, wallet_address, derivation_path, name, description],
+        ...(sovereignLifecycle ?? {}),
+      });
+      return { wallet_address, transaction_hash: txHash };
+    }
+
     const res = await fetch(`${this.baseUrl}/create_wallet`, {
       headers: headersWithApiKey(apiKey),
     });
@@ -613,23 +983,18 @@ export class LitNodeSimpleApiClient {
   async addGroup({ apiKey, groupName, groupDescription = '', pkpIdsPermitted = [], cidHashesPermitted = [], sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const name = groupName ?? '';
       const description = groupDescription ?? '';
-      // staticCall first to pre-fetch the new group_id without burning a tx.
-      let groupId = null;
-      try {
-        groupId = await contract.addGroup.staticCall(hash, name, description, cidHashesPermitted, pkpIdsPermitted);
-      } catch (e) {
-        // staticCall revert will surface again on the real call; proceed and
-        // let runContractWrite produce a decoded error.
-      }
-      const { txHash } = await runContractWrite({
+      // runContractWrite's call-before-send simulation returns the new group_id
+      // (addGroup's return value) as `simulatedResult`, so we can surface it
+      // without a separate staticCall.
+      const { txHash, simulatedResult } = await runContractWrite({
         contract, method: 'addGroup',
         args: [hash, name, description, cidHashesPermitted, pkpIdsPermitted],
         ...(sovereignLifecycle ?? {}),
       });
-      return { success: true, group_id: groupId != null ? groupId.toString() : null, transaction_hash: txHash };
+      return { success: true, group_id: simulatedResult != null ? simulatedResult.toString() : null, transaction_hash: txHash };
     }
     const body = {
       group_name: groupName ?? '',
@@ -654,7 +1019,7 @@ export class LitNodeSimpleApiClient {
   async addAction({ apiKey, actionIpfsCid, name, description, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const actionHash = await this._apiKeyHash(actionIpfsCid);
       const { txHash } = await runContractWrite({
         contract, method: 'addAction',
@@ -681,7 +1046,7 @@ export class LitNodeSimpleApiClient {
   async addActionToGroup({ apiKey, groupId, actionIpfsCid, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const actionHash = await this._apiKeyHash(actionIpfsCid);
       const { txHash } = await runContractWrite({
         contract, method: 'addActionToGroup',
@@ -711,7 +1076,7 @@ export class LitNodeSimpleApiClient {
   async addPkpToGroup({ apiKey, groupId, pkpId, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const { txHash } = await runContractWrite({
         contract, method: 'addPkpToGroup',
         args: [hash, BigInt(groupId), pkpId],
@@ -740,7 +1105,7 @@ export class LitNodeSimpleApiClient {
   async removePkpFromGroup({ apiKey, groupId, pkpId, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const { txHash } = await runContractWrite({
         contract, method: 'removePkpFromGroup',
         args: [hash, BigInt(groupId), pkpId],
@@ -784,7 +1149,7 @@ export class LitNodeSimpleApiClient {
     if (this.mode === 'sovereign') {
       const ethers = await loadEthers();
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       // Sovereign mode has no server-side Stripe billing: balance starts at 0
       // and can't be topped up without API mode. Caller may pass expiration
       // (uint256 seconds timestamp; 0 = never) and balance explicitly.
@@ -816,7 +1181,7 @@ export class LitNodeSimpleApiClient {
         ],
         ...(sovereignLifecycle ?? {}),
       });
-      return { success: true, api_key: newUsageKey, hash: usageHash, transaction_hash: txHash };
+      return { success: true, usage_api_key: newUsageKey, hash: usageHash, transaction_hash: txHash };
     }
     const body = {
       name,
@@ -862,7 +1227,7 @@ export class LitNodeSimpleApiClient {
     if (this.mode === 'sovereign') {
       const ethers = await loadEthers();
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const usageHash = ethers.keccak256(ethers.toUtf8Bytes(usageApiKey));
       // setUsageApiKey is an upsert; existing expiration/balance are
       // overwritten. Sovereign callers should fetch current values via
@@ -920,7 +1285,7 @@ export class LitNodeSimpleApiClient {
     if (this.mode === 'sovereign') {
       const ethers = await loadEthers();
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const usageHash = ethers.keccak256(ethers.toUtf8Bytes(usageApiKey));
       const { txHash } = await runContractWrite({
         contract, method: 'removeUsageApiKey',
@@ -943,7 +1308,7 @@ export class LitNodeSimpleApiClient {
   async removeGroup({ apiKey, groupId, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const { txHash } = await runContractWrite({
         contract, method: 'removeGroup',
         args: [hash, BigInt(groupId)],
@@ -969,7 +1334,7 @@ export class LitNodeSimpleApiClient {
   async updateGroup({ apiKey, groupId, name, description, pkpIdsPermitted = [], cidHashesPermitted = [], sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const { txHash } = await runContractWrite({
         contract, method: 'updateGroup',
         args: [hash, BigInt(groupId), name ?? '', description ?? '', cidHashesPermitted, pkpIdsPermitted],
@@ -1001,7 +1366,7 @@ export class LitNodeSimpleApiClient {
   async deleteAction({ apiKey, hashedCid, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const { txHash } = await runContractWrite({
         contract, method: 'removeAction',
         args: [hash, hashedCid],
@@ -1027,7 +1392,7 @@ export class LitNodeSimpleApiClient {
   async removeActionFromGroup({ apiKey, groupId, hashedCid, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const { txHash } = await runContractWrite({
         contract, method: 'removeActionFromGroup',
         args: [hash, BigInt(groupId), hashedCid],
@@ -1056,7 +1421,7 @@ export class LitNodeSimpleApiClient {
   async updateActionMetadata({ apiKey, hashedCid, name, description, groupId = 0, sovereignLifecycle } = {}) {
     if (this.mode === 'sovereign') {
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       // groupId === 0 means "account-level action metadata" per contract convention.
       const { txHash } = await runContractWrite({
         contract, method: 'updateActionMetadata',
@@ -1088,7 +1453,7 @@ export class LitNodeSimpleApiClient {
     if (this.mode === 'sovereign') {
       const ethers = await loadEthers();
       const contract = await this._getWriteContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const usageHash = ethers.keccak256(ethers.toUtf8Bytes(usageApiKey));
       const { txHash } = await runContractWrite({
         contract, method: 'updateUsageApiKeyMetadata',
@@ -1119,7 +1484,7 @@ export class LitNodeSimpleApiClient {
   async listApiKeys({ apiKey, pageNumber = '0', pageSize = '10' }) {
     if (this.mode === 'sovereign') {
       const contract = await this._getViewContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const rows = await contract.listApiKeys(hash, pageNumber, pageSize);
       return rows.map((r) => ({
         id: r.metadata.id.toString(),
@@ -1156,7 +1521,7 @@ export class LitNodeSimpleApiClient {
   async listGroups({ apiKey, pageNumber = '0', pageSize = '10' }) {
     if (this.mode === 'sovereign') {
       const contract = await this._getViewContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const rows = await contract.listGroups(hash, pageNumber, pageSize);
       return rows.map((r) => ({
         id: r.id.toString(),
@@ -1183,7 +1548,7 @@ export class LitNodeSimpleApiClient {
   async listWallets({ apiKey, pageNumber = '0', pageSize = '10' }) {
     if (this.mode === 'sovereign') {
       const contract = await this._getViewContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const rows = await contract.listPkps(hash, pageNumber, pageSize);
       return rows.map((r) => ({
         id: r.id.toString(),
@@ -1211,7 +1576,7 @@ export class LitNodeSimpleApiClient {
   async listWalletsInGroup({ apiKey, groupId, pageNumber = '0', pageSize = '10' }) {
     if (this.mode === 'sovereign') {
       const contract = await this._getViewContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       const rows = await contract.listWalletsInGroup(hash, groupId, pageNumber, pageSize);
       return rows.map((r) => ({
         id: r.id.toString(),
@@ -1245,7 +1610,7 @@ export class LitNodeSimpleApiClient {
   async listActions({ apiKey, groupId, pageNumber = '0', pageSize = '10' }) {
     if (this.mode === 'sovereign') {
       const contract = await this._getViewContract();
-      const hash = await this._apiKeyHash(apiKey);
+      const hash = await this._adminHash(apiKey);
       // Match server semantics: group IDs start at 1, so groupId==0 means
       // "account-level listing", not "group zero". listActionsInGroup with 0
       // can revert (GroupDoesNotExist) or return wrong data.
@@ -1276,14 +1641,15 @@ export class LitNodeSimpleApiClient {
   /**
    * GET /core/v1/get_node_chain_config
    * Returns the node's chain configuration (chain name, id, RPC URL, contract address, etc.).
-   * When the API does not include rpc_url, it is resolved from chainlistapi.com using chain_id.
+   * The API server omits rpc_url from the JSON response, so it is filled in from the
+   * known-chain map (anvil + Base).
    * @returns {Promise<NodeChainConfigResponse>}
    */
   async getNodeChainConfig() {
     const res = await fetch(`${this.baseUrl}/get_node_chain_config`);
     const cfg = await parseResponse(res, 'get_node_chain_config');
     if (!cfg.rpc_url && cfg.chain_id != null && cfg.is_evm) {
-      const rpcUrl = await resolveRpcUrlFromChainlist(cfg.chain_id);
+      const rpcUrl = rpcUrlForChainId(cfg.chain_id);
       if (rpcUrl) cfg.rpc_url = rpcUrl;
     }
     return cfg;
@@ -1327,13 +1693,17 @@ export class LitNodeSimpleApiClient {
 
   /**
    * GET /core/v1/billing/balance
-   * Returns the current credit balance for the authenticated API key.
-   * @param {string} apiKey
+   * Returns the current credit balance for the authenticated user.
+   * @param {string} apiKey - Raw API key. Ignored when `options.walletAuthHeader` is set.
+   * @param {{walletAuthHeader?: string, signal?: AbortSignal}} [options]
+   *   walletAuthHeader: base64(JSON{typed_data, signature}) for EIP-712 ChainSecured auth (CPL-285, CPL-286).
+   *   signal: AbortController signal to cancel the request mid-flight.
    * @returns {Promise<{balance_cents: number, balance_display: string}>}
    */
-  async getBillingBalance(apiKey) {
+  async getBillingBalance(apiKey, options = {}) {
     const res = await fetch(`${this.baseUrl}/billing/balance`, {
-      headers: headersWithApiKey(apiKey),
+      headers: billingHeaders(apiKey, options.walletAuthHeader),
+      signal: options.signal,
     });
     return parseResponse(res, 'billing/balance');
   }
@@ -1341,15 +1711,17 @@ export class LitNodeSimpleApiClient {
   /**
    * POST /core/v1/billing/create_payment_intent
    * Creates a Stripe PaymentIntent; returns client_secret and payment_intent_id.
-   * @param {string} apiKey
+   * @param {string} apiKey - Ignored when `options.walletAuthHeader` is set.
    * @param {number} amountCents - Amount in US cents (minimum 500)
+   * @param {{walletAuthHeader?: string, signal?: AbortSignal}} [options]
    * @returns {Promise<{client_secret: string, payment_intent_id: string}>}
    */
-  async createPaymentIntent(apiKey, amountCents) {
+  async createPaymentIntent(apiKey, amountCents, options = {}) {
     const res = await fetch(`${this.baseUrl}/billing/create_payment_intent`, {
       method: 'POST',
-      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      headers: billingHeaders(apiKey, options.walletAuthHeader, { 'Content-Type': 'application/json' }),
       body: JSON.stringify({ amount_cents: amountCents }),
+      signal: options.signal,
     });
     return parseResponse(res, 'billing/create_payment_intent');
   }
@@ -1357,18 +1729,33 @@ export class LitNodeSimpleApiClient {
   /**
    * POST /core/v1/billing/confirm_payment
    * Verifies a succeeded PaymentIntent and credits the account.
-   * @param {string} apiKey
+   * @param {string} apiKey - Ignored when `options.walletAuthHeader` is set.
    * @param {string} paymentIntentId
+   * @param {{walletAuthHeader?: string, signal?: AbortSignal}} [options]
    * @returns {Promise<void>}
    */
-  async confirmPayment(apiKey, paymentIntentId) {
+  async confirmPayment(apiKey, paymentIntentId, options = {}) {
     const res = await fetch(`${this.baseUrl}/billing/confirm_payment`, {
       method: 'POST',
-      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      headers: billingHeaders(apiKey, options.walletAuthHeader, { 'Content-Type': 'application/json' }),
       body: JSON.stringify({ payment_intent_id: paymentIntentId }),
+      signal: options.signal,
     });
     return parseResponse(res, 'billing/confirm_payment');
   }
+}
+
+/**
+ * Build headers for billing endpoints. ChainSecured callers send an
+ * X-Wallet-Auth header (base64(JSON{typed_data, signature})); API-mode
+ * callers send X-Api-Key. The server's BillingAuth guard prefers the
+ * wallet header when both are present (CPL-285, CPL-286).
+ */
+function billingHeaders(apiKey, walletAuthHeader, extra = {}) {
+  if (walletAuthHeader) {
+    return { 'X-Wallet-Auth': walletAuthHeader, ...extra };
+  }
+  return { 'X-Api-Key': apiKey, ...extra };
 }
 
 /**

@@ -34,9 +34,10 @@ pub struct StripeState {
     /// Avoids duplicate customer creation caused by Stripe Search API indexing lag.
     /// Uses `time_to_idle` so frequently accessed entries stay warm.
     customer_cache: Cache<String, String>,
-    /// api_key → wallet_address cache.
-    /// Resolves both master and usage API keys to the account's creator wallet address
-    /// via the on-chain `allApiKeyHashesToMaster` mapping, avoiding a contract call per charge.
+    /// api_key → billing wallet address cache.
+    /// Resolves both master and usage API keys to the account's billing wallet address
+    /// (the wallet used to identify the Stripe customer) via the on-chain
+    /// `allApiKeyHashesToMaster` mapping, avoiding a contract call per charge.
     wallet_cache: Cache<String, String>,
     /// customer_id → credit balance cache (10-min TTL).
     /// Avoids a Stripe API call on every charge; stale reads may allow some
@@ -195,13 +196,17 @@ async fn stripe_post_with_idempotency(
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-/// Compute a non-sensitive cache key from a raw API key string.
+/// Compute a non-sensitive cache key from an account identity string.
 ///
-/// Uses the same keccak256 hash that the contract uses, so no secret material
-/// is held in the cache's key set.  Avoids leaking raw API keys via memory
-/// dumps, debug tooling, or telemetry.
-fn cache_key(api_key: &str) -> String {
-    crate::utils::parse_with_hash::api_key_hash(api_key).to_string()
+/// Accepts either a raw API key (hashed via keccak256) or a precomputed
+/// 0x-prefixed 32-byte hex hash (used by ChainSecured callers, whose on-chain
+/// identity is `keccak256(walletAddress)`). Both forms collapse to the same
+/// U256 cache key, so a raw key and its hash share a cache entry.
+///
+/// Using the hash means no secret material is held in the cache's key set —
+/// avoids leaking raw API keys via memory dumps, debug tooling, or telemetry.
+fn cache_key(key_or_hash: &str) -> String {
+    crate::utils::parse_with_hash::usage_api_key_to_hash(key_or_hash).to_string()
 }
 
 /// Remove an API key from the wallet address cache.
@@ -211,13 +216,19 @@ pub async fn invalidate_wallet_cache(api_key: &str, state: &StripeState) {
     state.wallet_cache.invalidate(&cache_key(api_key)).await;
 }
 
-/// Resolve any API key (master or usage) to the account's creator wallet address.
+/// Resolve any account identity to its billing wallet address.
 ///
-/// Uses the on-chain `allApiKeyHashesToMaster` mapping so that usage API keys
-/// resolve to the same wallet (and therefore same Stripe customer) as their
-/// parent account key.  Results are cached for 1 hour.
+/// Accepts a raw API key (master or usage) or — for ChainSecured callers — a
+/// precomputed 0x-prefixed 32-byte hex hash (the wallet-derived
+/// `keccak256(walletAddress)`). Uses the on-chain `allApiKeyHashesToMaster`
+/// mapping so that usage API keys resolve to the same wallet (and therefore
+/// same Stripe customer) as their parent account key. The billing wallet is
+/// set at account creation and preserved across conversion to ChainSecured,
+/// so charges keep hitting the same Stripe customer after the admin wallet
+/// rotates (CPL-313). Legacy accounts without a billing wallet fall back to
+/// the admin wallet on-chain. Results are cached for 1 hour.
 ///
-/// The cache is keyed by the keccak256 hash of the API key (not the raw key)
+/// The cache is keyed by the keccak256 hash of the input (not the raw key)
 /// to avoid holding secret material in memory.
 #[instrument(name = "stripe::resolve_wallet_address", skip_all, err)]
 pub async fn resolve_wallet_address(api_key: &str, state: &StripeState) -> Result<String> {
@@ -227,7 +238,7 @@ pub async fn resolve_wallet_address(api_key: &str, state: &StripeState) -> Resul
         .wallet_cache
         .try_get_with(key, async {
             tracing::debug!("stripe::resolve_wallet_address: cache miss, calling contract");
-            crate::accounts::get_account_wallet_address(api_key).await
+            crate::accounts::get_billing_wallet_address(api_key).await
         })
         .await
         .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e}"));
@@ -1007,6 +1018,17 @@ mod tests {
     #[test]
     fn cache_key_different_inputs() {
         assert_ne!(cache_key("key-a"), cache_key("key-b"));
+    }
+
+    #[test]
+    fn cache_key_accepts_precomputed_hash() {
+        // ChainSecured callers send the wallet-derived hash directly. A raw key
+        // and its keccak256 hex form must collapse to the same cache key — and
+        // therefore resolve to the same on-chain account / Stripe customer.
+        use crate::utils::parse_with_hash::api_key_hash;
+        let raw = "test-api-key";
+        let hash_hex = format!("0x{:064x}", api_key_hash(raw));
+        assert_eq!(cache_key(raw), cache_key(&hash_hex));
     }
     // ── Balance cache merge logic ────────────────────────────────────────────
 

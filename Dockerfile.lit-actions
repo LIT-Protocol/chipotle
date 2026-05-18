@@ -25,9 +25,14 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
+# Drop privileges so a JS sandbox escape cannot reach root in the CVM.
+RUN useradd -u 10001 -m lit
+
 WORKDIR /app
 
 COPY --from=builder /build/lit-actions/target/release/lit_actions /usr/local/bin/
 COPY lit-actions/integrity.lock /app/integrity.lock
+
+USER lit
 
 CMD ["lit_actions", "--socket", "/tmp/lit_actions.sock", "--integrity-lock", "/app/integrity.lock"]

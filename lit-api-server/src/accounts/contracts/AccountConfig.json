@@ -18,6 +18,17 @@
           "internalType": "uint256",
           "name": "apiKeyHash",
           "type": "uint256"
+        }
+      ],
+      "name": "AccountDoesNotExist",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
         },
         {
           "internalType": "uint256",
@@ -228,7 +239,26 @@
         {
           "indexed": true,
           "internalType": "address",
-          "name": "creator",
+          "name": "newAdminWalletAddress",
+          "type": "address"
+        }
+      ],
+      "name": "AccountConvertedToChainSecured",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "admin",
           "type": "address"
         },
         {
@@ -327,6 +357,31 @@
         }
       ],
       "name": "ActionRemovedFromGroup",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "previousAdminWalletAddress",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "address",
+          "name": "newAdminWalletAddress",
+          "type": "address"
+        }
+      ],
+      "name": "ChainSecuredAccountOwnershipTransferred",
       "type": "event"
     },
     {
@@ -620,6 +675,24 @@
           "type": "uint256"
         },
         {
+          "internalType": "address",
+          "name": "newAdminWalletAddress",
+          "type": "address"
+        }
+      ],
+      "name": "convertToChainSecuredAccount",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
           "internalType": "bool",
           "name": "managed",
           "type": "bool"
@@ -636,11 +709,29 @@
         },
         {
           "internalType": "address",
-          "name": "creatorWalletAddress",
+          "name": "adminWalletAddress",
           "type": "address"
         }
       ],
       "name": "newAccount",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "string",
+          "name": "accountName",
+          "type": "string"
+        },
+        {
+          "internalType": "string",
+          "name": "accountDescription",
+          "type": "string"
+        }
+      ],
+      "name": "newChainSecuredAccount",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
@@ -873,6 +964,24 @@
       "inputs": [
         {
           "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        },
+        {
+          "internalType": "address",
+          "name": "newAdminWalletAddress",
+          "type": "address"
+        }
+      ],
+      "name": "transferChainSecuredAccountOwnership",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
           "name": "accountApiKeyHash",
           "type": "uint256"
         },
@@ -995,17 +1104,6 @@
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "uint256",
-          "name": "apiKeyHash",
-          "type": "uint256"
-        }
-      ],
-      "name": "AccountDoesNotExist",
-      "type": "error"
     },
     {
       "inputs": [],
@@ -1283,6 +1381,25 @@
         }
       ],
       "name": "getAccountWalletAddress",
+      "outputs": [
+        {
+          "internalType": "address",
+          "name": "",
+          "type": "address"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint256",
+          "name": "apiKeyHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "getBillingWalletAddress",
       "outputs": [
         {
           "internalType": "address",

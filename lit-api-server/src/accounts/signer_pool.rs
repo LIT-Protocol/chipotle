@@ -8,6 +8,7 @@ use ethers::signers::{LocalWallet, Signer};
 use ethers::types::{H160, U256};
 use ethers_providers::Middleware;
 
+use crate::accounts::decode_revert::decode_contract_revert;
 use crate::accounts::signable_contract::{
     SigningClient, get_admin_api_payer_contract, get_admin_api_signer,
     get_read_only_account_config_contract,
@@ -262,6 +263,16 @@ async fn set_api_payers(entries: Vec<SigningPoolEntry>) -> Result<()> {
     tracing::info!("signer_pool: setting api payers: {:?}", api_payers);
 
     let function_call = contract.set_api_payers(api_payers);
+
+    // Call-before-send: dry-run to surface a decoded revert reason before
+    // broadcasting the admin transaction.
+    if let Err(sim_err) = function_call.call().await {
+        let decoded = decode_contract_revert(&sim_err);
+        return Err(anyhow::anyhow!(
+            "Failed to set api payers (simulation): {decoded}"
+        ));
+    }
+
     let tx = function_call.send().await;
 
     if let Err(e) = tx {

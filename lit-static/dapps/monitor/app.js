@@ -335,28 +335,18 @@ function getServerUrl() {
   return (el('network')?.value || '').replace(/\/$/, '');
 }
 
-/* ═══ CORS proxy + chainlist ═════════════════════════════════════════════════ */
+/* ═══ Known chain RPC URLs ═══════════════════════════════════════════════════ */
 
-const CORS_PROXY = 'https://whateverorigin.org/get?url=';
+// The monitor supports anvil for local dev and Base for everything else.
+const KNOWN_RPC_URLS = {
+  31337: 'http://127.0.0.1:8545',
+  8453: 'https://mainnet.base.org',
+  84532: 'https://sepolia.base.org',
+};
 
-async function resolveRpcUrlFromChainlist(chainId) {
+function rpcUrlForChainId(chainId) {
   if (chainId == null || chainId === '') return null;
-  try {
-    const url = `${CORS_PROXY}${encodeURIComponent(`https://chainlistapi.com/chains/${chainId}`)}`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const wrapper = await res.json();
-    const data = typeof wrapper?.contents === 'string' ? JSON.parse(wrapper.contents) : wrapper;
-    const rpcs = data?.rpc;
-    if (!Array.isArray(rpcs)) return null;
-    const entry = rpcs.find((r) => {
-      const u = typeof r === 'string' ? r : r?.url;
-      return typeof u === 'string' && u.startsWith('https://');
-    });
-    return entry ? (typeof entry === 'string' ? entry : entry.url) : null;
-  } catch (_) {
-    return null;
-  }
+  return KNOWN_RPC_URLS[Number(chainId)] ?? null;
 }
 
 /* ═══ Data fetching ══════════════════════════════════════════════════════════ */
@@ -384,14 +374,8 @@ async function getNodeChainConfig(serverUrl) {
     setValue('cc-token',            cfg.token        ?? '—', !cfg.token);
 
     let rpcUrl = cfg.rpc_url ?? '';
-    if (!rpcUrl) {
-      const selectedNetwork = el('network')?.value || '';
-      const isLocal = (() => { try { return new URL(selectedNetwork).hostname === 'localhost'; } catch { return false; } })();
-      if (isLocal) {
-        rpcUrl = 'http://localhost:8545';
-      } else if (cfg.chain_id != null && cfg.is_evm) {
-        rpcUrl = (await resolveRpcUrlFromChainlist(cfg.chain_id)) ?? '';
-      }
+    if (!rpcUrl && cfg.chain_id != null && cfg.is_evm) {
+      rpcUrl = rpcUrlForChainId(cfg.chain_id) ?? '';
     }
     const rpcInput = el('cc-rpc-url');
     if (rpcInput) rpcInput.value = rpcUrl;

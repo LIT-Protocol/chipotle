@@ -17,8 +17,10 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
     openapi_get_routes_spec![
         list_api_keys,
         new_account,
+        convert_to_chain_secured_account,
         account_exists,
         create_wallet,
+        create_wallet_with_signature,
         lit_action,
         get_lit_action_ipfs_id,
         add_group,
@@ -29,6 +31,7 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         add_pkp_to_group,
         remove_pkp_from_group,
         add_usage_api_key,
+        add_usage_api_key_with_signature,
         update_usage_api_key,
         remove_usage_api_key,
         update_group,

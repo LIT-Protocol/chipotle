@@ -2,13 +2,19 @@
  * Authentication — session state, API client, theme, stat cards.
  */
 
-import { showStatus, hideStatus, formatError, logError, showActionProgress, closeActionProgress, escapeHtml } from './ui-utils.js';
+import { showStatus, hideStatus, formatError, logError, showActionProgress, closeActionProgress, escapeHtml, confirmDelete, openModal, closeModal } from './ui-utils.js';
 
 const STORAGE_KEY_API = 'accountconfig_api_key';
 const STORAGE_KEY_THEME = 'accountconfig_theme';
 const STORAGE_KEY_USAGE_OVERRIDE = 'accountconfig_usage_key_override';
 const STORAGE_KEY_OVERRIDE_ENABLED = 'accountconfig_usage_override_enabled';
 const STORAGE_KEY_MODE = 'accountconfig_mode';
+const STORAGE_KEY_CHAINSECURED_WALLET = 'accountconfig_chainsecured_wallet';
+const STORAGE_KEY_CHAINSECURED_HASH = 'accountconfig_chainsecured_hash';
+const STORAGE_KEY_CHAINSECURED_RPC = 'accountconfig_chainsecured_rpc_url';
+const STORAGE_KEY_CHAINSECURED_RPC_PANEL = 'accountconfig_chainsecured_rpc_panel_visible';
+const DEFAULT_CHAINSECURED_RPC_URL_REMOTE = 'https://base-rpc.publicnode.com';
+const DEFAULT_CHAINSECURED_RPC_URL_LOCAL = 'http://127.0.0.1:8545';
 export const LIST_PAGE_SIZE = '20';
 
 /**
@@ -19,10 +25,13 @@ export const LIST_PAGE_SIZE = '20';
  * Keep in sync with branched writes in core_sdk.js.
  */
 const SOVEREIGN_WRITE_METHODS = new Set([
+  'newChainSecuredAccount',
+  'createWallet',
   'addGroup', 'removeGroup', 'updateGroup',
   'addAction', 'deleteAction', 'addActionToGroup', 'removeActionFromGroup', 'updateActionMetadata',
   'addPkpToGroup', 'removePkpFromGroup',
   'addUsageApiKey', 'updateUsageApiKey', 'removeUsageApiKey', 'updateUsageApiKeyMetadata',
+  'transferChainSecuredAccountOwnership',
 ]);
 
 // ----- Mode (api | sovereign) -----
@@ -36,9 +45,7 @@ export function setMode(mode) {
   if (mode === 'sovereign') sessionStorage.setItem(STORAGE_KEY_MODE, 'sovereign');
   else sessionStorage.removeItem(STORAGE_KEY_MODE);
   // Invalidate cached client so the next getClient() rebuilds with the new mode.
-  _clientInstance = null;
-  _clientBaseUrl = null;
-  _clientMode = null;
+  resetClient();
 }
 
 // ----- API key session -----
@@ -50,8 +57,85 @@ export function getApiKey() {
 export function setApiKey(v) {
   if (v) sessionStorage.setItem(STORAGE_KEY_API, v);
   else sessionStorage.removeItem(STORAGE_KEY_API);
-  import('./billing.js').then((m) => m.resetBillingAvailability()).catch(() => {});
+  import('./billing.js').then((m) => {
+    m.resetBillingAvailability();
+    // Abort any in-flight billing requests under the prior identity (CPL-285).
+    if (typeof m.clearBillingSession === 'function') m.clearBillingSession();
+  }).catch(() => {});
   updateAuthUI();
+}
+
+// ----- ChainSecured session (wallet-backed) -----
+
+export function getChainSecuredWallet() {
+  return sessionStorage.getItem(STORAGE_KEY_CHAINSECURED_WALLET) || '';
+}
+
+export function getChainSecuredHash() {
+  return sessionStorage.getItem(STORAGE_KEY_CHAINSECURED_HASH) || '';
+}
+
+/**
+ * Persist a ChainSecured login: wallet address + precomputed apiKeyHash.
+ * Pushes the hash onto the cached SDK client's `adminHashOverride` so the
+ * 20 identity sites in core_sdk.js use the wallet-derived hash instead of
+ * hashing an (empty) api key string.
+ */
+export async function setChainSecuredSession({ walletAddress, apiKeyHash }) {
+  if (walletAddress) sessionStorage.setItem(STORAGE_KEY_CHAINSECURED_WALLET, walletAddress);
+  else sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_WALLET);
+  if (apiKeyHash) sessionStorage.setItem(STORAGE_KEY_CHAINSECURED_HASH, apiKeyHash);
+  else sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_HASH);
+  if (_clientInstance) _clientInstance.adminHashOverride = apiKeyHash || null;
+  updateAuthUI();
+}
+
+/** Clears ChainSecured session markers and the client cache. */
+export function clearChainSecuredSession() {
+  sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_WALLET);
+  sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_HASH);
+  // Abort any in-flight billing requests under the prior wallet (CPL-285).
+  import('./billing.js').then((m) => {
+    if (typeof m.clearBillingSession === 'function') m.clearBillingSession();
+  }).catch(() => {});
+  resetClient();
+}
+
+/** True if the user has any authenticated session — api key OR ChainSecured.
+ *  ChainSecured requires BOTH wallet + admin hash; if only one is present the
+ *  session is half-written (e.g. mid-login crash) and we clear it so the
+ *  caller can re-auth instead of hashing an empty api key against the wrong
+ *  on-chain identity. */
+export function isAuthenticated() {
+  if (getApiKey()) return true;
+  if (getMode() !== 'sovereign') return false;
+  const hasWallet = !!getChainSecuredWallet();
+  const hasHash = !!sessionStorage.getItem(STORAGE_KEY_CHAINSECURED_HASH);
+  if (hasWallet && hasHash) return true;
+  if (hasWallet || hasHash) clearChainSecuredSession();
+  return false;
+}
+
+/** Full sign-out: clears api-key, ChainSecured session, and the client cache. */
+export function logOut() {
+  sessionStorage.removeItem(STORAGE_KEY_API);
+  sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_WALLET);
+  sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_HASH);
+  clearOverrideState();
+  // Abort any in-flight billing requests under the prior identity (CPL-285).
+  import('./billing.js').then((m) => {
+    m.resetBillingAvailability();
+    if (typeof m.clearBillingSession === 'function') m.clearBillingSession();
+  }).catch(() => {});
+  resetClient();
+  updateAuthUI();
+}
+
+/** Invalidate the cached SDK client; next getClient() rebuilds fresh. */
+export function resetClient() {
+  _clientInstance = null;
+  _clientBaseUrl = null;
+  _clientMode = null;
 }
 
 /** Returns the usage API key override if set, otherwise the account API key. */
@@ -108,11 +192,72 @@ export function clearOverrideState() {
   setUsageKeyOverride('');
 }
 
+// ----- ChainSecured RPC URL override (CPL-276) -----
+
+/** True when the dashboard is served from a localhost origin. Shared by
+ *  `getBaseUrl()` and `getDefaultChainSecuredRpcUrl()`. */
+function isLocalhostOrigin() {
+  return typeof location !== 'undefined' && !!location.origin && location.origin.indexOf('localhost') !== -1;
+}
+
+/** Default RPC URL when no user override is set: local Anvil on localhost,
+ *  public Base RPC everywhere else. */
+export function getDefaultChainSecuredRpcUrl() {
+  return isLocalhostOrigin() ? DEFAULT_CHAINSECURED_RPC_URL_LOCAL : DEFAULT_CHAINSECURED_RPC_URL_REMOTE;
+}
+
+/** Effective RPC URL for ChainSecured reads/writes — user override or default. */
+export function getChainSecuredRpcUrl() {
+  return sessionStorage.getItem(STORAGE_KEY_CHAINSECURED_RPC) || getDefaultChainSecuredRpcUrl();
+}
+
+export function hasChainSecuredRpcOverride() {
+  return !!sessionStorage.getItem(STORAGE_KEY_CHAINSECURED_RPC);
+}
+
+/** Persist (or clear, on falsy) the user-supplied RPC URL.
+ *  Forces a fresh SDK client so its JsonRpcProvider rebinds to the new RPC. */
+export function setChainSecuredRpcUrl(v) {
+  if (v) sessionStorage.setItem(STORAGE_KEY_CHAINSECURED_RPC, v);
+  else sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_RPC);
+  resetClient();
+  updateChainSecuredRpcUrlUI();
+}
+
+export function isChainSecuredRpcPanelVisible() {
+  return sessionStorage.getItem(STORAGE_KEY_CHAINSECURED_RPC_PANEL) === 'true';
+}
+
+export function toggleChainSecuredRpcPanel() {
+  const next = !isChainSecuredRpcPanelVisible();
+  if (next) sessionStorage.setItem(STORAGE_KEY_CHAINSECURED_RPC_PANEL, 'true');
+  else sessionStorage.removeItem(STORAGE_KEY_CHAINSECURED_RPC_PANEL);
+  updateChainSecuredRpcUrlUI();
+}
+
+export function updateChainSecuredRpcUrlUI() {
+  const card = document.getElementById('chainsecured-rpc-card');
+  const input = document.getElementById('chainsecured-rpc-input');
+  const toggleBtn = document.getElementById('toggle-chainsecured-rpc-btn');
+  const resetBtn = document.getElementById('chainsecured-rpc-reset');
+  const defaultEl = document.getElementById('chainsecured-rpc-default');
+  const visible = isChainSecuredRpcPanelVisible();
+  const hasOverride = hasChainSecuredRpcOverride();
+  const defaultUrl = getDefaultChainSecuredRpcUrl();
+  if (card) card.style.display = visible ? '' : 'none';
+  if (input) {
+    input.value = getChainSecuredRpcUrl();
+    input.placeholder = defaultUrl;
+  }
+  if (defaultEl) defaultEl.textContent = defaultUrl;
+  if (resetBtn) resetBtn.style.display = hasOverride ? '' : 'none';
+  if (toggleBtn) toggleBtn.textContent = hasOverride ? '✓ RPC URL' : 'RPC URL';
+}
+
 // ----- Base URL -----
 
 export function getBaseUrl() {
-  if (typeof location !== 'undefined' && location.origin && location.origin.indexOf('localhost') !== -1)
-    return 'http://localhost:8000';
+  if (isLocalhostOrigin()) return 'http://localhost:8000';
   return '__LIT_API_BASE_URL__';
 }
 
@@ -132,16 +277,26 @@ export async function getClient() {
     const { createClient } = await import('../../core_sdk.js');
     const opts = { baseUrl, mode };
     if (mode === 'sovereign') {
-      // Bootstrap RPC + contract address via the server config endpoint
-      // (explicitly stays on the API path per CPL-267 plan).
+      // Bootstrap contract address + chain id via the server config endpoint.
+      // RPC URL is sourced from `getChainSecuredRpcUrl()` (default or user
+      // override under Account → RPC URL, per CPL-276), not the API. This is
+      // the fallback for reads that happen before a wallet signer is attached
+      // — once `connectSigner(signer)` runs, the SDK switches to the wallet's
+      // own provider for reads (CPL-283).
       const bootstrap = createClient({ baseUrl });
       const cfg = await bootstrap.getNodeChainConfig();
-      if (!cfg || !cfg.rpc_url || !cfg.contract_address) {
-        throw new Error('Node chain config missing rpc_url or contract_address');
+      if (!cfg || !cfg.contract_address) {
+        throw new Error('Node chain config missing contract_address');
       }
-      opts.rpcUrl = cfg.rpc_url;
+      opts.rpcUrl = getChainSecuredRpcUrl();
       opts.contractAddress = cfg.contract_address;
       if (cfg.chain_id != null) opts.chainId = Number(cfg.chain_id);
+    }
+    // Re-apply any active ChainSecured adminHash override so freshly-built
+    // clients resume with wallet-derived identity.
+    if (mode === 'sovereign') {
+      const chainSecuredHash = getChainSecuredHash();
+      if (chainSecuredHash) opts.adminHashOverride = chainSecuredHash;
     }
     const client = createClient(opts);
     _clientInstance = new Proxy(client, {
@@ -150,8 +305,14 @@ export async function getClient() {
         if (typeof val !== 'function') return val;
         return async function (...args) {
           const apiKey = (args[0] && typeof args[0] === 'object' && args[0].apiKey) || args[0];
-          const keyPreview = typeof apiKey === 'string' ? apiKey.substring(0, 6) + '\u2026' : '(none)';
-          console.log(`[dashboard:${mode}] ${prop} \u2192 ${baseUrl} | key: ${keyPreview}`);
+          let authPreview;
+          if (mode === 'sovereign' && target.adminHashOverride) {
+            const wallet = getChainSecuredWallet();
+            authPreview = wallet ? `wallet: ${wallet.slice(0, 6)}\u2026${wallet.slice(-4)}` : `hash: ${target.adminHashOverride.slice(0, 10)}\u2026`;
+          } else {
+            authPreview = typeof apiKey === 'string' ? `key: ${apiKey.substring(0, 6)}\u2026` : 'auth: (none)';
+          }
+          console.log(`[dashboard:${mode}] ${prop} \u2192 ${baseUrl} | ${authPreview}`);
 
           // Sovereign-mode writes: auto-inject lifecycle (wallet connect +
           // preview modal + tx status banner) unless caller already supplied
@@ -182,20 +343,16 @@ export async function getClient() {
  */
 async function ensureSovereignSigner(client) {
   if (client.signer) return;
-  const { connectEoa, switchChain } = await import('../../wallet_connect.js');
-  let { signer, chainId } = await connectEoa();
+  const { connectWallet, switchChain } = await import('../../wallet_connect.js');
+  let { signer, chainId } = await connectWallet({ chainId: client.chainId, rpcUrl: client.rpcUrl });
   if (client.chainId != null && chainId !== client.chainId) {
     try {
-      await switchChain(client.chainId);
+      ({ signer } = await switchChain(client.chainId));
     } catch (err) {
       throw new Error(
         `Your wallet is on chain ${chainId} but this dashboard expects chain ${client.chainId}. Switch network in your wallet and retry.`,
       );
     }
-    // switchChain rebinds window.ethereum to the new network; re-derive the
-    // signer from a fresh BrowserProvider so ethers caches the new chainId
-    // instead of signing against the previous network.
-    ({ signer } = await connectEoa());
   }
   client.connectSigner(signer);
 }
@@ -206,7 +363,7 @@ async function ensureSovereignSigner(client) {
  * onState: surfaces tx status in a non-dismissible progress banner.
  */
 async function buildSovereignLifecycle(client, sdkMethodName) {
-  const [{ showTxPreview }, { describeState, TX_STATES }] = await Promise.all([
+  const [{ showTxPreview }, { TX_STATES }] = await Promise.all([
     import('./tx_preview_modal.js'),
     import('../../tx_lifecycle.js'),
   ]);
@@ -220,7 +377,13 @@ async function buildSovereignLifecycle(client, sdkMethodName) {
     onPreview: (contractMethod, contractArgs) =>
       showTxPreview(contractMethod, contractArgs, meta),
     onState: (state, payload) => {
-      if (state === TX_STATES.SIGNING) {
+      // Preview modal owns the screen during PREPARING/PREVIEWING. Close any
+      // pre-existing action-overlay that a dashboard handler opened before
+      // calling the SDK (otherwise it stacks above and blocks the Confirm
+      // button). It is re-opened on SIGNING below.
+      if (state === TX_STATES.PREPARING || state === TX_STATES.PREVIEWING) {
+        closeActionProgress();
+      } else if (state === TX_STATES.SIGNING) {
         showActionProgress(sdkMethodName, 'Open your wallet to sign the transaction…');
       } else if (state === TX_STATES.PENDING) {
         showActionProgress(sdkMethodName, `Broadcast — ${payload?.txHash?.slice(0, 10)}… waiting for inclusion.`);
@@ -228,8 +391,6 @@ async function buildSovereignLifecycle(client, sdkMethodName) {
         showActionProgress(sdkMethodName, `Included — waiting for ${payload?.target} confirmations.`);
       } else if (state === TX_STATES.CONFIRMED || state === TX_STATES.FAILED || state === TX_STATES.REORGED) {
         closeActionProgress();
-      } else {
-        showActionProgress(sdkMethodName, describeState(state));
       }
     },
   };
@@ -264,10 +425,28 @@ export function updateStatCards() {
   const elGroups = document.getElementById('stat-groups');
   const elWallets = document.getElementById('stat-wallets');
   const elActions = document.getElementById('stat-actions');
-  if (elUsageKeys) elUsageKeys.textContent = (typeof _stats.usageKeys === 'number') ? _stats.usageKeys : getUsageKeysStore().length;
+  const usageKeysVal = (typeof _stats.usageKeys === 'number') ? _stats.usageKeys : getUsageKeysStore().length;
+  if (elUsageKeys) elUsageKeys.textContent = usageKeysVal;
   if (elGroups) elGroups.textContent = (typeof _stats.groups === 'number') ? _stats.groups : '—';
   if (elWallets) elWallets.textContent = (typeof _stats.wallets === 'number') ? _stats.wallets : '—';
   if (elActions) elActions.textContent = (typeof _stats.actions === 'number') ? _stats.actions : '—';
+
+  // Empty hero ↔ stats grid swap. Only swap once all four stores have resolved
+  // to numbers, otherwise we'd flash the hero during initial load.
+  const allResolved = typeof _stats.groups === 'number'
+    && typeof _stats.wallets === 'number'
+    && typeof _stats.actions === 'number';
+  const allZero = allResolved
+    && usageKeysVal === 0
+    && _stats.groups === 0
+    && _stats.wallets === 0
+    && _stats.actions === 0;
+  const heroEl = document.getElementById('overview-empty-state');
+  const statsEl = document.getElementById('stats-row');
+  if (heroEl && statsEl) {
+    heroEl.hidden = !allZero;
+    statsEl.hidden = allZero;
+  }
 }
 
 // ----- Module-scoped state (replaces window._*) -----
@@ -301,11 +480,106 @@ let _onAuthReady = null;
 export function setOnAuthReady(fn) { _onAuthReady = fn; }
 
 function updateAuthUI() {
-  const hasKey = !!getApiKey();
-  document.body.classList.toggle('has-api-key', hasKey);
+  const authed = isAuthenticated();
+  const isChainSecured = authed && getMode() === 'sovereign' && !!getChainSecuredWallet();
+  // Keep the legacy `has-api-key` hook — it's what existing CSS gates the
+  // dashboard shell on. `is-chainsecured` toggles ChainSecured-specific UI
+  // (hides Action Runner + Billing, shows owner pill, etc.).
+  document.body.classList.toggle('has-api-key', authed);
+  document.body.classList.toggle('is-chainsecured', isChainSecured);
+  renderModeBadge();
   import('./billing.js').then((m) => m.refreshBillingUI()).catch(() => {});
-  if (hasKey && _onAuthReady) {
+  if (authed && _onAuthReady) {
     _onAuthReady();
+  }
+}
+
+/**
+ * Paint the topbar mode badge + (ChainSecured only) owner wallet pill.
+ * Called on every `updateAuthUI` pass. ChainSecured pill paints from session
+ * immediately; on-chain reconciliation via `getAccountWalletAddress` runs
+ * async and overwrites if the chain disagrees.
+ */
+function renderModeBadge() {
+  const host = document.querySelector('.topbar-title');
+  if (!host) return;
+  const mode = getMode();
+  if (!isAuthenticated()) {
+    host.innerHTML = '&nbsp;';
+    return;
+  }
+  const isChainSecured = mode === 'sovereign' && !!getChainSecuredWallet();
+  const modeLabel = isChainSecured ? 'ChainSecured mode' : 'API mode';
+  const popoverContent = isChainSecured
+    ? `<strong>ChainSecured mode</strong>
+       <p>Your wallet is the account identity. Writes are signed on-chain as transactions you authorize in your wallet.</p>
+       <p class="mode-popover-hidden">Action runs use a usage API key from your account. Funding still uses your account billing.</p>`
+    : `<strong>API mode</strong>
+       <p>Writes go through the Chipotle API using your account API key. Fastest path, no wallet popups.</p>`;
+  let pillHtml = '';
+  if (isChainSecured) {
+    const wallet = getChainSecuredWallet();
+    const trunc = `${wallet.slice(0, 6)}\u2026${wallet.slice(-4)}`;
+    pillHtml = ` <button type="button" class="topbar-wallet-pill" id="topbar-wallet-pill" title="Copy wallet address" data-wallet="${escapeHtml(wallet)}">${escapeHtml(trunc)}</button>`;
+  }
+  host.innerHTML = `<span class="topbar-mode-badge-wrap">
+      <button type="button" class="topbar-mode-badge" id="topbar-mode-badge" aria-haspopup="dialog" aria-expanded="false">${escapeHtml(modeLabel)}</button>
+      <div class="topbar-mode-popover" id="topbar-mode-popover" role="dialog" aria-label="${escapeHtml(modeLabel)} details" hidden>${popoverContent}</div>
+    </span>${pillHtml}`;
+  const badgeBtn = document.getElementById('topbar-mode-badge');
+  const popover = document.getElementById('topbar-mode-popover');
+  if (badgeBtn && popover) {
+    const close = () => {
+      popover.hidden = true;
+      badgeBtn.setAttribute('aria-expanded', 'false');
+      document.removeEventListener('click', onDocClick, true);
+      document.removeEventListener('keydown', onKeyDown, true);
+    };
+    const onDocClick = (ev) => {
+      if (!badgeBtn.contains(ev.target) && !popover.contains(ev.target)) close();
+    };
+    const onKeyDown = (ev) => { if (ev.key === 'Escape') close(); };
+    badgeBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      const open = popover.hidden;
+      popover.hidden = !open;
+      badgeBtn.setAttribute('aria-expanded', String(open));
+      if (open) {
+        document.addEventListener('click', onDocClick, true);
+        document.addEventListener('keydown', onKeyDown, true);
+      }
+    });
+  }
+  const pill = document.getElementById('topbar-wallet-pill');
+  if (pill) {
+    pill.addEventListener('click', async () => {
+      const { copyToClipboard } = await import('./ui-utils.js');
+      await copyToClipboard(pill.dataset.wallet, pill);
+    });
+  }
+}
+
+/**
+ * Start the wallet-change watcher once. Logs out if the user disconnects the
+ * wallet or switches to a different account mid-session.
+ */
+let _walletWatchStarted = false;
+async function ensureWalletWatch() {
+  if (_walletWatchStarted) return;
+  _walletWatchStarted = true;
+  try {
+    const { onWalletChange } = await import('../../wallet_connect.js');
+    onWalletChange((snap) => {
+      if (getMode() !== 'sovereign' || !getChainSecuredWallet()) return;
+      const expected = getChainSecuredWallet().toLowerCase();
+      if (!snap.connected) {
+        logOut();
+      } else if (snap.address && snap.address.toLowerCase() !== expected) {
+        logOut();
+      }
+    });
+  } catch (e) {
+    console.warn('[auth] onWalletChange wiring failed:', e);
   }
 }
 
@@ -325,22 +599,53 @@ export function keyPreview(key) {
 
 export function initLogin() {
   const apiKeyInput = document.getElementById('login-api-key');
+  // Null-deref guard (TODOS.md:3-9) — pages that don't host the login form
+  // still import this module via app.js; skip wiring when the form is absent.
+  if (!apiKeyInput) {
+    // If a session already exists, surface the authed state on any page that
+    // imports auth (e.g. monitor's shared topbar) and return.
+    if (isAuthenticated()) updateAuthUI();
+    return;
+  }
   if (getApiKey()) apiKeyInput.value = '';
 
-  // Sovereign-mode toggle — reflects the current session mode and persists on change.
-  const modeToggle = document.getElementById('login-mode-sovereign');
-  const modeLabel = document.getElementById('login-mode-label');
-  if (modeToggle) {
-    modeToggle.checked = getMode() === 'sovereign';
-    const syncLabel = () => {
-      if (modeLabel) modeLabel.textContent = modeToggle.checked ? 'Sovereign mode' : 'API mode';
-    };
-    syncLabel();
-    modeToggle.addEventListener('change', () => {
-      setMode(modeToggle.checked ? 'sovereign' : 'api');
-      syncLabel();
-    });
+  ensureWalletWatch();
+
+  // CPL-288 — Auth mode toggle (API vs ChainSecured). Drives which login card
+  // is visible via `body.login-mode-chainsecured` (CSS in styles.css). Persists
+  // through setMode() so the same sessionStorage-backed mode the dashboard uses
+  // post-login is also primed before login. Implements the WAI-ARIA radiogroup
+  // pattern: roving tabindex (only the checked radio is tabbable) + arrow-key
+  // navigation that selects-on-move.
+  const authModeApi = document.getElementById('login-auth-mode-api');
+  const authModeChainSecured = document.getElementById('login-auth-mode-chainsecured');
+  function applyLoginAuthMode(mode, focusActive = false) {
+    const isSovereign = mode === 'sovereign';
+    setMode(isSovereign ? 'sovereign' : 'api');
+    document.body.classList.toggle('login-mode-chainsecured', isSovereign);
+    if (authModeApi) {
+      authModeApi.classList.toggle('is-active', !isSovereign);
+      authModeApi.setAttribute('aria-checked', !isSovereign ? 'true' : 'false');
+      authModeApi.setAttribute('tabindex', !isSovereign ? '0' : '-1');
+    }
+    if (authModeChainSecured) {
+      authModeChainSecured.classList.toggle('is-active', isSovereign);
+      authModeChainSecured.setAttribute('aria-checked', isSovereign ? 'true' : 'false');
+      authModeChainSecured.setAttribute('tabindex', isSovereign ? '0' : '-1');
+    }
+    if (focusActive) (isSovereign ? authModeChainSecured : authModeApi)?.focus();
+    hideStatus('login-status');
   }
+  authModeApi?.addEventListener('click', () => applyLoginAuthMode('api'));
+  authModeChainSecured?.addEventListener('click', () => applyLoginAuthMode('sovereign'));
+  function onAuthModeKey(e) {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+    e.preventDefault();
+    applyLoginAuthMode(getMode() === 'sovereign' ? 'api' : 'sovereign', true);
+  }
+  authModeApi?.addEventListener('keydown', onAuthModeKey);
+  authModeChainSecured?.addEventListener('keydown', onAuthModeKey);
+  applyLoginAuthMode(getMode());
 
   const tabExisting = document.getElementById('login-tab-existing');
   const tabNew = document.getElementById('login-tab-new');
@@ -360,6 +665,7 @@ export function initLogin() {
   tabExisting?.addEventListener('click', () => switchLoginTab(true));
   tabNew?.addEventListener('click', () => switchLoginTab(false));
 
+  // ----- Card A (Existing): API-key login -----
   document.getElementById('btn-login').addEventListener('click', async () => {
     const key = (apiKeyInput.value || '').trim();
     if (!key) {
@@ -370,6 +676,7 @@ export function initLogin() {
     const btn = document.getElementById('btn-login');
     btn.disabled = true;
     try {
+      setMode('api');
       const client = await getClient();
       const exists = await client.accountExists(key);
       if (exists) {
@@ -386,11 +693,18 @@ export function initLogin() {
     }
   });
 
+  // ----- Card B (Existing): ChainSecured wallet login -----
+  const btnLoginWallet = document.getElementById('btn-login-wallet');
+  if (btnLoginWallet) {
+    btnLoginWallet.addEventListener('click', () => loginWithWallet(btnLoginWallet));
+  }
+
   // If a session already exists, trigger the auth-ready flow on load
-  if (getApiKey()) {
+  if (isAuthenticated()) {
     updateAuthUI();
   }
 
+  // ----- Card A (New): managed account creation -----
   document.getElementById('btn-create-account').addEventListener('click', async () => {
     const name = document.getElementById('new-account-name').value.trim();
     const desc = document.getElementById('new-account-desc').value.trim();
@@ -411,6 +725,7 @@ export function initLogin() {
         'Creating account',
         'Creating a new Lit Express account and returning an API key.'
       );
+      setMode('api');
       const client = await getClient();
       const res = await client.newAccount({ accountName: name, accountDescription: desc, email: email || undefined });
       setApiKey(res.api_key);
@@ -425,6 +740,305 @@ export function initLogin() {
       btn.disabled = false;
     }
   });
+
+  // ----- Card B (New): ChainSecured account creation -----
+  const btnCreateChainSecured = document.getElementById('btn-create-chainsecured');
+  if (btnCreateChainSecured) {
+    btnCreateChainSecured.addEventListener('click', () => createChainSecuredAccount(btnCreateChainSecured));
+  }
+}
+
+/**
+ * Card B (Existing) click handler. Error ordering matters here — we prefetch
+ * chain config BEFORE popping MetaMask so a failed API server doesn't waste a
+ * wallet-connect. Same rule applies to newChainSecuredAccount.
+ */
+async function loginWithWallet(btn) {
+  hideStatus('login-status');
+  btn.disabled = true;
+  const prevMode = getMode();
+  try {
+    setMode('sovereign');
+    // Prefetch chain config via getClient() sovereign bootstrap — throws
+    // BEFORE wallet popup on unreachable API server.
+    const client = await getClient();
+    const { connectWallet } = await import('../../wallet_connect.js');
+    const ethers = await loadEthersLocal();
+    const { signer, address } = await connectWallet({ chainId: client.chainId, rpcUrl: client.rpcUrl });
+    // Attach the signer before the existence check: accountExistsAndIsMutable
+    // is msg.sender-gated and only the wallet that owns an unmanaged
+    // (ChainSecured) account passes. Without this, the SDK falls back to
+    // api_payer and the contract returns false for valid ChainSecured accounts.
+    client.connectSigner(signer);
+    const apiKeyHash = ethers.solidityPackedKeccak256(['address'], [address]);
+    const exists = await client.accountExistsByHash(apiKeyHash);
+    if (!exists) {
+      setMode(prevMode); // revert
+      showStatus(
+        'login-status',
+        'No ChainSecured account found for this wallet. Sign up in the New User tab.',
+        'error',
+      );
+      return;
+    }
+    await setChainSecuredSession({ walletAddress: address, apiKeyHash });
+    showStatus('login-status', 'Connected. Wallet is the account admin.', 'success');
+    runPostConnectDriftCheck(client).catch((e) => logError('drift-check', e));
+  } catch (e) {
+    setMode(prevMode);
+    logError('login-wallet', e);
+    showStatus('login-status', 'Error: ' + formatError(e), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/**
+ * Card B (New) click handler. Creates a ChainSecured account via the
+ * WritesFacet.newChainSecuredAccount path; the Proxy injects the
+ * sovereignLifecycle (wallet connect + preview modal + tx banner).
+ */
+async function createChainSecuredAccount(btn) {
+  const name = (document.getElementById('new-chainsecured-name')?.value || '').trim();
+  const desc = (document.getElementById('new-chainsecured-desc')?.value || '').trim();
+  hideStatus('login-status');
+  if (!name) {
+    showStatus('login-status', 'Enter an account name.', 'error');
+    return;
+  }
+  btn.disabled = true;
+  const prevMode = getMode();
+  try {
+    setMode('sovereign');
+    const client = await getClient();
+    // Proxy auto-runs ensureSovereignSigner → wallet-connect before the tx.
+    const res = await client.newChainSecuredAccount({ accountName: name, accountDescription: desc });
+    await setChainSecuredSession({ walletAddress: res.wallet_address, apiKeyHash: res.api_key_hash });
+    showChainSecuredBanner(res.wallet_address);
+    const nameEl = document.getElementById('new-chainsecured-name');
+    const descEl = document.getElementById('new-chainsecured-desc');
+    if (nameEl) nameEl.value = '';
+    if (descEl) descEl.value = '';
+    runPostConnectDriftCheck(client).catch((e) => logError('drift-check', e));
+  } catch (e) {
+    setMode(prevMode);
+    logError('create-chainsecured', e);
+    showStatus('login-status', 'Error: ' + formatError(e), 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+/**
+ * Account-dropdown handler. Converts the currently signed-in API account into a
+ * ChainSecured account by reassigning its admin wallet. Flow:
+ *   1. Connect wallet (sign-in EOA, enforce chain match) — forced *before* the
+ *      confirmation modal so the user can't commit to the irreversible action
+ *      without a working signer in hand (CPL-320).
+ *   2. Confirm (irreversible).
+ *   3. POST /core/v1/convert_to_chain_secured_account (api_payer signs the
+ *      on-chain `convertToChainSecuredAccount` call).
+ *   4. Switch dashboard mode to sovereign and reload.
+ *
+ * The on-chain apiKeyHash is preserved across conversion, so groups, actions,
+ * PKPs, and usage keys remain attached to the same account.
+ */
+export async function convertToChainSecured() {
+  const apiKey = getApiKey();
+  if (!apiKey || getMode() !== 'api') {
+    showStatus('dashboard-status', 'Convert is only available while signed in with an API key.', 'error');
+    return;
+  }
+
+  let signer;
+  let expectedChainId;
+  let client;
+  try {
+    showActionProgress('Convert to ChainSecured', 'Connect a wallet to take over admin ownership.');
+    client = await getClient();
+    // API-mode clients don't bootstrap chain config; fetch it now so we can
+    // enforce a wallet-chain match before signing AND pass `chainId` to the
+    // SDK (which would otherwise throw "chainId is unknown").
+    const cfg = await client.getNodeChainConfig();
+    expectedChainId = cfg && cfg.chain_id != null ? Number(cfg.chain_id) : null;
+    if (expectedChainId == null) {
+      throw new Error('Server did not report a chain id; cannot convert.');
+    }
+    const { connectWallet, switchChain } = await import('../../wallet_connect.js');
+    let chainId;
+    ({ signer, chainId } = await connectWallet({ chainId: expectedChainId, rpcUrl: getChainSecuredRpcUrl() }));
+    if (chainId !== expectedChainId) {
+      try {
+        ({ signer } = await switchChain(expectedChainId));
+      } catch {
+        throw new Error(
+          `Your wallet is on chain ${chainId} but this dashboard expects chain ${expectedChainId}. Switch network in your wallet and retry.`,
+        );
+      }
+    }
+  } catch (e) {
+    closeActionProgress();
+    logError('convert-to-chainsecured', e);
+    showStatus('login-status', 'Convert canceled: ' + formatError(e), 'error');
+    return;
+  }
+  closeActionProgress();
+
+  const ok = await confirmDelete(
+    "Convert this account to ChainSecured?\n\nYour connected wallet becomes the on-chain admin and your API key's write authority is removed permanently. This cannot be undone.\n\nYou will be asked to sign a message with your wallet to prove ownership, and will be signed in as the wallet after conversion.",
+    { title: 'Confirm ownership change', confirmLabel: 'Convert' },
+  );
+  if (!ok) return;
+
+  // The SDK call is one opaque await: wallet sign → server signs+broadcasts
+  // the on-chain tx → server awaits inclusion → returns. By the time it
+  // resolves the conversion is already on-chain, so the progress text
+  // covers both phases (sign + submit) before the await rather than
+  // claiming a phase that has already happened after.
+  showActionProgress(
+    'Convert to ChainSecured',
+    'Sign in your wallet, then we submit the conversion on-chain (this may take ~10–30 seconds)…',
+  );
+  try {
+    const res = await client.convertToChainSecuredAccount({ apiKey, signer, chainId: expectedChainId });
+    showActionProgress('Convert to ChainSecured', 'Conversion confirmed. Switching to ChainSecured mode…');
+    setMode('sovereign');
+    setApiKey('');
+    await setChainSecuredSession({ walletAddress: res.wallet_address, apiKeyHash: res.api_key_hash });
+    closeActionProgress();
+    showStatus('dashboard-status', 'Account converted. Reloading as ChainSecured…', 'success');
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    closeActionProgress();
+    logError('convert-to-chainsecured', e);
+    showStatus('dashboard-status', 'Convert failed: ' + formatError(e), 'error');
+  }
+}
+
+/**
+ * Account-dropdown handler. Transfers ownership of the currently-signed-in
+ * ChainSecured account to a new wallet. Flow:
+ *   1. Prompt for the new admin address (must be a valid checksummed or
+ *      lowercase 0x address).
+ *   2. Confirm (irreversible — the current wallet loses access).
+ *   3. Submit the on-chain `transferChainSecuredAccountOwnership` via the
+ *      sovereign-write path: SDK Proxy wires up wallet-connect, preview
+ *      modal, and tx-status banner automatically.
+ *   4. Sign the user out — their wallet is no longer the admin.
+ *
+ * ChainSecured mode only; the dropdown button is hidden in API mode.
+ */
+export async function changeChainSecuredOwnership() {
+  if (getMode() !== 'sovereign') {
+    showStatus('dashboard-status', 'Change ownership is only available for ChainSecured accounts.', 'error');
+    return;
+  }
+  const newAdmin = await promptForNewAdminAddress();
+  if (!newAdmin) return;
+
+  const ok = await confirmDelete(
+    `Transfer ownership to ${newAdmin}?\n\nYour connected wallet will lose admin access immediately and the new wallet becomes the sole on-chain admin. This cannot be undone — there is no way to recover access from the previous wallet.\n\nYou will be asked to sign the transaction with your current wallet, and signed out after it confirms.`,
+    { title: 'Confirm ownership change', confirmLabel: 'Transfer' },
+  );
+  if (!ok) return;
+
+  try {
+    const client = await getClient();
+    const res = await client.transferChainSecuredAccountOwnership({ newAdminWalletAddress: newAdmin });
+    showStatus(
+      'dashboard-status',
+      `Ownership transferred to ${res.new_admin}. Signing out — log in with the new wallet to continue.`,
+      'success',
+    );
+    setTimeout(() => {
+      logOut();
+      location.reload();
+    }, 1500);
+  } catch (e) {
+    logError('change-chainsecured-ownership', e);
+    showStatus('dashboard-status', 'Ownership transfer failed: ' + formatError(e), 'error');
+  }
+}
+
+/**
+ * Open a modal asking for the new admin wallet address. Resolves with a
+ * checksummed 0x address on Accept, or null on Cancel / invalid input.
+ */
+async function promptForNewAdminAddress() {
+  const ethers = await loadEthersLocal();
+  return new Promise((resolve) => {
+    let resolved = false;
+    const settle = (v) => {
+      if (resolved) return;
+      resolved = true;
+      closeModal();
+      resolve(v);
+    };
+    openModal(
+      'Change account ownership',
+      `<p>Enter the Ethereum address of the wallet that should become the new admin for this ChainSecured account.</p>
+       <label class="form-label" for="change-ownership-address-input">New admin wallet address</label>
+       <input type="text" id="change-ownership-address-input" class="form-input" placeholder="0x…" autocomplete="off" spellcheck="false" />
+       <div id="change-ownership-error" class="status error" style="display:none; margin-top:0.5rem;"></div>`,
+      `<button type="button" class="btn btn-secondary" id="change-ownership-cancel-btn">Cancel</button>
+       <button type="button" class="btn btn-primary" id="change-ownership-accept-btn">Accept</button>`,
+    );
+    const input = document.getElementById('change-ownership-address-input');
+    const err = document.getElementById('change-ownership-error');
+    const accept = document.getElementById('change-ownership-accept-btn');
+    const cancel = document.getElementById('change-ownership-cancel-btn');
+    const tryAccept = () => {
+      const raw = (input?.value || '').trim();
+      if (!ethers.isAddress(raw)) {
+        if (err) {
+          err.textContent = 'Please enter a valid Ethereum address.';
+          err.style.display = 'block';
+        }
+        input?.focus();
+        return;
+      }
+      settle(ethers.getAddress(raw));
+    };
+    accept?.addEventListener('click', tryAccept);
+    cancel?.addEventListener('click', () => settle(null));
+    input?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); tryAccept(); }
+      if (e.key === 'Escape') { e.preventDefault(); settle(null); }
+    });
+    // If the user dismisses the modal via the X / overlay click, the existing
+    // `initModalClose()` handler runs `closeModal()` directly without going
+    // through `settle()` — observe that and resolve null.
+    const overlay = document.getElementById('modal-overlay');
+    const observer = new MutationObserver(() => {
+      if (overlay && !overlay.classList.contains('is-open')) {
+        observer.disconnect();
+        settle(null);
+      }
+    });
+    if (overlay) observer.observe(overlay, { attributes: true, attributeFilter: ['class'] });
+    setTimeout(() => input?.focus(), 0);
+  });
+}
+
+async function loadEthersLocal() {
+  if (typeof globalThis !== 'undefined' && globalThis.ethers) return globalThis.ethers;
+  const mod = await import(/* @vite-ignore */ 'https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.min.js');
+  const e = mod.ethers ?? mod.default ?? mod;
+  if (typeof globalThis !== 'undefined') globalThis.ethers = e;
+  return e;
+}
+
+async function runPostConnectDriftCheck(client) {
+  if (typeof client.checkAbiDrift !== 'function') return;
+  const result = await client.checkAbiDrift();
+  const banner = document.getElementById('abi-drift-banner');
+  if (!banner) return;
+  if (!result.ok) {
+    banner.textContent = 'ABI drift detected — on-chain contract does not match this dashboard build. Writes are disabled. Reason: ' + result.reason;
+    banner.style.display = '';
+  } else {
+    banner.style.display = 'none';
+  }
 }
 
 function showNewAccountBanner(apiKey) {
@@ -440,5 +1054,35 @@ function showNewAccountBanner(apiKey) {
     const { copyToClipboard } = await import('./ui-utils.js');
     await copyToClipboard(apiKey, copyBtn);
   };
+  dismissBtn.onclick = () => { banner.style.display = 'none'; };
+}
+
+/**
+ * ChainSecured post-creation success banner. Re-uses the `new-account-banner`
+ * DOM when present; swaps the copy target from apiKey to wallet address and
+ * removes the "save this key" phrasing (there is no key).
+ */
+function showChainSecuredBanner(walletAddress) {
+  const banner = document.getElementById('new-account-banner');
+  const keyEl = document.getElementById('new-account-key-text');
+  const copyBtn = document.getElementById('new-account-copy-btn');
+  const dismissBtn = document.getElementById('new-account-dismiss-btn');
+  if (!banner || !keyEl || !copyBtn || !dismissBtn) return;
+  const body = banner.querySelector('.new-account-banner-body');
+  if (body) {
+    body.innerHTML = `<strong>Account created.</strong> Connected wallet <code class="mono">${escapeHtml(walletAddress)}</code> is the admin. No API key to copy \u2014 your wallet signs all writes.
+      <div class="new-account-key-row">
+        <code id="new-account-key-text" class="new-account-key mono">${escapeHtml(walletAddress)}</code>
+        <button type="button" id="new-account-copy-btn" class="btn btn-sm btn-outline">Copy</button>
+      </div>`;
+  }
+  banner.style.display = '';
+  const freshCopy = document.getElementById('new-account-copy-btn');
+  if (freshCopy) {
+    freshCopy.onclick = async () => {
+      const { copyToClipboard } = await import('./ui-utils.js');
+      await copyToClipboard(walletAddress, freshCopy);
+    };
+  }
   dismissBtn.onclick = () => { banner.style.display = 'none'; };
 }

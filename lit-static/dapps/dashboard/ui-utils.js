@@ -14,13 +14,22 @@ export function classifyError(e) {
   const raw = (e && e.message) ? e.message : String(e);
   const lower = raw.toLowerCase();
 
-  if (lower.includes('unauthorized') || lower.includes('403') || lower.includes('401') || lower.includes('session') || lower.includes('expired')) {
+  // Auth: only specific phrases, not bare "session"/"expired" which collide with
+  // contract revert reasons and ethers messages that mention those words.
+  if (
+    /\bunauthorized\b/.test(lower) ||
+    /\b401\b/.test(lower) ||
+    /\b403\b/.test(lower) ||
+    lower.includes('session expired') ||
+    lower.includes('token expired') ||
+    lower.includes('api key')
+  ) {
     return { type: 'auth', message: 'Session expired — please log in again.' };
   }
-  if (lower.includes('failed to fetch') || lower.includes('networkerror') || lower.includes('network') || lower.includes('err_connection')) {
+  if (lower.includes('failed to fetch') || lower.includes('networkerror') || lower.includes('err_connection')) {
     return { type: 'network', message: 'Connection lost — check your network and try again.' };
   }
-  if (lower.includes('500') || lower.includes('internal server') || lower.includes('502') || lower.includes('503')) {
+  if (/\b500\b/.test(lower) || /\b502\b/.test(lower) || /\b503\b/.test(lower) || lower.includes('internal server')) {
     return { type: 'server', message: 'Something went wrong on the server. Please try again.' };
   }
   return { type: 'unknown', message: raw };
@@ -141,12 +150,16 @@ export function initModalClose() {
 
 let _confirmResolve = null;
 
-export function confirmDelete(message) {
+export function confirmDelete(message, opts) {
   return new Promise((resolve) => {
     _confirmResolve = resolve;
     const overlay = document.getElementById('confirm-overlay');
     const msgEl = document.getElementById('confirm-message');
+    const titleEl = overlay?.querySelector('.modal-title');
+    const confirmBtn = document.getElementById('confirm-delete-btn');
     if (msgEl) msgEl.textContent = message || 'Are you sure you want to delete this item?';
+    if (titleEl) titleEl.textContent = opts?.title || 'Confirm delete';
+    if (confirmBtn) confirmBtn.textContent = opts?.confirmLabel || 'Delete';
     if (overlay) {
       overlay.classList.add('is-open');
       overlay.setAttribute('aria-hidden', 'false');

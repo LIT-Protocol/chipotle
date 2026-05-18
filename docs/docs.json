@@ -18,6 +18,7 @@
             "pages": [
               "management/dashboard",
               "management/api_direct",
+              "management/account_modes",
               "management/pricing",
               "management/crypto",
               "management/api_keys"

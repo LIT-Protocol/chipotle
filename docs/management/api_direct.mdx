@@ -280,6 +280,199 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
 - **`POST /billing/create_payment_intent`** — Creates a Stripe PaymentIntent. Body: `{"amount_cents": 500}` (minimum 500 = $5.00). Returns `client_secret` for use with Stripe.js.
 - **`POST /billing/confirm_payment`** — Verifies a succeeded PaymentIntent and credits the account. Body: `{"payment_intent_id": "pi_..."}`.
 
+### ChainSecured-mode HTTP endpoints
+
+Three HTTP endpoints back the ChainSecured (sovereign) flow. They sit alongside the on-chain writes — see [API mode vs ChainSecured mode](/management/account_modes) for the full SDK-side workflow and when to choose each mode.
+
+All three (and the billing-auth header described above) share the same EIP-712 typed-data envelope. The wallet UI displays a labelled struct — `address` and `issuedAt` fields under a stable `(name: "Lit ChainSecured", version: "1", chainId)` domain — so users can see exactly what they're signing. The `primaryType` pins the signature to a specific flow and is part of the EIP-712 type hash, so a signature minted for one endpoint is rejected by every other endpoint at the digest level. Typed-data payloads longer than 4 KiB (serialised JSON) are rejected.
+
+| Endpoint | `primaryType` |
+|----------|------------------|
+| `/create_wallet_with_signature` | `CreateWallet` |
+| `/convert_to_chain_secured_account` | `ConvertAccount` |
+| `/add_usage_api_key_with_signature` | `AddUsageApiKey` |
+| `X-Wallet-Auth` billing header | `BillingAuth` |
+
+The canonical typed-data shape (must match exactly — field declaration order is part of the EIP-712 type hash):
+
+```json
+{
+  "types": {
+    "EIP712Domain": [
+      { "name": "name",    "type": "string"  },
+      { "name": "version", "type": "string"  },
+      { "name": "chainId", "type": "uint256" }
+    ],
+    "<primaryType>": [
+      { "name": "address",  "type": "address" },
+      { "name": "issuedAt", "type": "uint256" }
+    ]
+  },
+  "primaryType": "<primaryType>",
+  "domain": {
+    "name": "Lit ChainSecured",
+    "version": "1",
+    "chainId": "8453"
+  },
+  "message": {
+    "address":  "0x…",
+    "issuedAt": "<unix-seconds>"
+  }
+}
+```
+
+The server enforces a ±5-minute window on `issuedAt` as the only replay protection — no nonce store. Worst-case replay on the unauthenticated mint endpoints just produces an extra unattached PKP (compute cost only — see each endpoint below for specifics).
+
+#### `POST /create_wallet_with_signature`
+
+Mints a PKP via DStack MPC after verifying a wallet-ownership signature. Used by `createWallet` in ChainSecured mode; the response is then passed to the on-chain `registerWalletDerivation` call (signed by the same wallet) to register the PKP to the account.
+
+No API key required. `primaryType` must be `CreateWallet`.
+
+**Request body:**
+
+```json
+{
+  "typed_data": { /* canonical EIP-712 typed data with primaryType: "CreateWallet" */ },
+  "signature": "0x<65-byte hex>"
+}
+```
+
+**Response:**
+
+```json
+{
+  "wallet_address": "0x...",
+  "derivation_path": "0x..."
+}
+```
+
+Pass `derivation_path` verbatim into `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` on the AccountConfig contract — until that lands, the PKP exists in MPC but is not registered to any account.
+
+```bash
+curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/create_wallet_with_signature" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "typed_data": {
+      "types": {
+        "EIP712Domain": [
+          {"name":"name","type":"string"},
+          {"name":"version","type":"string"},
+          {"name":"chainId","type":"uint256"}
+        ],
+        "CreateWallet": [
+          {"name":"address","type":"address"},
+          {"name":"issuedAt","type":"uint256"}
+        ]
+      },
+      "primaryType": "CreateWallet",
+      "domain": {"name":"Lit ChainSecured","version":"1","chainId":"8453"},
+      "message": {"address":"0xabc...","issuedAt":"1745798400"}
+    },
+    "signature": "0x..."
+  }'
+```
+
+#### `POST /convert_to_chain_secured_account`
+
+Flips a managed (API-mode) account to ChainSecured (unmanaged) in a single on-chain transaction. The account's `apiKeyHash` is preserved — groups, PKPs, action metadata, and usage API keys (everything keyed by `apiKeyHash` on-chain) stay attached. Only the admin wallet and the `managed` flag change on-chain. **Billing should be re-verified after conversion:** Stripe credits are associated with the Stripe customer resolved from the current admin wallet address, so a credit balance is not guaranteed to carry over automatically when the admin wallet changes. There is no reverse path.
+
+Requires the existing master API key (sent via `X-Api-Key` or `Authorization: Bearer`, per the auth header conventions above). The server's api\_payer signs the on-chain conversion after verifying the wallet signature; the new admin must sign EIP-712 typed data with `primaryType: "ConvertAccount"`.
+
+**Request body:**
+
+```json
+{
+  "new_admin_wallet_address": "0x...",
+  "typed_data": { /* primaryType: "ConvertAccount" */ },
+  "signature": "0x..."
+}
+```
+
+```bash
+curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/convert_to_chain_secured_account" \
+  -H "Content-Type: application/json" \
+  -H "X-Api-Key: KEY" \
+  -d '{
+    "new_admin_wallet_address":"0xabc...",
+    "typed_data": {
+      "types": {
+        "EIP712Domain": [
+          {"name":"name","type":"string"},
+          {"name":"version","type":"string"},
+          {"name":"chainId","type":"uint256"}
+        ],
+        "ConvertAccount": [
+          {"name":"address","type":"address"},
+          {"name":"issuedAt","type":"uint256"}
+        ]
+      },
+      "primaryType": "ConvertAccount",
+      "domain": {"name":"Lit ChainSecured","version":"1","chainId":"8453"},
+      "message": {"address":"0xabc...","issuedAt":"1745798400"}
+    },
+    "signature":"0x..."
+  }'
+```
+
+See [API mode vs ChainSecured mode → Converting an API account to ChainSecured](/management/account_modes#converting-an-api-account-to-chainsecured) for the dashboard flow, the SDK wrapper (`client.convertToChainSecuredAccount`), and the post-conversion verification checklist.
+
+#### `POST /add_usage_api_key_with_signature`
+
+The ChainSecured counterpart to `/add_usage_api_key`. Mirrors `create_wallet_with_signature`: the server mints a usage-key wallet via DStack MPC after verifying a wallet-ownership signature, then returns the secret (base64-encoded) plus the wallet address and derivation path. The client follows up on-chain — only the admin wallet of a ChainSecured account can call `setUsageApiKey`, so the server cannot complete the attach for you.
+
+No API key required. `primaryType` must be `AddUsageApiKey`. Worst-case replay just returns a fresh secret for an unattached wallet — equivalent to a freshly generated keypair until the admin wallet calls the on-chain follow-ups, so compute cost only.
+
+**Request body:**
+
+```json
+{
+  "typed_data": { /* primaryType: "AddUsageApiKey" */ },
+  "signature": "0x<65-byte hex>"
+}
+```
+
+**Response:**
+
+```json
+{
+  "usage_api_key": "<base64 of 32 secret bytes>",
+  "wallet_address": "0x...",
+  "derivation_path": "0x..."
+}
+```
+
+The client must do two on-chain calls signed by the admin wallet to attach the new usage key:
+
+1. `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` — registers the PKP to the account.
+2. `setUsageApiKey(adminHash, keccak256(usage_api_key_bytes), expiration, balance, name, description, …permissions)` — attaches the usage key with its permission set.
+
+Until both land, the secret in `usage_api_key` is just a freshly minted keypair with no on-chain identity.
+
+```bash
+curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/add_usage_api_key_with_signature" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "typed_data": {
+      "types": {
+        "EIP712Domain": [
+          {"name":"name","type":"string"},
+          {"name":"version","type":"string"},
+          {"name":"chainId","type":"uint256"}
+        ],
+        "AddUsageApiKey": [
+          {"name":"address","type":"address"},
+          {"name":"issuedAt","type":"uint256"}
+        ]
+      },
+      "primaryType": "AddUsageApiKey",
+      "domain": {"name":"Lit ChainSecured","version":"1","chainId":"8453"},
+      "message": {"address":"0xabc...","issuedAt":"1745798400"}
+    },
+    "signature":"0x..."
+  }'
+```
+
 ---
 
 Both request/response shapes and OpenAPI spec are available directly in the dev system. For a Swagger UI implementation of the OpenAPI spec, please browse to:\
