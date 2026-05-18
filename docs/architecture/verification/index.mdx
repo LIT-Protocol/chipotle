@@ -3,6 +3,16 @@ title: "Security & Verification"
 description: "How to verify that your connection to Lit Chipotle terminates inside a genuine TEE running unmodified code."
 ---
 
+The Lit Chipotle API server runs inside an Intel TDX [Trusted Execution Environment](https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html) on [Phala Cloud](https://phala.com/), with its keys gated by smart contracts on Base. This section explains how that works and how to verify it yourself.
+
+<Card
+  title="Just want to verify it? Start here."
+  icon="shield-check"
+  href="/architecture/verification/quick-verify"
+>
+  One-click Phala Trust Center report plus three commands you can paste into a terminal to confirm the API is running unmodified code on real Intel TDX hardware.
+</Card>
+
 ## Zero-Trust TLS
 
 **What is Zero-Trust TLS?** In traditional web hosting, you trust the server operator not to inspect or tamper with your traffic. Zero-Trust TLS (ZT-TLS) eliminates this trust assumption entirely. The TLS private key is generated **inside** the Trusted Execution Environment (TEE) and **never leaves it** — not even the cloud provider, OS administrator, or Lit Protocol team can extract it.
@@ -49,16 +59,22 @@ Once full verification passes, pin the TLS certificate fingerprint:
 
 ## What's Next
 
+- [Verify in 30 Seconds](/architecture/verification/quick-verify) — Phala Trust Center one-click report plus three terminal commands
+- [On-Chain KMS](/architecture/verification/onchain-kms) — how Base smart contracts gate key release and how to confirm the KMS is active
 - [Full Verification Guide](/architecture/verification/full-verification) — step-by-step commands to verify every layer of the chain of trust
 - [Chain of Trust Reference](/architecture/verification/chain-of-trust) — detailed explanation of what each verification step checks and why it matters
 
 ## Further Reading
 
+- [Phala Trust Center for Lit Chipotle](https://trust.phala.com/app/3f91deaf16ff7c823ee65081d6bafa1ceea05ffc) — live verification report for our production app
+- [Phala: Trust Center Verification](https://docs.phala.com/phala-cloud/attestation/trust-center-verification) — how the Trust Center works
+- [Phala: Attestation Overview](https://docs.phala.com/phala-cloud/attestation/overview)
+- [Phala: Understanding On-Chain KMS](https://docs.phala.com/phala-cloud/key-management/understanding-onchain-kms)
 - [Phala: Zero-Trust TLS (TEE-Controlled Domain Certificates)](https://docs.phala.com/dstack/design-documents/tee-controlled-domain-certificates)
 - [Phala: Complete Chain of Trust](https://docs.phala.com/phala-cloud/attestation/chain-of-trust)
 - [Phala: Verify Your Application](https://docs.phala.com/phala-cloud/attestation/verify-your-application)
 - [Phala: Get Attestation](https://docs.phala.com/phala-cloud/attestation/get-attestation)
 - [RTMR3 Calculator](https://rtmr3-calculator.vercel.app/) — web tool for computing compose hashes
 - [dstack Verification Script](https://github.com/Dstack-TEE/dstack-examples/blob/main/attestation/rtmr3-based/verify.py) — reference Python implementation
-- [Phala Trust Center](https://github.com/Phala-Network/trust-center) — reference verification implementation
+- [Phala Trust Center (reference implementation)](https://github.com/Phala-Network/trust-center)
 - [Sigstore cosign](https://docs.sigstore.dev/cosign/signing/overview/)

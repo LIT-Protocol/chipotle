@@ -1,0 +1,122 @@
+---
+title: "On-Chain KMS"
+description: "How Lit Chipotle's root keys are gated by smart contracts on Base — not by Phala or Lit — and how to verify the KMS is active and configured correctly."
+---
+
+Most "cloud KMS" services let the cloud provider authorize key release. Phala's [On-Chain KMS](https://docs.phala.com/phala-cloud/key-management/understanding-onchain-kms) replaces that backend with a smart contract on a public blockchain. The KMS will only release keys to a CVM whose attestation matches what's whitelisted on-chain — and Lit Protocol cannot change the whitelist unilaterally.
+
+This page explains what's on-chain, how to read it, and what "active" looks like.
+
+## Why On-Chain KMS
+
+Without on-chain KMS, a TEE provider's backend decides which CVMs get keys. That's one trusted party. With on-chain KMS:
+
+- **No central authority.** A smart contract is the only thing that can authorize key release. Phala's backend does not sign transactions on Lit's behalf.
+- **Public, auditable governance.** Every code-version whitelist change is a Base transaction. Anyone can read the history on Basescan.
+- **Multi-party control.** The contract owner is a 2/3 Safe multisig of Lit signers — no single party (including Lit) can change the whitelist alone.
+
+For the canonical design, see [Phala: Understanding On-Chain KMS](https://docs.phala.com/phala-cloud/key-management/understanding-onchain-kms) and [Cloud vs On-Chain KMS](https://docs.phala.com/phala-cloud/key-management/cloud-vs-onchain-kms).
+
+## The contracts
+
+Two contracts on Base together gate key release for the Lit Chipotle CVM:
+
+### Phala KMS — [`0x2f83…Ba9C`](https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C)
+
+A shared Phala contract that maintains the registry of KMS nodes, approved dstack OS images, and approved KMS aggregated measurements. It also acts as a factory for per-application `DstackApp` contracts.
+
+| Key state | What it means |
+|---|---|
+| `allowedOsImages(bytes32)` | Whitelist of dstack OS image measurements (firmware + kernel + initrd hashes). The CVM's MRTD / RTMR0–2 must match a whitelisted image or boot is refused. |
+| `kmsAllowedAggregatedMrs(bytes32)` | Whitelist of KMS instance measurements. Pins the CVM to a specific trusted KMS. |
+| `owner()` | The Safe multisig that controls the whitelists. |
+
+### DstackApp — [`0x3F91…05FfC`](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC)
+
+The application-specific contract for Lit Chipotle. Its address is the `app_id` returned by `GET /info`. Anyone can confirm this matches:
+
+```bash
+curl -sf https://api.chipotle.litprotocol.com/info \
+  | python3 -c 'import json,sys; print("0x" + json.load(sys.stdin)["app_id"])'
+# Expect: 0x3f91deaf16ff7c823ee65081d6bafa1ceea05ffc
+```
+
+| Key state | What it means |
+|---|---|
+| `allowedComposeHashes(bytes32)` | Whitelist of `app-compose.json` SHA-256 hashes. The TEE's RTMR3 must record a compose hash present here, or the KMS will not release keys. |
+| `allowedDeviceIds(bytes32)` | Whitelist of approved hardware device identifiers. |
+| `owner()` | The Safe multisig — only this address can add or remove compose hashes and device IDs. |
+
+## How key release is gated
+
+The flow on every CVM boot:
+
+1. The CVM generates an Intel TDX attestation quote covering its hardware, OS, and the compose hash of the code it loaded.
+2. The KMS verifies the quote against Intel's root certificates.
+3. The KMS reads the on-chain state:
+    - Is the OS image in `Phala KMS.allowedOsImages`?
+    - Is the KMS measurement in `Phala KMS.kmsAllowedAggregatedMrs`?
+    - Is the compose hash in `DstackApp.allowedComposeHashes`?
+    - Is the device ID in `DstackApp.allowedDeviceIds`?
+4. **Only if all four pass** does the KMS release the keys this CVM is allowed to use.
+
+This means: even if Lit Protocol pushed a malicious Docker image, the CVM running it would not be able to obtain the root keys unless the new compose hash was first whitelisted on Base — which requires 2 of 3 Safe signers to approve a transaction visible on Basescan.
+
+## Confirming the KMS is active
+
+"Active" for on-chain KMS means three things hold simultaneously. You can verify each on Basescan or with `cast`.
+
+### 1. The live compose hash is whitelisted
+
+```bash
+COMPOSE_HASH=0x$(curl -sf https://api.chipotle.litprotocol.com/info \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["compose_hash"])')
+
+cast call 0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC \
+  "allowedComposeHashes(bytes32)(bool)" "$COMPOSE_HASH" \
+  --rpc-url https://mainnet.base.org
+# Expect: true
+```
+
+A `true` here proves the currently-running code is authorized by on-chain governance. A `false` would mean the CVM is running code that the KMS would refuse to release keys to — which should never happen in production, because the CVM cannot boot without keys.
+
+### 2. The DstackApp owner is the Safe multisig
+
+```bash
+cast call 0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC \
+  "owner()(address)" \
+  --rpc-url https://mainnet.base.org
+# Expect: 0xF688411c0FFc300cAb33EB1dA651DBb3E6891098
+```
+
+This proves no single party can modify the compose-hash whitelist. The [Safe at `0xF688…1098`](https://app.safe.global/base:0xF688411c0FFc300cAb33EB1dA651DBb3E6891098) requires 2 of 3 signers to approve any change.
+
+### 3. The CVM's app_id matches the DstackApp address
+
+```bash
+APP_ID=$(curl -sf https://api.chipotle.litprotocol.com/info \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["app_id"])')
+echo "Live app_id:        0x$APP_ID"
+echo "Expected DstackApp: 0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC"
+```
+
+The two must match (case-insensitive). This proves the CVM you're talking to is actually attached to the on-chain governance contract you're auditing — not some other lookalike contract.
+
+## Auditing the governance history
+
+Every governance action that changed the KMS configuration is a Base transaction. On the [DstackApp's Basescan page](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC), the **Transactions** tab shows every `addComposeHash` and `removeComposeHash` call ever made. Each is a Safe execution requiring 2 of 3 signatures.
+
+To understand a specific deployment:
+
+1. Find the deployment date in [Lit's release notes](https://github.com/LIT-Protocol/chipotle/releases) (or `git log`).
+2. Find the `addComposeHash` transaction on Basescan around that date.
+3. Open the Safe transaction (linked from the Basescan tx) — you can see which signers approved it.
+
+This is the same audit trail used by the [Phala Trust Center](https://trust.phala.com/app/3f91deaf16ff7c823ee65081d6bafa1ceea05ffc) when it shows the on-chain governance state.
+
+## What's next
+
+- [Verify in 30 Seconds](/architecture/verification/quick-verify) — the Trust Center one-click report
+- [Full Verification Guide](/architecture/verification/full-verification) — replay the RTMR3 event log and check every layer
+- [Phala: Understanding On-Chain KMS](https://docs.phala.com/phala-cloud/key-management/understanding-onchain-kms)
+- [Phala: Cloud vs On-Chain KMS](https://docs.phala.com/phala-cloud/key-management/cloud-vs-onchain-kms)
