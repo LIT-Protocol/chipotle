@@ -537,7 +537,7 @@ async fn max_code_length(server: TestServer) {
 
     assert_eq!(
         res.unwrap_err().to_string().lines().next().unwrap(),
-        "unexpected error: Code payload is too large (14 bytes). Max length is 10 bytes."
+        "unexpected error: Combined code + js_params payload is too large (14 bytes: 14 code + 0 js_params). Max combined size is 10 bytes."
     );
 }
 
