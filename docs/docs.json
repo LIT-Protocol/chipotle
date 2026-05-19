@@ -10,9 +10,10 @@
   "navigation": {
     "tabs": [
       {
-        "tab": "Building on Lit Chipotle",
+        "tab": "Building on Lit Protocol",
         "pages": [
           "index",
+          "quickstart",
           {
             "group": "Management",
             "pages": [

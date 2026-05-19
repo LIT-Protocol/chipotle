@@ -1,82 +1,96 @@
 ---
-title: "Quick Start"
-description: "Get started with Lit Chipotle using the Lit Chipotle Dashboard or the REST API (Core SDK and cURL), the fastest and easiest method to get started with Lit Actions."
+title: "Lit Protocol"
+description: "Programmable signing, encryption, and verifiable compute backed by a TEE-secured key network. Build with the Dashboard, REST API, or write your own Lit Actions."
 ---
 
-This guide introduces the [**Lit Chipotle API**](https://api.chipotle.litprotocol.com/) and its web interface, the [**Lit Chipotle Dashboard**](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) which allows both web3 and non-web3 developers to quickly set up their Lit environment and start using Lit Actions.
+Lit is a decentralized key management network. It lets you create wallets (PKPs), permission them to immutable JavaScript programs (Lit Actions), and run those programs inside a TEE — producing signatures, ciphertexts, and verifiable outputs without ever exposing the underlying keys.
 
-## Zero to LitAction
+<Card
+  title="Start here: Quick Start"
+  icon="rocket"
+  href="/quickstart"
+  horizontal
+>
+  Create an account, fund it, and run your first Lit Action in a few minutes — via the Dashboard or the REST API.
+</Card>
 
-1. [Create an account via the Dashboard](/management/dashboard#1-request-a-new-account-or-log-in), note down your API key
-2. [Add funds](/management/pricing#paying-with-a-credit-card-via-stripe) — click **Add Funds** in the Dashboard and pay with a credit card (minimum $5.00). Running Lit Actions and metered/write management operations consume credits, while read-only management calls (for example listing resources or checking your balance) are free.
-3. Add a usage API key - set its permissions by clicking "All Options"
-4. Run a LitAction
-   1. [From the Dashboard](/management/dashboard#7-run-lit-actions)
-   2. [Programmatically via cURL/JavaScript](/management/api_direct#7-run-lit-action)
-   3. or build your own SDK from the [OpenAPI spec](/management/api_direct#open-api-specification)
+## Build
 
-## Overview
+The fastest paths to a running integration.
 
-The [**Lit Chipotle Dashboard**](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) is the front end to the [**Lit Chipotle API**](https://api.chipotle.litprotocol.com) server, designed to quickly and efficiently execute Lit Actions and to manage your user accounts, usage parameters, client wallet creation (PKPs), and IPFS based actions, through a simple set of groups. \
-\
-Specifically it lets you:
+<CardGroup cols={3}>
+  <Card title="Dashboard" icon="browser" href="/management/dashboard">
+    Web GUI for accounts, API keys, wallets (PKPs), IPFS actions, and groups.
+  </Card>
+  <Card title="REST API" icon="code" href="/management/api_direct">
+    Drive the same workflows from cURL, the lightweight JS SDK, or your own client built from the OpenAPI spec.
+  </Card>
+  <Card title="Lit Actions" icon="bolt" href="/lit-actions/index">
+    Immutable JavaScript programs stored on IPFS and executed inside the network.
+  </Card>
+</CardGroup>
 
-- Create accounts and obtain a master account API key.
-- Create **usage API keys** that can be scoped to specific lit-actions or used by dApps.
-- Create and manage **wallets (PKPs)** for signing and on-chain operations.
-- Register **IPFS CIDs** (immutable actions) and scope which wallets have access to them.
-- Organize all your resources into **groups** that combine PKPs, IPFS actions, and usage API keys in any combination.
-- Send **lit-actions** to the node for execution, authorized by a usage or account API key.
+## Use cases
 
-All of this can be done via the [**Dashboard**](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) (web GUI) or directly via the [**REST API**](https://api.chipotle.litprotocol.com), using a light-weight JS SDK, or even directly through cURL commands. Data is secure and on-chain—all configuration within the Dashboard can be achieved by talking directly to our contracts located on **BASE**.
+Common patterns you can build on Lit.
 
-## Using the Dashboard
+<CardGroup cols={2}>
+  <Card title="Sign a message or transaction" icon="signature" href="/lit-actions/examples#1-sign-a-message">
+    Use a PKP to attest to any payload — messages, EVM transactions, arbitrary bytes.
+  </Card>
+  <Card title="Encrypt and decrypt secrets" icon="lock" href="/lit-actions/examples#2-encrypt-a-secret">
+    Protect API keys, credentials, or user data with PKP-derived encryption.
+  </Card>
+  <Card title="Fetch and sign external data" icon="globe" href="/lit-actions/examples">
+    Call HTTP APIs from inside an action and return a signed result — an oracle, gated on whatever logic you write.
+  </Card>
+  <Card title="More examples" icon="sparkles" href="/lit-actions/examples">
+    Contract calls, sending ETH, conditional signing, and other patterns.
+  </Card>
+</CardGroup>
 
-The [Dashboard](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) is a web management GUI for Lit's Chipotle offering. Open it from your browser at
+## Concepts
 
-`https://dashboard.chipotle.litprotocol.com/dapps/dashboard/`
+How the pieces fit together and how trust is established.
 
-It supports light/dark theme for your convenience and provides simple management tools.
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="layer-group" href="/architecture/index">
+    The three layers: TEE enclave, on-chain permissions, and IPFS-hosted actions.
+  </Card>
+  <Card title="Auth Model" icon="shield-check" href="/architecture/authModel">
+    How API keys, scopes, and account ownership combine to authorize requests.
+  </Card>
+  <Card title="Groups" icon="folder-tree" href="/architecture/groups">
+    Bind PKPs to permitted action CIDs and usage keys.
+  </Card>
+  <Card title="Verification" icon="badge-check" href="/architecture/verification/index">
+    Attest that the network is running the code it claims to be running.
+  </Card>
+</CardGroup>
 
-**Dashboard workflow (recommended order):**
+## Operate
 
-1. [Request a new account (or log in)](/management/dashboard#1-request-a-new-account-or-log-in)
-2. [Add funds via credit card](/management/dashboard#2-add-funds)
-3. [Request usage API keys](/management/dashboard#3-request-usage-api-keys)
-4. [Request new PKPs (wallets)](/management/dashboard#4-request-new-pkps-wallets)
-5. [Register IPFS CIDs (actions)](/management/dashboard#5-register-ipfs-cids-actions)
-6. [Create groups](/management/dashboard#6-create-groups)
-7. [Run lit-actions](/management/dashboard#7-run-lit-actions)
+Account ownership, billing, and key management.
 
-For detailed step-by-step instructions with screenshots, see [Using the Dashboard](/management/dashboard).
+<CardGroup cols={3}>
+  <Card title="Account Modes" icon="users-gear" href="/management/account_modes">
+    SaaS vs. self-sovereign — picking an ownership model and migrating between them.
+  </Card>
+  <Card title="API Keys" icon="key" href="/management/api_keys">
+    Account keys vs. usage keys, and how to scope them.
+  </Card>
+  <Card title="Pricing" icon="credit-card" href="/management/pricing">
+    Credit-based billing, how requests are metered, and how to add funds.
+  </Card>
+</CardGroup>
 
-## Using the API directly
+## Reference
 
-The same workflows can be done via the REST API under `/core/v1/`. All endpoints that require authentication expect the API key in a header (`X-Api-Key` or `Authorization: Bearer`).
-
-**API workflow:**
-
-1. [New account or verify account (login)](/management/api_direct#1-new-account-or-verify-account-login)
-2. [Add funds via credit card](/management/pricing#paying-with-a-credit-card-via-stripe) (or [via the billing API](/management/api_direct#billing))
-3. [Add usage API key](/management/api_direct#3-add-usage-api-key)
-4. [Create wallet (PKP)](/management/api_direct#4-create-a-wallet-pkp)
-5. [Add group and register IPFS action](/management/api_direct#5-add-group-and-register-ipfs-action)
-6. [Add PKP to group (optional)](/management/api_direct#6-add-pkp-to-group-optional)
-7. [Run lit-action](/management/api_direct#7-run-lit-action)
-
-For full code examples (JavaScript Core SDK and cURL), see the [API Reference](/management/api_direct).
-
-## Daily Usage
-
-The dashboard is just your human-friendly configuration tool. Once your account and keys are set up to your liking, you can simply call the lit-action endpoint with your usage key each time you, your dApp or cron job needs to execute a lit action. So the only daily use step is
-
-1. Call the API with your usage key, action-code ( or IPFS CID ) and any parameters that you need
-
-## Further Reading
-
-- [API Mode vs ChainSecured Mode](/management/account_modes) — Picking an ownership model and migrating from API mode to ChainSecured
-- [API Keys](/management/api_keys) — Understanding account keys vs usage keys
-- [Pricing](/management/pricing) — Credit-based billing model
-- [Lit Actions](/lit-actions/index) — Writing and deploying Lit Actions
-- [Architecture](/architecture/index) — System design and auth model
-- [OpenAPI Spec](https://api.chipotle.litprotocol.com/core/v1/openapi.json) / [Swagger UI](https://api.chipotle.litprotocol.com/core/v1/swagger-ui)
+<CardGroup cols={2}>
+  <Card title="Lit Actions SDK" icon="book" href="/lit-actions/chipotle">
+    Functions available inside an action: signing, encryption, HTTP, response.
+  </Card>
+  <Card title="OpenAPI / Swagger" icon="file-code" href="https://api.chipotle.litprotocol.com/core/v1/swagger-ui">
+    Full REST API schema — generate clients in any language.
+  </Card>
+</CardGroup>
