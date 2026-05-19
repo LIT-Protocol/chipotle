@@ -1,0 +1,22 @@
+{
+  "name": "compliance-transfer-gate",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Lit Action + ERC-20 example: gate every transfer on live recipient risk screening.",
+  "scripts": {
+    "compile": "hardhat compile",
+    "setup": "node scripts/setup.js",
+    "deploy:baseSepolia": "hardhat run scripts/deploy.js --network baseSepolia",
+    "deploy:base": "hardhat run scripts/deploy.js --network base",
+    "transfer": "node scripts/transfer.js"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.2",
+    "dotenv": "^16.4.5",
+    "ethers": "^5.7.2"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.10"
+  }
+}
