@@ -5,6 +5,9 @@ use serde::Serialize;
 
 #[derive(Clone)]
 pub struct Mailer {
+    // All fields are Clone (reqwest::Client clones cheaply, String clones the
+    // underlying buffer). Used by tokio::spawn in /auth/request so the email
+    // send runs off the request path.
     api_key: String,
     from: String,
     http: reqwest::Client,

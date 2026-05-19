@@ -11,6 +11,7 @@ use sqlx::PgPool;
 use time::OffsetDateTime;
 
 use super::operator::Operator;
+use super::rate_limit::RateLimiter;
 use super::{MAGIC_LINK_TTL_SECONDS, SESSION_COOKIE_NAME, operator, session, token};
 use crate::config::Config;
 use crate::mail::Mailer;
@@ -28,16 +29,33 @@ pub struct RequestLinkResponse {
 }
 
 /// `POST /auth/request` — accept any email and, IF it matches an allowlisted
-/// operator, send them a magic-link email. Otherwise no-op. Same response in
-/// both cases so callers can't enumerate operators by trying emails.
+/// operator, send them a magic-link email. Otherwise no-op.
+///
+/// Same JSON shape regardless of allowlist membership so callers can't
+/// enumerate operators. Two related defenses:
+///
+/// 1. **Rate-limit check runs first**, before the operators table is touched,
+///    so a flood of requests for any single email returns at constant time
+///    regardless of allowlist status (defeats inbox spam + Resend-quota
+///    burning).
+/// 2. **Email send is spawned**, so the operator branch returns at the same
+///    speed as the non-operator branch (defeats latency-based enumeration of
+///    the operators table).
 #[post("/auth/request", data = "<form>")]
 pub async fn request_link(
     form: Form<RequestLinkForm<'_>>,
     pool: &State<PgPool>,
     config: &State<Config>,
     mailer: &State<Mailer>,
+    rate_limit: &State<RateLimiter>,
 ) -> Json<RequestLinkResponse> {
     let email = form.email.trim().to_lowercase();
+
+    if rate_limit.check_and_record(&email).await {
+        tracing::info!("magic-link request rate-limited for {email}");
+        return Json(RequestLinkResponse { ok: true });
+    }
+
     match operator::find_by_email(pool, &email).await {
         Ok(Some(_op)) => {
             let now = OffsetDateTime::now_utc().unix_timestamp();
@@ -53,11 +71,16 @@ pub async fn request_link(
                  <p><a href=\"{link}\">{link}</a></p>\
                  <p style=\"color: #777; font-size: 12px;\">If you didn't request this, you can ignore this email.</p>"
             );
-            if let Err(e) = mailer.send(&email, subject, &html, &text).await {
-                tracing::warn!("magic-link email send failed for {email}: {e}");
-            } else {
-                tracing::info!("magic-link sent to {email}");
-            }
+
+            let mailer = mailer.inner().clone();
+            let email_for_send = email.clone();
+            tokio::spawn(async move {
+                if let Err(e) = mailer.send(&email_for_send, subject, &html, &text).await {
+                    tracing::warn!("magic-link email send failed for {email_for_send}: {e}");
+                } else {
+                    tracing::info!("magic-link sent to {email_for_send}");
+                }
+            });
         }
         Ok(None) => {
             tracing::info!("magic-link requested for non-operator email; ignoring");

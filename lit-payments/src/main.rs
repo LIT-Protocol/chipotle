@@ -23,11 +23,13 @@ async fn rocket() -> _ {
 
     let mailer =
         mail::Mailer::new(cfg.resend_api_key.clone(), cfg.mail_from.clone()).expect("mailer");
+    let rate_limit = auth::rate_limit::RateLimiter::new();
 
     rocket::build()
         .manage(pool)
         .manage(cfg)
         .manage(mailer)
+        .manage(rate_limit)
         .mount(
             "/",
             routes![
