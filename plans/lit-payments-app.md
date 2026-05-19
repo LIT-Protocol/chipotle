@@ -73,7 +73,6 @@ lit-node-express/
 │   │   ├── chain.rs        ← LITKEY listener (WSS + poll)
 │   │   ├── db.rs           ← Postgres
 │   │   ├── auth.rs         ← magic-link
-│   │   ├── alerts.rs       ← Slack webhook
 │   │   └── endpoints/
 │   │       ├── portal.rs
 │   │       └── pay_with_litkey.rs
@@ -103,7 +102,7 @@ Tech stack: **Rust + Rocket + vanilla HTML/JS**. Matches existing repo conventio
 - **Platform**: Railway (service + managed Postgres in the same project).
 - **Outside the TEE.** No attestation pain; operators can hit Railway logs/shell for diagnostics.
 - **Ingress**: Railway's default TLS + custom domain.
-- **Secrets** (Railway env vars): Stripe restricted key, DB URL, magic-link signing key, Resend API key, Slack webhook URL, Alchemy WSS + HTTPS URLs, gateway contract address, treasury Safe address, LITKEY token address, CoinGecko ID.
+- **Secrets** (Railway env vars): Stripe restricted key, DB URL, magic-link signing key, Resend API key, Alchemy WSS + HTTPS URLs, gateway contract address, treasury Safe address, LITKEY token address, CoinGecko ID.
 
 ### Auth tiers
 
@@ -281,7 +280,7 @@ WebSocket primary + 60s reconciliation poll:
 
 1. `Payment` event observed at confirmation depth.
 2. Idempotency check on `(tx_hash, log_index)`.
-3. Look up Stripe customer by `metadata.wallet_address == event.wallet`. If none: Slack-alert admin; do not credit. (Should be rare — dashboard only generates the link for users with an active Lit account.)
+3. Look up Stripe customer by `metadata.wallet_address == event.wallet`. If none: log a warning and skip — do not credit, do not alert. Anyone calling `pay()` directly with a wallet that isn't a Lit customer is off the supported path; they'll reach out to support if it matters.
 4. Read `cents_per_litkey` from `litkey_rate`. Compute `cents = litkey_amount * rate`.
 5. Write `balance_transaction` with `amount = -cents`, description `"LITKEY payment: tx {tx_hash}"`.
 6. Insert row into `litkey_payments` (rate snapshotted in `rate_used`).
@@ -295,15 +294,15 @@ GET https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies
 ```
 
 - Background task polls every 5 min, upserts the single-row `litkey_rate` table.
-- If a fetch fails or returns nonsense (zero / null / >100× recent value): keep the last-known rate, Slack alert.
-- If the row's `fetched_at` is older than 1 hour: pause crediting + Slack alert (don't silently credit at stale rates).
-- Admin can override the rate from the admin UI (updates the same row with `source='manual'` + operator id). Slack alert on every manual override for transparency.
+- If a fetch fails or returns nonsense (zero / null / >100× recent value): keep the last-known rate, log a warning.
+- If the row's `fetched_at` is older than 1 hour: pause crediting and log a warning. Stuck payments will surface via user reports; mod can grant manually in the meantime.
+- Admin can override the rate from the admin UI (updates the same row with `source='manual'` + operator id). Override is recorded on the row itself — no separate notification.
 
 **Quote vs. credit semantics**: the payment page shows the rate at page-load and refreshes the quote every 30s. Once the user starts the `approve` tx, the LITKEY amount is frozen. At confirmation we credit using the rate **in effect at the on-chain `Payment` event** (the most recent value of `litkey_rate`). Page says "estimated credit, finalized at confirmation."
 
 ### Edge cases
 
-- **`event.wallet` doesn't match any Stripe customer** → Slack alert; don't credit. Operator can resolve manually via the credit portal. Should be rare (dashboard only generates the link for users with an active Lit account).
+- **`event.wallet` doesn't match any Stripe customer** → log + skip. No alert. If the payer cares, they'll contact support and a mod can grant via the credit portal.
 - **Direct send to the Safe** → unsupported; tokens just sit in the Safe. User contacts support → mod uses the credit portal.
 - **Reorgs** → 5-confirmation depth on Base prevents.
 - **Overpayment** → credit at current rate; no refund flow in v1.
@@ -318,7 +317,7 @@ GET https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies
 | 2 | Cloud provider | Railway (service + managed Postgres) |
 | 3 | Shared crate | Extract `lit-billing-core` now; both services depend on it |
 | 4 | Operator auth | Magic link via Resend, day 1; 15-min token, 7-day session |
-| 5 | Alert channel | Slack incoming webhook → `#payment-alerts` |
+| 5 | Alerting | None — rely on server logs (Railway) |
 | 6 | Reconciliation report | Deferred |
 | 7 | Refund / clawback flow | Deferred — handle manually in Stripe dashboard |
 | 8 | LITKEY chain | Base |
@@ -335,7 +334,6 @@ GET https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies
 | Item | Value |
 |---|---|
 | CoinGecko ID | `lit-protocol` |
-| Slack channel | `#payment-alerts` |
 | Magic-link sender | `noreply@mail.litprotocol.com` (subdomain) |
 | Initial operators | `chris@litprotocol.com` (admin); `Salamiademola73@gmail.com` (mod) |
 | Per-grant cap | $20 |
@@ -357,7 +355,6 @@ All questions are closed. Plan is ready to start building.
 2. **Foundation + Feature 1: admin credit portal** (1-1.5 weeks)
    - `lit-payments` crate skeleton, Railway project, managed Postgres provisioned, deploy pipeline.
    - Magic-link auth wired end-to-end (Resend + sessions + operators).
-   - Slack alert helper.
    - Portal: lookup, grant form, recent-grants list, caps.
    - **Milestone**: Discord mod logs in via magic link and grants credits.
 
@@ -377,6 +374,6 @@ All questions are closed. Plan is ready to start building.
 - **Mod auth abuse** — magic link + daily caps + per-row audit trail. Even a leaked operator account is capped at $100/day.
 - **URL spoofing / phishing the credited wallet** — attacker tricks user into paying with an attacker-chosen `wallet=` param, sending credit to the attacker. Mitigation: page prominently displays the account-to-be-credited (email + wallet) and requires confirmation before the wallet pop-up. We accept residual risk; HMAC-signing the URL is not worth the complexity for the impact.
 - **PaymentGateway contract bug** — small surface but real money. Mitigations: keep contract minimal & immutable, internal review, deploy to Base Sepolia first, monitor on-chain.
-- **Rate staleness** — `>1hr` since `fetched_at` pauses crediting + Slack alerts; admins can manually update.
+- **Rate staleness** — `>1hr` since `fetched_at` pauses crediting and logs a warning; admins manually update via the rate-override UI when they notice (via user reports or log monitoring).
 - **User sends LITKEY directly to the Safe** — funds sit unattributed in the Safe. Mitigation: mod uses the credit portal to grant manually when a user complains. Documented as unsupported.
 - **Reorg risk** — 5-confirmation depth on Base mitigates; risk is already near-zero past a handful of blocks.
