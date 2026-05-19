@@ -1,6 +1,6 @@
 ---
 title: "Examples"
-description: "Common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, sending ETH, gating ERC-20 transfers on live compliance data, and multi-RPC consensus oracles."
+description: "Common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, sending ETH, gating ERC-20 transfers on sanctions data, multi-RPC consensus oracles, and AI-consensus prediction-market resolution."
 ---
 
 Each example below is a self-contained Lit Action. Pass the code string to the `/core/v1/lit_action` endpoint with any required `js_params`. The `pkpId` parameter is the wallet address of the PKP you want to use, passed in via `js_params`.
@@ -383,4 +383,80 @@ Two colluding providers still can't fabricate a block hash the third would confi
 
 <Info>
   The full runnable example — registry contract, deploy script, URL-encryption helper, and an end-to-end runner that reads ERC-20 `balanceOf` from three providers and submits the signed reading on-chain — lives at [`examples/multi-rpc-consensus-oracle/`](https://github.com/LIT-Protocol/lit-node-express/tree/next/examples/multi-rpc-consensus-oracle) in the repo.
+</Info>
+
+---
+
+## 10. Resolve a Prediction Market by AI Consensus
+
+Poll multiple LLM providers in parallel with the same yes/no question and only sign the resolution when every model agrees. Same multi-source consensus pattern as example 9, but the parallel sources are AI models instead of RPCs.
+
+**Perplexity Sonar is required** because its built-in web search lets it answer questions about events that happened after a frontier model's training cutoff. **OpenAI and Anthropic are optional second opinions** — independent training corpora mean a confident-but-wrong frontier answer is unlikely to be confirmed by another frontier model. Configuring all three gives you 3-of-3 agreement before anything reaches the chain.
+
+```javascript
+// js_params: {
+//   questionId, questionText, resolveAt,
+//   marketAddress, marketChainId, deadline,
+//   decryptPkpId,
+//   encryptedPerplexityKey,           // required
+//   encryptedOpenAiKey, encryptedAnthropicKey  // optional
+// }
+async function main({
+  questionId, questionText, resolveAt,
+  marketAddress, marketChainId, deadline, decryptPkpId,
+  encryptedPerplexityKey, encryptedOpenAiKey, encryptedAnthropicKey,
+}) {
+  if (Math.floor(Date.now() / 1000) < resolveAt) {
+    return { authorized: false, reason: "not yet resolvable" };
+  }
+  // Bind questionId to the prompt so a caller can't swap the text.
+  const computedId = ethers.utils.keccak256(ethers.utils.toUtf8Bytes(questionText));
+  if (computedId.toLowerCase() !== questionId.toLowerCase()) {
+    return { authorized: false, reason: "questionText does not match questionId" };
+  }
+
+  const keys = await Promise.all([
+    ["perplexity", encryptedPerplexityKey],
+    ["openai", encryptedOpenAiKey],
+    ["anthropic", encryptedAnthropicKey],
+  ].map(async ([name, ct]) =>
+    ct
+      ? { name, key: await Lit.Actions.Decrypt({ pkpId: decryptPkpId, ciphertext: ct }) }
+      : { name, key: null }
+  ));
+
+  const prompt = `Answer YES, NO, or UNCLEAR. ` +
+    `If the question depends on future events, answer UNCLEAR. ` +
+    `Respond with a single word, no explanation.\n\nQuestion: ${questionText}`;
+  const votes = await Promise.all(keys.map(async ({ name, key }) =>
+    key ? { name, vote: parseVote(await callModel(name, key, prompt)) } : null
+  ));
+
+  const successful = votes.filter((v) => v && v.vote);
+  if (!successful.length) return { authorized: false, reason: "no model responded" };
+  if (!successful.every((v) => v.vote === successful[0].vote)) {
+    return { authorized: false, reason: "models disagree", votes: successful };
+  }
+  const answer = { YES: 1, NO: 2, UNCLEAR: 3 }[successful[0].vote];
+
+  const digest = ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["address", "bytes32", "uint8", "uint256", "uint256"],
+      [marketAddress, questionId, answer, deadline, marketChainId]
+    )
+  );
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  return {
+    authorized: true,
+    signature: await wallet.signMessage(ethers.utils.arrayify(digest)),
+    answer,
+    consensusAcross: successful.map((v) => v.name),
+  };
+}
+```
+
+Honest caveats: frontier models share training corpora, so a wrong answer that's widespread on the internet can be confidently confirmed by multiple models. Perplexity's grounding helps but isn't bulletproof — citations can drift. For real money this pattern wants a dispute window or a stake-and-slash flow on top.
+
+<Info>
+  The full runnable example — `PredictionMarket` contract, deploy script, key-encryption helper, propose/resolve runners, and a heavily-commented setup pipeline — lives at [`examples/prediction-market-oracle/`](https://github.com/LIT-Protocol/lit-node-express/tree/next/examples/prediction-market-oracle) in the repo.
 </Info>
