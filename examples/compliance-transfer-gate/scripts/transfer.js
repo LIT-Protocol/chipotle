@@ -77,9 +77,16 @@ async function main() {
     }),
   });
 
-  const body = await litRes.json();
-  if (!body.authorized) {
-    console.error("Lit Action denied the transfer:", body);
+  // /lit_action wraps the action's return value as
+  //   { response: <whatever you returned>, logs: "...", has_error: bool }
+  const envelope = await litRes.json();
+  if (envelope.has_error) {
+    console.error("Lit Action errored:", envelope.logs || envelope);
+    process.exit(2);
+  }
+  const body = envelope.response;
+  if (!body || !body.authorized) {
+    console.error("Lit Action denied the transfer:", body || envelope);
     process.exit(2);
   }
   console.log("Recipient cleared sanctions screening. Submitting transfer...");

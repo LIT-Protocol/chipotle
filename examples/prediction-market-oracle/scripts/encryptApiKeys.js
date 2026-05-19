@@ -44,11 +44,17 @@ async function encryptOne(secret) {
       js_params: { pkpId: DECRYPT_PKP_ADDRESS, secret },
     }),
   });
-  const body = await res.json();
-  if (!body.ciphertext) {
-    throw new Error(`encrypt failed: ${JSON.stringify(body)}`);
+  // /lit_action wraps the action's return value as
+  //   { response: <whatever you returned>, logs: "...", has_error: bool }
+  const envelope = await res.json();
+  if (envelope.has_error) {
+    throw new Error(`encrypt failed: ${envelope.logs || JSON.stringify(envelope)}`);
   }
-  return body.ciphertext;
+  const result = envelope.response;
+  if (!result || !result.ciphertext) {
+    throw new Error(`encrypt returned no ciphertext: ${JSON.stringify(envelope)}`);
+  }
+  return result.ciphertext;
 }
 
 async function encryptApiKeys() {
