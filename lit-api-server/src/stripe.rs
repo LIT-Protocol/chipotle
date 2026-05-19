@@ -36,9 +36,8 @@ pub const MIN_TOPUP_CENTS: i64 = 500;
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StripeState {
-    // NOTE: Debug is implemented manually below to redact the inner client.
     pub publishable_key: String,
     client: StripeClient,
     /// wallet_address → Stripe customer ID cache (10-min idle timeout).
@@ -59,15 +58,6 @@ pub struct StripeState {
     /// for 60 seconds, so each customer triggers at most one Stripe GET per minute
     /// regardless of request rate.
     balance_refresh_in_flight: Cache<String, ()>,
-}
-
-impl std::fmt::Debug for StripeState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("StripeState")
-            .field("publishable_key", &self.publishable_key)
-            .field("client", &self.client)
-            .finish()
-    }
 }
 
 /// Initialise Stripe from environment variables.  Returns `None` if the env vars are absent
