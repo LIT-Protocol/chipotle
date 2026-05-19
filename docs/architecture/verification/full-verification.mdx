@@ -280,10 +280,10 @@ cast call "$DSTACK_APP" "allowedComposeHashes(bytes32)" "$COMPOSE_HASH" --rpc-ur
 # If it returns 0x...00 (false), the CVM is running unauthorized code.
 ```
 
-**Governance via Safe multisig:** All on-chain governance actions are controlled by a 2/3 Safe multisig ([`0xF688411c0FFc300cAb33EB1dA651DBb3E6891098`](https://basescan.org/address/0xF688411c0FFc300cAb33EB1dA651DBb3E6891098)) on Base. This Safe administers:
+**Governance via Safe multisig:** All on-chain governance actions are controlled by a Safe multisig ([`0xF688411c0FFc300cAb33EB1dA651DBb3E6891098`](https://basescan.org/address/0xF688411c0FFc300cAb33EB1dA651DBb3E6891098)) on Base. This Safe administers:
 
 - **DstackApp** ([`0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC`](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC)) — compose-hash whitelisting for the Lit Chipotle CVM
 - **Phala KMS** ([`0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C`](https://basescan.org/address/0x2f83172A49584C017F2B256F0FB2Dca14126Ba9C)) — KMS configuration and allowed OS images
 - **AccountConfig** — _details coming soon_
 
-Any governance action (e.g., whitelisting a new compose-hash, updating allowed OS images, or upgrading the AccountConfig Diamond) requires at least 2 of 3 signers. Production deployments use a two-phase workflow: CI proposes the transaction to the Safe, and signers approve it through the Safe UI before the deployment can proceed.
+Any governance action (e.g., whitelisting a new compose-hash, updating allowed OS images, or upgrading the AccountConfig Diamond) requires Safe signer approval. Production deployments use a two-phase workflow: CI proposes the transaction to the Safe, and signers approve it through the Safe UI before the deployment can proceed.

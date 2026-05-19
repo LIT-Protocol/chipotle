@@ -13,7 +13,7 @@ Without on-chain KMS, a TEE provider's backend decides which CVMs get keys. That
 
 - **No central authority.** A smart contract is the only thing that can authorize key release. Phala's backend does not sign transactions on Lit's behalf.
 - **Public, auditable governance.** Every code-version whitelist change is a Base transaction. Anyone can read the history on Basescan.
-- **Multi-party control.** The contract owner is a 2/3 Safe multisig of Lit signers — no single party (including Lit) can change the whitelist alone.
+- **Multi-party control.** The contract owner is a Safe multisig of Lit signers — no single party (including Lit) can change the whitelist alone.
 
 For the canonical design, see [Phala: Understanding On-Chain KMS](https://docs.phala.com/phala-cloud/key-management/understanding-onchain-kms) and [Cloud vs On-Chain KMS](https://docs.phala.com/phala-cloud/key-management/cloud-vs-onchain-kms).
 
@@ -60,7 +60,7 @@ The flow on every CVM boot:
     - Is the device ID in `DstackApp.allowedDeviceIds`?
 4. **Only if all four pass** does the KMS release the keys this CVM is allowed to use.
 
-This means: even if Lit Protocol pushed a malicious Docker image, the CVM running it would not be able to obtain the root keys unless the new compose hash was first whitelisted on Base — which requires 2 of 3 Safe signers to approve a transaction visible on Basescan.
+This means: even if Lit Protocol pushed a malicious Docker image, the CVM running it would not be able to obtain the root keys unless the new compose hash was first whitelisted on Base — which requires Safe signers to approve a transaction visible on Basescan.
 
 ## Confirming the KMS is active
 
@@ -89,7 +89,7 @@ cast call 0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC \
 # Expect: 0xF688411c0FFc300cAb33EB1dA651DBb3E6891098
 ```
 
-This proves no single party can modify the compose-hash whitelist. The [Safe at `0xF688…1098`](https://app.safe.global/base:0xF688411c0FFc300cAb33EB1dA651DBb3E6891098) requires 2 of 3 signers to approve any change.
+This proves no single party can modify the compose-hash whitelist. The [Safe at `0xF688…1098`](https://app.safe.global/base:0xF688411c0FFc300cAb33EB1dA651DBb3E6891098) requires multiple signers to approve any change.
 
 ### 3. The CVM's app_id matches the DstackApp address
 
@@ -104,7 +104,7 @@ The two must match (case-insensitive). This proves the CVM you're talking to is 
 
 ## Auditing the governance history
 
-Every governance action that changed the KMS configuration is a Base transaction. On the [DstackApp's Basescan page](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC), the **Transactions** tab shows every `addComposeHash` and `removeComposeHash` call ever made. Each is a Safe execution requiring 2 of 3 signatures.
+Every governance action that changed the KMS configuration is a Base transaction. On the [DstackApp's Basescan page](https://basescan.org/address/0x3F91Deaf16FF7C823eE65081d6bAFA1cEea05FfC), the **Transactions** tab shows every `addComposeHash` and `removeComposeHash` call ever made. Each is a Safe execution requiring multiple signatures.
 
 To understand a specific deployment:
 

@@ -65,7 +65,7 @@ For the full end-to-end verification — including replaying the RTMR3 event log
 
 ## On-chain governance you can audit
 
-Three smart contracts on Base together define what Lit Chipotle is allowed to do. All three are administered by a 2/3 Safe multisig — no single party can change them.
+Three smart contracts on Base together define what Lit Chipotle is allowed to do. All three are administered by a Safe multisig — no single party can change them.
 
 <CardGroup cols={2}>
   <Card
@@ -83,11 +83,11 @@ Three smart contracts on Base together define what Lit Chipotle is allowed to do
     `0x2f83…Ba9C` — whitelists allowed dstack OS images and KMS instance measurements. Gatekeeps key release to the CVM.
   </Card>
   <Card
-    title="Safe Multisig (2/3)"
+    title="Safe Multisig"
     icon="users"
     href="https://basescan.org/address/0xF688411c0FFc300cAb33EB1dA651DBb3E6891098"
   >
-    `0xF688…1098` — owns both contracts above. Any deployment or config change requires at least 2 of 3 Lit signers.
+    `0xF688…1098` — owns both contracts above. Any deployment or config change requires multiple Lit signers.
   </Card>
   <Card
     title="On-Chain KMS Deep Dive"
