@@ -22,16 +22,16 @@ async function main() {
 
   const name = process.env.TOKEN_NAME || "Compliant USD";
   const symbol = process.env.TOKEN_SYMBOL || "cUSD";
-  const initialSupply = hre.ethers.parseUnits(
+  const initialSupply = hre.ethers.utils.parseUnits(
     process.env.INITIAL_SUPPLY || "1000000",
     18
   );
 
   const factory = await hre.ethers.getContractFactory("CompliantToken");
   const token = await factory.deploy(name, symbol, initialSupply, oracle);
-  await token.waitForDeployment();
+  await token.deployed();
 
-  const address = await token.getAddress();
+  const address = token.address;
   console.log("CompliantToken deployed:", address);
   console.log("Compliance oracle (action address):", oracle);
   console.log("Initial supply minted to deployer:", initialSupply.toString());

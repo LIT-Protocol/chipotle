@@ -17,9 +17,9 @@ async function main() {
 
   const factory = await hre.ethers.getContractFactory("PredictionMarket");
   const market = await factory.deploy(oracle);
-  await market.waitForDeployment();
+  await market.deployed();
 
-  const address = await market.getAddress();
+  const address = market.address;
   console.log("PredictionMarket deployed:", address);
   console.log("Oracle (action address):", oracle);
 

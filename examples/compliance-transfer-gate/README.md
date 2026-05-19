@@ -161,15 +161,15 @@ different chain:
 This is the cross-chain bit: the screening chain and the token chain are
 decoupled.
 
-## Hardening: multi-RPC consensus
+## Hardening: multi-source consensus
 
 The current action trusts a single screening RPC. A compromised RPC could lie
-about `isSanctioned`. To eliminate that single point of failure, fold in the
-pattern from [`../multi-rpc-consensus-oracle`](../multi-rpc-consensus-oracle):
-read from three independent RPCs (Infura, Alchemy, QuickNode) and only sign
-when all three return the same bool at the same block. The defensive
-`eth_chainId` check in this action is a small step toward that; the full
-consensus pattern is a much stronger guarantee.
+about `isSanctioned`. To eliminate that single point of failure, apply the
+multi-source pattern used in [`../multi-source-price-oracle`](../multi-source-price-oracle):
+fan out the `eth_call` to two or three independent mainnet RPCs and only sign
+when they all return the same `isSanctioned` byte. The defensive `eth_chainId`
+check in this action is a small step toward that; full multi-source agreement
+is a much stronger guarantee.
 
 ## Production considerations
 

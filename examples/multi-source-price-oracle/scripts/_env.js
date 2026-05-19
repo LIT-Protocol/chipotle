@@ -1,16 +1,7 @@
 // Minimal .env reader / upserter shared across all the scripts.
 //
-// We deliberately don't depend on `dotenv` so the helper scripts can run
-// without `npm install` if someone is poking around. The semantics are:
-//   - load(): parse .env into process.env (only setting keys that aren't
-//     already set, so explicit env-var overrides on the command line win).
-//   - upsert(key, value): if .env contains a line `KEY=...`, replace it;
-//     otherwise append `KEY=value` to the end. Writes back atomically.
-//
-// Why upsert? The setup script generates derived values (PKP address,
-// group ID, deployed contract address, ciphertexts) and stores them in
-// .env so re-running setup is idempotent — already-set values aren't
-// regenerated.
+// See the other example folders for the same helper — kept inline here
+// so each example folder is fully self-contained.
 
 const fs = require("fs");
 const path = require("path");

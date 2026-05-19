@@ -5,9 +5,10 @@ models and only signing the answer when they all agree.**
 
 This is the "use AI on-chain via Lit" example. Single-frontier-model
 resolution is too easy to hallucinate; this example uses the same
-multi-source consensus pattern as
-[`../multi-rpc-consensus-oracle`](../multi-rpc-consensus-oracle), but the
-parallel sources are AI providers instead of RPC providers.
+multi-source pattern as [`../multi-source-price-oracle`](../multi-source-price-oracle),
+but the parallel sources are AI providers instead of price feeds.
+Strict agreement (rather than median) is used here because the output
+is categorical YES/NO/UNCLEAR — there's nothing to take a median of.
 
 - **Perplexity Sonar Pro — required.** Sonar indexes the web at query time,
   so it can answer questions about events that happened after a frontier

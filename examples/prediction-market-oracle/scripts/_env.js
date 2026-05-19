@@ -1,8 +1,7 @@
 // Minimal .env reader / upserter shared across all the scripts.
 //
-// See the compliance-transfer-gate and multi-rpc-consensus-oracle examples
-// for the same helper — kept inline here so each example folder is fully
-// self-contained.
+// See the other example folders for the same helper — kept inline here
+// so each example folder is fully self-contained.
 
 const fs = require("fs");
 const path = require("path");
