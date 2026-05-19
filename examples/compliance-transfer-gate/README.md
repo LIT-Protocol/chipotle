@@ -85,7 +85,10 @@ npm install
 ```
 
 Edit `.env` and set:
-- `LIT_USAGE_API_KEY` — from the [Chipotle dashboard](https://dashboard.chipotle.litprotocol.com)
+- `LIT_API_KEY` — your **account-level (master) API key** from the
+  [Chipotle dashboard](https://dashboard.chipotle.litprotocol.com), *not* a
+  scoped usage key. Setup calls management endpoints (`/add_action`,
+  `/add_group`) that revert `NotMasterAccount` on scoped keys.
 - `DEPLOYER_PRIVATE_KEY` — an EOA with gas on Base Sepolia (or your target chain)
 - `SENDER_PRIVATE_KEY` — an EOA holding tokens (typically the same as deployer for testing)
 

@@ -14,7 +14,7 @@ env.load();
 
 const {
   LIT_API_BASE = "https://api.chipotle.litprotocol.com",
-  LIT_USAGE_API_KEY,
+  LIT_API_KEY,
   PRICE_ORACLE_ADDRESS,
   REGISTRY_CHAIN_ID = "84532",
   REGISTRY_RPC_URL = "https://sepolia.base.org",
@@ -35,7 +35,7 @@ async function main() {
     throw new Error("Usage: node scripts/submit.js --asset ETH");
   }
   for (const k of [
-    "LIT_USAGE_API_KEY",
+    "LIT_API_KEY",
     "PRICE_ORACLE_ADDRESS",
     "SUBMITTER_PRIVATE_KEY",
   ]) {
@@ -51,7 +51,7 @@ async function main() {
   const litRes = await fetch(`${LIT_API_BASE}/core/v1/lit_action`, {
     method: "POST",
     headers: {
-      "X-Api-Key": LIT_USAGE_API_KEY,
+      "X-Api-Key": LIT_API_KEY,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({

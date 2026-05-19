@@ -15,15 +15,15 @@ env.load();
 
 const {
   LIT_API_BASE = "https://api.chipotle.litprotocol.com",
-  LIT_USAGE_API_KEY,
+  LIT_API_KEY,
 } = process.env;
 
 async function mintPkp() {
-  if (!LIT_USAGE_API_KEY) throw new Error("LIT_USAGE_API_KEY is required");
+  if (!LIT_API_KEY) throw new Error("LIT_API_KEY is required");
 
   const res = await fetch(`${LIT_API_BASE}/core/v1/create_wallet`, {
     method: "GET",
-    headers: { "X-Api-Key": LIT_USAGE_API_KEY },
+    headers: { "X-Api-Key": LIT_API_KEY },
   });
   const body = await res.json();
   if (!res.ok || !body.wallet_address) {
