@@ -1,9 +1,11 @@
 ---
 title: "Examples"
-description: "Seven common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, and sending ETH — including examples gated on live external data."
+description: "Common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, sending ETH, gating ERC-20 transfers on live compliance data, and multi-RPC consensus oracles."
 ---
 
 Each example below is a self-contained Lit Action. Pass the code string to the `/core/v1/lit_action` endpoint with any required `js_params`. The `pkpId` parameter is the wallet address of the PKP you want to use, passed in via `js_params`.
+
+For examples that need more than one file to run — a Solidity contract, a deploy script, an off-chain client — see the [`examples/` folder in the repo](https://github.com/LIT-Protocol/lit-node-express/tree/next/examples).
 
 ---
 
@@ -193,3 +195,192 @@ async function main({ pkpId, toAddress, amountEth, chainId, rpcUrl }) {
 <Warning>
   The PKP wallet at `pkpId` must hold enough ETH on the target chain to cover both the transfer amount and the gas fee. Use `createWallet` to get a PKP address, fund it on-chain, then use that address as `pkpId`.
 </Warning>
+
+---
+
+## 8. Gate an ERC-20 Transfer on On-Chain Sanctions Data (Cross-Chain)
+
+Screen the recipient of every transfer against the [Chainalysis on-chain sanctions oracle](https://go.chainalysis.com/chainalysis-oracle-docs.html) and only sign a transfer authorization when the recipient is clear.
+
+The Chainalysis oracle is free and keyless — it's just a smart contract at `0x40C57923924B5c5c5455c48D93317139ADDaC8fb` you can `staticcall`. But it is only deployed on a handful of mainnets (Ethereum, Arbitrum, Polygon, BSC, Avalanche, Optimism, Celo). On **Base, Linea, Scroll, any L3, any testnet, or any non-EVM chain**, a contract can't reach it. The Lit Action bridges that gap: it `eth_call`s the oracle on Ethereum mainnet, then signs an authorization that the `CompliantToken` contract — deployed wherever you want — verifies with `ecrecover`.
+
+The signature uses `Lit.Actions.getLitActionPrivateKey()` — an identity derived from the action's IPFS CID. See [Action-Identity Signing](./patterns#action-identity-signing--immutable-proofs).
+
+```javascript
+// js_params: {
+//   from, to, amount, nonce, deadline, contractAddress, chainId,
+//   screeningRpcUrl, screeningChainId
+// }
+const CHAINALYSIS_ORACLE = "0x40C57923924B5c5c5455c48D93317139ADDaC8fb";
+const IS_SANCTIONED_SELECTOR = "0xdf592f7d"; // keccak256("isSanctioned(address)")[0..4]
+
+async function main({
+  from, to, amount, nonce, deadline, contractAddress, chainId,
+  screeningRpcUrl, screeningChainId,
+}) {
+  // Defense in depth: verify the RPC is on the chain we expect, so a
+  // swapped RPC can't point us at a chain where Chainalysis isn't
+  // deployed (where the call would return "0x" = "clean").
+  const reportedChainId = parseInt(await rpc(screeningRpcUrl, "eth_chainId", []), 16);
+  if (reportedChainId !== screeningChainId) {
+    return { authorized: false, reason: "screening RPC reports wrong chain" };
+  }
+
+  const callData = IS_SANCTIONED_SELECTOR +
+    to.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+  const result = await rpc(screeningRpcUrl, "eth_call", [
+    { to: CHAINALYSIS_ORACLE, data: callData }, "latest",
+  ]);
+  if (!result || result === "0x") {
+    return { authorized: false, reason: "oracle returned empty data — wrong chain?" };
+  }
+  if (BigInt(result) !== 0n) {
+    return { authorized: false, reason: "Recipient is sanctioned" };
+  }
+
+  const digest = ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["address", "address", "uint256", "bytes32", "uint256", "address", "uint256"],
+      [from, to, amount, nonce, deadline, contractAddress, chainId]
+    )
+  );
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  const signature = await wallet.signMessage(ethers.utils.arrayify(digest));
+  return { authorized: true, signature };
+}
+
+async function rpc(url, method, params) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  const body = await res.json();
+  if (body.error) throw new Error(body.error.message);
+  return body.result;
+}
+```
+
+The contract pins the action's derived address at deploy time — derive it once by calling `Lit.Actions.getLitActionWalletAddress({ ipfsId })` from inside any helper action, then pass that address to the `CompliantToken` constructor.
+
+For richer screening — hacker wallets, mixer interactions, fresh threat intel — swap the on-chain lookup for a paid API like Chainalysis KYT, TRM Labs, or GetBlock. The pattern becomes: encrypt the API key to a PKP, decrypt inside the TEE, call the API, sign on pass.
+
+The matching contract signs nothing itself — it just verifies that the digest recovers to a hard-coded PKP address:
+
+```solidity
+function transferWithAuth(
+    address to, uint256 amount, bytes32 nonce, uint256 deadline, bytes calldata signature
+) external returns (bool) {
+    if (block.timestamp > deadline) revert AuthorizationExpired();
+    if (usedNonces[msg.sender][nonce]) revert NonceAlreadyUsed();
+
+    bytes32 digest = keccak256(abi.encode(
+        msg.sender, to, amount, nonce, deadline, address(this), block.chainid
+    )).toEthSignedMessageHash();
+
+    if (digest.recover(signature) != complianceOracle) {
+        revert InvalidComplianceSignature();
+    }
+    usedNonces[msg.sender][nonce] = true;
+    _transfer(msg.sender, to, amount);
+    return true;
+}
+```
+
+The plain `transfer` and `transferFrom` overrides revert, so every movement of tokens must go through this gate.
+
+<Info>
+  The full runnable example — token contract, hardhat deploy script, API-key encryption helper, and an end-to-end transfer runner — lives at [`examples/compliance-transfer-gate/`](https://github.com/LIT-Protocol/lit-node-express/tree/next/examples/compliance-transfer-gate) in the repo.
+</Info>
+
+---
+
+## 9. Read a Contract from Three RPCs and Sign Only on Consensus
+
+Read the same EVM view function from three independent RPC providers (Infura, Alchemy, QuickNode) in parallel and only sign the result when all three return byte-identical data at the same block. Use this whenever a single RPC provider would be a single point of failure — a buggy upgrade, a hijacked endpoint, a deliberately fraudulent response.
+
+The URLs (which embed API keys) are passed in as ciphertexts so they never appear in source. After decryption the action enforces a hostname whitelist, because anyone with a usage key for the decrypt PKP could otherwise re-encrypt an arbitrary URL. Like example 8, the signature is produced by the action's own derived key — so the on-chain registry trusts *this specific code*, not whoever happens to hold a particular PKP.
+
+```javascript
+// js_params: {
+//   target, callData, sourceChainId, registryAddress, registryChainId,
+//   deadline, decryptPkpId, encryptedRpcUrls   // array of 3 ciphertexts
+// }
+const ALLOWED_HOSTS = [
+  /^[a-z0-9-]+\.infura\.io$/i,
+  /^eth-[a-z0-9-]+\.g\.alchemy\.com$/i,
+  /^[a-z0-9-]+\.quiknode\.pro$/i,
+];
+
+async function main({
+  target, callData, sourceChainId, registryAddress, registryChainId,
+  deadline, decryptPkpId, encryptedRpcUrls, blockLagBlocks = 5,
+}) {
+  const rpcUrls = await Promise.all(
+    encryptedRpcUrls.map((c) =>
+      Lit.Actions.Decrypt({ pkpId: decryptPkpId, ciphertext: c })
+    )
+  );
+  for (const url of rpcUrls) {
+    const host = new URL(url).hostname;
+    if (!ALLOWED_HOSTS.some((re) => re.test(host))) {
+      return { authorized: false, reason: `host not whitelisted: ${host}` };
+    }
+  }
+
+  const probes = await Promise.all(rpcUrls.map((u) => batch(u, [
+    { method: "eth_chainId", params: [] },
+    { method: "eth_blockNumber", params: [] },
+  ])));
+  for (const [cid] of probes) {
+    if (parseInt(cid, 16) !== sourceChainId) {
+      return { authorized: false, reason: "chain mismatch" };
+    }
+  }
+  const blockNumber = Math.min(...probes.map(([, bn]) => parseInt(bn, 16))) - blockLagBlocks;
+  const blockTag = "0x" + blockNumber.toString(16);
+
+  const reads = await Promise.all(rpcUrls.map((u) => batch(u, [
+    { method: "eth_call", params: [{ to: target, data: callData }, blockTag] },
+    { method: "eth_getBlockByNumber", params: [blockTag, false] },
+  ])));
+  const returnDatas = reads.map(([r]) => r);
+  const blockHashes = reads.map(([, b]) => b.hash);
+  if (!returnDatas.every((r) => r === returnDatas[0]) ||
+      !blockHashes.every((h) => h === blockHashes[0])) {
+    return { authorized: false, reason: "RPCs disagree", returnDatas, blockHashes };
+  }
+
+  const observedAt = parseInt(reads[0][1].timestamp, 16);
+  const digest = ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["address", "bytes", "bytes", "uint256", "uint256", "address", "uint256"],
+      [target, callData, returnDatas[0], observedAt, deadline, registryAddress, registryChainId]
+    )
+  );
+
+  // Action-identity signing — the registry trusts the address derived
+  // from this action's IPFS CID, nothing else.
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  const signature = await wallet.signMessage(ethers.utils.arrayify(digest));
+  return { authorized: true, signature, returnData: returnDatas[0], observedAt, blockNumber };
+}
+
+async function batch(url, calls) {
+  const body = calls.map((c, i) => ({ jsonrpc: "2.0", id: i + 1, ...c }));
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const arr = await res.json();
+  arr.sort((a, b) => a.id - b.id);
+  return arr.map((r) => r.result);
+}
+```
+
+Two colluding providers still can't fabricate a block hash the third would confirm — so the consensus check requires *both* the return data and the canonical block hash to match across all three.
+
+<Info>
+  The full runnable example — registry contract, deploy script, URL-encryption helper, and an end-to-end runner that reads ERC-20 `balanceOf` from three providers and submits the signed reading on-chain — lives at [`examples/multi-rpc-consensus-oracle/`](https://github.com/LIT-Protocol/lit-node-express/tree/next/examples/multi-rpc-consensus-oracle) in the repo.
+</Info>

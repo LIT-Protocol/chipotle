@@ -1,0 +1,25 @@
+{
+  "name": "multi-rpc-consensus-oracle",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Lit Action that reads an EVM view function from three RPC providers in parallel and signs only when all three agree.",
+  "scripts": {
+    "compile": "hardhat compile",
+    "setup": "node scripts/setup.js",
+    "mint-pkp": "node scripts/mintPkp.js",
+    "deploy:baseSepolia": "hardhat run scripts/deploy.js --network baseSepolia",
+    "deploy:base": "hardhat run scripts/deploy.js --network base",
+    "encrypt-urls": "node scripts/encryptRpcUrls.js",
+    "submit": "node scripts/submit.js",
+    "test-consensus": "node scripts/test-consensus.js"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.2",
+    "dotenv": "^16.4.5",
+    "ethers": "^5.7.2"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "hardhat": "^2.22.10"
+  }
+}
