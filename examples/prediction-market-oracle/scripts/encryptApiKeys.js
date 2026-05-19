@@ -18,7 +18,7 @@ env.load();
 
 const {
   LIT_API_BASE = "https://api.chipotle.litprotocol.com",
-  LIT_USAGE_API_KEY,
+  LIT_API_KEY,
   DECRYPT_PKP_ADDRESS,
   PERPLEXITY_API_KEY,
   OPENAI_API_KEY,
@@ -36,7 +36,7 @@ async function encryptOne(secret) {
   const res = await fetch(`${LIT_API_BASE}/core/v1/lit_action`, {
     method: "POST",
     headers: {
-      "X-Api-Key": LIT_USAGE_API_KEY,
+      "X-Api-Key": LIT_API_KEY,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
@@ -58,7 +58,7 @@ async function encryptOne(secret) {
 }
 
 async function encryptApiKeys() {
-  for (const k of ["LIT_USAGE_API_KEY", "DECRYPT_PKP_ADDRESS", "PERPLEXITY_API_KEY"]) {
+  for (const k of ["LIT_API_KEY", "DECRYPT_PKP_ADDRESS", "PERPLEXITY_API_KEY"]) {
     if (!process.env[k]) throw new Error(`${k} is required`);
   }
 

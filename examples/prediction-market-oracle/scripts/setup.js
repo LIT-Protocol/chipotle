@@ -1,7 +1,7 @@
 // One-shot setup for the prediction-market-oracle example.
 //
 // What you provide (in .env before running):
-//   LIT_USAGE_API_KEY        Account or usage API key.
+//   LIT_API_KEY        Account or usage API key.
 //   PERPLEXITY_API_KEY       Required — web-grounded baseline.
 //   OPENAI_API_KEY           Optional — frontier-model second opinion.
 //   ANTHROPIC_API_KEY        Optional — frontier-model second opinion.
@@ -50,11 +50,11 @@ async function main() {
 
   const {
     LIT_API_BASE = "https://api.chipotle.litprotocol.com",
-    LIT_USAGE_API_KEY,
+    LIT_API_KEY,
   } = process.env;
 
   for (const k of [
-    "LIT_USAGE_API_KEY",
+    "LIT_API_KEY",
     "PERPLEXITY_API_KEY",
     "DEPLOYER_PRIVATE_KEY",
   ]) {
@@ -87,7 +87,7 @@ async function main() {
   // Step 2: Compute the action's IPFS CID.
   // -------------------------------------------------------------------------
   const actionCode = fs.readFileSync(ACTION_FILE, "utf8");
-  const freshCid = await getActionCid(LIT_API_BASE, LIT_USAGE_API_KEY, actionCode);
+  const freshCid = await getActionCid(LIT_API_BASE, LIT_API_KEY, actionCode);
   if (!process.env.ACTION_IPFS_CID || process.env.ACTION_IPFS_CID !== freshCid) {
     if (process.env.ACTION_IPFS_CID) {
       console.log("Step 2/9: action source changed — updating CID...");
@@ -110,7 +110,7 @@ async function main() {
     console.log("Step 3/9: Deriving action wallet address from CID...");
     const addr = await deriveActionWalletAddress(
       LIT_API_BASE,
-      LIT_USAGE_API_KEY,
+      LIT_API_KEY,
       actionCid
     );
     env.upsert("ACTION_WALLET_ADDRESS", addr);
@@ -126,7 +126,7 @@ async function main() {
   // -------------------------------------------------------------------------
   if (!process.env.GROUP_ID) {
     console.log("Step 4/9: Creating group...");
-    const id = await addGroup(LIT_API_BASE, LIT_USAGE_API_KEY);
+    const id = await addGroup(LIT_API_BASE, LIT_API_KEY);
     env.upsert("GROUP_ID", String(id));
     console.log(`  GROUP_ID=${id}`);
   } else {
@@ -139,7 +139,7 @@ async function main() {
   // -------------------------------------------------------------------------
   console.log("Step 5/9: Registering action with account...");
   await idempotent(
-    () => addAction(LIT_API_BASE, LIT_USAGE_API_KEY, actionCid),
+    () => addAction(LIT_API_BASE, LIT_API_KEY, actionCid),
     "action already registered"
   );
 
@@ -148,7 +148,7 @@ async function main() {
   // -------------------------------------------------------------------------
   console.log("Step 6/9: Adding action to group...");
   await idempotent(
-    () => addActionToGroup(LIT_API_BASE, LIT_USAGE_API_KEY, groupId, actionCid),
+    () => addActionToGroup(LIT_API_BASE, LIT_API_KEY, groupId, actionCid),
     "action already in group"
   );
 
@@ -160,7 +160,7 @@ async function main() {
     () =>
       addPkpToGroup(
         LIT_API_BASE,
-        LIT_USAGE_API_KEY,
+        LIT_API_KEY,
         groupId,
         process.env.DECRYPT_PKP_ADDRESS
       ),

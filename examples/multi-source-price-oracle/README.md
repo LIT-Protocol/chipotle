@@ -131,7 +131,10 @@ cp .env.example .env
 ```
 
 Edit `.env` and set:
-- `LIT_USAGE_API_KEY` — from the [Chipotle dashboard](https://dashboard.chipotle.litprotocol.com).
+- `LIT_API_KEY` — your **account-level (master) API key** from the
+  [Chipotle dashboard](https://dashboard.chipotle.litprotocol.com), *not* a
+  scoped usage key. Setup calls management endpoints that revert
+  `NotMasterAccount` on scoped keys.
 - `DEPLOYER_PRIVATE_KEY` — an EOA with gas on Base Sepolia (or your target chain).
 - `SUBMITTER_PRIVATE_KEY` — for `submit.js`; can be the same EOA as the deployer for testing.
 

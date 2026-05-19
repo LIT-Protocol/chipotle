@@ -1,7 +1,7 @@
 // One-shot setup for the multi-source-price-oracle example.
 //
 // What you provide (in .env before running):
-//   LIT_USAGE_API_KEY        Account or usage API key from the dashboard.
+//   LIT_API_KEY        Account or usage API key from the dashboard.
 //   DEPLOYER_PRIVATE_KEY     EOA used to deploy the PriceOracle registry.
 //
 // Notice what's *not* here: no PKP, no API keys, no encryption. The three
@@ -39,10 +39,10 @@ async function main() {
 
   const {
     LIT_API_BASE = "https://api.chipotle.litprotocol.com",
-    LIT_USAGE_API_KEY,
+    LIT_API_KEY,
   } = process.env;
 
-  for (const k of ["LIT_USAGE_API_KEY", "DEPLOYER_PRIVATE_KEY"]) {
+  for (const k of ["LIT_API_KEY", "DEPLOYER_PRIVATE_KEY"]) {
     if (!process.env[k]) {
       throw new Error(
         `${k} is required in .env. Copy .env.example to .env and fill it in.`
@@ -54,7 +54,7 @@ async function main() {
   // Step 1: Compute the action's IPFS CID.
   // -------------------------------------------------------------------------
   const actionCode = fs.readFileSync(ACTION_FILE, "utf8");
-  const freshCid = await getActionCid(LIT_API_BASE, LIT_USAGE_API_KEY, actionCode);
+  const freshCid = await getActionCid(LIT_API_BASE, LIT_API_KEY, actionCode);
   if (!process.env.ACTION_IPFS_CID || process.env.ACTION_IPFS_CID !== freshCid) {
     if (process.env.ACTION_IPFS_CID) {
       console.log("Step 1/6: action source changed — updating CID...");
@@ -77,7 +77,7 @@ async function main() {
     console.log("Step 2/6: Deriving action wallet address from CID...");
     const addr = await deriveActionWalletAddress(
       LIT_API_BASE,
-      LIT_USAGE_API_KEY,
+      LIT_API_KEY,
       actionCid
     );
     env.upsert("ACTION_WALLET_ADDRESS", addr);
@@ -93,7 +93,7 @@ async function main() {
   // -------------------------------------------------------------------------
   if (!process.env.GROUP_ID) {
     console.log("Step 3/6: Creating group...");
-    const id = await addGroup(LIT_API_BASE, LIT_USAGE_API_KEY);
+    const id = await addGroup(LIT_API_BASE, LIT_API_KEY);
     env.upsert("GROUP_ID", String(id));
     console.log(`  GROUP_ID=${id}`);
   } else {
@@ -106,7 +106,7 @@ async function main() {
   // -------------------------------------------------------------------------
   console.log("Step 4/6: Registering action with account...");
   await idempotent(
-    () => addAction(LIT_API_BASE, LIT_USAGE_API_KEY, actionCid),
+    () => addAction(LIT_API_BASE, LIT_API_KEY, actionCid),
     "action already registered"
   );
 
@@ -115,7 +115,7 @@ async function main() {
   // -------------------------------------------------------------------------
   console.log("Step 5/6: Adding action to group...");
   await idempotent(
-    () => addActionToGroup(LIT_API_BASE, LIT_USAGE_API_KEY, groupId, actionCid),
+    () => addActionToGroup(LIT_API_BASE, LIT_API_KEY, groupId, actionCid),
     "action already in group"
   );
 
