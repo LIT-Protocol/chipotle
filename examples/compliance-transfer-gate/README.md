@@ -195,4 +195,4 @@ is a much stronger guarantee.
   sanctions list. For richer screening, swap the on-chain lookup for a
   paid provider (TRM Labs, GetBlock, MetaSleuth, Chainalysis KYT) — the
   pattern (encrypt API key → decrypt in TEE → fetch → sign) is shown in
-  earlier revisions of this example.
+  other examples.

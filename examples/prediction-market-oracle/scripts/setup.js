@@ -242,6 +242,9 @@ async function getActionCid(base, apiKey, code) {
 }
 
 async function deriveActionWalletAddress(base, apiKey, cid) {
+  // /lit_action wraps the action's return value as
+  //   { response: <whatever you returned>, logs: "...", has_error: bool }
+  // so the action's payload lives at body.response, not body itself.
   const body = await call(base, apiKey, "lit_action", {
     method: "POST",
     body: JSON.stringify({
@@ -249,10 +252,14 @@ async function deriveActionWalletAddress(base, apiKey, cid) {
       js_params: { ipfsId: cid },
     }),
   });
-  if (!body.walletAddress) {
+  if (body.has_error) {
+    throw new Error(`address derivation failed: ${body.logs || JSON.stringify(body)}`);
+  }
+  const result = body.response;
+  if (!result || !result.walletAddress) {
     throw new Error(`address derivation returned: ${JSON.stringify(body)}`);
   }
-  return body.walletAddress;
+  return result.walletAddress;
 }
 
 async function addGroup(base, apiKey) {
