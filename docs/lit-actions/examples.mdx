@@ -1,6 +1,6 @@
 ---
 title: "Examples"
-description: "Common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, sending ETH, gating ERC-20 transfers on sanctions data, multi-RPC consensus oracles, and AI-consensus prediction-market resolution."
+description: "Common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, sending ETH, gating ERC-20 transfers on sanctions data, multi-source price oracles, and AI-consensus prediction-market resolution."
 ---
 
 Each example below is a self-contained Lit Action. Pass the code string to the `/core/v1/lit_action` endpoint with any required `js_params`. The `pkpId` parameter is the wallet address of the PKP you want to use, passed in via `js_params`.
@@ -295,101 +295,94 @@ The plain `transfer` and `transferFrom` overrides revert, so every movement of t
 
 ---
 
-## 9. Read a Contract from Three RPCs and Sign Only on Consensus
+## 9. Median Price Oracle Across Three Exchanges
 
-Read the same EVM view function from three independent RPC providers (Infura, Alchemy, QuickNode) in parallel and only sign the result when all three return byte-identical data at the same block. Use this whenever a single RPC provider would be a single point of failure — a buggy upgrade, a hijacked endpoint, a deliberately fraudulent response.
+Fetch a spot price from three independent exchanges (Coinbase, Kraken, Bitstamp), take the median, and sign it for any EVM chain. This is the practical "I need a Chainlink-shaped feed without Chainlink" pattern.
 
-The URLs (which embed API keys) are passed in as ciphertexts so they never appear in source. After decryption the action enforces a hostname whitelist, because anyone with a usage key for the decrypt PKP could otherwise re-encrypt an arbitrary URL. Like example 8, the signature is produced by the action's own derived key — so the on-chain registry trusts *this specific code*, not whoever happens to hold a particular PKP.
+Median (rather than strict byte-equality) is the right aggregation for live market prices — exchanges disagree by a few cents at every moment, so byte-equality would never pass. A median naturally rejects one outlier; combined with a `maxSpreadBps` check (refuse to sign if min/max differ by more than the threshold) it catches both single-source manipulation and any-source-market-state-broken situations.
+
+All three sources here are keyless public HTTP endpoints — no API keys, no PKP, no encryption.
 
 ```javascript
 // js_params: {
-//   target, callData, sourceChainId, registryAddress, registryChainId,
-//   deadline, decryptPkpId, encryptedRpcUrls   // array of 3 ciphertexts
+//   asset, registryAddress, registryChainId, deadline,
+//   maxSpreadBps = 100, minSources = 2, decimals = 8
 // }
-const ALLOWED_HOSTS = [
-  /^[a-z0-9-]+\.infura\.io$/i,
-  /^eth-[a-z0-9-]+\.g\.alchemy\.com$/i,
-  /^[a-z0-9-]+\.quiknode\.pro$/i,
-];
+const SYMBOLS = {
+  ETH: { coinbase: "ETH-USD", kraken: "ETHUSD", krakenKey: "XETHZUSD", bitstamp: "ethusd" },
+  BTC: { coinbase: "BTC-USD", kraken: "XBTUSD", krakenKey: "XXBTZUSD", bitstamp: "btcusd" },
+};
 
 async function main({
-  target, callData, sourceChainId, registryAddress, registryChainId,
-  deadline, decryptPkpId, encryptedRpcUrls, blockLagBlocks = 5,
+  asset, registryAddress, registryChainId, deadline,
+  maxSpreadBps = 100, minSources = 2, decimals = 8,
 }) {
-  const rpcUrls = await Promise.all(
-    encryptedRpcUrls.map((c) =>
-      Lit.Actions.Decrypt({ pkpId: decryptPkpId, ciphertext: c })
-    )
-  );
-  for (const url of rpcUrls) {
-    const host = new URL(url).hostname;
-    if (!ALLOWED_HOSTS.some((re) => re.test(host))) {
-      return { authorized: false, reason: `host not whitelisted: ${host}` };
-    }
+  const s = SYMBOLS[asset];
+  if (!s) return { authorized: false, reason: `unsupported asset: ${asset}` };
+
+  const settled = await Promise.allSettled([
+    fetch(`https://api.coinbase.com/v2/prices/${s.coinbase}/spot`)
+      .then((r) => r.json()).then((b) => ({ name: "coinbase", price: Number(b.data.amount) })),
+    fetch(`https://api.kraken.com/0/public/Ticker?pair=${s.kraken}`)
+      .then((r) => r.json()).then((b) => ({
+        name: "kraken",
+        price: Number((b.result[s.krakenKey] || Object.values(b.result)[0]).c[0]),
+      })),
+    fetch(`https://www.bitstamp.net/api/v2/ticker/${s.bitstamp}/`)
+      .then((r) => r.json()).then((b) => ({ name: "bitstamp", price: Number(b.last) })),
+  ]);
+
+  const ok = settled
+    .filter((r) => r.status === "fulfilled" && r.value.price > 0)
+    .map((r) => r.value);
+  if (ok.length < minSources) {
+    return { authorized: false, reason: `only ${ok.length}/3 sources succeeded` };
   }
 
-  const probes = await Promise.all(rpcUrls.map((u) => batch(u, [
-    { method: "eth_chainId", params: [] },
-    { method: "eth_blockNumber", params: [] },
-  ])));
-  for (const [cid] of probes) {
-    if (parseInt(cid, 16) !== sourceChainId) {
-      return { authorized: false, reason: "chain mismatch" };
-    }
-  }
-  const blockNumber = Math.min(...probes.map(([, bn]) => parseInt(bn, 16))) - blockLagBlocks;
-  const blockTag = "0x" + blockNumber.toString(16);
-
-  const reads = await Promise.all(rpcUrls.map((u) => batch(u, [
-    { method: "eth_call", params: [{ to: target, data: callData }, blockTag] },
-    { method: "eth_getBlockByNumber", params: [blockTag, false] },
-  ])));
-  const returnDatas = reads.map(([r]) => r);
-  const blockHashes = reads.map(([, b]) => b.hash);
-  if (!returnDatas.every((r) => r === returnDatas[0]) ||
-      !blockHashes.every((h) => h === blockHashes[0])) {
-    return { authorized: false, reason: "RPCs disagree", returnDatas, blockHashes };
+  const prices = ok.map((s) => s.price).sort((a, b) => a - b);
+  const median = prices.length % 2
+    ? prices[(prices.length - 1) / 2]
+    : (prices[prices.length / 2 - 1] + prices[prices.length / 2]) / 2;
+  const spreadBps = Math.round(((prices[prices.length - 1] - prices[0]) / median) * 10000);
+  if (spreadBps > maxSpreadBps) {
+    return { authorized: false, reason: `spread ${spreadBps} bps exceeds ${maxSpreadBps}` };
   }
 
-  const observedAt = parseInt(reads[0][1].timestamp, 16);
+  const priceInt = BigInt(Math.round(median * 10 ** decimals));
+  const observedAt = Math.floor(Date.now() / 1000);
   const digest = ethers.utils.keccak256(
     ethers.utils.defaultAbiCoder.encode(
-      ["address", "bytes", "bytes", "uint256", "uint256", "address", "uint256"],
-      [target, callData, returnDatas[0], observedAt, deadline, registryAddress, registryChainId]
+      ["string", "uint256", "uint8", "uint256", "uint256", "address", "uint256"],
+      [asset, priceInt, decimals, observedAt, deadline, registryAddress, registryChainId]
     )
   );
-
-  // Action-identity signing — the registry trusts the address derived
-  // from this action's IPFS CID, nothing else.
   const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
   const signature = await wallet.signMessage(ethers.utils.arrayify(digest));
-  return { authorized: true, signature, returnData: returnDatas[0], observedAt, blockNumber };
-}
 
-async function batch(url, calls) {
-  const body = calls.map((c, i) => ({ jsonrpc: "2.0", id: i + 1, ...c }));
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const arr = await res.json();
-  arr.sort((a, b) => a.id - b.id);
-  return arr.map((r) => r.result);
+  return {
+    authorized: true,
+    signature,
+    asset,
+    price: priceInt.toString(),
+    decimals,
+    observedAt,
+    spreadBps,
+    sources: ok,
+  };
 }
 ```
 
-Two colluding providers still can't fabricate a block hash the third would confirm — so the consensus check requires *both* the return data and the canonical block hash to match across all three.
+To move the median an attacker needs to influence two of three sources at the same instant — for major exchanges that is enormously expensive — and the spread check fails closed if any pair of sources gives implausibly different prices.
 
 <Info>
-  The full runnable example — registry contract, deploy script, URL-encryption helper, and an end-to-end runner that reads ERC-20 `balanceOf` from three providers and submits the signed reading on-chain — lives at [`examples/multi-rpc-consensus-oracle/`](https://github.com/LIT-Protocol/lit-node-express/tree/next/examples/multi-rpc-consensus-oracle) in the repo.
+  The full runnable example — `PriceOracle` registry contract, deploy script, end-to-end submission runner, and a zero-dep `npm run test-medianizer` harness that exercises the fetch logic without touching any chain — lives at [`examples/multi-source-price-oracle/`](https://github.com/LIT-Protocol/lit-node-express/tree/next/examples/multi-source-price-oracle) in the repo.
 </Info>
 
 ---
 
 ## 10. Resolve a Prediction Market by AI Consensus
 
-Poll multiple LLM providers in parallel with the same yes/no question and only sign the resolution when every model agrees. Same multi-source consensus pattern as example 9, but the parallel sources are AI models instead of RPCs.
+Poll multiple LLM providers in parallel with the same yes/no question and only sign the resolution when every model agrees. Same multi-source idea as example 9, but the parallel sources are AI models instead of price feeds — and the aggregation is *strict agreement* rather than a median, because the output is categorical YES/NO/UNCLEAR.
 
 **Perplexity Sonar is required** because its built-in web search lets it answer questions about events that happened after a frontier model's training cutoff. **OpenAI and Anthropic are optional second opinions** — independent training corpora mean a confident-but-wrong frontier answer is unlikely to be confirmed by another frontier model. Configuring all three gives you 3-of-3 agreement before anything reaches the chain.
 

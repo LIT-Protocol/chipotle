@@ -6,7 +6,12 @@ const PRIVATE_KEY = process.env.DEPLOYER_PRIVATE_KEY;
 module.exports = {
   solidity: {
     version: "0.8.24",
-    settings: { optimizer: { enabled: true, runs: 200 } },
+    settings: {
+      optimizer: { enabled: true, runs: 200 },
+      // Required for OpenZeppelin v5 (uses Cancun's mcopy opcode).
+      // Base, Optimism, Arbitrum and Ethereum mainnet all support Cancun.
+      evmVersion: "cancun",
+    },
   },
   networks: {
     base: {

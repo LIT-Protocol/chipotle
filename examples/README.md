@@ -8,7 +8,7 @@ don't cover.
 | Example | What it shows |
 | --- | --- |
 | [`compliance-transfer-gate`](./compliance-transfer-gate) | An ERC-20 whose every transfer is gated on the Chainalysis on-chain sanctions oracle. The action reads the oracle on Ethereum mainnet and signs an authorization the token contract — on any chain — verifies. Keyless. |
-| [`multi-rpc-consensus-oracle`](./multi-rpc-consensus-oracle) | Reads an EVM view function from three RPC providers (Infura, Alchemy, QuickNode) in parallel and only signs when all three agree. URLs are encrypted to the PKP and host-whitelisted inside the action. |
+| [`multi-source-price-oracle`](./multi-source-price-oracle) | Spot-price oracle. Fetches from Coinbase, Kraken, and Bitstamp in parallel, takes the median, rejects if the spread is too wide, signs the result for any EVM chain. Keyless. |
 | [`prediction-market-oracle`](./prediction-market-oracle) | AI consensus for prediction-market resolution. Polls Perplexity (required, web-grounded) plus OpenAI and Anthropic (optional second opinions); only signs when every configured model agrees. |
 
 If you're looking for a one-file recipe (sign a message, decrypt a secret,
