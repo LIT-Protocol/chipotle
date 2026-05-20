@@ -36,12 +36,18 @@ const {
 } = process.env;
 
 // Hardhat network name -> everything we need to talk to that chain.
+// `minConfirmations` must match the per-chain policy baked into
+// action/bridgeAction.js (RPC_HOSTS). The action declines to sign until
+// the burn block is buried under this many blocks, so bridge.js polls
+// up to that depth before calling /lit_action. If you change the action
+// table, change this table too.
 const NETWORKS = {
   baseSepolia: {
     chainId: 84532,
     address: BRIDGE_TOKEN_BASE_SEPOLIA,
     rpc: BASE_SEPOLIA_RPC_URL, // local provider for the burn / mint tx
     alchemyRpc: BASE_SEPOLIA_ALCHEMY_URL, // the URL the action will use
+    minConfirmations: 5,
     label: "Base Sepolia",
   },
   arbitrumSepolia: {
@@ -49,6 +55,7 @@ const NETWORKS = {
     address: BRIDGE_TOKEN_ARB_SEPOLIA,
     rpc: ARBITRUM_SEPOLIA_RPC_URL,
     alchemyRpc: ARBITRUM_SEPOLIA_ALCHEMY_URL,
+    minConfirmations: 5,
     label: "Arbitrum Sepolia",
   },
 };
@@ -132,6 +139,28 @@ async function main() {
   console.log(
     `  BurnInitiated nonce=${parsed.args.nonce.toString()} logIndex=${logIndex}`
   );
+
+  // -------------------------------------------------------------------------
+  // Step 1b: Wait for `minConfirmations` blocks. The action declines to sign
+  // until the burn block is buried under N blocks (reorg protection), so
+  // calling /lit_action immediately would just bounce. We poll the source
+  // provider here instead of inside the action so the failure mode is "the
+  // CLI prints a clear progress message" rather than "the action returns
+  // an unactionable error."
+  const burnBlock = burnReceipt.blockNumber;
+  const wantBlock = burnBlock + src.minConfirmations;
+  console.log(
+    `  waiting for ${src.minConfirmations} confirmations (need head >= block ${wantBlock})...`
+  );
+  while (true) {
+    const head = await srcProvider.getBlockNumber();
+    if (head >= wantBlock) {
+      console.log(`  head at block ${head} — confirmed`);
+      break;
+    }
+    process.stdout.write(`\r  head at block ${head} (${wantBlock - head} more to go)   `);
+    await new Promise((r) => setTimeout(r, 2000));
+  }
 
   // -------------------------------------------------------------------------
   // Step 2: Ask the action to attest the burn and sign the mint.

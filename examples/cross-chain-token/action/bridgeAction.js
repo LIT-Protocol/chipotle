@@ -246,10 +246,16 @@ async function main({
 }
 
 async function rpc(url, method, params) {
+  // `redirect: "error"` defends against the case where the whitelisted RPC
+  // host ever ships an open redirect — without it, a 307/308 to attacker
+  // infrastructure would let the attacker answer eth_chainId,
+  // eth_getTransactionReceipt, and eth_blockNumber after the hostname pin
+  // already passed.
   const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    redirect: "error",
   });
   const body = await res.json();
   if (body.error) throw new Error(`${method} -> ${body.error.message}`);

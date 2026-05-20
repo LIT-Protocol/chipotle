@@ -552,6 +552,9 @@ async function rpc(url, method, params) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    // Defang an open redirect on the whitelisted host that would otherwise
+    // let an attacker answer JSON-RPC requests after the hostname pin passed.
+    redirect: "error",
   });
   const body = await res.json();
   if (body.error) throw new Error(body.error.message);
