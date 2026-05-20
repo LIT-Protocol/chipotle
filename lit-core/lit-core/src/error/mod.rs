@@ -619,15 +619,20 @@ mod tests {
 
     #[test]
     fn error_to_debug_test() {
+        let l1 = line!() + 1;
         let err = generic_err("first", None);
+        let l2 = line!() + 1;
         let err = sev_snp_err(err, Some("sev-snp".into()));
+        let l3 = line!() + 1;
         let err = err_code(err, EC::CoreFatal, Some("fatal-1".into()));
 
         let err = format!("{:?}", err);
 
         assert_eq!(
             err,
-            "lit_core::Error { kind: Unexpected, code: CoreFatal, msg: \"fatal-1\", source: lit_core::Error { kind: SevSnp, msg: \"sev-snp\", source: lit_core::Error { kind: Generic, source: \"first\", caller:  { file: \"lit-core/src/error/mod.rs:622:19\" } }, caller:  { file: \"lit-core/src/error/mod.rs:623:19\" } }, caller:  { file: \"lit-core/src/error/mod.rs:624:19\" } }"
+            format!(
+                "lit_core::Error {{ kind: Unexpected, code: CoreFatal, msg: \"fatal-1\", source: lit_core::Error {{ kind: SevSnp, msg: \"sev-snp\", source: lit_core::Error {{ kind: Generic, source: \"first\", caller:  {{ file: \"lit-core/src/error/mod.rs:{l1}:19\" }} }}, caller:  {{ file: \"lit-core/src/error/mod.rs:{l2}:19\" }} }}, caller:  {{ file: \"lit-core/src/error/mod.rs:{l3}:19\" }} }}"
+            )
         );
     }
 
