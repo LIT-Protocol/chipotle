@@ -121,7 +121,14 @@ async function main() {
 
   // -------------------------------------------------------------------------
   // Steps 7 + 8: Deploy on each chain.
-  // -------------------------------------------------------------------------
+  //
+  // On a rerun, the initial env.load() at the top of main() has already
+  // populated process.env with the previous run's deployed addresses, and
+  // env.load() refuses to overwrite already-set values. Clear them here so
+  // the fresh addresses written by deploy.js into .env get picked up by the
+  // post-deploy env.load() — otherwise step 9 would wire the new contracts
+  // to the OLD addresses and leave the new ones with empty bridgePartner.
+  for (const c of CHAINS) delete process.env[c.envKey];
   for (let i = 0; i < CHAINS.length; i++) {
     const c = CHAINS[i];
     console.log(`Step ${7 + i}/9: Deploying BridgeToken on ${c.label}...`);

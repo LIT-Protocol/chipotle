@@ -55,6 +55,7 @@ contract BridgeToken is ERC20 {
 
     error NotOwner();
     error UnknownSourceChain();
+    error UnknownDestinationChain();
     error SourceContractMismatch();
     error WrongDestinationContract();
     error WrongDestinationChain();
@@ -101,6 +102,10 @@ contract BridgeToken is ERC20 {
         external
         returns (uint256)
     {
+        // Reject before burning so a typo or unwired chain can't permanently
+        // destroy a holder's balance — the destination side would have no
+        // way to honour the mint.
+        if (bridgePartner[destChainId] == address(0)) revert UnknownDestinationChain();
         uint256 n = ++burnNonce;
         _burn(msg.sender, amount);
         emit BurnInitiated(msg.sender, recipient, amount, destChainId, n);

@@ -534,6 +534,17 @@ async function main({
     destChainId, destContract, deadline,
   };
 }
+
+async function rpc(url, method, params) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  const body = await res.json();
+  if (body.error) throw new Error(body.error.message);
+  return body.result;
+}
 ```
 
 The destination `BridgeToken.mint` re-derives the same digest, recovers the signer, and checks it matches the pinned `bridgeOracle`. It also checks an independent `bridgePartner[srcChainId]` mapping — wired during setup to point at the sibling deployment — so a forged burn from a copycat contract with the same event shape can't mint here. Each `(srcChainId, burnTxHash, logIndex)` is recorded in `usedBurnIds` to prevent replays.
