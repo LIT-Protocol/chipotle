@@ -133,11 +133,22 @@ Edit `.env` and set:
 npm run setup
 ```
 
-Walks through nine steps, printing each as it goes. Everything derived
-gets written back to `.env` so re-runs are idempotent. If you edit
-`action/marketOracle.js`, step 2 detects the new CID, clears the now-stale
-`ACTION_WALLET_ADDRESS` and `GROUP_ID`, and re-runs the wiring with the
-fresh CID.
+Walks through ten steps, printing each as it goes. The two we added on
+top of the basic scaffold are:
+
+- Step 1 mints a **decrypt PKP** used as the encryption boundary for the
+  AI provider keys (Lit's `Encrypt`/`Decrypt` are PKP-keyed).
+- Step 8 creates a **scoped usage API key** with execute permission in
+  the group, saved as `LIT_USAGE_API_KEY`. Both `encryptApiKeys.js`
+  (during setup) and `resolve.js` (after setup) call `/lit_action` with
+  this key — the master `LIT_API_KEY` can't execute actions in your own
+  groups (the contract's `canExecuteAction` only consults
+  `usageApiKeys[...]`).
+
+Everything derived gets written back to `.env` so re-runs are idempotent.
+If you edit `action/marketOracle.js`, step 2 detects the new CID, clears
+the now-stale `ACTION_WALLET_ADDRESS` and `GROUP_ID`, and re-runs the
+wiring with the fresh CID.
 
 ### 4. Propose and resolve a question
 

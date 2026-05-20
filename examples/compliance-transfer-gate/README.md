@@ -104,7 +104,7 @@ the token lives).
 npm run setup
 ```
 
-This walks through six steps, printing each one as it goes:
+This walks through seven steps, printing each one as it goes:
 
 1. Compute the action's IPFS CID.
 2. Derive the action's wallet address from its CID — this is what the
@@ -112,11 +112,16 @@ This walks through six steps, printing each one as it goes:
 3. Create a permission group.
 4. Register the action against your account.
 5. Authorize the action inside the group.
-6. Deploy `CompliantToken` with the action's wallet address as the oracle.
+6. Create a scoped usage API key with `execute_in_groups: [groupId]`,
+   saved as `LIT_USAGE_API_KEY` in `.env`. `transfer.js` uses this for
+   `/lit_action` — the master key can't execute actions in your own
+   groups (the contract's `canExecuteAction` only consults the
+   `usageApiKeys[...]` mapping).
+7. Deploy `CompliantToken` with the action's wallet address as the oracle.
 
 Every step that produces a new value writes it back to `.env`. If you edit
 the action source, step 1 detects the new CID, clears the now-stale
-`ACTION_WALLET_ADDRESS` and `GROUP_ID`, and re-runs steps 2–5 with the fresh
+`ACTION_WALLET_ADDRESS` and `GROUP_ID`, and re-runs steps 2–6 with the fresh
 CID. The on-chain contract still trusts the old address — you'd redeploy
 the token (or wire in a rotate-oracle path) after such an edit.
 
