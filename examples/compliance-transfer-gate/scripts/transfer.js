@@ -22,8 +22,12 @@ const {
   CHAIN_ID = "84532",
   RPC_URL = "https://sepolia.base.org",
   SENDER_PRIVATE_KEY,
-  SCREENING_RPC_URL = "https://eth.drpc.org",
-  SCREENING_CHAIN_ID = "1",
+  // Must be an eth-mainnet.g.alchemy.com URL — the action's hostname
+  // whitelist is hardcoded. To use a different provider, edit
+  // ALLOWED_SCREENING_HOST in action/complianceGate.js (which mints a
+  // new action CID and signer address — you'll need to redeploy the
+  // CompliantToken with the new oracle address).
+  SCREENING_RPC_URL,
 } = process.env;
 
 function parseArgs() {
@@ -43,6 +47,7 @@ async function main() {
     "LIT_USAGE_API_KEY",
     "COMPLIANT_TOKEN_ADDRESS",
     "SENDER_PRIVATE_KEY",
+    "SCREENING_RPC_URL",
   ]) {
     if (!process.env[k]) throw new Error(`${k} env var is required`);
   }
@@ -75,7 +80,6 @@ async function main() {
         contractAddress: COMPLIANT_TOKEN_ADDRESS,
         chainId: Number(CHAIN_ID),
         screeningRpcUrl: SCREENING_RPC_URL,
-        screeningChainId: Number(SCREENING_CHAIN_ID),
       },
     }),
   });

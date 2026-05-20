@@ -206,24 +206,23 @@ The Chainalysis oracle is free and keyless — it's just a smart contract at `0x
 
 The signature uses `Lit.Actions.getLitActionPrivateKey()` — an identity derived from the action's IPFS CID. See [Action-Identity Signing](./patterns#action-identity-signing--immutable-proofs).
 
+The trust anchor is a hardcoded hostname whitelist. Anyone calling the action supplies `screeningRpcUrl` via `js_params`, so a caller-supplied `chainId` check would just be theater (pair a malicious RPC with a matching chain id, gate passes). Instead the action checks the URL's hostname against `eth-mainnet.g.alchemy.com` — TLS guarantees we're actually talking to Alchemy. Trust shifts to "Alchemy is honest about Ethereum mainnet."
+
 ```javascript
 // js_params: {
 //   from, to, amount, nonce, deadline, contractAddress, chainId,
-//   screeningRpcUrl, screeningChainId
+//   screeningRpcUrl   // must be an https://eth-mainnet.g.alchemy.com URL
 // }
 const CHAINALYSIS_ORACLE = "0x40C57923924B5c5c5455c48D93317139ADDaC8fb";
 const IS_SANCTIONED_SELECTOR = "0xdf592f7d"; // keccak256("isSanctioned(address)")[0..4]
+const ALLOWED_SCREENING_HOST = /^eth-mainnet\.g\.alchemy\.com$/i;
 
 async function main({
-  from, to, amount, nonce, deadline, contractAddress, chainId,
-  screeningRpcUrl, screeningChainId,
+  from, to, amount, nonce, deadline, contractAddress, chainId, screeningRpcUrl,
 }) {
-  // Defense in depth: verify the RPC is on the chain we expect, so a
-  // swapped RPC can't point us at a chain where Chainalysis isn't
-  // deployed (where the call would return "0x" = "clean").
-  const reportedChainId = parseInt(await rpc(screeningRpcUrl, "eth_chainId", []), 16);
-  if (reportedChainId !== screeningChainId) {
-    return { authorized: false, reason: "screening RPC reports wrong chain" };
+  const host = new URL(screeningRpcUrl).hostname;
+  if (!ALLOWED_SCREENING_HOST.test(host)) {
+    return { authorized: false, reason: `host not whitelisted: ${host}` };
   }
 
   const callData = IS_SANCTIONED_SELECTOR +
@@ -232,7 +231,7 @@ async function main({
     { to: CHAINALYSIS_ORACLE, data: callData }, "latest",
   ]);
   if (!result || result === "0x") {
-    return { authorized: false, reason: "oracle returned empty data — wrong chain?" };
+    return { authorized: false, reason: "oracle returned empty data" };
   }
   if (BigInt(result) !== 0n) {
     return { authorized: false, reason: "Recipient is sanctioned" };
@@ -263,7 +262,7 @@ async function rpc(url, method, params) {
 
 The contract pins the action's derived address at deploy time — derive it once by calling `Lit.Actions.getLitActionWalletAddress({ ipfsId })` from inside any helper action, then pass that address to the `CompliantToken` constructor.
 
-For richer screening — hacker wallets, mixer interactions, fresh threat intel — swap the on-chain lookup for a paid API like Chainalysis KYT, TRM Labs, or GetBlock. The pattern becomes: encrypt the API key to a PKP, decrypt inside the TEE, call the API, sign on pass.
+Swapping providers (Infura, QuickNode, your own node) means editing the regex — which produces a new action CID and signer address, requiring a redeploy. That's by design: the trust anchor is content-addressed. For richer screening — hacker wallets, mixer interactions, fresh threat intel — swap the on-chain lookup for a paid API like Chainalysis KYT, TRM Labs, or GetBlock. The pattern becomes: encrypt the API key to a PKP, decrypt inside the TEE, call the API, sign on pass.
 
 The matching contract signs nothing itself — it just verifies that the digest recovers to a hard-coded PKP address:
 

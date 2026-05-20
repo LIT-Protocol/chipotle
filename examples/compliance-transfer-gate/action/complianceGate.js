@@ -24,13 +24,30 @@
 //   deadline              unix seconds; signature is unusable after this
 //   contractAddress       address of the CompliantToken
 //   chainId               chain id where the CompliantToken is deployed
-//   screeningRpcUrl       URL of an RPC for the chain where Chainalysis lives
-//   screeningChainId      chain id of the screening chain — defensively checked
-//                         against eth_chainId so a swapped RPC can't fake clean
+//   screeningRpcUrl       Alchemy RPC URL for Ethereum mainnet (the chain
+//                         where the Chainalysis oracle is deployed). The
+//                         action enforces the hostname below — see comment.
 
 const CHAINALYSIS_ORACLE = "0x40C57923924B5c5c5455c48D93317139ADDaC8fb";
 // keccak256("isSanctioned(address)")[0..4]
 const IS_SANCTIONED_SELECTOR = "0xdf592f7d";
+
+// The action's trust anchor. Anyone with a usage key can supply *any*
+// `screeningRpcUrl` in js_params, so a caller-controlled chainId check
+// would be theater (they'd just supply a matching pair). Instead we
+// require the URL's hostname to match Alchemy's Ethereum-mainnet
+// endpoint — anchored `$`/`^` so subdomain tricks like
+// `eth-mainnet.g.alchemy.com.attacker.com` get rejected. The trust
+// model shifts onto "we're definitely talking to Alchemy's servers"
+// (TLS guarantees the rest).
+//
+// To use a different provider (Infura / QuickNode / your own node),
+// or to screen on a different mainnet where Chainalysis is deployed
+// (Polygon, Arbitrum, BNB, Avalanche, Optimism, Celo), edit this regex.
+// Note that editing the action source changes its IPFS CID, which
+// changes the action's derived signer address — old CompliantToken
+// deployments will refuse signatures from the modified action.
+const ALLOWED_SCREENING_HOST = /^eth-mainnet\.g\.alchemy\.com$/i;
 
 async function main({
   from,
@@ -41,20 +58,17 @@ async function main({
   contractAddress,
   chainId,
   screeningRpcUrl,
-  screeningChainId,
 }) {
-  // Defense in depth: verify the RPC is actually reporting the chain we
-  // expect. Without this an attacker who controls js_params could point us
-  // at a fork or a chain where Chainalysis isn't deployed (and the call
-  // would return empty bytes, which BigInt parses as 0 = "clean").
-  const reportedChainId = parseInt(
-    await rpc(screeningRpcUrl, "eth_chainId", []),
-    16
-  );
-  if (reportedChainId !== screeningChainId) {
+  let host;
+  try {
+    host = new URL(screeningRpcUrl).hostname;
+  } catch {
+    return { authorized: false, reason: "screeningRpcUrl is not a valid URL" };
+  }
+  if (!ALLOWED_SCREENING_HOST.test(host)) {
     return {
       authorized: false,
-      reason: `screening RPC reported chain ${reportedChainId}, expected ${screeningChainId}`,
+      reason: `screening RPC host not whitelisted: ${host} (expected eth-mainnet.g.alchemy.com)`,
     };
   }
 
