@@ -91,10 +91,7 @@ pub async fn find_or_create_by_wallet(
 ///
 /// Email is matched literally; callers should pass the user-provided string
 /// trimmed and lowercased if they want case-insensitive behavior.
-pub async fn search_by_email(
-    client: &StripeClient,
-    email: &str,
-) -> Result<Vec<CustomerSummary>> {
+pub async fn search_by_email(client: &StripeClient, email: &str) -> Result<Vec<CustomerSummary>> {
     let query = format!("email:'{email}'");
     let resp = client
         .get(
