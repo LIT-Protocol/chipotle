@@ -95,4 +95,8 @@ jobs:
 
       - name: deny
         working-directory: ${{ matrix.crate }}
-        run: cargo deny check --config ${{ github.workspace }}/deny.toml advisories sources
+        # -W advisory-not-detected / unmatched-source: the deny.toml ignore +
+        # allow-git lists are the union across all four workspaces, so each
+        # individual workspace sees entries that don't apply — downgrade those
+        # lints to warnings so they don't fail the build.
+        run: cargo deny check --config ${{ github.workspace }}/deny.toml -W advisory-not-detected -W unmatched-source advisories sources
