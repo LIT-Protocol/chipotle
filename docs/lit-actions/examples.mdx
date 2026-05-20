@@ -5,7 +5,7 @@ description: "Common Lit Action patterns covering signing, encryption, decryptio
 
 Each example below is a self-contained Lit Action. Pass the code string to the `/core/v1/lit_action` endpoint with any required `js_params`. The `pkpId` parameter is the wallet address of the PKP you want to use, passed in via `js_params`.
 
-For examples that need more than one file to run — a Solidity contract, a deploy script, an off-chain client — see the [`examples/` folder in the repo](https://github.com/LIT-Protocol/lit-node-express/tree/next/examples).
+For examples that need more than one file to run — a Solidity contract, a deploy script, an off-chain client — see the [`examples/` folder in the repo](https://github.com/LIT-Protocol/chipotle/tree/main/examples).
 
 ---
 
@@ -289,7 +289,7 @@ function transferWithAuth(
 The plain `transfer` and `transferFrom` overrides revert, so every movement of tokens must go through this gate.
 
 <Info>
-  The full runnable example — token contract, hardhat deploy script, API-key encryption helper, and an end-to-end transfer runner — lives at [`examples/compliance-transfer-gate/`](https://github.com/LIT-Protocol/lit-node-express/tree/next/examples/compliance-transfer-gate) in the repo.
+  The full runnable example — token contract, hardhat deploy script, and an end-to-end transfer runner — lives at [`examples/compliance-transfer-gate/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/compliance-transfer-gate) in the repo. The example is keyless: the action reads the Chainalysis oracle via an Alchemy RPC and signs with its own CID-derived key, so no PKP or encrypted secrets are required.
 </Info>
 
 ---
@@ -374,7 +374,7 @@ async function main({
 To move the median an attacker needs to influence two of three sources at the same instant — for major exchanges that is enormously expensive — and the spread check fails closed if any pair of sources gives implausibly different prices.
 
 <Info>
-  The full runnable example — `PriceOracle` registry contract, deploy script, end-to-end submission runner, and a zero-dep `npm run test-medianizer` harness that exercises the fetch logic without touching any chain — lives at [`examples/multi-source-price-oracle/`](https://github.com/LIT-Protocol/lit-node-express/tree/next/examples/multi-source-price-oracle) in the repo.
+  The full runnable example — `PriceOracle` registry contract, deploy script, end-to-end submission runner, and a zero-dep `npm run test-medianizer` harness that exercises the fetch logic without touching any chain — lives at [`examples/multi-source-price-oracle/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/multi-source-price-oracle) in the repo.
 </Info>
 
 ---
@@ -452,5 +452,5 @@ async function main({
 Honest caveats: frontier models share training corpora, so a wrong answer that's widespread on the internet can be confidently confirmed by multiple models. Perplexity's grounding helps but isn't bulletproof — citations can drift. For real money this pattern wants a dispute window or a stake-and-slash flow on top.
 
 <Info>
-  The full runnable example — `PredictionMarket` contract, deploy script, key-encryption helper, propose/resolve runners, and a heavily-commented setup pipeline — lives at [`examples/prediction-market-oracle/`](https://github.com/LIT-Protocol/lit-node-express/tree/next/examples/prediction-market-oracle) in the repo.
+  The full runnable example — `PredictionMarket` contract, deploy script, key-encryption helper, propose/resolve runners, and a heavily-commented setup pipeline — lives at [`examples/prediction-market-oracle/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/prediction-market-oracle) in the repo.
 </Info>

@@ -129,9 +129,15 @@ async function main({
     };
   }
 
-  // Convert the median to fixed-point. Round half-up.
-  const scale = 10 ** decimals;
-  const priceInt = BigInt(Math.round(median * scale));
+  // Convert the median to fixed-point. Use string concatenation +
+  // BigInt rather than `median * 10**decimals` so we don't lose
+  // precision (or overflow Number.MAX_SAFE_INTEGER) at decimals=18.
+  //
+  // Spot prices from these exchanges carry ~5-8 significant figures
+  // after the decimal point — well within Number's ~15 digit budget —
+  // so toFixed up to 8 captures everything they sent us, then we pad
+  // with zeros up to `decimals` via BigInt.
+  const priceInt = scaleToFixedPoint(median, decimals);
 
   const observedAt = Math.floor(Date.now() / 1000);
 
@@ -159,4 +165,20 @@ async function main({
     sources: successful,
     failed,
   };
+}
+
+// Scale a JS Number (e.g. 2104.62) to an integer with `decimals`
+// fractional digits, returned as a BigInt. Safe for decimals=18:
+// captures Number's available precision via toFixed(min(decimals,8))
+// then zero-pads the remainder in BigInt land.
+function scaleToFixedPoint(value, decimals) {
+  const SAFE_FRACTIONAL = 8;
+  const fracDigits = Math.min(decimals, SAFE_FRACTIONAL);
+  const padDigits = decimals - fracDigits;
+  const fixed = value.toFixed(fracDigits);
+  const negative = fixed.startsWith("-");
+  const [whole, frac = ""] = (negative ? fixed.slice(1) : fixed).split(".");
+  const padded = frac.padEnd(fracDigits, "0") + "0".repeat(padDigits);
+  const magnitude = BigInt(whole + padded);
+  return negative ? -magnitude : magnitude;
 }

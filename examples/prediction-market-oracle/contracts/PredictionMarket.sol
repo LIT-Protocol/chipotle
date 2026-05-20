@@ -44,6 +44,7 @@ contract PredictionMarket {
     error Expired();
     error InvalidSignature();
     error EmptyText();
+    error NotProposed();
 
     event QuestionProposed(bytes32 indexed id, address indexed proposer, string text, uint256 resolveAt);
     event QuestionResolved(bytes32 indexed id, Answer answer, uint64 resolvedAt);
@@ -59,7 +60,13 @@ contract PredictionMarket {
     function propose(string calldata text, uint256 resolveAt) external returns (bytes32 id) {
         if (bytes(text).length == 0) revert EmptyText();
         id = keccak256(bytes(text));
-        if (questions[id].resolveAt != 0) revert AlreadyProposed();
+        // Use proposer != address(0) as the "already proposed" sentinel
+        // rather than resolveAt != 0. resolveAt is caller-supplied and
+        // legitimately 0 in common cases (e.g. the demo's
+        // "immediately resolvable" mode), so it can't double as an
+        // existence marker. propose only ever sets proposer to a
+        // non-zero msg.sender, so this check is safe.
+        if (questions[id].proposer != address(0)) revert AlreadyProposed();
         questions[id] = Question({
             text: text,
             resolveAt: resolveAt,
@@ -77,7 +84,7 @@ contract PredictionMarket {
         bytes calldata signature
     ) external {
         Question storage q = questions[id];
-        if (q.resolveAt == 0) revert AlreadyResolved(); // not proposed
+        if (q.proposer == address(0)) revert NotProposed();
         if (q.answer != Answer.Unresolved) revert AlreadyResolved();
         if (block.timestamp < q.resolveAt) revert NotYetResolvable();
         if (block.timestamp > deadline) revert Expired();

@@ -5,12 +5,13 @@
 //   - load(): parse .env into process.env (only setting keys that aren't
 //     already set, so explicit env-var overrides on the command line win).
 //   - upsert(key, value): if .env contains a line `KEY=...`, replace it;
-//     otherwise append `KEY=value` to the end. Writes back atomically.
+//     otherwise append `KEY=value` to the end. Writes back via writeFileSync (not atomic; fine for a single-process script).
 //
 // Why upsert? The setup script generates derived values (PKP address,
 // group ID, deployed contract address, ciphertexts) and stores them in
-// .env so re-running setup is idempotent — already-set values aren't
-// regenerated.
+// .env so each step can record what it derived. Setup overwrites all
+// of these on every run — see scripts/setup.js for the "fresh setup
+// each time" rationale.
 
 const fs = require("fs");
 const path = require("path");
