@@ -14,7 +14,10 @@ env.load();
 
 const {
   LIT_API_BASE = "https://api.chipotle.litprotocol.com",
-  LIT_API_KEY,
+  // Scoped usage key created by setup.js (step 6) with execute permission
+  // for the compliance action's group. Required for /lit_action — the
+  // master account key won't work here.
+  LIT_USAGE_API_KEY,
   COMPLIANT_TOKEN_ADDRESS,
   CHAIN_ID = "84532",
   RPC_URL = "https://sepolia.base.org",
@@ -37,7 +40,7 @@ async function main() {
     throw new Error("Usage: node scripts/transfer.js --to 0x... --amount 100");
   }
   for (const k of [
-    "LIT_API_KEY",
+    "LIT_USAGE_API_KEY",
     "COMPLIANT_TOKEN_ADDRESS",
     "SENDER_PRIVATE_KEY",
   ]) {
@@ -58,7 +61,7 @@ async function main() {
   const litRes = await fetch(`${LIT_API_BASE}/core/v1/lit_action`, {
     method: "POST",
     headers: {
-      "X-Api-Key": LIT_API_KEY,
+      "X-Api-Key": LIT_USAGE_API_KEY,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({

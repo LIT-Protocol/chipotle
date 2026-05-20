@@ -15,7 +15,7 @@ env.load();
 
 const {
   LIT_API_BASE = "https://api.chipotle.litprotocol.com",
-  LIT_API_KEY,
+  LIT_USAGE_API_KEY,
   DECRYPT_PKP_ADDRESS,
   PREDICTION_MARKET_ADDRESS,
   ENCRYPTED_PERPLEXITY_API_KEY,
@@ -40,7 +40,7 @@ async function main() {
   const args = parseArgs();
   if (!args.id) throw new Error("Usage: node scripts/resolve.js --id 0x...");
   for (const k of [
-    "LIT_API_KEY",
+    "LIT_USAGE_API_KEY",
     "DECRYPT_PKP_ADDRESS",
     "PREDICTION_MARKET_ADDRESS",
     "ENCRYPTED_PERPLEXITY_API_KEY",
@@ -80,7 +80,7 @@ async function main() {
   const litRes = await fetch(`${LIT_API_BASE}/core/v1/lit_action`, {
     method: "POST",
     headers: {
-      "X-Api-Key": LIT_API_KEY,
+      "X-Api-Key": LIT_USAGE_API_KEY,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({

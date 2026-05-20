@@ -12,7 +12,18 @@
 //   3. Create a permission group via /core/v1/add_group
 //   4. Register the action via /core/v1/add_action
 //   5. Wire the action into the group via /core/v1/add_action_to_group
-//   6. Deploy CompliantToken (pinning ACTION_WALLET_ADDRESS as oracle)
+//   6. Create a scoped usage API key with execute permission in that group
+//   7. Deploy CompliantToken (pinning ACTION_WALLET_ADDRESS as oracle)
+//
+// Two keys are in play:
+//   * LIT_API_KEY     — the ACCOUNT-LEVEL (master) key, used by setup
+//                       itself to call management endpoints.
+//   * LIT_USAGE_API_KEY — a SCOPED usage key created by step 6 with
+//                         execute permission only in this example's
+//                         group. transfer.js uses this for /lit_action.
+// The master can't execute /lit_action for actions registered in your own
+// groups (canExecuteAction inspects usageApiKeys[apiKeyHash]); the scoped
+// key is the right shape for that.
 //
 // Notice what's *not* here: no minted PKP, no encrypted secrets, no API
 // keys to provision. The action reads the Chainalysis sanctions oracle
@@ -137,28 +148,53 @@ async function main() {
   // -------------------------------------------------------------------------
   // Step 5: Authorize the action inside the group.
   // -------------------------------------------------------------------------
-  console.log("Step 5/6: Adding action to group...");
+  console.log("Step 5/7: Adding action to group...");
   await idempotent(
     () => addActionToGroup(LIT_API_BASE, LIT_API_KEY, groupId, actionCid),
     "action already in group"
   );
 
   // -------------------------------------------------------------------------
-  // Step 6: Deploy CompliantToken.
+  // Step 6: Create a scoped usage API key with execute permission in the
+  // group.
+  //
+  // The contract's canExecuteAction check inspects
+  // account.usageApiKeys[apiKeyHash].executeInGroups — which is only
+  // populated for keys created via /add_usage_api_key. The master key
+  // (LIT_API_KEY) can run management endpoints but can NOT run
+  // /lit_action for actions registered in your own groups; that requires
+  // a usage key scoped with execute_in_groups: [groupId]. We create one
+  // here and stash it as LIT_USAGE_API_KEY for transfer.js to use.
+  //
+  // Heads up: usage keys are shown ONCE by the server. If LIT_USAGE_API_KEY
+  // is missing from .env we have to create a fresh one (the old one is
+  // unrecoverable).
+  // -------------------------------------------------------------------------
+  if (!process.env.LIT_USAGE_API_KEY) {
+    console.log("Step 6/7: Creating scoped usage API key...");
+    const key = await createUsageApiKey(LIT_API_BASE, LIT_API_KEY, groupId);
+    env.upsert("LIT_USAGE_API_KEY", key);
+    console.log(`  LIT_USAGE_API_KEY=${key.slice(0, 12)}... (full key written to .env)`);
+  } else {
+    console.log("Step 6/7: usage API key already in .env. Skipping.");
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 7: Deploy CompliantToken.
   //
   // The constructor pins ACTION_WALLET_ADDRESS — the address derived
   // from the action's CID — as the compliance oracle. The deploy
   // script writes the resulting contract address back to .env.
   // -------------------------------------------------------------------------
   if (!process.env.COMPLIANT_TOKEN_ADDRESS) {
-    console.log(`Step 6/6: Deploying CompliantToken to ${DEPLOY_NETWORK}...`);
+    console.log(`Step 7/7: Deploying CompliantToken to ${DEPLOY_NETWORK}...`);
     execSync(`npx hardhat run scripts/deploy.js --network ${DEPLOY_NETWORK}`, {
       stdio: "inherit",
       cwd: path.join(__dirname, ".."),
     });
     env.load();
   } else {
-    console.log(`Step 6/6: contract already deployed (${process.env.COMPLIANT_TOKEN_ADDRESS}). Skipping.`);
+    console.log(`Step 7/7: contract already deployed (${process.env.COMPLIANT_TOKEN_ADDRESS}). Skipping.`);
   }
 
   // -------------------------------------------------------------------------
@@ -254,6 +290,27 @@ async function addActionToGroup(base, apiKey, groupId, cid) {
     method: "POST",
     body: JSON.stringify({ group_id: Number(groupId), action_ipfs_cid: cid }),
   });
+}
+
+async function createUsageApiKey(base, apiKey, groupId) {
+  const body = await call(base, apiKey, "add_usage_api_key", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "compliance-transfer-gate-executor",
+      description: "Scoped key used by transfer.js to execute the gate action",
+      can_create_groups: false,
+      can_delete_groups: false,
+      can_create_pkps: false,
+      manage_ipfs_ids_in_groups: [],
+      add_pkp_to_groups: [],
+      remove_pkp_from_groups: [],
+      execute_in_groups: [Number(groupId)],
+    }),
+  });
+  if (!body.usage_api_key) {
+    throw new Error(`add_usage_api_key returned no key: ${JSON.stringify(body)}`);
+  }
+  return body.usage_api_key;
 }
 
 async function idempotent(fn, label) {

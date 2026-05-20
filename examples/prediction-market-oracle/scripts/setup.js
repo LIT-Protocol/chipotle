@@ -27,8 +27,18 @@
 //   5. Register the action
 //   6. Authorize the action inside the group
 //   7. Authorize the decrypt PKP inside the group
-//   8. Deploy PredictionMarket (pinning ACTION_WALLET_ADDRESS as oracle)
-//   9. Encrypt all configured AI provider keys to the decrypt PKP
+//   8. Create a scoped usage API key with execute permission in the group
+//   9. Deploy PredictionMarket (pinning ACTION_WALLET_ADDRESS as oracle)
+//  10. Encrypt all configured AI provider keys to the decrypt PKP
+//
+// Two keys are in play:
+//   * LIT_API_KEY       — ACCOUNT-LEVEL (master) key, for setup's management
+//                         calls.
+//   * LIT_USAGE_API_KEY — SCOPED usage key created by step 8 with execute
+//                         permission only in this example's group. Used by
+//                         step 10 (encryptApiKeys.js) and by resolve.js.
+//                         The master can't execute /lit_action for actions
+//                         in your own groups; only a scoped usage key can.
 
 const fs = require("fs");
 const path = require("path");
@@ -155,7 +165,7 @@ async function main() {
   // -------------------------------------------------------------------------
   // Step 7: Authorize the decrypt PKP inside the group.
   // -------------------------------------------------------------------------
-  console.log("Step 7/9: Adding decrypt PKP to group...");
+  console.log("Step 7/10: Adding decrypt PKP to group...");
   await idempotent(
     () =>
       addPkpToGroup(
@@ -168,26 +178,45 @@ async function main() {
   );
 
   // -------------------------------------------------------------------------
-  // Step 8: Deploy PredictionMarket.
+  // Step 8: Create a scoped usage API key with execute permission in the
+  // group. See compliance-transfer-gate/scripts/setup.js for the full
+  // rationale: master LIT_API_KEY can do management calls but can't
+  // execute /lit_action for actions in your own groups.
+  //
+  // We use this key for both resolve.js (the resolution flow) and
+  // encryptApiKeys.js (step 10 below), since the encrypt-action call also
+  // goes through /lit_action.
+  // -------------------------------------------------------------------------
+  if (!process.env.LIT_USAGE_API_KEY) {
+    console.log("Step 8/10: Creating scoped usage API key...");
+    const key = await createUsageApiKey(LIT_API_BASE, LIT_API_KEY, groupId);
+    env.upsert("LIT_USAGE_API_KEY", key);
+    console.log(`  LIT_USAGE_API_KEY=${key.slice(0, 12)}... (full key written to .env)`);
+  } else {
+    console.log("Step 8/10: usage API key already in .env. Skipping.");
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 9: Deploy PredictionMarket.
   // -------------------------------------------------------------------------
   if (!process.env.PREDICTION_MARKET_ADDRESS) {
-    console.log(`Step 8/9: Deploying PredictionMarket to ${DEPLOY_NETWORK}...`);
+    console.log(`Step 9/10: Deploying PredictionMarket to ${DEPLOY_NETWORK}...`);
     execSync(`npx hardhat run scripts/deploy.js --network ${DEPLOY_NETWORK}`, {
       stdio: "inherit",
       cwd: path.join(__dirname, ".."),
     });
     env.load();
   } else {
-    console.log(`Step 8/9: contract already deployed (${process.env.PREDICTION_MARKET_ADDRESS}). Skipping.`);
+    console.log(`Step 9/10: contract already deployed (${process.env.PREDICTION_MARKET_ADDRESS}). Skipping.`);
   }
 
   // -------------------------------------------------------------------------
-  // Step 9: Encrypt all configured AI provider keys to the decrypt PKP.
+  // Step 10: Encrypt all configured AI provider keys to the decrypt PKP.
   //
   // Always encrypts the *current* plaintexts — re-running setup after
   // adding (or rotating) an optional key will pick it up automatically.
   // -------------------------------------------------------------------------
-  console.log("Step 9/9: Encrypting AI provider keys to decrypt PKP...");
+  console.log("Step 10/10: Encrypting AI provider keys to decrypt PKP...");
   const { encryptApiKeys } = require("./encryptApiKeys");
   await encryptApiKeys();
 
@@ -298,6 +327,27 @@ async function addPkpToGroup(base, apiKey, groupId, pkpAddress) {
     method: "POST",
     body: JSON.stringify({ group_id: Number(groupId), pkp_id: pkpAddress }),
   });
+}
+
+async function createUsageApiKey(base, apiKey, groupId) {
+  const body = await call(base, apiKey, "add_usage_api_key", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "prediction-market-oracle-executor",
+      description: "Scoped key used by resolve.js + encryptApiKeys.js for /lit_action calls",
+      can_create_groups: false,
+      can_delete_groups: false,
+      can_create_pkps: false,
+      manage_ipfs_ids_in_groups: [],
+      add_pkp_to_groups: [],
+      remove_pkp_from_groups: [],
+      execute_in_groups: [Number(groupId)],
+    }),
+  });
+  if (!body.usage_api_key) {
+    throw new Error(`add_usage_api_key returned no key: ${JSON.stringify(body)}`);
+  }
+  return body.usage_api_key;
 }
 
 async function idempotent(fn, label) {

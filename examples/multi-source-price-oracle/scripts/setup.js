@@ -113,24 +113,39 @@ async function main() {
   // -------------------------------------------------------------------------
   // Step 5: Authorize the action inside the group.
   // -------------------------------------------------------------------------
-  console.log("Step 5/6: Adding action to group...");
+  console.log("Step 5/7: Adding action to group...");
   await idempotent(
     () => addActionToGroup(LIT_API_BASE, LIT_API_KEY, groupId, actionCid),
     "action already in group"
   );
 
   // -------------------------------------------------------------------------
-  // Step 6: Deploy PriceOracle.
+  // Step 6: Create a scoped usage API key with execute permission in the
+  // group. See compliance-transfer-gate/scripts/setup.js for the full
+  // rationale: the master LIT_API_KEY can do management calls but can't
+  // execute /lit_action for actions in your own groups.
+  // -------------------------------------------------------------------------
+  if (!process.env.LIT_USAGE_API_KEY) {
+    console.log("Step 6/7: Creating scoped usage API key...");
+    const key = await createUsageApiKey(LIT_API_BASE, LIT_API_KEY, groupId);
+    env.upsert("LIT_USAGE_API_KEY", key);
+    console.log(`  LIT_USAGE_API_KEY=${key.slice(0, 12)}... (full key written to .env)`);
+  } else {
+    console.log("Step 6/7: usage API key already in .env. Skipping.");
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 7: Deploy PriceOracle.
   // -------------------------------------------------------------------------
   if (!process.env.PRICE_ORACLE_ADDRESS) {
-    console.log(`Step 6/6: Deploying PriceOracle to ${DEPLOY_NETWORK}...`);
+    console.log(`Step 7/7: Deploying PriceOracle to ${DEPLOY_NETWORK}...`);
     execSync(`npx hardhat run scripts/deploy.js --network ${DEPLOY_NETWORK}`, {
       stdio: "inherit",
       cwd: path.join(__dirname, ".."),
     });
     env.load();
   } else {
-    console.log(`Step 6/6: contract already deployed (${process.env.PRICE_ORACLE_ADDRESS}). Skipping.`);
+    console.log(`Step 7/7: contract already deployed (${process.env.PRICE_ORACLE_ADDRESS}). Skipping.`);
   }
 
   // -------------------------------------------------------------------------
@@ -225,6 +240,27 @@ async function addActionToGroup(base, apiKey, groupId, cid) {
     method: "POST",
     body: JSON.stringify({ group_id: Number(groupId), action_ipfs_cid: cid }),
   });
+}
+
+async function createUsageApiKey(base, apiKey, groupId) {
+  const body = await call(base, apiKey, "add_usage_api_key", {
+    method: "POST",
+    body: JSON.stringify({
+      name: "multi-source-price-oracle-executor",
+      description: "Scoped key used by submit.js to execute the price oracle action",
+      can_create_groups: false,
+      can_delete_groups: false,
+      can_create_pkps: false,
+      manage_ipfs_ids_in_groups: [],
+      add_pkp_to_groups: [],
+      remove_pkp_from_groups: [],
+      execute_in_groups: [Number(groupId)],
+    }),
+  });
+  if (!body.usage_api_key) {
+    throw new Error(`add_usage_api_key returned no key: ${JSON.stringify(body)}`);
+  }
+  return body.usage_api_key;
 }
 
 async function idempotent(fn, label) {
