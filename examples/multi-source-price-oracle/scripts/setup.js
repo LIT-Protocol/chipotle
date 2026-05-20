@@ -57,82 +57,84 @@ async function main() {
   const freshCid = await getActionCid(LIT_API_BASE, LIT_API_KEY, actionCode);
   if (!process.env.ACTION_IPFS_CID || process.env.ACTION_IPFS_CID !== freshCid) {
     if (process.env.ACTION_IPFS_CID) {
-      console.log("Step 1/6: action source changed — updating CID...");
+      console.log("Step 1/7: action source changed — updating CID...");
       env.upsert("ACTION_WALLET_ADDRESS", "");
       env.upsert("GROUP_ID", "");
+      env.upsert("LIT_USAGE_API_KEY", "");
     } else {
-      console.log("Step 1/6: Computing action CID...");
+      console.log("Step 1/7: Computing action CID...");
     }
     env.upsert("ACTION_IPFS_CID", freshCid);
     console.log(`  ACTION_IPFS_CID=${freshCid}`);
   } else {
-    console.log(`Step 1/6: action CID unchanged (${freshCid}). Skipping.`);
+    console.log(`Step 1/7: action CID unchanged (${freshCid}). Skipping.`);
   }
   const actionCid = process.env.ACTION_IPFS_CID;
 
   // -------------------------------------------------------------------------
-  // Step 2: Derive the action's wallet address from its CID.
-  // -------------------------------------------------------------------------
-  if (!process.env.ACTION_WALLET_ADDRESS) {
-    console.log("Step 2/6: Deriving action wallet address from CID...");
-    const addr = await deriveActionWalletAddress(
-      LIT_API_BASE,
-      LIT_API_KEY,
-      actionCid
-    );
-    env.upsert("ACTION_WALLET_ADDRESS", addr);
-    console.log(`  ACTION_WALLET_ADDRESS=${addr}`);
-  } else {
-    console.log(
-      `Step 2/6: action wallet address already in .env (${process.env.ACTION_WALLET_ADDRESS}). Skipping.`
-    );
-  }
-
-  // -------------------------------------------------------------------------
-  // Step 3: Create a permission group.
+  // Step 2: Create a permission group with a wildcard action allowlist.
+  // (cid_hashes_permitted: ["0"] = U256(0) = "any action allowed here".)
+  // See compliance-transfer-gate/scripts/setup.js for the longer
+  // explanation of why wildcard here is fine.
   // -------------------------------------------------------------------------
   if (!process.env.GROUP_ID) {
-    console.log("Step 3/6: Creating group...");
+    console.log("Step 2/7: Creating group (wildcard action allowlist)...");
     const id = await addGroup(LIT_API_BASE, LIT_API_KEY);
     env.upsert("GROUP_ID", String(id));
     console.log(`  GROUP_ID=${id}`);
   } else {
-    console.log(`Step 3/6: group already in .env (${process.env.GROUP_ID}). Skipping.`);
+    console.log(`Step 2/7: group already in .env (${process.env.GROUP_ID}). Skipping.`);
   }
   const groupId = Number(process.env.GROUP_ID);
 
   // -------------------------------------------------------------------------
-  // Step 4: Register the action.
+  // Step 3: Create a scoped usage API key — the deriver in step 4 and
+  // submit.js both call /lit_action, which requires execute permission
+  // in the action's group. The master LIT_API_KEY doesn't have it; only
+  // a usage key minted with execute_in_groups: [groupId] does.
   // -------------------------------------------------------------------------
-  console.log("Step 4/6: Registering action with account...");
+  if (!process.env.LIT_USAGE_API_KEY) {
+    console.log("Step 3/7: Creating scoped usage API key...");
+    const key = await createUsageApiKey(LIT_API_BASE, LIT_API_KEY, groupId);
+    env.upsert("LIT_USAGE_API_KEY", key);
+    console.log(`  LIT_USAGE_API_KEY=${key.slice(0, 12)}... (full key written to .env)`);
+  } else {
+    console.log("Step 3/7: usage API key already in .env. Skipping.");
+  }
+  const usageKey = process.env.LIT_USAGE_API_KEY;
+
+  // -------------------------------------------------------------------------
+  // Step 4: Derive the action's wallet address from its CID. Calls
+  // /lit_action with the scoped usage key.
+  // -------------------------------------------------------------------------
+  if (!process.env.ACTION_WALLET_ADDRESS) {
+    console.log("Step 4/7: Deriving action wallet address from CID...");
+    const addr = await deriveActionWalletAddress(LIT_API_BASE, usageKey, actionCid);
+    env.upsert("ACTION_WALLET_ADDRESS", addr);
+    console.log(`  ACTION_WALLET_ADDRESS=${addr}`);
+  } else {
+    console.log(
+      `Step 4/7: action wallet address already in .env (${process.env.ACTION_WALLET_ADDRESS}). Skipping.`
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 5: Register the action with the account (metadata).
+  // -------------------------------------------------------------------------
+  console.log("Step 5/7: Registering action with account...");
   await idempotent(
     () => addAction(LIT_API_BASE, LIT_API_KEY, actionCid),
     "action already registered"
   );
 
   // -------------------------------------------------------------------------
-  // Step 5: Authorize the action inside the group.
+  // Step 6: Add the specific action CID to the group (audit trail).
   // -------------------------------------------------------------------------
-  console.log("Step 5/7: Adding action to group...");
+  console.log("Step 6/7: Adding action to group...");
   await idempotent(
     () => addActionToGroup(LIT_API_BASE, LIT_API_KEY, groupId, actionCid),
     "action already in group"
   );
-
-  // -------------------------------------------------------------------------
-  // Step 6: Create a scoped usage API key with execute permission in the
-  // group. See compliance-transfer-gate/scripts/setup.js for the full
-  // rationale: the master LIT_API_KEY can do management calls but can't
-  // execute /lit_action for actions in your own groups.
-  // -------------------------------------------------------------------------
-  if (!process.env.LIT_USAGE_API_KEY) {
-    console.log("Step 6/7: Creating scoped usage API key...");
-    const key = await createUsageApiKey(LIT_API_BASE, LIT_API_KEY, groupId);
-    env.upsert("LIT_USAGE_API_KEY", key);
-    console.log(`  LIT_USAGE_API_KEY=${key.slice(0, 12)}... (full key written to .env)`);
-  } else {
-    console.log("Step 6/7: usage API key already in .env. Skipping.");
-  }
 
   // -------------------------------------------------------------------------
   // Step 7: Deploy PriceOracle.
@@ -218,7 +220,10 @@ async function addGroup(base, apiKey) {
       group_name: "multi-source-price-oracle",
       group_description: "Action-derived signer for median spot-price attestations",
       pkp_ids_permitted: [],
-      cid_hashes_permitted: [],
+      // U256(0) = wildcard "any action allowed in this group" — needed so
+      // the one-shot deriver action in setup can execute. Bounded by the
+      // scoped usage key (only execute permission in THIS group).
+      cid_hashes_permitted: ["0"],
     }),
   });
   return body.group_id;

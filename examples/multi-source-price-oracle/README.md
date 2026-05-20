@@ -147,18 +147,19 @@ npm run setup
 Walks through seven steps, printing each as it goes:
 
 1. Compute the action's IPFS CID.
-2. Derive the action's wallet address from its CID.
-3. Create a permission group.
-4. Register the action with your account.
-5. Authorize the action inside the group.
-6. Create a scoped usage API key with `execute_in_groups: [groupId]`,
-   saved as `LIT_USAGE_API_KEY` in `.env`. `submit.js` uses this for
-   `/lit_action`.
+2. Create a permission group with a wildcard action allowlist
+   (`cid_hashes_permitted: ["0"]`).
+3. Create a scoped usage API key (`execute_in_groups: [groupId]`),
+   saved as `LIT_USAGE_API_KEY` in `.env`. The deriver in step 4 and
+   `submit.js` afterward both use this for `/lit_action`.
+4. Derive the action's wallet address from its CID.
+5. Register the action with your account (metadata).
+6. Add the specific action CID to the group (audit trail).
 7. Deploy `PriceOracle` with the action's wallet address as the signer.
 
 Idempotent: re-runs skip whatever's already done. If you edit the action
-source, step 1 detects the new CID, clears `ACTION_WALLET_ADDRESS` and
-`GROUP_ID`, and re-runs steps 2–6 with the fresh CID.
+source, step 1 detects the new CID and clears `ACTION_WALLET_ADDRESS`,
+`GROUP_ID`, and `LIT_USAGE_API_KEY`; steps 2–6 then run fresh.
 
 ### 4. Submit a price reading
 
