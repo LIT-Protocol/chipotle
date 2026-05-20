@@ -61,7 +61,18 @@ async fn health(
                 grpc_pool.add_connection(&socket_key, channel).await;
                 true
             }
-            Err(_) => false,
+            Err(e) => {
+                // Surface the connect error so /health failures are debuggable
+                // without an exec into the container. The probe runs frequently
+                // so log at warn (not error) to avoid alert spam during the
+                // brief window before lit-actions has bound the socket.
+                tracing::warn!(
+                    socket = %socket_key,
+                    error = %e,
+                    "lit-actions socket connect failed during /health probe"
+                );
+                false
+            }
         }
     };
 
