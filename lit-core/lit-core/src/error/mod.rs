@@ -351,7 +351,6 @@ impl StdError for Error {
 }
 
 #[derive(Clone, PartialEq)]
-#[allow(dead_code)]
 struct Caller {
     file: String,
     line: u32,
@@ -376,7 +375,6 @@ impl From<&Location<'_>> for Caller {
 }
 
 #[derive(Debug, Clone, Ord, PartialOrd, Eq, PartialEq, Description, Serialize, Deserialize)]
-#[allow(dead_code)]
 pub enum Kind {
     /// An error has occured.
     Unknown,
@@ -459,24 +457,8 @@ macro_rules! generate_pkg_constructors {
         #[allow(dead_code)]
         #[track_caller]
         #[inline]
-        $vis fn generic_err_code<E: Into<BoxError>>(e: E, code: $code, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::Generic), $pkg, msg, Some(Arc::new(code)), Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
         $vis fn unexpected_err<E: Into<BoxError>>(e: E, msg: Option<String>) -> Error {
             Error::new(Some(Kind::Unexpected), $pkg, msg, None, Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
-        $vis fn unexpected_err_code<E: Into<BoxError>>(e: E, code: $code, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::Unexpected), $pkg, msg, Some(Arc::new(code)), Some(e), Some(Location::caller()))
         }
 
         $(#[$attr])*
@@ -491,14 +473,6 @@ macro_rules! generate_pkg_constructors {
         #[allow(dead_code)]
         #[track_caller]
         #[inline]
-        $vis fn ipfs_err_code<E: Into<BoxError>>(e: E, code: $code, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::IPFS), $pkg, msg, Some(Arc::new(code)), Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
         $vis fn io_err<E: Into<BoxError>>(e: E, msg: Option<String>) -> Error {
             Error::new(Some(Kind::Io), $pkg, msg, None, Some(e), Some(Location::caller()))
         }
@@ -507,24 +481,8 @@ macro_rules! generate_pkg_constructors {
         #[allow(dead_code)]
         #[track_caller]
         #[inline]
-        $vis fn io_err_code<E: Into<BoxError>>(e: E, code: $code, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::Io), $pkg, msg, Some(Arc::new(code)), Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
         $vis fn config_err<E: Into<BoxError>>(e: E, msg: Option<String>) -> Error {
             Error::new(Some(Kind::Config), $pkg, msg, None, Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
-        $vis fn config_err_code<E: Into<BoxError>>(e: E, code: $code, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::Config), $pkg, msg, Some(Arc::new(code)), Some(e), Some(Location::caller()))
         }
 
         $(#[$attr])*
@@ -571,24 +529,8 @@ macro_rules! generate_pkg_constructors {
         #[allow(dead_code)]
         #[track_caller]
         #[inline]
-        $vis fn parser_err_code<E: Into<BoxError>>(e: E, code: $code, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::Parser), $pkg, msg, Some(Arc::new(code)), Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
         $vis fn serializer_err<E: Into<BoxError>>(e: E, msg: Option<String>) -> Error {
             Error::new(Some(Kind::Serializer), $pkg, msg, None, Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
-        $vis fn serializer_err_code<E: Into<BoxError>>(e: E, code: $code, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::Serializer), $pkg, msg, Some(Arc::new(code)), Some(e), Some(Location::caller()))
         }
 
         $(#[$attr])*
@@ -603,72 +545,8 @@ macro_rules! generate_pkg_constructors {
         #[allow(dead_code)]
         #[track_caller]
         #[inline]
-        $vis fn lock_err_code<E: Into<BoxError>>(e: E, code: $code, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::Lock), $pkg, msg, Some(Arc::new(code)), Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
-        $vis fn timeout_err<E: Into<BoxError>>(e: E, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::Timeout), $pkg, msg, None, Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
         $vis fn timeout_err_code<E: Into<BoxError>>(e: E, code: $code, msg: Option<String>) -> Error {
             Error::new(Some(Kind::Timeout), $pkg, msg, Some(Arc::new(code)), Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
-        $vis fn memory_limit_err<E: Into<BoxError>>(e: E, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::MemoryLimit), $pkg, msg, None, Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
-        $vis fn memory_limit_err_code<E: Into<BoxError>>(e: E, code: $code, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::MemoryLimit), $pkg, msg, Some(Arc::new(code)), Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
-        $vis fn blockchain_err<E: Into<BoxError>>(e: E, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::Blockchain), $pkg, msg, None, Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
-        $vis fn blockchain_err_code<E: Into<BoxError>>(e: E, code: $code, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::Blockchain), $pkg, msg, Some(Arc::new(code)), Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
-        $vis fn attestation_err<E: Into<BoxError>>(e: E, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::Attestation), $pkg, msg, None, Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
-        $vis fn attestation_err_code<E: Into<BoxError>>(e: E, code: $code, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::Attestation), $pkg, msg, Some(Arc::new(code)), Some(e), Some(Location::caller()))
         }
 
         $(#[$attr])*
@@ -683,32 +561,8 @@ macro_rules! generate_pkg_constructors {
         #[allow(dead_code)]
         #[track_caller]
         #[inline]
-        $vis fn certs_err_code<E: Into<BoxError>>(e: E, code: $code, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::Certs), $pkg, msg, Some(Arc::new(code)), Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
         $vis fn http_client_err<E: Into<BoxError>>(e: E, msg: Option<String>) -> Error {
             Error::new(Some(Kind::HttpClient), $pkg, msg, None, Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
-        $vis fn http_client_err_code<E: Into<BoxError>>(e: E, code: $code, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::HttpClient), $pkg, msg, Some(Arc::new(code)), Some(e), Some(Location::caller()))
-        }
-
-        $(#[$attr])*
-        #[allow(dead_code)]
-        #[track_caller]
-        #[inline]
-        $vis fn connect_err<E: Into<BoxError>>(e: E, msg: Option<String>) -> Error {
-            Error::new(Some(Kind::Connect), $pkg, msg, None, Some(e), Some(Location::caller()))
         }
 
         $(#[$attr])*
@@ -773,7 +627,7 @@ mod tests {
 
         assert_eq!(
             err,
-            "lit_core::Error { kind: Unexpected, code: CoreFatal, msg: \"fatal-1\", source: lit_core::Error { kind: SevSnp, msg: \"sev-snp\", source: lit_core::Error { kind: Generic, source: \"first\", caller:  { file: \"lit-core/src/error/mod.rs:768:19\" } }, caller:  { file: \"lit-core/src/error/mod.rs:769:19\" } }, caller:  { file: \"lit-core/src/error/mod.rs:770:19\" } }"
+            "lit_core::Error { kind: Unexpected, code: CoreFatal, msg: \"fatal-1\", source: lit_core::Error { kind: SevSnp, msg: \"sev-snp\", source: lit_core::Error { kind: Generic, source: \"first\", caller:  { file: \"lit-core/src/error/mod.rs:622:19\" } }, caller:  { file: \"lit-core/src/error/mod.rs:623:19\" } }, caller:  { file: \"lit-core/src/error/mod.rs:624:19\" } }"
         );
     }
 

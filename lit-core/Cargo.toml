@@ -3,7 +3,6 @@ members = [
     "lit-api-core",
     "lit-core",
     "lit-core-derive",
-    "lit-logging",
     "lit-observability",
 ]
 resolver = "2" 

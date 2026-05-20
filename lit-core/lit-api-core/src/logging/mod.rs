@@ -104,7 +104,6 @@ impl Plugin for FileLoggingPlugin {
         Ok(())
     }
 
-    // FIXME: the way this opens the file each time is really inefficient.  instead, look at the lit-core/lit-logging-src-pluging/log_service.rs does it with a queue and a thread for a better option
     fn handle(&self, _pkg: &str, record: &dyn LogRecord) -> Result<()> {
         if let Some(path) = &self.path {
             let mut file = OpenOptions::new()

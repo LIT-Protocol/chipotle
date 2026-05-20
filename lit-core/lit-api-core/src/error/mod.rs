@@ -19,9 +19,6 @@ pub(crate) enum EC {
     /// The API path was not found.
     #[code(kind = Validation, http_status = 404)]
     CoreApiRouteNotFound,
-    /// Missing required header: X-Correlation-Id / X-Request-Id
-    #[code(kind = Validation, http_status = 400)]
-    CoreApiMissingRequiredXRequestIdHeader,
     /// Missing required header: X-Lit-Sdk-Version
     #[code(kind = Validation, http_status = 400)]
     CoreApiInvalidXSDKVersionHeader,

@@ -4,8 +4,10 @@ use std::fmt;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 
+#[cfg(test)]
 use derive_more::Display;
 
+#[cfg(test)]
 use lit_core_derive::{Description, ErrorCode};
 
 use crate::error::Kind;
@@ -19,15 +21,12 @@ pub trait Code: Display + Debug + Description {
     fn http_status(&self) -> Option<u16>;
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 #[derive(Clone, Debug, Display, ErrorCode, Description)]
 pub(crate) enum EC {
     /// A fatal error occurred in the lit core system
     #[code(kind = Unexpected, http_status = 500)]
     CoreFatal,
-    /// An unexpected internal server error occurred.
-    #[code(kind = Unexpected, http_status = 500)]
-    CoreUnexpected,
 }
 
 /// Used mostly to reconstruct an error from a prior state (i.e. a PublicError from an API).

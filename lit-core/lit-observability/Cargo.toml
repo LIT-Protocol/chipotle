@@ -37,7 +37,3 @@ path = "../lit-core"
 
 [dependencies.lit-core-derive]
 path = "../lit-core-derive"
-
-[dependencies.lit-logging]
-path = "../lit-logging"
-features = ["service"]

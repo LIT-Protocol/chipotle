@@ -2715,18 +2715,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "env_logger"
-version = "0.10.0"
-source = "git+https://github.com/LIT-Protocol/env_logger.git#e8907ca549e66754af35661951e0b325ad11d412"
-dependencies = [
- "humantime",
- "is-terminal",
- "log",
- "regex",
- "termcolor",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3859,12 +3847,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
-name = "humantime"
-version = "2.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "135b12329e5e3ce057a9f972339ea52bc954fe1e9358ef27f95e89716fbc5424"
-
-[[package]]
 name = "hyper"
 version = "0.14.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4007,21 +3989,6 @@ dependencies = [
  "tower-service",
  "tracing",
  "windows-registry",
-]
-
-[[package]]
-name = "hyperlocal"
-version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "986c5ce3b994526b3cd75578e62554abd09f0899d6206de48b3e96ab34ccc8c7"
-dependencies = [
- "hex",
- "http-body-util",
- "hyper 1.8.1",
- "hyper-util",
- "pin-project-lite",
- "tokio",
- "tower-service",
 ]
 
 [[package]]
@@ -4661,7 +4628,6 @@ dependencies = [
  "clap",
  "config",
  "derive_more 2.1.1",
- "env_logger",
  "flate2",
  "hex",
  "lit-core-derive",
@@ -4687,26 +4653,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lit-logging"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "crossbeam-channel",
- "derive_more 2.1.1",
- "env_logger",
- "hyper 1.8.1",
- "hyperlocal",
- "lit-core",
- "lit-core-derive",
- "log",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "lit-observability"
 version = "0.1.0"
 dependencies = [
@@ -4715,7 +4661,6 @@ dependencies = [
  "flume",
  "lit-core",
  "lit-core-derive",
- "lit-logging",
  "metrics",
  "nu-ansi-term",
  "opentelemetry",
@@ -7932,15 +7877,6 @@ dependencies = [
  "dirs-next",
  "rustversion",
  "winapi",
-]
-
-[[package]]
-name = "termcolor"
-version = "1.4.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
-dependencies = [
- "winapi-util",
 ]
 
 [[package]]

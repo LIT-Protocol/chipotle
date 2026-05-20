@@ -778,15 +778,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "crossbeam-channel"
-version = "0.5.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "82b8f8f868b36967f9606790d1903570de9ceaf870a7bf9fbbd3016d636a2cb2"
-dependencies = [
- "crossbeam-utils",
-]
-
-[[package]]
 name = "crossbeam-utils"
 version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2147,26 +2138,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lit-logging"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "crossbeam-channel",
- "derive_more",
- "env_logger",
- "hyper 1.6.0",
- "hyperlocal",
- "lit-core",
- "lit-core-derive",
- "log",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "lit-observability"
 version = "0.1.0"
 dependencies = [
@@ -2175,7 +2146,6 @@ dependencies = [
  "flume",
  "lit-core",
  "lit-core-derive",
- "lit-logging",
  "metrics",
  "nu-ansi-term",
  "opentelemetry",
