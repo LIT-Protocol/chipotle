@@ -272,6 +272,9 @@ pub async fn convert_to_chain_secured_account(
         &req.signature,
         crate::core::eip712::PRIMARY_TYPE_CONVERT_ACCOUNT,
     )?;
+    // Bridge alloy Address → ethers H160 for the remainder of this function;
+    // the rest of the file is still on ethers types until Phase 4.
+    let signer = H160::from_slice(signer.as_slice());
     if signer != claimed_address {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!("Signature does not match new_admin_wallet_address"),

@@ -18,8 +18,10 @@
 //! bytes than the server expects, the digest differs and recovery fails —
 //! no out-of-band type-hash check needed beyond pinning the schema.
 
-use ethers::core::types::transaction::eip712::{EIP712Domain, Eip712, Eip712DomainType, TypedData};
-use ethers::core::types::{Address, RecoveryMessage, Signature as EthSignature, U256};
+use std::collections::BTreeMap;
+
+use alloy::dyn_abi::TypedData;
+use alloy::primitives::{Address, Signature, U256};
 
 use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::v1::helpers::api_status::ApiStatus;
@@ -56,20 +58,63 @@ pub(crate) const PRIMARY_TYPE_CONVERT_ACCOUNT: &str = "ConvertAccount";
 pub(crate) const PRIMARY_TYPE_ADD_USAGE_API_KEY: &str = "AddUsageApiKey";
 pub(crate) const PRIMARY_TYPE_BILLING_AUTH: &str = "BillingAuth";
 
+/// One field of an EIP-712 type declaration. Mirrors the wire shape
+/// (`{"name": "...", "type": "..."}`) so we can validate the client-supplied
+/// `types` map byte-for-byte against the canonical schema. We don't use
+/// alloy's `PropertyDef` directly here because comparison ergonomics with
+/// string literals are simpler with a plain struct, and the JSON shape we
+/// validate against is fixed.
+#[derive(Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+struct Eip712FieldDef {
+    name: String,
+    #[serde(rename = "type")]
+    ty: String,
+}
+
+impl Eip712FieldDef {
+    fn new(name: &str, ty: &str) -> Self {
+        Self {
+            name: name.to_string(),
+            ty: ty.to_string(),
+        }
+    }
+}
+
+/// Just the slice of the JSON we need to validate the schema. Alloy's
+/// `TypedData::resolver` is opaque (private fields), so we deserialize the
+/// `types` and `primaryType` keys into our own view and run schema checks
+/// against that. The same JSON is also fed to `alloy::dyn_abi::TypedData`
+/// to compute the EIP-712 digest — serde_json yields a deterministic logical
+/// value, so both parses see the same fields.
+#[derive(Debug, serde::Deserialize)]
+struct TypedDataSchemaView {
+    types: BTreeMap<String, Vec<Eip712FieldDef>>,
+    #[serde(rename = "primaryType")]
+    primary_type: String,
+    domain: DomainView,
+    message: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+struct DomainView {
+    name: Option<String>,
+    version: Option<String>,
+    #[serde(rename = "chainId")]
+    chain_id: Option<serde_json::Value>,
+    #[serde(default, rename = "verifyingContract")]
+    verifying_contract: Option<serde_json::Value>,
+    #[serde(default)]
+    salt: Option<serde_json::Value>,
+}
+
 /// The four flows share an identical message struct: `(address, issuedAt)`.
 /// Field declaration order is part of the EIP-712 type hash — clients must
 /// declare the fields in this order, and any reordering is rejected by
 /// `validate_type_schema`.
-fn payload_field_schema() -> [Eip712DomainType; 2] {
+fn payload_field_schema() -> [Eip712FieldDef; 2] {
     [
-        Eip712DomainType {
-            name: "address".to_string(),
-            r#type: "address".to_string(),
-        },
-        Eip712DomainType {
-            name: "issuedAt".to_string(),
-            r#type: "uint256".to_string(),
-        },
+        Eip712FieldDef::new("address", "address"),
+        Eip712FieldDef::new("issuedAt", "uint256"),
     ]
 }
 
@@ -77,20 +122,11 @@ fn payload_field_schema() -> [Eip712DomainType; 2] {
 /// chainId) subset — no `verifyingContract` (this server is not an
 /// on-chain contract) and no `salt`. Clients must declare these in the
 /// same order; any other shape is rejected.
-fn domain_field_schema() -> [Eip712DomainType; 3] {
+fn domain_field_schema() -> [Eip712FieldDef; 3] {
     [
-        Eip712DomainType {
-            name: "name".to_string(),
-            r#type: "string".to_string(),
-        },
-        Eip712DomainType {
-            name: "version".to_string(),
-            r#type: "string".to_string(),
-        },
-        Eip712DomainType {
-            name: "chainId".to_string(),
-            r#type: "uint256".to_string(),
-        },
+        Eip712FieldDef::new("name", "string"),
+        Eip712FieldDef::new("version", "string"),
+        Eip712FieldDef::new("chainId", "uint256"),
     ]
 }
 
@@ -104,46 +140,44 @@ fn is_known_primary_type(s: &str) -> bool {
     )
 }
 
-/// Build the canonical typed data the server expects for a given flow.
+/// Build the canonical typed data JSON the server expects for a given flow.
 /// Used by tests to round-trip a wallet signature; not part of the request
 /// path (the request path validates the client-supplied typed data instead
 /// of rebuilding it, so the wallet's view and the server's view are bit-
 /// identical when verification succeeds).
 #[cfg(test)]
-pub(crate) fn build_canonical_typed_data(
+pub(crate) fn build_canonical_typed_data_json(
     primary_type: &str,
     address: Address,
     issued_at: i64,
     chain_id: u64,
-) -> TypedData {
-    use std::collections::BTreeMap;
+) -> serde_json::Value {
+    let payload_fields: Vec<serde_json::Value> = payload_field_schema()
+        .iter()
+        .map(|f| serde_json::json!({ "name": f.name, "type": f.ty }))
+        .collect();
+    let domain_fields: Vec<serde_json::Value> = domain_field_schema()
+        .iter()
+        .map(|f| serde_json::json!({ "name": f.name, "type": f.ty }))
+        .collect();
 
-    let mut types: BTreeMap<String, Vec<Eip712DomainType>> = BTreeMap::new();
-    types.insert("EIP712Domain".to_string(), domain_field_schema().to_vec());
-    types.insert(primary_type.to_string(), payload_field_schema().to_vec());
-
-    let mut message: BTreeMap<String, serde_json::Value> = BTreeMap::new();
-    message.insert(
-        "address".to_string(),
-        serde_json::Value::String(format!("0x{:x}", address)),
-    );
-    message.insert(
-        "issuedAt".to_string(),
-        serde_json::Value::String(issued_at.to_string()),
-    );
-
-    TypedData {
-        domain: EIP712Domain {
-            name: Some(EIP712_DOMAIN_NAME.to_string()),
-            version: Some(EIP712_DOMAIN_VERSION.to_string()),
-            chain_id: Some(U256::from(chain_id)),
-            verifying_contract: None,
-            salt: None,
+    serde_json::json!({
+        "types": {
+            "EIP712Domain": domain_fields,
+            primary_type: payload_fields,
         },
-        types,
-        primary_type: primary_type.to_string(),
-        message,
-    }
+        "primaryType": primary_type,
+        "domain": {
+            "name": EIP712_DOMAIN_NAME,
+            "version": EIP712_DOMAIN_VERSION,
+            // chainId is stringified to match the wire shape JS wallets use.
+            "chainId": chain_id.to_string(),
+        },
+        "message": {
+            "address": format!("{:#x}", address),
+            "issuedAt": issued_at.to_string(),
+        },
+    })
 }
 
 /// Verify an EIP-712 typed-data + signature pair for a specific ChainSecured
@@ -169,54 +203,62 @@ pub(crate) fn verify_eip712_signature(
         ));
     }
 
+    let view: TypedDataSchemaView =
+        serde_json::from_value(typed_data_json.clone()).map_err(|e| {
+            ApiStatus::bad_request(
+                anyhow::anyhow!(e),
+                "typed_data is not a valid EIP-712 typed-data object",
+            )
+        })?;
+
+    if view.primary_type != expected_primary_type {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!(
+                "primaryType mismatch: typed_data says {:?}, this endpoint expects {:?}",
+                view.primary_type,
+                expected_primary_type
+            ),
+            "primaryType mismatch — signature was minted for a different flow",
+        ));
+    }
+    if !is_known_primary_type(&view.primary_type) {
+        // Defence in depth — `expected_primary_type` is always one of our
+        // constants, but pin the wider invariant explicitly so adding a new
+        // primary type forces us to update `is_known_primary_type` too.
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("Unknown primaryType {:?}", view.primary_type),
+            "Unknown primaryType",
+        ));
+    }
+
+    validate_domain(&view.domain)?;
+    validate_type_schema(&view)?;
+    let address = extract_address(&view)?;
+    let issued_at = extract_issued_at(&view)?;
+    validate_timestamp(issued_at)?;
+
+    // Parse a second time into alloy's TypedData to compute the EIP-712
+    // digest. Two parses of the same JSON yield the same logical value.
     let typed_data: TypedData = serde_json::from_value(typed_data_json.clone()).map_err(|e| {
         ApiStatus::bad_request(
             anyhow::anyhow!(e),
             "typed_data is not a valid EIP-712 typed-data object",
         )
     })?;
-
-    if typed_data.primary_type != expected_primary_type {
-        return Err(ApiStatus::bad_request(
-            anyhow::anyhow!(
-                "primaryType mismatch: typed_data says {:?}, this endpoint expects {:?}",
-                typed_data.primary_type,
-                expected_primary_type
-            ),
-            "primaryType mismatch — signature was minted for a different flow",
-        ));
-    }
-    if !is_known_primary_type(&typed_data.primary_type) {
-        // Defence in depth — `expected_primary_type` is always one of our
-        // constants, but pin the wider invariant explicitly so adding a new
-        // primary type forces us to update `is_known_primary_type` too.
-        return Err(ApiStatus::bad_request(
-            anyhow::anyhow!("Unknown primaryType {:?}", typed_data.primary_type),
-            "Unknown primaryType",
-        ));
-    }
-
-    validate_domain(&typed_data.domain)?;
-    validate_type_schema(&typed_data)?;
-    let address = extract_address(&typed_data)?;
-    let issued_at = extract_issued_at(&typed_data)?;
-    validate_timestamp(issued_at)?;
-
-    let digest = typed_data.encode_eip712().map_err(|e| {
+    let digest = typed_data.eip712_signing_hash().map_err(|e| {
         ApiStatus::internal_server_error(
-            anyhow::anyhow!("encode_eip712 failed: {}", e),
-            "encode_eip712 failed",
+            anyhow::anyhow!("eip712_signing_hash failed: {}", e),
+            "eip712_signing_hash failed",
         )
     })?;
-    let sig: EthSignature =
-        signature_hex
-            .trim()
-            .parse()
-            .map_err(|e: ethers::core::types::SignatureError| {
-                ApiStatus::bad_request(anyhow::anyhow!(e), "Invalid signature hex")
-            })?;
+    let sig: Signature = signature_hex
+        .trim()
+        .parse()
+        .map_err(|e: alloy::primitives::SignatureError| {
+            ApiStatus::bad_request(anyhow::anyhow!(e), "Invalid signature hex")
+        })?;
     let recovered = sig
-        .recover(RecoveryMessage::Hash(digest.into()))
+        .recover_address_from_prehash(&digest)
         .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "Signature recovery failed"))?;
 
     if recovered != address {
@@ -228,7 +270,7 @@ pub(crate) fn verify_eip712_signature(
     Ok(address)
 }
 
-fn validate_domain(domain: &EIP712Domain) -> Result<(), ApiStatus> {
+fn validate_domain(domain: &DomainView) -> Result<(), ApiStatus> {
     if domain.name.as_deref() != Some(EIP712_DOMAIN_NAME) {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!(
@@ -254,7 +296,13 @@ fn validate_domain(domain: &EIP712Domain) -> Result<(), ApiStatus> {
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))
         .map_err(|e| ApiStatus::internal_server_error(e, "GLOBAL_NODE_CONFIG missing"))?;
     let expected_chain_id = U256::from(node_config.chain.info().chain_id);
-    if domain.chain_id != Some(expected_chain_id) {
+    let actual_chain_id = domain
+        .chain_id
+        .as_ref()
+        .map(parse_u256_loose)
+        .transpose()
+        .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "Invalid chainId in domain"))?;
+    if actual_chain_id != Some(expected_chain_id) {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!(
                 "Chain ID mismatch: typed_data says {:?}, server is on {}",
@@ -277,17 +325,39 @@ fn validate_domain(domain: &EIP712Domain) -> Result<(), ApiStatus> {
     Ok(())
 }
 
-fn validate_type_schema(typed_data: &TypedData) -> Result<(), ApiStatus> {
+/// Parse a chainId as either a numeric string ("175188"), a hex string
+/// ("0x2ac14"), or a JSON number. Matches what JS wallets and viem produce
+/// across versions.
+fn parse_u256_loose(v: &serde_json::Value) -> Result<U256, anyhow::Error> {
+    match v {
+        serde_json::Value::String(s) => {
+            let s = s.trim();
+            if let Some(rest) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+                U256::from_str_radix(rest, 16)
+                    .map_err(|e| anyhow::anyhow!("invalid hex chainId: {e}"))
+            } else {
+                s.parse::<U256>()
+                    .map_err(|e| anyhow::anyhow!("invalid decimal chainId: {e}"))
+            }
+        }
+        serde_json::Value::Number(n) => {
+            let u = n
+                .as_u64()
+                .ok_or_else(|| anyhow::anyhow!("chainId must be a non-negative integer"))?;
+            Ok(U256::from(u))
+        }
+        _ => Err(anyhow::anyhow!("chainId must be a string or number")),
+    }
+}
+
+fn validate_type_schema(view: &TypedDataSchemaView) -> Result<(), ApiStatus> {
     let expected_payload = payload_field_schema();
-    let primary_decl = typed_data
-        .types
-        .get(&typed_data.primary_type)
-        .ok_or_else(|| {
-            ApiStatus::bad_request(
-                anyhow::anyhow!("Missing types[{}]", typed_data.primary_type),
-                "Missing primaryType in types",
-            )
-        })?;
+    let primary_decl = view.types.get(&view.primary_type).ok_or_else(|| {
+        ApiStatus::bad_request(
+            anyhow::anyhow!("Missing types[{}]", view.primary_type),
+            "Missing primaryType in types",
+        )
+    })?;
     if primary_decl.as_slice() != expected_payload.as_slice() {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!(
@@ -299,7 +369,7 @@ fn validate_type_schema(typed_data: &TypedData) -> Result<(), ApiStatus> {
     }
 
     let expected_domain = domain_field_schema();
-    let domain_decl = typed_data.types.get("EIP712Domain").ok_or_else(|| {
+    let domain_decl = view.types.get("EIP712Domain").ok_or_else(|| {
         ApiStatus::bad_request(
             anyhow::anyhow!("Missing types[EIP712Domain]"),
             "Missing EIP712Domain in types",
@@ -319,11 +389,11 @@ fn validate_type_schema(typed_data: &TypedData) -> Result<(), ApiStatus> {
     // We don't use them, but a wallet might display them (depending on
     // implementation) and the user could be misled into thinking they
     // signed something different.
-    if typed_data.types.len() != 2 {
+    if view.types.len() != 2 {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!(
                 "Unexpected type definitions — expected only EIP712Domain and {}",
-                typed_data.primary_type
+                view.primary_type
             ),
             "Unexpected type definitions",
         ));
@@ -336,14 +406,14 @@ fn validate_type_schema(typed_data: &TypedData) -> Result<(), ApiStatus> {
     // some wallet UIs render alongside the canonical fields, fooling the
     // user into signing what looks like a different action. Pin the
     // message to exactly the canonical (address, issuedAt) pair.
-    if typed_data.message.len() != 2
-        || !typed_data.message.contains_key("address")
-        || !typed_data.message.contains_key("issuedAt")
+    if view.message.len() != 2
+        || !view.message.contains_key("address")
+        || !view.message.contains_key("issuedAt")
     {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!(
                 "message must contain exactly `address` and `issuedAt`, got {:?}",
-                typed_data.message.keys().collect::<Vec<_>>()
+                view.message.keys().collect::<Vec<_>>()
             ),
             "message contains unexpected fields",
         ));
@@ -351,8 +421,8 @@ fn validate_type_schema(typed_data: &TypedData) -> Result<(), ApiStatus> {
     Ok(())
 }
 
-fn extract_address(typed_data: &TypedData) -> Result<Address, ApiStatus> {
-    let address_val = typed_data.message.get("address").ok_or_else(|| {
+fn extract_address(view: &TypedDataSchemaView) -> Result<Address, ApiStatus> {
+    let address_val = view.message.get("address").ok_or_else(|| {
         ApiStatus::bad_request(
             anyhow::anyhow!("Missing message.address"),
             "Missing message.address",
@@ -363,8 +433,8 @@ fn extract_address(typed_data: &TypedData) -> Result<Address, ApiStatus> {
     Ok(address)
 }
 
-fn extract_issued_at(typed_data: &TypedData) -> Result<i64, ApiStatus> {
-    let issued_val = typed_data.message.get("issuedAt").ok_or_else(|| {
+fn extract_issued_at(view: &TypedDataSchemaView) -> Result<i64, ApiStatus> {
+    let issued_val = view.message.get("issuedAt").ok_or_else(|| {
         ApiStatus::bad_request(
             anyhow::anyhow!("Missing message.issuedAt"),
             "Missing message.issuedAt",
@@ -422,8 +492,9 @@ fn validate_timestamp(issued_at: i64) -> Result<(), ApiStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethers::core::types::H256;
-    use ethers::signers::{LocalWallet, Signer};
+    use alloy::dyn_abi::TypedData;
+    use alloy::signers::SignerSync;
+    use alloy::signers::local::PrivateKeySigner;
 
     /// `GLOBAL_NODE_CONFIG` is a `OnceLock` populated at server startup. Tests
     /// share it — only the first `get_or_init` wins, so every test below sees
@@ -449,23 +520,23 @@ mod tests {
     /// `(typed_data_json, signature_hex)` so tests can hand them to the
     /// verifier in the same shape an HTTP request would.
     fn sign_canonical(
-        wallet: &LocalWallet,
+        wallet: &PrivateKeySigner,
         primary_type: &str,
         issued_at: i64,
         chain_id: u64,
     ) -> (serde_json::Value, String) {
-        let typed_data =
-            build_canonical_typed_data(primary_type, wallet.address(), issued_at, chain_id);
-        let digest = typed_data.encode_eip712().unwrap();
-        let sig = wallet.sign_hash(H256::from(digest)).unwrap();
-        let json = serde_json::to_value(&typed_data).unwrap();
-        (json, format!("0x{}", sig))
+        let json =
+            build_canonical_typed_data_json(primary_type, wallet.address(), issued_at, chain_id);
+        let typed_data: TypedData = serde_json::from_value(json.clone()).unwrap();
+        let digest = typed_data.eip712_signing_hash().unwrap();
+        let sig = wallet.sign_hash_sync(&digest).unwrap();
+        (json, format!("0x{}", hex::encode(sig.as_bytes())))
     }
 
     #[test]
     fn happy_path_create_wallet() {
         let chain_id = ensure_test_chain_id();
-        let wallet = LocalWallet::new(&mut rand::thread_rng());
+        let wallet = PrivateKeySigner::random();
         let (typed, sig) =
             sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
         let recovered = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET).unwrap();
@@ -481,12 +552,99 @@ mod tests {
             PRIMARY_TYPE_ADD_USAGE_API_KEY,
             PRIMARY_TYPE_BILLING_AUTH,
         ] {
-            let wallet = LocalWallet::new(&mut rand::thread_rng());
+            let wallet = PrivateKeySigner::random();
             let (typed, sig) = sign_canonical(&wallet, primary, now_secs(), chain_id);
             let recovered = verify_eip712_signature(&typed, &sig, primary)
                 .unwrap_or_else(|e| panic!("expected {primary} to verify, got: {e:?}"));
             assert_eq!(recovered, wallet.address(), "{primary} address mismatch");
         }
+    }
+
+    /// Parity check: a payload signed by the legacy ethers stack must verify
+    /// under the alloy-based verifier. This catches any divergence in digest
+    /// computation between the two libraries (typehash, field encoding,
+    /// domain separator). The ethers side is still in tree during phases
+    /// 3-6; this test will be removed in Phase 7 alongside the dep itself.
+    #[test]
+    fn cross_impl_parity_ethers_signed_verifies_under_alloy() {
+        use ethers::core::types::transaction::eip712::{
+            EIP712Domain, Eip712, Eip712DomainType, TypedData as EthersTypedData,
+        };
+        use ethers::core::types::H256 as EthersH256;
+        use ethers::signers::{LocalWallet as EthersLocalWallet, Signer};
+        use std::collections::BTreeMap as EthersBTreeMap;
+
+        let chain_id = ensure_test_chain_id();
+        let primary_type = PRIMARY_TYPE_CREATE_WALLET;
+        let issued_at = now_secs();
+        let ethers_wallet = EthersLocalWallet::new(&mut rand::thread_rng());
+        let ethers_addr = ethers_wallet.address();
+
+        // Build the typed data using ethers, exactly as a JS wallet would.
+        let mut types: EthersBTreeMap<String, Vec<Eip712DomainType>> = EthersBTreeMap::new();
+        types.insert(
+            "EIP712Domain".to_string(),
+            vec![
+                Eip712DomainType {
+                    name: "name".to_string(),
+                    r#type: "string".to_string(),
+                },
+                Eip712DomainType {
+                    name: "version".to_string(),
+                    r#type: "string".to_string(),
+                },
+                Eip712DomainType {
+                    name: "chainId".to_string(),
+                    r#type: "uint256".to_string(),
+                },
+            ],
+        );
+        types.insert(
+            primary_type.to_string(),
+            vec![
+                Eip712DomainType {
+                    name: "address".to_string(),
+                    r#type: "address".to_string(),
+                },
+                Eip712DomainType {
+                    name: "issuedAt".to_string(),
+                    r#type: "uint256".to_string(),
+                },
+            ],
+        );
+        let mut message: EthersBTreeMap<String, serde_json::Value> = EthersBTreeMap::new();
+        message.insert(
+            "address".to_string(),
+            serde_json::Value::String(format!("0x{:x}", ethers_addr)),
+        );
+        message.insert(
+            "issuedAt".to_string(),
+            serde_json::Value::String(issued_at.to_string()),
+        );
+        let ethers_typed = EthersTypedData {
+            domain: EIP712Domain {
+                name: Some(EIP712_DOMAIN_NAME.to_string()),
+                version: Some(EIP712_DOMAIN_VERSION.to_string()),
+                chain_id: Some(ethers::core::types::U256::from(chain_id)),
+                verifying_contract: None,
+                salt: None,
+            },
+            types,
+            primary_type: primary_type.to_string(),
+            message,
+        };
+        let digest = ethers_typed.encode_eip712().unwrap();
+        let sig = ethers_wallet.sign_hash(EthersH256::from(digest)).unwrap();
+        let json = serde_json::to_value(&ethers_typed).unwrap();
+
+        // Verify via the alloy-based verifier.
+        let recovered =
+            verify_eip712_signature(&json, &format!("0x{}", sig), primary_type).unwrap();
+        let expected = Address::from_slice(ethers_addr.as_bytes());
+        assert_eq!(
+            recovered, expected,
+            "alloy verifier did not recover the ethers signer — digest divergence",
+        );
     }
 
     /// The core CPL-286 promise: a signature minted for one flow must not
@@ -498,7 +656,7 @@ mod tests {
     #[test]
     fn cross_flow_replay_rejected_at_primary_type_check() {
         let chain_id = ensure_test_chain_id();
-        let wallet = LocalWallet::new(&mut rand::thread_rng());
+        let wallet = PrivateKeySigner::random();
         // User signs a CreateWallet typed payload.
         let (typed, sig) =
             sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
@@ -518,7 +676,7 @@ mod tests {
     #[test]
     fn cross_flow_replay_rejected_at_recovery_when_primary_type_rewritten() {
         let chain_id = ensure_test_chain_id();
-        let wallet = LocalWallet::new(&mut rand::thread_rng());
+        let wallet = PrivateKeySigner::random();
         // User signs CreateWallet.
         let (mut typed, sig) =
             sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
@@ -548,7 +706,7 @@ mod tests {
     #[test]
     fn rejects_chain_id_mismatch() {
         let chain_id = ensure_test_chain_id();
-        let wallet = LocalWallet::new(&mut rand::thread_rng());
+        let wallet = PrivateKeySigner::random();
         let (typed, sig) = sign_canonical(
             &wallet,
             PRIMARY_TYPE_CREATE_WALLET,
@@ -563,7 +721,7 @@ mod tests {
     #[test]
     fn rejects_domain_name_mismatch() {
         let chain_id = ensure_test_chain_id();
-        let wallet = LocalWallet::new(&mut rand::thread_rng());
+        let wallet = PrivateKeySigner::random();
         let (mut typed, sig) =
             sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
         typed["domain"]["name"] = serde_json::json!("Not Lit ChainSecured");
@@ -575,7 +733,7 @@ mod tests {
     #[test]
     fn rejects_domain_version_mismatch() {
         let chain_id = ensure_test_chain_id();
-        let wallet = LocalWallet::new(&mut rand::thread_rng());
+        let wallet = PrivateKeySigner::random();
         let (mut typed, sig) =
             sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
         typed["domain"]["version"] = serde_json::json!("99");
@@ -587,7 +745,7 @@ mod tests {
     #[test]
     fn rejects_extra_domain_field_verifying_contract() {
         let chain_id = ensure_test_chain_id();
-        let wallet = LocalWallet::new(&mut rand::thread_rng());
+        let wallet = PrivateKeySigner::random();
         let (mut typed, sig) =
             sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
         typed["domain"]["verifyingContract"] =
@@ -600,7 +758,7 @@ mod tests {
     #[test]
     fn rejects_schema_field_reorder() {
         let chain_id = ensure_test_chain_id();
-        let wallet = LocalWallet::new(&mut rand::thread_rng());
+        let wallet = PrivateKeySigner::random();
         let (mut typed, sig) =
             sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
         // Swap field order on the primary type — produces a different type hash.
@@ -616,7 +774,7 @@ mod tests {
     #[test]
     fn rejects_extra_type_definitions() {
         let chain_id = ensure_test_chain_id();
-        let wallet = LocalWallet::new(&mut rand::thread_rng());
+        let wallet = PrivateKeySigner::random();
         let (mut typed, sig) =
             sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
         // Smuggle in an extra type the wallet UI might display alongside.
@@ -631,7 +789,7 @@ mod tests {
     #[test]
     fn rejects_timestamp_too_old() {
         let chain_id = ensure_test_chain_id();
-        let wallet = LocalWallet::new(&mut rand::thread_rng());
+        let wallet = PrivateKeySigner::random();
         let stale = now_secs() - TIMESTAMP_SKEW_SECONDS - 1;
         let (typed, sig) = sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, stale, chain_id);
         let err = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET)
@@ -642,7 +800,7 @@ mod tests {
     #[test]
     fn rejects_timestamp_too_far_future() {
         let chain_id = ensure_test_chain_id();
-        let wallet = LocalWallet::new(&mut rand::thread_rng());
+        let wallet = PrivateKeySigner::random();
         let future = now_secs() + TIMESTAMP_SKEW_SECONDS + 1;
         let (typed, sig) = sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, future, chain_id);
         let err = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET)
@@ -689,27 +847,31 @@ mod tests {
     #[test]
     fn rejects_address_signer_mismatch() {
         let chain_id = ensure_test_chain_id();
-        let signer = LocalWallet::new(&mut rand::thread_rng());
-        let other = LocalWallet::new(&mut rand::thread_rng());
+        let signer = PrivateKeySigner::random();
+        let other = PrivateKeySigner::random();
         // typed data claims `other.address()` but is signed by `signer`.
-        let typed_data = build_canonical_typed_data(
+        let json = build_canonical_typed_data_json(
             PRIMARY_TYPE_CREATE_WALLET,
             other.address(),
             now_secs(),
             chain_id,
         );
-        let digest = typed_data.encode_eip712().unwrap();
-        let sig = signer.sign_hash(H256::from(digest)).unwrap();
-        let json = serde_json::to_value(&typed_data).unwrap();
-        let err = verify_eip712_signature(&json, &format!("0x{}", sig), PRIMARY_TYPE_CREATE_WALLET)
-            .expect_err("must reject — recovered signer ≠ claimed address");
+        let typed_data: TypedData = serde_json::from_value(json.clone()).unwrap();
+        let digest = typed_data.eip712_signing_hash().unwrap();
+        let sig = signer.sign_hash_sync(&digest).unwrap();
+        let err = verify_eip712_signature(
+            &json,
+            &format!("0x{}", hex::encode(sig.as_bytes())),
+            PRIMARY_TYPE_CREATE_WALLET,
+        )
+        .expect_err("must reject — recovered signer ≠ claimed address");
         assert!(format!("{err}").contains("Signature does not match"));
     }
 
     #[test]
     fn rejects_bad_signature_hex() {
         let chain_id = ensure_test_chain_id();
-        let wallet = LocalWallet::new(&mut rand::thread_rng());
+        let wallet = PrivateKeySigner::random();
         let (typed, _) = sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
         let err = verify_eip712_signature(&typed, "0xnothex", PRIMARY_TYPE_CREATE_WALLET)
             .expect_err("must reject — bad signature hex");
@@ -772,7 +934,7 @@ mod tests {
     #[test]
     fn rejects_extra_message_fields() {
         let chain_id = ensure_test_chain_id();
-        let wallet = LocalWallet::new(&mut rand::thread_rng());
+        let wallet = PrivateKeySigner::random();
         let (mut typed, sig) =
             sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
         typed["message"]["decoy"] = serde_json::json!("Authorize $10 subscription");

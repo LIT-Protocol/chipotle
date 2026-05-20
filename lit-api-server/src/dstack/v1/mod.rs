@@ -1,5 +1,5 @@
 use crate::utils::generate_lit_action_derivation_path;
-use ethers::utils::keccak256;
+use alloy::primitives::keccak256;
 use tracing::instrument;
 mod dstack;
 pub mod endpoints;
@@ -47,6 +47,6 @@ async fn get_key(path: &str, purpose: &str) -> Result<[u8; 32], String> {
 
     // While this looks a bit redundant, it's necessary to ensure that more than 1 secret can be exported
     // without compromising the security of the master key(s) used to derive them.
-    let secret = keccak256(&secret);
+    let secret = keccak256(&secret).0;
     Ok(secret)
 }

@@ -13,7 +13,15 @@ resolver = "2"
 edition = "2024"
 
 [workspace.dependencies]
-alloy = { version = "0.12.5", features = ["eip712", "sol-types"]}
+alloy = { version = "1.0", features = [
+    "contract",
+    "eip712",
+    "network",
+    "providers",
+    "rpc-types",
+    "signer-local",
+    "sol-types",
+] }
 arc-swap = { version = "1.7" }
 async-std = { version = "1.13" }
 async-trait = { version = "0.1" }
