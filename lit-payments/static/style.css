@@ -1,0 +1,79 @@
+:root {
+  color-scheme: light dark;
+  --bg: #fafafa;
+  --fg: #111;
+  --muted: #666;
+  --border: #ddd;
+  --accent: #2d3a6b;
+  --error: #b00020;
+  --ok: #1f6b3a;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111;
+    --fg: #eee;
+    --muted: #999;
+    --border: #333;
+    --accent: #88a;
+    --error: #ff7676;
+    --ok: #6fcf97;
+  }
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; height: 100%; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 32px;
+}
+
+h1 { margin: 0 0 6px; font-size: 22px; }
+.subtitle { margin: 0 0 24px; color: var(--muted); }
+.note { margin: 16px 0 24px; color: var(--muted); font-size: 14px; }
+
+label {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 6px;
+  color: var(--muted);
+}
+input[type=email] {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 15px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  margin-bottom: 16px;
+}
+button {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 15px;
+  font-weight: 500;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.6; cursor: not-allowed; }
+
+.status { margin-top: 16px; font-size: 14px; min-height: 1.2em; }
+.status.error { color: var(--error); }
+.status.ok { color: var(--ok); }

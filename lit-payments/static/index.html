@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lit Payments</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="card">
+    <h1>Lit Payments</h1>
+    <p id="who" class="subtitle">Loading…</p>
+    <p class="note">Admin tools will appear here as features ship.</p>
+    <button id="logout-btn" type="button">Sign out</button>
+  </main>
+
+  <script>
+    (async () => {
+      try {
+        const resp = await fetch('/api/me', { credentials: 'same-origin' });
+        if (resp.status === 401) {
+          window.location.href = '/login';
+          return;
+        }
+        const me = await resp.json();
+        document.getElementById('who').textContent =
+          `Signed in as ${me.email} (${me.role})`;
+      } catch (e) {
+        document.getElementById('who').textContent = 'Could not load profile';
+      }
+    })();
+
+    document.getElementById('logout-btn').addEventListener('click', async () => {
+      await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
+      window.location.href = '/login';
+    });
+  </script>
+</body>
+</html>
