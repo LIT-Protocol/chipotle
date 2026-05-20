@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 
 use anyhow::Result;
+use lit_billing_core::StripeClient;
 use lit_payments::auth::routes as auth_routes;
+use lit_payments::portal::routes as portal_routes;
 use lit_payments::{auth, config, db, mail};
 use rocket::fs::{FileServer, NamedFile};
 use rocket::http::Status;
@@ -24,12 +26,14 @@ async fn rocket() -> _ {
     let mailer =
         mail::Mailer::new(cfg.resend_api_key.clone(), cfg.mail_from.clone()).expect("mailer");
     let rate_limit = auth::rate_limit::RateLimiter::new();
+    let stripe = StripeClient::new(cfg.stripe_secret_key.clone()).expect("stripe client");
 
     rocket::build()
         .manage(pool)
         .manage(cfg)
         .manage(mailer)
         .manage(rate_limit)
+        .manage(stripe)
         .mount(
             "/",
             routes![
@@ -40,6 +44,9 @@ async fn rocket() -> _ {
                 auth_routes::verify_link,
                 auth_routes::logout,
                 auth_routes::me,
+                portal_routes::lookup_customer,
+                portal_routes::grant_credit,
+                portal_routes::list_grants,
             ],
         )
         .mount("/static", FileServer::from("static"))

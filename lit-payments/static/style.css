@@ -77,3 +77,134 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 .status { margin-top: 16px; font-size: 14px; min-height: 1.2em; }
 .status.error { color: var(--error); }
 .status.ok { color: var(--ok); }
+.error { color: var(--error); }
+.muted { color: var(--muted); }
+
+/* ── dashboard layout ─────────────────────────────────────────── */
+body.dashboard {
+  display: block;
+  padding: 0;
+}
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+}
+.dashboard-header h1 { font-size: 16px; margin: 0; }
+.header-right { display: flex; align-items: center; gap: 12px; }
+.header-right .muted { font-size: 14px; }
+button.ghost {
+  width: auto;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.dashboard-main {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.dashboard-main .card { max-width: none; padding: 24px; }
+.dashboard-main h2 { margin: 0 0 4px; font-size: 18px; }
+
+/* Inline row form (email/wallet lookup) */
+.row-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+.row-form input[type=text] {
+  flex: 1;
+  width: auto;
+  margin: 0;
+  padding: 10px 12px;
+  font-size: 15px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+}
+.row-form button {
+  width: auto;
+  padding: 10px 16px;
+}
+
+/* Match cards */
+.match {
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.match-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+.match-email { font-weight: 600; }
+.match-wallet { font-family: ui-monospace, SFMono-Regular, monospace; font-size: 12px; word-break: break-all; }
+.match-balance { font-weight: 600; white-space: nowrap; }
+
+.grant-form {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: 140px 1fr auto;
+  grid-template-areas:
+    "amount note button"
+    "status status status";
+  gap: 8px 12px;
+  align-items: end;
+}
+.grant-form label { margin: 0; }
+.grant-form label:first-of-type { grid-area: amount; }
+.grant-form .note-label { grid-area: note; }
+.grant-form button {
+  grid-area: button;
+  width: auto;
+  padding: 10px 14px;
+}
+.grant-form .status { grid-area: status; margin-top: 4px; }
+.grant-form input[type=number],
+.grant-form input[type=text] {
+  width: 100%;
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--fg);
+}
+
+/* Grants table */
+.grants-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 16px;
+  font-size: 14px;
+}
+.grants-table th, .grants-table td {
+  text-align: left;
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.grants-table th {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.grants-table td .muted {
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  word-break: break-all;
+}

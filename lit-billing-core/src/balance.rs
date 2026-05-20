@@ -24,3 +24,41 @@ pub async fn fetch(client: &StripeClient, customer_id: &str) -> Result<i64> {
     tracing::debug!(customer_id, balance, "stripe::fetch_balance: done");
     Ok(balance)
 }
+
+/// Write a balance transaction on a Stripe customer.
+///
+/// `amount_cents` is signed: positive = charge (debit credit), negative =
+/// credit (top-up / grant). Currency is hard-coded to USD; if we ever take
+/// other currencies this becomes a parameter.
+///
+/// If `idempotency_key` is `Some`, Stripe's Idempotency-Key header is set
+/// so duplicate POSTs within 24 hours collapse to a single transaction.
+/// Callers should pass a fresh UUID per logical attempt.
+///
+/// Returns the Stripe balance-transaction id (e.g. `cbtxn_…`).
+pub async fn write_transaction(
+    client: &StripeClient,
+    customer_id: &str,
+    amount_cents: i64,
+    description: &str,
+    idempotency_key: Option<&str>,
+) -> Result<String> {
+    let amount_str = amount_cents.to_string();
+    let params = [
+        ("amount", amount_str.as_str()),
+        ("currency", "usd"),
+        ("description", description),
+    ];
+    let path = format!("customers/{customer_id}/balance_transactions");
+    let resp = match idempotency_key {
+        Some(key) => client.post_with_idempotency(&path, &params, key).await?,
+        None => client.post(&path, &params).await?,
+    };
+    let id = resp
+        .body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Stripe: missing balance_transaction id"))?
+        .to_string();
+    Ok(id)
+}

@@ -1,13 +1,25 @@
 # lit-payments
 
-Ops-facing billing service. Magic-link auth + (later) admin credit portal
-and LITKEY payment gateway. Deployed outside the TEE, on Railway.
+Ops-facing billing service. Magic-link auth + admin credit portal + (later)
+LITKEY payment gateway. Deployed outside the TEE, on Railway.
 
 See `plans/lit-payments-app.md` (in the repo root, on the planning branch)
 for the full design.
 
-This PR ships **foundation + magic-link auth + login UI only**. The credit
-portal endpoints and admin UI come in a follow-up PR.
+## Routes
+
+Public:
+- `GET /login` — login page (form posts to `/auth/request`).
+- `POST /auth/request` — send magic link (rate-limited per email, 60s cooldown).
+- `GET /auth/verify?token=…` — validate token, set session cookie, redirect.
+
+Authenticated (operator session cookie required):
+- `GET /` — admin dashboard.
+- `GET /api/me` — current operator profile.
+- `POST /auth/logout` — delete session.
+- `GET /api/customer/lookup?email=…` or `?wallet=…` — preview a Stripe customer + balance.
+- `POST /api/grant` — apply a credit (subject to caps + UUID idempotency key).
+- `GET /api/grants?limit=N` — recent grants by the calling operator.
 
 ## Local development
 
@@ -33,9 +45,13 @@ MAGIC_LINK_SIGNING_KEY=$(openssl rand -base64 32)
 RESEND_API_KEY=re_...                    # https://resend.com → API keys
 MAIL_FROM=noreply@mail.litprotocol.com   # must be a verified Resend sender
 PUBLIC_BASE_URL=http://localhost:8000
-STRIPE_SECRET_KEY=rk_test_...            # not used yet; parsed eagerly
+STRIPE_SECRET_KEY=rk_test_...            # Stripe restricted key
 ROCKET_SECRET_KEY=$(openssl rand -base64 32)  # required for private cookies in release
 ROCKET_PORT=8000
+
+# Optional — cap defaults match the plan ($20 per grant, $100/op/day):
+# MAX_GRANT_CENTS=2000
+# MAX_DAILY_PER_OPERATOR_CENTS=10000
 ```
 
 ### 3. Run
