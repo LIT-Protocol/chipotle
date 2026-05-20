@@ -27,7 +27,7 @@ use lit_api_server::stripe::{
     self, ReportBalanceTx, ReportCustomer, ReportRow, aggregate_report_rows, cents_to_display,
 };
 
-const DEFAULT_DAYS: u32 = 30;
+const DEFAULT_DAYS: u32 = 14;
 const DEFAULT_OUT: &str = "stripe-report";
 
 struct Args {

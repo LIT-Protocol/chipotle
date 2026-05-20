@@ -344,6 +344,7 @@ fn build_rocket(
         )
         .mount("/", core::v1::health::routes())
         .mount("/core/v1/", core_routes)
+        .mount("/core/v1/", core::v1::health::routes())
         .mount(
             "/core/v1/swagger-ui/",
             make_swagger_ui(&SwaggerUIConfig {
