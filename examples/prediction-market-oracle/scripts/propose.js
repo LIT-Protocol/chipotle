@@ -1,9 +1,11 @@
 // Proposes a question to the deployed PredictionMarket contract.
-// resolveAt defaults to "now + 5 minutes" so you can immediately try
-// resolving it in the same session.
+// resolveAt defaults to "now" so you can resolve it as soon as the
+// propose tx mines. A real prediction market would set this to whenever
+// the underlying event is expected to be decidable; for a docs demo,
+// immediate is fine.
 //
 // Usage:
-//   node scripts/propose.js --text "Will the year 2027 be a leap year?"
+//   node scripts/propose.js --text "Did the Lakers beat the Celtics on 2026-05-15?"
 //   node scripts/propose.js --text "..." --resolveIn 3600   # 1 hour from now
 
 const { ethers } = require("ethers");
@@ -33,7 +35,10 @@ async function main() {
     if (!process.env[k]) throw new Error(`${k} is required`);
   }
 
-  const resolveIn = Number(args.resolveIn || "300"); // default 5 min
+  // Default is 0 — question is resolvable as soon as the propose tx
+  // mines. Pass `--resolveIn N` for a longer window (real prediction
+  // markets would set this to whenever the underlying event closes).
+  const resolveIn = Number(args.resolveIn ?? "0");
   const resolveAt = Math.floor(Date.now() / 1000) + resolveIn;
 
   const provider = new ethers.providers.JsonRpcProvider(RPC_URL);

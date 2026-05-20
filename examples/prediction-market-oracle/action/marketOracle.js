@@ -75,7 +75,12 @@ async function main({
   // this in addition to the contract's enforcement.
   const now = Math.floor(Date.now() / 1000);
   if (now < resolveAt) {
-    return { authorized: false, reason: "question is not yet resolvable" };
+    return {
+      authorized: false,
+      reason: `question is not yet resolvable (${resolveAt - now}s remaining)`,
+      now,
+      resolveAt,
+    };
   }
 
   // Sanity: hash the text and verify it matches the questionId. Protects
@@ -129,13 +134,19 @@ async function main({
   );
 
   const successful = votes.filter((v) => v && v.vote);
-  const failed = votes.filter((v) => v && v.error);
+  const failed = votes
+    .filter((v) => v && (v.error || (v.raw && !v.vote)))
+    .map((v) =>
+      v.error
+        ? { name: v.name, error: v.error }
+        : { name: v.name, error: `unparseable response: ${(v.raw || "").slice(0, 80)}` }
+    );
 
   if (successful.length === 0) {
     return {
       authorized: false,
       reason: "no model returned a parseable answer",
-      details: votes,
+      failedModels: failed,
     };
   }
 
@@ -145,6 +156,7 @@ async function main({
       authorized: false,
       reason: "models disagree",
       votes: successful.map((v) => ({ name: v.name, vote: v.vote })),
+      failedModels: failed,
     };
   }
   const answer = voteToAnswer(firstVote);
@@ -186,37 +198,51 @@ function voteToAnswer(vote) {
 }
 
 async function callModel(name, apiKey, prompt) {
-  if (name === "perplexity") return callOpenAiCompatible(
-    "https://api.perplexity.ai/chat/completions",
-    apiKey,
-    "sonar-pro",
-    prompt
-  );
-  if (name === "openai") return callOpenAiCompatible(
-    "https://api.openai.com/v1/chat/completions",
-    apiKey,
-    "gpt-5.5",
-    prompt
-  );
+  if (name === "perplexity") return callPerplexity(apiKey, prompt);
+  if (name === "openai") return callOpenAi(apiKey, prompt);
   if (name === "anthropic") return callAnthropic(apiKey, prompt);
   throw new Error(`unknown model: ${name}`);
 }
 
-async function callOpenAiCompatible(url, apiKey, model, prompt) {
-  const res = await fetch(url, {
+// Perplexity Sonar uses the OpenAI-compatible chat-completions API and
+// still accepts the classic max_tokens + temperature parameters.
+async function callPerplexity(apiKey, prompt) {
+  const res = await fetch("https://api.perplexity.ai/chat/completions", {
     method: "POST",
     headers: {
       Authorization: `Bearer ${apiKey}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({
-      model,
+      model: "sonar-pro",
       messages: [{ role: "user", content: prompt }],
       max_tokens: 16,
       temperature: 0,
     }),
   });
-  if (!res.ok) throw new Error(`${url} returned ${res.status}`);
+  if (!res.ok) throw new Error(`perplexity ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const body = await res.json();
+  return body?.choices?.[0]?.message?.content || "";
+}
+
+// gpt-5.x changed the parameter names: max_tokens is rejected (must be
+// max_completion_tokens) and only the default temperature is accepted.
+// Reasoning models also consume tokens internally before producing
+// visible output, so a 16-token cap can come back empty — give it room.
+async function callOpenAi(apiKey, prompt) {
+  const res = await fetch("https://api.openai.com/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model: "gpt-5.5",
+      messages: [{ role: "user", content: prompt }],
+      max_completion_tokens: 256,
+    }),
+  });
+  if (!res.ok) throw new Error(`openai ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const body = await res.json();
   return body?.choices?.[0]?.message?.content || "";
 }
@@ -231,12 +257,16 @@ async function callAnthropic(apiKey, prompt) {
     },
     body: JSON.stringify({
       model: "claude-opus-4-7",
-      max_tokens: 16,
+      // Bigger budget than perplexity — Claude tends to preface answers
+      // with a brief sentence even when the prompt says "single word."
+      // parseVote scans for the first YES/NO/UNCLEAR token, so any prefix
+      // is fine as long as the answer is in the response.
+      max_tokens: 64,
       temperature: 0,
       messages: [{ role: "user", content: prompt }],
     }),
   });
-  if (!res.ok) throw new Error(`anthropic returned ${res.status}`);
+  if (!res.ok) throw new Error(`anthropic ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const body = await res.json();
   return body?.content?.[0]?.text || "";
 }
