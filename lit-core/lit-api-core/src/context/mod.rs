@@ -46,7 +46,6 @@ pub trait Tracer: Sync + Send {
     fn apply_fields(&self, fields: &mut Map<String, Value>) -> Result<()>;
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Tracing {
@@ -66,7 +65,6 @@ impl Tracer for Tracing {
     }
 
     /// Add some fields to the structured logs.
-    #[allow(dead_code)]
     fn add_field(&mut self, key: String, value: Value) {
         let mut fields = self.fields.take().unwrap_or_default();
 
@@ -101,85 +99,6 @@ impl<'r> FromRequest<'r> for Tracing {
         apply_req_tracing_fields(req, &mut tracing);
 
         Outcome::Success(tracing)
-    }
-}
-
-#[allow(dead_code)]
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct TracingRequired {
-    correlation_id: String,
-    fields: Option<HashMap<String, Value>>,
-}
-
-impl TracingRequired {
-    pub fn new(correlation_id: String) -> Self {
-        Self { correlation_id, fields: None }
-    }
-
-    pub fn into_bytes(self) -> Vec<u8> {
-        self.correlation_id.into_bytes()
-    }
-}
-
-impl Tracer for TracingRequired {
-    fn correlation_id(&self) -> &String {
-        &self.correlation_id
-    }
-
-    /// Add some fields to the structured logs.
-    fn add_field(&mut self, key: String, value: Value) {
-        let mut fields = self.fields.take().unwrap_or_default();
-
-        fields.insert(key, value);
-        self.fields = Some(fields);
-    }
-
-    /// Apply the fields for structured logging (used in the logging plugins)
-    fn apply_fields(&self, fields: &mut Map<String, Value>) -> Result<()> {
-        if let Some(our_fields) = self.fields.as_ref() {
-            for (key, value) in our_fields.iter() {
-                fields.insert(key.clone(), value.clone());
-            }
-        }
-
-        Ok(())
-    }
-}
-
-#[rocket::async_trait]
-impl<'r> FromRequest<'r> for TracingRequired {
-    type Error = crate::error::Error;
-
-    async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Self::Error> {
-        let (request_id, correlation_id) = extract_request_and_correlation_ids(req);
-
-        // TracingRequired requires at least one header
-        if let Some(correlation_id) = correlation_id {
-            // Preserve distinct values when both headers are present
-            let request_id = request_id.unwrap_or_else(|| correlation_id.clone());
-
-            // Set request context (span extensions + OTel attributes) for consistency
-            set_request_context(Some(request_id), Some(correlation_id.clone()));
-
-            let mut tracing = Self::new(correlation_id);
-            apply_req_tracing_fields(req, &mut tracing);
-
-            Outcome::Success(tracing)
-        } else {
-            Outcome::Error((
-                rocket::http::Status::ImATeapot,
-                push_err_to_req(
-                    req,
-                    validation_err_code(
-                        format!(
-                            "Missing '{HEADER_KEY_X_REQUEST_ID}' or '{HEADER_KEY_X_CORRELATION_ID}' header."
-                        ),
-                        EC::CoreApiMissingRequiredXRequestIdHeader,
-                        None,
-                    ),
-                ),
-            ))
-        }
     }
 }
 

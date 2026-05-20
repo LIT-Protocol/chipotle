@@ -26,7 +26,6 @@ opentelemetry_sdk = { workspace = true, features = ["logs"], optional = true }
 tokio.workspace = true
 tonic = "0.12"
 tonic-middleware = "0.2"
-tower = "0.5"
 tracing = { workspace = true, features = ["std"] }
 tracing-log = { version = "0.2", optional = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry", "std"] }
@@ -37,7 +36,3 @@ path = "../lit-core"
 
 [dependencies.lit-core-derive]
 path = "../lit-core-derive"
-
-[dependencies.lit-logging]
-path = "../lit-logging"
-features = ["service"]

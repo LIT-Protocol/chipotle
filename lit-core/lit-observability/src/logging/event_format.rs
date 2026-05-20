@@ -7,8 +7,6 @@
 //!
 //! This mod should mostly be used in development and testing environments.
 
-#![allow(dead_code)]
-
 use core::fmt;
 
 #[cfg(feature = "tracing-log")]
@@ -39,7 +37,6 @@ use super::context_layer::RequestContext;
 #[derive(Debug, Clone)]
 pub struct CustomEventFormatter<T = SystemTime> {
     pub(crate) timer: T,
-    pub(crate) ansi: Option<bool>,
     pub(crate) display_timestamp: bool,
     pub(crate) display_target: bool,
     pub(crate) display_level: bool,
@@ -56,7 +53,6 @@ impl Default for CustomEventFormatter {
     fn default() -> Self {
         Self {
             timer: SystemTime,
-            ansi: None,
             display_timestamp: true,
             display_target: true,
             display_level: true,
@@ -72,129 +68,6 @@ impl Default for CustomEventFormatter {
 }
 
 impl<T> CustomEventFormatter<T> {
-    /// Use the given [`timer`] for log message timestamps.
-    ///
-    /// See [`time` module] for the provided timer implementations.
-    ///
-    /// Note that using the `"time"` feature flag enables the
-    /// additional time formatters [`UtcTime`] and [`LocalTime`], which use the
-    /// [`time` crate] to provide more sophisticated timestamp formatting
-    /// options.
-    ///
-    /// [`timer`]: super::time::FormatTime
-    /// [`time` module]: mod@super::time
-    /// [`UtcTime`]: super::time::UtcTime
-    /// [`LocalTime`]: super::time::LocalTime
-    /// [`time` crate]: https://docs.rs/time/0.3
-    pub fn with_timer<T2>(self, timer: T2) -> CustomEventFormatter<T2> {
-        CustomEventFormatter {
-            timer,
-            ansi: self.ansi,
-            display_target: self.display_target,
-            display_timestamp: self.display_timestamp,
-            display_level: self.display_level,
-            display_thread_id: self.display_thread_id,
-            display_thread_name: self.display_thread_name,
-            display_filename: self.display_filename,
-            display_line_number: self.display_line_number,
-            display_event_scope: self.display_event_scope,
-            display_request_context: self.display_request_context,
-            prefix_string: self.prefix_string,
-        }
-    }
-
-    /// Do not emit timestamps with log messages.
-    pub fn without_time(self) -> CustomEventFormatter<()> {
-        CustomEventFormatter {
-            timer: (),
-            ansi: self.ansi,
-            display_timestamp: false,
-            display_target: self.display_target,
-            display_level: self.display_level,
-            display_thread_id: self.display_thread_id,
-            display_thread_name: self.display_thread_name,
-            display_filename: self.display_filename,
-            display_line_number: self.display_line_number,
-            display_event_scope: self.display_event_scope,
-            display_request_context: self.display_request_context,
-            prefix_string: self.prefix_string,
-        }
-    }
-
-    /// Sets whether or not request context (request_id, correlation_id) is displayed.
-    ///
-    /// When enabled, the formatter will look for `RequestContext` in span extensions
-    /// and display the request_id and correlation_id if present.
-    pub fn with_request_context(self, display_request_context: bool) -> CustomEventFormatter<T> {
-        CustomEventFormatter { display_request_context, ..self }
-    }
-
-    /// Enable ANSI terminal colors for formatted output.
-    pub fn with_ansi(self, ansi: bool) -> CustomEventFormatter<T> {
-        Self { ansi: Some(ansi), ..self }
-    }
-
-    /// Sets whether or not an event's target is displayed.
-    pub fn with_target(self, display_target: bool) -> CustomEventFormatter<T> {
-        CustomEventFormatter { display_target, ..self }
-    }
-
-    /// Sets whether or not an event's level is displayed.
-    pub fn with_level(self, display_level: bool) -> CustomEventFormatter<T> {
-        CustomEventFormatter { display_level, ..self }
-    }
-
-    /// Sets whether or not the [thread ID] of the current thread is displayed
-    /// when formatting events.
-    ///
-    /// [thread ID]: std::thread::ThreadId
-    pub fn with_thread_ids(self, display_thread_id: bool) -> CustomEventFormatter<T> {
-        CustomEventFormatter { display_thread_id, ..self }
-    }
-
-    /// Sets whether or not the [name] of the current thread is displayed
-    /// when formatting events.
-    ///
-    /// [name]: std::thread#naming-threads
-    pub fn with_thread_names(self, display_thread_name: bool) -> CustomEventFormatter<T> {
-        CustomEventFormatter { display_thread_name, ..self }
-    }
-
-    /// Sets whether or not an event's [source code file path][file] is
-    /// displayed.
-    ///
-    /// [file]: tracing_core::Metadata::file
-    pub fn with_file(self, display_filename: bool) -> CustomEventFormatter<T> {
-        CustomEventFormatter { display_filename, ..self }
-    }
-
-    /// Sets whether or not an event's [source code line number][line] is
-    /// displayed.
-    ///
-    /// [line]: tracing_core::Metadata::line
-    pub fn with_line_number(self, display_line_number: bool) -> CustomEventFormatter<T> {
-        CustomEventFormatter { display_line_number, ..self }
-    }
-
-    /// Sets whether or not the scope of the event is displayed.
-    pub fn with_event_scope(self, display_event_scope: bool) -> CustomEventFormatter<T> {
-        CustomEventFormatter { display_event_scope, ..self }
-    }
-
-    /// When set, the provided string will be printed before each log message.
-    pub fn with_prefix_string(self, prefix_string: Option<String>) -> CustomEventFormatter<T> {
-        CustomEventFormatter { prefix_string, ..self }
-    }
-
-    /// Sets whether or not the source code location from which an event
-    /// originated is displayed.
-    ///
-    /// This is equivalent to calling [`Format::with_file`] and
-    /// [`Format::with_line_number`] with the same value.
-    pub fn with_source_location(self, display_location: bool) -> Self {
-        self.with_line_number(display_location).with_file(display_location)
-    }
-
     #[inline]
     fn format_timestamp(&self, writer: &mut Writer<'_>) -> fmt::Result
     where
@@ -253,14 +126,6 @@ where
         if let Some(prefix) = &self.prefix_string {
             write!(writer, "{} ", prefix)?;
         }
-
-        // if the `Format` struct *also* has an ANSI color configuration,
-        // override the writer...the API for configuring ANSI color codes on the
-        // `Format` struct is deprecated, but we still need to honor those
-        // configurations.
-        // if let Some(ansi) = self.ansi {
-        //     writer = writer.with_ansi(ansi);
-        // }
 
         self.format_timestamp(&mut writer)?;
 

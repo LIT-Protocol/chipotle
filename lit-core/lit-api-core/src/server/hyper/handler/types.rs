@@ -26,15 +26,6 @@ impl Request {
         Self { req, ctx }
     }
 
-    #[allow(dead_code)]
-    pub fn try_from(v: impl Serialize, ctx: Arc<Context>) -> Result<Self> {
-        let json = serde_json::to_vec(&v).map_err(|e| conversion_err(e, None))?;
-
-        let bytes = Bytes::from(json);
-
-        Ok(Self::new(HyperRequest::new(bytes.into()), ctx))
-    }
-
     pub fn ctx(&self) -> Arc<Context> {
         self.ctx.clone()
     }
@@ -70,21 +61,6 @@ impl Response {
         let bytes = Bytes::from(json);
 
         Ok(Self::new(HyperResponse::new(bytes.into())))
-    }
-
-    #[allow(dead_code)]
-    pub async fn deserialize<T: for<'a> Deserialize<'a>>(self) -> Result<T> {
-        let body_bytes = self
-            .res
-            .into_body()
-            .collect()
-            .await
-            .map_err(|e| conversion_err(e, Some("Unable to obtain response body bytes".into())))?
-            .to_bytes();
-
-        serde_json::from_slice(&body_bytes).map_err(|e| {
-            conversion_err(e, Some("Unable to deserialize response body as JSON".into()))
-        })
     }
 }
 

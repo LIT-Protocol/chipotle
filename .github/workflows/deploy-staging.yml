@@ -175,6 +175,7 @@ jobs:
           DEPLOY_PATHS=(
             lit-actions/
             lit-api-server/
+            lit-billing-core/
             lit-core/
             otel-collector/
             Dockerfile.lit-actions
