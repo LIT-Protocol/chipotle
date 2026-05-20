@@ -298,24 +298,24 @@ The plain `transfer` and `transferFrom` overrides revert, so every movement of t
 
 Fetch a spot price from three independent exchanges (Coinbase, Kraken, Bitstamp), take the median, and sign it for any EVM chain. This is the practical "I need a Chainlink-shaped feed without Chainlink" pattern.
 
-Median (rather than strict byte-equality) is the right aggregation for live market prices — exchanges disagree by a few cents at every moment, so byte-equality would never pass. A median naturally rejects one outlier; combined with a `maxSpreadBps` check (refuse to sign if min/max differ by more than the threshold) it catches both single-source manipulation and any-source-market-state-broken situations.
+Median (rather than strict byte-equality) is the right aggregation for live market prices — exchanges disagree by a few cents at every moment, so byte-equality would never pass. A median naturally rejects one outlier; combined with a `MAX_SPREAD_BPS` check (refuse to sign if min/max differ by more than the threshold) it catches both single-source manipulation and any-source-market-state-broken situations.
+
+The safety thresholds (`MAX_SPREAD_BPS`, `MIN_SOURCES`, `DECIMALS`) are hardcoded constants in the action source rather than caller-supplied `js_params`. Otherwise anyone holding the usage key could request a signature with `MIN_SOURCES: 1` and a huge spread cap, bypassing the median-of-three story. Editing a constant mints a new action CID — and therefore a new signer address — which forces a redeploy of the registry. The trust anchor is content-addressed.
 
 All three sources here are keyless public HTTP endpoints — no API keys, no PKP, no encryption.
 
 ```javascript
-// js_params: {
-//   asset, registryAddress, registryChainId, deadline,
-//   maxSpreadBps = 100, minSources = 2, decimals = 8
-// }
+// js_params: { asset, registryAddress, registryChainId, deadline }
+const MAX_SPREAD_BPS = 100;   // 1%
+const MIN_SOURCES = 2;        // require >= this many successful fetches
+const DECIMALS = 8;           // fixed-point precision for the signed price
+
 const SYMBOLS = {
   ETH: { coinbase: "ETH-USD", kraken: "ETHUSD", krakenKey: "XETHZUSD", bitstamp: "ethusd" },
   BTC: { coinbase: "BTC-USD", kraken: "XBTUSD", krakenKey: "XXBTZUSD", bitstamp: "btcusd" },
 };
 
-async function main({
-  asset, registryAddress, registryChainId, deadline,
-  maxSpreadBps = 100, minSources = 2, decimals = 8,
-}) {
+async function main({ asset, registryAddress, registryChainId, deadline }) {
   const s = SYMBOLS[asset];
   if (!s) return { authorized: false, reason: `unsupported asset: ${asset}` };
 
@@ -334,7 +334,7 @@ async function main({
   const ok = settled
     .filter((r) => r.status === "fulfilled" && r.value.price > 0)
     .map((r) => r.value);
-  if (ok.length < minSources) {
+  if (ok.length < MIN_SOURCES) {
     return { authorized: false, reason: `only ${ok.length}/3 sources succeeded` };
   }
 
@@ -343,16 +343,19 @@ async function main({
     ? prices[(prices.length - 1) / 2]
     : (prices[prices.length / 2 - 1] + prices[prices.length / 2]) / 2;
   const spreadBps = Math.round(((prices[prices.length - 1] - prices[0]) / median) * 10000);
-  if (spreadBps > maxSpreadBps) {
-    return { authorized: false, reason: `spread ${spreadBps} bps exceeds ${maxSpreadBps}` };
+  if (spreadBps > MAX_SPREAD_BPS) {
+    return { authorized: false, reason: `spread ${spreadBps} bps exceeds ${MAX_SPREAD_BPS}` };
   }
 
-  const priceInt = BigInt(Math.round(median * 10 ** decimals));
+  // Use string-concat + BigInt instead of Math.round(median * 10**DECIMALS)
+  // so we don't lose precision (or overflow Number.MAX_SAFE_INTEGER) at
+  // DECIMALS=18.
+  const priceInt = scaleToFixedPoint(median, DECIMALS);
   const observedAt = Math.floor(Date.now() / 1000);
   const digest = ethers.utils.keccak256(
     ethers.utils.defaultAbiCoder.encode(
       ["string", "uint256", "uint8", "uint256", "uint256", "address", "uint256"],
-      [asset, priceInt, decimals, observedAt, deadline, registryAddress, registryChainId]
+      [asset, priceInt, DECIMALS, observedAt, deadline, registryAddress, registryChainId]
     )
   );
   const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());

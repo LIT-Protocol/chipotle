@@ -23,9 +23,16 @@
 //   registryAddress    Address of the PriceOracle contract
 //   registryChainId    Chain id where the registry lives
 //   deadline           Signature expiry (unix seconds)
-//   maxSpreadBps       Optional, default 100 (= 1%) — abort if (max-min)/median exceeds this
-//   minSources         Optional, default 2 — require at least this many successful fetches
-//   decimals           Optional, default 8 — fixed-point precision for the signed price
+//
+// The safety thresholds (max spread, minimum sources, decimals) are
+// HARDCODED below rather than taken from js_params. Caller-supplied
+// safety knobs are theatre: anyone with the usage key could otherwise
+// request a signed reading with `minSources: 1, maxSpreadBps: 99999`
+// and bypass the median-of-three / 1% spread story the README
+// promises. To change a threshold, edit the constants — that mints a
+// new action CID, which changes the signer address, which forces a
+// redeploy of PriceOracle. That's the trust model: thresholds are
+// content-addressed, not configurable per call.
 
 // Per-source symbol mappings. Kraken's legacy ticker has BTC=XBT and
 // returns result keys with X/Z prefixes (XXBTZUSD, XETHZUSD); the others
@@ -35,6 +42,14 @@ const SYMBOLS = {
   BTC: { coinbase: "BTC-USD", kraken: "XBTUSD", krakenKey: "XXBTZUSD", bitstamp: "btcusd" },
   SOL: { coinbase: "SOL-USD", kraken: "SOLUSD", krakenKey: "SOLUSD",   bitstamp: "solusd" },
 };
+
+// Safety thresholds — see "trust model" comment at the top.
+// Edit these constants to tighten / loosen, but doing so changes the
+// action's IPFS CID and therefore its signer address, requiring a
+// redeploy of the PriceOracle contract.
+const MAX_SPREAD_BPS = 100; // (max - min) / median, in basis points
+const MIN_SOURCES = 2; // require at least this many successful fetches
+const DECIMALS = 8; // fixed-point precision for the signed price
 
 const SOURCES = [
   {
@@ -75,9 +90,6 @@ async function main({
   registryAddress,
   registryChainId,
   deadline,
-  maxSpreadBps = 100,
-  minSources = 2,
-  decimals = 8,
 }) {
   const symbols = SYMBOLS[asset];
   if (!symbols) {
@@ -105,10 +117,10 @@ async function main({
     }
   });
 
-  if (successful.length < minSources) {
+  if (successful.length < MIN_SOURCES) {
     return {
       authorized: false,
-      reason: `only ${successful.length}/${SOURCES.length} sources succeeded (need ${minSources})`,
+      reason: `only ${successful.length}/${SOURCES.length} sources succeeded (need ${MIN_SOURCES})`,
       failed,
     };
   }
@@ -120,24 +132,20 @@ async function main({
       : (prices[prices.length / 2 - 1] + prices[prices.length / 2]) / 2;
   const spreadBps = Math.round(((prices[prices.length - 1] - prices[0]) / median) * 10000);
 
-  if (spreadBps > maxSpreadBps) {
+  if (spreadBps > MAX_SPREAD_BPS) {
     return {
       authorized: false,
-      reason: `spread ${spreadBps} bps exceeds max ${maxSpreadBps} bps`,
+      reason: `spread ${spreadBps} bps exceeds max ${MAX_SPREAD_BPS} bps`,
       sources: successful,
       spreadBps,
     };
   }
 
   // Convert the median to fixed-point. Use string concatenation +
-  // BigInt rather than `median * 10**decimals` so we don't lose
-  // precision (or overflow Number.MAX_SAFE_INTEGER) at decimals=18.
-  //
-  // Spot prices from these exchanges carry ~5-8 significant figures
-  // after the decimal point — well within Number's ~15 digit budget —
-  // so toFixed up to 8 captures everything they sent us, then we pad
-  // with zeros up to `decimals` via BigInt.
-  const priceInt = scaleToFixedPoint(median, decimals);
+  // BigInt rather than `median * 10**DECIMALS` so we don't lose
+  // precision (or overflow Number.MAX_SAFE_INTEGER) if DECIMALS gets
+  // bumped to 18.
+  const priceInt = scaleToFixedPoint(median, DECIMALS);
 
   const observedAt = Math.floor(Date.now() / 1000);
 
@@ -145,7 +153,7 @@ async function main({
   const digest = ethers.utils.keccak256(
     ethers.utils.defaultAbiCoder.encode(
       ["string", "uint256", "uint8", "uint256", "uint256", "address", "uint256"],
-      [asset, priceInt, decimals, observedAt, deadline, registryAddress, registryChainId]
+      [asset, priceInt, DECIMALS, observedAt, deadline, registryAddress, registryChainId]
     )
   );
 
@@ -159,7 +167,7 @@ async function main({
     asset,
     price: priceInt.toString(),
     priceFloat: median,
-    decimals,
+    decimals: DECIMALS,
     observedAt,
     spreadBps,
     sources: successful,

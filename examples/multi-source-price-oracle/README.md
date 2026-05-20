@@ -215,16 +215,26 @@ their threat model.
 
 ## Tuning
 
-- **`maxSpreadBps`** (default 100). Raise it for volatile assets where
-  legitimate cross-exchange spreads are wider; lower it for high-stakes
-  consumers that want to halt on any unusual market state.
-- **`minSources`** (default 2). Set to 3 to require all three sources to
-  respond — strictest, but a single provider outage halts the oracle.
-- **`decimals`** (default 8). Chainlink-compatible. Bump to 18 if your
+These knobs are **hardcoded constants at the top of
+[`action/priceOracle.js`](./action/priceOracle.js)**, not `js_params`.
+Caller-supplied safety thresholds would be theatre — anyone holding the
+usage key could ask the action to sign with `MIN_SOURCES = 1` and a
+huge spread limit, defeating the median-of-three story this example
+sells. Hardcoding them puts the trust anchor in the action's IPFS CID:
+edit a constant, the CID changes, the signer address changes, and
+existing PriceOracle deployments stop accepting signatures from the
+modified action — i.e. you redeploy.
+
+- **`MAX_SPREAD_BPS`** (default 100, i.e. 1%). Raise for volatile
+  assets where legitimate cross-exchange spreads are wider; lower for
+  high-stakes consumers that want to halt on any unusual market state.
+- **`MIN_SOURCES`** (default 2). Set to 3 to require all three sources
+  — strictest, but a single provider outage halts the oracle.
+- **`DECIMALS`** (default 8). Chainlink-compatible. Bump to 18 if your
   consumers want full ETH-precision fixed-point.
-- **Additional sources.** Add entries to `SOURCES` in `priceOracle.js`.
-  More sources mean median is more robust but latency rises to the slowest
-  fetch.
+- **Additional sources.** Add entries to `SOURCES` further down in
+  `priceOracle.js`. More sources mean median is more robust but
+  latency rises to the slowest fetch.
 
 ## Production considerations
 
