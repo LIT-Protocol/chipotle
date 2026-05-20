@@ -28,23 +28,30 @@
 //                      multiple BurnInitiated events
 //   deadline           unix seconds; the destination contract rejects after
 
-// Each entry binds a chain id to its accepted RPC hostnames. Pinning the
-// hostname rather than just the chainId matters because the caller supplies
-// both — they could otherwise pair a hostile RPC with a matching chainId
-// and pass the chainId check. TLS guarantees the body came from the named
-// host, which is the trust anchor we actually want. Edit this table to add
-// chains; doing so changes the action's IPFS CID and therefore the signer
-// address, forcing redeploys of every existing BridgeToken.
+// Per-chain RPC policy. `host` is the accepted hostname (TLS guarantees the
+// body came from there). `minConfirmations` is how many blocks the burn tx
+// must be buried under before we'll sign, to defang reorgs that would let
+// a user keep their source-chain balance AND mint on the destination.
 //
-// 84532 = Base Sepolia, 421614 = Arbitrum Sepolia. Defaults use Alchemy
-// because their hostnames are predictable enough to anchor with a regex —
-// public RPCs often share hostnames between chains (`rpc.ankr.com` etc.),
-// which is precisely what we need to rule out.
+// Edit this table to add chains; doing so changes the action's IPFS CID
+// and therefore the signer address, forcing redeploys of every existing
+// BridgeToken. 84532 = Base Sepolia, 421614 = Arbitrum Sepolia. Both are
+// rollups with fast soft finality; 5 blocks is overkill for normal
+// conditions and still very fast in wall-clock time (~10s on Base Sepolia,
+// ~1s on Arb Sepolia). Production deployments on chains with deeper
+// reorg risk (L1 mainnet, BNB, etc.) want substantially higher.
+//
+// Public RPCs often share hostnames between chains (`rpc.ankr.com` etc.),
+// which is precisely what the hostname pin is here to rule out.
 const RPC_HOSTS = {
-  // base sepolia
-  84532: /^base-sepolia\.g\.alchemy\.com$/i,
-  // arbitrum sepolia
-  421614: /^arb-sepolia\.g\.alchemy\.com$/i,
+  84532: {
+    host: /^base-sepolia\.g\.alchemy\.com$/i,
+    minConfirmations: 5,
+  },
+  421614: {
+    host: /^arb-sepolia\.g\.alchemy\.com$/i,
+    minConfirmations: 5,
+  },
 };
 
 async function main({
@@ -57,24 +64,33 @@ async function main({
   logIndex,
   deadline,
 }) {
-  // ---- 1. Hostname whitelist for the source RPC ---------------------------
-  const hostRe = RPC_HOSTS[Number(srcChainId)];
-  if (!hostRe) {
+  // ---- 1. Hostname + scheme whitelist for the source RPC ------------------
+  // HTTPS is mandatory: TLS is the trust anchor for "body came from the
+  // named host." Plain http:// would let a network attacker on the path
+  // return a fake receipt while still passing the hostname pin.
+  const policy = RPC_HOSTS[Number(srcChainId)];
+  if (!policy) {
     return {
       authorized: false,
       reason: `srcChainId ${srcChainId} not in RPC_HOSTS whitelist`,
     };
   }
-  let host;
+  let parsed;
   try {
-    host = new URL(srcRpcUrl).hostname;
+    parsed = new URL(srcRpcUrl);
   } catch {
     return { authorized: false, reason: "srcRpcUrl is not a valid URL" };
   }
-  if (!hostRe.test(host)) {
+  if (parsed.protocol !== "https:") {
     return {
       authorized: false,
-      reason: `srcRpcUrl host ${host} does not match whitelist for chain ${srcChainId}`,
+      reason: `srcRpcUrl must use https:// (got ${parsed.protocol})`,
+    };
+  }
+  if (!policy.host.test(parsed.hostname)) {
+    return {
+      authorized: false,
+      reason: `srcRpcUrl host ${parsed.hostname} does not match whitelist for chain ${srcChainId}`,
     };
   }
 
@@ -99,6 +115,22 @@ async function main({
   }
   if (BigInt(receipt.status) !== 1n) {
     return { authorized: false, reason: "burn tx reverted" };
+  }
+
+  // ---- 3a. Finality check -------------------------------------------------
+  // If we sign before the burn is finalized, a reorg can pull the burn out
+  // of history while the mint signature is already issued — user keeps
+  // source-chain tokens AND mints on the destination. Wait for the burn
+  // block to be buried under `minConfirmations` blocks. Per-chain count
+  // lives in RPC_HOSTS.
+  const headBlock = BigInt(await rpc(srcRpcUrl, "eth_blockNumber", []));
+  const burnBlock = BigInt(receipt.blockNumber);
+  const confirmations = headBlock - burnBlock;
+  if (confirmations < BigInt(policy.minConfirmations)) {
+    return {
+      authorized: false,
+      reason: `burn has ${confirmations} confirmations, need ${policy.minConfirmations} on chain ${srcChainId}`,
+    };
   }
 
   const idx = Number(logIndex);

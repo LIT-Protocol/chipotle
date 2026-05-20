@@ -472,20 +472,25 @@ Same content-addressed trust property as the compliance gate: the signer key com
 //   destChainId, destContract, logIndex, deadline,
 // }
 const RPC_HOSTS = {
-  84532:  /^base-sepolia\.g\.alchemy\.com$/i,  // base sepolia
-  421614: /^arb-sepolia\.g\.alchemy\.com$/i,   // arbitrum sepolia
+  84532:  { host: /^base-sepolia\.g\.alchemy\.com$/i, minConfirmations: 5 },
+  421614: { host: /^arb-sepolia\.g\.alchemy\.com$/i,  minConfirmations: 5 },
 };
 
 async function main({
   burnTxHash, srcChainId, srcRpcUrl, srcContract,
   destChainId, destContract, logIndex, deadline,
 }) {
-  // Hostname-whitelist the RPC per chain id. A caller-supplied chainId check
-  // alone is theater (the caller can lie consistently); the hostname pins
-  // trust to "TLS says this came from Alchemy's actual servers."
-  const hostRe = RPC_HOSTS[Number(srcChainId)];
-  if (!hostRe) return { authorized: false, reason: `chainId ${srcChainId} not whitelisted` };
-  if (!hostRe.test(new URL(srcRpcUrl).hostname)) {
+  // Hostname-whitelist the RPC per chain id, and require https://. A
+  // caller-supplied chainId check alone is theater (caller can lie
+  // consistently); the hostname + TLS scheme pin trust to "this body
+  // came from Alchemy's actual servers, not a path-level MITM."
+  const policy = RPC_HOSTS[Number(srcChainId)];
+  if (!policy) return { authorized: false, reason: `chainId ${srcChainId} not whitelisted` };
+  const parsed = new URL(srcRpcUrl);
+  if (parsed.protocol !== "https:") {
+    return { authorized: false, reason: "srcRpcUrl must use https://" };
+  }
+  if (!policy.host.test(parsed.hostname)) {
     return { authorized: false, reason: `srcRpcUrl host not whitelisted` };
   }
   const reportedChainId = await rpc(srcRpcUrl, "eth_chainId", []);
@@ -496,6 +501,13 @@ async function main({
   const receipt = await rpc(srcRpcUrl, "eth_getTransactionReceipt", [burnTxHash]);
   if (!receipt || BigInt(receipt.status) !== 1n) {
     return { authorized: false, reason: "burn tx missing or reverted" };
+  }
+  // Defang reorgs: don't sign until the burn is buried under N blocks.
+  // Otherwise a reorg can pull the burn out of history after the action
+  // signs, letting the user keep source tokens AND mint on the destination.
+  const head = BigInt(await rpc(srcRpcUrl, "eth_blockNumber", []));
+  if (head - BigInt(receipt.blockNumber) < BigInt(policy.minConfirmations)) {
+    return { authorized: false, reason: "burn not yet confirmed" };
   }
   const log = receipt.logs.find((l) => Number(l.logIndex) === Number(logIndex));
   if (!log || log.address.toLowerCase() !== srcContract.toLowerCase()) {

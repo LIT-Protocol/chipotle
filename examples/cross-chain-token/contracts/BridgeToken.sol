@@ -23,10 +23,11 @@ import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/Messa
 ///     modified action's signatures.
 ///   * Each deployment also stores `bridgePartner[srcChainId] => address`
 ///     entries pointing at its sibling contracts on other chains, set by the
-///     deployer via `setBridgePartner` during setup. The action signs over
-///     the source contract address so a mint on B can verify the burn
-///     happened in the expected contract on A, not some attacker-controlled
-///     copycat with the same event shape.
+///     deployer via `setBridgePartner` during setup. Wiring is **write-once
+///     per chain**: a partner can only be set if it's currently zero. This
+///     closes the "owner re-points partner at a copycat source and mints
+///     unbacked supply" attack — once wired, the deployer key has no
+///     remaining privilege over an already-bridged chain.
 ///   * Each `(srcChainId, burnTxHash, logIndex)` triple can mint exactly
 ///     once — `usedBurnIds` prevents replay across calls.
 contract BridgeToken is ERC20 {
@@ -57,11 +58,12 @@ contract BridgeToken is ERC20 {
     error UnknownSourceChain();
     error UnknownDestinationChain();
     error SourceContractMismatch();
-    error WrongDestinationContract();
-    error WrongDestinationChain();
     error AlreadyRedeemed();
     error AuthorizationExpired();
     error InvalidBridgeSignature();
+    error PartnerAlreadySet();
+    error ZeroRecipient();
+    error ZeroPartner();
 
     event BurnInitiated(
         address indexed from,
@@ -106,6 +108,9 @@ contract BridgeToken is ERC20 {
         // destroy a holder's balance — the destination side would have no
         // way to honour the mint.
         if (bridgePartner[destChainId] == address(0)) revert UnknownDestinationChain();
+        // _mint on the destination would revert for address(0), so the
+        // tokens would be permanently lost. Catch it here.
+        if (recipient == address(0)) revert ZeroRecipient();
         uint256 n = ++burnNonce;
         _burn(msg.sender, amount);
         emit BurnInitiated(msg.sender, recipient, amount, destChainId, n);
@@ -158,22 +163,18 @@ contract BridgeToken is ERC20 {
         emit BridgeMint(recipient, amount, srcChainId, burnTxHash, logIndex);
     }
 
-    /// @notice One-time wiring of sibling chains after both BridgeToken
-    ///         deployments exist. Idempotent — the deployer can re-point a
-    ///         chain id at any time, which is fine for an example but a
-    ///         production deployment would lock this down (multisig,
-    ///         timelock, or renounce after wiring).
+    /// @notice One-time wiring of a sibling chain after both BridgeToken
+    ///         deployments exist. Write-once per `chainId`: once a partner is
+    ///         set non-zero, this function reverts for that chain forever.
+    ///         If you typo a partner address during setup the only path
+    ///         forward is to redeploy this contract — which is the same
+    ///         path the example's "re-run setup is a fresh setup" model
+    ///         already takes.
     function setBridgePartner(uint256 chainId, address partner) external {
         if (msg.sender != owner) revert NotOwner();
+        if (partner == address(0)) revert ZeroPartner();
+        if (bridgePartner[chainId] != address(0)) revert PartnerAlreadySet();
         bridgePartner[chainId] = partner;
         emit BridgePartnerSet(chainId, partner);
-    }
-
-    /// @notice For the example: deployer can hand off control of
-    ///         `setBridgePartner` to a multisig later, or to address(0) to
-    ///         freeze the wiring permanently.
-    function transferOwnership(address newOwner) external {
-        if (msg.sender != owner) revert NotOwner();
-        owner = newOwner;
     }
 }

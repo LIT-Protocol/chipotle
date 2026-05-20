@@ -1,9 +1,12 @@
 # Cross-Chain Token
 
 **Permissionless burn/mint bridging for an ERC-20: a Lit Action checks burn
-events on one chain and signs the matching mint on another. No relayer
-trust, no bridge multisig, no API key — works for any pair of chains the
-action knows how to read.**
+events on one chain and signs the matching mint on another. No external
+oracle key (Chainalysis, Etherscan, ...), no off-chain relayer federation,
+no bridge multisig holding funds — works for any pair of chains the action
+knows how to read.** You do still need a Lit usage API key to call
+`/lit_action`; it's bounded to executing this action's group and can't mint
+anything by itself.
 
 Same `BridgeToken` contract is deployed on two chains (Base Sepolia and
 Arbitrum Sepolia by default). To move tokens A → B, the holder calls `burn`
@@ -102,15 +105,24 @@ burn that never happened, and the action would happily sign a mint.
 
 The fix is the same as in [`compliance-transfer-gate`](../compliance-transfer-gate):
 the action enforces a **per-chain hostname whitelist** baked into the
-source. For `srcChainId=84532` (Base Sepolia) the URL must resolve to
-`base-sepolia.g.alchemy.com`; for `srcChainId=421614` (Arb Sepolia) it
-must be `arb-sepolia.g.alchemy.com`. Hostnames are anchored
+source, plus **mandatory `https://`** so a plain-HTTP URL can't be paired
+with a path-level MITM. For `srcChainId=84532` (Base Sepolia) the URL must
+resolve to `base-sepolia.g.alchemy.com`; for `srcChainId=421614` (Arb
+Sepolia) it must be `arb-sepolia.g.alchemy.com`. Hostnames are anchored
 (`^`/`$`) so subdomain tricks like `base-sepolia.g.alchemy.com.attacker.com`
-get rejected. TLS guarantees the body came from the named host, so the
-trust shifts onto "Alchemy is reporting the chain truthfully" — the same
-assumption almost every dapp already makes.
+get rejected. TLS then guarantees the body came from the named host, so
+the trust shifts onto "Alchemy is reporting the chain truthfully" — the
+same assumption almost every dapp already makes.
 
 A belt-and-suspenders `eth_chainId` check runs after the hostname check.
+
+**Finality.** Naive bridges sign a mint the moment the burn receipt
+appears, which leaves a window where a reorg can pull the burn out of
+history *after* the mint signature is issued — the user keeps source-chain
+tokens AND mints on the destination. The action requires the burn block to
+be buried under `minConfirmations` blocks (5 on both default chains;
+configurable per chain in `RPC_HOSTS`) before it'll sign. Production
+chains with deeper reorg risk want substantially higher.
 
 To use a different provider, edit `RPC_HOSTS` in
 [`action/bridgeAction.js`](./action/bridgeAction.js). For Infura use
@@ -210,24 +222,28 @@ source it expected.
 
 ## Production considerations
 
-- **Finality.** This example signs immediately after `eth_getTransactionReceipt`
-  returns. On chains with reorg risk (most rollups settle in seconds, but
-  L1 has minutes of finality) you'd add a confirmations check inside the
-  action — `eth_getTransactionByHash` against `latest - N` blocks, or wait
-  for an explicit `finalized` block tag. The action's `RPC_HOSTS` whitelist
-  ensures the block tag genuinely comes from the host you named.
+- **Finality.** The action requires `RPC_HOSTS[chainId].minConfirmations`
+  blocks (5 by default on both chains) between the burn block and the
+  current head before it signs. Tune per chain; production deployments on
+  L1 or chains with deeper reorg risk want substantially higher, or wait
+  for an explicit `finalized` block tag.
 - **Double-mint protection.** Each `(srcChainId, burnTxHash, logIndex)` is
   recorded in `usedBurnIds[bytes32]`, so even if a relayer replays the
   signed mint, the second attempt reverts with `AlreadyRedeemed`.
+- **Owner can't rug the wiring.** `setBridgePartner` is write-once per
+  chain id — once wired, the deployer key has no remaining privilege over
+  that chain. The owner can never re-point a partner at a copycat contract
+  to forge fake burns. The trade-off: a typo during setup means redeploying
+  the contract on that chain (which is also the example's reset path).
 - **Locked supply.** The destination's `_mint` is gated only by the signed
   attestation — no peg, no LP, no cap. Conservation across chains is
   enforced by the action's logic: it only signs after observing an
   on-chain burn. If you swap the action for one that signs without
   reading the burn, supply across the bridge would diverge.
 - **Pause / upgrade.** `BridgeToken` is intentionally minimal — no pause,
-  no admin keys beyond the one-time `setBridgePartner` wiring. A
-  production deployment would wrap `mint` in a pause guard controlled by
-  a multisig, and consider a per-block mint cap.
+  no admin keys beyond the one-time write-once wiring. A production
+  deployment would wrap `mint` in a pause guard controlled by a multisig,
+  and consider a per-block mint cap.
 - **Action CID rotation.** Once tokens exist across both chains, rotating
   the action requires redeploying every `BridgeToken` (the oracle address
   is `immutable`). A production version would store `bridgeOracle` in
