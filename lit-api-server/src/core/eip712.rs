@@ -251,12 +251,13 @@ pub(crate) fn verify_eip712_signature(
             "eip712_signing_hash failed",
         )
     })?;
-    let sig: Signature = signature_hex
-        .trim()
-        .parse()
-        .map_err(|e: alloy::primitives::SignatureError| {
-            ApiStatus::bad_request(anyhow::anyhow!(e), "Invalid signature hex")
-        })?;
+    let sig: Signature =
+        signature_hex
+            .trim()
+            .parse()
+            .map_err(|e: alloy::primitives::SignatureError| {
+                ApiStatus::bad_request(anyhow::anyhow!(e), "Invalid signature hex")
+            })?;
     let recovered = sig
         .recover_address_from_prehash(&digest)
         .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "Signature recovery failed"))?;
@@ -567,10 +568,10 @@ mod tests {
     /// 3-6; this test will be removed in Phase 7 alongside the dep itself.
     #[test]
     fn cross_impl_parity_ethers_signed_verifies_under_alloy() {
+        use ethers::core::types::H256 as EthersH256;
         use ethers::core::types::transaction::eip712::{
             EIP712Domain, Eip712, Eip712DomainType, TypedData as EthersTypedData,
         };
-        use ethers::core::types::H256 as EthersH256;
         use ethers::signers::{LocalWallet as EthersLocalWallet, Signer};
         use std::collections::BTreeMap as EthersBTreeMap;
 
