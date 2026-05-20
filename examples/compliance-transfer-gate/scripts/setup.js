@@ -7,13 +7,20 @@
 //
 // What this script does, in order:
 //   1. Compute the action's IPFS CID via /core/v1/get_lit_action_ipfs_id
-//   2. Derive the action's wallet address by running a one-shot inline
-//      Lit Action that calls Lit.Actions.getLitActionWalletAddress
-//   3. Create a permission group via /core/v1/add_group
-//   4. Register the action via /core/v1/add_action
-//   5. Wire the action into the group via /core/v1/add_action_to_group
-//   6. Create a scoped usage API key with execute permission in that group
+//   2. Create a permission group with a wildcard action allowlist
+//      (cid_hashes_permitted: ["0"]) via /core/v1/add_group
+//   3. Create a scoped usage API key with execute permission in that group
+//   4. Derive the action's wallet address by running a one-shot inline
+//      Lit Action with the usage key from step 3
+//   5. Register the action via /core/v1/add_action (metadata only)
+//   6. Wire the specific action CID into the group via
+//      /core/v1/add_action_to_group (intent + audit trail)
 //   7. Deploy CompliantToken (pinning ACTION_WALLET_ADDRESS as oracle)
+//
+// Order matters: the deriver in step 4 calls /lit_action, which the
+// contract authorizes only when the calling key has an entry in
+// usageApiKeys with executeInGroups containing this action's group. So
+// the group + usage key must exist before the deriver runs.
 //
 // Two keys are in play:
 //   * LIT_API_KEY     — the ACCOUNT-LEVEL (master) key, used by setup
@@ -80,82 +87,49 @@ async function main() {
   const freshCid = await getActionCid(LIT_API_BASE, LIT_API_KEY, actionCode);
   if (!process.env.ACTION_IPFS_CID || process.env.ACTION_IPFS_CID !== freshCid) {
     if (process.env.ACTION_IPFS_CID) {
-      console.log("Step 1/6: action source changed — updating CID...");
+      console.log("Step 1/7: action source changed — updating CID...");
+      // The old GROUP_ID + usage key were scoped to a now-stale CID; clear
+      // them so steps 2-4 recreate a fresh group + key for the new CID.
       env.upsert("ACTION_WALLET_ADDRESS", "");
       env.upsert("GROUP_ID", "");
+      env.upsert("LIT_USAGE_API_KEY", "");
     } else {
-      console.log("Step 1/6: Computing action CID...");
+      console.log("Step 1/7: Computing action CID...");
     }
     env.upsert("ACTION_IPFS_CID", freshCid);
     console.log(`  ACTION_IPFS_CID=${freshCid}`);
   } else {
-    console.log(`Step 1/6: action CID unchanged (${freshCid}). Skipping.`);
+    console.log(`Step 1/7: action CID unchanged (${freshCid}). Skipping.`);
   }
   const actionCid = process.env.ACTION_IPFS_CID;
 
   // -------------------------------------------------------------------------
-  // Step 2: Derive the action's wallet address from its CID.
+  // Step 2: Create a permission group with a WILDCARD action allowlist.
   //
-  // Lit.Actions.getLitActionWalletAddress({ ipfsId }) is only callable
-  // from inside a Lit Action, so we run a one-shot inline action whose
-  // only job is to look up the main action's address. The derived
-  // address is what the deployed contract will pin as the compliance
-  // oracle. Anyone running THIS exact action source will sign with
-  // exactly this address; nobody else can.
-  // -------------------------------------------------------------------------
-  if (!process.env.ACTION_WALLET_ADDRESS) {
-    console.log("Step 2/6: Deriving action wallet address from CID...");
-    const addr = await deriveActionWalletAddress(
-      LIT_API_BASE,
-      LIT_API_KEY,
-      actionCid
-    );
-    env.upsert("ACTION_WALLET_ADDRESS", addr);
-    console.log(`  ACTION_WALLET_ADDRESS=${addr}`);
-  } else {
-    console.log(
-      `Step 2/6: action wallet address already in .env (${process.env.ACTION_WALLET_ADDRESS}). Skipping.`
-    );
-  }
-
-  // -------------------------------------------------------------------------
-  // Step 3: Create a permission group.
+  // A group is the unit of authorization on Lit: it bundles which action
+  // CIDs may execute under which usage API keys. We pass cid_hashes=["0"]
+  // which the server parses as U256(0) — the contract treats U256(0) in
+  // a group's cidHash set as "any action allowed in this group" (see
+  // ViewsFacet.groupIdsForAction: `cidHash.contains(cidHash) || cidHash.contains(0)`).
+  // Wildcard is what makes the one-shot deriver action in step 4 below
+  // executable — its inline CID isn't pre-registered anywhere.
   //
-  // A group is the unit of authorization on Lit: it bundles which
-  // action CIDs may execute under which usage API keys. (We don't add
-  // any PKPs to this group because the example doesn't use any — the
-  // action signs with its own CID-derived key, not a PKP.)
+  // The scoping that still matters: the usage key created in step 3 only
+  // has execute permission inside THIS group, so the wildcard is bounded
+  // by the usage key's reach.
   // -------------------------------------------------------------------------
   if (!process.env.GROUP_ID) {
-    console.log("Step 3/6: Creating group...");
+    console.log("Step 2/7: Creating group (wildcard action allowlist)...");
     const id = await addGroup(LIT_API_BASE, LIT_API_KEY);
     env.upsert("GROUP_ID", String(id));
     console.log(`  GROUP_ID=${id}`);
   } else {
-    console.log(`Step 3/6: group already in .env (${process.env.GROUP_ID}). Skipping.`);
+    console.log(`Step 2/7: group already in .env (${process.env.GROUP_ID}). Skipping.`);
   }
   const groupId = Number(process.env.GROUP_ID);
 
   // -------------------------------------------------------------------------
-  // Step 4: Register the action with the account.
-  // -------------------------------------------------------------------------
-  console.log("Step 4/6: Registering action with account...");
-  await idempotent(
-    () => addAction(LIT_API_BASE, LIT_API_KEY, actionCid),
-    "action already registered"
-  );
-
-  // -------------------------------------------------------------------------
-  // Step 5: Authorize the action inside the group.
-  // -------------------------------------------------------------------------
-  console.log("Step 5/7: Adding action to group...");
-  await idempotent(
-    () => addActionToGroup(LIT_API_BASE, LIT_API_KEY, groupId, actionCid),
-    "action already in group"
-  );
-
-  // -------------------------------------------------------------------------
-  // Step 6: Create a scoped usage API key with execute permission in the
+  // Step 3: Create a scoped usage API key with execute permission in the
   // group.
   //
   // The contract's canExecuteAction check inspects
@@ -164,20 +138,74 @@ async function main() {
   // (LIT_API_KEY) can run management endpoints but can NOT run
   // /lit_action for actions registered in your own groups; that requires
   // a usage key scoped with execute_in_groups: [groupId]. We create one
-  // here and stash it as LIT_USAGE_API_KEY for transfer.js to use.
+  // here so step 4 (which calls /lit_action for the deriver) and
+  // transfer.js (which calls /lit_action for the compliance action)
+  // both have a key the contract authorizes.
   //
   // Heads up: usage keys are shown ONCE by the server. If LIT_USAGE_API_KEY
   // is missing from .env we have to create a fresh one (the old one is
   // unrecoverable).
   // -------------------------------------------------------------------------
   if (!process.env.LIT_USAGE_API_KEY) {
-    console.log("Step 6/7: Creating scoped usage API key...");
+    console.log("Step 3/7: Creating scoped usage API key...");
     const key = await createUsageApiKey(LIT_API_BASE, LIT_API_KEY, groupId);
     env.upsert("LIT_USAGE_API_KEY", key);
     console.log(`  LIT_USAGE_API_KEY=${key.slice(0, 12)}... (full key written to .env)`);
   } else {
-    console.log("Step 6/7: usage API key already in .env. Skipping.");
+    console.log("Step 3/7: usage API key already in .env. Skipping.");
   }
+  const usageKey = process.env.LIT_USAGE_API_KEY;
+
+  // -------------------------------------------------------------------------
+  // Step 4: Derive the action's wallet address from its CID.
+  //
+  // Lit.Actions.getLitActionWalletAddress({ ipfsId }) is only callable
+  // from inside a Lit Action, so we run a one-shot inline action whose
+  // only job is to look up the main action's address. We call this with
+  // the scoped usage key (step 3) — its execute permission in the
+  // wildcard-action group covers any inline action.
+  //
+  // The derived address is what the deployed contract will pin as the
+  // compliance oracle. Anyone running THIS exact action source will
+  // sign with exactly this address; nobody else can.
+  // -------------------------------------------------------------------------
+  if (!process.env.ACTION_WALLET_ADDRESS) {
+    console.log("Step 4/7: Deriving action wallet address from CID...");
+    const addr = await deriveActionWalletAddress(LIT_API_BASE, usageKey, actionCid);
+    env.upsert("ACTION_WALLET_ADDRESS", addr);
+    console.log(`  ACTION_WALLET_ADDRESS=${addr}`);
+  } else {
+    console.log(
+      `Step 4/7: action wallet address already in .env (${process.env.ACTION_WALLET_ADDRESS}). Skipping.`
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Step 5: Register the action with the account.
+  //
+  // Records metadata (name + description) under the account. Strictly
+  // optional given the wildcard group authorizes any action, but worth
+  // doing for dashboard visibility and as an audit trail.
+  // -------------------------------------------------------------------------
+  console.log("Step 5/7: Registering action with account...");
+  await idempotent(
+    () => addAction(LIT_API_BASE, LIT_API_KEY, actionCid),
+    "action already registered"
+  );
+
+  // -------------------------------------------------------------------------
+  // Step 6: Add the specific compliance action CID to the group.
+  //
+  // Also optional with the wildcard cidHash already in the group, but
+  // documents intent and lets you tighten security later by removing the
+  // wildcard ("0") entry from the group via update_group, leaving only
+  // this CID authorized.
+  // -------------------------------------------------------------------------
+  console.log("Step 6/7: Adding action to group...");
+  await idempotent(
+    () => addActionToGroup(LIT_API_BASE, LIT_API_KEY, groupId, actionCid),
+    "action already in group"
+  );
 
   // -------------------------------------------------------------------------
   // Step 7: Deploy CompliantToken.
@@ -268,7 +296,11 @@ async function addGroup(base, apiKey) {
       group_name: "compliance-transfer-gate",
       group_description: "Action-derived signer for on-chain-Chainalysis transfer gating",
       pkp_ids_permitted: [],
-      cid_hashes_permitted: [],
+      // U256(0) in the group's cidHash set = "any action allowed in this
+      // group." Bounded by the scoped usage key (step 3 in setup) — which
+      // only has execute permission in THIS group, so the wildcard
+      // doesn't grant the holder access to any other group's resources.
+      cid_hashes_permitted: ["0"],
     }),
   });
   return body.group_id;
