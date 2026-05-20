@@ -99,10 +99,10 @@ Tech stack: **Rust + Rocket + vanilla HTML/JS**. Matches existing repo conventio
 ### Deployment
 
 - **Hostname**: `payments.litprotocol.com`.
-- **Platform**: Railway (service + managed Postgres in the same project).
-- **Outside the TEE.** No attestation pain; operators can hit Railway logs/shell for diagnostics.
-- **Ingress**: Railway's default TLS + custom domain.
-- **Secrets** (Railway env vars): Stripe restricted key, DB URL, magic-link signing key, Resend API key, Alchemy WSS + HTTPS URLs, gateway contract address, treasury Safe address, LITKEY token address, CoinGecko ID.
+- **Platform**: Fly.io (app + Fly Postgres, or external Postgres via Supabase/Neon). `fly.toml` lives at the repo root so the Dockerfile can pull in the sibling `lit-billing-core/` crate via the repo-root build context.
+- **Outside the TEE.** No attestation pain; operators can `fly logs` / `fly ssh console` for diagnostics.
+- **Ingress**: Fly's default TLS + `fly certs create payments.litprotocol.com`.
+- **Secrets** (`fly secrets set …`): Stripe restricted key, DB URL, magic-link signing key, Resend API key, Alchemy WSS + HTTPS URLs, gateway contract address, treasury Safe address, LITKEY token address, CoinGecko ID. Plus `ROCKET_SECRET_KEY` for Rocket's private-cookie encryption.
 
 ### Auth tiers
 
@@ -314,10 +314,10 @@ GET https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies
 | # | Question | Decision |
 |---|---|---|
 | 1 | Hostname | `payments.litprotocol.com` |
-| 2 | Cloud provider | Railway (service + managed Postgres) |
+| 2 | Cloud provider | Fly.io (app + Fly Postgres, or external Postgres) |
 | 3 | Shared crate | Extract `lit-billing-core` now; both services depend on it |
 | 4 | Operator auth | Magic link via Resend, day 1; 15-min token, 7-day session |
-| 5 | Alerting | None — rely on server logs (Railway) |
+| 5 | Alerting | None — rely on server logs (`fly logs`) |
 | 6 | Reconciliation report | Deferred |
 | 7 | Refund / clawback flow | Deferred — handle manually in Stripe dashboard |
 | 8 | LITKEY chain | Base |
@@ -353,7 +353,7 @@ All questions are closed. Plan is ready to start building.
    - **Milestone**: foundation for both services is in place.
 
 2. **Foundation + Feature 1: admin credit portal** (1-1.5 weeks)
-   - `lit-payments` crate skeleton, Railway project, managed Postgres provisioned, deploy pipeline.
+   - `lit-payments` crate skeleton, Fly.io app + Postgres provisioned, `fly deploy` pipeline.
    - Magic-link auth wired end-to-end (Resend + sessions + operators).
    - Portal: lookup, grant form, recent-grants list, caps.
    - **Milestone**: Discord mod logs in via magic link and grants credits.
