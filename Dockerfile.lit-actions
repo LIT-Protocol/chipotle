@@ -20,19 +20,28 @@ RUN cd lit-actions && cargo build --release --features production --bin lit_acti
 
 FROM debian:bookworm-slim AS runtime
 
+# util-linux brings `setpriv`, which the entrypoint uses to drop privileges
+# after chowning the shared socket volume. libssl3 + ca-certificates are
+# runtime deps for the Rust binary.
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
+    util-linux \
     && rm -rf /var/lib/apt/lists/*
 
-# Drop privileges so a JS sandbox escape cannot reach root in the CVM.
+# Drop privileges so a JS sandbox escape cannot reach root in the CVM. The
+# privilege drop happens inside docker-entrypoint-lit-actions.sh so the
+# entrypoint can first chown the shared /tmp volume to the lit user — named
+# volumes don't inherit the image's 1777 /tmp mode, which would otherwise
+# block the UnixListener bind. See CPL-327.
 RUN useradd -u 10001 -m lit
 
 WORKDIR /app
 
 COPY --from=builder /build/lit-actions/target/release/lit_actions /usr/local/bin/
 COPY lit-actions/integrity.lock /app/integrity.lock
+COPY docker-entrypoint-lit-actions.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-USER lit
-
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["lit_actions", "--socket", "/tmp/lit_actions.sock", "--integrity-lock", "/app/integrity.lock"]
