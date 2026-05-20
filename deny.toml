@@ -1,0 +1,91 @@
+# cargo-deny configuration.
+#
+# Scope: advisory + source-allowlist checks only. License and ban checks are
+# intentionally not enabled here so this config does not block builds on
+# unrelated policy decisions — tighten later if/when we want that coverage.
+#
+# Run locally:    cargo deny check --config <repo-root>/deny.toml advisories sources
+# CI invocation:  see .github/workflows/rust-ci.yml
+
+[graph]
+all-features = true
+
+[advisories]
+# RustSec advisory database. Vulnerabilities still fail the build by default;
+# yanked crates warn (the lockfile can lag a yank by hours).
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "warn"
+
+# Pre-existing advisory backlog captured on 2026-05-19 across all four cargo
+# workspaces (lit-actions, lit-core, lit-api-server, rust_generator_and_deployer).
+# Every entry here should be triaged and either resolved (cargo update / dep
+# bump) or kept with explicit justification. Advisories published AFTER this
+# snapshot will NOT be in this list, so they will fail CI — that is the point.
+#
+# History:
+# - 2026-05-19: initial snapshot, 34 advisories.
+# - 2026-05-19: lockfile bumps via `cargo update -p` cleared RUSTSEC-2026-{0007,
+#   0037,0067,0068} (bytes / quinn-proto / tar / tar) across all workspaces,
+#   and RUSTSEC-2026-0009 (time) in lit-core and lit-api-server. Picked up
+#   RUSTSEC-2024-0388 (derivative unmaintained, transitive via ark-ff). The
+#   time bump in lit-actions had to be reverted because `time --precise 0.3.47`
+#   cascaded serde to 1.0.228, which broke compilation of `swc_config 0.1.15`
+#   and `swc_common 0.37.5` (transitives via deno_ast → deno_runtime — they
+#   re-export the removed `serde::__private` module). Real fix is bumping
+#   deno_runtime; until then time stays at 0.3.44 in lit-actions and
+#   RUSTSEC-2026-0009 stays in the ignore list. Net: 31 active.
+#
+# Suggested triage order: vulnerabilities > unsound > unmaintained.
+ignore = [
+    # ── vulnerabilities ───────────────────────────────────────────────────────
+    { id = "RUSTSEC-2023-0071", reason = "Marvin Attack timing sidechannel in rsa — transitive via ethers; no upstream fix" },
+    { id = "RUSTSEC-2025-0009", reason = "AES panic on overflow check — transitive; pre-existing" },
+    { id = "RUSTSEC-2026-0009", reason = "time DoS via stack exhaustion — still present in lit-actions (time 0.3.47 cascades serde 1.0.228 which breaks swc_config/swc_common from deno chain); cleared in lit-core and lit-api-server" },
+    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki CRL distribution-point matching — pinned by rustls 0.21 via ethers chain" },
+    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki URI name constraints — pinned by rustls 0.21 via ethers chain" },
+    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki wildcard name constraints — pinned by rustls 0.21 via ethers chain" },
+    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki CRL parsing panic — pinned by rustls 0.21 via ethers chain" },
+    { id = "RUSTSEC-2026-0118", reason = "hickory NSEC3 unbounded loop — no upstream fix yet" },
+    { id = "RUSTSEC-2026-0119", reason = "hickory DNS O(n^2) name compression — pinned by deno_runtime chain" },
+
+    # ── unsound ───────────────────────────────────────────────────────────────
+    { id = "RUSTSEC-2019-0036", reason = "failure type confusion — transitive; pre-existing" },
+    { id = "RUSTSEC-2021-0145", reason = "atty unaligned read — transitive; pre-existing" },
+    { id = "RUSTSEC-2026-0012", reason = "keccak ARMv8 asm backend — only triggers with opt-in feature; pre-existing" },
+    { id = "RUSTSEC-2026-0097", reason = "rand custom logger unsound — pre-existing" },
+
+    # ── unmaintained ──────────────────────────────────────────────────────────
+    { id = "RUSTSEC-2020-0036", reason = "failure deprecated — transitive; pre-existing" },
+    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained — pre-existing" },
+    { id = "RUSTSEC-2024-0375", reason = "atty unmaintained — pre-existing" },
+    { id = "RUSTSEC-2024-0384", reason = "instant unmaintained — pre-existing" },
+    { id = "RUSTSEC-2024-0388", reason = "derivative unmaintained — transitive via ark-ff; surfaced after bytes/quinn/tar bumps refreshed the lockfile" },
+    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained — pre-existing" },
+    { id = "RUSTSEC-2025-0010", reason = "ring <0.17 unmaintained — pre-existing" },
+    { id = "RUSTSEC-2025-0052", reason = "async-std discontinued — pre-existing" },
+    { id = "RUSTSEC-2025-0056", reason = "adler unmaintained, use adler2 — pre-existing" },
+    { id = "RUSTSEC-2025-0057", reason = "fxhash unmaintained — pre-existing" },
+    { id = "RUSTSEC-2025-0075", reason = "unic-char-range unmaintained — pre-existing" },
+    { id = "RUSTSEC-2025-0080", reason = "unic-common unmaintained — pre-existing" },
+    { id = "RUSTSEC-2025-0081", reason = "unic-char-property unmaintained — pre-existing" },
+    { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version unmaintained — pre-existing" },
+    { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident unmaintained — pre-existing" },
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained — pre-existing" },
+    { id = "RUSTSEC-2025-0141", reason = "bincode unmaintained — pre-existing" },
+    { id = "RUSTSEC-2026-0105", reason = "core2 unmaintained, all versions yanked — pre-existing" },
+]
+
+[sources]
+# Block any non-crates.io registry and any git dep not on the explicit allow
+# list below. New git deps must be added here, which forces a review.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = [
+    "https://github.com/LIT-Protocol/bulletproofs",
+    "https://github.com/Lit-Protocol/deno_core",
+    "https://github.com/LIT-Protocol/env_logger",
+    "https://github.com/LIT-Protocol/rust-ipfs-api",
+    "https://github.com/LIT-Protocol/zerossl",
+    "https://github.com/integer32llc/libffi-rs",
+]
