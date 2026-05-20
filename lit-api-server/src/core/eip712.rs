@@ -64,7 +64,16 @@ pub(crate) const PRIMARY_TYPE_BILLING_AUTH: &str = "BillingAuth";
 /// alloy's `PropertyDef` directly here because comparison ergonomics with
 /// string literals are simpler with a plain struct, and the JSON shape we
 /// validate against is fixed.
+///
+/// `deny_unknown_fields` is load-bearing: a phishing dApp could otherwise
+/// embed a decoy field like `{ "name": "address", "type": "address",
+/// "label": "Approve $500" }`. The extra key doesn't change the EIP-712
+/// type hash (only `name` + `type` are encoded), so the digest still
+/// recovers, but some wallet UIs surface the unknown metadata to the
+/// user. The schema-equality check below sees only the canonical fields
+/// and would silently pass without this guard.
 #[derive(Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 struct Eip712FieldDef {
     name: String,
     #[serde(rename = "type")]
@@ -86,7 +95,12 @@ impl Eip712FieldDef {
 /// against that. The same JSON is also fed to `alloy::dyn_abi::TypedData`
 /// to compute the EIP-712 digest — serde_json yields a deterministic logical
 /// value, so both parses see the same fields.
+/// `deny_unknown_fields` on the top-level view: a phishing payload could
+/// otherwise smuggle in an extra top-level key (e.g. `displayMessage`) that
+/// some wallet UIs surface alongside the signed struct. The four canonical
+/// keys are exhaustive for what this server validates.
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TypedDataSchemaView {
     types: BTreeMap<String, Vec<Eip712FieldDef>>,
     #[serde(rename = "primaryType")]
@@ -95,7 +109,13 @@ struct TypedDataSchemaView {
     message: BTreeMap<String, serde_json::Value>,
 }
 
+/// `deny_unknown_fields` is load-bearing on the domain too — the goal is
+/// strict anti-phishing pinning to exactly `(name, version, chainId)`. The
+/// explicit `verifying_contract`/`salt` rejects below still trip if those
+/// fields are present (so the error message stays specific for the common
+/// case), but anything *else* (e.g. `displayName`) is rejected here.
 #[derive(Debug, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct DomainView {
     name: Option<String>,
     version: Option<String>,
@@ -203,6 +223,14 @@ pub(crate) fn verify_eip712_signature(
         ));
     }
 
+    // Accept both wire shapes for the typed-data payload: the object form
+    // (what viem and ethers.js v6 send) and the stringified form (what
+    // `eth_signTypedData_v4` returns from MetaMask, which some clients
+    // forward as-is). Both ethers' and alloy's `TypedData` deserializers
+    // accept both shapes, so the prior verifier handled both; rejecting
+    // the stringified form would silently break those clients.
+    let typed_data_json = normalize_typed_data_input(typed_data_json)?;
+
     let view: TypedDataSchemaView =
         serde_json::from_value(typed_data_json.clone()).map_err(|e| {
             ApiStatus::bad_request(
@@ -239,7 +267,7 @@ pub(crate) fn verify_eip712_signature(
 
     // Parse a second time into alloy's TypedData to compute the EIP-712
     // digest. Two parses of the same JSON yield the same logical value.
-    let typed_data: TypedData = serde_json::from_value(typed_data_json.clone()).map_err(|e| {
+    let typed_data: TypedData = serde_json::from_value(typed_data_json).map_err(|e| {
         ApiStatus::bad_request(
             anyhow::anyhow!(e),
             "typed_data is not a valid EIP-712 typed-data object",
@@ -300,7 +328,7 @@ fn validate_domain(domain: &DomainView) -> Result<(), ApiStatus> {
     let actual_chain_id = domain
         .chain_id
         .as_ref()
-        .map(parse_u256_loose)
+        .map(|v| parse_u256_loose(v, "chainId"))
         .transpose()
         .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "Invalid chainId in domain"))?;
     if actual_chain_id != Some(expected_chain_id) {
@@ -326,28 +354,51 @@ fn validate_domain(domain: &DomainView) -> Result<(), ApiStatus> {
     Ok(())
 }
 
-/// Parse a chainId as either a numeric string ("175188"), a hex string
-/// ("0x2ac14"), or a JSON number. Matches what JS wallets and viem produce
-/// across versions.
-fn parse_u256_loose(v: &serde_json::Value) -> Result<U256, anyhow::Error> {
+/// Parse a `uint256` JSON value (chainId, issuedAt, …) as either a numeric
+/// string ("175188"), a hex string ("0x2ac14"), or a JSON number. Matches
+/// what JS wallets, viem, and ethers.js produce across versions; the
+/// EIP-712 spec doesn't pin a single wire shape for uint256.
+fn parse_u256_loose(v: &serde_json::Value, field: &str) -> Result<U256, anyhow::Error> {
     match v {
         serde_json::Value::String(s) => {
             let s = s.trim();
             if let Some(rest) = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
                 U256::from_str_radix(rest, 16)
-                    .map_err(|e| anyhow::anyhow!("invalid hex chainId: {e}"))
+                    .map_err(|e| anyhow::anyhow!("invalid hex {field}: {e}"))
             } else {
                 s.parse::<U256>()
-                    .map_err(|e| anyhow::anyhow!("invalid decimal chainId: {e}"))
+                    .map_err(|e| anyhow::anyhow!("invalid decimal {field}: {e}"))
             }
         }
         serde_json::Value::Number(n) => {
             let u = n
                 .as_u64()
-                .ok_or_else(|| anyhow::anyhow!("chainId must be a non-negative integer"))?;
+                .ok_or_else(|| anyhow::anyhow!("{field} must be a non-negative integer"))?;
             Ok(U256::from(u))
         }
-        _ => Err(anyhow::anyhow!("chainId must be a string or number")),
+        _ => Err(anyhow::anyhow!("{field} must be a string or number")),
+    }
+}
+
+/// Accept both wire shapes for the typed-data payload:
+///   1. The object form: `req.typed_data = { types: {...}, ... }`
+///   2. The stringified form: `req.typed_data = "{ \"types\": ... }"`
+///
+/// `eth_signTypedData_v4` returns a JSON string; some clients forward it
+/// verbatim as the `typed_data` field. Both ethers' `TypedData` and
+/// alloy's `TypedData` deserializers accept both shapes, so the prior
+/// verifier silently handled both and we preserve that here.
+fn normalize_typed_data_input(
+    typed_data_json: &serde_json::Value,
+) -> Result<serde_json::Value, ApiStatus> {
+    match typed_data_json {
+        serde_json::Value::String(s) => serde_json::from_str(s).map_err(|e| {
+            ApiStatus::bad_request(
+                anyhow::anyhow!(e),
+                "typed_data is a string but not valid JSON",
+            )
+        }),
+        other => Ok(other.clone()),
     }
 }
 
@@ -441,24 +492,25 @@ fn extract_issued_at(view: &TypedDataSchemaView) -> Result<i64, ApiStatus> {
             "Missing message.issuedAt",
         )
     })?;
-    // ethers JS serializes uint256 as a string for typed data, but a small
-    // integer fits in JSON numbers — accept both shapes so the client can
-    // pick whichever is most natural for its stack.
-    match issued_val {
-        serde_json::Value::String(s) => s.parse::<i64>().map_err(|e| {
-            ApiStatus::bad_request(anyhow::anyhow!(e), "issuedAt not a unix timestamp")
-        }),
-        serde_json::Value::Number(n) => n.as_i64().ok_or_else(|| {
-            ApiStatus::bad_request(
-                anyhow::anyhow!("issuedAt not a unix timestamp"),
-                "issuedAt not a unix timestamp",
-            )
-        }),
-        _ => Err(ApiStatus::bad_request(
-            anyhow::anyhow!("issuedAt must be a number or numeric string"),
-            "issuedAt must be a number or numeric string",
-        )),
+    // The field is declared `uint256` in the schema. JS wallets generally
+    // emit it as a decimal string, but alloy and ethers both accept hex
+    // strings and JSON numbers for uint256 — and the digest the wallet
+    // signed is computed from whichever wire shape they used. Mirror that
+    // here so we don't reject pre-recovery on a payload that would hash
+    // correctly. Then bound to i64::MAX so the ±skew arithmetic below
+    // can't overflow.
+    let n = parse_u256_loose(issued_val, "issuedAt")
+        .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "issuedAt not a uint256 value"))?;
+    let i64_max_as_u256 = U256::from(i64::MAX as u64);
+    if n > i64_max_as_u256 {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("issuedAt exceeds i64::MAX ({})", i64::MAX),
+            "issuedAt out of range",
+        ));
     }
+    // Safe: bounded to i64::MAX above.
+    let as_u64: u64 = n.to::<u64>();
+    Ok(as_u64 as i64)
 }
 
 fn validate_timestamp(issued_at: i64) -> Result<(), ApiStatus> {
@@ -809,11 +861,12 @@ mod tests {
         assert!(format!("{err}").contains("timestamp"));
     }
 
-    /// `i64::MIN` would wrap on naive `(now - issued_at).abs()` in release
-    /// builds, which would let an attacker bypass the skew check. We can't
-    /// actually sign such typed data (uint256 can't hold negatives — the
-    /// wallet would refuse), but a malicious client can hand-craft the JSON
-    /// after the fact. This pins the i128 widening fix in `validate_timestamp`.
+    /// Defense-in-depth: a malicious client can hand-craft `issuedAt` as
+    /// `i64::MIN` after the fact (the wallet would refuse, but the JSON
+    /// path is unauthenticated). Now rejected one layer earlier at
+    /// `extract_issued_at` since `uint256` can't hold negatives, so it
+    /// never reaches `validate_timestamp` where the i128 widening lives.
+    /// Both layers are defensive; this test pins the earlier rejection.
     #[test]
     fn rejects_i64_min_issued_at() {
         let chain_id = ensure_test_chain_id();
@@ -841,8 +894,151 @@ mod tests {
             }
         });
         let err = verify_eip712_signature(&typed, "0x00", PRIMARY_TYPE_CREATE_WALLET)
-            .expect_err("must reject — issued_at saturates to i64::MIN");
-        assert!(format!("{err}").contains("timestamp"));
+            .expect_err("must reject — issued_at is negative, not a valid uint256");
+        assert!(format!("{err}").contains("issuedAt"));
+    }
+
+    /// `issuedAt` greater than `i64::MAX` would overflow the i64 skew
+    /// arithmetic. `extract_issued_at` rejects this before any timestamp
+    /// math runs.
+    #[test]
+    fn rejects_issued_at_overflows_i64() {
+        let chain_id = ensure_test_chain_id();
+        // i64::MAX is 9223372036854775807; pick something well above it
+        // that still fits in uint256.
+        let huge = "99999999999999999999"; // > i64::MAX
+        let typed = serde_json::json!({
+            "types": {
+                "EIP712Domain": [
+                    { "name": "name", "type": "string" },
+                    { "name": "version", "type": "string" },
+                    { "name": "chainId", "type": "uint256" },
+                ],
+                "CreateWallet": [
+                    { "name": "address", "type": "address" },
+                    { "name": "issuedAt", "type": "uint256" },
+                ],
+            },
+            "primaryType": "CreateWallet",
+            "domain": {
+                "name": "Lit ChainSecured",
+                "version": "1",
+                "chainId": chain_id.to_string(),
+            },
+            "message": {
+                "address": "0x0000000000000000000000000000000000000000",
+                "issuedAt": huge,
+            }
+        });
+        let err = verify_eip712_signature(&typed, "0x00", PRIMARY_TYPE_CREATE_WALLET)
+            .expect_err("must reject — issuedAt out of i64 range");
+        assert!(format!("{err}").contains("out of range"));
+    }
+
+    /// CPL-286 hardening (codex adversarial review): an EIP-712 field
+    /// declaration must contain only `name` and `type`. A phishing dApp
+    /// could otherwise smuggle a decoy key like `label: "Approve $500"`
+    /// that some wallet UIs surface to the user — the EIP-712 type hash
+    /// only commits to `(name, type)`, so the digest still recovers and
+    /// the canonical schema-equality check would silently pass.
+    #[test]
+    fn rejects_extra_key_in_field_def() {
+        let chain_id = ensure_test_chain_id();
+        let typed = serde_json::json!({
+            "types": {
+                "EIP712Domain": [
+                    { "name": "name", "type": "string" },
+                    { "name": "version", "type": "string" },
+                    { "name": "chainId", "type": "uint256" },
+                ],
+                "CreateWallet": [
+                    { "name": "address", "type": "address", "label": "Approve $500" },
+                    { "name": "issuedAt", "type": "uint256" },
+                ],
+            },
+            "primaryType": "CreateWallet",
+            "domain": {
+                "name": "Lit ChainSecured",
+                "version": "1",
+                "chainId": chain_id.to_string(),
+            },
+            "message": {
+                "address": "0x0000000000000000000000000000000000000000",
+                "issuedAt": now_secs().to_string(),
+            }
+        });
+        let err = verify_eip712_signature(&typed, "0x00", PRIMARY_TYPE_CREATE_WALLET)
+            .expect_err("must reject — field def has an extra key");
+        // serde's deny_unknown_fields error message includes the key name.
+        assert!(
+            format!("{err}").contains("label") || format!("{err}").contains("unknown field"),
+            "unexpected error: {err}",
+        );
+    }
+
+    /// Same hardening, domain side: anything beyond `(name, version,
+    /// chainId, verifyingContract, salt)` is rejected. The
+    /// `verifying_contract`/`salt` *presence* still hits the more specific
+    /// error message; truly unknown keys (e.g. `displayName`) hit
+    /// `deny_unknown_fields` here.
+    #[test]
+    fn rejects_extra_key_in_domain() {
+        let chain_id = ensure_test_chain_id();
+        let wallet = PrivateKeySigner::random();
+        let (mut typed, sig) =
+            sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
+        typed["domain"]["displayName"] = serde_json::json!("Approve transfer");
+        let err = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET)
+            .expect_err("must reject — unknown domain key");
+        assert!(
+            format!("{err}").contains("displayName") || format!("{err}").contains("unknown field"),
+            "unexpected error: {err}",
+        );
+        // Suppress unused-variable warning for chain_id when wallet is used.
+        let _ = chain_id;
+    }
+
+    /// Accept the `eth_signTypedData_v4` wire shape where `typed_data`
+    /// is a JSON string containing the typed-data object (as opposed to
+    /// the object inline). Both ethers' and alloy's `TypedData::Deserialize`
+    /// accept both shapes; we preserve that here. Otherwise any client
+    /// forwarding the metamask response verbatim would break.
+    #[test]
+    fn accepts_stringified_typed_data() {
+        let chain_id = ensure_test_chain_id();
+        let wallet = PrivateKeySigner::random();
+        let (json, sig) = sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
+        let stringified = serde_json::Value::String(serde_json::to_string(&json).unwrap());
+        let recovered = verify_eip712_signature(&stringified, &sig, PRIMARY_TYPE_CREATE_WALLET)
+            .expect("stringified typed_data must verify");
+        assert_eq!(recovered, wallet.address());
+    }
+
+    /// `issuedAt` declared `uint256` can be a hex string. The verifier
+    /// must accept it; alloy's digest computation does, so rejecting it
+    /// pre-recovery would silently break otherwise-valid signatures.
+    #[test]
+    fn accepts_hex_issued_at() {
+        let chain_id = ensure_test_chain_id();
+        let wallet = PrivateKeySigner::random();
+        // Build canonical typed data, then rewrite issuedAt as hex.
+        let mut json = build_canonical_typed_data_json(
+            PRIMARY_TYPE_CREATE_WALLET,
+            wallet.address(),
+            now_secs(),
+            chain_id,
+        );
+        let now = now_secs();
+        json["message"]["issuedAt"] = serde_json::json!(format!("0x{:x}", now));
+        // Sign the digest of the rewritten payload — that's what a wallet
+        // signing the hex form would produce.
+        let typed_data: TypedData = serde_json::from_value(json.clone()).unwrap();
+        let digest = typed_data.eip712_signing_hash().unwrap();
+        let sig = wallet.sign_hash_sync(&digest).unwrap();
+        let sig_hex = format!("0x{}", hex::encode(sig.as_bytes()));
+        let recovered = verify_eip712_signature(&json, &sig_hex, PRIMARY_TYPE_CREATE_WALLET)
+            .expect("hex issuedAt must verify");
+        assert_eq!(recovered, wallet.address());
     }
 
     #[test]
