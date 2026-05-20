@@ -146,10 +146,10 @@ Walks through ten steps, printing each as it goes. The headline pieces:
   execute actions in your own groups (the contract's `canExecuteAction`
   only consults `usageApiKeys[...]`).
 
-Everything derived gets written back to `.env` so re-runs are idempotent.
-If you edit `action/marketOracle.js`, step 2 detects the new CID and
-clears the now-stale `ACTION_WALLET_ADDRESS`, `GROUP_ID`, and
-`LIT_USAGE_API_KEY`; the wiring then re-runs fresh.
+Re-running `npm run setup` does a fresh setup top-to-bottom: every step
+creates new on-chain state and overwrites the corresponding key in
+`.env`. The previously-minted PKP / group / usage key / contract / and
+ciphertexts become orphaned.
 
 ### 4. Propose and resolve a question
 

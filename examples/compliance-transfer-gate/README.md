@@ -152,12 +152,11 @@ This walks through seven steps, printing each one as it goes:
    by removing the wildcard via `update_group`).
 7. Deploy `CompliantToken` with the action's wallet address as the oracle.
 
-Every step that produces a new value writes it back to `.env`. If you edit
-the action source, step 1 detects the new CID, clears the now-stale
-`ACTION_WALLET_ADDRESS`, `GROUP_ID`, and `LIT_USAGE_API_KEY` (since the
-old key was scoped to a now-stale group), and re-runs steps 2–6 fresh.
-The on-chain contract still trusts the old action address — you'd
-redeploy the token (or wire in a rotate-oracle path) after such an edit.
+Re-running `npm run setup` does a fresh setup top-to-bottom: every step
+creates new on-chain state and overwrites the corresponding key in
+`.env`. The previously-minted group / usage key / contract become
+orphaned. That's intentional — a production app would manage upgrades,
+but here "run setup again" is the simplest reset.
 
 ### 3. Send a compliance-gated transfer
 

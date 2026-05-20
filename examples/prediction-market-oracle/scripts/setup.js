@@ -1,49 +1,38 @@
 // One-shot setup for the prediction-market-oracle example.
 //
 // What you provide (in .env before running):
-//   LIT_API_KEY        Account or usage API key.
-//   PERPLEXITY_API_KEY       Required — web-grounded baseline.
-//   OPENAI_API_KEY           Optional — frontier-model second opinion.
-//   ANTHROPIC_API_KEY        Optional — frontier-model second opinion.
-//   DEPLOYER_PRIVATE_KEY     EOA used to deploy the registry.
+//   LIT_API_KEY              Account-level (master) Lit API key
+//   PERPLEXITY_API_KEY       Required — web-grounded baseline model
+//   OPENAI_API_KEY           Optional — frontier-model second opinion
+//   ANTHROPIC_API_KEY        Optional — frontier-model second opinion
+//   DEPLOYER_PRIVATE_KEY     EOA used to deploy the registry
 //
 // Two cryptographic identities at play:
 //
 //   * The action's derived wallet address (ACTION_WALLET_ADDRESS) —
 //     computed from the action's IPFS CID. This is what the deployed
-//     PredictionMarket trusts as its `oracle`. Editing the action source
-//     produces a new CID and therefore a new address; old markets stop
-//     trusting the new action.
+//     PredictionMarket trusts as its `oracle`.
 //
-//   * The decrypt PKP (DECRYPT_PKP_ADDRESS) — the encryption boundary for
-//     the AI provider keys (Perplexity, optionally OpenAI and Anthropic).
-//     It signs nothing the market cares about.
+//   * The decrypt PKP (DECRYPT_PKP_ADDRESS) — the encryption boundary
+//     for the AI provider keys (Encrypt/Decrypt in Lit are PKP-keyed).
+//     Signs nothing the market cares about.
 //
 // What this script does, in order:
-//   1. Mint the decrypt PKP
+//   1. Mint a fresh decrypt PKP
 //   2. Compute the action's IPFS CID
-//   3. Create a permission group (wildcard cid_hashes, no PKPs yet)
+//   3. Create a permission group (wildcard action allowlist)
 //   4. Authorize the decrypt PKP inside the group
-//   5. Create a scoped usage API key with execute permission in the group
-//   6. Derive the action's wallet address from its CID (uses the usage key)
+//   5. Create a scoped usage API key with execute_in_groups: [groupId]
+//   6. Derive the action's wallet address (uses the usage key)
 //   7. Register the action (metadata)
 //   8. Add the specific action CID to the group (audit trail)
 //   9. Deploy PredictionMarket (pinning ACTION_WALLET_ADDRESS as oracle)
 //  10. Encrypt all configured AI provider keys to the decrypt PKP
 //
-// Order matters: the deriver in step 6 calls /lit_action, which the
-// contract authorizes only when the calling key has an entry in
-// usageApiKeys with executeInGroups containing this action's group. So
-// the group + usage key must exist before the deriver runs.
-//
-// Two keys are in play:
-//   * LIT_API_KEY       — ACCOUNT-LEVEL (master) key, for setup's management
-//                         calls.
-//   * LIT_USAGE_API_KEY — SCOPED usage key created by step 8 with execute
-//                         permission only in this example's group. Used by
-//                         step 10 (encryptApiKeys.js) and by resolve.js.
-//                         The master can't execute /lit_action for actions
-//                         in your own groups; only a scoped usage key can.
+// Re-running this script does a fresh setup top-to-bottom: every step
+// creates new on-chain state and overwrites the corresponding key in
+// .env. The previously-minted PKP / group / usage key / contract / and
+// ciphertexts become orphaned. That's fine for a docs example.
 
 const fs = require("fs");
 const path = require("path");
@@ -86,145 +75,81 @@ async function main() {
     );
   }
 
+  const actionCode = fs.readFileSync(ACTION_FILE, "utf8");
+
   // -------------------------------------------------------------------------
   // Step 1: Mint the decrypt PKP.
   // -------------------------------------------------------------------------
-  if (!process.env.DECRYPT_PKP_ADDRESS) {
-    console.log("Step 1/10: Minting decrypt PKP...");
-    const { mintPkp } = require("./mintPkp");
-    const addr = await mintPkp();
-    console.log(`  DECRYPT_PKP_ADDRESS=${addr}`);
-  } else {
-    console.log(`Step 1/10: decrypt PKP already in .env (${process.env.DECRYPT_PKP_ADDRESS}). Skipping.`);
-  }
+  console.log("Step 1/10: Minting decrypt PKP...");
+  const { mintPkp } = require("./mintPkp");
+  const pkpAddr = await mintPkp();
+  console.log(`  DECRYPT_PKP_ADDRESS=${pkpAddr}`);
 
   // -------------------------------------------------------------------------
   // Step 2: Compute the action's IPFS CID.
   // -------------------------------------------------------------------------
-  const actionCode = fs.readFileSync(ACTION_FILE, "utf8");
-  const freshCid = await getActionCid(LIT_API_BASE, LIT_API_KEY, actionCode);
-  if (!process.env.ACTION_IPFS_CID || process.env.ACTION_IPFS_CID !== freshCid) {
-    if (process.env.ACTION_IPFS_CID) {
-      console.log("Step 2/10: action source changed — updating CID...");
-      env.upsert("ACTION_WALLET_ADDRESS", "");
-      env.upsert("GROUP_ID", "");
-      env.upsert("LIT_USAGE_API_KEY", "");
-    } else {
-      console.log("Step 2/10: Computing action CID...");
-    }
-    env.upsert("ACTION_IPFS_CID", freshCid);
-    console.log(`  ACTION_IPFS_CID=${freshCid}`);
-  } else {
-    console.log(`Step 2/10: action CID unchanged (${freshCid}). Skipping.`);
-  }
-  const actionCid = process.env.ACTION_IPFS_CID;
+  console.log("Step 2/10: Computing action CID...");
+  const actionCid = await getActionCid(LIT_API_BASE, LIT_API_KEY, actionCode);
+  env.upsert("ACTION_IPFS_CID", actionCid);
+  console.log(`  ACTION_IPFS_CID=${actionCid}`);
 
   // -------------------------------------------------------------------------
-  // Step 3: Create a permission group with a wildcard action allowlist.
-  // (cid_hashes_permitted: ["0"] = U256(0) = "any action allowed here".)
+  // Step 3: Create the group with a wildcard action allowlist.
   // -------------------------------------------------------------------------
-  if (!process.env.GROUP_ID) {
-    console.log("Step 3/10: Creating group (wildcard action allowlist)...");
-    const id = await addGroup(LIT_API_BASE, LIT_API_KEY);
-    env.upsert("GROUP_ID", String(id));
-    console.log(`  GROUP_ID=${id}`);
-  } else {
-    console.log(`Step 3/10: group already in .env (${process.env.GROUP_ID}). Skipping.`);
-  }
-  const groupId = Number(process.env.GROUP_ID);
+  console.log("Step 3/10: Creating group (wildcard action allowlist)...");
+  const groupId = await addGroup(LIT_API_BASE, LIT_API_KEY);
+  env.upsert("GROUP_ID", String(groupId));
+  console.log(`  GROUP_ID=${groupId}`);
 
   // -------------------------------------------------------------------------
   // Step 4: Authorize the decrypt PKP inside the group.
   //
-  // Needed BEFORE step 5 (the deriver) because canUseWalletInAction
-  // checks the group's pkpId set. The deriver itself doesn't use the PKP,
-  // but doing this here keeps the "everything execution-related must be
-  // authorized before we run any /lit_action" rule consistent.
+  // Done BEFORE the deriver in step 6 so everything execution-related is
+  // wired up before the first /lit_action call.
   // -------------------------------------------------------------------------
   console.log("Step 4/10: Adding decrypt PKP to group...");
-  await idempotent(
-    () =>
-      addPkpToGroup(
-        LIT_API_BASE,
-        LIT_API_KEY,
-        groupId,
-        process.env.DECRYPT_PKP_ADDRESS
-      ),
-    "pkp already in group"
-  );
+  await addPkpToGroup(LIT_API_BASE, LIT_API_KEY, groupId, pkpAddr);
 
   // -------------------------------------------------------------------------
-  // Step 5: Create a scoped usage API key with execute permission in the
-  // group. See compliance-transfer-gate/scripts/setup.js for the full
-  // rationale: master LIT_API_KEY can do management calls but can't
-  // execute /lit_action for actions in your own groups.
-  //
-  // We use this key for the deriver in step 6, for resolve.js (after
-  // setup), and for encryptApiKeys.js (step 10 below) since the encrypt-
-  // action call also goes through /lit_action.
+  // Step 5: Create a scoped usage API key.
   // -------------------------------------------------------------------------
-  if (!process.env.LIT_USAGE_API_KEY) {
-    console.log("Step 5/10: Creating scoped usage API key...");
-    const key = await createUsageApiKey(LIT_API_BASE, LIT_API_KEY, groupId);
-    env.upsert("LIT_USAGE_API_KEY", key);
-    console.log(`  LIT_USAGE_API_KEY=${key.slice(0, 12)}... (full key written to .env)`);
-  } else {
-    console.log("Step 5/10: usage API key already in .env. Skipping.");
-  }
-  const usageKey = process.env.LIT_USAGE_API_KEY;
+  console.log("Step 5/10: Creating scoped usage API key...");
+  const usageKey = await createUsageApiKey(LIT_API_BASE, LIT_API_KEY, groupId);
+  env.upsert("LIT_USAGE_API_KEY", usageKey);
+  console.log(`  LIT_USAGE_API_KEY=${usageKey.slice(0, 12)}... (full key written to .env)`);
 
   // -------------------------------------------------------------------------
-  // Step 6: Derive the action's wallet address from its CID. Calls
-  // /lit_action with the scoped usage key.
+  // Step 6: Derive the action's wallet address from its CID.
   // -------------------------------------------------------------------------
-  if (!process.env.ACTION_WALLET_ADDRESS) {
-    console.log("Step 6/10: Deriving action wallet address from CID...");
-    const addr = await deriveActionWalletAddress(LIT_API_BASE, usageKey, actionCid);
-    env.upsert("ACTION_WALLET_ADDRESS", addr);
-    console.log(`  ACTION_WALLET_ADDRESS=${addr}`);
-  } else {
-    console.log(
-      `Step 6/10: action wallet address already in .env (${process.env.ACTION_WALLET_ADDRESS}). Skipping.`
-    );
-  }
+  console.log("Step 6/10: Deriving action wallet address from CID...");
+  const actionAddr = await deriveActionWalletAddress(LIT_API_BASE, usageKey, actionCid);
+  env.upsert("ACTION_WALLET_ADDRESS", actionAddr);
+  console.log(`  ACTION_WALLET_ADDRESS=${actionAddr}`);
 
   // -------------------------------------------------------------------------
-  // Step 7: Register the action with the account (metadata).
+  // Step 7: Register the action (metadata).
   // -------------------------------------------------------------------------
   console.log("Step 7/10: Registering action with account...");
-  await idempotent(
-    () => addAction(LIT_API_BASE, LIT_API_KEY, actionCid),
-    "action already registered"
-  );
+  await addAction(LIT_API_BASE, LIT_API_KEY, actionCid);
 
   // -------------------------------------------------------------------------
   // Step 8: Add the specific action CID to the group (audit trail).
   // -------------------------------------------------------------------------
   console.log("Step 8/10: Adding action to group...");
-  await idempotent(
-    () => addActionToGroup(LIT_API_BASE, LIT_API_KEY, groupId, actionCid),
-    "action already in group"
-  );
+  await addActionToGroup(LIT_API_BASE, LIT_API_KEY, groupId, actionCid);
 
   // -------------------------------------------------------------------------
   // Step 9: Deploy PredictionMarket.
   // -------------------------------------------------------------------------
-  if (!process.env.PREDICTION_MARKET_ADDRESS) {
-    console.log(`Step 9/10: Deploying PredictionMarket to ${DEPLOY_NETWORK}...`);
-    execSync(`npx hardhat run scripts/deploy.js --network ${DEPLOY_NETWORK}`, {
-      stdio: "inherit",
-      cwd: path.join(__dirname, ".."),
-    });
-    env.load();
-  } else {
-    console.log(`Step 9/10: contract already deployed (${process.env.PREDICTION_MARKET_ADDRESS}). Skipping.`);
-  }
+  console.log(`Step 9/10: Deploying PredictionMarket to ${DEPLOY_NETWORK}...`);
+  execSync(`npx hardhat run scripts/deploy.js --network ${DEPLOY_NETWORK}`, {
+    stdio: "inherit",
+    cwd: path.join(__dirname, ".."),
+  });
+  env.load();
 
   // -------------------------------------------------------------------------
   // Step 10: Encrypt all configured AI provider keys to the decrypt PKP.
-  //
-  // Always encrypts the *current* plaintexts — re-running setup after
-  // adding (or rotating) an optional key will pick it up automatically.
   // -------------------------------------------------------------------------
   console.log("Step 10/10: Encrypting AI provider keys to decrypt PKP...");
   const { encryptApiKeys } = require("./encryptApiKeys");
@@ -281,9 +206,6 @@ async function getActionCid(base, apiKey, code) {
 }
 
 async function deriveActionWalletAddress(base, apiKey, cid) {
-  // /lit_action wraps the action's return value as
-  //   { response: <whatever you returned>, logs: "...", has_error: bool }
-  // so the action's payload lives at body.response, not body itself.
   const body = await call(base, apiKey, "lit_action", {
     method: "POST",
     body: JSON.stringify({
@@ -308,9 +230,6 @@ async function addGroup(base, apiKey) {
       group_name: "prediction-market-oracle",
       group_description: "AI multi-model consensus for prediction market resolution",
       pkp_ids_permitted: [],
-      // U256(0) = wildcard "any action allowed in this group" — needed
-      // so the deriver and the encrypt-helper inline actions can both
-      // execute. Bounded by the scoped usage key.
       cid_hashes_permitted: ["0"],
     }),
   });
@@ -361,24 +280,6 @@ async function createUsageApiKey(base, apiKey, groupId) {
     throw new Error(`add_usage_api_key returned no key: ${JSON.stringify(body)}`);
   }
   return body.usage_api_key;
-}
-
-async function idempotent(fn, label) {
-  try {
-    await fn();
-  } catch (err) {
-    const text = (err.message || "").toLowerCase();
-    if (
-      err.status === 409 ||
-      text.includes("already") ||
-      text.includes("exists") ||
-      text.includes("duplicate")
-    ) {
-      console.log(`  (${label})`);
-      return;
-    }
-    throw err;
-  }
 }
 
 main().catch((err) => {
