@@ -74,7 +74,7 @@ jobs:
 
       - name: Build contract deployer
         working-directory: lit-api-server/blockchain/rust_generator_and_deployer
-        run: cargo build --bin contract_deployer
+        run: cargo build --locked --bin contract_deployer
 
       - name: Upgrade diamond facets
         working-directory: lit-api-server/blockchain/lit_node_express

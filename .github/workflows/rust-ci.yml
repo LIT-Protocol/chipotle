@@ -74,12 +74,25 @@ jobs:
 
       - name: clippy
         working-directory: ${{ matrix.crate }}
-        run: cargo clippy --all-features -- -D warnings
+        run: cargo clippy --locked --all-features -- -D warnings
 
       - name: build
         working-directory: ${{ matrix.crate }}
-        run: cargo build --all-features
+        run: cargo build --locked --all-features
 
       - name: test
         working-directory: ${{ matrix.crate }}
-        run: cargo test --all-features
+        run: cargo test --locked --all-features
+
+      # Supply-chain check: cargo-deny covers the RustSec advisory DB (same
+      # source as cargo-audit) plus a git-source allowlist. Installed once per
+      # matrix job via taiki-e/install-action, which uses prebuilt binaries.
+      # The pre-existing advisory backlog lives in deny.toml's [advisories.ignore]
+      # block; new RUSTSEC IDs fail CI by default.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny
+
+      - name: deny
+        working-directory: ${{ matrix.crate }}
+        run: cargo deny check --config ${{ github.workspace }}/deny.toml advisories sources
