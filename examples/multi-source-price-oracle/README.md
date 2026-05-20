@@ -157,9 +157,10 @@ Walks through seven steps, printing each as it goes:
 6. Add the specific action CID to the group (audit trail).
 7. Deploy `PriceOracle` with the action's wallet address as the signer.
 
-Idempotent: re-runs skip whatever's already done. If you edit the action
-source, step 1 detects the new CID and clears `ACTION_WALLET_ADDRESS`,
-`GROUP_ID`, and `LIT_USAGE_API_KEY`; steps 2–6 then run fresh.
+Re-running `npm run setup` does a fresh setup top-to-bottom: every step
+creates new on-chain state and overwrites the corresponding key in
+`.env`. The previously-minted group / usage key / contract become
+orphaned.
 
 ### 4. Submit a price reading
 
