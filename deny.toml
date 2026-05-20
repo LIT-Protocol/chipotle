@@ -25,18 +25,22 @@ yanked = "warn"
 # History:
 # - 2026-05-19: initial snapshot, 34 advisories.
 # - 2026-05-19: lockfile bumps via `cargo update -p` cleared RUSTSEC-2026-{0007,
-#   0037,0067,0068,0009} (bytes / quinn-proto / tar / tar / time) across all
-#   workspaces. The time bump in lit-actions and lit-core required
-#   `cargo update -p time --precise 0.3.47` because plain `cargo update -p time`
-#   resolved only to 0.3.44. Cascaded a compatible serde 1.0.219 → 1.0.228 bump
-#   (adds serde_core as a separate crate). Picked up RUSTSEC-2024-0388
-#   (derivative unmaintained, transitive via ark-ff). Net: 30 active.
+#   0037,0067,0068} (bytes / quinn-proto / tar / tar) across all workspaces,
+#   and RUSTSEC-2026-0009 (time) in lit-core and lit-api-server. Picked up
+#   RUSTSEC-2024-0388 (derivative unmaintained, transitive via ark-ff). The
+#   time bump in lit-actions had to be reverted because `time --precise 0.3.47`
+#   cascaded serde to 1.0.228, which broke compilation of `swc_config 0.1.15`
+#   and `swc_common 0.37.5` (transitives via deno_ast → deno_runtime — they
+#   re-export the removed `serde::__private` module). Real fix is bumping
+#   deno_runtime; until then time stays at 0.3.44 in lit-actions and
+#   RUSTSEC-2026-0009 stays in the ignore list. Net: 31 active.
 #
 # Suggested triage order: vulnerabilities > unsound > unmaintained.
 ignore = [
     # ── vulnerabilities ───────────────────────────────────────────────────────
     { id = "RUSTSEC-2023-0071", reason = "Marvin Attack timing sidechannel in rsa — transitive via ethers; no upstream fix" },
     { id = "RUSTSEC-2025-0009", reason = "AES panic on overflow check — transitive; pre-existing" },
+    { id = "RUSTSEC-2026-0009", reason = "time DoS via stack exhaustion — still present in lit-actions (time 0.3.47 cascades serde 1.0.228 which breaks swc_config/swc_common from deno chain); cleared in lit-core and lit-api-server" },
     { id = "RUSTSEC-2026-0049", reason = "rustls-webpki CRL distribution-point matching — pinned by rustls 0.21 via ethers chain" },
     { id = "RUSTSEC-2026-0098", reason = "rustls-webpki URI name constraints — pinned by rustls 0.21 via ethers chain" },
     { id = "RUSTSEC-2026-0099", reason = "rustls-webpki wildcard name constraints — pinned by rustls 0.21 via ethers chain" },
