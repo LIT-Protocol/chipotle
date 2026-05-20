@@ -417,9 +417,11 @@ async function main({
       : { name, key: null }
   ));
 
-  const prompt = `Answer YES, NO, or UNCLEAR. ` +
-    `If the question depends on future events, answer UNCLEAR. ` +
-    `Respond with a single word, no explanation.\n\nQuestion: ${questionText}`;
+  const prompt = `Prediction-market questions are phrased in future tense ` +
+    `but the event may have already occurred. Treat the question as ` +
+    `"has the predicted outcome occurred, as of now?". ` +
+    `Answer YES, NO, or UNCLEAR (UNCLEAR if the event hasn't happened yet ` +
+    `or sources disagree). Respond with a single word.\n\nQuestion: ${questionText}`;
   const votes = await Promise.all(keys.map(async ({ name, key }) =>
     key ? { name, vote: parseVote(await callModel(name, key, prompt)) } : null
   ));

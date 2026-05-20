@@ -169,7 +169,7 @@ async function main() {
   console.log("  AI models in consensus: ", configured.join(", "));
 
   console.log("\nTry it out:");
-  console.log('  npm run propose -- --text "Did the Eagles win Super Bowl LIX?"');
+  console.log('  npm run propose -- --text "Will the Seattle Seahawks win Super Bowl LX?"');
   console.log("  npm run resolve -- --id 0x<the-id-printed-above>");
 }
 

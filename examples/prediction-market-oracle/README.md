@@ -28,7 +28,7 @@ agreement before anything reaches the chain.
 ## How it works
 
 ```
-  market.propose("Will 2027 be a leap year?", resolveAt)
+  market.propose("Will the Seattle Seahawks win Super Bowl LX?", resolveAt)
        │
        ▼
   PredictionMarket (Base, or wherever you deploy it)
@@ -56,6 +56,13 @@ agreement before anything reaches the chain.
        │
        ▼   ecrecover(sig) == oracle ✓  →  question stored as NO
 ```
+
+Prediction-market questions are conventionally phrased in future tense
+("Will X happen?"), but by the time of resolution the event has usually
+already occurred. The action treats every question as asking "has the
+predicted outcome occurred, as of now?" — so a future-tense question
+about a past event resolves the same way a past-tense version of the
+same question would.
 
 The signature uses `Lit.Actions.getLitActionPrivateKey()` — derived from
 the action's IPFS CID. The deployed `PredictionMarket` pins the address
@@ -154,14 +161,9 @@ ciphertexts become orphaned.
 ### 4. Propose and resolve a question
 
 ```bash
-# Propose a question. resolveAt defaults to "now + 5 minutes" so you
-# can immediately resolve it.
-npm run propose -- --text "Will the year 2027 be a leap year?"
-#                                                  ↳ 2027 % 4 != 0, so the
-#                                                    correct answer is NO
-
-# Wait ~5 minutes (or pass --resolveIn 10 to propose with a 10-second window
-# for quick demos).
+# Propose a question. resolveAt defaults to "now" so you can resolve as
+# soon as the propose tx mines.
+npm run propose -- --text "Will the Seattle Seahawks win Super Bowl LX?"
 
 npm run resolve -- --id 0x<the-id-printed-above>
 ```
@@ -169,10 +171,10 @@ npm run resolve -- --id 0x<the-id-printed-above>
 Expected output for a clear answer:
 
 ```
-Question: Will the year 2027 be a leap year?
-resolveAt: 2026-05-19T22:00:00.000Z
+Question: Will the Seattle Seahawks win Super Bowl LX?
+resolveAt: 2026-05-20T01:43:53.000Z
 Asking the AI consensus oracle...
-Consensus: NO (across perplexity, openai, anthropic)
+Consensus: YES (across perplexity, openai, anthropic)
 tx: 0x...
 mined in block 12345678
 ```
