@@ -62,6 +62,10 @@ async function encryptApiKeys() {
     if (!process.env[k]) throw new Error(`${k} is required`);
   }
 
+  // Always rewrite all three ENCRYPTED_* slots based on the CURRENT
+  // plaintext keys in .env. If a plaintext was removed since the last
+  // run, clear the corresponding ciphertext too so resolve.js doesn't
+  // keep using a stale key.
   const out = {};
 
   out.perplexity = await encryptOne(PERPLEXITY_API_KEY);
@@ -73,6 +77,7 @@ async function encryptApiKeys() {
     env.upsert("ENCRYPTED_OPENAI_API_KEY", out.openai);
     console.log(`  OpenAI:     encrypted (${out.openai.slice(0, 40)}...)`);
   } else {
+    env.upsert("ENCRYPTED_OPENAI_API_KEY", "");
     console.log("  OpenAI:     skipped (no OPENAI_API_KEY in .env)");
   }
 
@@ -81,6 +86,7 @@ async function encryptApiKeys() {
     env.upsert("ENCRYPTED_ANTHROPIC_API_KEY", out.anthropic);
     console.log(`  Anthropic:  encrypted (${out.anthropic.slice(0, 40)}...)`);
   } else {
+    env.upsert("ENCRYPTED_ANTHROPIC_API_KEY", "");
     console.log("  Anthropic:  skipped (no ANTHROPIC_API_KEY in .env)");
   }
 
