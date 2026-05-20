@@ -52,9 +52,10 @@ async fn rocket() -> _ {
         .mount("/static", FileServer::from("static"))
 }
 
-/// Translate platform-provided env vars (Railway sets `PORT`) into the names
-/// Rocket reads (`ROCKET_PORT`). Also default the bind address to `0.0.0.0`
-/// so the container's listener is reachable through Railway's ingress.
+/// Translate platform-provided env vars (Fly.io and most container hosts set
+/// `PORT`) into the names Rocket reads (`ROCKET_PORT`). Also default the bind
+/// address to `0.0.0.0` so the container's listener is reachable through the
+/// platform's ingress.
 fn apply_platform_env() {
     if std::env::var("ROCKET_PORT").is_err()
         && let Ok(port) = std::env::var("PORT")

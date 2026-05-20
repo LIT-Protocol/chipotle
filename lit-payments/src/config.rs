@@ -7,7 +7,9 @@ use anyhow::{Context, Result};
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    /// Postgres connection string. Railway provides this automatically.
+    /// Postgres connection string. On Fly.io, supplied via `fly secrets set`
+    /// after attaching/creating a Postgres cluster (or via an external
+    /// provider like Supabase / Neon).
     pub database_url: String,
     /// HMAC-SHA256 key for signing magic-link tokens. At least 32 random bytes,
     /// base64-encoded. Generate with `openssl rand -base64 32`.
