@@ -1,9 +1,9 @@
 ---
 title: "Lit Protocol"
-description: "Programmable signing, encryption, and verifiable compute backed by a TEE-secured key network. Build with the Dashboard, REST API, or write your own Lit Actions."
+description: "One programmable runtime for everything between an event and a signed action. Read from any source, compute inside a chain-secured TEE, write to any chain or API — with no backend to trust."
 ---
 
-Lit is a decentralized key management network. It lets you create wallets (PKPs), permission them to immutable JavaScript programs (Lit Actions), and run those programs inside a TEE — producing signatures, ciphertexts, and verifiable outputs without ever exposing the underlying keys.
+Lit is a programmable runtime that reads data from any source, runs your JavaScript inside a chain-secured TEE, and signs on any chain or API. Keys never leave the enclave, and the code that's allowed to use them is governed on-chain. You get the speed and expressiveness of a single trusted runtime, with the auditability of a smart contract.
 
 <Card
   title="Start here: Quick Start"
@@ -26,45 +26,45 @@ The fastest paths to a running integration.
     Drive the same workflows from cURL, the lightweight JS SDK, or your own client built from the OpenAPI spec.
   </Card>
   <Card title="Lit Actions" icon="bolt" href="/lit-actions/index">
-    Immutable JavaScript programs stored on IPFS and executed inside the network.
+    JavaScript that runs inside the network's TEE — read, decide, sign, in one file.
   </Card>
 </CardGroup>
 
 ## Use cases
 
-Common patterns you can build on Lit.
+Patterns you can build on one programmable runtime.
 
 <CardGroup cols={2}>
-  <Card title="Sign a message or transaction" icon="signature" href="/lit-actions/examples#1-sign-a-message">
-    Use a PKP to attest to any payload — messages, EVM transactions, arbitrary bytes.
+  <Card title="Cross-chain actions" icon="arrows-left-right" href="/lit-actions/examples">
+    Read state on one chain, sign on another — bridges, mirrors, and replays without a multisig in the middle.
   </Card>
-  <Card title="Encrypt and decrypt secrets" icon="lock" href="/lit-actions/examples#2-encrypt-a-secret">
-    Protect API keys, credentials, or user data with PKP-derived encryption.
+  <Card title="Custom oracles" icon="globe" href="/lit-actions/examples">
+    Aggregate any HTTP or RPC feed inside the TEE, sign the result with a PKP, deliver it anywhere a signature is trusted.
   </Card>
-  <Card title="Fetch and sign external data" icon="globe" href="/lit-actions/examples">
-    Call HTTP APIs from inside an action and return a signed result — an oracle, gated on whatever logic you write.
+  <Card title="Conditional signing" icon="shield-check" href="/lit-actions/examples">
+    Sign only when on- or off-chain conditions hold — sanctions screens, price thresholds, KYC checks, dispute windows.
   </Card>
-  <Card title="More examples" icon="sparkles" href="/lit-actions/examples">
-    Contract calls, sending ETH, conditional signing, and other patterns.
+  <Card title="Encrypted secrets" icon="lock" href="/lit-actions/examples#2-encrypt-a-secret">
+    Encrypt API keys, credentials, or user data under a PKP — decryptable only by an action you've authorized on-chain.
   </Card>
 </CardGroup>
 
 ## Concepts
 
-How the pieces fit together and how trust is established.
+How the runtime works and how trust is established.
 
 <CardGroup cols={2}>
   <Card title="Architecture" icon="layer-group" href="/architecture/index">
-    The three layers: TEE enclave, on-chain permissions, and IPFS-hosted actions.
+    The three layers: chain-secured TEE, on-chain permissions, and IPFS-hosted actions.
   </Card>
   <Card title="Auth Model" icon="shield-check" href="/architecture/authModel">
     How API keys, scopes, and account ownership combine to authorize requests.
   </Card>
   <Card title="Groups" icon="folder-tree" href="/architecture/groups">
-    Bind PKPs to permitted action CIDs and usage keys.
+    Bind Programmable Key Pairs to permitted action CIDs and usage keys.
   </Card>
   <Card title="Verification" icon="badge-check" href="/architecture/verification/index">
-    Attest that the network is running the code it claims to be running.
+    Attest that the enclave is running the code it claims to be running.
   </Card>
 </CardGroup>
 
