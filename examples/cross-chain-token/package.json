@@ -1,0 +1,22 @@
+{
+  "name": "cross-chain-token",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Lit Action + ERC-20 example: a burn/mint cross-chain token where the action observes burn events on one chain and signs the matching mint on another.",
+  "scripts": {
+    "compile": "hardhat compile",
+    "setup": "node scripts/setup.js",
+    "deploy:baseSepolia": "hardhat run scripts/deploy.js --network baseSepolia",
+    "deploy:arbitrumSepolia": "hardhat run scripts/deploy.js --network arbitrumSepolia",
+    "bridge": "node scripts/bridge.js"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.2",
+    "dotenv": "^16.4.5",
+    "ethers": "^5.7.2"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^2.0.2",
+    "hardhat": "^2.22.10"
+  }
+}

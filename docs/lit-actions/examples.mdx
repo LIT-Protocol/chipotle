@@ -1,6 +1,6 @@
 ---
 title: "Examples"
-description: "Common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, sending ETH, gating ERC-20 transfers on sanctions data, multi-source price oracles, and AI-consensus prediction-market resolution."
+description: "Common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, sending ETH, gating ERC-20 transfers on sanctions data, multi-source price oracles, AI-consensus prediction-market resolution, and permissionless cross-chain token bridging."
 ---
 
 Each example below is a self-contained Lit Action. Pass the code string to the `/core/v1/lit_action` endpoint with any required `js_params`. The `pkpId` parameter is the wallet address of the PKP you want to use, passed in via `js_params`.
@@ -456,4 +456,90 @@ Honest caveats: frontier models share training corpora, so a wrong answer that's
 
 <Info>
   The full runnable example — `PredictionMarket` contract, deploy script, key-encryption helper, propose/resolve runners, and a heavily-commented setup pipeline — lives at [`examples/prediction-market-oracle/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/prediction-market-oracle) in the repo.
+</Info>
+
+---
+
+## 11. Cross-Chain Burn/Mint Bridge
+
+Deploy the same `BridgeToken` contract on two chains. The holder calls `burn` on chain A, which destroys the local supply and emits `BurnInitiated(from, recipient, amount, destChainId, nonce)`. A Lit Action reads that event via `eth_getTransactionReceipt` against a hostname-whitelisted RPC, validates it, and signs a mint authorization for chain B. Anyone can submit the mint — the signature is the authorization, not the caller.
+
+Same content-addressed trust property as the compliance gate: the signer key comes from `Lit.Actions.getLitActionPrivateKey()`, which derives the key from the action's IPFS CID. Edit the action by a byte and the signer changes, and every deployed `BridgeToken` refuses the modified action. The trust collapses from "trust this federation of relayers" to "trust this exact piece of code."
+
+```javascript
+// js_params: {
+//   burnTxHash, srcChainId, srcRpcUrl, srcContract,
+//   destChainId, destContract, logIndex, deadline,
+// }
+const RPC_HOSTS = {
+  84532:  /^base-sepolia\.g\.alchemy\.com$/i,  // base sepolia
+  421614: /^arb-sepolia\.g\.alchemy\.com$/i,   // arbitrum sepolia
+};
+
+async function main({
+  burnTxHash, srcChainId, srcRpcUrl, srcContract,
+  destChainId, destContract, logIndex, deadline,
+}) {
+  // Hostname-whitelist the RPC per chain id. A caller-supplied chainId check
+  // alone is theater (the caller can lie consistently); the hostname pins
+  // trust to "TLS says this came from Alchemy's actual servers."
+  const hostRe = RPC_HOSTS[Number(srcChainId)];
+  if (!hostRe) return { authorized: false, reason: `chainId ${srcChainId} not whitelisted` };
+  if (!hostRe.test(new URL(srcRpcUrl).hostname)) {
+    return { authorized: false, reason: `srcRpcUrl host not whitelisted` };
+  }
+  const reportedChainId = await rpc(srcRpcUrl, "eth_chainId", []);
+  if (BigInt(reportedChainId) !== BigInt(srcChainId)) {
+    return { authorized: false, reason: "RPC chainId mismatch" };
+  }
+
+  const receipt = await rpc(srcRpcUrl, "eth_getTransactionReceipt", [burnTxHash]);
+  if (!receipt || BigInt(receipt.status) !== 1n) {
+    return { authorized: false, reason: "burn tx missing or reverted" };
+  }
+  const log = receipt.logs.find((l) => Number(l.logIndex) === Number(logIndex));
+  if (!log || log.address.toLowerCase() !== srcContract.toLowerCase()) {
+    return { authorized: false, reason: "log not from expected srcContract" };
+  }
+  const expectedTopic = ethers.utils.id(
+    "BurnInitiated(address,address,uint256,uint256,uint256)"
+  );
+  if (log.topics[0].toLowerCase() !== expectedTopic.toLowerCase()) {
+    return { authorized: false, reason: "not a BurnInitiated event" };
+  }
+  // BurnInitiated has indexed (from, recipient, destChainId); data carries (amount, nonce).
+  const recipient = ethers.utils.getAddress("0x" + log.topics[2].slice(26));
+  const logDestChainId = BigInt(log.topics[3]);
+  const [amount, srcNonce] = ethers.utils.defaultAbiCoder.decode(
+    ["uint256", "uint256"], log.data
+  );
+  if (logDestChainId !== BigInt(destChainId)) {
+    return { authorized: false, reason: "burn targets a different chain" };
+  }
+
+  const digest = ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["uint256", "address", "bytes32", "uint256", "address",
+       "uint256", "uint256", "uint256", "address", "uint256"],
+      [srcChainId, srcContract, burnTxHash, logIndex, recipient,
+       amount, srcNonce, deadline, destContract, destChainId]
+    )
+  );
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  return {
+    authorized: true,
+    signature: await wallet.signMessage(ethers.utils.arrayify(digest)),
+    srcChainId, srcContract, burnTxHash, logIndex,
+    recipient, amount: amount.toString(), srcNonce: srcNonce.toString(),
+    destChainId, destContract, deadline,
+  };
+}
+```
+
+The destination `BridgeToken.mint` re-derives the same digest, recovers the signer, and checks it matches the pinned `bridgeOracle`. It also checks an independent `bridgePartner[srcChainId]` mapping — wired during setup to point at the sibling deployment — so a forged burn from a copycat contract with the same event shape can't mint here. Each `(srcChainId, burnTxHash, logIndex)` is recorded in `usedBurnIds` to prevent replays.
+
+This is the permissionless half: any wallet can submit the mint tx (sponsored by a relayer, the recipient themselves, or whoever wants the gas burden). The mint goes through *only* because the signature is valid — there's no on-chain allowlist of submitters.
+
+<Info>
+  The full runnable example — `BridgeToken` contract, two-chain deploy script, `setBridgePartner` wiring, and an end-to-end `npm run bridge` runner that burns on one chain and mints on the other — lives at [`examples/cross-chain-token/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/cross-chain-token) in the repo. Defaults to Base Sepolia ↔ Arbitrum Sepolia; the `RPC_HOSTS` table is the only thing you'd touch to add more chains.
 </Info>
