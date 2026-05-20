@@ -19,15 +19,13 @@ EVM chain Hardhat can talk to.
 ## How it works
 
 ```
-   user wallet         Lit Action            Chainalysis oracle    CompliantToken
-                                             (Ethereum mainnet)        (Base)
+   user wallet         Lit Action          Alchemy + Chainalysis     CompliantToken
+                                             (Ethereum mainnet)         (Base)
        │                   │                         │                   │
        │ js_params         │                         │                   │
        ├──────────────────►│                         │                   │
-       │                   │ eth_chainId             │                   │
-       │                   │ (defensive)             │                   │
-       │                   ├────────────────────────►│                   │
-       │                   │◄────────────────────────┤                   │
+       │                   │ check URL host          │                   │
+       │                   │ matches alchemy regex   │                   │
        │                   │                         │                   │
        │                   │ eth_call(               │                   │
        │                   │   chainalysis,          │                   │
@@ -91,12 +89,40 @@ Edit `.env` and set:
   `/add_group`) that revert `NotMasterAccount` on scoped keys.
 - `DEPLOYER_PRIVATE_KEY` — an EOA with gas on Base Sepolia (or your target chain)
 - `SENDER_PRIVATE_KEY` — an EOA holding tokens (typically the same as deployer for testing)
+- `SCREENING_RPC_URL` — an **Ethereum mainnet Alchemy URL** of the form
+  `https://eth-mainnet.g.alchemy.com/v2/<your-api-key>`. Free tier at
+  https://dashboard.alchemy.com works. The action hardcodes a hostname
+  whitelist requiring `eth-mainnet.g.alchemy.com` (see the "Trust model"
+  section below).
 
-That's it. No Chainalysis signup, no encryption keys. The default
-`SCREENING_RPC_URL` points at `eth.drpc.org` (Ethereum mainnet) — change it
-if you'd rather use your own RPC. To target a different chain, change
-`DEPLOY_NETWORK` (Hardhat network name) and `CHAIN_ID` + `RPC_URL` (where
-the token lives).
+No Chainalysis signup, no encryption keys. To target a different *token*
+chain (where `CompliantToken` lives), change `DEPLOY_NETWORK` (Hardhat
+network name) and `CHAIN_ID` + `RPC_URL`. The *screening* chain stays
+on Ethereum mainnet unless you also edit the action.
+
+### Trust model
+
+A naïve version of this action might take both a `screeningRpcUrl` and a
+`screeningChainId` and check that `eth_chainId` reports the expected value.
+That check is theater: anyone calling the action supplies both fields, so
+they can lie consistently — pair a malicious RPC with a matching chain id
+and the gate passes.
+
+The real anchor is the hostname. The action checks
+`new URL(screeningRpcUrl).hostname` against an anchored regex
+(`/^eth-mainnet\.g\.alchemy\.com$/`). The check passes only when TLS
+delivers data from Alchemy's actual servers — which is something nobody
+short of a CA-level compromise can fake. Trust shifts to "Alchemy is
+honest about Ethereum mainnet state," which is the same assumption almost
+every dapp already makes.
+
+To swap providers, edit `ALLOWED_SCREENING_HOST` in
+[`action/complianceGate.js`](./action/complianceGate.js). For Infura use
+`/^mainnet\.infura\.io$/i`, for QuickNode use
+`/^[a-z0-9-]+\.quiknode\.pro$/i`, etc. Any edit changes the action's
+IPFS CID and therefore its signer address — the existing on-chain
+contract will refuse signatures from the modified action, so you'd need
+to redeploy (or wire a rotate-oracle setter behind a multisig).
 
 ### 2. Run setup
 
@@ -171,13 +197,15 @@ decoupled.
 
 ## Hardening: multi-source consensus
 
-The current action trusts a single screening RPC. A compromised RPC could lie
-about `isSanctioned`. To eliminate that single point of failure, apply the
-multi-source pattern used in [`../multi-source-price-oracle`](../multi-source-price-oracle):
-fan out the `eth_call` to two or three independent mainnet RPCs and only sign
-when they all return the same `isSanctioned` byte. The defensive `eth_chainId`
-check in this action is a small step toward that; full multi-source agreement
-is a much stronger guarantee.
+The current action trusts one provider (Alchemy). If Alchemy itself ever lied
+about an `isSanctioned` reading — buggy upgrade, hijacked endpoint, deliberate
+fraud — the gate would happily sign a malicious transfer. To eliminate that
+single point of failure, apply the multi-source pattern used in
+[`../multi-source-price-oracle`](../multi-source-price-oracle): fan the
+`eth_call` out to two or three independently-hostnamed providers (Alchemy +
+Infura + QuickNode) and only sign when they all return the same bool. Edit
+the action to keep three regexes instead of one and require all three URLs
+in `js_params`.
 
 ## Production considerations
 
