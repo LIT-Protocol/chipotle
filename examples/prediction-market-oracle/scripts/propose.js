@@ -5,8 +5,12 @@
 // immediate is fine.
 //
 // Usage:
-//   node scripts/propose.js --text "Did the Lakers beat the Celtics on 2026-05-15?"
+//   node scripts/propose.js --text "Will the Seattle Seahawks win Super Bowl LX?"
 //   node scripts/propose.js --text "..." --resolveIn 3600   # 1 hour from now
+//
+// Prediction-market questions are conventionally future-tense ("Will
+// X happen?"). The action handles those the same as past-tense by
+// treating them as "has the predicted outcome occurred, as of now?"
 
 const { ethers } = require("ethers");
 const env = require("./_env");

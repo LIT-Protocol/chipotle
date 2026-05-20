@@ -46,14 +46,18 @@ const ANSWER_UNCLEAR = 3;
 
 const PROMPT = (questionText) => `You are a fact-checker resolving a prediction-market question.
 
+Prediction-market questions are phrased in future tense ("Will X happen?")
+but they may refer to events that have ALREADY occurred by the time of
+resolution. Treat the question as: "Has the predicted outcome occurred,
+as of now?"
+
 Answer with EXACTLY ONE word: YES, NO, or UNCLEAR.
 
-YES = the answer is yes / the event occurred / the statement is true.
-NO = the answer is no / the event did not occur / the statement is false.
-UNCLEAR = you cannot determine the answer with high confidence from authoritative sources.
-
-If the question depends on future events that have not yet occurred, answer UNCLEAR.
-If sources disagree, answer UNCLEAR.
+YES     = the predicted outcome has occurred / is true as of now.
+NO      = the predicted outcome did not occur / is false as of now.
+UNCLEAR = the event has not yet happened OR you cannot determine the
+          answer with high confidence from authoritative sources OR
+          sources disagree.
 
 Question: ${questionText}
 
