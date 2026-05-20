@@ -1,9 +1,11 @@
 ---
 title: "Examples"
-description: "Seven common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, and sending ETH — including examples gated on live external data."
+description: "Common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, sending ETH, gating ERC-20 transfers on sanctions data, multi-source price oracles, and AI-consensus prediction-market resolution."
 ---
 
 Each example below is a self-contained Lit Action. Pass the code string to the `/core/v1/lit_action` endpoint with any required `js_params`. The `pkpId` parameter is the wallet address of the PKP you want to use, passed in via `js_params`.
+
+For examples that need more than one file to run — a Solidity contract, a deploy script, an off-chain client — see the [`examples/` folder in the repo](https://github.com/LIT-Protocol/chipotle/tree/main/examples).
 
 ---
 
@@ -193,3 +195,265 @@ async function main({ pkpId, toAddress, amountEth, chainId, rpcUrl }) {
 <Warning>
   The PKP wallet at `pkpId` must hold enough ETH on the target chain to cover both the transfer amount and the gas fee. Use `createWallet` to get a PKP address, fund it on-chain, then use that address as `pkpId`.
 </Warning>
+
+---
+
+## 8. Gate an ERC-20 Transfer on On-Chain Sanctions Data (Cross-Chain)
+
+Screen the recipient of every transfer against the [Chainalysis on-chain sanctions oracle](https://go.chainalysis.com/chainalysis-oracle-docs.html) and only sign a transfer authorization when the recipient is clear.
+
+The Chainalysis oracle is free and keyless — it's just a smart contract at `0x40C57923924B5c5c5455c48D93317139ADDaC8fb` you can `staticcall`. But it is only deployed on a handful of mainnets (Ethereum, Arbitrum, Polygon, BSC, Avalanche, Optimism, Celo). On **Base, Linea, Scroll, any L3, any testnet, or any non-EVM chain**, a contract can't reach it. The Lit Action bridges that gap: it `eth_call`s the oracle on Ethereum mainnet, then signs an authorization that the `CompliantToken` contract — deployed wherever you want — verifies with `ecrecover`.
+
+The signature uses `Lit.Actions.getLitActionPrivateKey()` — an identity derived from the action's IPFS CID. See [Action-Identity Signing](./patterns#action-identity-signing--immutable-proofs).
+
+The trust anchor is a hardcoded hostname whitelist. Anyone calling the action supplies `screeningRpcUrl` via `js_params`, so a caller-supplied `chainId` check would just be theater (pair a malicious RPC with a matching chain id, gate passes). Instead the action checks the URL's hostname against `eth-mainnet.g.alchemy.com` — TLS guarantees we're actually talking to Alchemy. Trust shifts to "Alchemy is honest about Ethereum mainnet."
+
+```javascript
+// js_params: {
+//   from, to, amount, nonce, deadline, contractAddress, chainId,
+//   screeningRpcUrl   // must be an https://eth-mainnet.g.alchemy.com URL
+// }
+const CHAINALYSIS_ORACLE = "0x40C57923924B5c5c5455c48D93317139ADDaC8fb";
+const IS_SANCTIONED_SELECTOR = "0xdf592f7d"; // keccak256("isSanctioned(address)")[0..4]
+const ALLOWED_SCREENING_HOST = /^eth-mainnet\.g\.alchemy\.com$/i;
+
+async function main({
+  from, to, amount, nonce, deadline, contractAddress, chainId, screeningRpcUrl,
+}) {
+  const host = new URL(screeningRpcUrl).hostname;
+  if (!ALLOWED_SCREENING_HOST.test(host)) {
+    return { authorized: false, reason: `host not whitelisted: ${host}` };
+  }
+
+  const callData = IS_SANCTIONED_SELECTOR +
+    to.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+  const result = await rpc(screeningRpcUrl, "eth_call", [
+    { to: CHAINALYSIS_ORACLE, data: callData }, "latest",
+  ]);
+  if (!result || result === "0x") {
+    return { authorized: false, reason: "oracle returned empty data" };
+  }
+  if (BigInt(result) !== 0n) {
+    return { authorized: false, reason: "Recipient is sanctioned" };
+  }
+
+  const digest = ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["address", "address", "uint256", "bytes32", "uint256", "address", "uint256"],
+      [from, to, amount, nonce, deadline, contractAddress, chainId]
+    )
+  );
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  const signature = await wallet.signMessage(ethers.utils.arrayify(digest));
+  return { authorized: true, signature };
+}
+
+async function rpc(url, method, params) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  const body = await res.json();
+  if (body.error) throw new Error(body.error.message);
+  return body.result;
+}
+```
+
+The contract pins the action's derived address at deploy time — derive it once by calling `Lit.Actions.getLitActionWalletAddress({ ipfsId })` from inside any helper action, then pass that address to the `CompliantToken` constructor.
+
+Swapping providers (Infura, QuickNode, your own node) means editing the regex — which produces a new action CID and signer address, requiring a redeploy. That's by design: the trust anchor is content-addressed. For richer screening — hacker wallets, mixer interactions, fresh threat intel — swap the on-chain lookup for a paid API like Chainalysis KYT, TRM Labs, or GetBlock. The pattern becomes: encrypt the API key to a PKP, decrypt inside the TEE, call the API, sign on pass.
+
+The matching contract signs nothing itself — it just verifies that the digest recovers to a hard-coded PKP address:
+
+```solidity
+function transferWithAuth(
+    address to, uint256 amount, bytes32 nonce, uint256 deadline, bytes calldata signature
+) external returns (bool) {
+    if (block.timestamp > deadline) revert AuthorizationExpired();
+    if (usedNonces[msg.sender][nonce]) revert NonceAlreadyUsed();
+
+    bytes32 digest = keccak256(abi.encode(
+        msg.sender, to, amount, nonce, deadline, address(this), block.chainid
+    )).toEthSignedMessageHash();
+
+    if (digest.recover(signature) != complianceOracle) {
+        revert InvalidComplianceSignature();
+    }
+    usedNonces[msg.sender][nonce] = true;
+    _transfer(msg.sender, to, amount);
+    return true;
+}
+```
+
+The plain `transfer` and `transferFrom` overrides revert, so every movement of tokens must go through this gate.
+
+<Info>
+  The full runnable example — token contract, hardhat deploy script, and an end-to-end transfer runner — lives at [`examples/compliance-transfer-gate/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/compliance-transfer-gate) in the repo. The example is keyless: the action reads the Chainalysis oracle via an Alchemy RPC and signs with its own CID-derived key, so no PKP or encrypted secrets are required.
+</Info>
+
+---
+
+## 9. Median Price Oracle Across Three Exchanges
+
+Fetch a spot price from three independent exchanges (Coinbase, Kraken, Bitstamp), take the median, and sign it for any EVM chain. This is the practical "I need a Chainlink-shaped feed without Chainlink" pattern.
+
+Median (rather than strict byte-equality) is the right aggregation for live market prices — exchanges disagree by a few cents at every moment, so byte-equality would never pass. A median naturally rejects one outlier; combined with a `MAX_SPREAD_BPS` check (refuse to sign if min/max differ by more than the threshold) it catches both single-source manipulation and any-source-market-state-broken situations.
+
+The safety thresholds (`MAX_SPREAD_BPS`, `MIN_SOURCES`, `DECIMALS`) are hardcoded constants in the action source rather than caller-supplied `js_params`. Otherwise anyone holding the usage key could request a signature with `MIN_SOURCES: 1` and a huge spread cap, bypassing the median-of-three story. Editing a constant mints a new action CID — and therefore a new signer address — which forces a redeploy of the registry. The trust anchor is content-addressed.
+
+All three sources here are keyless public HTTP endpoints — no API keys, no PKP, no encryption.
+
+```javascript
+// js_params: { asset, registryAddress, registryChainId, deadline }
+const MAX_SPREAD_BPS = 100;   // 1%
+const MIN_SOURCES = 2;        // require >= this many successful fetches
+const DECIMALS = 8;           // fixed-point precision for the signed price
+
+const SYMBOLS = {
+  ETH: { coinbase: "ETH-USD", kraken: "ETHUSD", krakenKey: "XETHZUSD", bitstamp: "ethusd" },
+  BTC: { coinbase: "BTC-USD", kraken: "XBTUSD", krakenKey: "XXBTZUSD", bitstamp: "btcusd" },
+};
+
+async function main({ asset, registryAddress, registryChainId, deadline }) {
+  const s = SYMBOLS[asset];
+  if (!s) return { authorized: false, reason: `unsupported asset: ${asset}` };
+
+  const settled = await Promise.allSettled([
+    fetch(`https://api.coinbase.com/v2/prices/${s.coinbase}/spot`)
+      .then((r) => r.json()).then((b) => ({ name: "coinbase", price: Number(b.data.amount) })),
+    fetch(`https://api.kraken.com/0/public/Ticker?pair=${s.kraken}`)
+      .then((r) => r.json()).then((b) => ({
+        name: "kraken",
+        price: Number((b.result[s.krakenKey] || Object.values(b.result)[0]).c[0]),
+      })),
+    fetch(`https://www.bitstamp.net/api/v2/ticker/${s.bitstamp}/`)
+      .then((r) => r.json()).then((b) => ({ name: "bitstamp", price: Number(b.last) })),
+  ]);
+
+  const ok = settled
+    .filter((r) => r.status === "fulfilled" && r.value.price > 0)
+    .map((r) => r.value);
+  if (ok.length < MIN_SOURCES) {
+    return { authorized: false, reason: `only ${ok.length}/3 sources succeeded` };
+  }
+
+  const prices = ok.map((s) => s.price).sort((a, b) => a - b);
+  const median = prices.length % 2
+    ? prices[(prices.length - 1) / 2]
+    : (prices[prices.length / 2 - 1] + prices[prices.length / 2]) / 2;
+  const spreadBps = Math.round(((prices[prices.length - 1] - prices[0]) / median) * 10000);
+  if (spreadBps > MAX_SPREAD_BPS) {
+    return { authorized: false, reason: `spread ${spreadBps} bps exceeds ${MAX_SPREAD_BPS}` };
+  }
+
+  // Use string-concat + BigInt instead of Math.round(median * 10**DECIMALS)
+  // so we don't lose precision (or overflow Number.MAX_SAFE_INTEGER) at
+  // DECIMALS=18.
+  const priceInt = scaleToFixedPoint(median, DECIMALS);
+  const observedAt = Math.floor(Date.now() / 1000);
+  const digest = ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["string", "uint256", "uint8", "uint256", "uint256", "address", "uint256"],
+      [asset, priceInt, DECIMALS, observedAt, deadline, registryAddress, registryChainId]
+    )
+  );
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  const signature = await wallet.signMessage(ethers.utils.arrayify(digest));
+
+  return {
+    authorized: true,
+    signature,
+    asset,
+    price: priceInt.toString(),
+    decimals,
+    observedAt,
+    spreadBps,
+    sources: ok,
+  };
+}
+```
+
+To move the median an attacker needs to influence two of three sources at the same instant — for major exchanges that is enormously expensive — and the spread check fails closed if any pair of sources gives implausibly different prices.
+
+<Info>
+  The full runnable example — `PriceOracle` registry contract, deploy script, end-to-end submission runner, and a zero-dep `npm run test-medianizer` harness that exercises the fetch logic without touching any chain — lives at [`examples/multi-source-price-oracle/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/multi-source-price-oracle) in the repo.
+</Info>
+
+---
+
+## 10. Resolve a Prediction Market by AI Consensus
+
+Poll multiple LLM providers in parallel with the same yes/no question and only sign the resolution when every model agrees. Same multi-source idea as example 9, but the parallel sources are AI models instead of price feeds — and the aggregation is *strict agreement* rather than a median, because the output is categorical YES/NO/UNCLEAR.
+
+**Perplexity Sonar is required** because its built-in web search lets it answer questions about events that happened after a frontier model's training cutoff. **OpenAI and Anthropic are optional second opinions** — independent training corpora mean a confident-but-wrong frontier answer is unlikely to be confirmed by another frontier model. Configuring all three gives you 3-of-3 agreement before anything reaches the chain.
+
+```javascript
+// js_params: {
+//   questionId, questionText, resolveAt,
+//   marketAddress, marketChainId, deadline,
+//   decryptPkpId,
+//   encryptedPerplexityKey,           // required
+//   encryptedOpenAiKey, encryptedAnthropicKey  // optional
+// }
+async function main({
+  questionId, questionText, resolveAt,
+  marketAddress, marketChainId, deadline, decryptPkpId,
+  encryptedPerplexityKey, encryptedOpenAiKey, encryptedAnthropicKey,
+}) {
+  if (Math.floor(Date.now() / 1000) < resolveAt) {
+    return { authorized: false, reason: "not yet resolvable" };
+  }
+  // Bind questionId to the prompt so a caller can't swap the text.
+  const computedId = ethers.utils.keccak256(ethers.utils.toUtf8Bytes(questionText));
+  if (computedId.toLowerCase() !== questionId.toLowerCase()) {
+    return { authorized: false, reason: "questionText does not match questionId" };
+  }
+
+  const keys = await Promise.all([
+    ["perplexity", encryptedPerplexityKey],
+    ["openai", encryptedOpenAiKey],
+    ["anthropic", encryptedAnthropicKey],
+  ].map(async ([name, ct]) =>
+    ct
+      ? { name, key: await Lit.Actions.Decrypt({ pkpId: decryptPkpId, ciphertext: ct }) }
+      : { name, key: null }
+  ));
+
+  const prompt = `Prediction-market questions are phrased in future tense ` +
+    `but the event may have already occurred. Treat the question as ` +
+    `"has the predicted outcome occurred, as of now?". ` +
+    `Answer YES, NO, or UNCLEAR (UNCLEAR if the event hasn't happened yet ` +
+    `or sources disagree). Respond with a single word.\n\nQuestion: ${questionText}`;
+  const votes = await Promise.all(keys.map(async ({ name, key }) =>
+    key ? { name, vote: parseVote(await callModel(name, key, prompt)) } : null
+  ));
+
+  const successful = votes.filter((v) => v && v.vote);
+  if (!successful.length) return { authorized: false, reason: "no model responded" };
+  if (!successful.every((v) => v.vote === successful[0].vote)) {
+    return { authorized: false, reason: "models disagree", votes: successful };
+  }
+  const answer = { YES: 1, NO: 2, UNCLEAR: 3 }[successful[0].vote];
+
+  const digest = ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["address", "bytes32", "uint8", "uint256", "uint256"],
+      [marketAddress, questionId, answer, deadline, marketChainId]
+    )
+  );
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  return {
+    authorized: true,
+    signature: await wallet.signMessage(ethers.utils.arrayify(digest)),
+    answer,
+    consensusAcross: successful.map((v) => v.name),
+  };
+}
+```
+
+Honest caveats: frontier models share training corpora, so a wrong answer that's widespread on the internet can be confidently confirmed by multiple models. Perplexity's grounding helps but isn't bulletproof — citations can drift. For real money this pattern wants a dispute window or a stake-and-slash flow on top.
+
+<Info>
+  The full runnable example — `PredictionMarket` contract, deploy script, key-encryption helper, propose/resolve runners, and a heavily-commented setup pipeline — lives at [`examples/prediction-market-oracle/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/prediction-market-oracle) in the repo.
+</Info>
