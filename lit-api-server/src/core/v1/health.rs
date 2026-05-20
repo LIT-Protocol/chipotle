@@ -63,10 +63,12 @@ async fn health(
             }
             Err(e) => {
                 // Surface the connect error so /health failures are debuggable
-                // without an exec into the container. The probe runs frequently
-                // so log at warn (not error) to avoid alert spam during the
-                // brief window before lit-actions has bound the socket.
-                tracing::warn!(
+                // without an exec into the container. /health is unauthenticated
+                // and polled by the NLB on a short interval, so log at debug —
+                // promoting to warn would flood logs (and on-call) during any
+                // sustained lit-actions outage. The JSON response already
+                // signals the failure; this line just records the *reason*.
+                tracing::debug!(
                     socket = %socket_key,
                     error = %e,
                     "lit-actions socket connect failed during /health probe"
