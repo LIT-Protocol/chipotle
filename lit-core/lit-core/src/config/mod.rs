@@ -60,7 +60,6 @@ pub struct LitConfigBuilder {
 }
 
 impl LitConfigBuilder {
-    #[allow(dead_code)]
     pub fn new_with_paths(
         key: Option<String>, home_dir: Option<String>, cfg_dir_default: &str,
         cfg_dir_guest_init: &str,
