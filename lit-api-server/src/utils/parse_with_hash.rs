@@ -134,9 +134,8 @@ fn parse_u256(s: &str) -> Result<U256, ApiStatus> {
 fn parse_h160(s: &str) -> Result<Address, ApiStatus> {
     let s = s.trim();
     if s.starts_with("0x") || s.starts_with("0X") {
-        let bytes = hex_to_bytes(s).map_err(|e| {
-            ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex for Address")
-        })?;
+        let bytes = hex_to_bytes(s)
+            .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex for Address"))?;
         if bytes.len() != 20 {
             return Err(ApiStatus::bad_request(
                 anyhow::anyhow!("invalid Address: expected 20 bytes, got {}", bytes.len()),

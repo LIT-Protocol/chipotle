@@ -91,10 +91,7 @@ async fn create_new_wallet() -> Result<(String, Address, [u8; 32], U256), ApiSta
     })?;
 
     let signer = PrivateKeySigner::from_slice(&secret).map_err(|e| {
-        ApiStatus::internal_server_error(
-            anyhow::anyhow!(e),
-            "PrivateKeySigner::from_slice failed",
-        )
+        ApiStatus::internal_server_error(anyhow::anyhow!(e), "PrivateKeySigner::from_slice failed")
     })?;
     let wallet_address = signer.address();
     let public_key_bytes = signer.credential().verifying_key().as_affine().to_bytes();
@@ -836,10 +833,7 @@ pub async fn get_admin_api_payer() -> Result<String, ApiStatus> {
         ApiStatus::internal_server_error(anyhow::anyhow!(e), "get_admin_api_payer failed")
     })?;
     let signer = PrivateKeySigner::from_slice(&admin_api_payer).map_err(|e| {
-        ApiStatus::internal_server_error(
-            anyhow::anyhow!(e),
-            "PrivateKeySigner::from_slice failed",
-        )
+        ApiStatus::internal_server_error(anyhow::anyhow!(e), "PrivateKeySigner::from_slice failed")
     })?;
     Ok(bytes_to_0x_hex(signer.address().as_slice()))
 }

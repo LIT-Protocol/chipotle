@@ -69,8 +69,8 @@ pub async fn convert_to_chain_secured_account(
     let (contract, signer_address, client) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
     let api_key_hash = ae_u256(api_key_hash(api_key));
-    let function_call = contract
-        .convert_to_chain_secured_account(api_key_hash, ae_addr(new_admin_wallet_address));
+    let function_call =
+        contract.convert_to_chain_secured_account(api_key_hash, ae_addr(new_admin_wallet_address));
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
     blockchain_cache::invalidate_for_account(api_key).await;
     Ok(result)
@@ -542,7 +542,11 @@ pub async fn list_groups(
     let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = ae_u256(api_key_hash(api_key));
     let page = contract
-        .list_groups(account_api_key_hash, ae_u256(page_number), ae_u256(page_size))
+        .list_groups(
+            account_api_key_hash,
+            ae_u256(page_number),
+            ae_u256(page_size),
+        )
         .call()
         .await?;
     Ok(page)
@@ -558,7 +562,11 @@ pub async fn list_wallets(
     let account_api_key_hash = ae_u256(api_key_hash(api_key));
 
     let page = contract
-        .list_pkps(account_api_key_hash, ae_u256(page_number), ae_u256(page_size))
+        .list_pkps(
+            account_api_key_hash,
+            ae_u256(page_number),
+            ae_u256(page_size),
+        )
         .call()
         .await?;
     Ok(page)
@@ -595,7 +603,11 @@ pub async fn list_actions(
     let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = ae_u256(api_key_hash(api_key));
     let page = contract
-        .list_actions(account_api_key_hash, ae_u256(page_number), ae_u256(page_size))
+        .list_actions(
+            account_api_key_hash,
+            ae_u256(page_number),
+            ae_u256(page_size),
+        )
         .call()
         .await?;
     Ok(page)
@@ -631,7 +643,11 @@ pub async fn list_api_keys(
     let contract = get_read_only_account_config_contract().await?;
     let account_api_key_hash = ae_u256(api_key_hash(api_key));
     let page = contract
-        .list_api_keys(account_api_key_hash, ae_u256(page_number), ae_u256(page_size))
+        .list_api_keys(
+            account_api_key_hash,
+            ae_u256(page_number),
+            ae_u256(page_size),
+        )
         .call()
         .await?;
     Ok(page)
@@ -767,7 +783,8 @@ pub async fn can_execute_action_and_use_wallet(
     let wallet_eth = ae_addr(wallet_address);
 
     if let Some(cache) = blockchain_cache::get() {
-        let key = cache.execute_and_wallet_key(account_api_key_hash_alloy, cid_hash, wallet_address);
+        let key =
+            cache.execute_and_wallet_key(account_api_key_hash_alloy, cid_hash, wallet_address);
         return cache
             .execute_and_wallet_cache()
             .try_get_with(key, async {
