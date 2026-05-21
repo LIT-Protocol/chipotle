@@ -248,9 +248,13 @@ async fn check_for_new_api_payer_count(
     }
 
     if let Ok(rebalance_amount) = get_rebalance_amount().await
-        && rebalance_amount > U256::zero()
-        && let Err(e) =
-            rebalance_entries(rebalance_amount, old_entries.clone(), entries.clone()).await
+        && rebalance_amount > alloy::primitives::U256::ZERO
+        && let Err(e) = rebalance_entries(
+            crate::utils::alloy_ethers::alloy_u256_to_ethers(rebalance_amount),
+            old_entries.clone(),
+            entries.clone(),
+        )
+        .await
     {
         tracing::error!("signer_pool: failed to rebalance entries: {e}");
     }

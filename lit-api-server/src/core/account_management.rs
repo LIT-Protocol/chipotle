@@ -26,9 +26,9 @@ use crate::utils::parse_with_hash::{
     is_precomputed_hash_shape, string_group_id_to_u256,
 };
 use crate::{accounts, dstack};
+use alloy::primitives::{Address, U256};
+use alloy::signers::local::PrivateKeySigner;
 use elliptic_curve::group::GroupEncoding;
-use ethers::signers::{LocalWallet, Signer};
-use ethers::types::{H160, U256};
 use ipfs_hasher::IpfsHasher;
 use lit_core::utils::binary::{bytes_to_0x_hex, hex_to_bytes};
 use rocket::serde::json::Json;
@@ -80,7 +80,7 @@ fn encode_api_key_from_secret(secret: &[u8; 32]) -> Result<String, ApiStatus> {
 }
 
 // Create a new wallet and return the public key, wallet address, and secret.
-async fn create_new_wallet() -> Result<(String, H160, [u8; 32], U256), ApiStatus> {
+async fn create_new_wallet() -> Result<(String, Address, [u8; 32], U256), ApiStatus> {
     let (derivation_u256, derivation_path) = generate_unique_derivation_path();
     tracing::info!(
         "Creating new wallet with derivation path: {}",
@@ -90,11 +90,11 @@ async fn create_new_wallet() -> Result<(String, H160, [u8; 32], U256), ApiStatus
         ApiStatus::internal_server_error(anyhow::anyhow!(e), "get_client_key failed")
     })?;
 
-    let local_wallet = LocalWallet::from_bytes(&secret).map_err(|e| {
-        ApiStatus::internal_server_error(anyhow::anyhow!(e), "LocalWallet::from_bytes failed")
+    let signer = PrivateKeySigner::from_slice(&secret).map_err(|e| {
+        ApiStatus::internal_server_error(anyhow::anyhow!(e), "PrivateKeySigner::from_slice failed")
     })?;
-    let wallet_address = local_wallet.address();
-    let public_key_bytes = local_wallet.signer().verifying_key().as_affine().to_bytes();
+    let wallet_address = signer.address();
+    let public_key_bytes = signer.credential().verifying_key().as_affine().to_bytes();
     let public_key_string = bytes_to_0x_hex(public_key_bytes);
 
     Ok((public_key_string, wallet_address, secret, derivation_u256))
@@ -138,7 +138,7 @@ pub async fn new_account(
     // Best-effort: eagerly create the Stripe customer (with $0 balance) and set the email
     // if provided.  Neither failure should prevent account creation.
     if let Some(stripe) = stripe_state {
-        let wallet_hex = bytes_to_0x_hex(wallet_address.as_bytes());
+        let wallet_hex = bytes_to_0x_hex(wallet_address.as_slice());
         match crate::stripe::get_customer_by_wallet(&wallet_hex, &stripe).await {
             Ok(customer_id) => {
                 if !email.trim().is_empty() {
@@ -154,7 +154,7 @@ pub async fn new_account(
 
     Ok(NewAccountResponse {
         api_key: api_key.to_string(),
-        wallet_address: bytes_to_0x_hex(wallet_address.as_bytes()),
+        wallet_address: bytes_to_0x_hex(wallet_address.as_slice()),
     })
 }
 
@@ -185,7 +185,7 @@ pub async fn create_wallet(
     .map_err(|e| map_contract_error(e, "create_wallet failed"))?;
 
     Ok(CreateWalletResponse {
-        wallet_address: bytes_to_0x_hex(wallet_address.as_bytes()),
+        wallet_address: bytes_to_0x_hex(wallet_address.as_slice()),
     })
 }
 
@@ -203,7 +203,7 @@ pub async fn create_wallet_with_signature(
     );
     let (_public_key, wallet_address, _secret, derivation_u256) = create_new_wallet().await?;
     Ok(CreateWalletWithSignatureResponse {
-        wallet_address: bytes_to_0x_hex(wallet_address.as_bytes()),
+        wallet_address: bytes_to_0x_hex(wallet_address.as_slice()),
         derivation_path: format!("0x{:x}", derivation_u256),
     })
 }
@@ -229,7 +229,7 @@ pub async fn add_usage_api_key_with_signature(
     let usage_api_key = encode_api_key_from_secret(&secret)?;
     Ok(AddUsageApiKeyWithSignatureResponse {
         usage_api_key,
-        wallet_address: bytes_to_0x_hex(wallet_address.as_bytes()),
+        wallet_address: bytes_to_0x_hex(wallet_address.as_slice()),
         derivation_path: format!("0x{:x}", derivation_u256),
     })
 }
@@ -259,8 +259,8 @@ pub async fn convert_to_chain_secured_account(
             "new_admin_wallet_address must be 20 bytes",
         ));
     }
-    let claimed_address = H160::from_slice(&claimed_address_bytes);
-    if claimed_address == H160::zero() {
+    let claimed_address = Address::from_slice(&claimed_address_bytes);
+    if claimed_address == Address::ZERO {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!("new_admin_wallet_address must be non-zero"),
             "new_admin_wallet_address must be non-zero",
@@ -272,9 +272,6 @@ pub async fn convert_to_chain_secured_account(
         &req.signature,
         crate::core::eip712::PRIMARY_TYPE_CONVERT_ACCOUNT,
     )?;
-    // Bridge alloy Address → ethers H160 for the remainder of this function;
-    // the rest of the file is still on ethers types until Phase 4.
-    let signer = H160::from_slice(signer.as_slice());
     if signer != claimed_address {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!("Signature does not match new_admin_wallet_address"),
@@ -338,7 +335,7 @@ pub async fn delete_action(
     req: Json<DeleteActionRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let action_hash = hashed_cid_to_u256(&req.hashed_cid)?;
-    if action_hash == U256::zero() {
+    if action_hash == U256::ZERO {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!("Cannot remove action with hash 0x0"),
             "Cannot remove action with hash 0x0",
@@ -375,7 +372,7 @@ pub async fn add_pkp_to_group(
             "Invalid PKP ID",
         ));
     }
-    let wallet_address = H160::from_slice(&wallet_address_bytes);
+    let wallet_address = Address::from_slice(&wallet_address_bytes);
     accounts::add_pkp_to_group(signer_pool, api_key, group_id, wallet_address)
         .await
         .map_err(|e| map_contract_error(e, "add_pkp_to_group failed"))?;
@@ -395,7 +392,7 @@ pub async fn remove_pkp_from_group(
             "Invalid PKP ID",
         ));
     }
-    let wallet_address = H160::from_slice(&src);
+    let wallet_address = Address::from_slice(&src);
     accounts::remove_pkp_from_group(signer_pool, api_key, group_id, wallet_address)
         .await
         .map_err(|e| map_contract_error(e, "remove_pkp_from_group failed"))?;
@@ -462,7 +459,7 @@ pub async fn remove_group(
     req: Json<RemoveGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = string_group_id_to_u256(&req.group_id)?;
-    if group_id == U256::zero() {
+    if group_id == U256::ZERO {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!("Cannot remove group with ID 0"),
             "Cannot remove group with ID 0",
@@ -522,7 +519,7 @@ pub async fn update_group(
     req: Json<UpdateGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = U256::from(req.group_id);
-    if group_id == U256::zero() {
+    if group_id == U256::ZERO {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!("Cannot update group with ID 0"),
             "Cannot update group with ID 0",
@@ -550,7 +547,7 @@ pub async fn remove_action_from_group(
     req: Json<RemoveActionFromGroupRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let group_id = U256::from(req.group_id);
-    if group_id == U256::zero() {
+    if group_id == U256::ZERO {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!("Cannot remove action from group with ID 0"),
             "Cannot remove action from group with ID 0",
@@ -569,7 +566,7 @@ pub async fn update_action_metadata(
     req: Json<UpdateActionMetadataRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
     let action_hash = hashed_cid_to_u256(&req.hashed_cid)?;
-    if action_hash == U256::zero() {
+    if action_hash == U256::ZERO {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!("Cannot update action with hash 0x0"),
             "Cannot update action with hash 0x0",
@@ -579,7 +576,7 @@ pub async fn update_action_metadata(
         signer_pool,
         api_key,
         action_hash,
-        U256::zero(),
+        U256::ZERO,
         &req.name,
         &req.description,
     )
@@ -624,7 +621,9 @@ fn metadata_to_item(
     wildcard_name: &str,
     wildcard_description: &str,
 ) -> ListMetadataItem {
-    if m.id == U256::zero() {
+    // `accounts::Metadata` is still an ethers-generated struct (Phase 5 will
+    // regenerate it via sol!); compare against ethers' zero until then.
+    if m.id == ethers::types::U256::zero() {
         return ListMetadataItem {
             id: wildcard_id.to_string(),
             name: wildcard_name.to_string(),
@@ -766,7 +765,7 @@ pub async fn list_actions(
     let list = match group_id {
         Some(gid_str) => {
             let gid = string_group_id_to_u256(gid_str)?;
-            if gid == U256::zero() {
+            if gid == U256::ZERO {
                 accounts::list_actions(api_key, pn, ps)
                     .await
                     .map_err(|e| ApiStatus::internal_server_error(e, "list_actions failed"))?
@@ -818,11 +817,13 @@ pub async fn get_api_payers() -> Result<Vec<String>, ApiStatus> {
                 ApiStatus::internal_server_error(anyhow::anyhow!(e), "get_api_payers failed")
             })?;
 
-        let local_wallet = LocalWallet::from_bytes(&api_payer).map_err(|e| {
-            ApiStatus::internal_server_error(anyhow::anyhow!(e), "LocalWallet::from_bytes failed")
+        let signer = PrivateKeySigner::from_slice(&api_payer).map_err(|e| {
+            ApiStatus::internal_server_error(
+                anyhow::anyhow!(e),
+                "PrivateKeySigner::from_slice failed",
+            )
         })?;
-        let wallet_address = local_wallet.address();
-        api_payers.push(bytes_to_0x_hex(wallet_address.as_bytes()));
+        api_payers.push(bytes_to_0x_hex(signer.address().as_slice()));
     }
     Ok(api_payers)
 }
@@ -831,11 +832,10 @@ pub async fn get_admin_api_payer() -> Result<String, ApiStatus> {
     let admin_api_payer = dstack::v1::get_admin_api_payer_key().await.map_err(|e| {
         ApiStatus::internal_server_error(anyhow::anyhow!(e), "get_admin_api_payer failed")
     })?;
-    let local_wallet = LocalWallet::from_bytes(&admin_api_payer).map_err(|e| {
-        ApiStatus::internal_server_error(anyhow::anyhow!(e), "LocalWallet::from_bytes failed")
+    let signer = PrivateKeySigner::from_slice(&admin_api_payer).map_err(|e| {
+        ApiStatus::internal_server_error(anyhow::anyhow!(e), "PrivateKeySigner::from_slice failed")
     })?;
-    let wallet_address = local_wallet.address();
-    Ok(bytes_to_0x_hex(wallet_address.as_bytes()))
+    Ok(bytes_to_0x_hex(signer.address().as_slice()))
 }
 
 #[cfg(test)]

@@ -156,28 +156,6 @@ impl FromStr for CurveType {
     }
 }
 
-impl TryFrom<ethers::types::U256> for CurveType {
-    type Error = anyhow::Error;
-    fn try_from(curve_type: ethers::types::U256) -> Result<Self> {
-        let curve_type = curve_type.as_u32();
-        let curve_type = TryInto::<u8>::try_into(curve_type);
-        match curve_type {
-            Ok(1) => Ok(CurveType::BLS),
-            Ok(2) => Ok(CurveType::K256),
-            Ok(3) => Ok(CurveType::Ed25519),
-            Ok(4) => Ok(CurveType::Ed448),
-            Ok(5) => Ok(CurveType::Ristretto25519),
-            Ok(6) => Ok(CurveType::P256),
-            Ok(7) => Ok(CurveType::P384),
-            Ok(8) => Ok(CurveType::RedJubjub),
-            Ok(9) => Ok(CurveType::RedDecaf377),
-            Ok(10) => Ok(CurveType::BLS12381G1),
-            Ok(11) => Ok(CurveType::RedPallas),
-            _ => CurveType::invalid(),
-        }
-    }
-}
-
 impl TryFrom<u8> for CurveType {
     type Error = anyhow::Error;
     fn try_from(byte: u8) -> std::result::Result<Self, Self::Error> {
@@ -198,17 +176,9 @@ impl TryFrom<u8> for CurveType {
     }
 }
 
-impl From<CurveType> for ethers::types::U256 {
-    fn from(curve_type: CurveType) -> ethers::types::U256 {
-        let curve_type = curve_type as u8;
-        ethers::types::U256::from(curve_type as u32)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethers::types::U256;
 
     // ── FromStr ─────────────────────────────────────────────────────────
     #[test]
@@ -277,24 +247,6 @@ mod tests {
         assert!(CurveType::try_from(0u8).is_err());
         assert!(CurveType::try_from(12u8).is_err());
         assert!(CurveType::try_from(255u8).is_err());
-    }
-
-    // ── TryFrom<U256> ──────────────────────────────────────────────────
-    #[test]
-    fn try_from_u256_round_trip() {
-        for variant in CurveType::into_iter() {
-            let u256_val: U256 = variant.into();
-            let back = CurveType::try_from(u256_val).unwrap();
-            assert_eq!(variant, back);
-        }
-    }
-
-    // ── Into<U256> ─────────────────────────────────────────────────────
-    #[test]
-    fn into_u256_matches_repr() {
-        assert_eq!(U256::from(CurveType::BLS), U256::from(1));
-        assert_eq!(U256::from(CurveType::K256), U256::from(2));
-        assert_eq!(U256::from(CurveType::RedPallas), U256::from(11));
     }
 
     // ── Display / as_str ───────────────────────────────────────────────

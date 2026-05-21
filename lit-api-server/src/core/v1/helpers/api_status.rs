@@ -73,27 +73,15 @@ impl From<serde_bare::Error> for ApiStatus {
     }
 }
 
-impl From<ethers::abi::ethereum_types::FromStrRadixErr> for ApiStatus {
-    fn from(e: ethers::abi::ethereum_types::FromStrRadixErr) -> Self {
-        Self::bad_request(e.into(), "Invalid radix string.")
+impl From<alloy::primitives::ruint::ParseError> for ApiStatus {
+    fn from(e: alloy::primitives::ruint::ParseError) -> Self {
+        Self::bad_request(anyhow::anyhow!(e), "Invalid radix string.")
     }
 }
 
 impl From<url::ParseError> for ApiStatus {
     fn from(e: url::ParseError) -> Self {
         Self::bad_request(e.into(), "Invalid URL.")
-    }
-}
-
-impl From<ethers::providers::ProviderError> for ApiStatus {
-    fn from(e: ethers::providers::ProviderError) -> Self {
-        Self::internal_server_error(e.into(), "Provider error.")
-    }
-}
-
-impl From<ethers::utils::ConversionError> for ApiStatus {
-    fn from(e: ethers::utils::ConversionError) -> Self {
-        Self::internal_server_error(e.into(), "Conversion error.")
     }
 }
 
