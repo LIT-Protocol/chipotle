@@ -1,6 +1,11 @@
 /**
  * Billing — Stripe integration, payment flow.
  *
+ * Uses Stripe Payment Element which auto-renders whichever methods are
+ * enabled on the Stripe account (card, USDC, USDP, ETH, SOL). Crypto
+ * payments use a redirect flow; card payments complete inline when no
+ * additional action is required.
+ *
  * ChainSecured callers (CPL-285, CPL-286) authenticate to /billing/* with an
  * EIP-712 typed-data signature proving they hold the wallet's private key.
  * The wallet UI surfaces `primaryType: BillingAuth` and labelled fields so a
@@ -13,8 +18,7 @@
  * captured-credential snapshot — `clearBillingSession()` is called on logout
  * or wallet switch and aborts pending fetches; every post-await branch
  * re-checks `billingAuthKey() === captured` before mutating UI or calling
- * Stripe.confirmCardPayment so a mid-flight session change can never credit
- * the prior account.
+ * Stripe so a mid-flight session change can never credit the prior account.
  */
 
 import {
@@ -33,7 +37,10 @@ import {
 import { formatError, logError } from './ui-utils.js';
 
 let _stripe = null;
-let _stripeCard = null;
+let _publishableKey = null;
+let _elements = null;
+let _paymentElement = null;
+let _paymentIntentId = null;
 
 let _billingAvailable = null;
 let _billingCheckedAt = 0;
@@ -121,7 +128,8 @@ export async function checkBillingAvailable() {
   }
   try {
     const client = await getClient();
-    await client.getStripeConfig();
+    const cfg = await client.getStripeConfig();
+    _publishableKey = cfg.publishable_key;
     _billingAvailable = true;
   } catch (_) {
     _billingAvailable = false;
@@ -273,6 +281,61 @@ async function loadBillingBalance() {
   }
 }
 
+function setModalStep(step) {
+  const amountGroup = document.getElementById('billing-amount-group');
+  const paymentGroup = document.getElementById('billing-payment-group');
+  const continueBtn = document.getElementById('billing-continue-btn');
+  const payBtn = document.getElementById('billing-pay-btn');
+  const backBtn = document.getElementById('billing-back-btn');
+  if (step === 'amount') {
+    if (amountGroup) amountGroup.style.display = '';
+    if (paymentGroup) paymentGroup.style.display = 'none';
+    if (continueBtn) continueBtn.style.display = '';
+    if (payBtn) payBtn.style.display = 'none';
+    if (backBtn) backBtn.style.display = 'none';
+  } else {
+    if (amountGroup) amountGroup.style.display = 'none';
+    if (paymentGroup) paymentGroup.style.display = '';
+    if (continueBtn) continueBtn.style.display = 'none';
+    if (payBtn) payBtn.style.display = '';
+    if (backBtn) backBtn.style.display = '';
+  }
+}
+
+function setStatus(message, kind) {
+  const el = document.getElementById('billing-modal-status');
+  if (!el) return;
+  if (!message) {
+    el.style.display = 'none';
+    el.textContent = '';
+    return;
+  }
+  el.textContent = message;
+  el.className = 'status ' + (kind || 'info');
+  el.style.display = 'block';
+}
+
+function resetPaymentElement() {
+  if (_paymentElement) {
+    try { _paymentElement.unmount(); } catch (_) { /* ignore */ }
+    try { _paymentElement.destroy(); } catch (_) { /* ignore */ }
+  }
+  _paymentElement = null;
+  _elements = null;
+  _paymentIntentId = null;
+}
+
+async function ensureStripe() {
+  if (_stripe) return _stripe;
+  if (!_publishableKey) {
+    const client = await getClient();
+    const cfg = await client.getStripeConfig();
+    _publishableKey = cfg.publishable_key;
+  }
+  _stripe = Stripe(_publishableKey); // eslint-disable-line no-undef
+  return _stripe;
+}
+
 async function openAddFundsModal() {
   if (_billingAvailable === false) return;
   const overlay = document.getElementById('billing-modal-overlay');
@@ -280,58 +343,35 @@ async function openAddFundsModal() {
   overlay.classList.add('is-open');
   overlay.setAttribute('aria-hidden', 'false');
 
-  const statusEl = document.getElementById('billing-modal-status');
-  if (statusEl) { statusEl.style.display = 'none'; }
+  setStatus('');
+  setModalStep('amount');
+  resetPaymentElement();
 
-  const payBtn = document.getElementById('billing-pay-btn');
-  if (payBtn) payBtn.disabled = true;
-
-  if (!_stripe) {
-    try {
-      const client = await getClient();
-      const cfg = await client.getStripeConfig();
-      _stripe = Stripe(cfg.publishable_key); // eslint-disable-line no-undef
-      const elements = _stripe.elements();
-      _stripeCard = elements.create('card');
-      _stripeCard.mount('#stripe-card-element');
-    } catch (e) {
-      logError('stripe-init', e);
-      if (statusEl) {
-        statusEl.textContent = 'Billing not available: ' + formatError(e);
-        statusEl.className = 'status error';
-        statusEl.style.display = 'block';
-      }
-      return;
-    }
+  try {
+    await ensureStripe();
+  } catch (e) {
+    logError('stripe-init', e);
+    setStatus('Billing not available: ' + formatError(e), 'error');
+    return;
   }
 
   // Sovereign mode: prime the wallet-auth cache now (one EIP-712 typed-data
-  // popup) so the user's later Pay click — and the balance refresh that
-  // follows — flows without a second prompt. If they cancel the signature,
+  // popup) so the user's later Continue/Pay clicks — and the balance refresh
+  // that follows — flow without a second prompt. If they cancel the signature,
   // surface that in the modal status and leave the modal open so they can retry.
   if (getMode() === 'sovereign' && !hasValidWalletAuthCache()) {
-    if (statusEl) {
-      statusEl.textContent = 'Approve the wallet signature to enable billing for this session…';
-      statusEl.className = 'status info';
-      statusEl.style.display = 'block';
-    }
+    setStatus('Approve the wallet signature to enable billing for this session…', 'info');
     try {
       await getWalletAuthHeader();
-      if (statusEl) statusEl.style.display = 'none';
+      setStatus('');
     } catch (e) {
       logError('wallet-auth-prime', e);
-      if (statusEl) {
-        statusEl.textContent = 'Wallet signature required to fund a ChainSecured account: ' + formatError(e);
-        statusEl.className = 'status error';
-        statusEl.style.display = 'block';
-      }
+      setStatus('Wallet signature required to fund a ChainSecured account: ' + formatError(e), 'error');
       return;
     }
     // Now that we have a valid cache, surface the actual balance.
     loadBillingBalance();
   }
-
-  if (payBtn) payBtn.disabled = false;
 }
 
 function closeBillingModal() {
@@ -340,12 +380,202 @@ function closeBillingModal() {
     overlay.classList.remove('is-open');
     overlay.setAttribute('aria-hidden', 'true');
   }
+  resetPaymentElement();
+  setModalStep('amount');
+  setStatus('');
+}
+
+async function handleContinue() {
+  const apiKey = billingAuthKey();
+  if (!apiKey) return;
+
+  const amountInput = document.getElementById('billing-amount');
+  const amountCents = parseInt(amountInput?.value || '0', 10);
+  if (!amountCents || amountCents < 500) {
+    setStatus('Minimum amount is $5.00.', 'error');
+    return;
+  }
+
+  const continueBtn = document.getElementById('billing-continue-btn');
+  if (continueBtn) continueBtn.disabled = true;
+  setStatus('');
+
+  const ctrl = ensureAbortController();
+  try {
+    await ensureStripe();
+    if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
+    const client = await getClient();
+    if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
+    const opts = await billingRequestOptions(ctrl.signal);
+    if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
+    const intent = await client.createPaymentIntent(apiKey, amountCents, opts);
+    if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
+    _paymentIntentId = intent.payment_intent_id;
+
+    _elements = _stripe.elements({ clientSecret: intent.client_secret });
+    // Suppress billing-address collection — credits are scoped to the
+    // account/wallet, not to a postal address. `address: 'never'` hides the
+    // address fields entirely; Stripe still gathers any name/email that a
+    // specific payment method strictly needs.
+    _paymentElement = _elements.create('payment', {
+      fields: { billingDetails: { address: 'never' } },
+    });
+    _paymentElement.mount('#stripe-payment-element');
+    setModalStep('payment');
+  } catch (e) {
+    if (e && (e.name === 'AbortError' || ctrl.signal.aborted)) return;
+    if (getMode() === 'sovereign' && isAuthError(e)) evictWalletAuthCache();
+    logError('createPaymentIntent', e);
+    if (billingAuthKey() === apiKey) {
+      setStatus('Could not start payment: ' + formatError(e), 'error');
+    }
+  } finally {
+    if (continueBtn) continueBtn.disabled = false;
+  }
+}
+
+function handleBack() {
+  resetPaymentElement();
+  setStatus('');
+  setModalStep('amount');
+}
+
+async function handlePay() {
+  const apiKey = billingAuthKey();
+  if (!apiKey || !_stripe || !_elements || !_paymentIntentId) return;
+
+  const payBtn = document.getElementById('billing-pay-btn');
+  const backBtn = document.getElementById('billing-back-btn');
+  if (payBtn) payBtn.disabled = true;
+  if (backBtn) backBtn.disabled = true;
+  setStatus('');
+
+  const intentId = _paymentIntentId;
+  const ctrl = ensureAbortController();
+  // Stripe redirects to return_url for methods that require it (crypto);
+  // card payments complete inline when redirect: 'if_required' is set.
+  const returnUrl = window.location.origin + window.location.pathname;
+
+  try {
+    const result = await _stripe.confirmPayment({
+      elements: _elements,
+      confirmParams: {
+        return_url: returnUrl,
+        // We tell the Payment Element not to render address fields
+        // (`fields.billingDetails.address: 'never'`), so Stripe requires us
+        // to pass a billing-address country here for methods that need one
+        // (e.g. card AVS). Default to 'US'; crypto methods ignore this.
+        payment_method_data: {
+          billing_details: { address: { country: 'US' } },
+        },
+      },
+      redirect: 'if_required',
+    });
+
+    if (result.error) {
+      throw new Error(result.error.message);
+    }
+
+    if (billingAuthKey() !== apiKey || ctrl.signal.aborted) {
+      // Payment succeeded on Stripe but the session changed before we could
+      // credit. The PaymentIntent is settled against the prior wallet's
+      // Stripe customer; surface the intent ID for manual reconciliation.
+      setStatus('Payment processed — session changed before crediting. Reference: ' + intentId, 'info');
+      return;
+    }
+
+    try {
+      const client = await getClient();
+      if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
+      // Re-fetch options in case the cached wallet-auth header expired during
+      // the Stripe.js round-trip.
+      const opts = await billingRequestOptions(ctrl.signal);
+      if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
+      await client.confirmPayment(apiKey, intentId, opts);
+    } catch (confirmErr) {
+      if (confirmErr && (confirmErr.name === 'AbortError' || ctrl.signal.aborted)) return;
+      logError('confirmPayment', confirmErr, { intentId });
+      closeBillingModal();
+      showTopLevelStatus('Payment processed — credit pending. Reference: ' + intentId, 'info');
+      await loadBillingBalance();
+      return;
+    }
+
+    closeBillingModal();
+    await loadBillingBalance();
+  } catch (e) {
+    if (e && (e.name === 'AbortError' || ctrl.signal.aborted)) return;
+    if (getMode() === 'sovereign' && isAuthError(e)) evictWalletAuthCache();
+    logError('payment', e, { intentId });
+    if (billingAuthKey() === apiKey) {
+      setStatus('Payment failed: ' + formatError(e), 'error');
+    }
+  } finally {
+    if (payBtn) payBtn.disabled = false;
+    if (backBtn) backBtn.disabled = false;
+  }
+}
+
+export async function handleBillingReturn() {
+  const params = new URLSearchParams(window.location.search);
+  const intentId = params.get('payment_intent');
+  const status = params.get('redirect_status');
+  if (!intentId || !status) return;
+
+  // Strip Stripe redirect params regardless of outcome so reloads don't retrigger.
+  const cleanUrl = window.location.origin + window.location.pathname + window.location.hash;
+  window.history.replaceState({}, '', cleanUrl);
+
+  const apiKey = billingAuthKey();
+  if (!apiKey) return;
+
+  // Stripe redirect_status values: `succeeded`, `processing`,
+  // `requires_payment_method`, `requires_action`, `failed`, `canceled`.
+  // For `succeeded` and `processing` we still call the backend so it can
+  // credit (succeeded) or record-pending (processing) — Stripe only flips
+  // crypto intents to `succeeded` after on-chain confirmation, but the
+  // settled state can arrive while the user is mid-redirect.
+  if (status !== 'succeeded' && status !== 'processing') {
+    showTopLevelStatus('Payment ' + status + '. Reference: ' + intentId, 'error');
+    return;
+  }
+
+  const ctrl = ensureAbortController();
+  try {
+    const client = await getClient();
+    if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
+    const opts = await billingRequestOptions(ctrl.signal);
+    if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
+    await client.confirmPayment(apiKey, intentId, opts);
+    if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
+    if (status === 'succeeded') {
+      showTopLevelStatus('Credits added to your account.', 'success');
+    } else {
+      showTopLevelStatus('Payment processing — credits will appear once settled. Reference: ' + intentId, 'info');
+    }
+    await loadBillingBalance();
+  } catch (e) {
+    if (e && (e.name === 'AbortError' || ctrl.signal.aborted)) return;
+    if (getMode() === 'sovereign' && isAuthError(e)) evictWalletAuthCache();
+    logError('handleBillingReturn', e, { intentId });
+    showTopLevelStatus('Payment processed — credit pending. Reference: ' + intentId, 'info');
+  }
+}
+
+function showTopLevelStatus(message, kind) {
+  const el = document.getElementById('overview-status');
+  if (!el) return;
+  el.textContent = message;
+  el.className = 'status ' + (kind || 'info');
+  el.style.display = 'block';
 }
 
 export function initBilling() {
   const addFundsBtn = document.getElementById('btn-add-funds');
   const closeBtn = document.getElementById('billing-modal-close-btn');
   const cancelBtn = document.getElementById('billing-cancel-btn');
+  const continueBtn = document.getElementById('billing-continue-btn');
+  const backBtn = document.getElementById('billing-back-btn');
   const payBtn = document.getElementById('billing-pay-btn');
 
   if (addFundsBtn) addFundsBtn.addEventListener('click', openAddFundsModal);
@@ -353,97 +583,7 @@ export function initBilling() {
   if (noFundsLink) noFundsLink.addEventListener('click', (e) => { e.preventDefault(); openAddFundsModal(); });
   if (closeBtn) closeBtn.addEventListener('click', closeBillingModal);
   if (cancelBtn) cancelBtn.addEventListener('click', closeBillingModal);
-
-  if (payBtn) {
-    payBtn.addEventListener('click', async () => {
-      const apiKey = billingAuthKey();
-      if (!apiKey || !_stripe || !_stripeCard) return;
-
-      const amountInput = document.getElementById('billing-amount');
-      const amountCents = parseInt(amountInput.value, 10);
-      const statusEl = document.getElementById('billing-modal-status');
-
-      // Client-side validation: minimum $5.00
-      if (!amountCents || amountCents < 500) {
-        if (statusEl) {
-          statusEl.textContent = 'Minimum amount is $5.00.';
-          statusEl.className = 'status error';
-          statusEl.style.display = 'block';
-        }
-        return;
-      }
-
-      payBtn.disabled = true;
-      if (statusEl) { statusEl.style.display = 'none'; }
-
-      const ctrl = ensureAbortController();
-      let intentId = null;
-      try {
-        const client = await getClient();
-        if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
-        const opts = await billingRequestOptions(ctrl.signal);
-        if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
-        const intent = await client.createPaymentIntent(apiKey, amountCents, opts);
-        if (billingAuthKey() !== apiKey || ctrl.signal.aborted) {
-          // Auth changed after intent was created — log but don't proceed.
-          // The PaymentIntent will simply expire unconfirmed.
-          logError('payment', new Error('session changed mid-flight, dropping intent'), { intentId: intent.payment_intent_id });
-          return;
-        }
-        intentId = intent.payment_intent_id;
-
-        const result = await _stripe.confirmCardPayment(intent.client_secret, {
-          payment_method: { card: _stripeCard },
-        });
-
-        if (result.error) {
-          throw new Error(result.error.message);
-        }
-
-        if (billingAuthKey() !== apiKey || ctrl.signal.aborted) {
-          // Card was charged, but the session changed before we could call
-          // confirmPayment. The funds are reserved on the original wallet's
-          // Stripe customer; surface the intent ID for manual reconciliation.
-          if (statusEl) {
-            statusEl.textContent = 'Payment processed — session changed before crediting. Reference: ' + intent.payment_intent_id;
-            statusEl.className = 'status info';
-            statusEl.style.display = 'block';
-          }
-          return;
-        }
-
-        // Separate try for confirmPayment — card is already charged at this point
-        try {
-          // Re-fetch options in case the cached wallet-auth header expired during the Stripe.js round-trip.
-          const opts2 = await billingRequestOptions(ctrl.signal);
-          if (billingAuthKey() !== apiKey || ctrl.signal.aborted) return;
-          await client.confirmPayment(apiKey, intent.payment_intent_id, opts2);
-        } catch (confirmErr) {
-          logError('confirmPayment', confirmErr, { intentId });
-          if (statusEl) {
-            statusEl.textContent = 'Payment processed — credit pending. Reference: ' + intent.payment_intent_id;
-            statusEl.className = 'status info';
-            statusEl.style.display = 'block';
-          }
-          closeBillingModal();
-          await loadBillingBalance();
-          return;
-        }
-
-        closeBillingModal();
-        await loadBillingBalance();
-      } catch (e) {
-        if (e && (e.name === 'AbortError' || ctrl.signal.aborted)) return;
-        if (getMode() === 'sovereign' && isAuthError(e)) evictWalletAuthCache();
-        logError('payment', e, { intentId });
-        if (statusEl && billingAuthKey() === apiKey) {
-          statusEl.textContent = 'Payment failed: ' + formatError(e);
-          statusEl.className = 'status error';
-          statusEl.style.display = 'block';
-        }
-      } finally {
-        payBtn.disabled = false;
-      }
-    });
-  }
+  if (continueBtn) continueBtn.addEventListener('click', handleContinue);
+  if (backBtn) backBtn.addEventListener('click', handleBack);
+  if (payBtn) payBtn.addEventListener('click', handlePay);
 }
