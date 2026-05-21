@@ -2,7 +2,7 @@ name: Contract Bindings Check
 
 on:
   push:
-    branches: [main, next]
+    branches: [main]
   pull_request:
 
 permissions:
