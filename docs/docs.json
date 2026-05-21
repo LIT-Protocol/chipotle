@@ -32,6 +32,7 @@
               "lit-actions/imports",
               "lit-actions/examples",
               "lit-actions/patterns",
+              "lit-actions/secrets",
               "lit-actions/limits",
               {
                 "group": "Migration",
