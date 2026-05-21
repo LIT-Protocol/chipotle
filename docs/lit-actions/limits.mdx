@@ -13,11 +13,10 @@ The following limits apply to all Lit Action executions on Chipotle. They are de
 
 | Limit | Default |
 |---|---|
-| Maximum action code size (inline) | 16 MB |
+| Maximum combined `code` + `js_params` payload | 16 MB |
 | Maximum IPFS action size | N/A |
-| Maximum `js_params` payload | 64 KB |
 
-Action code submitted inline via the API or Dashboard must not exceed 16 MB. Downloading actions via IPFS is not currently supported. If your action requires large static data, consider fetching it at runtime via `fetch` rather than bundling it into the action itself.
+Action code and `js_params` share a single 16 MB budget — `code` and `js_params` may each be as large as you like as long as the sum of their sizes (code bytes + JSON-serialized `js_params` bytes) does not exceed 16 MB. Downloading actions via IPFS is not currently supported. If your action requires large static data, consider fetching it at runtime via `fetch` rather than bundling it into the action itself.
 
 ---
 

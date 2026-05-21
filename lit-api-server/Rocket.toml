@@ -5,5 +5,5 @@ logging = { level = "info" }
 
 [default.limits]
 form = "10 MiB"
-json = "10 MiB"
+json = "20 MiB"
 file = "10 MiB"
