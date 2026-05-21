@@ -38,7 +38,8 @@ jobs:
       - name: Install Foundry
         uses: foundry-rs/foundry-toolchain@v1
         with:
-          version: stable
+          # Pinned for reproducibility. Bump intentionally when upgrading.
+          version: v1.5.1
 
       - name: Build contracts
         working-directory: lit-api-server/blockchain/lit_node_express

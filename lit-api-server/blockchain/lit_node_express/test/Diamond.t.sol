@@ -49,7 +49,8 @@ contract DiamondTest is BaseTest {
     }
 
     function test_fallback_unknownSelectorReverts() public {
-        // FunctionNotFound(bytes4) selector + arbitrary bytes4
+        // Send calldata starting with a selector the diamond has not cut in, so the
+        // fallback's lookup returns address(0) and reverts with FunctionNotFound.
         bytes4 unknown = bytes4(0xdeadbeef);
         (bool ok,) = d.diamond.call(abi.encodePacked(unknown));
         assertFalse(ok, "call to unknown selector should revert");

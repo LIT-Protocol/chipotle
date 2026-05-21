@@ -14,7 +14,13 @@ import {IDiamond} from "../../interfaces/IDiamond.sol";
 import {IDiamondCut} from "../../interfaces/IDiamondCut.sol";
 
 /// @notice Test-only helper that deploys an `AccountConfig` diamond with all
-///         production facets cut in. Mirrors the production Rust `contract_deployer`.
+///         production facets cut in.
+/// @dev    The production Rust `contract_deployer` derives selectors from the
+///         compiled facet ABI. To keep this helper self-contained (and avoid
+///         pulling in cheatcode-driven ABI parsing in every test run), the
+///         selector arrays below are maintained by hand. If you add or rename
+///         a public/external function on any facet, update the matching
+///         `*Selectors()` function or the new selector will not be cut in.
 library DiamondDeploy {
     struct Deployed {
         address payable diamond;

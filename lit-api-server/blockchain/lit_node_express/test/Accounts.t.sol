@@ -160,7 +160,10 @@ contract AccountsTest is BaseTest {
         writes.registerWalletDerivation(hash, pkpAddr, 43, "dup", "dup");
     }
 
-    function test_listGroupContents_unknownAccountReverts() public {
+    function test_views_unknownAccountReverts() public {
+        // Any read that resolves through `getReadOnlyAccount` should revert for a
+        // hash that has never been written. Using `getAccountWalletAddress` as the
+        // probe — the same revert path covers every account-scoped view.
         uint256 hash = apiKeyHashOf(user);
         vm.expectRevert(abi.encodeWithSelector(AppStorage.AccountDoesNotExist.selector, hash));
         views_.getAccountWalletAddress(hash);
