@@ -21,9 +21,6 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     && rm -rf /var/lib/apt/lists/*
 
-# Drop privileges so an RCE cannot weaponise /var/run/dstack.sock as a KMS oracle.
-RUN useradd -u 10001 -m lit
-
 WORKDIR /app
 
 COPY --from=builder /build/lit-api-server/target/release/lit-api-server /usr/local/bin/
@@ -33,7 +30,5 @@ COPY --from=builder /build/lit-api-server/log_levels.toml /app/
 # NodeConfig.toml required at startup (main branch uses NodeConfig.main.toml; default: next)
 ARG NODE_CONFIG=NodeConfig.next.toml
 COPY --from=builder /build/lit-api-server/${NODE_CONFIG} /app/NodeConfig.toml
-
-USER lit
 
 CMD ["lit-api-server"]
