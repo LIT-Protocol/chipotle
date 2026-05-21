@@ -25,6 +25,16 @@ dstack-sdk = "0.1.2"
 derive_builder = "0.12.0"
 derive_more = { version = "2" , features = ["display"] }
 
+alloy = { version = "1.0", features = [
+    "contract",
+    "dyn-abi",
+    "eip712",
+    "network",
+    "providers",
+    "rpc-types",
+    "signer-local",
+    "sol-types",
+] }
 ethers = { version = "2.0.8", features = ["abigen", "legacy"] }
 ethers-providers = "2"
 git-version = "0.3.9"

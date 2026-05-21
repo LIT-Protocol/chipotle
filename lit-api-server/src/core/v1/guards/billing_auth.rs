@@ -24,7 +24,7 @@
 //! query balance and spawn PaymentIntents. The signature proves possession of
 //! the wallet's private key.
 
-use ethers::utils::keccak256;
+use alloy::primitives::keccak256;
 use rocket::http::Status;
 use rocket::request::{FromRequest, Outcome, Request};
 use rocket_okapi::Result as RocketOkapiResult;
@@ -97,7 +97,7 @@ impl<'r> FromRequest<'r> for BillingAuth {
                 ) {
                     Ok(wallet) => {
                         let wallet_hex = format!("0x{:x}", wallet);
-                        let hash = keccak256(wallet.as_bytes());
+                        let hash = keccak256(wallet.as_slice());
                         let api_key_hash_hex = format!("0x{}", hex::encode(hash));
                         return Outcome::Success(BillingAuth::WalletSigned {
                             wallet_address_hex: wallet_hex,
