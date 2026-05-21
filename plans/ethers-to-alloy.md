@@ -20,10 +20,11 @@ EIP-712 / signer / provider stack on a maintained codebase.
 
 | Workspace | Files touching ethers | Notes |
 |---|---|---|
-| `lit-api-server` | 22 source files | Providers, signers, middleware, types, EIP-712, `abigen!` |
-| `lit-api-server/blockchain/rust_generator_and_deployer` | 8 files (~3.4k LoC generated) | Standalone cargo workspace — contract codegen + deployer binary |
-| `lit-core` | 0 (only a comment) | Already declares `alloy = "0.12.5"` in `[workspace.dependencies]` but no crate consumes it |
-| `lit-actions` | 0 | Not affected |
+| `lit-api-server` | 22 Rust source files + Cargo manifest/lockfile | Providers, signers, middleware, types, EIP-712, `abigen!` |
+| `lit-api-server/blockchain/rust_generator_and_deployer` | 8 Rust files (~3.4k LoC generated) + Cargo manifest/lockfile | Standalone cargo workspace — contract codegen + deployer binary |
+| `lit-core` | 0 Rust imports; 1 workspace manifest dep; 1 explanatory comment | No code consumes `ethers`, but `[workspace.dependencies]` still declares it and must be removed in the final Rust dependency-drop phase |
+| `lit-actions` | Bundled/runtime `ethers.js` API, not `ethers-rs` | Separate JS/runtime API surface; not part of the RustSec-driven `ethers-rs` removal unless we intentionally make a breaking Lit Actions API change |
+| `lit-static` / `examples` / docs / k6 | `ethers.js` examples, browser SDK/dashboard code, Hardhat scripts, docs snippets | Separate JS cleanup/follow-up; Alloy is Rust-only, so these need an explicit replacement strategy (likely viem/native helpers) rather than being folded into the Rust migration |
 
 ## Target version
 
@@ -109,10 +110,13 @@ Largest single PR but mostly mechanical regeneration.
   - [ ] `c_diamond_multi_init.rs`
   - [ ] `c_ownership_facet.rs`
 
-### Phase 7 — Drop ethers
+### Phase 7 — Drop Rust `ethers-rs`
 - [ ] Remove `ethers` + `ethers-providers` from `lit-api-server/Cargo.toml`
-- [ ] Remove `ethers` from `lit-core/Cargo.toml` workspace deps
+- [ ] Remove `ethers` from `lit-core/Cargo.toml` workspace deps (no Rust code imports it; this is a stale workspace dependency only)
 - [ ] Remove `ethers` from `rust_generator_and_deployer/Cargo.toml`
+- [ ] Delete `ethers` / `ethers-providers` entries from the affected `Cargo.lock` files after dependency resolution
+- [ ] Delete the Phase 3 cross-implementation parity test in `lit-api-server/src/core/eip712.rs` (`cross_impl_parity_ethers_signed_verifies_under_alloy`), since it intentionally imports `ethers` until the final Rust drop
+- [ ] Verify `git grep -n -E 'ethers::|use ethers|abigen!|ethers-providers|^ethers[[:space:]]*=' -- ':*.rs' ':*.toml' ':!**/target/**'` only returns allowed historical docs/comments, not build inputs
 - [ ] Delete these entries from `deny.toml` ignore list:
   - [ ] `RUSTSEC-2023-0071`
   - [ ] `RUSTSEC-2026-0049`
@@ -121,7 +125,20 @@ Largest single PR but mostly mechanical regeneration.
   - [ ] `RUSTSEC-2026-0104`
 - [ ] Update `deny.toml` history comment with the snapshot diff
 - [ ] `cargo deny check advisories` clean (modulo remaining unrelated advisories)
-- [ ] `cargo tree | grep -E '(ethers|rustls-webpki 0\.10|rsa)' ` returns nothing in any workspace
+- [ ] `cargo tree | grep -E '(ethers|rustls-webpki 0\.10|rsa)' ` returns nothing in each Rust workspace:
+  - [ ] `lit-core`
+  - [ ] `lit-api-server`
+  - [ ] `lit-api-server/blockchain/rust_generator_and_deployer`
+
+### Phase 8 — Inventory / replace non-Rust `ethers.js` surfaces
+This is a separate cleanup from the RustSec-driven `ethers-rs` migration. Alloy does not replace browser/Node `ethers.js`, and Lit Actions currently exposes `ethers.js` as a runtime global, so this phase should start with an API-compat decision rather than a blind removal.
+
+- [ ] Decide whether `lit-actions` should continue exposing `ethers.js` as a supported global. If not, plan the breaking-change window, replacement helper/API, and docs migration.
+- [ ] `lit-actions/ext/js/00_ethers.js`, `05_globalsDocs.js`, `99_patches.js`, `server/cdn_module_loader.rs`, generated docs/types — either keep as an explicit supported runtime API or replace with the chosen JS alternative.
+- [ ] `lit-static/core_sdk.js`, `wallet_connect.js`, `tx_lifecycle.js`, `dapps/dashboard/*`, `dapps/monitor/*` — replace browser `ethers.js` usage with the chosen JS library/native helpers, or explicitly document why these remain on `ethers.js`.
+- [ ] `examples/*` and `lit-api-server/blockchain/lit_node_express` Hardhat scripts/package manifests — replace direct `ethers` dependencies/usages where practical; note that Hardhat's `hre.ethers` plugin usage may require a larger tooling migration.
+- [ ] Docs / README / k6 snippets — update examples once the runtime/static/example replacements land.
+- [ ] Verification for JS cleanup: `git grep -n -i 'ethers' -- ':!**/node_modules/**' ':!**/target/**'` returns only intentionally retained references.
 
 ## Risk register
 
