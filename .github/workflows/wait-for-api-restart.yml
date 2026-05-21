@@ -118,6 +118,13 @@ jobs:
           # The API's commit_version is produced by git_version!() which runs
           # git describe --always at compile time. Reproduce the same output
           # here so we can compare directly.
+          #
+          # Note: git describe abbreviates the SHA using core.abbrev=auto
+          # (default since Git 2.11), which picks length based on the local
+          # repo's object count. The builder container and this runner can
+          # differ by a character (e.g. g615bf66 vs g615bf664), so we accept
+          # any pair where one side is a prefix of the other — the shorter
+          # SHA is always a prefix of the longer one.
           EXPECTED_VERSION=$(git describe --always "${{ inputs.expected_sha }}")
 
           echo "Polling $VERSION_URL for commit_version == $EXPECTED_VERSION (timeout: ${TIMEOUT}s)..."
@@ -125,8 +132,10 @@ jobs:
 
           while true; do
             CURRENT_VERSION=$(curl -sf "$VERSION_URL" 2>/dev/null | jq -r '.commit_version // empty' 2>/dev/null || true)
-            if [ "$CURRENT_VERSION" = "$EXPECTED_VERSION" ]; then
-              echo "Version matched: $CURRENT_VERSION"
+            case "$EXPECTED_VERSION" in "$CURRENT_VERSION"*) PREFIX_MATCH=1 ;; *) PREFIX_MATCH=0 ;; esac
+            case "$CURRENT_VERSION" in "$EXPECTED_VERSION"*) REVERSE_MATCH=1 ;; *) REVERSE_MATCH=0 ;; esac
+            if [ -n "$CURRENT_VERSION" ] && { [ "$PREFIX_MATCH" = 1 ] || [ "$REVERSE_MATCH" = 1 ]; }; then
+              echo "Version matched: $CURRENT_VERSION (expected: $EXPECTED_VERSION)"
               break
             fi
             if [ "$(date +%s)" -ge "$deadline" ]; then

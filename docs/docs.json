@@ -93,7 +93,8 @@
   "footer": {
     "socials": {
       "x": "https://twitter.com/litprotocol",
-      "discord": "https://litgateway.com/discord"
+      "discord": "https://litgateway.com/discord",
+      "github": "https://github.com/LIT-Protocol/chipotle"
     }
   }
 }

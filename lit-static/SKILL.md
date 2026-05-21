@@ -200,8 +200,7 @@ Use `[0]` as wildcard for "all groups" in any group array.
 
 | Limit | Value |
 |-------|-------|
-| Max code size (inline) | 16 MB |
-| Max `js_params` payload | 64 KB |
+| Max combined `code` + `js_params` payload | 16 MB |
 | Max execution time | 15 minutes |
 | Max memory | 64 MB |
 | Max HTTP fetches per action | 50 |

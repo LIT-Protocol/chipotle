@@ -69,7 +69,7 @@ jobs:
 
       - name: Build contract deployer
         working-directory: lit-api-server/blockchain/rust_generator_and_deployer
-        run: cargo build --bin contract_deployer
+        run: cargo build --locked --bin contract_deployer
 
       - name: Deploy facets and generate proposal
         working-directory: lit-api-server/blockchain/lit_node_express

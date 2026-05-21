@@ -38,7 +38,6 @@ lit-actions-server = { path = "server" }
 lit-actions-snapshot = { path = "snapshot" }
 lit-api-core = { path = "../lit-core/lit-api-core" }
 lit-core = { path = "../lit-core/lit-core", features = ["unix"] }
-lit-logging = { path = "../lit-core/lit-logging" }
 lit-observability = { path = "../lit-core/lit-observability" }
 
 [patch.crates-io]

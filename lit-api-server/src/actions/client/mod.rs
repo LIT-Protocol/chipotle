@@ -24,11 +24,13 @@ pub(crate) const DEFAULT_MEMORY_LIMIT_MB: u32 = 64; // 64MB
 pub(crate) const DEFAULT_MAX_CODE_LENGTH: u64 = 16 * 1024 * 1024; // 16MB
 pub(crate) const DEFAULT_MAX_CONSOLE_LOG_LENGTH: u64 = 1024 * 100; // 100KB
 pub(crate) const DEFAULT_MAX_FETCH_COUNT: u32 = 50;
-pub(crate) const DEFAULT_MAX_RESPONSE_LENGTH: u64 = 1024 * 100; // 100KB
+pub(crate) const DEFAULT_MAX_RESPONSE_LENGTH: u64 = 1024 * 1024; // 1MB
 pub(crate) const DEFAULT_MAX_GET_KEYS_COUNT: u32 = 10; // 10 signature requests per action execution
 pub(crate) const DEFAULT_MAX_RETRIES: u32 = 3;
 
 // Upper-bound constants (10x default) — chain config values beyond these are rejected.
+// Note: MAX_MAX_RESPONSE_LENGTH is intentionally omitted; the response cap is fixed at
+// DEFAULT_MAX_RESPONSE_LENGTH and chain config can only lower it.
 pub(crate) const MAX_TIMEOUT_MS: u64 = DEFAULT_TIMEOUT_MS * 10;
 pub(crate) const MAX_ASYNC_TIMEOUT_MS: u64 = DEFAULT_ASYNC_TIMEOUT_MS * 10;
 pub(crate) const MAX_CLIENT_TIMEOUT_MS_BUFFER: u64 = DEFAULT_CLIENT_TIMEOUT_MS_BUFFER * 10;
@@ -36,7 +38,6 @@ pub(crate) const MAX_MEMORY_LIMIT_MB: u32 = DEFAULT_MEMORY_LIMIT_MB * 10;
 pub(crate) const MAX_MAX_CODE_LENGTH: u64 = DEFAULT_MAX_CODE_LENGTH * 10;
 pub(crate) const MAX_MAX_CONSOLE_LOG_LENGTH: u64 = DEFAULT_MAX_CONSOLE_LOG_LENGTH * 10;
 pub(crate) const MAX_MAX_FETCH_COUNT: u32 = DEFAULT_MAX_FETCH_COUNT * 10;
-pub(crate) const MAX_MAX_RESPONSE_LENGTH: u64 = DEFAULT_MAX_RESPONSE_LENGTH * 10;
 pub(crate) const MAX_MAX_GET_KEYS_COUNT: u32 = DEFAULT_MAX_GET_KEYS_COUNT * 10;
 pub(crate) const MAX_MAX_RETRIES: u32 = DEFAULT_MAX_RETRIES * 10;
 

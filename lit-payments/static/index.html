@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lit Payments — Admin</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body class="dashboard">
+  <header class="dashboard-header">
+    <h1>Lit Payments</h1>
+    <div class="header-right">
+      <span id="who" class="muted">Loading…</span>
+      <button id="logout-btn" class="ghost" type="button">Sign out</button>
+    </div>
+  </header>
+
+  <main class="dashboard-main">
+
+    <!-- ── Look up customer ─────────────────────────────────────── -->
+    <section class="card">
+      <h2>Look up a customer</h2>
+      <p class="muted">Enter an email <em>or</em> a wallet address.</p>
+      <form id="lookup-form" class="row-form">
+        <input id="lookup-input" type="text" placeholder="email or 0x…" autocomplete="off" required>
+        <button type="submit">Look up</button>
+      </form>
+      <div id="lookup-status" class="status" role="status" aria-live="polite"></div>
+      <div id="matches"></div>
+    </section>
+
+    <!-- ── Recent grants ────────────────────────────────────────── -->
+    <section class="card">
+      <h2>Your recent grants</h2>
+      <table id="grants-table" class="grants-table">
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Customer</th>
+            <th>Amount</th>
+            <th>Note</th>
+          </tr>
+        </thead>
+        <tbody id="grants-tbody">
+          <tr><td colspan="4" class="muted">Loading…</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+  </main>
+
+  <template id="match-template">
+    <article class="match">
+      <div class="match-head">
+        <div>
+          <div class="match-email"></div>
+          <div class="match-wallet muted"></div>
+        </div>
+        <div class="match-balance"></div>
+      </div>
+      <form class="grant-form">
+        <label>
+          Amount ($)
+          <input type="number" name="dollars" step="0.01" min="0.01" required>
+        </label>
+        <label class="note-label">
+          Note (optional — appears in Stripe + audit log)
+          <input type="text" name="note" maxlength="120">
+        </label>
+        <button type="submit">Grant credit</button>
+        <span class="status" role="status" aria-live="polite"></span>
+      </form>
+    </article>
+  </template>
+
+  <script>
+    /* ── auth + chrome ──────────────────────────────────────────── */
+    (async () => {
+      try {
+        const resp = await fetch('/api/me', { credentials: 'same-origin' });
+        if (resp.status === 401) { window.location.href = '/login'; return; }
+        const me = await resp.json();
+        document.getElementById('who').textContent = `${me.email} (${me.role})`;
+      } catch (e) {
+        document.getElementById('who').textContent = 'profile unavailable';
+      }
+    })();
+
+    document.getElementById('logout-btn').addEventListener('click', async () => {
+      await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
+      window.location.href = '/login';
+    });
+
+    /* ── shared helpers ─────────────────────────────────────────── */
+    function fmtCents(c) {
+      const sign = c < 0 ? '-' : '';
+      const abs = Math.abs(c);
+      return `${sign}$${Math.floor(abs/100)}.${String(abs%100).padStart(2,'0')}`;
+    }
+    function fmtTime(iso) {
+      const d = new Date(iso);
+      return d.toLocaleString();
+    }
+    function genUuid() {
+      if (crypto.randomUUID) return crypto.randomUUID();
+      // Fallback for very old browsers — RFC 4122 v4.
+      const buf = new Uint8Array(16);
+      crypto.getRandomValues(buf);
+      buf[6] = (buf[6] & 0x0f) | 0x40;
+      buf[8] = (buf[8] & 0x3f) | 0x80;
+      const hex = [...buf].map(b => b.toString(16).padStart(2,'0')).join('');
+      return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+    }
+    function setStatus(el, text, kind) {
+      el.textContent = text;
+      el.className = 'status' + (kind ? ' ' + kind : '');
+    }
+
+    /* ── lookup + match rendering ───────────────────────────────── */
+    const lookupForm   = document.getElementById('lookup-form');
+    const lookupInput  = document.getElementById('lookup-input');
+    const lookupStatus = document.getElementById('lookup-status');
+    const matchesEl    = document.getElementById('matches');
+    const matchTpl     = document.getElementById('match-template');
+
+    lookupForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const raw = lookupInput.value.trim();
+      if (!raw) return;
+      const isWallet = raw.startsWith('0x') || raw.startsWith('0X');
+      const param = isWallet ? `wallet=${encodeURIComponent(raw)}` : `email=${encodeURIComponent(raw)}`;
+      setStatus(lookupStatus, 'Looking up…', '');
+      matchesEl.innerHTML = '';
+      try {
+        const resp = await fetch(`/api/customer/lookup?${param}`, { credentials: 'same-origin' });
+        const body = await resp.json();
+        if (!resp.ok) { setStatus(lookupStatus, body.error || 'Lookup failed', 'error'); return; }
+        if (!body.matches.length) {
+          setStatus(lookupStatus, isWallet
+            ? 'No Stripe customer for that wallet. Ask the user to top up at least once via the dashboard first.'
+            : 'No Stripe customer with that email. Ask the user to set their email in the dashboard settings.',
+            'error');
+          return;
+        }
+        setStatus(lookupStatus, `${body.matches.length} match${body.matches.length === 1 ? '' : 'es'}.`, 'ok');
+        for (const m of body.matches) renderMatch(m);
+      } catch (err) {
+        setStatus(lookupStatus, 'Lookup failed: ' + err, 'error');
+      }
+    });
+
+    function renderMatch(m) {
+      const node = matchTpl.content.firstElementChild.cloneNode(true);
+      node.querySelector('.match-email').textContent  = m.email || '(no email)';
+      node.querySelector('.match-wallet').textContent = m.wallet_address || '(no wallet)';
+      node.querySelector('.match-balance').textContent = m.balance_display;
+      const grantForm   = node.querySelector('.grant-form');
+      const status      = node.querySelector('.status');
+      const balanceCell = node.querySelector('.match-balance');
+
+      grantForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const dollars = parseFloat(grantForm.dollars.value);
+        if (!isFinite(dollars) || dollars <= 0) {
+          setStatus(status, 'Amount must be a positive number.', 'error');
+          return;
+        }
+        const cents = Math.round(dollars * 100);
+        const note  = grantForm.note.value.trim();
+        const button = grantForm.querySelector('button');
+        button.disabled = true;
+        setStatus(status, 'Granting…', '');
+        try {
+          const resp = await fetch('/api/grant', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              idempotency_key: genUuid(),
+              wallet_address: m.wallet_address || '',
+              email: m.email || null,
+              cents,
+              note,
+            }),
+          });
+          const body = await resp.json();
+          if (!resp.ok) {
+            setStatus(status, body.error || `Failed (HTTP ${resp.status})`, 'error');
+            button.disabled = false;
+            return;
+          }
+          balanceCell.textContent = body.new_balance_display;
+          setStatus(status,
+            body.idempotent_replay
+              ? `Replay of an earlier grant — no new credit applied. Balance: ${body.new_balance_display}`
+              : `Granted ${fmtCents(cents)}. New balance: ${body.new_balance_display}`,
+            'ok');
+          grantForm.note.value = '';
+          grantForm.dollars.value = '';
+          button.disabled = false;
+          loadGrants();
+        } catch (err) {
+          setStatus(status, 'Grant failed: ' + err, 'error');
+          button.disabled = false;
+        }
+      });
+
+      matchesEl.appendChild(node);
+    }
+
+    /* ── recent grants table ────────────────────────────────────── */
+    const grantsTbody = document.getElementById('grants-tbody');
+
+    async function loadGrants() {
+      try {
+        const resp = await fetch('/api/grants', { credentials: 'same-origin' });
+        const body = await resp.json();
+        if (!resp.ok || !body.grants.length) {
+          grantsTbody.innerHTML =
+            `<tr><td colspan="4" class="muted">${resp.ok ? 'No grants yet.' : (body.error || 'Failed to load')}</td></tr>`;
+          return;
+        }
+        grantsTbody.innerHTML = body.grants.map(g => `
+          <tr>
+            <td>${fmtTime(g.created_at)}</td>
+            <td><div>${g.email || '(no email)'}</div><div class="muted">${g.wallet_address}</div></td>
+            <td>${fmtCents(g.cents)}</td>
+            <td>${g.note || ''}</td>
+          </tr>
+        `).join('');
+      } catch (err) {
+        grantsTbody.innerHTML = `<tr><td colspan="4" class="error">Load failed: ${err}</td></tr>`;
+      }
+    }
+
+    loadGrants();
+  </script>
+</body>
+</html>

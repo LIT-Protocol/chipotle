@@ -1,0 +1,42 @@
+# Dockerfile for lit-payments.
+#
+# Build context: the REPO ROOT (so the sibling `lit-billing-core/` crate is
+# reachable via the COPY commands below).
+#
+# On Fly.io: fly.toml at the repo root points `[build] dockerfile` here, so
+# `fly deploy` from the repo root just works. See lit-payments/README.md.
+
+# ── Build stage ────────────────────────────────────────────────────────────
+FROM rust:1.91-slim-bookworm AS builder
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends pkg-config libssl-dev ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy the crates this service depends on.
+COPY lit-billing-core ./lit-billing-core
+COPY lit-payments    ./lit-payments
+
+WORKDIR /build/lit-payments
+RUN cargo build --release --bin lit-payments
+
+# ── Runtime stage ──────────────────────────────────────────────────────────
+FROM debian:bookworm-slim
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY --from=builder /build/lit-payments/target/release/lit-payments /app/lit-payments
+COPY lit-payments/static     ./static
+COPY lit-payments/migrations ./migrations
+
+# Fly.io (and most container hosts) provide $PORT; main.rs translates it to
+# ROCKET_PORT at startup.
+ENV RUST_LOG=info
+
+ENTRYPOINT ["/app/lit-payments"]

@@ -33,7 +33,6 @@ num_cpus = { version = "1.16" }
 once_cell.workspace = true
 openssl = { version = "0.10.71" }
 opentelemetry.workspace = true
-opentelemetry-semantic-conventions.workspace = true
 opentelemetry_sdk.workspace = true
 reqwest = { workspace = true, optional = true }
 rocket = { version = "0.5", features = ["tls", "json"], optional = true }
@@ -61,11 +60,3 @@ path = "../lit-observability"
 git = "https://github.com/LIT-Protocol/zerossl"
 branch = "main"
 optional = true
-
-[dependencies.uuid]
-version = "1.15"
-features = [
-    "v4",
-    "fast-rng",
-    "macro-diagnostics",
-]

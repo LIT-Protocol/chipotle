@@ -45,7 +45,7 @@ jobs:
 
       - name: Generate OpenAPI spec from sources
         working-directory: lit-api-server
-        run: cargo run --bin openapi_spec > "${{ runner.temp }}/openapi-from-source.json"
+        run: cargo run --locked --bin openapi_spec > "${{ runner.temp }}/openapi-from-source.json"
 
       - name: Generate k6 client from spec
         run: |

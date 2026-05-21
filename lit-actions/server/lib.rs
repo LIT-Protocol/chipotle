@@ -2,6 +2,7 @@ mod bundler;
 pub mod cdn_module_loader;
 mod import_rewriter;
 mod runtime;
+mod v8_code_cache;
 pub mod worker_pool;
 
 pub mod server;
