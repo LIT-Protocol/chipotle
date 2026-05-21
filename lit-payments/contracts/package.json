@@ -1,0 +1,30 @@
+{
+  "name": "lit-payments-contracts",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "compile": "hardhat compile",
+    "test": "hardhat clean && hardhat test",
+    "deploy:base-sepolia": "hardhat run scripts/deploy.ts --network baseSepolia",
+    "deploy:base": "hardhat run scripts/deploy.ts --network base",
+    "verify:base-sepolia": "hardhat verify --network baseSepolia",
+    "verify:base": "hardhat verify --network base"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-chai-matchers": "^2.1.2",
+    "@nomicfoundation/hardhat-ethers": "^3.0.8",
+    "@nomicfoundation/hardhat-verify": "^2.1.1",
+    "@types/chai": "^4.3.20",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^22.19.9",
+    "chai": "^4.5.0",
+    "hardhat": "^2.26.0",
+    "ts-node": "^10.9.2",
+    "typescript": "~5.8.0"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.4.0",
+    "dotenv": "^16.4.7",
+    "ethers": "^6.13.5"
+  }
+}

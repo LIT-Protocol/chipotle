@@ -1,0 +1,51 @@
+# Runs hardhat test on every PR touching the lit-payments-contracts project.
+# Compiles the Solidity contracts and executes the TypeScript unit tests.
+
+name: lit-payments-contracts CI
+
+on:
+  pull_request:
+    paths:
+      - "lit-payments/contracts/**"
+      - ".github/workflows/lit-payments-contracts-ci.yml"
+  push:
+    branches: [main, next]
+    paths:
+      - "lit-payments/contracts/**"
+      - ".github/workflows/lit-payments-contracts-ci.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: >
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    name: hardhat test
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Reset workspace to HEAD
+        run: git checkout HEAD -- .
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install contracts dependencies
+        working-directory: lit-payments/contracts
+        run: npm ci
+
+      - name: Compile
+        working-directory: lit-payments/contracts
+        run: npx hardhat compile
+
+      - name: Test
+        working-directory: lit-payments/contracts
+        run: npx hardhat test
