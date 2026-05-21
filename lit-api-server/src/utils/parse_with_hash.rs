@@ -1,12 +1,9 @@
 use crate::core::v1::helpers::api_status::ApiStatus;
-use ethers::{
-    types::{H160, U256},
-    utils::keccak256,
-};
+use alloy::primitives::{Address, U256, keccak256};
 use lit_core::utils::binary::hex_to_bytes;
 
 pub fn api_key_hash(api_key_base_64: &str) -> U256 {
-    U256::from_big_endian(&keccak256(api_key_base_64.as_bytes()))
+    U256::from_be_bytes(keccak256(api_key_base_64.as_bytes()).0)
 }
 
 /// True when `s` is shaped like a precomputed 32-byte keccak256 hash:
@@ -35,7 +32,8 @@ pub fn usage_api_key_to_hash(s: &str) -> U256 {
     if is_precomputed_hash_shape(trimmed) {
         // `is_precomputed_hash_shape` already validated 32-byte hex.
         let bytes = hex_to_bytes(trimmed).expect("validated above");
-        return U256::from_big_endian(&bytes);
+        let arr: [u8; 32] = bytes.try_into().expect("32 bytes validated above");
+        return U256::from_be_bytes(arr);
     }
     api_key_hash(trimmed)
 }
@@ -45,7 +43,7 @@ pub fn hex_array_to_u256_array(hex_array: &[String]) -> Result<Vec<U256>, ApiSta
 }
 
 #[allow(dead_code)]
-pub fn hex_array_to_h160_array(hex_array: &[String]) -> Result<Vec<H160>, ApiStatus> {
+pub fn hex_array_to_h160_array(hex_array: &[String]) -> Result<Vec<Address>, ApiStatus> {
     parse_h160_hex_list(hex_array)
 }
 
@@ -53,15 +51,15 @@ pub fn string_to_hashed_u256(s: &str) -> Result<U256, ApiStatus> {
     parse_u256(s)
 }
 
-pub fn pkp_id_to_h160(s: &str) -> Result<H160, ApiStatus> {
+pub fn pkp_id_to_h160(s: &str) -> Result<Address, ApiStatus> {
     wallet_string_to_h160(s)
 }
 
-pub fn wallet_string_to_h160(s: &str) -> Result<H160, ApiStatus> {
+pub fn wallet_string_to_h160(s: &str) -> Result<Address, ApiStatus> {
     if !(s.starts_with("0x") || s.starts_with("0X")) {
         return Err(ApiStatus::bad_request(
-            anyhow::anyhow!("H160 address must be prefixed with 0x: {}", s),
-            "Unable to parse H160 address",
+            anyhow::anyhow!("Address must be prefixed with 0x: {}", s),
+            "Unable to parse wallet address",
         ));
     }
 
@@ -104,7 +102,7 @@ pub fn hashed_cid_to_u256(hashed_cid: &str) -> Result<U256, ApiStatus> {
 
 fn string_to_bytes_to_hash_to_u256(s: &str) -> Result<U256, ApiStatus> {
     let bytes = keccak256(s.as_bytes());
-    Ok(U256::from_big_endian(&bytes))
+    Ok(U256::from_be_bytes(bytes.0))
 }
 
 /// Parse U256 from a `0x`-prefixed hex string or a decimal string.
@@ -115,30 +113,41 @@ fn parse_u256(s: &str) -> Result<U256, ApiStatus> {
     if s.starts_with("0x") || s.starts_with("0X") {
         let bytes = hex_to_bytes(s)
             .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex for U256"))?;
-        Ok(U256::from_big_endian(&bytes))
+        if bytes.len() > 32 {
+            return Err(ApiStatus::bad_request(
+                anyhow::anyhow!("U256 hex exceeds 32 bytes: got {}", bytes.len()),
+                "invalid hex for U256",
+            ));
+        }
+        // Left-pad to 32 bytes so shorter hex inputs are still accepted.
+        let mut padded = [0u8; 32];
+        let offset = 32 - bytes.len();
+        padded[offset..].copy_from_slice(&bytes);
+        Ok(U256::from_be_bytes(padded))
     } else {
-        U256::from_dec_str(s)
+        U256::from_str_radix(s, 10)
             .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid decimal for U256"))
     }
 }
 
-// Parse H160 from hex string (with or without 0x prefix).
-fn parse_h160(s: &str) -> Result<H160, ApiStatus> {
+// Parse Address from hex string (with or without 0x prefix).
+fn parse_h160(s: &str) -> Result<Address, ApiStatus> {
     let s = s.trim();
     if s.starts_with("0x") || s.starts_with("0X") {
-        let bytes = hex_to_bytes(s)
-            .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex for H160"))?;
+        let bytes = hex_to_bytes(s).map_err(|e| {
+            ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex for Address")
+        })?;
         if bytes.len() != 20 {
             return Err(ApiStatus::bad_request(
-                anyhow::anyhow!("invalid H160: expected 20 bytes, got {}", bytes.len()),
-                "invalid H160: address must be exactly 20 bytes",
+                anyhow::anyhow!("invalid Address: expected 20 bytes, got {}", bytes.len()),
+                "invalid Address: address must be exactly 20 bytes",
             ));
         }
-        Ok(H160::from_slice(&bytes))
+        Ok(Address::from_slice(&bytes))
     } else {
         Err(ApiStatus::bad_request(
-            anyhow::anyhow!("invalid hex for H160"),
-            "invalid hex for H160",
+            anyhow::anyhow!("invalid hex for Address"),
+            "invalid hex for Address",
         ))
     }
 }
@@ -150,12 +159,21 @@ fn parse_u256_hex_list(strings: &[String]) -> Result<Vec<U256>, ApiStatus> {
         .map(|s| {
             let bytes = hex_to_bytes(s.trim())
                 .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex in list"))?;
-            Ok(U256::from_big_endian(&bytes))
+            if bytes.len() > 32 {
+                return Err(ApiStatus::bad_request(
+                    anyhow::anyhow!("U256 hex exceeds 32 bytes: got {}", bytes.len()),
+                    "invalid hex in list",
+                ));
+            }
+            let mut padded = [0u8; 32];
+            let offset = 32 - bytes.len();
+            padded[offset..].copy_from_slice(&bytes);
+            Ok(U256::from_be_bytes(padded))
         })
         .collect::<Result<Vec<_>, _>>()
 }
 
-fn parse_h160_hex_list(strings: &[String]) -> Result<Vec<H160>, ApiStatus> {
+fn parse_h160_hex_list(strings: &[String]) -> Result<Vec<Address>, ApiStatus> {
     strings
         .iter()
         .map(|s| {
@@ -163,11 +181,11 @@ fn parse_h160_hex_list(strings: &[String]) -> Result<Vec<H160>, ApiStatus> {
                 .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "invalid hex in list"))?;
             if bytes.len() != 20 {
                 return Err(ApiStatus::bad_request(
-                    anyhow::anyhow!("invalid H160: expected 20 bytes, got {}", bytes.len()),
-                    "invalid H160: address must be exactly 20 bytes",
+                    anyhow::anyhow!("invalid Address: expected 20 bytes, got {}", bytes.len()),
+                    "invalid Address: address must be exactly 20 bytes",
                 ));
             }
-            Ok(H160::from_slice(&bytes))
+            Ok(Address::from_slice(&bytes))
         })
         .collect::<Result<Vec<_>, _>>()
 }
@@ -201,13 +219,13 @@ mod tests {
         // A valid 0x-prefixed 32-byte hex string should be parsed directly, not re-hashed.
         let hex_str = "0x0000000000000000000000000000000000000000000000000000000000000001";
         let result = usage_api_key_to_hash(hex_str);
-        assert_eq!(result, U256::from(1));
+        assert_eq!(result, U256::from(1u64));
     }
 
     #[test]
     fn usage_api_key_to_hash_trims_whitespace() {
         let hex_str = "  0x0000000000000000000000000000000000000000000000000000000000000002  ";
-        assert_eq!(usage_api_key_to_hash(hex_str), U256::from(2));
+        assert_eq!(usage_api_key_to_hash(hex_str), U256::from(2u64));
     }
 
     #[test]
@@ -278,13 +296,13 @@ mod tests {
     #[test]
     fn parse_u256_decimal() {
         let result = hashed_cid_to_u256("42").unwrap();
-        assert_eq!(result, U256::from(42));
+        assert_eq!(result, U256::from(42u64));
     }
 
     #[test]
     fn parse_u256_hex() {
         let result = hashed_cid_to_u256("0xff").unwrap();
-        assert_eq!(result, U256::from(255));
+        assert_eq!(result, U256::from(255u64));
     }
 
     #[test]
@@ -298,10 +316,16 @@ mod tests {
     }
 
     // ── wallet_string_to_h160 / pkp_id_to_h160 ─────────────────────────
+    fn addr_from_low_u64(n: u64) -> Address {
+        let mut bytes = [0u8; 20];
+        bytes[12..].copy_from_slice(&n.to_be_bytes());
+        Address::from(bytes)
+    }
+
     #[test]
     fn wallet_string_valid_address() {
         let addr = wallet_string_to_h160("0x0000000000000000000000000000000000000001").unwrap();
-        assert_eq!(addr, H160::from_low_u64_be(1));
+        assert_eq!(addr, addr_from_low_u64(1));
     }
 
     #[test]
@@ -320,7 +344,7 @@ mod tests {
     #[test]
     fn pkp_id_valid() {
         let addr = pkp_id_to_h160("0x0000000000000000000000000000000000000042").unwrap();
-        assert_eq!(addr, H160::from_low_u64_be(0x42));
+        assert_eq!(addr, addr_from_low_u64(0x42));
     }
 
     // ── ipfs_cid_to_u256 ───────────────────────────────────────────────
@@ -346,7 +370,7 @@ mod tests {
             "0x00000000000000000000000000000000000000000000000000000000000000ff".to_string(),
         ];
         let result = hex_array_to_u256_array(&input).unwrap();
-        assert_eq!(result, vec![U256::from(1), U256::from(255)]);
+        assert_eq!(result, vec![U256::from(1u64), U256::from(255u64)]);
     }
 
     #[test]
@@ -366,7 +390,7 @@ mod tests {
     fn hex_array_to_h160_valid() {
         let input = vec!["0x0000000000000000000000000000000000000001".to_string()];
         let result = hex_array_to_h160_array(&input).unwrap();
-        assert_eq!(result, vec![H160::from_low_u64_be(1)]);
+        assert_eq!(result, vec![addr_from_low_u64(1)]);
     }
 
     #[test]
@@ -379,13 +403,13 @@ mod tests {
     #[test]
     fn string_group_id_valid_decimal() {
         let result = string_group_id_to_u256("100").unwrap();
-        assert_eq!(result, U256::from(100));
+        assert_eq!(result, U256::from(100u64));
     }
 
     #[test]
     fn string_group_id_valid_hex() {
         let result = string_group_id_to_u256("0x64").unwrap();
-        assert_eq!(result, U256::from(100));
+        assert_eq!(result, U256::from(100u64));
     }
 
     #[test]

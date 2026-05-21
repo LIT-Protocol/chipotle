@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 use std::time::Duration;
 
-use ethers::types::U256;
+use alloy::primitives::{Address, U256};
 use moka::future::Cache;
 
 /// TTL in seconds — 60 minutes, extending on every access.
@@ -94,15 +94,10 @@ impl BlockchainCache {
     }
 
     /// Build a cache key for `can_use_wallet_in_action`.
-    pub fn use_wallet_key(
-        &self,
-        api_key_hash: U256,
-        cid_hash: U256,
-        wallet: ethers::types::H160,
-    ) -> String {
+    pub fn use_wallet_key(&self, api_key_hash: U256, cid_hash: U256, wallet: Address) -> String {
         let h = api_key_hash.to_string();
         let g = self.generation(&h);
-        format!("{h}:g{g}:{cid_hash}:{wallet:?}")
+        format!("{h}:g{g}:{cid_hash}:{wallet:#x}")
     }
 
     /// Build a cache key for `can_execute_action_and_use_wallet`.
@@ -110,18 +105,18 @@ impl BlockchainCache {
         &self,
         api_key_hash: U256,
         cid_hash: U256,
-        wallet: ethers::types::H160,
+        wallet: Address,
     ) -> String {
         let h = api_key_hash.to_string();
         let g = self.generation(&h);
-        format!("{h}:g{g}:ew:{cid_hash}:{wallet:?}")
+        format!("{h}:g{g}:ew:{cid_hash}:{wallet:#x}")
     }
 
     /// Build a cache key for `get_wallet_derivation`.
-    pub fn wallet_derivation_key(&self, api_key_hash: U256, wallet: ethers::types::H160) -> String {
+    pub fn wallet_derivation_key(&self, api_key_hash: U256, wallet: Address) -> String {
         let h = api_key_hash.to_string();
         let g = self.generation(&h);
-        format!("{h}:g{g}:wd:{wallet:?}")
+        format!("{h}:g{g}:wd:{wallet:#x}")
     }
 
     /// Reference to the `can_execute_action` cache.
@@ -204,7 +199,7 @@ pub async fn invalidate_for_account(api_key: &str) {
 
     // Fetch all usage keys under this account and bump each one.
     // list_api_keys resolves both master and usage keys to the correct account.
-    match super::list_api_keys(api_key, U256::zero(), U256::from(1000)).await {
+    match super::list_api_keys(api_key, U256::ZERO, U256::from(1000u64)).await {
         Ok(usage_keys) => {
             for uk in &usage_keys {
                 let hash = uk.api_key_hash.to_string();
@@ -246,10 +241,15 @@ pub fn invalidate_for_keys(master_api_key: &str, usage_api_key: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethers::types::H160;
 
     fn test_cache() -> BlockchainCache {
         BlockchainCache::new()
+    }
+
+    fn addr_from_low_u64(n: u64) -> Address {
+        let mut bytes = [0u8; 20];
+        bytes[12..].copy_from_slice(&n.to_be_bytes());
+        Address::from(bytes)
     }
 
     // ── Generation counter ──────────────────────────────────────────
@@ -297,8 +297,8 @@ mod tests {
     #[test]
     fn execute_action_key_format() {
         let cache = test_cache();
-        let hash = U256::from(42);
-        let cid = U256::from(99);
+        let hash = U256::from(42u64);
+        let cid = U256::from(99u64);
         let key = cache.execute_action_key(hash, cid);
         assert_eq!(key, "42:g0:99");
     }
@@ -306,9 +306,9 @@ mod tests {
     #[test]
     fn use_wallet_key_format() {
         let cache = test_cache();
-        let hash = U256::from(42);
-        let cid = U256::from(99);
-        let wallet = H160::from_low_u64_be(0xdead);
+        let hash = U256::from(42u64);
+        let cid = U256::from(99u64);
+        let wallet = addr_from_low_u64(0xdead);
         let key = cache.use_wallet_key(hash, cid, wallet);
         assert!(key.starts_with("42:g0:99:"));
         assert!(key.contains("0x000000000000000000000000000000000000dead"));
@@ -317,9 +317,9 @@ mod tests {
     #[test]
     fn execute_and_wallet_key_has_ew_discriminator() {
         let cache = test_cache();
-        let hash = U256::from(1);
-        let cid = U256::from(2);
-        let wallet = H160::zero();
+        let hash = U256::from(1u64);
+        let cid = U256::from(2u64);
+        let wallet = Address::ZERO;
         let key = cache.execute_and_wallet_key(hash, cid, wallet);
         assert!(
             key.contains(":ew:"),
@@ -330,8 +330,8 @@ mod tests {
     #[test]
     fn key_changes_after_bump() {
         let cache = test_cache();
-        let hash = U256::from(42);
-        let cid = U256::from(99);
+        let hash = U256::from(42u64);
+        let cid = U256::from(99u64);
 
         let key_before = cache.execute_action_key(hash, cid);
         assert!(key_before.contains(":g0:"));
@@ -348,8 +348,8 @@ mod tests {
     #[tokio::test]
     async fn cache_hit_returns_stored_value() {
         let cache = test_cache();
-        let hash = U256::from(10);
-        let cid = U256::from(20);
+        let hash = U256::from(10u64);
+        let cid = U256::from(20u64);
 
         let key = cache.execute_action_key(hash, cid);
         cache.execute_action.insert(key.clone(), true).await;
@@ -363,8 +363,8 @@ mod tests {
     #[tokio::test]
     async fn cache_miss_after_invalidation() {
         let cache = test_cache();
-        let hash = U256::from(10);
-        let cid = U256::from(20);
+        let hash = U256::from(10u64);
+        let cid = U256::from(20u64);
 
         // Populate cache
         let key = cache.execute_action_key(hash, cid);
@@ -385,9 +385,9 @@ mod tests {
     #[tokio::test]
     async fn invalidation_is_per_account() {
         let cache = test_cache();
-        let hash_a = U256::from(100);
-        let hash_b = U256::from(200);
-        let cid = U256::from(50);
+        let hash_a = U256::from(100u64);
+        let hash_b = U256::from(200u64);
+        let cid = U256::from(50u64);
 
         // Populate both accounts
         let key_a = cache.execute_action_key(hash_a, cid);
@@ -414,9 +414,9 @@ mod tests {
     #[tokio::test]
     async fn use_wallet_cache_hit_and_invalidation() {
         let cache = test_cache();
-        let hash = U256::from(5);
-        let cid = U256::from(6);
-        let wallet = H160::from_low_u64_be(0xbeef);
+        let hash = U256::from(5u64);
+        let cid = U256::from(6u64);
+        let wallet = addr_from_low_u64(0xbeef);
 
         let key = cache.use_wallet_key(hash, cid, wallet);
         cache.use_wallet.insert(key.clone(), true).await;
@@ -431,9 +431,9 @@ mod tests {
     #[tokio::test]
     async fn execute_and_wallet_cache_hit_and_invalidation() {
         let cache = test_cache();
-        let hash = U256::from(7);
-        let cid = U256::from(8);
-        let wallet = H160::from_low_u64_be(0xcafe);
+        let hash = U256::from(7u64);
+        let cid = U256::from(8u64);
+        let wallet = addr_from_low_u64(0xcafe);
 
         let key = cache.execute_and_wallet_key(hash, cid, wallet);
         cache
@@ -455,8 +455,8 @@ mod tests {
     #[test]
     fn wallet_derivation_key_has_wd_discriminator() {
         let cache = test_cache();
-        let hash = U256::from(1);
-        let wallet = H160::from_low_u64_be(0xdead);
+        let hash = U256::from(1u64);
+        let wallet = addr_from_low_u64(0xdead);
         let key = cache.wallet_derivation_key(hash, wallet);
         assert!(
             key.contains(":wd:"),
@@ -467,17 +467,17 @@ mod tests {
     #[tokio::test]
     async fn wallet_derivation_cache_hit_and_invalidation() {
         let cache = test_cache();
-        let hash = U256::from(5);
-        let wallet = H160::from_low_u64_be(0xbeef);
+        let hash = U256::from(5u64);
+        let wallet = addr_from_low_u64(0xbeef);
 
         let key = cache.wallet_derivation_key(hash, wallet);
         cache
             .wallet_derivation
-            .insert(key.clone(), U256::from(42))
+            .insert(key.clone(), U256::from(42u64))
             .await;
         assert_eq!(
             cache.wallet_derivation.get(&key).await,
-            Some(U256::from(42))
+            Some(U256::from(42u64))
         );
 
         cache.bump_generation(&hash.to_string());
@@ -491,8 +491,8 @@ mod tests {
     #[tokio::test]
     async fn try_get_with_populates_on_miss() {
         let cache = test_cache();
-        let hash = U256::from(1);
-        let cid = U256::from(2);
+        let hash = U256::from(1u64);
+        let cid = U256::from(2u64);
         let key = cache.execute_action_key(hash, cid);
 
         // Cache miss triggers the closure
@@ -517,8 +517,8 @@ mod tests {
     #[tokio::test]
     async fn try_get_with_misses_after_generation_bump() {
         let cache = test_cache();
-        let hash = U256::from(1);
-        let cid = U256::from(2);
+        let hash = U256::from(1u64);
+        let cid = U256::from(2u64);
 
         // Populate via try_get_with
         let key = cache.execute_action_key(hash, cid);

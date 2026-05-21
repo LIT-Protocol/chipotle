@@ -68,23 +68,31 @@ Truly leaf: files whose ethers usage doesn't cross the module boundary.
 
 **Out-of-Phase-3 finding:** `src/accounts/signable_contract.rs` was originally listed under Phase 3 but on inspection it contains zero EIP-712 code — it's entirely `LocalWallet`/`SignerMiddleware`/`NonceManagerMiddleware`/`ContractCall`. Moved into Phase 4 where it belongs.
 
-### Phase 4 — Signers + providers + middleware (+ all U256/H160 sites)
-This is the highest-risk phase — touches signing and nonce semantics. Also absorbs all the H160/U256-boundary leaf files that Phase 2 had to defer.
+### Phase 4 — U256/H160 boundary migration + caller bridges
+Migrates the H160/U256 boundary files and the accounts/account_management public APIs to alloy types. The signer/middleware/contract stack stays on ethers because the abigen-generated `AccountConfig<M>` requires `M: ethers::Middleware`; that swap moves to Phase 5 where the contract bindings get regenerated via `sol!` and the dependency inverts.
 
-- [ ] `src/accounts/signer_pool.rs` — `LocalWallet` + `SignerMiddleware` + `NonceManagerMiddleware` → alloy `PrivateKeySigner` + `ProviderBuilder::new().with_recommended_fillers().wallet(...)`
-- [ ] `src/accounts/mod.rs` — type updates
-- [ ] `src/accounts/signable_contract.rs` — `ContractCall` → alloy `CallBuilder`; `SignerMiddleware`/`NonceManagerMiddleware` stack swap
-- [ ] `src/core/account_management.rs` — signer construction + H160/U256 throughout; remove the alloy→ethers bridge added in Phase 3
-- [ ] `src/actions/client/op_code_helpers/private_keys.rs` — signer construction
-- [ ] `src/utils/mod.rs`, `src/utils/parse_with_hash.rs` — H160/U256 → alloy `Address`/`U256`
-- [ ] `src/core/v1/models/curve_type.rs` — `TryFrom<ethers::U256>` / `From<CurveType> for ethers::U256` impls → alloy
-- [ ] `src/core/v1/helpers/api_status.rs` — `From<ethers::providers::ProviderError>` etc. → alloy error types
-- [ ] `src/accounts/blockchain_cache.rs` — U256/H160 in cache key fns
-- [ ] Verify nonce-manager parity: alloy's `NonceFiller` has different cache/recovery semantics vs. ethers `NonceManagerMiddleware` — document any behavioral differences
+- [x] `src/utils/alloy_ethers.rs` — new bridge module with alloy↔ethers `U256`/`Address` helpers (removed in Phase 5 once the abigen layer is gone)
+- [x] `src/utils/mod.rs`, `src/utils/parse_with_hash.rs` — H160/U256 → alloy `Address`/`U256`
+- [x] `src/core/v1/models/curve_type.rs` — removed unused `TryFrom<ethers::U256>` / `From<CurveType> for ethers::U256` impls (no external callers; alloy's blanket `TryFrom` impl on `U256` conflicted with a hand-rolled `From`)
+- [x] `src/core/v1/helpers/api_status.rs` — replaced `From<ethers::abi::ethereum_types::FromStrRadixErr>` with alloy's `ruint::ParseError`; dropped unused `From<ethers::providers::ProviderError>` and `From<ethers::utils::ConversionError>` (no callers)
+- [x] `src/accounts/blockchain_cache.rs` — cache-key fns take alloy `U256`/`Address`; switched address rendering from ethers' lowercase `Debug` to `{:#x}` so keys stay deterministic
+- [x] `src/actions/client/op_code_helpers/private_keys.rs` — `LocalWallet` → `PrivateKeySigner`
+- [x] `src/accounts/mod.rs` — public API now takes/returns alloy `Address`/`U256`; internally bridges to ethers at every contract call site via `ae_addr` / `ae_u256` / `ea_u256`. Removes the alloy→ethers `H160::from_slice(signer.as_slice())` bridge added in Phase 3
+- [x] `src/core/account_management.rs` — pubsig & internals on alloy types; wallet construction via `PrivateKeySigner`; `accounts::Metadata.id` comparisons keep `ethers::types::U256::zero()` because `Metadata` is still an abigen-generated struct (Phase 5 regenerates it)
+- [x] Signer-pool / signable-contract internals **left on ethers** for Phase 5 — see header note above. The `SignerHandle.address` field stays `ethers::H160` since no alloy-typed caller touches it directly today.
+- [x] 217 lib tests pass; clippy clean
 
 ### Phase 5 — `abigen!` → `sol!` in lit-api-server
+Pairs the contract-binding regeneration with the signer/middleware stack swap, since the two are tightly coupled (alloy contracts take alloy providers; `sol!`-generated bindings replace the abigen `M: ethers::Middleware` constraint with alloy `Provider`).
+
 - [ ] `src/restart.rs` — `EthEvent` subscription → alloy `Filter`/`Event::watch`
 - [ ] `src/accounts/contracts/account_config_contract.rs` — regenerate bindings via `sol!` from existing ABI JSON
+- [ ] `src/accounts/signer_pool.rs` — `LocalWallet` + `SignerMiddleware` + `NonceManagerMiddleware` → alloy `PrivateKeySigner` + `ProviderBuilder::new().with_recommended_fillers().wallet(...)`
+- [ ] `src/accounts/signable_contract.rs` — `ContractCall` → alloy `CallBuilder`; `SignerMiddleware`/`NonceManagerMiddleware` stack swap
+- [ ] `src/accounts/decode_revert.rs` — switch from ethers `ContractError` to alloy's equivalent
+- [ ] Remove `src/utils/alloy_ethers.rs` and all `ae_*` / `ea_*` call sites in `accounts/mod.rs`
+- [ ] `src/core/account_management.rs::metadata_to_item` — drop the temporary `ethers::types::U256::zero()` comparison once `Metadata.id` is alloy `U256`
+- [ ] Verify nonce-manager parity: alloy's `NonceFiller` has different cache/recovery semantics vs. ethers `NonceManagerMiddleware` — document any behavioral differences
 
 ### Phase 6 — rust_generator_and_deployer (separate cargo workspace)
 Largest single PR but mostly mechanical regeneration.
