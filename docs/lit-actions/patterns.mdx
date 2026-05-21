@@ -172,6 +172,10 @@ Note that someone could always copy your publicly available Lit Action source co
 
 ## Encrypt / Decrypt — PKP Wallets as Data Vaults
 
+<Note>
+For the full walkthrough on handling secrets — minting a vault PKP, permissioning actions via groups, encrypt/decrypt lifecycle, storage, and rotation — see the [Secrets guide](/lit-actions/secrets). This section focuses on the design pattern of using a PKP as a vault and gating decrypt access for dApp users.
+</Note>
+
 ### One PKP per logical data boundary
 
 The best practice for encrypting a set of related data is to **create a dedicated PKP wallet for that data boundary**. The PKP's derived symmetric key is then used to encrypt everything in that boundary — user records, API keys, configuration, documents, whatever belongs together.
