@@ -169,15 +169,17 @@ impl Client {
     ) -> Result<ExecutionState> {
         let js_params_bytes = globals
             .as_ref()
-            .and_then(|v| serde_json::to_vec(v).ok())
-            .unwrap_or_default();
-        let combined_len = code.len() + js_params_bytes.len();
+            .map(serde_json::to_vec)
+            .transpose()
+            .context("failed to serialize js_params")?;
+        let js_params_len = js_params_bytes.as_ref().map_or(0, Vec::len);
+        let combined_len = code.len() + js_params_len;
         if combined_len > self.max_code_length as usize {
             bail!(
                 "Combined code + js_params payload is too large ({} bytes: {} code + {} js_params). Max combined size is {} bytes.",
                 combined_len,
                 code.len(),
-                js_params_bytes.len(),
+                js_params_len,
                 self.max_code_length,
             );
         }
@@ -217,11 +219,7 @@ impl Client {
             .send_async(
                 ExecutionRequest {
                     code: code.to_string(),
-                    js_params: if globals.is_some() {
-                        Some(js_params_bytes)
-                    } else {
-                        None
-                    },
+                    js_params: js_params_bytes,
                     auth_context: serde_json::to_vec(&[0; 0]).ok(),
                     http_headers: self.http_headers.clone(),
                     timeout: Some(self.timeout_ms),
