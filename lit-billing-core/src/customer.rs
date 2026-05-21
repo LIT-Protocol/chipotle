@@ -5,8 +5,61 @@
 //! this module the single source of truth.
 
 use anyhow::Result;
+use serde::Serialize;
 
 use crate::client::StripeClient;
+
+/// Stripe customer summary returned by lookup helpers. Balance is intentionally
+/// not part of this struct — fetch it separately via [`crate::balance::fetch`]
+/// for the customer(s) the caller actually wants to act on.
+#[derive(Debug, Clone, Serialize)]
+pub struct CustomerSummary {
+    pub id: String,
+    pub email: Option<String>,
+    pub wallet_address: Option<String>,
+}
+
+fn parse_summary(value: &serde_json::Value) -> Option<CustomerSummary> {
+    let id = value.get("id").and_then(|v| v.as_str())?.to_string();
+    let email = value
+        .get("email")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+    let wallet_address = value
+        .get("metadata")
+        .and_then(|m| m.get("wallet_address"))
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.to_string());
+    Some(CustomerSummary {
+        id,
+        email,
+        wallet_address,
+    })
+}
+
+/// Find the Stripe customer for this wallet without creating one if missing.
+///
+/// Returns `Ok(None)` if no customer has `metadata.wallet_address == wallet`.
+pub async fn find_by_wallet(client: &StripeClient, wallet_address: &str) -> Result<Option<String>> {
+    let query = format!("metadata['wallet_address']:'{wallet_address}'");
+    let resp = client
+        .get(
+            "customers/search",
+            &[("query", query.as_str()), ("limit", "1")],
+        )
+        .await?;
+    let id = resp
+        .body
+        .get("data")
+        .and_then(|d| d.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|c| c.get("id"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    Ok(id)
+}
 
 /// Find the Stripe customer for this wallet, creating one if none exists.
 ///
@@ -19,23 +72,9 @@ pub async fn find_or_create_by_wallet(
     client: &StripeClient,
     wallet_address: &str,
 ) -> Result<String> {
-    // Search by metadata.
-    let query = format!("metadata['wallet_address']:'{wallet_address}'");
-    let resp = client
-        .get(
-            "customers/search",
-            &[("query", query.as_str()), ("limit", "1")],
-        )
-        .await?;
-
-    if let Some(data) = resp.body.get("data").and_then(|d| d.as_array())
-        && let Some(first) = data.first()
-        && let Some(id) = first.get("id").and_then(|i| i.as_str())
-    {
-        return Ok(id.to_string());
-    };
-
-    // Not found, create a new customer
+    if let Some(id) = find_by_wallet(client, wallet_address).await? {
+        return Ok(id);
+    }
     let resp = client
         .post("customers", &[("metadata[wallet_address]", wallet_address)])
         .await?;
@@ -45,6 +84,28 @@ pub async fn find_or_create_by_wallet(
         .and_then(|i| i.as_str())
         .ok_or_else(|| anyhow::anyhow!("Stripe: missing customer id"))?;
     Ok(id.to_string())
+}
+
+/// Search customers by email. Returns every match (Stripe allows multiple
+/// customers with the same email).
+///
+/// Email is matched literally; callers should pass the user-provided string
+/// trimmed and lowercased if they want case-insensitive behavior.
+pub async fn search_by_email(client: &StripeClient, email: &str) -> Result<Vec<CustomerSummary>> {
+    let query = format!("email:'{email}'");
+    let resp = client
+        .get(
+            "customers/search",
+            &[("query", query.as_str()), ("limit", "10")],
+        )
+        .await?;
+    let data = resp
+        .body
+        .get("data")
+        .and_then(|d| d.as_array())
+        .cloned()
+        .unwrap_or_default();
+    Ok(data.iter().filter_map(parse_summary).collect())
 }
 
 /// Set (or update) the email on an existing Stripe customer.

@@ -1,8 +1,10 @@
 # Dockerfile for lit-payments.
 #
-# Build context: the REPO ROOT (so `../lit-billing-core` is reachable).
-# On Railway: Settings → Build → "Root Directory" should be unset (or `/`),
-# and "Dockerfile Path" should be `lit-payments/Dockerfile`.
+# Build context: the REPO ROOT (so the sibling `lit-billing-core/` crate is
+# reachable via the COPY commands below).
+#
+# On Fly.io: fly.toml at the repo root points `[build] dockerfile` here, so
+# `fly deploy` from the repo root just works. See lit-payments/README.md.
 
 # ── Build stage ────────────────────────────────────────────────────────────
 FROM rust:1.91-slim-bookworm AS builder
@@ -33,7 +35,8 @@ COPY --from=builder /build/lit-payments/target/release/lit-payments /app/lit-pay
 COPY lit-payments/static     ./static
 COPY lit-payments/migrations ./migrations
 
-# Railway provides $PORT; main.rs translates it to ROCKET_PORT at startup.
+# Fly.io (and most container hosts) provide $PORT; main.rs translates it to
+# ROCKET_PORT at startup.
 ENV RUST_LOG=info
 
 ENTRYPOINT ["/app/lit-payments"]

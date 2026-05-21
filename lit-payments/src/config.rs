@@ -7,7 +7,9 @@ use anyhow::{Context, Result};
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    /// Postgres connection string. Railway provides this automatically.
+    /// Postgres connection string. On Fly.io, supplied via `fly secrets set`
+    /// after attaching/creating a Postgres cluster (or via an external
+    /// provider like Supabase / Neon).
     pub database_url: String,
     /// HMAC-SHA256 key for signing magic-link tokens. At least 32 random bytes,
     /// base64-encoded. Generate with `openssl rand -base64 32`.
@@ -20,9 +22,11 @@ pub struct Config {
     /// e.g., "https://payments.litprotocol.com".
     pub public_base_url: String,
     /// Stripe restricted secret key for the ops-facing service.
-    /// Not used yet by the foundation/auth code, but parsed eagerly so a
-    /// misconfigured deploy fails on boot rather than on first request.
     pub stripe_secret_key: String,
+    /// Max cents a single grant can apply. Default $20.
+    pub max_grant_cents: i64,
+    /// Max cents one operator can grant in a rolling 24-hour window. Default $100.
+    pub max_daily_per_operator_cents: i64,
 }
 
 impl Config {
@@ -36,7 +40,19 @@ impl Config {
                 .trim_end_matches('/')
                 .to_string(),
             stripe_secret_key: required("STRIPE_SECRET_KEY")?,
+            max_grant_cents: optional_i64("MAX_GRANT_CENTS", 2_000)?,
+            max_daily_per_operator_cents: optional_i64("MAX_DAILY_PER_OPERATOR_CENTS", 10_000)?,
         })
+    }
+}
+
+fn optional_i64(name: &str, default: i64) -> Result<i64> {
+    match std::env::var(name) {
+        Ok(v) if !v.trim().is_empty() => v
+            .trim()
+            .parse::<i64>()
+            .with_context(|| format!("env var {name} must be an integer; got {v:?}")),
+        _ => Ok(default),
     }
 }
 

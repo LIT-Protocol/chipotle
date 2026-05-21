@@ -1,13 +1,25 @@
 # lit-payments
 
-Ops-facing billing service. Magic-link auth + (later) admin credit portal
-and LITKEY payment gateway. Deployed outside the TEE, on Railway.
+Ops-facing billing service. Magic-link auth + admin credit portal + (later)
+LITKEY payment gateway. Deployed outside the TEE, on Fly.io.
 
 See `plans/lit-payments-app.md` (in the repo root, on the planning branch)
 for the full design.
 
-This PR ships **foundation + magic-link auth + login UI only**. The credit
-portal endpoints and admin UI come in a follow-up PR.
+## Routes
+
+Public:
+- `GET /login` — login page (form posts to `/auth/request`).
+- `POST /auth/request` — send magic link (rate-limited per email, 60s cooldown).
+- `GET /auth/verify?token=…` — validate token, set session cookie, redirect.
+
+Authenticated (operator session cookie required):
+- `GET /` — admin dashboard.
+- `GET /api/me` — current operator profile.
+- `POST /auth/logout` — delete session.
+- `GET /api/customer/lookup?email=…` or `?wallet=…` — preview a Stripe customer + balance.
+- `POST /api/grant` — apply a credit (subject to caps + UUID idempotency key).
+- `GET /api/grants?limit=N` — recent grants by the calling operator.
 
 ## Local development
 
@@ -33,9 +45,13 @@ MAGIC_LINK_SIGNING_KEY=$(openssl rand -base64 32)
 RESEND_API_KEY=re_...                    # https://resend.com → API keys
 MAIL_FROM=noreply@mail.litprotocol.com   # must be a verified Resend sender
 PUBLIC_BASE_URL=http://localhost:8000
-STRIPE_SECRET_KEY=rk_test_...            # not used yet; parsed eagerly
+STRIPE_SECRET_KEY=rk_test_...            # Stripe restricted key
 ROCKET_SECRET_KEY=$(openssl rand -base64 32)  # required for private cookies in release
 ROCKET_PORT=8000
+
+# Optional — cap defaults match the plan ($20 per grant, $100/op/day):
+# MAX_GRANT_CENTS=2000
+# MAX_DAILY_PER_OPERATOR_CENTS=10000
 ```
 
 ### 3. Run
@@ -49,24 +65,75 @@ Visit <http://localhost:8000/login>, enter `chris@litprotocol.com` (or
 whatever's seeded in `migrations/20260518000002_seed_operators.sql`),
 check your inbox, click the link.
 
-## Deploy to Railway
+## Deploy to Fly.io
 
-1. New Railway project → "Empty Project".
-2. Add a **PostgreSQL** plugin. Railway exposes `DATABASE_URL` to the
-   service automatically.
-3. Create a service from this GitHub repo. In service settings:
-   - **Root Directory**: leave blank (build context = repo root).
-   - **Dockerfile Path**: `lit-payments/Dockerfile`.
-   - **Watch Paths**: `lit-payments/**`, `lit-billing-core/**`.
-4. Add env vars on the service:
-   - `MAGIC_LINK_SIGNING_KEY` — `openssl rand -base64 32`
-   - `RESEND_API_KEY` — from Resend dashboard
-   - `MAIL_FROM` — `noreply@mail.litprotocol.com` (or your verified sender)
-   - `PUBLIC_BASE_URL` — `https://payments.litprotocol.com`
-   - `STRIPE_SECRET_KEY` — a Stripe **restricted** key
-   - `ROCKET_SECRET_KEY` — `openssl rand -base64 32`
-5. Generate a public domain in Railway settings. Point your CNAME at it.
-6. Deploy. Migrations run on first boot.
+The `fly.toml` at the repo root configures this service. The build context
+is the repo root (so the lit-billing-core sibling crate is reachable from
+the Dockerfile). All `fly` commands run from the repo root.
+
+### 1. Create the app
+
+```sh
+fly apps create lit-payments
+```
+
+(Or `fly launch --no-deploy` to let flyctl walk you through it; reuse the
+existing `fly.toml` when prompted.)
+
+### 2. Provision Postgres
+
+Pick one — both expose a `DATABASE_URL`-shaped connection string:
+
+- **Fly Postgres (Managed Postgres)**:
+  ```sh
+  fly postgres create --name lit-payments-db --region iad
+  fly postgres attach lit-payments-db --app lit-payments
+  ```
+  The attach command sets `DATABASE_URL` on the app automatically.
+
+- **External (Supabase / Neon / etc.)**: set `DATABASE_URL` manually:
+  ```sh
+  fly secrets set --app lit-payments DATABASE_URL='postgres://...'
+  ```
+
+### 3. Set the rest of the secrets
+
+```sh
+fly secrets set --app lit-payments \
+  MAGIC_LINK_SIGNING_KEY="$(openssl rand -base64 32)" \
+  RESEND_API_KEY=re_... \
+  MAIL_FROM='noreply@mail.litprotocol.com' \
+  PUBLIC_BASE_URL='https://payments.litprotocol.com' \
+  STRIPE_SECRET_KEY=rk_... \
+  ROCKET_SECRET_KEY="$(openssl rand -base64 32)"
+```
+
+`ROCKET_SECRET_KEY` is required by Rocket for private (encrypted) cookies
+in release builds. The other vars are documented above under
+"Local development."
+
+### 4. Custom domain
+
+```sh
+fly certs create --app lit-payments payments.litprotocol.com
+```
+
+Fly prints the DNS records (CNAME or A/AAAA) to add. Once they propagate,
+the cert provisions automatically.
+
+### 5. Deploy
+
+```sh
+fly deploy
+```
+
+Migrations run on first boot of every release; safe to redeploy any time.
+Health checks hit `/health` (configured in `fly.toml`).
+
+### Updating
+
+`fly deploy` again. Fly's blue-green deploy flips traffic when the new
+machine passes its health check.
 
 ## Mail sender setup (Resend + `mail.litprotocol.com`)
 
