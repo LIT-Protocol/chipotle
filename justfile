@@ -9,7 +9,7 @@ image_lit_actions     := image_base + '-lit-actions:'     + image_tag
 image_lit_api_server  := image_base + '-lit-api-server:'  + image_tag
 image_otel_collector  := image_base + '-otel-collector:'  + image_tag
 # main → chipotle-next (override with PHALA_APP_NAME)
-app_name       := 'chipotle-next'
+app_name       := env('PHALA_APP_NAME', 'chipotle-next')
 instance_type  := 'tdx.small'
 gcp_project_id := 'chipotle-next'
 node_config    := 'NodeConfig.main.toml'
