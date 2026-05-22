@@ -36,11 +36,13 @@ contract LitkeyPaymentGateway {
         uint256 amount
     );
 
+    error InvalidToken();
     error InvalidTreasury();
     error InvalidWallet();
     error InvalidAmount();
 
     constructor(IERC20 _litkey, address _treasury) {
+        if (address(_litkey) == address(0)) revert InvalidToken();
         if (_treasury == address(0)) revert InvalidTreasury();
         litkey = _litkey;
         treasury = _treasury;

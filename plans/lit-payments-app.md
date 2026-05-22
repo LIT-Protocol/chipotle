@@ -304,7 +304,7 @@ GET https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies
 - Background task polls every 5 min, upserts the single-row `litkey_rate` table.
 - If a fetch fails or returns nonsense (zero / null / >100× recent value): keep the last-known rate, log a warning.
 - If the row's `fetched_at` is older than 1 hour: pause crediting and log a warning. Stuck payments will surface via user reports; mod can grant manually in the meantime.
-- Admin can override the rate from the admin UI (updates the same row with `source='manual'` + operator id). Override is recorded on the row itself — no separate notification.
+- Admin can override the rate from the admin UI (updates the same row with `source='manual'` + operator id). Manual override is authoritative until another admin changes it; the poller does not overwrite manual values. Stale manual values still pause crediting so an operator has to deliberately refresh the override during an oracle incident. Override is recorded on the row itself — no separate notification.
 - `LITKEY_DISCOUNT_BASIS_POINTS` configures an incentive discount for LITKEY payments. Default `0` means no discount. Example: `2000` means "20% off vs credit card", so the effective credit rate is `market_rate / (1 - 0.20)`; users receive 1.25× the market-rate Stripe credit per LITKEY. This is intentionally an env var rather than a DB setting for v1 simplicity.
 
 **Quote vs. credit semantics**: the payment page shows the rate at page-load and refreshes the quote every 30s. Once the user starts the `approve` tx, the LITKEY amount is frozen. At confirmation we credit using the rate **in effect at the on-chain `Payment` event** (the most recent value of `litkey_rate`) plus the configured `LITKEY_DISCOUNT_BASIS_POINTS` multiplier. Page says "estimated credit, finalized at confirmation."
@@ -396,7 +396,8 @@ All questions are closed. Plan is ready to start building.
    - 60s reconciliation poll for logs in `(last_processed_block, latest_block - 5)` as a safety net for WS gaps.
    - 5-confirmation depth on Base before crediting.
    - Idempotency on `(tx_hash, log_index)` unique in `litkey_payments`.
-   - For each Payment event: read `litkey_rate`, apply `LITKEY_DISCOUNT_BASIS_POINTS` to compute the effective credit rate, compute `cents = litkey_amount * effective_rate`, look up Stripe customer by `metadata.wallet_address == event.wallet`, write the credit via `lit_billing_core::balance::write_transaction`, persist a `litkey_payments` row.
+   - For each Payment event: read `litkey_rate`, reject/hold crediting if `crediting_paused` is true, apply `LITKEY_DISCOUNT_BASIS_POINTS` to compute the effective credit rate, compute `cents = litkey_amount * effective_rate`, look up Stripe customer by `metadata.wallet_address == event.wallet`, write the credit via `lit_billing_core::balance::write_transaction`, persist a `litkey_payments` row.
+   - Before production listener crediting, upgrade rate math from whole cents/LITKEY to a higher-precision fixed-point representation and round only once at the final Stripe-cent amount. The current 3b admin UI/API is acceptable for quoting visibility, but final crediting should avoid systematic over/under-crediting from whole-cent spot-rate rounding.
    - Migrations: `litkey_payments`, `chain_checkpoint`.
    - **Depends on**: 3a contract deployed + address known (`0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b` on Base mainnet); 3b rate table existing.
 

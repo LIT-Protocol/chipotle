@@ -33,6 +33,14 @@ describe("LitkeyPaymentGateway", () => {
       expect(await gateway.treasury()).to.equal(treasury.address);
     });
 
+    it("reverts when litkey is the zero address", async () => {
+      const [, treasury] = await ethers.getSigners();
+      const Gateway = await ethers.getContractFactory("LitkeyPaymentGateway");
+      await expect(
+        Gateway.deploy(ZeroAddress, treasury.address),
+      ).to.be.revertedWithCustomError(Gateway, "InvalidToken");
+    });
+
     it("reverts when treasury is the zero address", async () => {
       const Mock = await ethers.getContractFactory("MockERC20");
       const litkey = await Mock.deploy();

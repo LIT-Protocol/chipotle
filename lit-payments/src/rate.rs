@@ -1,5 +1,7 @@
 //! LITKEY/USD rate parsing, validation, persistence, admin API, and polling.
 
+use std::time::Duration as StdDuration;
+
 use anyhow::{Context, Result, anyhow};
 use reqwest::Client;
 use rocket::State;
@@ -36,6 +38,7 @@ pub struct RateResponse {
     pub rate: Option<LitkeyRate>,
     pub discount_basis_points: i64,
     pub effective_cents_per_litkey: Option<i64>,
+    pub crediting_paused: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -141,10 +144,10 @@ pub fn is_stale(fetched_at: OffsetDateTime, now: OffsetDateTime) -> bool {
 }
 
 pub fn should_poll_coingecko(current: Option<&LitkeyRate>) -> bool {
-    // A fresh manual override is intentionally authoritative. Let it stand
-    // until it becomes stale; after that, CoinGecko may refresh the row so
-    // crediting is not paused indefinitely.
-    !matches!(current, Some(rate) if rate.source == "manual" && !rate.stale)
+    // A manual override is intentionally authoritative until an admin changes
+    // it. It may become stale (and therefore pause crediting), but the poller
+    // should not automatically overwrite it with the source the admin overrode.
+    !matches!(current, Some(rate) if rate.source == "manual")
 }
 
 pub async fn fetch_coingecko_cents(client: &Client) -> Result<i64> {
@@ -223,9 +226,23 @@ pub async fn set_manual(pool: &PgPool, cents_per_litkey: i64, operator_id: i64) 
     Ok(())
 }
 
+fn coingecko_client() -> Result<Client> {
+    Client::builder()
+        .connect_timeout(StdDuration::from_secs(5))
+        .timeout(StdDuration::from_secs(10))
+        .build()
+        .context("building CoinGecko HTTP client")
+}
+
 pub fn spawn_rate_poller(pool: PgPool) {
     tokio::spawn(async move {
-        let client = Client::new();
+        let client = match coingecko_client() {
+            Ok(client) => client,
+            Err(e) => {
+                tracing::warn!("litkey rate poller could not start: {e}");
+                return;
+            }
+        };
         loop {
             poll_once(&pool, &client).await;
             tokio::time::sleep(POLL_INTERVAL).await;
@@ -298,6 +315,16 @@ pub async fn get_rate(
     )?))
 }
 
+/// `GET /api/litkey/quote` — public quote for the end-user pay-with-LITKEY page.
+#[rocket::get("/api/litkey/quote")]
+pub async fn get_quote(pool: &State<PgPool>, config: &State<Config>) -> ApiResult<RateResponse> {
+    let rate = get_current(pool).await.map_err(server_err)?;
+    Ok(Json(build_rate_response(
+        rate,
+        config.litkey_discount_basis_points,
+    )?))
+}
+
 /// `POST /api/litkey/rate/override` — admin-only manual rate override.
 #[rocket::post("/api/litkey/rate/override", format = "json", data = "<req>")]
 pub async fn override_rate(
@@ -325,8 +352,10 @@ fn build_rate_response(
     rate: Option<LitkeyRate>,
     discount_basis_points: i64,
 ) -> Result<RateResponse, ApiError> {
+    let crediting_paused = rate.as_ref().is_none_or(|r| r.stale);
     let effective_cents_per_litkey = rate
         .as_ref()
+        .filter(|_| !crediting_paused)
         .map(|r| apply_discount_to_cents(r.cents_per_litkey, discount_basis_points))
         .transpose()
         .map_err(server_err)?;
@@ -334,6 +363,7 @@ fn build_rate_response(
         rate,
         discount_basis_points,
         effective_cents_per_litkey,
+        crediting_paused,
     })
 }
 
@@ -387,7 +417,7 @@ mod tests {
     }
 
     #[test]
-    fn fresh_manual_override_pauses_coingecko_polling_until_stale() {
+    fn manual_override_pauses_coingecko_polling_until_admin_changes_it() {
         let now = OffsetDateTime::now_utc();
         let fresh_manual = LitkeyRate {
             cents_per_litkey: 12,
@@ -408,9 +438,45 @@ mod tests {
         };
 
         assert!(!should_poll_coingecko(Some(&fresh_manual)));
-        assert!(should_poll_coingecko(Some(&stale_manual)));
+        assert!(!should_poll_coingecko(Some(&stale_manual)));
         assert!(should_poll_coingecko(Some(&coingecko)));
         assert!(should_poll_coingecko(None));
+    }
+
+    #[test]
+    fn stale_or_missing_rate_pauses_crediting_and_hides_effective_rate() {
+        let now = OffsetDateTime::now_utc();
+        let stale_rate = LitkeyRate {
+            cents_per_litkey: 100,
+            source: "coingecko".to_string(),
+            fetched_at: now - Duration::hours(2),
+            updated_by_operator_id: None,
+            stale: true,
+        };
+
+        let missing = build_rate_response(None, 2_000).unwrap();
+        assert!(missing.crediting_paused);
+        assert_eq!(missing.effective_cents_per_litkey, None);
+
+        let stale = build_rate_response(Some(stale_rate), 2_000).unwrap();
+        assert!(stale.crediting_paused);
+        assert_eq!(stale.effective_cents_per_litkey, None);
+    }
+
+    #[test]
+    fn fresh_rate_exposes_discount_adjusted_effective_rate() {
+        let now = OffsetDateTime::now_utc();
+        let fresh_rate = LitkeyRate {
+            cents_per_litkey: 100,
+            source: "coingecko".to_string(),
+            fetched_at: now,
+            updated_by_operator_id: None,
+            stale: false,
+        };
+
+        let response = build_rate_response(Some(fresh_rate), 2_000).unwrap();
+        assert!(!response.crediting_paused);
+        assert_eq!(response.effective_cents_per_litkey, Some(125));
     }
 
     #[test]

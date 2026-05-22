@@ -12,6 +12,7 @@ Public:
 - `GET /login` — login page (form posts to `/auth/request`).
 - `POST /auth/request` — send magic link (rate-limited per email, 60s cooldown).
 - `GET /auth/verify?token=…` — validate token, set session cookie, redirect.
+- `GET /api/litkey/quote` — public LITKEY quote for the end-user payment page; includes `crediting_paused` and omits an effective credit rate while paused.
 
 Authenticated (operator session cookie required):
 - `GET /` — admin dashboard.
@@ -20,7 +21,7 @@ Authenticated (operator session cookie required):
 - `GET /api/customer/lookup?email=…` or `?wallet=…` — preview a Stripe customer + balance.
 - `POST /api/grant` — apply a credit (subject to caps + UUID idempotency key).
 - `GET /api/grants?limit=N` — recent grants by the calling operator.
-- `GET /api/litkey/rate` — current LITKEY market rate plus discount-adjusted credit rate.
+- `GET /api/litkey/rate` — current LITKEY market rate plus discount-adjusted credit rate for operators.
 - `POST /api/litkey/rate/override` — admin-only manual market-rate override.
 
 ## Local development

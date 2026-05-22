@@ -50,6 +50,7 @@ async fn rocket() -> _ {
                 portal_routes::grant_credit,
                 portal_routes::list_grants,
                 rate::get_rate,
+                rate::get_quote,
                 rate::override_rate,
             ],
         )
