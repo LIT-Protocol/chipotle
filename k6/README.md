@@ -11,7 +11,7 @@ Auto-generated from the OpenAPI spec using [@grafana/openapi-to-k6](https://gith
 
 ```bash
 npm install -g @grafana/openapi-to-k6
-openapi-to-k6 https://api.dev.litprotocol.com/openapi.json \ ./k6
+openapi-to-k6 https://test.chipotle.litprotocol.com/openapi.json ./k6
 
 # Note: The OpenAPI spec paths omit the /core/v1 prefix. Set BASE_URL with /core/v1
 # when running against the Phala deployment, e.g. BASE_URL=.../core/v1

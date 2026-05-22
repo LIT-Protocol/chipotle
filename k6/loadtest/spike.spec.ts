@@ -12,9 +12,9 @@
  *   BASE_URL=http://localhost:8000/core/v1 k6 run k6/loadtest/spike.spec.ts
  *
  * Environment:
- *   BASE_URL        - API base URL (default: api.dev.litprotocol.com/core/v1)
- *   SPIK_VUS        - Peak virtual users (default: 20)
- *   SPIK_DURATION   - Sustain duration at peak (default: 2m)
+ *   BASE_URL        - API base URL (default: https://test.chipotle.litprotocol.com/core/v1)
+ *   SPIK_VUS        - Peak virtual users (default: 25)
+ *   SPIK_DURATION   - Sustain duration at peak (default: 1m)
  */
 import { checkAndLog, warnOnHttpFailures } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";

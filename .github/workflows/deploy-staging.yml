@@ -105,7 +105,7 @@ jobs:
             echo "instance_type=tdx.large" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-dev" >> "$GITHUB_OUTPUT"
             echo "node_config=NodeConfig.main.toml" >> "$GITHUB_OUTPUT"
-            DOMAIN="api.dev.litprotocol.com"
+            DOMAIN="test.chipotle.litprotocol.com"
           elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
             # Targets the prod2 instance provisioned via `phala instances add`
             # during the prod6→prod2 migration. Shares the same app_id

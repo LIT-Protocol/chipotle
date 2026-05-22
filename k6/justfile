@@ -15,7 +15,7 @@
 #   just NETWORK=main BASE_URL='https://other.example.com/core/v1' spike
 
 NETWORK := 'main'
-_base_url_main := 'https://api.dev.litprotocol.com/core/v1'
+_base_url_main := 'https://test.chipotle.litprotocol.com/core/v1'
 _base_url_next := 'https://test.chipotle.litprotocol.com/core/v1'
 _base_url_prod := 'https://api.chipotle.litprotocol.com/core/v1'
 _accounts_file_main := './data/accounts.dev.json'
