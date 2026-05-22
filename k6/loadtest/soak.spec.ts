@@ -27,7 +27,7 @@
  *   ramp_* - Gradual load increase: +1 VU per minute for 8 min, then 1 min ramp-down.
  *
  * Environment:
- *   BASE_URL       - API base URL (default: api.dev.litprotocol.com/core/v1)
+ *   BASE_URL       - API base URL (default: test.chipotle.litprotocol.com/core/v1)
  *   SCENARIO       - Run only this scenario group: "soak" or "ramp" (default: both)
  *   SOAK_DURATION  - Total test duration for soak scenario (default: 30m)
  *   SOAK_VUS       - Virtual users for soak scenario (default: 3)

@@ -8,7 +8,6 @@ description: Teaches how to create and configure a Lit Chipotle account (account
 Lit Chipotle is a programmable key management system. Accounts hold wallets (PKPs), IPFS-pinned JavaScript programs (Lit Actions), and permission groups — all enforced on-chain via the `AccountConfig` smart contract and executed inside a TEE (Trusted Execution Environment).
 
 **Production API**: `https://api.chipotle.litprotocol.com`
-**Dev API**: `https://api.dev.litprotocol.com`
 **Dashboard**: `https://dashboard.chipotle.litprotocol.com/dapps/dashboard/`
 **Local dev**: `http://localhost:8000`
 

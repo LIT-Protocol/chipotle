@@ -5,7 +5,7 @@
 import type { Params } from "k6/http";
 
 export const BASE_URL =
-  __ENV.BASE_URL || "https://api.dev.litprotocol.com/core/v1";
+  __ENV.BASE_URL || "https://test.chipotle.litprotocol.com/core/v1";
 
 /**
  * A unique ID for this k6 run, used as the X-Correlation-Id header so that
