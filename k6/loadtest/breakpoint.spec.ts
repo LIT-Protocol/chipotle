@@ -20,7 +20,7 @@
  *   BASE_URL=http://localhost:8000/core/v1 k6 run k6/loadtest/breakpoint.spec.ts
  *
  * Environment:
- *   BASE_URL          - API base URL (default: test.chipotle.litprotocol.com/core/v1)
+ *   BASE_URL          - API base URL (default: https://test.chipotle.litprotocol.com/core/v1)
  *   BPT_MAX_VUS       - Max/peak virtual users across both scenarios (default: 50)
  *   BPT_STEP_DURATION - Duration for each load step (default: 2m)
  *   BPT_STEPS         - Comma-separated list of VU levels; last one is treated
