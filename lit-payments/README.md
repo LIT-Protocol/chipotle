@@ -65,8 +65,8 @@ ROCKET_PORT=8000
 # 1 / (1 - 0.20) = 1.25x the market-rate Stripe credit per LITKEY.
 # LITKEY_DISCOUNT_BASIS_POINTS=0
 
-# Optional — configure LITKEY on-chain listener scaffold (live WSS/polling is
-# enabled in a follow-up 3c slice; these vars validate the Base gateway config):
+# Optional — enable the LITKEY on-chain listener. The current 3c slice starts
+# the HTTPS reconciliation poller; WSS subscription remains a follow-up.
 # ALCHEMY_WSS_URL=wss://base-mainnet.g.alchemy.com/v2/...
 # ALCHEMY_HTTPS_URL=https://base-mainnet.g.alchemy.com/v2/...
 # LITKEY_GATEWAY_ADDRESS=0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b
@@ -74,6 +74,20 @@ ROCKET_PORT=8000
 # LITKEY_CONFIRMATIONS=5
 # LITKEY_RECONCILIATION_INTERVAL_SECS=60
 ```
+
+## LITKEY listener runtime status
+
+When `ALCHEMY_HTTPS_URL` and `LITKEY_GATEWAY_ADDRESS` are configured, the app
+spawns a confirmed-block reconciliation loop. Each pass reads the checkpoint,
+fetches Base logs for the safe range `(last_processed_block, latest - confirmations)`,
+processes decoded gateway `Payment(indexed wallet,indexed payer,uint256 amount)`
+events through the shared crediting handler, and advances the checkpoint only
+after the whole range succeeds.
+
+Crediting pauses when the LITKEY rate row is missing or stale, records dust and
+no-customer events without a Stripe balance write, and credits known customers
+with the deterministic `PaymentLog::idempotency_key()`. The Alchemy WSS fast path
+is still intentionally deferred; it should reuse the same handler/idempotency.
 
 ### 3. Run
 
