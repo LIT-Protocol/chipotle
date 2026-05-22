@@ -399,10 +399,10 @@ All questions are closed. Plan is ready to start building.
    - [x] Added pure payment classification/crediting helpers: missing/stale rate pauses crediting; zero-cent payments record as `dust`; missing Stripe customers record as `no_customer`; positive known-customer payments produce a Stripe credit action with deterministic idempotency and an audit-friendly description.
    - [x] Added DB helper layer for payment idempotency inserts and checkpoint read/advance; checkpoint advancement uses `GREATEST` so retries cannot move a gateway checkpoint backwards.
    - [x] Started the runtime slice: `spawn_litkey_listener` now starts an HTTPS reconciliation loop when config exists. The loop reads the current checkpoint, computes the safe confirmed range, fetches latest block/logs through a testable RPC abstraction, processes each decoded gateway `Payment` event through the shared handler, and advances the checkpoint only after the full range succeeds.
-   - [ ] WSS subscription to `Payment` events from the deployed gateway contract; exponential backoff reconnect.
+   - [x] WSS subscription to `Payment` events from the deployed gateway contract with subscription acknowledgement validation, removed-log pending eviction, pending-confirmation buffering, read/connect timeouts, and exponential backoff reconnect. WSS never advances checkpoints; it shares the parser, idempotency, and crediting handler with reconciliation.
    - [x] 60s reconciliation poll for logs in `(last_processed_block, latest_block - 5)` as a safety net for WS gaps.
    - [x] 5-confirmation depth on Base before crediting.
-   - [x] Idempotency on `(tx_hash, log_index)` unique in `litkey_payments`.
+   - [x] Idempotency on `(chain_id, tx_hash, log_index)` unique in `litkey_payments`.
    - [x] For each Payment event: read `litkey_rate`, reject/hold crediting if `crediting_paused` is true, apply `LITKEY_DISCOUNT_BASIS_POINTS`, compute Stripe cents from native LITKEY wei + `usd_wei_per_litkey` using BigInt-style integer math, look up Stripe customer by `metadata.wallet_address == event.wallet`, write the credit via `lit_billing_core::balance::write_transaction`, persist a `litkey_payments` row.
    - [x] Rate precision prerequisite is handled in 3b: `litkey_rate.usd_wei_per_litkey` stores 18-decimal USD fixed point, CoinGecko parsing preserves arbitrary-precision JSON numbers, and the settlement helper rounds only once at final Stripe cents. Do not reintroduce whole-cent/LITKEY math in the listener.
    - Migrations: `litkey_payments`, `chain_checkpoint`.

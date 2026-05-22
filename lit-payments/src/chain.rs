@@ -9,17 +9,22 @@ use async_trait::async_trait;
 use ethers_core::abi::{ParamType, decode};
 use ethers_core::types::{Address, Bytes, H256, Log, U64, U256};
 use ethers_core::utils::keccak256;
+use futures_util::{SinkExt, StreamExt};
 use lit_billing_core::{StripeClient, balance, customer};
 use reqwest::Client;
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{Value, json};
 use sqlx::PgPool;
-use std::time::Duration as StdDuration;
-use tokio::time::{Duration, sleep};
+use std::{collections::HashMap, time::Duration as StdDuration};
+use tokio::time::{Duration, sleep, timeout};
+use tokio_tungstenite::{connect_async, tungstenite::Message};
 pub const BASE_CHAIN_ID: i64 = 8453;
 pub const DEFAULT_CONFIRMATIONS: u64 = 5;
 pub const DEFAULT_RECONCILIATION_INTERVAL_SECS: u64 = 60;
 pub const MAX_RECONCILIATION_BLOCK_RANGE: u64 = 2_000;
+const WSS_CONNECT_TIMEOUT_SECS: u64 = 15;
+const WSS_SUBSCRIBE_ACK_TIMEOUT_SECS: u64 = 15;
+const WSS_READ_IDLE_TIMEOUT_SECS: u64 = 20;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChainConfig {
@@ -41,6 +46,12 @@ pub struct PaymentLog {
     pub tx_hash: H256,
     pub log_index: u64,
     pub block_number: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WssPaymentNotification {
+    Added(PaymentLog),
+    Removed(PaymentLog),
 }
 
 impl PaymentLog {
@@ -422,6 +433,7 @@ struct RpcLog {
     transaction_hash: Option<H256>,
     topics: Vec<H256>,
     data: Bytes,
+    removed: Option<bool>,
 }
 
 impl From<RpcLog> for Log {
@@ -433,6 +445,7 @@ impl From<RpcLog> for Log {
             transaction_hash: log.transaction_hash,
             topics: log.topics,
             data: log.data,
+            removed: log.removed,
             ..Default::default()
         }
     }
@@ -535,6 +548,188 @@ pub const PAYMENT_EVENT_SIGNATURE: &str = "Payment(address,address,uint256)";
 
 pub fn payment_event_topic() -> H256 {
     H256::from(keccak256(PAYMENT_EVENT_SIGNATURE.as_bytes()))
+}
+
+pub fn wss_payment_log_subscribe_request(gateway_address: Address) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "eth_subscribe",
+        "params": [
+            "logs",
+            {
+                "address": format_address(gateway_address),
+                "topics": [format!("{:#x}", payment_event_topic())]
+            }
+        ]
+    })
+}
+
+pub fn parse_wss_subscription_ack(message: &str, request_id: u64) -> Result<Option<String>> {
+    let value: Value = serde_json::from_str(message).context("decoding LITKEY WSS JSON message")?;
+    if value.get("id").and_then(Value::as_u64) != Some(request_id) {
+        return Ok(None);
+    }
+
+    if let Some(error) = value.get("error") {
+        let message = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown JSON-RPC error");
+        let code = error
+            .get("code")
+            .and_then(Value::as_i64)
+            .unwrap_or_default();
+        anyhow::bail!("LITKEY WSS eth_subscribe failed: {message} ({code})");
+    }
+
+    let subscription_id = value
+        .get("result")
+        .and_then(Value::as_str)
+        .context("LITKEY WSS eth_subscribe response missing subscription id")?;
+    Ok(Some(subscription_id.to_string()))
+}
+
+fn wss_notification_result(message: &str, subscription_id: &str) -> Result<Option<Value>> {
+    let value: Value = serde_json::from_str(message).context("decoding LITKEY WSS JSON message")?;
+    if value.get("method").and_then(Value::as_str) != Some("eth_subscription") {
+        return Ok(None);
+    }
+
+    let params = value
+        .get("params")
+        .context("LITKEY WSS subscription message missing params")?;
+    let actual_subscription = params
+        .get("subscription")
+        .and_then(Value::as_str)
+        .context("LITKEY WSS subscription message missing subscription id")?;
+    if actual_subscription != subscription_id {
+        return Ok(None);
+    }
+
+    Ok(Some(params.get("result").cloned().context(
+        "LITKEY WSS subscription message missing result",
+    )?))
+}
+
+pub fn parse_wss_payment_log_notification(
+    chain_id: i64,
+    gateway_address: Address,
+    subscription_id: &str,
+    message: &str,
+) -> Result<Option<WssPaymentNotification>> {
+    let Some(result) = wss_notification_result(message, subscription_id)? else {
+        return Ok(None);
+    };
+
+    let removed = result
+        .get("removed")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let rpc_log: RpcLog =
+        serde_json::from_value(result).context("decoding LITKEY WSS payment log")?;
+    let Some(payment_log) = parse_gateway_payment_log(chain_id, gateway_address, rpc_log.into())?
+    else {
+        return Ok(None);
+    };
+    if removed {
+        tracing::warn!(
+            tx_hash = %format!("{:#x}", payment_log.tx_hash),
+            log_index = payment_log.log_index,
+            block_number = payment_log.block_number,
+            "LITKEY WSS received removed/reorged payment log"
+        );
+        return Ok(Some(WssPaymentNotification::Removed(payment_log)));
+    }
+    Ok(Some(WssPaymentNotification::Added(payment_log)))
+}
+
+fn pending_payment_key(log: &PaymentLog) -> String {
+    log.idempotency_key()
+}
+
+pub async fn drain_confirmed_wss_payments<R, P>(
+    rpc: &R,
+    processor: &P,
+    config: &ChainConfig,
+    pending: &mut HashMap<String, PaymentLog>,
+) -> Result<usize>
+where
+    R: ChainRpc,
+    P: ConfirmedPaymentProcessor,
+{
+    if pending.is_empty() {
+        return Ok(0);
+    }
+
+    let latest_block = rpc.latest_block().await?;
+    let mut confirmed_keys = Vec::new();
+    for (key, log) in pending.iter() {
+        if is_confirmed(log.block_number, latest_block, config.confirmations) {
+            confirmed_keys.push(key.clone());
+        }
+    }
+    confirmed_keys.sort();
+
+    let mut processed = 0;
+    for key in confirmed_keys {
+        let Some(log) = pending.get(&key).cloned() else {
+            continue;
+        };
+        processor.process_confirmed_payment(log).await?;
+        pending.remove(&key);
+        processed += 1;
+    }
+    Ok(processed)
+}
+
+pub async fn process_wss_payment_notification<R, P>(
+    rpc: &R,
+    processor: &P,
+    config: &ChainConfig,
+    subscription_id: &str,
+    message: &str,
+    pending: &mut HashMap<String, PaymentLog>,
+) -> Result<bool>
+where
+    R: ChainRpc,
+    P: ConfirmedPaymentProcessor,
+{
+    let Some(notification) = parse_wss_payment_log_notification(
+        config.chain_id,
+        config.gateway_address,
+        subscription_id,
+        message,
+    )?
+    else {
+        return Ok(false);
+    };
+
+    let log = match notification {
+        WssPaymentNotification::Added(log) => log,
+        WssPaymentNotification::Removed(log) => {
+            pending.remove(&pending_payment_key(&log));
+            return Ok(false);
+        }
+    };
+
+    let latest_block = rpc.latest_block().await?;
+    if is_confirmed(log.block_number, latest_block, config.confirmations) {
+        processor.process_confirmed_payment(log).await?;
+        return Ok(true);
+    }
+
+    let key = pending_payment_key(&log);
+    tracing::debug!(
+        tx_hash = %format!("{:#x}", log.tx_hash),
+        log_index = log.log_index,
+        block_number = log.block_number,
+        latest_block,
+        confirmations = config.confirmations,
+        "LITKEY WSS payment log is pending confirmations"
+    );
+    pending.insert(key, log);
+    Ok(false)
 }
 
 pub fn parse_gateway_payment_log(
@@ -688,11 +883,118 @@ where
     }
 }
 
+async fn next_wss_text<S>(socket: &mut S) -> Result<String>
+where
+    S: StreamExt<Item = std::result::Result<Message, tokio_tungstenite::tungstenite::Error>>
+        + Unpin,
+{
+    let message = timeout(
+        Duration::from_secs(WSS_READ_IDLE_TIMEOUT_SECS),
+        socket.next(),
+    )
+    .await
+    .map_err(|_| anyhow::anyhow!("LITKEY WSS read timed out"))?
+    .context("LITKEY WSS stream ended")?
+    .context("reading LITKEY WSS message")?;
+
+    match message {
+        Message::Text(text) => Ok(text.to_string()),
+        Message::Binary(bytes) => std::str::from_utf8(&bytes)
+            .context("decoding LITKEY WSS binary JSON")
+            .map(str::to_owned),
+        Message::Close(frame) => anyhow::bail!("LITKEY WSS closed: {frame:?}"),
+        Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => Ok(String::new()),
+    }
+}
+
+async fn wait_for_wss_subscription_ack<S>(socket: &mut S, request_id: u64) -> Result<String>
+where
+    S: StreamExt<Item = std::result::Result<Message, tokio_tungstenite::tungstenite::Error>>
+        + Unpin,
+{
+    timeout(Duration::from_secs(WSS_SUBSCRIBE_ACK_TIMEOUT_SECS), async {
+        loop {
+            let text = next_wss_text(socket).await?;
+            if text.is_empty() {
+                continue;
+            }
+            if let Some(subscription_id) = parse_wss_subscription_ack(&text, request_id)? {
+                return Ok(subscription_id);
+            }
+        }
+    })
+    .await
+    .context("timed out waiting for LITKEY WSS subscription ack")?
+}
+
+async fn wss_listener_connection_once<P>(processor: &P, config: &ChainConfig) -> Result<()>
+where
+    P: ConfirmedPaymentProcessor,
+{
+    let latest_rpc = HttpGatewayRpc::new(config);
+    let (mut socket, _) = timeout(
+        Duration::from_secs(WSS_CONNECT_TIMEOUT_SECS),
+        connect_async(&config.alchemy_wss_url),
+    )
+    .await
+    .context("timed out connecting LITKEY Alchemy WSS")?
+    .context("connecting LITKEY Alchemy WSS")?;
+
+    socket
+        .send(Message::Text(
+            wss_payment_log_subscribe_request(config.gateway_address)
+                .to_string()
+                .into(),
+        ))
+        .await
+        .context("subscribing to LITKEY Payment logs over WSS")?;
+
+    let subscription_id = wait_for_wss_subscription_ack(&mut socket, 1).await?;
+    tracing::info!(subscription_id, "LITKEY WSS subscription acknowledged");
+
+    let mut pending = HashMap::new();
+    loop {
+        let text = next_wss_text(&mut socket).await?;
+        if text.is_empty() {
+            drain_confirmed_wss_payments(&latest_rpc, processor, config, &mut pending).await?;
+            continue;
+        }
+        process_wss_payment_notification(
+            &latest_rpc,
+            processor,
+            config,
+            &subscription_id,
+            &text,
+            &mut pending,
+        )
+        .await?;
+        drain_confirmed_wss_payments(&latest_rpc, processor, config, &mut pending).await?;
+    }
+}
+
+pub async fn wss_listener_loop<P>(processor: P, config: ChainConfig)
+where
+    P: ConfirmedPaymentProcessor,
+{
+    let mut attempt = 0_u32;
+    loop {
+        match wss_listener_connection_once(&processor, &config).await {
+            Ok(()) => attempt = 0,
+            Err(err) => {
+                tracing::warn!(error = %err, "LITKEY WSS listener connection failed");
+                let delay = backoff_delay_secs(attempt);
+                attempt = attempt.saturating_add(1);
+                sleep(Duration::from_secs(delay)).await;
+            }
+        }
+    }
+}
+
 /// Register the phase-3c LITKEY listener when chain config is present.
 ///
-/// This slice starts the confirmed-block HTTPS reconciliation poller. The WSS
-/// subscription fast path remains intentionally deferred; both paths will share
-/// the same handler and idempotency key when WSS is added.
+/// Starts both the Alchemy WSS fast path and the confirmed-block HTTPS
+/// reconciliation poller. Both paths share the same parser, handler, and
+/// idempotency key; WSS never advances reconciliation checkpoints.
 pub fn spawn_litkey_listener(
     pool: PgPool,
     stripe: StripeClient,
@@ -706,10 +1008,17 @@ pub fn spawn_litkey_listener(
 
     let rpc = HttpGatewayRpc::new(&config);
     let store = PgReconciliationStore::new(pool.clone());
-    let processor = StripePaymentProcessor::new(pool, stripe, discount_basis_points);
+    let reconciliation_processor =
+        StripePaymentProcessor::new(pool.clone(), stripe.clone(), discount_basis_points);
     let task_config = config.clone();
     tokio::spawn(async move {
-        reconciliation_loop(store, rpc, processor, task_config).await;
+        reconciliation_loop(store, rpc, reconciliation_processor, task_config).await;
+    });
+
+    let wss_processor = StripePaymentProcessor::new(pool, stripe, discount_basis_points);
+    let task_config = config.clone();
+    tokio::spawn(async move {
+        wss_listener_loop(wss_processor, task_config).await;
     });
 
     tracing::info!(
@@ -718,7 +1027,7 @@ pub fn spawn_litkey_listener(
         confirmations = config.confirmations,
         reconciliation_interval_secs = config.reconciliation_interval_secs,
         discount_basis_points,
-        "LITKEY reconciliation listener started; WSS subscription remains deferred"
+        "LITKEY listener started with Alchemy WSS fast path and HTTPS reconciliation fallback"
     );
 }
 
@@ -769,6 +1078,152 @@ mod tests {
     fn reconnect_backoff_caps_at_thirty_seconds() {
         let delays: Vec<u64> = (0..8).map(backoff_delay_secs).collect();
         assert_eq!(delays, vec![1, 2, 4, 8, 16, 30, 30, 30]);
+    }
+
+    #[test]
+    fn builds_alchemy_wss_payment_log_subscription_for_configured_gateway() {
+        let config = sample_chain_config();
+        let payload = wss_payment_log_subscribe_request(config.gateway_address);
+
+        assert_eq!(payload["jsonrpc"], "2.0");
+        assert_eq!(payload["id"], 1);
+        assert_eq!(payload["method"], "eth_subscribe");
+        assert_eq!(payload["params"][0], "logs");
+        assert_eq!(
+            payload["params"][1]["address"],
+            format_address(config.gateway_address)
+        );
+        assert_eq!(
+            payload["params"][1]["topics"][0],
+            format!("{:#x}", payment_event_topic())
+        );
+    }
+
+    #[test]
+    fn parses_wss_subscription_ack_and_errors() {
+        assert_eq!(
+            parse_wss_subscription_ack(r#"{"jsonrpc":"2.0","id":1,"result":"0xsub"}"#, 1).unwrap(),
+            Some("0xsub".to_string())
+        );
+        assert!(
+            parse_wss_subscription_ack(r#"{"jsonrpc":"2.0","id":2,"result":"0xother"}"#, 1)
+                .unwrap()
+                .is_none()
+        );
+        let err = parse_wss_subscription_ack(
+            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"nope"}}"#,
+            1,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("eth_subscribe failed"));
+    }
+
+    #[test]
+    fn parses_eth_subscription_payment_log_notification_with_existing_parser() {
+        let expected = sample_payment_log();
+        let message = sample_subscription_message(&expected);
+
+        let parsed = parse_wss_payment_log_notification(
+            expected.chain_id,
+            expected.gateway_address,
+            "0xsub",
+            &message.to_string(),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(parsed, WssPaymentNotification::Added(expected));
+    }
+
+    #[test]
+    fn ignores_unrelated_wss_messages_but_errors_on_malformed_subscribed_logs() {
+        let expected = sample_payment_log();
+        assert!(
+            parse_wss_payment_log_notification(
+                expected.chain_id,
+                expected.gateway_address,
+                "0xsub",
+                r#"{"jsonrpc":"2.0","id":1,"result":"0xsub"}"#,
+            )
+            .unwrap()
+            .is_none()
+        );
+        assert!(
+            parse_wss_payment_log_notification(
+                expected.chain_id,
+                expected.gateway_address,
+                "0xsub",
+                r#"{"jsonrpc":"2.0","method":"eth_subscription","params":{"subscription":"0xother","result":{}}}"#,
+            )
+            .unwrap()
+            .is_none()
+        );
+
+        let missing_topics = json!({
+            "jsonrpc": "2.0",
+            "method": "eth_subscription",
+            "params": {
+                "subscription": "0xsub",
+                "result": {
+                    "address": format_address(expected.gateway_address),
+                    "blockNumber": format!("0x{:x}", expected.block_number),
+                    "logIndex": format!("0x{:x}", expected.log_index),
+                    "transactionHash": format!("{:#x}", expected.tx_hash),
+                    "data": format!("0x{}", hex::encode(encode(&[Token::Uint(expected.amount_wei)])))
+                }
+            }
+        });
+        let err = parse_wss_payment_log_notification(
+            expected.chain_id,
+            expected.gateway_address,
+            "0xsub",
+            &missing_topics.to_string(),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("decoding LITKEY WSS payment log"));
+
+        let malformed = json!({
+            "jsonrpc": "2.0",
+            "method": "eth_subscription",
+            "params": {
+                "subscription": "0xsub",
+                "result": {
+                    "address": format_address(expected.gateway_address),
+                    "blockNumber": format!("0x{:x}", expected.block_number),
+                    "logIndex": format!("0x{:x}", expected.log_index),
+                    "transactionHash": format!("{:#x}", expected.tx_hash),
+                    "topics": [format!("{:#x}", payment_event_topic()), indexed_address_topic(expected.wallet)],
+                    "data": format!("0x{}", hex::encode(encode(&[Token::Uint(expected.amount_wei)])))
+                }
+            }
+        });
+
+        let err = parse_wss_payment_log_notification(
+            expected.chain_id,
+            expected.gateway_address,
+            "0xsub",
+            &malformed.to_string(),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("exactly 3 topics"));
+    }
+
+    #[test]
+    fn parses_removed_wss_logs_for_pending_eviction() {
+        let expected = sample_payment_log();
+        let mut message = sample_subscription_message(&expected);
+        message["params"]["result"]["removed"] = json!(true);
+
+        assert_eq!(
+            parse_wss_payment_log_notification(
+                expected.chain_id,
+                expected.gateway_address,
+                "0xsub",
+                &message.to_string(),
+            )
+            .unwrap(),
+            Some(WssPaymentNotification::Removed(expected))
+        );
     }
 
     #[test]
@@ -905,6 +1360,28 @@ mod tests {
         }
     }
 
+    fn sample_subscription_message(log: &PaymentLog) -> Value {
+        json!({
+            "jsonrpc": "2.0",
+            "method": "eth_subscription",
+            "params": {
+                "subscription": "0xsub",
+                "result": {
+                    "address": format_address(log.gateway_address),
+                    "blockNumber": format!("0x{:x}", log.block_number),
+                    "logIndex": format!("0x{:x}", log.log_index),
+                    "transactionHash": format!("{:#x}", log.tx_hash),
+                    "topics": [
+                        format!("{:#x}", payment_event_topic()),
+                        format!("{:#x}", indexed_address_topic(log.wallet)),
+                        format!("{:#x}", indexed_address_topic(log.payer))
+                    ],
+                    "data": format!("0x{}", hex::encode(encode(&[Token::Uint(log.amount_wei)])))
+                }
+            }
+        })
+    }
+
     fn fresh_rate() -> crate::rate::LitkeyRate {
         crate::rate::LitkeyRate {
             usd_wei_per_litkey: "1000000000000000000".to_string(),
@@ -988,6 +1465,154 @@ mod tests {
             confirmations: 5,
             reconciliation_interval_secs: 60,
         }
+    }
+
+    #[tokio::test]
+    async fn wss_notification_processes_only_confirmed_payment_logs() {
+        let log = sample_payment_log();
+        let message = sample_subscription_message(&log).to_string();
+        let mut config = sample_chain_config();
+        config.gateway_address = log.gateway_address;
+
+        let rpc = FakeRpc {
+            latest: log.block_number + config.confirmations,
+            logs: vec![],
+            ranges: std::sync::Mutex::new(Vec::new()),
+        };
+        let processor = FakeProcessor {
+            processed: std::sync::Mutex::new(Vec::new()),
+            fail: false,
+        };
+        let mut pending = HashMap::new();
+
+        assert!(
+            process_wss_payment_notification(
+                &rpc,
+                &processor,
+                &config,
+                "0xsub",
+                &message,
+                &mut pending,
+            )
+            .await
+            .unwrap()
+        );
+        assert_eq!(
+            *processor.processed.lock().unwrap(),
+            vec![(log.block_number, log.log_index)]
+        );
+        assert!(pending.is_empty());
+        assert!(rpc.ranges.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn wss_notification_buffers_unconfirmed_logs_and_drains_when_confirmed() {
+        let log = sample_payment_log();
+        let message = sample_subscription_message(&log).to_string();
+        let mut config = sample_chain_config();
+        config.gateway_address = log.gateway_address;
+
+        let unconfirmed_rpc = FakeRpc {
+            latest: log.block_number + config.confirmations - 1,
+            logs: vec![],
+            ranges: std::sync::Mutex::new(Vec::new()),
+        };
+        let processor = FakeProcessor {
+            processed: std::sync::Mutex::new(Vec::new()),
+            fail: false,
+        };
+        let mut pending = HashMap::new();
+
+        assert!(
+            !process_wss_payment_notification(
+                &unconfirmed_rpc,
+                &processor,
+                &config,
+                "0xsub",
+                &message,
+                &mut pending,
+            )
+            .await
+            .unwrap()
+        );
+        assert!(processor.processed.lock().unwrap().is_empty());
+        assert_eq!(pending.len(), 1);
+        assert!(unconfirmed_rpc.ranges.lock().unwrap().is_empty());
+
+        let confirmed_rpc = FakeRpc {
+            latest: log.block_number + config.confirmations,
+            logs: vec![],
+            ranges: std::sync::Mutex::new(Vec::new()),
+        };
+        assert_eq!(
+            drain_confirmed_wss_payments(&confirmed_rpc, &processor, &config, &mut pending)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            *processor.processed.lock().unwrap(),
+            vec![(log.block_number, log.log_index)]
+        );
+        assert!(pending.is_empty());
+    }
+
+    #[tokio::test]
+    async fn wss_removed_notification_evicts_pending_log_before_drain() {
+        let log = sample_payment_log();
+        let message = sample_subscription_message(&log).to_string();
+        let mut removed_message = sample_subscription_message(&log);
+        removed_message["params"]["result"]["removed"] = json!(true);
+        let mut config = sample_chain_config();
+        config.gateway_address = log.gateway_address;
+
+        let unconfirmed_rpc = FakeRpc {
+            latest: log.block_number + config.confirmations - 1,
+            logs: vec![],
+            ranges: std::sync::Mutex::new(Vec::new()),
+        };
+        let processor = FakeProcessor {
+            processed: std::sync::Mutex::new(Vec::new()),
+            fail: false,
+        };
+        let mut pending = HashMap::new();
+
+        process_wss_payment_notification(
+            &unconfirmed_rpc,
+            &processor,
+            &config,
+            "0xsub",
+            &message,
+            &mut pending,
+        )
+        .await
+        .unwrap();
+        assert_eq!(pending.len(), 1);
+
+        process_wss_payment_notification(
+            &unconfirmed_rpc,
+            &processor,
+            &config,
+            "0xsub",
+            &removed_message.to_string(),
+            &mut pending,
+        )
+        .await
+        .unwrap();
+        assert!(pending.is_empty());
+
+        let confirmed_rpc = FakeRpc {
+            latest: log.block_number + config.confirmations,
+            logs: vec![],
+            ranges: std::sync::Mutex::new(Vec::new()),
+        };
+        assert_eq!(
+            drain_confirmed_wss_payments(&confirmed_rpc, &processor, &config, &mut pending)
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(processor.processed.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
