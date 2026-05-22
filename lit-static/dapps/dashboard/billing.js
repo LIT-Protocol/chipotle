@@ -46,6 +46,7 @@ let _billingAvailable = null;
 let _billingCheckedAt = 0;
 let _billingRetryTimer = null;
 const BILLING_RETRY_MS = 30000;
+const PAYMENTS_BASE_URL = 'https://payments.litprotocol.com';
 
 // AbortController for in-flight billing fetches. Recreated lazily; aborted on
 // session change via clearBillingSession().
@@ -119,6 +120,19 @@ function evictWalletAuthCache() {
  */
 function isAuthError(e) {
   return !!(e && (e.status === 401 || e.status === 400));
+}
+
+function updatePayWithLitkeyLink(visible) {
+  const el = document.getElementById('btn-pay-litkey');
+  if (!el) return;
+  const wallet = getMode() === 'sovereign' ? getChainSecuredWallet() : null;
+  if (visible && wallet && /^0x[0-9a-fA-F]{40}$/.test(wallet)) {
+    el.href = PAYMENTS_BASE_URL + '/payWithLitkey?wallet=' + encodeURIComponent(wallet);
+    el.style.display = '';
+  } else {
+    el.removeAttribute('href');
+    el.style.display = 'none';
+  }
 }
 
 export async function checkBillingAvailable() {
@@ -209,6 +223,7 @@ export function refreshBillingUI() {
   if (!capturedKey || hasUsageKeyOverride()) {
     if (balanceEl) balanceEl.style.display = 'none';
     if (addFundsBtn) addFundsBtn.style.display = 'none';
+    updatePayWithLitkeyLink(false);
     if (notRequiredEl) notRequiredEl.style.display = 'none';
     if (billingBanner) billingBanner.style.display = 'none';
     if (noFundsWarning) noFundsWarning.style.display = 'none';
@@ -219,6 +234,7 @@ export function refreshBillingUI() {
     if (available) {
       if (balanceEl) balanceEl.style.display = '';
       if (addFundsBtn) addFundsBtn.style.display = '';
+      updatePayWithLitkeyLink(true);
       if (notRequiredEl) notRequiredEl.style.display = 'none';
       if (billingBanner) billingBanner.style.display = 'none';
       // In sovereign mode never auto-trigger a wallet popup just to render
@@ -239,6 +255,7 @@ export function refreshBillingUI() {
     } else {
       if (balanceEl) balanceEl.style.display = 'none';
       if (addFundsBtn) addFundsBtn.style.display = 'none';
+      updatePayWithLitkeyLink(false);
       if (notRequiredEl) notRequiredEl.style.display = '';
       if (billingBanner) billingBanner.style.display = '';
       if (noFundsWarning) noFundsWarning.style.display = 'none';

@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pay with LITKEY</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/pay-with-litkey.css">
+  <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.umd.min.js" integrity="sha384-JjzOKxQsr+Jhx75Ot1XldVFnWF2UCtB4Ig2JuEcuBt4VAdUG6alucV+sHrYjPn5C" crossorigin="anonymous"></script>
+  <script defer src="/static/pay-with-litkey.js"></script>
+</head>
+<body class="litkey-pay-page">
+  <main class="pay-card">
+    <p class="eyebrow">Lit Protocol Payments</p>
+    <h1>Pay with LITKEY</h1>
+    <p class="muted">Credit an existing Lit account with LITKEY on Base mainnet.</p>
+
+    <section class="account-box" aria-labelledby="account-heading">
+      <h2 id="account-heading">Account to be credited</h2>
+      <dl>
+        <dt>Email</dt><dd id="account-email">Loading…</dd>
+        <dt>Wallet</dt><dd id="account-wallet">Loading…</dd>
+      </dl>
+      <label class="confirm-row"><input type="checkbox" id="confirm-account"> I confirm this is the account I want to credit.</label>
+    </section>
+
+    <section class="payment-box" aria-labelledby="payment-heading">
+      <h2 id="payment-heading">Payment amount</h2>
+      <label for="credit-dollars">Desired account credit (USD)</label>
+      <div class="amount-row"><span>$</span><input id="credit-dollars" inputmode="decimal" value="5.00" aria-describedby="minimum-copy"></div>
+      <p id="minimum-copy" class="hint">Minimum payment is $5.00 equivalent. Quote refreshes every 30 seconds until approval starts.</p>
+      <div class="quote-grid">
+        <span>Estimated LITKEY</span><strong id="litkey-amount">—</strong>
+        <span>Effective rate</span><strong id="rate-display">—</strong>
+        <span>Quote status</span><strong id="quote-status">Loading…</strong>
+      </div>
+    </section>
+
+    <div id="status" class="status info" role="status">Loading account and quote…</div>
+    <div class="actions">
+      <button type="button" id="connect-wallet" class="btn btn-secondary">Connect wallet</button>
+      <button type="button" id="approve" class="btn btn-primary" disabled>Approve exact LITKEY</button>
+      <button type="button" id="pay" class="btn btn-primary" disabled>Pay</button>
+    </div>
+    <p class="fine-print">Final credit is estimated in the browser and finalized by the confirmation listener after the transaction is confirmed.</p>
+  </main>
+</body>
+</html>

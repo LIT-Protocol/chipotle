@@ -10,9 +10,13 @@ for the full design.
 
 Public:
 - `GET /login` — login page (form posts to `/auth/request`).
+- `GET /payWithLitkey?wallet=0x…` — end-user Base mainnet LITKEY payment page for an existing Stripe customer wallet.
 - `POST /auth/request` — send magic link (rate-limited per email, 60s cooldown).
 - `GET /auth/verify?token=…` — validate token, set session cookie, redirect.
+- `GET /api/customer/preview?wallet=0x…` — wallet-scoped customer identity preview for the LITKEY payment page. Returns only `found`, `email`, and `wallet_address`; it does not expose Stripe customer ids or balances.
 - `GET /api/litkey/quote` — public LITKEY quote for the end-user payment page; includes `crediting_paused` and omits an effective credit rate while paused.
+- `GET /api/litkey/payment-config` — public Base mainnet payment config: chain id, LITKEY token address, and payment gateway address. Fails closed with `503` if the on-chain listener is not configured.
+- `GET /api/litkey/payment-status?tx_hash=0x…&wallet=0x…` — wallet-scoped listener status for a submitted transaction; used by the payment page to poll for `credited`, `dust`, `paused`, or `no_customer` after submission.
 
 Authenticated (operator session cookie required):
 - `GET /` — admin dashboard.
@@ -76,6 +80,20 @@ ROCKET_PORT=8000
 ```
 
 ## LITKEY listener runtime status
+
+`/payWithLitkey?wallet=0x…` lets a user credit an existing Stripe customer by
+paying LITKEY to the deployed gateway on Base mainnet. The page validates that
+the URL wallet maps to a customer, prominently displays the email and wallet that
+will be credited, refreshes the quote every 30 seconds until approval starts,
+freezes the quote and LITKEY amount for exact-amount approval, calls
+`pay(amount, wallet)`, and polls the listener status endpoint scoped by
+transaction hash plus credited wallet. The public preview endpoint intentionally
+reveals whether the supplied wallet has a Stripe customer and the email that will
+be credited so payment-link recipients can verify the destination before
+spending. The payment config endpoint fails closed when the listener is disabled,
+so users cannot be directed to send LITKEY while automatic crediting is offline.
+The dashboard exposes a conservative `Pay with LITKEY` entry point only when the
+signed-in user is in ChainSecured mode and the wallet address is known.
 
 When `ALCHEMY_WSS_URL`, `ALCHEMY_HTTPS_URL`, and `LITKEY_GATEWAY_ADDRESS` are
 configured, the app spawns both an Alchemy WSS logs subscription fast path and a

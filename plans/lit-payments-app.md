@@ -6,9 +6,9 @@ Date: 2026-05-18 (last updated: 2026-05-21)
 
 ## Current state (TL;DR for a new session)
 
-- **Shipped to `next`**: `lit-billing-core` extraction (PR #358), `lit-payments` foundation + magic-link auth (PR #359), admin credit portal + Fly.io deploy target (PR #370).
-- **Open**: `LitkeyPaymentGateway` Solidity contract + Hardhat project (PR #373).
-- **In progress**: rate poller (3b) implemented in this PR worktree; Alchemy WSS listener (3c) and Wagmi payment page + dashboard link (3d) remain. See the Sequencing section near the bottom for what each entails and recommended order.
+- **Shipped to `main`**: `lit-billing-core` extraction (PR #358), `lit-payments` foundation + magic-link auth (PR #359), admin credit portal + Fly.io deploy target (PR #370), LITKEY gateway/rate/listener scaffolding (PR #373), and listener runtime with WSS fast path + Alloy migration (PR #378).
+- **This PR worktree**: phase 3d implements `/payWithLitkey`, public wallet-scoped preview/config/status APIs, and a dashboard `Pay with LITKEY` entry point for ChainSecured wallets.
+- **Remaining before retiring manual flow**: deploy/smoke-test the runtime + payment page in a controlled environment, monitor first live credits, and add operational alerts/runbooks as needed.
 
 The rest of this doc is the original design + decisions, kept for context. Implementation details that diverged from the plan are noted inline.
 
@@ -408,17 +408,19 @@ All questions are closed. Plan is ready to start building.
    - Migrations: `litkey_payments`, `chain_checkpoint`.
    - **Depends on**: 3a contract deployed + address known (`0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b` on Base mainnet); 3b rate table existing.
 
-   **3d.** ⏭️ Wagmi `/payWithLitkey` page + dashboard "Pay with tokens" link — NOT STARTED
-   - New page at `payments.litprotocol.com/payWithLitkey?wallet=<address>`. Wallet param is plain (no HMAC — see "URL spoofing" risk).
-   - Flow: page validates the wallet has a Stripe customer → prominently shows the account-to-be-credited (email + wallet) → user confirms → Wagmi wallet connect → quote (refreshed every 30s, frozen at approve) → approve → pay → poll the listener's grants for credit confirmation.
-   - Small change to `lit-static/dapps/dashboard/` to add the "Pay with tokens" button.
+   **3d.** 🚧 `/payWithLitkey` page + dashboard "Pay with LITKEY" link — IMPLEMENTED IN THIS PR WORKTREE
+   - [x] New public page at `payments.litprotocol.com/payWithLitkey?wallet=<address>`. Wallet param is plain (no HMAC — see "URL spoofing" risk).
+   - [x] Public wallet-only account preview API exposes `{found,email,wallet_address}` without Stripe customer id or balance.
+   - [x] Public payment config/status APIs expose browser payment config and allow polling `litkey_payments` by `(tx_hash, wallet)` without leaking other customers' status.
+   - [x] Vanilla ethers/EIP-1193 page validates the account, prominently displays email + wallet, requires confirmation, switches to Base mainnet, refreshes the quote every 30s until approval starts, approves exact LITKEY, pays the gateway, and polls listener status.
+   - [x] Small change to `lit-static/dapps/dashboard/` to add the "Pay with LITKEY" button for ChainSecured wallets when billing is available and a wallet address is known.
    - **Depends on**: 3a contract address (`0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b` on Base mainnet); 3c listener handling the resulting `Payment` events.
 
    **Milestone (when 3a-d ship)**: users self-serve LITKEY payments end-to-end on Base mainnet; the manual "send LITKEY to the wallet and I'll credit you in Stripe" flow is retired.
 
-### Suggested ordering for the remaining PRs
+### Follow-up after phase 3d
 
-`3b` (rate poller) → `3c` (listener) → `3d` (payment page). 3b is fully independent so it's the cleanest next slice. 3c needs the contract address (deploy on Sepolia first) and the rate table from 3b. 3d depends on both.
+After this PR lands, the remaining work is operational rather than another planned build slice: deploy the payments app with listener env configured, smoke-test a small Base mainnet LITKEY payment against the deployed gateway, verify Stripe crediting and dashboard balance refresh, then add monitoring/runbook coverage for stuck listener status or paused pricing.
 
 ## Risks
 
