@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lit Triggers</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="card wide">
+    <h1>Lit Triggers</h1>
+    <p id="who" class="subtitle">Loading…</p>
+
+    <section class="panel">
+      <h2>Create trigger</h2>
+      <p class="note">
+        Your Lit/Chipotle admin API key is used only by this browser tab to mint
+        a scoped usage key. The admin key is never sent to lit-triggers.
+      </p>
+      <form id="trigger-form">
+        <label for="chipotle-url">Chipotle add_usage_api_key URL</label>
+        <input id="chipotle-url" name="chipotleUrl" type="url" value="https://api.chipotle.litprotocol.com/add_usage_api_key" required>
+
+        <label for="admin-key">Lit/Chipotle admin API key</label>
+        <input id="admin-key" name="adminKey" type="password" autocomplete="off" required>
+
+        <label for="group-id">Group ID for execute_in_groups</label>
+        <input id="group-id" name="groupId" type="text" required>
+
+        <label for="name">Trigger name</label>
+        <input id="name" name="name" type="text" required>
+
+        <label for="kind">Trigger kind</label>
+        <select id="kind" name="kind">
+          <option value="webhook">webhook</option>
+          <option value="schedule">schedule</option>
+          <option value="chain_event">chain_event</option>
+        </select>
+
+        <label for="action-code">Action code</label>
+        <textarea id="action-code" name="actionCode" rows="8" required></textarea>
+
+        <label for="trigger-config">Trigger config JSON</label>
+        <textarea id="trigger-config" name="triggerConfig" rows="5">{}</textarea>
+
+        <button id="create-btn" type="submit">Mint usage key + create trigger</button>
+      </form>
+      <p id="status" class="status"></p>
+    </section>
+
+    <section class="panel">
+      <h2>Your triggers</h2>
+      <button id="refresh-btn" type="button">Refresh triggers</button>
+      <pre id="triggers-list" class="output">[]</pre>
+    </section>
+
+    <button id="logout-btn" type="button" class="secondary">Sign out</button>
+  </main>
+
+  <script>
+    const statusEl = document.getElementById('status');
+    const triggersEl = document.getElementById('triggers-list');
+
+    function setStatus(message, cls = '') {
+      statusEl.textContent = message;
+      statusEl.className = `status ${cls}`.trim();
+    }
+
+    async function loadProfile() {
+      const resp = await fetch('/api/me', { credentials: 'same-origin' });
+      if (resp.status === 401) {
+        window.location.href = '/login';
+        return null;
+      }
+      if (!resp.ok) throw new Error(`profile failed: ${resp.status}`);
+      const me = await resp.json();
+      document.getElementById('who').textContent = `Signed in as ${me.email}`;
+      return me;
+    }
+
+    async function refreshTriggers() {
+      const resp = await fetch('/api/triggers', { credentials: 'same-origin' });
+      if (!resp.ok) throw new Error(`list triggers failed: ${resp.status}`);
+      const triggers = await resp.json();
+      triggersEl.textContent = JSON.stringify(triggers, null, 2);
+    }
+
+    async function mintUsageKey({ chipotleUrl, adminKey, groupId }) {
+      const resp = await fetch(chipotleUrl, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'authorization': `Bearer ${adminKey}`
+        },
+        body: JSON.stringify({
+          scope: {
+            execute_in_groups: [groupId],
+            create_pkp: false,
+            manage_groups: false,
+            manage_ipfs_ids_in_groups: false
+          }
+        })
+      });
+      if (!resp.ok) {
+        const body = await resp.text();
+        throw new Error(`Chipotle usage-key mint failed: ${resp.status} ${body}`);
+      }
+      const json = await resp.json();
+      const usageKey = json.usage_api_key || json.usageApiKey || json.key;
+      if (!usageKey) throw new Error('Chipotle response did not include usage_api_key');
+      return usageKey;
+    }
+
+    document.getElementById('trigger-form').addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
+      const createBtn = document.getElementById('create-btn');
+      createBtn.disabled = true;
+      setStatus('Minting scoped usage key in browser…');
+      try {
+        const usageApiKey = await mintUsageKey({
+          chipotleUrl: form.get('chipotleUrl'),
+          adminKey: form.get('adminKey'),
+          groupId: form.get('groupId')
+        });
+
+        // Drop the admin key from the DOM as soon as the browser-side Chipotle
+        // call succeeds. Only the scoped usage key below is sent to lit-triggers.
+        document.getElementById('admin-key').value = '';
+
+        const config = JSON.parse(form.get('triggerConfig') || '{}');
+        setStatus('Creating trigger…');
+        const resp = await fetch('/api/triggers', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            name: form.get('name'),
+            kind: form.get('kind'),
+            action_code: form.get('actionCode'),
+            default_params: {},
+            usage_api_key: usageApiKey,
+            config
+          })
+        });
+        if (!resp.ok) throw new Error(`create trigger failed: ${resp.status} ${await resp.text()}`);
+        setStatus('Trigger created. The scoped usage key was stored encrypted at rest.', 'ok');
+        await refreshTriggers();
+      } catch (e) {
+        setStatus(e.message || String(e), 'error');
+      } finally {
+        createBtn.disabled = false;
+      }
+    });
+
+    document.getElementById('refresh-btn').addEventListener('click', () => {
+      refreshTriggers().catch((e) => setStatus(e.message || String(e), 'error'));
+    });
+
+    document.getElementById('logout-btn').addEventListener('click', async () => {
+      await fetch('/auth/logout', { method: 'POST', credentials: 'same-origin' });
+      window.location.href = '/login';
+    });
+
+    loadProfile()
+      .then((me) => { if (me) return refreshTriggers(); })
+      .catch((e) => {
+        document.getElementById('who').textContent = 'Could not load profile';
+        setStatus(e.message || String(e), 'error');
+      });
+  </script>
+</body>
+</html>
