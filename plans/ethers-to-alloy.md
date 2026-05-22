@@ -93,14 +93,14 @@ Migrates the H160/U256 boundary files and the accounts/account_management public
 ### Phase 5 — `abigen!` → `sol!` in lit-api-server
 Pairs the contract-binding regeneration with the signer/middleware stack swap, since the two are tightly coupled (alloy contracts take alloy providers; `sol!`-generated bindings replace the abigen `M: ethers::Middleware` constraint with alloy `Provider`).
 
-- [ ] `src/restart.rs` — `EthEvent` subscription → alloy `Filter`/`Event::watch`
-- [ ] `src/accounts/contracts/account_config_contract.rs` — regenerate bindings via `sol!` from existing ABI JSON
-- [ ] `src/accounts/signer_pool.rs` — `LocalWallet` + `SignerMiddleware` + `NonceManagerMiddleware` → alloy `PrivateKeySigner` + `ProviderBuilder::new().with_recommended_fillers().wallet(...)`
-- [ ] `src/accounts/signable_contract.rs` — `ContractCall` → alloy `CallBuilder`; `SignerMiddleware`/`NonceManagerMiddleware` stack swap
-- [ ] `src/accounts/decode_revert.rs` — switch from ethers `ContractError` to alloy's equivalent
-- [ ] Remove `src/utils/alloy_ethers.rs` and all `ae_*` / `ea_*` call sites in `accounts/mod.rs`
-- [ ] `src/core/account_management.rs::metadata_to_item` — drop the temporary `ethers::types::U256::zero()` comparison once `Metadata.id` is alloy `U256`
-- [ ] Verify nonce-manager parity: alloy's `NonceFiller` has different cache/recovery semantics vs. ethers `NonceManagerMiddleware` — document any behavioral differences
+- [x] `src/restart.rs` — `EthEvent` subscription → alloy `Filter`/`Event::watch`
+- [x] `src/accounts/contracts/account_config_contract.rs` — regenerate bindings via `sol!` from existing ABI JSON
+- [x] `src/accounts/signer_pool.rs` — `LocalWallet` + `SignerMiddleware` + `NonceManagerMiddleware` → alloy `PrivateKeySigner` + `ProviderBuilder::new().wallet(...)` (recommended fillers are enabled by default in alloy 1.8)
+- [x] `src/accounts/signable_contract.rs` — `ContractCall` → alloy `CallBuilder`; `SignerMiddleware`/`NonceManagerMiddleware` stack swap
+- [x] `src/accounts/decode_revert.rs` — switch from ethers `ContractError` to alloy's equivalent
+- [x] Remove `src/utils/alloy_ethers.rs` and all `ae_*` / `ea_*` call sites in `accounts/mod.rs`
+- [x] `src/core/account_management.rs::metadata_to_item` — drop the temporary `ethers::types::U256::zero()` comparison once `Metadata.id` is alloy `U256`
+- [x] Verify nonce-manager parity: alloy's `NonceFiller` has different cache/recovery semantics vs. ethers `NonceManagerMiddleware` — documented in `src/accounts/signable_contract.rs`
 
 ### Phase 6 — rust_generator_and_deployer (separate cargo workspace)
 Largest single PR but mostly mechanical regeneration.

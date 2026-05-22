@@ -1,13 +1,9 @@
 //! On-chain restart trigger listener.
 //!
 //! Polls the `ServerTriggered` event from the AccountConfig contract.
-//! When the diamond owner calls `serverTrigger(uint256)` on-chain, this
-//! listener detects the event and sends a restart signal to the main loop
-//! via [`RestartHandle`].
 
-use crate::accounts::signable_contract::{Middleware, get_read_only_account_config_contract};
-use ethers::contract::EthEvent;
-use ethers::types::BlockNumber;
+use crate::accounts::signable_contract::get_read_only_account_config_contract;
+use alloy::providers::Provider;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -28,45 +24,25 @@ impl RestartHandle {
     /// Send a restart signal. Returns `true` if the signal was sent or
     /// already queued (a restart is in progress). Returns `false` only
     /// when the channel is closed.
-    /// Uses `try_send` so the listener is never blocked waiting for the
-    /// main loop to consume a previous signal.
     pub fn trigger(&self) -> bool {
         match self.tx.try_send(()) {
             Ok(()) => true,
-            Err(mpsc::error::TrySendError::Full(_)) => {
-                // A restart is already queued; no need to queue another.
-                true
-            }
+            Err(mpsc::error::TrySendError::Full(_)) => true,
             Err(mpsc::error::TrySendError::Closed(_)) => false,
         }
     }
-}
-
-/// ABI definition for the ServerTriggered event emitted by APIConfigFacet.
-/// This is defined manually to avoid depending on the full generated contract bindings
-/// (which would need to be regenerated after the Solidity change).
-#[derive(Clone, Debug, EthEvent)]
-#[ethevent(name = "ServerTriggered", abi = "ServerTriggered(uint256,address)")]
-pub struct ServerTriggeredEvent {
-    pub value: ethers::types::U256,
-    #[ethevent(indexed)]
-    pub sender: ethers::types::Address,
 }
 
 /// Maximum number of consecutive startup failures before giving up.
 const MAX_LISTENER_RETRIES: u32 = 5;
 
 /// Start the on-chain event listener as a background task.
-///
-/// Polls the AccountConfig contract for `ServerTriggered` events starting from
-/// the current block. When a new event is detected, sends a restart signal
-/// via the provided handle. Retries with exponential backoff on failure.
 pub fn start_server_trigger_listener(restart_handle: RestartHandle) {
     tokio::spawn(async move {
         let mut attempt = 0u32;
         loop {
             match run_event_listener(restart_handle.clone()).await {
-                Ok(()) => break, // listener exited cleanly (channel closed)
+                Ok(()) => break,
                 Err(e) => {
                     attempt += 1;
                     if attempt >= MAX_LISTENER_RETRIES {
@@ -91,15 +67,12 @@ pub fn start_server_trigger_listener(restart_handle: RestartHandle) {
 
 async fn run_event_listener(restart_handle: RestartHandle) -> anyhow::Result<()> {
     let contract = get_read_only_account_config_contract().await?;
-    let client = contract.client();
+    let client = contract.provider();
 
-    // Start listening from the current block. Fail loudly rather than
-    // defaulting to block 0 (which would scan the entire chain history).
     let start_block = client
         .get_block_number()
         .await
-        .map_err(|e| anyhow::anyhow!("Failed to get initial block number: {e}"))?
-        .as_u64();
+        .map_err(|e| anyhow::anyhow!("Failed to get initial block number: {e}"))?;
 
     tracing::info!(
         from_block = start_block,
@@ -107,18 +80,15 @@ async fn run_event_listener(restart_handle: RestartHandle) -> anyhow::Result<()>
         "Server trigger event listener started"
     );
 
-    // Start one block before `start_block` so the first query range
-    // (`last_checked_block + 1 ..= latest`) actually includes `start_block`.
-    // Otherwise an event emitted in the block we observed at startup would be missed.
     let mut last_checked_block = start_block.saturating_sub(1);
     let mut interval = tokio::time::interval(EVENT_POLL_INTERVAL);
-    interval.tick().await; // discard the immediate first tick
+    interval.tick().await;
 
     loop {
         interval.tick().await;
 
         let latest_block = match client.get_block_number().await {
-            Ok(b) => b.as_u64(),
+            Ok(b) => b,
             Err(e) => {
                 tracing::warn!("Failed to get latest block number: {e}");
                 continue;
@@ -129,19 +99,17 @@ async fn run_event_listener(restart_handle: RestartHandle) -> anyhow::Result<()>
             continue;
         }
 
-        // Query ServerTriggered events in the new block range.
-        let filter = contract
-            .event_for_name::<ServerTriggeredEvent>("ServerTriggered")
-            .map_err(|e| anyhow::anyhow!("Failed to create event filter: {e}"))?
-            .from_block(BlockNumber::Number(
-                last_checked_block.saturating_add(1).into(),
-            ))
-            .to_block(BlockNumber::Number(latest_block.into()));
+        let events = contract
+            .ServerTriggered_filter()
+            .from_block(last_checked_block.saturating_add(1))
+            .to_block(latest_block)
+            .query()
+            .await;
 
-        match filter.query().await {
+        match events {
             Ok(events) => {
                 if !events.is_empty() {
-                    let event = &events[events.len() - 1]; // use the latest event
+                    let (event, _log) = &events[events.len() - 1];
                     tracing::info!(
                         value = %event.value,
                         sender = ?event.sender,
@@ -161,7 +129,6 @@ async fn run_event_listener(restart_handle: RestartHandle) -> anyhow::Result<()>
                         format!("{}..{}", last_checked_block.saturating_add(1), latest_block),
                     "Failed to query ServerTriggered events: {e}"
                 );
-                // Don't update last_checked_block so we retry this range.
                 continue;
             }
         }

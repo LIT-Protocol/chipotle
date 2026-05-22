@@ -623,7 +623,7 @@ fn metadata_to_item(
 ) -> ListMetadataItem {
     // `accounts::Metadata` is still an ethers-generated struct (Phase 5 will
     // regenerate it via sol!); compare against ethers' zero until then.
-    if m.id == ethers::types::U256::zero() {
+    if m.id == alloy::primitives::U256::ZERO {
         return ListMetadataItem {
             id: wildcard_id.to_string(),
             name: wildcard_name.to_string(),
@@ -631,8 +631,7 @@ fn metadata_to_item(
         };
     }
 
-    let mut bytes = [0; 32];
-    m.id.to_big_endian(&mut bytes);
+    let bytes = m.id.to_be_bytes::<32>();
 
     ListMetadataItem {
         id: bytes_to_0x_hex(bytes),
@@ -645,12 +644,10 @@ fn metadata_to_item(
 fn usage_api_key_to_api_key_item(
     m: &accounts::contracts::account_config_contract::UsageApiKeyReturn,
 ) -> ApiKeyItem {
-    let mut bytes = [0; 32];
-    m.metadata.id.to_big_endian(&mut bytes);
+    let bytes = m.metadata.id.to_be_bytes::<32>();
     let id = bytes_to_0x_hex(bytes);
 
-    let mut hash_bytes = [0; 32];
-    m.api_key_hash.to_big_endian(&mut hash_bytes);
+    let hash_bytes = m.apiKeyHash.to_be_bytes::<32>();
     let api_key_hash = bytes_to_0x_hex(hash_bytes);
 
     ApiKeyItem {
@@ -659,22 +656,22 @@ fn usage_api_key_to_api_key_item(
         name: m.metadata.name.clone(),
         description: m.metadata.description.clone(),
         expiration: m.expiration.to_string(),
-        balance: m.balance.as_u64(),
-        can_create_groups: m.create_groups,
-        can_delete_groups: m.delete_groups,
-        can_create_pkps: m.create_pk_ps,
+        balance: m.balance.to::<u64>(),
+        can_create_groups: m.createGroups,
+        can_delete_groups: m.deleteGroups,
+        can_create_pkps: m.createPKPs,
         can_manage_ipfs_ids_in_groups: m
-            .manage_ipfs_ids_in_groups
+            .manageIPFSIdsInGroups
             .iter()
-            .map(|id| id.as_u64())
+            .map(|id| id.to::<u64>())
             .collect(),
-        can_add_pkp_to_groups: m.add_pkp_to_groups.iter().map(|id| id.as_u64()).collect(),
+        can_add_pkp_to_groups: m.addPkpToGroups.iter().map(|id| id.to::<u64>()).collect(),
         can_remove_pkp_from_groups: m
-            .remove_pkp_from_groups
+            .removePkpFromGroups
             .iter()
-            .map(|id| id.as_u64())
+            .map(|id| id.to::<u64>())
             .collect(),
-        can_execute_in_groups: m.execute_in_groups.iter().map(|id| id.as_u64()).collect(),
+        can_execute_in_groups: m.executeInGroups.iter().map(|id| id.to::<u64>()).collect(),
     }
 }
 
@@ -723,7 +720,7 @@ pub async fn list_wallets(
             id: m.id.to_string(),
             name: m.name.clone(),
             description: m.description.clone(),
-            wallet_address: bytes_to_0x_hex(m.pkp_id.as_bytes()),
+            wallet_address: bytes_to_0x_hex(m.pkpId.as_slice()),
         })
         .collect();
     Ok(wallet_items)
@@ -748,7 +745,7 @@ pub async fn list_wallets_in_group(
             id: m.id.to_string(),
             name: m.name.clone(),
             description: m.description.clone(),
-            wallet_address: bytes_to_0x_hex(m.pkp_id.as_bytes()),
+            wallet_address: bytes_to_0x_hex(m.pkpId.as_slice()),
         })
         .collect();
     Ok(wallet_items)

@@ -1,12 +1,11 @@
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use alloy::primitives::{Address, B256, U256};
+use alloy::providers::Provider;
+use alloy::rpc::types::TransactionRequest;
+use alloy::signers::Signer;
+use alloy::signers::local::PrivateKeySigner;
 use anyhow::Result;
-use ethers::middleware::{NonceManagerMiddleware, SignerMiddleware};
-use ethers::providers::{Http, Provider};
-use ethers::signers::{LocalWallet, Signer};
-use ethers::types::{H160, U256};
-use ethers_providers::Middleware;
 
 use crate::accounts::decode_revert::decode_contract_revert;
 use crate::accounts::signable_contract::{
@@ -27,8 +26,8 @@ fn record_idle_signers(entries: &[SigningPoolEntry]) {
 
 #[derive(Clone)]
 pub struct SigningPoolEntry {
-    client: Arc<SigningClient>,
-    address: H160,
+    client: SigningClient,
+    address: Address,
     in_use: bool,
     in_use_since: Option<Instant>,
     last_request: Instant,
@@ -37,13 +36,13 @@ pub struct SigningPoolEntry {
 /// Returned by `SignerPool::request`. Contains the signing client and its
 /// address. Pass `address` back to `SignerPool::release` when done.
 pub struct SignerHandle {
-    pub client: Option<Arc<SigningClient>>,
-    pub address: H160,
+    pub client: Option<SigningClient>,
+    pub address: Address,
 }
 
 pub enum SigningPoolMessage {
     Request { reply: flume::Sender<SignerHandle> },
-    Release { address: H160 },
+    Release { address: Address },
 }
 
 /// A clone-cheap handle to the background signer pool task.
@@ -68,7 +67,7 @@ impl SignerPool {
     }
 
     /// Return a previously borrowed signer back to the pool.
-    pub async fn release(&self, address: H160) -> Result<()> {
+    pub async fn release(&self, address: Address) -> Result<()> {
         self.tx
             .send_async(SigningPoolMessage::Release { address })
             .await
@@ -112,16 +111,13 @@ pub async fn get_signer_entries(
         let secret = get_lit_payer_key(i as u16)
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
-        let wallet = LocalWallet::from_bytes(&secret)?.with_chain_id(chain_info.chain_id);
+        let wallet = PrivateKeySigner::from_bytes(&B256::from_slice(&secret))?
+            .with_chain_id(Some(chain_info.chain_id));
         let address = wallet.address();
-        let rpc_url = node_config.chain.rpc_url();
-        let provider =
-            Provider::<Http>::try_from(rpc_url.as_str())?.interval(Duration::from_secs(2));
-        let signer = SignerMiddleware::new(provider, wallet);
-        let nonce_manager = NonceManagerMiddleware::new(signer, address);
+        let client = crate::accounts::signable_contract::signer_provider(wallet)?;
         tracing::info!("signer_pool: created signer {} address={:?}", i, address);
         entries.push(SigningPoolEntry {
-            client: Arc::new(nonce_manager),
+            client,
             address,
             in_use: false,
             in_use_since: None,
@@ -149,7 +145,7 @@ async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<Signin
                             tracing::warn!("signer_pool: no signers available, returning None");
                             let _ = reply.send(SignerHandle {
                                 client: None,
-                                address: H160::zero(),
+                                address: Address::ZERO,
                             });
                             continue;
                         }
@@ -160,7 +156,7 @@ async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<Signin
                             entry.in_use_since = Some(Instant::now());
                             tracing::info!("signer_pool: granted lease to {:?}", entry.address);
                             let _ = reply.send(SignerHandle {
-                                client: Some(Arc::clone(&entry.client)),
+                                client: Some(entry.client.clone()),
                                 address: entry.address,
                             });
                         } else {
@@ -172,7 +168,7 @@ async fn run_pool(mut entries: Vec<SigningPoolEntry>, rx: flume::Receiver<Signin
                                 .min_by_key(|e| e.in_use_since.unwrap_or(Instant::now()))
                             {
                                 let _ = reply.send(SignerHandle {
-                                    client: Some(Arc::clone(&entry.client)),
+                                    client: Some(entry.client.clone()),
                                     address: entry.address,
                                 });
                             }
@@ -249,12 +245,8 @@ async fn check_for_new_api_payer_count(
 
     if let Ok(rebalance_amount) = get_rebalance_amount().await
         && rebalance_amount > alloy::primitives::U256::ZERO
-        && let Err(e) = rebalance_entries(
-            crate::utils::alloy_ethers::alloy_u256_to_ethers(rebalance_amount),
-            old_entries.clone(),
-            entries.clone(),
-        )
-        .await
+        && let Err(e) =
+            rebalance_entries(rebalance_amount, old_entries.clone(), entries.clone()).await
     {
         tracing::error!("signer_pool: failed to rebalance entries: {e}");
     }
@@ -266,7 +258,7 @@ async fn set_api_payers(entries: Vec<SigningPoolEntry>) -> Result<()> {
 
     tracing::info!("signer_pool: setting api payers: {:?}", api_payers);
 
-    let function_call = contract.set_api_payers(api_payers);
+    let function_call = contract.setApiPayers(api_payers);
 
     // Call-before-send: dry-run to surface a decoded revert reason before
     // broadcasting the admin transaction.
@@ -312,19 +304,18 @@ async fn rebalance_entries(
 ) -> Result<()> {
     let admin_signer = get_admin_api_signer().await?;
     let read_only_client = get_read_only_account_config_contract().await?;
-    let admin_wallet = read_only_client.admin_api_payer_account().call().await?;
+    let admin_wallet = read_only_client.adminApiPayerAccount().call().await?;
 
     let chain_info = GLOBAL_NODE_CONFIG
         .get()
         .ok_or_else(|| anyhow::anyhow!("Node configuration not found"))?;
     let chain_info = chain_info.chain.info();
 
-    let block_number = None;
-    let gas_required = admin_signer.get_gas_price().await? * 21000 * 2;
+    let gas_required = U256::from(admin_signer.get_gas_price().await?) * U256::from(21000 * 2);
     tracing::info!("signer_pool: gas price: {gas_required}");
 
     for entry in old_entries.iter() {
-        let current_funds = admin_signer.get_balance(entry.address, None).await?;
+        let current_funds = admin_signer.get_balance(entry.address).await?;
         if current_funds < gas_required {
             tracing::error!(
                 "signer_pool: not enough funds to rebalance:   {:?} has {current_funds} < {gas_required}",
@@ -332,15 +323,17 @@ async fn rebalance_entries(
             );
             continue;
         }
-        let req = ethers::types::Eip1559TransactionRequest::new()
-            .to(admin_wallet)
-            .value(current_funds - gas_required)
-            .chain_id(chain_info.chain_id);
+        let req = TransactionRequest {
+            to: Some(alloy::primitives::TxKind::Call(admin_wallet)),
+            value: Some(current_funds - gas_required),
+            chain_id: Some(chain_info.chain_id),
+            ..Default::default()
+        };
 
-        let tx = entry.client.send_transaction(req, block_number).await;
+        let tx = entry.client.send_transaction(req).await;
         match tx {
             Ok(tx) => {
-                tx.await?;
+                tx.get_receipt().await?;
                 tracing::info!(
                     "signer_pool: repatriated funds to admin wallet from {:?}",
                     entry.address
@@ -356,15 +349,17 @@ async fn rebalance_entries(
     }
 
     for entry in new_entries.iter() {
-        let req = ethers::types::Eip1559TransactionRequest::new()
-            .to(entry.address)
-            .value(rebalance_amount)
-            .chain_id(chain_info.chain_id);
+        let req = TransactionRequest {
+            to: Some(alloy::primitives::TxKind::Call(entry.address)),
+            value: Some(rebalance_amount),
+            chain_id: Some(chain_info.chain_id),
+            ..Default::default()
+        };
 
-        let tx = admin_signer.send_transaction(req, block_number).await;
+        let tx = admin_signer.send_transaction(req).await;
         match tx {
             Ok(tx) => {
-                tx.await?;
+                tx.get_receipt().await?;
                 tracing::info!("signer_pool: funded {:?}", entry.address);
             }
             Err(e) => {

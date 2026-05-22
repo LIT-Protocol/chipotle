@@ -202,7 +202,7 @@ pub async fn invalidate_for_account(api_key: &str) {
     match super::list_api_keys(api_key, U256::ZERO, U256::from(1000u64)).await {
         Ok(usage_keys) => {
             for uk in &usage_keys {
-                let hash = uk.api_key_hash.to_string();
+                let hash = uk.apiKeyHash.to_string();
                 if hash != caller_hash {
                     cache.bump_generation(&hash);
                 }

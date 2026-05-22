@@ -1,4 +1,3 @@
-pub mod alloy_ethers;
 pub mod chain_info;
 pub mod parse_with_hash;
 use alloy::primitives::{Address, U256, keccak256};
