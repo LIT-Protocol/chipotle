@@ -31,6 +31,10 @@ jobs:
         with:
           node-version: 22
 
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
       - name: Install contract dependencies
         working-directory: lit-api-server/blockchain/lit_node_express
         run: npm ci

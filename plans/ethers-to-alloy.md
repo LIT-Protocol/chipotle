@@ -94,7 +94,7 @@ Migrates the H160/U256 boundary files and the accounts/account_management public
 Pairs the contract-binding regeneration with the signer/middleware stack swap, since the two are tightly coupled (alloy contracts take alloy providers; `sol!`-generated bindings replace the abigen `M: ethers::Middleware` constraint with alloy `Provider`).
 
 - [x] `src/restart.rs` — `EthEvent` subscription → alloy `Filter`/`Event::watch`
-- [x] `src/accounts/contracts/account_config_contract.rs` — regenerate bindings via `sol!` from existing ABI JSON
+- [x] `src/accounts/contracts/account_config_contract.rs` — regenerate bindings via `forge bind` from the generated AccountConfig ABI JSON
 - [x] `src/accounts/signer_pool.rs` — `LocalWallet` + `SignerMiddleware` + `NonceManagerMiddleware` → alloy `PrivateKeySigner` + `ProviderBuilder::new().wallet(...)` (recommended fillers are enabled by default in alloy 1.8)
 - [x] `src/accounts/signable_contract.rs` — `ContractCall` → alloy `CallBuilder`; `SignerMiddleware`/`NonceManagerMiddleware` stack swap
 - [x] `src/accounts/decode_revert.rs` — switch from ethers `ContractError` to alloy's equivalent

@@ -57,8 +57,8 @@ Blockchain tooling and contracts used by the server.
 
 | Path | Description |
 |------|-------------|
-| **`rust_generator_and_deployer/`** | Rust CLI tools: **contract generator** (ABI → Rust bindings) and **contract deployer** (artifact folder → chain). See [Usage](#blockchainrust_generator_and_deployer) below. |
-| **`lit_node_express/`** | Lit Node Express contracts and Makefile. |
+| **`rust_generator_and_deployer/`** | Rust CLI tools for deploying contract artifacts. The legacy ethers-based contract generator remains for the Phase 6 workspace migration. |
+| **`lit_node_express/`** | Lit Node Express contracts and Makefile. `make generate` compiles Solidity and regenerates the checked-in Alloy AccountConfig binding via `forge bind`. |
 | **`swaps/`** | Hardhat project with the **QuoteStorage** Solidity contract (swap requests, quotes). |
 
 ---
@@ -67,7 +67,7 @@ Blockchain tooling and contracts used by the server.
 
 Rust tools for generating contract bindings and deploying contracts.
 
-- **Contract generator** — Reads ABI JSON files from a folder (recursively), uses `ethers::contract::Abigen` to generate Rust bindings, and writes `.rs` files and ABI copies into an output folder.
+- **Contract generator** — The old standalone generator uses `ethers::contract::Abigen`; Phase 5 moved the checked-in `AccountConfig` binding to Alloy and regenerates it from `blockchain/lit_node_express` with `forge bind` (`make generate`). The legacy generator stays here until the separate Phase 6 migration of this workspace.
 - **Contract deployer** — Reads a folder of contract artifact JSONs (Hardhat/Foundry-style: `abi` + `bytecode` or `evm.bytecode.object`), deploys each contract that has bytecode to a chosen network using a configurable or default wallet.
 
 **Build (from `blockchain/rust_generator_and_deployer`):**
