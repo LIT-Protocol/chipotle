@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use anyhow::Result;
 use lit_triggers::auth::routes as auth_routes;
 use lit_triggers::{
-    auth, config, db, dispatcher, mail, scheduler, triggers, webhook, webhook_rate_limit,
+    auth, chain_events, config, db, dispatcher, mail, scheduler, triggers, webhook,
+    webhook_rate_limit,
 };
 use rocket::fs::{FileServer, NamedFile};
 use rocket::http::Status;
@@ -29,6 +30,7 @@ async fn rocket() -> _ {
 
     tokio::spawn(dispatcher::run(pool.clone(), cfg.clone()));
     tokio::spawn(scheduler::run(pool.clone(), cfg.clone()));
+    tokio::spawn(chain_events::run(pool.clone(), cfg.clone()));
 
     rocket::build()
         .manage(pool)

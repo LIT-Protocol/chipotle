@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod chain_events;
 pub mod chipotle;
 pub mod config;
 pub mod crypto;

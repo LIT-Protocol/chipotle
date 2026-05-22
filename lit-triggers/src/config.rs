@@ -17,6 +17,73 @@ pub struct Config {
     pub webhook_user_max_requests_per_minute: u32,
     pub webhook_trigger_max_requests_per_minute: u32,
     pub webhook_default_max_queued_runs: u32,
+    pub chain_poll_interval_secs: u64,
+    pub chain_confirmation_depth: u64,
+    pub chain_max_block_range: u64,
+    pub chain_rpc_timeout_secs: u64,
+    pub chain_initial_lookback_blocks: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChainKind {
+    Evm,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChainSpec {
+    pub key: &'static str,
+    pub chain_id: u64,
+    pub kind: ChainKind,
+    pub default_rpc_envvar: &'static str,
+    pub default_ws_envvar: Option<&'static str>,
+}
+
+pub const CHAIN_SPECS: &[ChainSpec] = &[
+    ChainSpec {
+        key: "ethereum",
+        chain_id: 1,
+        kind: ChainKind::Evm,
+        default_rpc_envvar: "ETHEREUM_RPC_URL",
+        default_ws_envvar: Some("ETHEREUM_WS_RPC_URL"),
+    },
+    ChainSpec {
+        key: "base",
+        chain_id: 8453,
+        kind: ChainKind::Evm,
+        default_rpc_envvar: "BASE_RPC_URL",
+        default_ws_envvar: Some("BASE_WS_RPC_URL"),
+    },
+    ChainSpec {
+        key: "arbitrum",
+        chain_id: 42161,
+        kind: ChainKind::Evm,
+        default_rpc_envvar: "ARBITRUM_RPC_URL",
+        default_ws_envvar: Some("ARBITRUM_WS_RPC_URL"),
+    },
+    ChainSpec {
+        key: "bsc",
+        chain_id: 56,
+        kind: ChainKind::Evm,
+        default_rpc_envvar: "BSC_RPC_URL",
+        default_ws_envvar: Some("BSC_WS_RPC_URL"),
+    },
+    ChainSpec {
+        key: "polygon",
+        chain_id: 137,
+        kind: ChainKind::Evm,
+        default_rpc_envvar: "POLYGON_RPC_URL",
+        default_ws_envvar: Some("POLYGON_WS_RPC_URL"),
+    },
+];
+
+pub fn chain_spec_by_key(key: &str) -> Option<&'static ChainSpec> {
+    CHAIN_SPECS
+        .iter()
+        .find(|spec| spec.key.eq_ignore_ascii_case(key.trim()))
+}
+
+pub fn chain_spec_by_id(chain_id: u64) -> Option<&'static ChainSpec> {
+    CHAIN_SPECS.iter().find(|spec| spec.chain_id == chain_id)
 }
 
 impl Config {
@@ -51,6 +118,11 @@ impl Config {
                 "WEBHOOK_DEFAULT_MAX_QUEUED_RUNS",
                 100,
             )?,
+            chain_poll_interval_secs: optional_parse_min("CHAIN_POLL_INTERVAL_SECS", 15, 1)?,
+            chain_confirmation_depth: optional_parse("CHAIN_CONFIRMATION_DEPTH", 12)?,
+            chain_max_block_range: optional_parse_min("CHAIN_MAX_BLOCK_RANGE", 500, 1)?,
+            chain_rpc_timeout_secs: optional_parse_min("CHAIN_RPC_TIMEOUT_SECS", 10, 1)?,
+            chain_initial_lookback_blocks: optional_parse("CHAIN_INITIAL_LOOKBACK_BLOCKS", 100)?,
         })
     }
 }
@@ -78,6 +150,18 @@ where
             .map_err(|e| anyhow::anyhow!("env var {name} has invalid value: {e}")),
         None => Ok(default),
     }
+}
+
+fn optional_parse_min<T>(name: &str, default: T, min: T) -> Result<T>
+where
+    T: std::str::FromStr + PartialOrd + Copy + std::fmt::Display,
+    T::Err: std::fmt::Display,
+{
+    let value = optional_parse(name, default)?;
+    if value < min {
+        anyhow::bail!("env var {name} must be >= {min}");
+    }
+    Ok(value)
 }
 
 fn parse_b64_key(name: &str) -> Result<Vec<u8>> {
