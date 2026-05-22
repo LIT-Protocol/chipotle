@@ -225,7 +225,8 @@
     }
 
     /* ── LITKEY rate display + admin override ───────────────────── */
-    function renderRate(rate) {
+    function renderRate(payload) {
+      const rate = payload.rate;
       if (!rate) {
         rateCurrent.textContent = 'No rate has been fetched yet. Crediting must remain paused.';
         rateCurrent.className = 'rate-current error';
@@ -234,7 +235,11 @@
       const source = rate.source === 'manual'
         ? `manual override by operator #${rate.updated_by_operator_id}`
         : 'CoinGecko';
-      rateCurrent.textContent = `${fmtCents(rate.cents_per_litkey)} per LITKEY — ${source}, fetched ${fmtTime(rate.fetched_at)}${rate.stale ? ' — STALE (>1h), crediting paused' : ''}`;
+      const discountPct = (payload.discount_basis_points / 100).toFixed(2).replace(/\.00$/, '');
+      const effective = payload.effective_cents_per_litkey != null
+        ? ` Effective credit rate: ${fmtCents(payload.effective_cents_per_litkey)} per LITKEY after ${discountPct}% discount.`
+        : '';
+      rateCurrent.textContent = `${fmtCents(rate.cents_per_litkey)} market rate per LITKEY — ${source}, fetched ${fmtTime(rate.fetched_at)}.${effective}${rate.stale ? ' — STALE (>1h), crediting paused' : ''}`;
       rateCurrent.className = 'rate-current' + (rate.stale ? ' error' : ' ok');
       rateCents.value = rate.cents_per_litkey;
     }
@@ -244,7 +249,7 @@
         const resp = await fetch('/api/litkey/rate', { credentials: 'same-origin' });
         const body = await resp.json();
         if (!resp.ok) { setStatus(rateStatus, body.error || 'Failed to load rate', 'error'); return; }
-        renderRate(body.rate);
+        renderRate(body);
       } catch (err) {
         setStatus(rateStatus, 'Rate load failed: ' + err, 'error');
       }
@@ -269,7 +274,7 @@
         });
         const body = await resp.json();
         if (!resp.ok) { setStatus(rateStatus, body.error || `Failed (HTTP ${resp.status})`, 'error'); return; }
-        renderRate(body.rate);
+        renderRate(body);
         setStatus(rateStatus, 'Manual rate override saved.', 'ok');
       } catch (err) {
         setStatus(rateStatus, 'Override failed: ' + err, 'error');

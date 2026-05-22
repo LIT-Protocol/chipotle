@@ -5,6 +5,8 @@
 
 use anyhow::{Context, Result};
 
+use crate::rate;
+
 #[derive(Clone, Debug)]
 pub struct Config {
     /// Postgres connection string. On Fly.io, supplied via `fly secrets set`
@@ -27,6 +29,9 @@ pub struct Config {
     pub max_grant_cents: i64,
     /// Max cents one operator can grant in a rolling 24-hour window. Default $100.
     pub max_daily_per_operator_cents: i64,
+    /// Discount for LITKEY payments, in basis points. Default 0. Example:
+    /// 2000 = "20% off vs credit card".
+    pub litkey_discount_basis_points: i64,
 }
 
 impl Config {
@@ -42,8 +47,15 @@ impl Config {
             stripe_secret_key: required("STRIPE_SECRET_KEY")?,
             max_grant_cents: optional_i64("MAX_GRANT_CENTS", 2_000)?,
             max_daily_per_operator_cents: optional_i64("MAX_DAILY_PER_OPERATOR_CENTS", 10_000)?,
+            litkey_discount_basis_points: parse_discount_basis_points()?,
         })
     }
+}
+
+fn parse_discount_basis_points() -> Result<i64> {
+    let bps = optional_i64("LITKEY_DISCOUNT_BASIS_POINTS", 0)?;
+    rate::validate_discount_basis_points(bps)?;
+    Ok(bps)
 }
 
 fn optional_i64(name: &str, default: i64) -> Result<i64> {

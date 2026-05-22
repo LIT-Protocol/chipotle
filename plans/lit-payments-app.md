@@ -305,8 +305,9 @@ GET https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies
 - If a fetch fails or returns nonsense (zero / null / >100× recent value): keep the last-known rate, log a warning.
 - If the row's `fetched_at` is older than 1 hour: pause crediting and log a warning. Stuck payments will surface via user reports; mod can grant manually in the meantime.
 - Admin can override the rate from the admin UI (updates the same row with `source='manual'` + operator id). Override is recorded on the row itself — no separate notification.
+- `LITKEY_DISCOUNT_BASIS_POINTS` configures an incentive discount for LITKEY payments. Default `0` means no discount. Example: `2000` means "20% off vs credit card", so the effective credit rate is `market_rate / (1 - 0.20)`; users receive 1.25× the market-rate Stripe credit per LITKEY. This is intentionally an env var rather than a DB setting for v1 simplicity.
 
-**Quote vs. credit semantics**: the payment page shows the rate at page-load and refreshes the quote every 30s. Once the user starts the `approve` tx, the LITKEY amount is frozen. At confirmation we credit using the rate **in effect at the on-chain `Payment` event** (the most recent value of `litkey_rate`). Page says "estimated credit, finalized at confirmation."
+**Quote vs. credit semantics**: the payment page shows the rate at page-load and refreshes the quote every 30s. Once the user starts the `approve` tx, the LITKEY amount is frozen. At confirmation we credit using the rate **in effect at the on-chain `Payment` event** (the most recent value of `litkey_rate`) plus the configured `LITKEY_DISCOUNT_BASIS_POINTS` multiplier. Page says "estimated credit, finalized at confirmation."
 
 ### Edge cases
 
@@ -347,6 +348,7 @@ GET https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies
 | Per-grant cap | $20 |
 | Per-operator daily cap | $100 |
 | Global cap | none |
+| LITKEY payment discount | Env var `LITKEY_DISCOUNT_BASIS_POINTS`, default `0`; `2000` = 20% off vs credit card |
 
 ## Open questions
 
@@ -386,6 +388,7 @@ All questions are closed. Plan is ready to start building.
    - [x] Migration adding the single-row `litkey_rate` table (`id PRIMARY KEY DEFAULT 1 CHECK (id = 1)`, `cents_per_litkey`, `source`, `fetched_at`, `updated_by_operator_id`).
    - [x] Stale (>1hr) is surfaced on the API/UI and logs a warning so future 3c crediting can pause (no Slack alert — `fly logs` only).
    - [x] Admin UI section on the dashboard to view the current rate + override it (`source='manual'`).
+   - [x] Env-configured LITKEY payment discount (`LITKEY_DISCOUNT_BASIS_POINTS`, default `0`; `2000` = 20% off vs credit card) exposed in the rate API/UI as the discount-adjusted effective credit rate.
    - [x] **No on-chain dependency** — can ship before 3c.
 
    **3c.** ⏭️ Alchemy WSS listener + `litkey_payments` + `chain_checkpoint` — NOT STARTED
@@ -393,7 +396,7 @@ All questions are closed. Plan is ready to start building.
    - 60s reconciliation poll for logs in `(last_processed_block, latest_block - 5)` as a safety net for WS gaps.
    - 5-confirmation depth on Base before crediting.
    - Idempotency on `(tx_hash, log_index)` unique in `litkey_payments`.
-   - For each Payment event: read `litkey_rate`, compute `cents = litkey_amount * rate`, look up Stripe customer by `metadata.wallet_address == event.wallet`, write the credit via `lit_billing_core::balance::write_transaction`, persist a `litkey_payments` row.
+   - For each Payment event: read `litkey_rate`, apply `LITKEY_DISCOUNT_BASIS_POINTS` to compute the effective credit rate, compute `cents = litkey_amount * effective_rate`, look up Stripe customer by `metadata.wallet_address == event.wallet`, write the credit via `lit_billing_core::balance::write_transaction`, persist a `litkey_payments` row.
    - Migrations: `litkey_payments`, `chain_checkpoint`.
    - **Depends on**: 3a contract deployed + address known (`0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b` on Base mainnet); 3b rate table existing.
 

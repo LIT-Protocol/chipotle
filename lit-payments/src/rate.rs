@@ -11,6 +11,7 @@ use time::{Duration, OffsetDateTime};
 
 use crate::auth::Operator;
 use crate::auth::operator::Role;
+use crate::config::Config;
 use crate::portal::types::ErrorResponse;
 
 pub const COINGECKO_URL: &str =
@@ -18,6 +19,7 @@ pub const COINGECKO_URL: &str =
 pub const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 pub const STALE_AFTER: Duration = Duration::hours(1);
 pub const MAX_CENTS_PER_LITKEY: i64 = 1_000_000; // $10,000/LITKEY: reject obvious feed nonsense.
+pub const MAX_DISCOUNT_BASIS_POINTS: i64 = 9_000; // Cap at 90% off to avoid effectively-free credits.
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LitkeyRate {
@@ -32,6 +34,8 @@ pub struct LitkeyRate {
 #[derive(Debug, Serialize)]
 pub struct RateResponse {
     pub rate: Option<LitkeyRate>,
+    pub discount_basis_points: i64,
+    pub effective_cents_per_litkey: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -91,6 +95,32 @@ pub fn validate_manual_cents(cents: i64) -> Result<()> {
         );
     }
     Ok(())
+}
+
+pub fn validate_discount_basis_points(discount_basis_points: i64) -> Result<()> {
+    if !(0..=MAX_DISCOUNT_BASIS_POINTS).contains(&discount_basis_points) {
+        anyhow::bail!(
+            "LITKEY_DISCOUNT_BASIS_POINTS must be between 0 and {} basis points",
+            MAX_DISCOUNT_BASIS_POINTS
+        );
+    }
+    Ok(())
+}
+
+/// Convert market cents/LITKEY into Stripe credit cents/LITKEY after discount.
+///
+/// A 20% discount means paying $0.80 worth of LITKEY should buy $1.00 of
+/// Stripe credit, so the credit rate is market_rate / (1 - discount).
+pub fn apply_discount_to_cents(
+    market_cents_per_litkey: i64,
+    discount_basis_points: i64,
+) -> Result<i64> {
+    validate_manual_cents(market_cents_per_litkey)?;
+    validate_discount_basis_points(discount_basis_points)?;
+    let denominator = 10_000_i128 - i128::from(discount_basis_points);
+    let numerator = i128::from(market_cents_per_litkey) * 10_000_i128;
+    let rounded = (numerator + denominator / 2) / denominator;
+    i64::try_from(rounded).context("discount-adjusted LITKEY cents overflowed i64")
 }
 
 /// Reject invalid candidates and feed spikes above 100x the most recent valid row.
@@ -256,9 +286,16 @@ async fn poll_once(pool: &PgPool, client: &Client) {
 
 /// `GET /api/litkey/rate` — current LITKEY/USD rate, if one exists.
 #[rocket::get("/api/litkey/rate")]
-pub async fn get_rate(_operator: Operator, pool: &State<PgPool>) -> ApiResult<RateResponse> {
+pub async fn get_rate(
+    _operator: Operator,
+    pool: &State<PgPool>,
+    config: &State<Config>,
+) -> ApiResult<RateResponse> {
     let rate = get_current(pool).await.map_err(server_err)?;
-    Ok(Json(RateResponse { rate }))
+    Ok(Json(build_rate_response(
+        rate,
+        config.litkey_discount_basis_points,
+    )?))
 }
 
 /// `POST /api/litkey/rate/override` — admin-only manual rate override.
@@ -267,6 +304,7 @@ pub async fn override_rate(
     operator: Operator,
     req: Json<OverrideRateRequest>,
     pool: &State<PgPool>,
+    config: &State<Config>,
 ) -> ApiResult<RateResponse> {
     if operator.role != Role::Admin {
         return Err(err(Status::Forbidden, "admin role required"));
@@ -277,7 +315,26 @@ pub async fn override_rate(
         .await
         .map_err(server_err)?;
     let rate = get_current(pool).await.map_err(server_err)?;
-    Ok(Json(RateResponse { rate }))
+    Ok(Json(build_rate_response(
+        rate,
+        config.litkey_discount_basis_points,
+    )?))
+}
+
+fn build_rate_response(
+    rate: Option<LitkeyRate>,
+    discount_basis_points: i64,
+) -> Result<RateResponse, ApiError> {
+    let effective_cents_per_litkey = rate
+        .as_ref()
+        .map(|r| apply_discount_to_cents(r.cents_per_litkey, discount_basis_points))
+        .transpose()
+        .map_err(server_err)?;
+    Ok(RateResponse {
+        rate,
+        discount_basis_points,
+        effective_cents_per_litkey,
+    })
 }
 
 #[cfg(test)]
@@ -362,5 +419,23 @@ mod tests {
         assert!(validate_manual_cents(1_000_000).is_ok());
         assert!(validate_manual_cents(0).is_err());
         assert!(validate_manual_cents(1_000_001).is_err());
+    }
+
+    #[test]
+    fn applies_litkey_discount_as_extra_credit_per_token() {
+        assert_eq!(apply_discount_to_cents(100, 0).unwrap(), 100);
+        // 20% off means paying $0.80 worth of LITKEY buys $1.00 credit,
+        // so each token credits 1 / (1 - 0.20) = 1.25x spot value.
+        assert_eq!(apply_discount_to_cents(100, 2_000).unwrap(), 125);
+        assert_eq!(apply_discount_to_cents(33, 2_000).unwrap(), 41);
+    }
+
+    #[test]
+    fn validates_litkey_discount_basis_points() {
+        assert!(validate_discount_basis_points(0).is_ok());
+        assert!(validate_discount_basis_points(2_000).is_ok());
+        assert!(validate_discount_basis_points(9_000).is_ok());
+        assert!(validate_discount_basis_points(-1).is_err());
+        assert!(validate_discount_basis_points(9_001).is_err());
     }
 }

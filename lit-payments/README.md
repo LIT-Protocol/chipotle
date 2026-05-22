@@ -20,6 +20,8 @@ Authenticated (operator session cookie required):
 - `GET /api/customer/lookup?email=…` or `?wallet=…` — preview a Stripe customer + balance.
 - `POST /api/grant` — apply a credit (subject to caps + UUID idempotency key).
 - `GET /api/grants?limit=N` — recent grants by the calling operator.
+- `GET /api/litkey/rate` — current LITKEY market rate plus discount-adjusted credit rate.
+- `POST /api/litkey/rate/override` — admin-only manual market-rate override.
 
 ## Local development
 
@@ -52,6 +54,11 @@ ROCKET_PORT=8000
 # Optional — cap defaults match the plan ($20 per grant, $100/op/day):
 # MAX_GRANT_CENTS=2000
 # MAX_DAILY_PER_OPERATOR_CENTS=10000
+
+# Optional — incentive discount for paying with LITKEY, in basis points.
+# 0 = no discount. 2000 = 20% off vs credit card, so users receive
+# 1 / (1 - 0.20) = 1.25x the market-rate Stripe credit per LITKEY.
+# LITKEY_DISCOUNT_BASIS_POINTS=0
 ```
 
 ### 3. Run
@@ -105,6 +112,7 @@ fly secrets set --app lit-payments \
   MAIL_FROM='noreply@mail.litprotocol.com' \
   PUBLIC_BASE_URL='https://payments.litprotocol.com' \
   STRIPE_SECRET_KEY=rk_... \
+  LITKEY_DISCOUNT_BASIS_POINTS=0 \
   ROCKET_SECRET_KEY="$(openssl rand -base64 32)"
 ```
 
