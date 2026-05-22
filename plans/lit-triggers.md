@@ -27,26 +27,43 @@ machines-with-state.
 
 ## Trust model
 
-The whole design hinges on **scoped usage API keys**. A user:
+The whole design hinges on **scoped usage API keys**. `lit-triggers` is not the
+Chipotle account system and does not need to link a user to a Chipotle account
+as a first-class identity. It has its own auth model; its job is simply:
 
-1. Logs into the Chipotle dashboard.
-2. Creates a usage API key scoped to `execute_in_groups: [N]` only — no PKP
-   creation, no group management, nothing else.
-3. Hands that key to `lit-triggers` along with the action CID they want fired.
+> automate your existing Chipotle stuff.
+
+A user:
+
+1. Logs into the `lit-triggers` dashboard.
+2. Enters their Lit/Chipotle admin API key **in the browser only**.
+3. The frontend calls Chipotle directly to create a usage API key scoped to
+   `execute_in_groups: [N]` only — no PKP creation, no group management,
+   nothing else.
+4. The frontend sends only the scoped usage key (+ trigger config) to the
+   `lit-triggers` backend.
+5. The admin API key is dropped from JS memory and never leaves the browser.
 
 If `lit-triggers` is compromised, the blast radius is "attacker can call the
 already-scoped action with whatever inputs they want." They cannot mint
-wallets, change groups, or pivot to other accounts. The service stores keys
-encrypted at rest (envelope-encrypted with a fly secret) and never logs them.
+wallets, change groups, or pivot to other accounts. The service stores scoped
+usage keys encrypted at rest (envelope-encrypted with a fly secret) and never
+logs them.
+
+The capability boundary is the usage key + group permissions + PKP permissions.
+We do not treat a Chipotle account link as part of the v1 security model.
 
 ## Trigger types (v1)
 
 ### 1. Webhook
 - Each trigger gets a unique inbound URL: `POST /webhook/<trigger_id>`.
-- Optional shared-secret HMAC validation (`X-Signature: sha256=...`) so the
-  caller can be authenticated. Or "open" mode for prototyping.
+- No HMAC/signature requirement in v1. Keep webhook setup dead simple.
+- Basic abuse controls before enqueueing: IP-based rate limit, user/trigger
+  rate limit, max request body size, and max queued runs per trigger.
 - Request body (JSON or raw) becomes a value the user's action can read via
   the `params` field on the Lit Action call.
+- Webhook handling is async: validate + rate-limit + enqueue a run + return
+  `202 Accepted`; a worker calls Chipotle out-of-band.
 
 ### 2. Blockchain event
 - EVM-only in v1. Configure: chain (chain_id), contract address, event
@@ -90,14 +107,19 @@ CREATE TABLE triggers (
   action_cid TEXT NOT NULL,
   default_params JSONB NOT NULL DEFAULT '{}'::jsonb,
 
-  -- The Chipotle account this trigger belongs to, learned by calling
-  -- Chipotle with the usage key on create. Used for display + grouping
-  -- triggers under "your account."
-  chipotle_account_address TEXT NOT NULL,
-
   -- The scoped usage API key, envelope-encrypted at rest.
   usage_api_key_ciphertext BYTEA NOT NULL,
   usage_api_key_nonce BYTEA NOT NULL,
+
+  -- Optional display/debug metadata only. Do not use this as the auth boundary;
+  -- the scoped usage key is the capability. In v1 we don't need to link the
+  -- lit-triggers user to a Chipotle account.
+  chipotle_account_address TEXT,
+
+  -- Basic anti-abuse knobs. Defaults are set by the service config, but can be
+  -- overridden later per user/trigger if needed.
+  max_runs_per_minute INTEGER,
+  max_queued_runs INTEGER,
 
   -- Kind-specific config (webhook secret, chain event filter, cron expr).
   config JSONB NOT NULL,
@@ -159,40 +181,66 @@ Spawn on boot from `main.rs`:
 3. **Run dispatcher** — pulls `status='queued'` rows from `trigger_runs`,
    POSTs to Chipotle, writes the result. Exponential backoff on transient
    errors. Per-trigger concurrency limit.
-4. **Janitor** — trims `trigger_runs` older than N days; purges expired
+4. **Rate limiter / admission control** — rejects webhook requests before
+   enqueueing if an IP, user, trigger, body-size, queue-depth, or concurrency
+   limit is exceeded. This is intentionally basic in v1; no billing gate and
+   no webhook HMAC/signature requirement yet.
+5. **Janitor** — trims `trigger_runs` older than N days; purges expired
    sessions.
 
 ## Decisions (locked in 2026-05-20)
 
-### 1. Auth — account key never touches our backend
+### 1. Auth — admin key never touches our backend
 
 Two distinct concerns, kept separate:
 
 - **Logging into the management UI.** Magic-link (port the `auth` module
   from `lit-payments` — same email-based HMAC-signed-token flow). On first
-  login we create a `users` row keyed by email. The user's Chipotle account
-  identity is *attached* later, not at login time.
+  login we create a `users` row keyed by email. This is `lit-triggers`' own
+  auth model and does not need to be linked to a Chipotle account in v1.
 
 - **Provisioning the scoped usage key for a trigger.** The user pastes their
-  **account key into the browser, not the server.** Frontend JS:
+  **Lit/Chipotle admin API key into the browser, not the server.** Frontend JS:
   1. Calls Chipotle's `add_usage_api_key` directly from the browser with
      a narrow scope: `execute_in_groups: [<group_id>]`, everything else false.
   2. Receives the freshly minted `usage_api_key`.
   3. POSTs *only* the usage key (+ the group/action config) to `lit-triggers`.
-  4. The account key is dropped from JS memory and never persisted anywhere.
+  4. The admin API key is dropped from JS memory and never persisted anywhere.
 
-  The backend immediately calls Chipotle with the usage key to learn which
-  account it belongs to (account wallet address). That address is stored on
-  the trigger row and used to bind triggers to a Chipotle account *without*
-  the backend ever seeing the account credential.
+  The backend treats the scoped usage key as the capability. It may optionally
+  derive Chipotle account metadata for display/debugging, but it does not need
+  a hard "link this `lit-triggers` user to this Chipotle account" flow.
 
   Optional escape hatch: the user can also paste a pre-made usage key
   directly, skipping the auto-mint flow, if they prefer to manage scopes
   themselves.
 
 This is the right answer — it preserves the property that the most powerful
-credential (account key) is only ever present in the browser tab for a few
+credential (admin key) is only ever present in the browser tab for a few
 hundred milliseconds during setup.
+
+### 1b. Abuse controls — basic quotas, not billing or webhook signatures
+
+Anything that runs on Chipotle is monetized Chipotle usage, so the goal is not
+to prevent Chipotle calls. The goal is to keep `lit-triggers` itself from being
+abused as a free unauthenticated queue/CPU sink.
+
+For v1:
+
+- No payment gate for `lit-triggers` itself.
+- No HMAC/signature requirement for webhooks yet.
+- Webhook requests are async: accept, enqueue, return `202`, execute later.
+- Enforce simple limits before enqueueing:
+  - per-IP request rate,
+  - per-user request/run rate,
+  - per-trigger request/run rate,
+  - max request body size,
+  - max queued runs per trigger,
+  - per-trigger concurrency cap in the dispatcher.
+
+This gives us enough protection for a first public/beta version while keeping
+setup friction low. Billing or stronger webhook auth can be added later if real
+usage patterns justify it.
 
 ### 2. Multi-tenant.
 
@@ -258,6 +306,13 @@ pub fn cid_for_action_code(code: &str) -> String { /* IpfsHasher::default().comp
 Schema impact: drop the `action_cid` column. Keep `action_code TEXT NOT NULL`
 and add a computed-on-write `action_cid TEXT NOT NULL` for display/lookup.
 
+Important terminology: nobody "owns" a CID. A CID identifies action code
+content, not a user, account, PKP, or payment relationship. Users own/control
+PKPs and use groups, then grant those groups access to CIDs. If two users paste
+the same action code, they naturally get the same CID, and that's fine. The UI
+should phrase this as "execute CID X using your scoped usage key / group
+permissions," not "execute another user's CID."
+
 ### 6. Naming — `lit-triggers`.
 
 Confirmed.
@@ -280,11 +335,12 @@ Confirmed.
 
 ## Rough milestones
 
-1. **PR 1 — foundation.** Crate skeleton, Postgres + sqlx, magic-link or
-   account-key auth, `users` + `triggers` tables, CRUD API, no workers yet.
-   Mirrors lit-payments PR 1.
+1. **PR 1 — foundation.** Crate skeleton, Postgres + sqlx, magic-link +
+   admin-key-in-browser usage-key provisioning, `users` + `triggers` tables,
+   CRUD API, no workers yet. Mirrors lit-payments PR 1.
 2. **PR 2 — webhook trigger.** Public webhook endpoint + run dispatcher +
-   call out to Chipotle. End-to-end first trigger type working.
+   basic IP/user/trigger rate limits + async enqueue + call out to Chipotle.
+   End-to-end first trigger type working.
 3. **PR 3 — scheduled trigger.** Cron scheduler + worker integration.
 4. **PR 4 — chain event trigger.** EVM listener with watermarks. Biggest
    chunk by far.
