@@ -11,6 +11,7 @@ use time::OffsetDateTime;
 use uuid::Uuid;
 
 use crate::auth::User;
+use crate::chain_events;
 use crate::config::Config;
 use crate::crypto;
 use crate::scheduler;
@@ -238,6 +239,8 @@ pub async fn update_trigger(
 ) -> ApiResult<TriggerResponse> {
     let id = parse_id(id)?;
     let existing = get_existing_for_update(pool.inner(), user.id, id).await?;
+    let existing_kind = existing.kind.clone();
+    let existing_config = existing.config.clone();
     let req = req.into_inner();
     let name = req.name.unwrap_or(existing.name);
     let kind = req.kind.unwrap_or(existing.kind);
@@ -289,15 +292,53 @@ pub async fn update_trigger(
     )
     .bind(req.max_runs_per_minute.or(existing.max_runs_per_minute))
     .bind(req.max_queued_runs.or(existing.max_queued_runs))
-    .bind(config_json)
+    .bind(config_json.clone())
     .bind(req.enabled.unwrap_or(existing.enabled))
     .fetch_one(pool.inner())
     .await
     .map_err(|_| err(Status::InternalServerError, "update_failed"))?;
 
+    if chain_event_watermark_scope_changed(&existing_kind, &existing_config, &kind, &config_json) {
+        reset_chain_event_state(pool.inner(), id).await?;
+    }
+
     row_to_trigger(row)
         .map(Json)
         .map_err(|_| err(Status::InternalServerError, "decode_failed"))
+}
+
+fn chain_event_watermark_scope_changed(
+    old_kind: &TriggerKind,
+    old_config: &Value,
+    new_kind: &TriggerKind,
+    new_config: &Value,
+) -> bool {
+    old_kind == &TriggerKind::ChainEvent
+        && (new_kind != &TriggerKind::ChainEvent || old_config != new_config)
+}
+
+async fn reset_chain_event_state(
+    pool: &PgPool,
+    trigger_id: Uuid,
+) -> Result<(), Custom<Json<ErrorResponse>>> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|_| err(Status::InternalServerError, "chain_state_reset_failed"))?;
+    sqlx::query("DELETE FROM chain_watermarks WHERE trigger_id = $1")
+        .bind(trigger_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| err(Status::InternalServerError, "chain_state_reset_failed"))?;
+    sqlx::query("DELETE FROM chain_event_deliveries WHERE trigger_id = $1")
+        .bind(trigger_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| err(Status::InternalServerError, "chain_state_reset_failed"))?;
+    tx.commit()
+        .await
+        .map_err(|_| err(Status::InternalServerError, "chain_state_reset_failed"))?;
+    Ok(())
 }
 
 #[delete("/api/triggers/<id>")]
@@ -506,18 +547,22 @@ fn validate_kind_config(
     kind: &TriggerKind,
     config: &Value,
 ) -> Result<(), Custom<Json<ErrorResponse>>> {
-    if kind != &TriggerKind::Schedule {
-        return Ok(());
+    match kind {
+        TriggerKind::Schedule => {
+            let cron = config
+                .get("cron")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| err(Status::BadRequest, "cron_required"))?;
+
+            scheduler::validate_cron(cron).map_err(|_| err(Status::BadRequest, "invalid_cron"))
+        }
+        TriggerKind::ChainEvent => chain_events::parse_chain_event_config(config)
+            .map(|_| ())
+            .map_err(|_| err(Status::BadRequest, "invalid_chain_event_config")),
+        TriggerKind::Webhook => Ok(()),
     }
-
-    let cron = config
-        .get("cron")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .ok_or_else(|| err(Status::BadRequest, "cron_required"))?;
-
-    scheduler::validate_cron(cron).map_err(|_| err(Status::BadRequest, "invalid_cron"))
 }
 
 #[cfg(test)]
@@ -603,6 +648,73 @@ mod tests {
             config: empty_object(),
         };
         assert!(validate_create(&req).is_ok());
+    }
+
+    #[test]
+    fn chain_event_create_validation_accepts_valid_config() {
+        let req = CreateTriggerRequest {
+            name: "n".into(),
+            kind: TriggerKind::ChainEvent,
+            action_code: "code".into(),
+            default_params: empty_object(),
+            usage_api_key: "usage".into(),
+            chipotle_account_address: None,
+            max_runs_per_minute: None,
+            max_queued_runs: None,
+            config: json!({
+                "chain": "ethereum",
+                "contract_address": "0x0000000000000000000000000000000000000001",
+                "event_signature": "Transfer(address,address,uint256)",
+                "topic_filters": [null, "0x0000000000000000000000000000000000000000000000000000000000000002"]
+            }),
+        };
+        assert!(validate_create(&req).is_ok());
+    }
+
+    #[test]
+    fn chain_event_create_validation_rejects_invalid_config() {
+        let req = CreateTriggerRequest {
+            name: "n".into(),
+            kind: TriggerKind::ChainEvent,
+            action_code: "code".into(),
+            default_params: empty_object(),
+            usage_api_key: "usage".into(),
+            chipotle_account_address: None,
+            max_runs_per_minute: None,
+            max_queued_runs: None,
+            config: json!({
+                "chain": "tron",
+                "contract_address": "0x1234",
+                "event_signature": "Transfer(address,address,uint256)"
+            }),
+        };
+        assert!(validate_create(&req).is_err());
+    }
+
+    #[test]
+    fn chain_event_state_reset_detects_scope_changes() {
+        let old_config = json!({
+            "chain": "ethereum",
+            "contract_address": "0x0000000000000000000000000000000000000001",
+            "event_signature": "Transfer(address,address,uint256)",
+        });
+        let new_config = json!({
+            "chain": "ethereum",
+            "contract_address": "0x0000000000000000000000000000000000000002",
+            "event_signature": "Transfer(address,address,uint256)",
+        });
+        assert!(chain_event_watermark_scope_changed(
+            &TriggerKind::ChainEvent,
+            &old_config,
+            &TriggerKind::ChainEvent,
+            &new_config
+        ));
+        assert!(!chain_event_watermark_scope_changed(
+            &TriggerKind::Webhook,
+            &old_config,
+            &TriggerKind::ChainEvent,
+            &new_config
+        ));
     }
 
     #[test]

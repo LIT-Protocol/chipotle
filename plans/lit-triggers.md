@@ -340,8 +340,7 @@ Confirmed.
    basic IP/user/trigger rate limits + async enqueue + call out to Chipotle.
    End-to-end first trigger type working.
 3. ✅ **PR 3 — scheduled trigger (implemented 2026-05-22).** Cron scheduler + worker integration.
-4. **PR 4 — chain event trigger.** EVM listener with watermarks. Biggest
-   chunk by far.
+4. ✅ **PR 4 — chain event trigger (implemented 2026-05-22).** EVM polling listener with watermarks, idempotent deliveries, chain-event validation, and best-effort decoding.
 5. **PR 5 — admin UI.** Static HTML/JS dashboard for managing triggers, in
    the same spirit as `lit-payments/static/`.
 6. **PR 6 — fly.io deploy.** `fly.toml`, secrets, health checks, docs.
