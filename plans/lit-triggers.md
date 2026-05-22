@@ -339,7 +339,7 @@ Confirmed.
 2. ✅ **PR 2 — webhook trigger (implemented 2026-05-22).** Public webhook endpoint + run dispatcher +
    basic IP/user/trigger rate limits + async enqueue + call out to Chipotle.
    End-to-end first trigger type working.
-3. **PR 3 — scheduled trigger.** Cron scheduler + worker integration.
+3. ✅ **PR 3 — scheduled trigger (implemented 2026-05-22).** Cron scheduler + worker integration.
 4. **PR 4 — chain event trigger.** EVM listener with watermarks. Biggest
    chunk by far.
 5. **PR 5 — admin UI.** Static HTML/JS dashboard for managing triggers, in

@@ -2,7 +2,9 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use lit_triggers::auth::routes as auth_routes;
-use lit_triggers::{auth, config, db, dispatcher, mail, triggers, webhook, webhook_rate_limit};
+use lit_triggers::{
+    auth, config, db, dispatcher, mail, scheduler, triggers, webhook, webhook_rate_limit,
+};
 use rocket::fs::{FileServer, NamedFile};
 use rocket::http::Status;
 use rocket::response::Redirect;
@@ -26,6 +28,7 @@ async fn rocket() -> _ {
     let webhook_rate_limit = webhook_rate_limit::WebhookRateLimiter::new();
 
     tokio::spawn(dispatcher::run(pool.clone(), cfg.clone()));
+    tokio::spawn(scheduler::run(pool.clone(), cfg.clone()));
 
     rocket::build()
         .manage(pool)

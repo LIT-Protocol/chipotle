@@ -5,6 +5,7 @@ pub mod crypto;
 pub mod db;
 pub mod dispatcher;
 pub mod mail;
+pub mod scheduler;
 pub mod triggers;
 pub mod webhook;
 pub mod webhook_rate_limit;
