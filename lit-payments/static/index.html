@@ -29,6 +29,18 @@
       <div id="matches"></div>
     </section>
 
+    <!-- ── LITKEY rate ──────────────────────────────────────────── -->
+    <section class="card">
+      <h2>LITKEY rate</h2>
+      <p class="muted">CoinGecko polls every 5 minutes. Admins can override the current USD-per-LITKEY rate. Internally this is stored as 18-decimal USD fixed point.</p>
+      <div id="rate-current" class="rate-current muted">Loading…</div>
+      <form id="rate-form" class="row-form">
+        <input id="rate-usd" type="text" inputmode="decimal" placeholder="USD per LITKEY, e.g. 0.006" required>
+        <button type="submit">Override rate</button>
+      </form>
+      <div id="rate-status" class="status" role="status" aria-live="polite"></div>
+    </section>
+
     <!-- ── Recent grants ────────────────────────────────────────── -->
     <section class="card">
       <h2>Your recent grants</h2>
@@ -122,6 +134,10 @@
     const lookupStatus = document.getElementById('lookup-status');
     const matchesEl    = document.getElementById('matches');
     const matchTpl     = document.getElementById('match-template');
+    const rateCurrent  = document.getElementById('rate-current');
+    const rateForm     = document.getElementById('rate-form');
+    const rateUsd      = document.getElementById('rate-usd');
+    const rateStatus   = document.getElementById('rate-status');
 
     lookupForm.addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -208,31 +224,139 @@
       matchesEl.appendChild(node);
     }
 
+    /* ── LITKEY rate display + admin override ───────────────────── */
+    function usdWeiToDisplay(raw) {
+      if (raw == null) return 'unavailable';
+      const wei = BigInt(raw);
+      const scale = 1000000000000000000n;
+      const whole = wei / scale;
+      const frac = (wei % scale).toString().padStart(18, '0').replace(/0+$/, '');
+      return `$${whole.toString()}${frac ? '.' + frac : ''}`;
+    }
+    function parseUsdToWei(raw) {
+      const value = raw.trim();
+      if (!/^\d+(\.\d+)?$/.test(value)) throw new Error('Rate must be a positive decimal USD amount.');
+      const [whole, fracRaw = ''] = value.split('.');
+      const frac = (fracRaw + '0'.repeat(18)).slice(0, 18);
+      const wei = BigInt(whole) * 1000000000000000000n + BigInt(frac || '0');
+      if (wei <= 0n) throw new Error('Rate must be greater than zero at 18-decimal precision.');
+      return wei.toString();
+    }
+    function renderRate(payload) {
+      const rate = payload.rate;
+      if (!rate) {
+        rateCurrent.textContent = 'No rate has been fetched yet. Crediting must remain paused.';
+        rateCurrent.className = 'rate-current error';
+        return;
+      }
+      const source = rate.source === 'manual'
+        ? `manual override by operator #${rate.updated_by_operator_id}`
+        : 'CoinGecko';
+      const discountPct = (payload.discount_basis_points / 100).toFixed(2).replace(/\.00$/, '');
+      const effective = payload.effective_usd_wei_per_litkey != null
+        ? ` Effective credit rate: ${usdWeiToDisplay(payload.effective_usd_wei_per_litkey)} per LITKEY after ${discountPct}% discount.`
+        : ' Crediting is paused until a fresh rate is available.';
+      rateCurrent.textContent = `${usdWeiToDisplay(rate.usd_wei_per_litkey)} market rate per LITKEY — ${source}, fetched ${fmtTime(rate.fetched_at)}.${effective}${payload.crediting_paused ? ' — CREDITING PAUSED' : ''}`;
+      rateCurrent.className = 'rate-current' + (rate.stale ? ' error' : ' ok');
+      rateUsd.value = usdWeiToDisplay(rate.usd_wei_per_litkey).replace(/^\$/, '');
+    }
+
+    async function loadRate() {
+      try {
+        const resp = await fetch('/api/litkey/rate', { credentials: 'same-origin' });
+        const body = await resp.json();
+        if (!resp.ok) { setStatus(rateStatus, body.error || 'Failed to load rate', 'error'); return; }
+        renderRate(body);
+      } catch (err) {
+        setStatus(rateStatus, 'Rate load failed: ' + err, 'error');
+      }
+    }
+
+    rateForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      let usdWei;
+      try {
+        usdWei = parseUsdToWei(rateUsd.value);
+      } catch (err) {
+        setStatus(rateStatus, err.message, 'error');
+        return;
+      }
+      const button = rateForm.querySelector('button');
+      button.disabled = true;
+      setStatus(rateStatus, 'Saving override…', '');
+      try {
+        const resp = await fetch('/api/litkey/rate/override', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ usd_wei_per_litkey: usdWei }),
+        });
+        const body = await resp.json();
+        if (!resp.ok) { setStatus(rateStatus, body.error || `Failed (HTTP ${resp.status})`, 'error'); return; }
+        renderRate(body);
+        setStatus(rateStatus, 'Manual rate override saved.', 'ok');
+      } catch (err) {
+        setStatus(rateStatus, 'Override failed: ' + err, 'error');
+      } finally {
+        button.disabled = false;
+      }
+    });
+
     /* ── recent grants table ────────────────────────────────────── */
     const grantsTbody = document.getElementById('grants-tbody');
+
+    function renderGrantsMessage(text, className = 'muted') {
+      grantsTbody.replaceChildren();
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 4;
+      td.className = className;
+      td.textContent = text;
+      tr.appendChild(td);
+      grantsTbody.appendChild(tr);
+    }
+
+    function renderGrantRow(g) {
+      const tr = document.createElement('tr');
+      const when = document.createElement('td');
+      when.textContent = fmtTime(g.created_at);
+
+      const customer = document.createElement('td');
+      const email = document.createElement('div');
+      email.textContent = g.email || '(no email)';
+      const wallet = document.createElement('div');
+      wallet.className = 'muted';
+      wallet.textContent = g.wallet_address || '(no wallet)';
+      customer.append(email, wallet);
+
+      const amount = document.createElement('td');
+      amount.textContent = fmtCents(g.cents);
+      const note = document.createElement('td');
+      note.textContent = g.note || '';
+
+      tr.append(when, customer, amount, note);
+      return tr;
+    }
 
     async function loadGrants() {
       try {
         const resp = await fetch('/api/grants', { credentials: 'same-origin' });
         const body = await resp.json();
-        if (!resp.ok || !body.grants.length) {
-          grantsTbody.innerHTML =
-            `<tr><td colspan="4" class="muted">${resp.ok ? 'No grants yet.' : (body.error || 'Failed to load')}</td></tr>`;
+        if (!resp.ok) {
+          renderGrantsMessage(body.error || 'Failed to load', 'muted');
           return;
         }
-        grantsTbody.innerHTML = body.grants.map(g => `
-          <tr>
-            <td>${fmtTime(g.created_at)}</td>
-            <td><div>${g.email || '(no email)'}</div><div class="muted">${g.wallet_address}</div></td>
-            <td>${fmtCents(g.cents)}</td>
-            <td>${g.note || ''}</td>
-          </tr>
-        `).join('');
+        if (!body.grants.length) {
+          renderGrantsMessage('No grants yet.');
+          return;
+        }
+        grantsTbody.replaceChildren(...body.grants.map(renderGrantRow));
       } catch (err) {
-        grantsTbody.innerHTML = `<tr><td colspan="4" class="error">Load failed: ${err}</td></tr>`;
+        renderGrantsMessage('Load failed: ' + err, 'error');
       }
     }
 
+    loadRate();
     loadGrants();
   </script>
 </body>

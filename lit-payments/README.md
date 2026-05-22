@@ -12,6 +12,7 @@ Public:
 - `GET /login` — login page (form posts to `/auth/request`).
 - `POST /auth/request` — send magic link (rate-limited per email, 60s cooldown).
 - `GET /auth/verify?token=…` — validate token, set session cookie, redirect.
+- `GET /api/litkey/quote` — public LITKEY quote for the end-user payment page; includes `crediting_paused` and omits an effective credit rate while paused.
 
 Authenticated (operator session cookie required):
 - `GET /` — admin dashboard.
@@ -20,6 +21,12 @@ Authenticated (operator session cookie required):
 - `GET /api/customer/lookup?email=…` or `?wallet=…` — preview a Stripe customer + balance.
 - `POST /api/grant` — apply a credit (subject to caps + UUID idempotency key).
 - `GET /api/grants?limit=N` — recent grants by the calling operator.
+- `GET /api/litkey/rate` — current LITKEY market rate plus discount-adjusted credit rate for operators. Rates are returned as decimal strings in `usd_wei_per_litkey` / `effective_usd_wei_per_litkey`, where `1 USD = 1e18` units.
+- `POST /api/litkey/rate/override` — admin-only manual market-rate override. Body: `{ "usd_wei_per_litkey": "6000000000000000" }` for `$0.006/LITKEY`.
+
+## LITKEY rate precision
+
+LITKEY pricing is intentionally stored as 18-decimal USD fixed point instead of whole cents because LITKEY can trade below one cent. Example: `$0.006/LITKEY` is stored as `6000000000000000` (`0.006 * 1e18`). The listener settlement helper keeps the on-chain `Payment.amount` in native LITKEY wei, multiplies by `usd_wei_per_litkey` with `num-bigint`, applies `LITKEY_DISCOUNT_BASIS_POINTS`, and rounds only once at the final Stripe-cent boundary.
 
 ## Local development
 
@@ -52,6 +59,20 @@ ROCKET_PORT=8000
 # Optional — cap defaults match the plan ($20 per grant, $100/op/day):
 # MAX_GRANT_CENTS=2000
 # MAX_DAILY_PER_OPERATOR_CENTS=10000
+
+# Optional — incentive discount for paying with LITKEY, in basis points.
+# 0 = no discount. 2000 = 20% off vs credit card, so users receive
+# 1 / (1 - 0.20) = 1.25x the market-rate Stripe credit per LITKEY.
+# LITKEY_DISCOUNT_BASIS_POINTS=0
+
+# Optional — configure LITKEY on-chain listener scaffold (live WSS/polling is
+# enabled in a follow-up 3c slice; these vars validate the Base gateway config):
+# ALCHEMY_WSS_URL=wss://base-mainnet.g.alchemy.com/v2/...
+# ALCHEMY_HTTPS_URL=https://base-mainnet.g.alchemy.com/v2/...
+# LITKEY_GATEWAY_ADDRESS=0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b
+# LITKEY_CHAIN_ID=8453
+# LITKEY_CONFIRMATIONS=5
+# LITKEY_RECONCILIATION_INTERVAL_SECS=60
 ```
 
 ### 3. Run
@@ -105,6 +126,7 @@ fly secrets set --app lit-payments \
   MAIL_FROM='noreply@mail.litprotocol.com' \
   PUBLIC_BASE_URL='https://payments.litprotocol.com' \
   STRIPE_SECRET_KEY=rk_... \
+  LITKEY_DISCOUNT_BASIS_POINTS=0 \
   ROCKET_SECRET_KEY="$(openssl rand -base64 32)"
 ```
 
