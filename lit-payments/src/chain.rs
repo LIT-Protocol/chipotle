@@ -4,6 +4,7 @@
 //! reconciliation poller so confirmation depth, idempotency, and checkpoint
 //! behavior cannot drift between paths.
 
+use anyhow::{Context, Result};
 use ethers_core::types::{Address, H256, U256};
 use lit_billing_core::StripeClient;
 use sqlx::PgPool;
@@ -81,12 +82,128 @@ pub fn backoff_delay_secs(attempt: u32) -> u64 {
     2_u64.saturating_pow(attempt).clamp(1, 30)
 }
 
-/// Start the phase-3c LITKEY listener tasks when chain config is present.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PaymentStatus {
+    Credited,
+    Dust,
+    Paused,
+    NoCustomer,
+}
+
+impl PaymentStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Credited => "credited",
+            Self::Dust => "dust",
+            Self::Paused => "paused",
+            Self::NoCustomer => "no_customer",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NewLitkeyPayment {
+    pub log: PaymentLog,
+    pub usd_wei_per_litkey: Option<String>,
+    pub discount_basis_points: i64,
+    pub cents_credited: i64,
+    pub status: PaymentStatus,
+    pub stripe_customer_id: Option<String>,
+    pub stripe_balance_transaction_id: Option<String>,
+}
+
+pub async fn payment_exists(pool: &PgPool, log: &PaymentLog) -> Result<bool> {
+    let exists = sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM litkey_payments WHERE chain_id = $1 AND tx_hash = $2 AND log_index = $3)",
+    )
+    .bind(log.chain_id)
+    .bind(format!("{:#x}", log.tx_hash))
+    .bind(log.log_index as i64)
+    .fetch_one(pool)
+    .await
+    .context("checking litkey payment idempotency")?;
+    Ok(exists)
+}
+
+pub async fn insert_payment(pool: &PgPool, payment: &NewLitkeyPayment) -> Result<bool> {
+    let inserted = sqlx::query_scalar::<_, i64>(
+        "INSERT INTO litkey_payments (
+            chain_id, gateway_address, tx_hash, log_index, block_number,
+            wallet_address, payer_address, litkey_amount_wei, usd_wei_per_litkey,
+            discount_basis_points, cents_credited, status, stripe_customer_id,
+            stripe_balance_transaction_id
+         ) VALUES (
+            $1, $2, $3, $4, $5,
+            $6, $7, $8::numeric, $9::numeric,
+            $10, $11, $12, $13, $14
+         ) ON CONFLICT (chain_id, tx_hash, log_index) DO NOTHING
+         RETURNING id",
+    )
+    .bind(payment.log.chain_id)
+    .bind(payment.log.gateway_address())
+    .bind(format!("{:#x}", payment.log.tx_hash))
+    .bind(payment.log.log_index as i64)
+    .bind(payment.log.block_number as i64)
+    .bind(payment.log.wallet_address())
+    .bind(payment.log.payer_address())
+    .bind(payment.log.amount_wei_string())
+    .bind(payment.usd_wei_per_litkey.as_deref())
+    .bind(payment.discount_basis_points)
+    .bind(payment.cents_credited)
+    .bind(payment.status.as_str())
+    .bind(payment.stripe_customer_id.as_deref())
+    .bind(payment.stripe_balance_transaction_id.as_deref())
+    .fetch_optional(pool)
+    .await
+    .context("inserting litkey payment")?;
+    Ok(inserted.is_some())
+}
+
+pub async fn current_checkpoint(
+    pool: &PgPool,
+    chain_id: i64,
+    gateway_address: Address,
+) -> Result<u64> {
+    let block = sqlx::query_scalar::<_, Option<i64>>(
+        "SELECT last_processed_block FROM chain_checkpoint WHERE chain_id = $1 AND gateway_address = $2",
+    )
+    .bind(chain_id)
+    .bind(format_address(gateway_address))
+    .fetch_optional(pool)
+    .await
+    .context("reading chain checkpoint")?
+    .flatten()
+    .unwrap_or(0);
+    u64::try_from(block).context("chain checkpoint was negative")
+}
+
+pub async fn advance_checkpoint(
+    pool: &PgPool,
+    chain_id: i64,
+    gateway_address: Address,
+    last_processed_block: u64,
+) -> Result<()> {
+    sqlx::query(
+        "INSERT INTO chain_checkpoint (chain_id, gateway_address, last_processed_block)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (chain_id, gateway_address) DO UPDATE SET
+           last_processed_block = GREATEST(chain_checkpoint.last_processed_block, EXCLUDED.last_processed_block),
+           updated_at = now()",
+    )
+    .bind(chain_id)
+    .bind(format_address(gateway_address))
+    .bind(last_processed_block as i64)
+    .execute(pool)
+    .await
+    .context("advancing chain checkpoint")?;
+    Ok(())
+}
+
+/// Register the phase-3c LITKEY listener scaffold when chain config is present.
 ///
-/// The concrete WSS subscription and HTTPS log-query loops are intentionally
-/// split from pure helpers so idempotency/checkpoint math is testable. This
-/// starter is safe to call in environments that have not set chain secrets yet:
-/// it logs and leaves LITKEY crediting disabled.
+/// This does not yet subscribe to RPC. It validates and logs the configured
+/// gateway so the DB/idempotency/checkpoint pieces can ship before live
+/// processing; live WSS/poller tasks must be added before production crediting.
 pub fn spawn_litkey_listener(
     _pool: PgPool,
     _stripe: StripeClient,
@@ -104,7 +221,7 @@ pub fn spawn_litkey_listener(
         confirmations = config.confirmations,
         reconciliation_interval_secs = config.reconciliation_interval_secs,
         discount_basis_points,
-        "LITKEY listener configured; reconciliation/WSS processing will use shared payment primitives"
+        "LITKEY listener scaffold configured; live WSS/reconciliation tasks are still disabled"
     );
 }
 

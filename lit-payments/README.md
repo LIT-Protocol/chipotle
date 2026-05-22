@@ -65,7 +65,8 @@ ROCKET_PORT=8000
 # 1 / (1 - 0.20) = 1.25x the market-rate Stripe credit per LITKEY.
 # LITKEY_DISCOUNT_BASIS_POINTS=0
 
-# Optional — enable LITKEY on-chain payment listener (Base mainnet):
+# Optional — configure LITKEY on-chain listener scaffold (live WSS/polling is
+# enabled in a follow-up 3c slice; these vars validate the Base gateway config):
 # ALCHEMY_WSS_URL=wss://base-mainnet.g.alchemy.com/v2/...
 # ALCHEMY_HTTPS_URL=https://base-mainnet.g.alchemy.com/v2/...
 # LITKEY_GATEWAY_ADDRESS=0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b

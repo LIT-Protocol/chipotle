@@ -42,6 +42,10 @@ jobs:
         working-directory: lit-payments/contracts
         run: npm ci
 
+      - name: Audit production deploy dependencies
+        working-directory: lit-payments/contracts
+        run: npm audit --omit=dev
+
       - name: Compile
         working-directory: lit-payments/contracts
         run: npx hardhat compile
