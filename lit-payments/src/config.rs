@@ -5,8 +5,8 @@
 
 use std::str::FromStr;
 
+use alloy_primitives::Address;
 use anyhow::{Context, Result};
-use ethers_core::types::Address;
 
 use crate::{chain, rate};
 

@@ -4,11 +4,10 @@
 //! reconciliation poller so confirmation depth, idempotency, and checkpoint
 //! behavior cannot drift between paths.
 
+use alloy_dyn_abi::DynSolType;
+use alloy_primitives::{Address, B256, Bytes, U256, keccak256};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use ethers_core::abi::{ParamType, decode};
-use ethers_core::types::{Address, Bytes, H256, Log, U64, U256};
-use ethers_core::utils::keccak256;
 use futures_util::{SinkExt, StreamExt};
 use lit_billing_core::{StripeClient, balance, customer};
 use reqwest::Client;
@@ -43,7 +42,7 @@ pub struct PaymentLog {
     pub wallet: Address,
     pub payer: Address,
     pub amount_wei: U256,
-    pub tx_hash: H256,
+    pub tx_hash: B256,
     pub log_index: u64,
     pub block_number: u64,
 }
@@ -76,7 +75,7 @@ impl PaymentLog {
     }
 }
 
-pub fn payment_idempotency_key(chain_id: i64, tx_hash: H256, log_index: u64) -> String {
+pub fn payment_idempotency_key(chain_id: i64, tx_hash: B256, log_index: u64) -> String {
     format!("litkey:{chain_id}:{tx_hash:#x}:{log_index}")
 }
 
@@ -426,14 +425,27 @@ struct JsonRpcError {
 struct RpcLog {
     address: Address,
     #[serde(rename = "blockNumber")]
-    block_number: Option<U64>,
+    #[serde(with = "alloy_serde::quantity::opt")]
+    block_number: Option<u64>,
     #[serde(rename = "logIndex")]
-    log_index: Option<U256>,
+    #[serde(with = "alloy_serde::quantity::opt")]
+    log_index: Option<u64>,
     #[serde(rename = "transactionHash")]
-    transaction_hash: Option<H256>,
-    topics: Vec<H256>,
+    transaction_hash: Option<B256>,
+    topics: Vec<B256>,
     data: Bytes,
     removed: Option<bool>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Log {
+    pub address: Address,
+    pub block_number: Option<u64>,
+    pub log_index: Option<u64>,
+    pub transaction_hash: Option<B256>,
+    pub topics: Vec<B256>,
+    pub data: Bytes,
+    pub removed: Option<bool>,
 }
 
 impl From<RpcLog> for Log {
@@ -446,7 +458,6 @@ impl From<RpcLog> for Log {
             topics: log.topics,
             data: log.data,
             removed: log.removed,
-            ..Default::default()
         }
     }
 }
@@ -517,8 +528,11 @@ impl HttpGatewayRpc {
 #[async_trait]
 impl ChainRpc for HttpGatewayRpc {
     async fn latest_block(&self) -> Result<u64> {
-        let block: U64 = self.rpc("eth_blockNumber", json!([])).await?;
-        Ok(block.as_u64())
+        #[derive(Deserialize)]
+        struct BlockNumber(#[serde(with = "alloy_serde::quantity")] u64);
+
+        let block: BlockNumber = self.rpc("eth_blockNumber", json!([])).await?;
+        Ok(block.0)
     }
 
     async fn payment_logs(&self, from_block: u64, to_block: u64) -> Result<Vec<PaymentLog>> {
@@ -546,8 +560,8 @@ impl ChainRpc for HttpGatewayRpc {
 
 pub const PAYMENT_EVENT_SIGNATURE: &str = "Payment(address,address,uint256)";
 
-pub fn payment_event_topic() -> H256 {
-    H256::from(keccak256(PAYMENT_EVENT_SIGNATURE.as_bytes()))
+pub fn payment_event_topic() -> B256 {
+    keccak256(PAYMENT_EVENT_SIGNATURE.as_bytes())
 }
 
 pub fn wss_payment_log_subscribe_request(gateway_address: Address) -> Value {
@@ -756,23 +770,17 @@ pub fn parse_gateway_payment_log(
     let tx_hash = log
         .transaction_hash
         .context("payment log missing tx hash")?;
-    let log_index = log
-        .log_index
-        .context("payment log missing log index")?
-        .as_u64();
+    let log_index = log.log_index.context("payment log missing log index")?;
     let block_number = log
         .block_number
-        .context("payment log missing block number")?
-        .as_u64();
+        .context("payment log missing block number")?;
 
-    let wallet = Address::from_slice(&log.topics[1].as_bytes()[12..]);
-    let payer = Address::from_slice(&log.topics[2].as_bytes()[12..]);
-    let decoded =
-        decode(&[ParamType::Uint(256)], &log.data.0).context("decoding indexed Payment amount")?;
-    let amount_wei = decoded[0]
-        .clone()
-        .into_uint()
-        .context("Payment amount not uint")?;
+    let wallet = Address::from_slice(&log.topics[1].as_slice()[12..]);
+    let payer = Address::from_slice(&log.topics[2].as_slice()[12..]);
+    let decoded = DynSolType::Uint(256)
+        .abi_decode(&log.data)
+        .context("decoding indexed Payment amount")?;
+    let (amount_wei, _) = decoded.as_uint().context("Payment amount not uint")?;
 
     Ok(Some(PaymentLog {
         chain_id,
@@ -1034,14 +1042,13 @@ pub fn spawn_litkey_listener(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ethers_core::abi::{Token, encode};
-    use ethers_core::types::{Address, H256, Log, U256};
+    use alloy_dyn_abi::DynSolValue;
     use std::str::FromStr;
 
     #[test]
     fn formats_deterministic_stripe_idempotency_key() {
         let tx_hash =
-            H256::from_str("0x1111111111111111111111111111111111111111111111111111111111111111")
+            B256::from_str("0x1111111111111111111111111111111111111111111111111111111111111111")
                 .unwrap();
         assert_eq!(
             payment_idempotency_key(8453, tx_hash, 7),
@@ -1169,7 +1176,7 @@ mod tests {
                     "blockNumber": format!("0x{:x}", expected.block_number),
                     "logIndex": format!("0x{:x}", expected.log_index),
                     "transactionHash": format!("{:#x}", expected.tx_hash),
-                    "data": format!("0x{}", hex::encode(encode(&[Token::Uint(expected.amount_wei)])))
+                    "data": format!("0x{}", hex::encode(encode_uint256(expected.amount_wei)))
                 }
             }
         });
@@ -1193,7 +1200,7 @@ mod tests {
                     "logIndex": format!("0x{:x}", expected.log_index),
                     "transactionHash": format!("{:#x}", expected.tx_hash),
                     "topics": [format!("{:#x}", payment_event_topic()), indexed_address_topic(expected.wallet)],
-                    "data": format!("0x{}", hex::encode(encode(&[Token::Uint(expected.amount_wei)])))
+                    "data": format!("0x{}", hex::encode(encode_uint256(expected.amount_wei)))
                 }
             }
         });
@@ -1235,8 +1242,8 @@ mod tests {
             gateway_address: wallet,
             wallet,
             payer,
-            amount_wei: U256::from_dec_str("1000000000000000000").unwrap(),
-            tx_hash: H256::zero(),
+            amount_wei: U256::from_str("1000000000000000000").unwrap(),
+            tx_hash: B256::ZERO,
             log_index: 3,
             block_number: 123,
         };
@@ -1252,10 +1259,14 @@ mod tests {
         assert_eq!(log.amount_wei_string(), "1000000000000000000");
     }
 
-    fn indexed_address_topic(address: Address) -> H256 {
+    fn indexed_address_topic(address: Address) -> B256 {
         let mut bytes = [0_u8; 32];
-        bytes[12..].copy_from_slice(address.as_bytes());
-        H256::from(bytes)
+        bytes[12..].copy_from_slice(address.as_slice());
+        B256::from(bytes)
+    }
+
+    fn encode_uint256(value: U256) -> Vec<u8> {
+        DynSolValue::Uint(value, 256).abi_encode()
     }
 
     #[test]
@@ -1268,7 +1279,7 @@ mod tests {
                 indexed_address_topic(expected.wallet),
                 indexed_address_topic(expected.payer),
             ],
-            data: encode(&[Token::Uint(expected.amount_wei)]).into(),
+            data: encode_uint256(expected.amount_wei).into(),
             transaction_hash: Some(expected.tx_hash),
             log_index: Some(expected.log_index.into()),
             block_number: Some(expected.block_number.into()),
@@ -1291,11 +1302,12 @@ mod tests {
                 payment_event_topic(),
                 indexed_address_topic(expected.wallet),
             ],
-            data: encode(&[
-                Token::Address(expected.wallet),
-                Token::Address(expected.payer),
-                Token::Uint(expected.amount_wei),
+            data: DynSolValue::Tuple(vec![
+                DynSolValue::Address(expected.wallet),
+                DynSolValue::Address(expected.payer),
+                DynSolValue::Uint(expected.amount_wei, 256),
             ])
+            .abi_encode()
             .into(),
             transaction_hash: Some(expected.tx_hash),
             log_index: Some(expected.log_index.into()),
@@ -1312,7 +1324,7 @@ mod tests {
             payment_event_topic(),
             indexed_address_topic(expected.wallet),
             indexed_address_topic(expected.payer),
-            H256::zero(),
+            B256::ZERO,
         ];
         let err = parse_gateway_payment_log(expected.chain_id, expected.gateway_address, log)
             .unwrap_err();
@@ -1331,7 +1343,7 @@ mod tests {
                 indexed_address_topic(expected.wallet),
                 indexed_address_topic(expected.payer),
             ],
-            data: encode(&[Token::Uint(expected.amount_wei)]).into(),
+            data: encode_uint256(expected.amount_wei).into(),
             transaction_hash: Some(expected.tx_hash),
             log_index: Some(expected.log_index.into()),
             block_number: Some(expected.block_number.into()),
@@ -1350,8 +1362,8 @@ mod tests {
                 .unwrap(),
             wallet: Address::from_str("0x2000000000000000000000000000000000000000").unwrap(),
             payer: Address::from_str("0x3000000000000000000000000000000000000000").unwrap(),
-            amount_wei: U256::from_dec_str("1000000000000000000").unwrap(),
-            tx_hash: H256::from_str(
+            amount_wei: U256::from_str("1000000000000000000").unwrap(),
+            tx_hash: B256::from_str(
                 "0x4444444444444444444444444444444444444444444444444444444444444444",
             )
             .unwrap(),
@@ -1376,7 +1388,7 @@ mod tests {
                         format!("{:#x}", indexed_address_topic(log.wallet)),
                         format!("{:#x}", indexed_address_topic(log.payer))
                     ],
-                    "data": format!("0x{}", hex::encode(encode(&[Token::Uint(log.amount_wei)])))
+                    "data": format!("0x{}", hex::encode(encode_uint256(log.amount_wei)))
                 }
             }
         })
