@@ -1,0 +1,32 @@
+[package]
+name = "lit-triggers"
+version = "0.1.0"
+edition = "2021"
+description = "Lit Protocol reactive Lit Action trigger runner"
+license = "Apache-2.0"
+
+[dependencies]
+anyhow = "1.0"
+aes-gcm = "0.10"
+base64 = "0.22"
+hmac = "0.12"
+moka = { version = "0.12", features = ["future"] }
+rand = "0.8"
+reqwest = { version = "0.12", features = ["json"] }
+rocket = { version = "0.5.1", features = ["json", "secrets"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.10"
+sqlx = { version = "0.8", features = [
+    "postgres",
+    "runtime-tokio",
+    "uuid",
+    "time",
+    "macros",
+] }
+time = { version = "0.3", features = ["serde", "formatting", "macros"] }
+tokio = { version = "1", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+ipfs-hasher = "0.13.0"

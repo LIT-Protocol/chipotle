@@ -335,9 +335,7 @@ Confirmed.
 
 ## Rough milestones
 
-1. **PR 1 — foundation.** Crate skeleton, Postgres + sqlx, magic-link +
-   admin-key-in-browser usage-key provisioning, `users` + `triggers` tables,
-   CRUD API, no workers yet. Mirrors lit-payments PR 1.
+1. ✅ **PR 1 — foundation (implemented 2026-05-22).** Crate skeleton, Postgres + sqlx, magic-link auth, encrypted scoped usage-key storage, `users` + `triggers` tables, CRUD API, no workers yet. Tests pass with `cargo +1.91 test`.
 2. **PR 2 — webhook trigger.** Public webhook endpoint + run dispatcher +
    basic IP/user/trigger rate limits + async enqueue + call out to Chipotle.
    End-to-end first trigger type working.
