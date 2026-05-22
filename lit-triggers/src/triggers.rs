@@ -13,6 +13,7 @@ use uuid::Uuid;
 use crate::auth::User;
 use crate::config::Config;
 use crate::crypto;
+use crate::scheduler;
 use ipfs_hasher::IpfsHasher;
 
 type ApiResult<T> = Result<Json<T>, Custom<Json<ErrorResponse>>>;
@@ -245,6 +246,7 @@ pub async fn update_trigger(
     let default_params = req.default_params.unwrap_or(existing.default_params);
     let config_json = req.config.unwrap_or(existing.config);
     validate_common(&name, &action_code, &default_params, &config_json)?;
+    validate_kind_config(&kind, &config_json)?;
 
     let (nonce, ciphertext) = match req.usage_api_key {
         Some(k) => {
@@ -474,7 +476,8 @@ fn validate_create(req: &CreateTriggerRequest) -> Result<(), Custom<Json<ErrorRe
         &req.action_code,
         &req.default_params,
         &req.config,
-    )
+    )?;
+    validate_kind_config(&req.kind, &req.config)
 }
 
 fn validate_common(
@@ -499,9 +502,28 @@ fn validate_common(
     Ok(())
 }
 
+fn validate_kind_config(
+    kind: &TriggerKind,
+    config: &Value,
+) -> Result<(), Custom<Json<ErrorResponse>>> {
+    if kind != &TriggerKind::Schedule {
+        return Ok(());
+    }
+
+    let cron = config
+        .get("cron")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| err(Status::BadRequest, "cron_required"))?;
+
+    scheduler::validate_cron(cron).map_err(|_| err(Status::BadRequest, "invalid_cron"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn trigger_kind_serializes_as_api_values() {
@@ -533,6 +555,54 @@ mod tests {
             config: empty_object(),
         };
         assert!(validate_create(&req).is_err());
+    }
+
+    #[test]
+    fn schedule_create_validation_requires_cron() {
+        let req = CreateTriggerRequest {
+            name: "n".into(),
+            kind: TriggerKind::Schedule,
+            action_code: "code".into(),
+            default_params: empty_object(),
+            usage_api_key: "usage".into(),
+            chipotle_account_address: None,
+            max_runs_per_minute: None,
+            max_queued_runs: None,
+            config: empty_object(),
+        };
+        assert!(validate_create(&req).is_err());
+    }
+
+    #[test]
+    fn schedule_create_validation_accepts_valid_cron() {
+        let req = CreateTriggerRequest {
+            name: "n".into(),
+            kind: TriggerKind::Schedule,
+            action_code: "code".into(),
+            default_params: empty_object(),
+            usage_api_key: "usage".into(),
+            chipotle_account_address: None,
+            max_runs_per_minute: None,
+            max_queued_runs: None,
+            config: json!({ "cron": "*/5 * * * *" }),
+        };
+        assert!(validate_create(&req).is_ok());
+    }
+
+    #[test]
+    fn webhook_create_validation_does_not_require_cron() {
+        let req = CreateTriggerRequest {
+            name: "n".into(),
+            kind: TriggerKind::Webhook,
+            action_code: "code".into(),
+            default_params: empty_object(),
+            usage_api_key: "usage".into(),
+            chipotle_account_address: None,
+            max_runs_per_minute: None,
+            max_queued_runs: None,
+            config: empty_object(),
+        };
+        assert!(validate_create(&req).is_ok());
     }
 
     #[test]
