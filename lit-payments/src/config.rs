@@ -3,9 +3,12 @@
 //! All env vars are read once at startup. Missing required vars fail the
 //! process with a clear message — no silent defaults.
 
-use anyhow::{Context, Result};
+use std::str::FromStr;
 
-use crate::rate;
+use anyhow::{Context, Result};
+use ethers_core::types::Address;
+
+use crate::{chain, rate};
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -32,6 +35,9 @@ pub struct Config {
     /// Discount for LITKEY payments, in basis points. Default 0. Example:
     /// 2000 = "20% off vs credit card".
     pub litkey_discount_basis_points: i64,
+    /// Optional Base LITKEY listener configuration. If unset, the admin portal
+    /// and rate poller run but on-chain payment processing stays disabled.
+    pub litkey_chain: Option<chain::ChainConfig>,
 }
 
 impl Config {
@@ -48,6 +54,7 @@ impl Config {
             max_grant_cents: optional_i64("MAX_GRANT_CENTS", 2_000)?,
             max_daily_per_operator_cents: optional_i64("MAX_DAILY_PER_OPERATOR_CENTS", 10_000)?,
             litkey_discount_basis_points: parse_discount_basis_points()?,
+            litkey_chain: parse_litkey_chain_config()?,
         })
     }
 }
@@ -66,6 +73,52 @@ fn optional_i64(name: &str, default: i64) -> Result<i64> {
             .with_context(|| format!("env var {name} must be an integer; got {v:?}")),
         _ => Ok(default),
     }
+}
+
+fn optional_u64(name: &str, default: u64) -> Result<u64> {
+    match std::env::var(name) {
+        Ok(v) if !v.trim().is_empty() => v
+            .trim()
+            .parse::<u64>()
+            .with_context(|| format!("env var {name} must be an unsigned integer; got {v:?}")),
+        _ => Ok(default),
+    }
+}
+
+fn optional_trimmed(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn parse_litkey_chain_config() -> Result<Option<chain::ChainConfig>> {
+    let wss = optional_trimmed("ALCHEMY_WSS_URL");
+    let https = optional_trimmed("ALCHEMY_HTTPS_URL");
+    let gateway = optional_trimmed("LITKEY_GATEWAY_ADDRESS");
+
+    if wss.is_none() && https.is_none() && gateway.is_none() {
+        return Ok(None);
+    }
+
+    let wss = wss.context("ALCHEMY_WSS_URL is required when enabling LITKEY listener")?;
+    let https = https.context("ALCHEMY_HTTPS_URL is required when enabling LITKEY listener")?;
+    let gateway =
+        gateway.context("LITKEY_GATEWAY_ADDRESS is required when enabling LITKEY listener")?;
+    let gateway_address = Address::from_str(&gateway)
+        .with_context(|| format!("LITKEY_GATEWAY_ADDRESS must be a 0x address; got {gateway:?}"))?;
+
+    Ok(Some(chain::ChainConfig {
+        chain_id: optional_i64("LITKEY_CHAIN_ID", chain::BASE_CHAIN_ID)?,
+        alchemy_wss_url: wss,
+        alchemy_https_url: https,
+        gateway_address,
+        confirmations: optional_u64("LITKEY_CONFIRMATIONS", chain::DEFAULT_CONFIRMATIONS)?,
+        reconciliation_interval_secs: optional_u64(
+            "LITKEY_RECONCILIATION_INTERVAL_SECS",
+            chain::DEFAULT_RECONCILIATION_INTERVAL_SECS,
+        )?,
+    }))
 }
 
 fn required(name: &str) -> Result<String> {

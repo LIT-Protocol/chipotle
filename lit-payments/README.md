@@ -64,6 +64,14 @@ ROCKET_PORT=8000
 # 0 = no discount. 2000 = 20% off vs credit card, so users receive
 # 1 / (1 - 0.20) = 1.25x the market-rate Stripe credit per LITKEY.
 # LITKEY_DISCOUNT_BASIS_POINTS=0
+
+# Optional — enable LITKEY on-chain payment listener (Base mainnet):
+# ALCHEMY_WSS_URL=wss://base-mainnet.g.alchemy.com/v2/...
+# ALCHEMY_HTTPS_URL=https://base-mainnet.g.alchemy.com/v2/...
+# LITKEY_GATEWAY_ADDRESS=0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b
+# LITKEY_CHAIN_ID=8453
+# LITKEY_CONFIRMATIONS=5
+# LITKEY_RECONCILIATION_INTERVAL_SECS=60
 ```
 
 ### 3. Run

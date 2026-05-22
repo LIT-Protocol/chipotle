@@ -392,8 +392,11 @@ All questions are closed. Plan is ready to start building.
    - [x] Env-configured LITKEY payment discount (`LITKEY_DISCOUNT_BASIS_POINTS`, default `0`; `2000` = 20% off vs credit card) exposed in the rate API/UI as the discount-adjusted effective credit rate.
    - [x] **No on-chain dependency** — can ship before 3c.
 
-   **3c.** ⏭️ Alchemy WSS listener + `litkey_payments` + `chain_checkpoint` — NOT STARTED
-   - WSS subscription to `Payment` events from the deployed gateway contract; exponential backoff reconnect.
+   **3c.** 🚧 Alchemy WSS listener + `litkey_payments` + `chain_checkpoint` — STARTED IN PR WORKTREE
+   - [x] Added phase-3c schema: `litkey_payments` with `UNIQUE(chain_id, tx_hash, log_index)` and `chain_checkpoint` with per-chain `last_processed_block`.
+   - [x] Added listener configuration/env parsing for `ALCHEMY_WSS_URL`, `ALCHEMY_HTTPS_URL`, `LITKEY_GATEWAY_ADDRESS`, `LITKEY_CHAIN_ID` (default Base `8453`), `LITKEY_CONFIRMATIONS` (default `5`), and `LITKEY_RECONCILIATION_INTERVAL_SECS` (default `60`). If the chain env vars are absent, the portal/rate poller still boot and LITKEY crediting stays disabled.
+   - [x] Added shared listener primitives/tests for deterministic Stripe idempotency keys, address normalization, confirmation depth, reconciliation ranges, reconnect backoff, and native wei amount formatting.
+   - [ ] WSS subscription to `Payment` events from the deployed gateway contract; exponential backoff reconnect.
    - 60s reconciliation poll for logs in `(last_processed_block, latest_block - 5)` as a safety net for WS gaps.
    - 5-confirmation depth on Base before crediting.
    - Idempotency on `(tx_hash, log_index)` unique in `litkey_payments`.
