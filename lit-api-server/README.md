@@ -58,7 +58,7 @@ Blockchain tooling and contracts used by the server.
 | Path | Description |
 |------|-------------|
 | **`rust_generator_and_deployer/`** | Rust CLI tools for deploying contract artifacts. The legacy ethers-based contract generator remains for the Phase 6 workspace migration. |
-| **`lit_node_express/`** | Lit Node Express contracts and Makefile. `make generate` compiles Solidity and regenerates the checked-in Alloy AccountConfig binding via `forge bind`. |
+| **`lit_node_express/`** | Lit Node Express contracts and Makefile. `make generate` compiles Solidity and regenerates the checked-in Alloy AccountConfig binding via `forge bind` plus a small Node.js post-processing script. |
 | **`swaps/`** | Hardhat project with the **QuoteStorage** Solidity contract (swap requests, quotes). |
 
 ---

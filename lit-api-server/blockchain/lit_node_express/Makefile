@@ -35,7 +35,7 @@ generate: compile facade
 		--overwrite \
 		--skip-cargo-toml \
 		--alloy-version 1.0
-	python3 postprocess-forge-bindings.py \
+	node postprocess-forge-bindings.mjs \
 		--forge-output $(ACCOUNT_CONFIG_BINDINGS_TMP)/mod.rs \
 		--binding-output $(ACCOUNT_CONFIG_BINDING) \
 		--abi-source $(ACCOUNT_CONFIG_ARTIFACT) \
