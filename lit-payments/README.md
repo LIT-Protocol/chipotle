@@ -21,8 +21,12 @@ Authenticated (operator session cookie required):
 - `GET /api/customer/lookup?email=…` or `?wallet=…` — preview a Stripe customer + balance.
 - `POST /api/grant` — apply a credit (subject to caps + UUID idempotency key).
 - `GET /api/grants?limit=N` — recent grants by the calling operator.
-- `GET /api/litkey/rate` — current LITKEY market rate plus discount-adjusted credit rate for operators.
-- `POST /api/litkey/rate/override` — admin-only manual market-rate override.
+- `GET /api/litkey/rate` — current LITKEY market rate plus discount-adjusted credit rate for operators. Rates are returned as decimal strings in `usd_wei_per_litkey` / `effective_usd_wei_per_litkey`, where `1 USD = 1e18` units.
+- `POST /api/litkey/rate/override` — admin-only manual market-rate override. Body: `{ "usd_wei_per_litkey": "6000000000000000" }` for `$0.006/LITKEY`.
+
+## LITKEY rate precision
+
+LITKEY pricing is intentionally stored as 18-decimal USD fixed point instead of whole cents because LITKEY can trade below one cent. Example: `$0.006/LITKEY` is stored as `6000000000000000` (`0.006 * 1e18`). The listener settlement helper keeps the on-chain `Payment.amount` in native LITKEY wei, multiplies by `usd_wei_per_litkey` with `num-bigint`, applies `LITKEY_DISCOUNT_BASIS_POINTS`, and rounds only once at the final Stripe-cent boundary.
 
 ## Local development
 

@@ -32,10 +32,10 @@
     <!-- ── LITKEY rate ──────────────────────────────────────────── -->
     <section class="card">
       <h2>LITKEY rate</h2>
-      <p class="muted">CoinGecko polls every 5 minutes. Admins can override the current cents-per-LITKEY rate.</p>
+      <p class="muted">CoinGecko polls every 5 minutes. Admins can override the current USD-per-LITKEY rate. Internally this is stored as 18-decimal USD fixed point.</p>
       <div id="rate-current" class="rate-current muted">Loading…</div>
       <form id="rate-form" class="row-form">
-        <input id="rate-cents" type="number" min="1" step="1" placeholder="cents per LITKEY" required>
+        <input id="rate-usd" type="text" inputmode="decimal" placeholder="USD per LITKEY, e.g. 0.006" required>
         <button type="submit">Override rate</button>
       </form>
       <div id="rate-status" class="status" role="status" aria-live="polite"></div>
@@ -136,7 +136,7 @@
     const matchTpl     = document.getElementById('match-template');
     const rateCurrent  = document.getElementById('rate-current');
     const rateForm     = document.getElementById('rate-form');
-    const rateCents    = document.getElementById('rate-cents');
+    const rateUsd      = document.getElementById('rate-usd');
     const rateStatus   = document.getElementById('rate-status');
 
     lookupForm.addEventListener('submit', async (e) => {
@@ -225,6 +225,23 @@
     }
 
     /* ── LITKEY rate display + admin override ───────────────────── */
+    function usdWeiToDisplay(raw) {
+      if (raw == null) return 'unavailable';
+      const wei = BigInt(raw);
+      const scale = 1000000000000000000n;
+      const whole = wei / scale;
+      const frac = (wei % scale).toString().padStart(18, '0').replace(/0+$/, '');
+      return `$${whole.toString()}${frac ? '.' + frac : ''}`;
+    }
+    function parseUsdToWei(raw) {
+      const value = raw.trim();
+      if (!/^\d+(\.\d+)?$/.test(value)) throw new Error('Rate must be a positive decimal USD amount.');
+      const [whole, fracRaw = ''] = value.split('.');
+      const frac = (fracRaw + '0'.repeat(18)).slice(0, 18);
+      const wei = BigInt(whole) * 1000000000000000000n + BigInt(frac || '0');
+      if (wei <= 0n) throw new Error('Rate must be greater than zero at 18-decimal precision.');
+      return wei.toString();
+    }
     function renderRate(payload) {
       const rate = payload.rate;
       if (!rate) {
@@ -236,12 +253,12 @@
         ? `manual override by operator #${rate.updated_by_operator_id}`
         : 'CoinGecko';
       const discountPct = (payload.discount_basis_points / 100).toFixed(2).replace(/\.00$/, '');
-      const effective = payload.effective_cents_per_litkey != null
-        ? ` Effective credit rate: ${fmtCents(payload.effective_cents_per_litkey)} per LITKEY after ${discountPct}% discount.`
+      const effective = payload.effective_usd_wei_per_litkey != null
+        ? ` Effective credit rate: ${usdWeiToDisplay(payload.effective_usd_wei_per_litkey)} per LITKEY after ${discountPct}% discount.`
         : ' Crediting is paused until a fresh rate is available.';
-      rateCurrent.textContent = `${fmtCents(rate.cents_per_litkey)} market rate per LITKEY — ${source}, fetched ${fmtTime(rate.fetched_at)}.${effective}${payload.crediting_paused ? ' — CREDITING PAUSED' : ''}`;
+      rateCurrent.textContent = `${usdWeiToDisplay(rate.usd_wei_per_litkey)} market rate per LITKEY — ${source}, fetched ${fmtTime(rate.fetched_at)}.${effective}${payload.crediting_paused ? ' — CREDITING PAUSED' : ''}`;
       rateCurrent.className = 'rate-current' + (rate.stale ? ' error' : ' ok');
-      rateCents.value = rate.cents_per_litkey;
+      rateUsd.value = usdWeiToDisplay(rate.usd_wei_per_litkey).replace(/^\$/, '');
     }
 
     async function loadRate() {
@@ -257,9 +274,11 @@
 
     rateForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const cents = Number.parseInt(rateCents.value, 10);
-      if (!Number.isInteger(cents) || cents <= 0) {
-        setStatus(rateStatus, 'Rate must be a positive integer number of cents.', 'error');
+      let usdWei;
+      try {
+        usdWei = parseUsdToWei(rateUsd.value);
+      } catch (err) {
+        setStatus(rateStatus, err.message, 'error');
         return;
       }
       const button = rateForm.querySelector('button');
@@ -270,7 +289,7 @@
           method: 'POST',
           credentials: 'same-origin',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cents_per_litkey: cents }),
+          body: JSON.stringify({ usd_wei_per_litkey: usdWei }),
         });
         const body = await resp.json();
         if (!resp.ok) { setStatus(rateStatus, body.error || `Failed (HTTP ${resp.status})`, 'error'); return; }

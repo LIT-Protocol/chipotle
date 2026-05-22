@@ -162,7 +162,7 @@ litkey_payments(
   credited_wallet,                -- event.wallet
   litkey_amount,
   cents_credited,
-  rate_used,                      -- cents per LITKEY at credit time
+  rate_used,                      -- snapshot of usd_wei_per_litkey at credit time
   stripe_customer_id,
   stripe_balance_transaction_id,
   credited_at,
@@ -172,7 +172,7 @@ litkey_payments(
 
 litkey_rate(
   id PRIMARY KEY DEFAULT 1 CHECK (id = 1),  -- single-row table
-  cents_per_litkey,
+  usd_wei_per_litkey,            -- 18-decimal USD fixed point per 1 whole LITKEY
   source,                         -- 'coingecko' | 'manual'
   fetched_at,
   updated_by_operator_id          -- null when source='coingecko'
@@ -289,7 +289,7 @@ WebSocket primary + 60s reconciliation poll:
 1. `Payment` event observed at confirmation depth.
 2. Idempotency check on `(tx_hash, log_index)`.
 3. Look up Stripe customer by `metadata.wallet_address == event.wallet`. If none: log a warning and skip — do not credit, do not alert. Anyone calling `pay()` directly with a wallet that isn't a Lit customer is off the supported path; they'll reach out to support if it matters.
-4. Read `cents_per_litkey` from `litkey_rate`. Compute `cents = litkey_amount * rate`.
+4. Read `usd_wei_per_litkey` from `litkey_rate` (`1 USD = 1e18` fixed-point units). Compute Stripe cents from native `Payment.amount` LITKEY wei with BigInt-style integer math: `amount_wei * usd_wei_per_litkey * 100 * 10000 / (1e18 token scale * 1e18 USD scale * (10000 - discount_bps))`, rounded once at the final Stripe-cent boundary.
 5. Write `balance_transaction` with `amount = -cents`, description `"LITKEY payment: tx {tx_hash}"`.
 6. Insert row into `litkey_payments` (rate snapshotted in `rate_used`).
 
@@ -302,6 +302,7 @@ GET https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies
 ```
 
 - Background task polls every 5 min, upserts the single-row `litkey_rate` table.
+- Rates are stored as `usd_wei_per_litkey`: 18-decimal USD fixed point per 1 whole LITKEY (`1 USD = 1e18`; `$0.006/LITKEY = 6000000000000000`). This deliberately mirrors token-native integer accounting so sub-cent LITKEY prices are not rounded to whole cents.
 - If a fetch fails or returns nonsense (zero / null / >100× recent value): keep the last-known rate, log a warning.
 - If the row's `fetched_at` is older than 1 hour: pause crediting and log a warning. Stuck payments will surface via user reports; mod can grant manually in the meantime.
 - Admin can override the rate from the admin UI (updates the same row with `source='manual'` + operator id). Manual override is authoritative until another admin changes it; the poller does not overwrite manual values. Stale manual values still pause crediting so an operator has to deliberately refresh the override during an oracle incident. Override is recorded on the row itself — no separate notification.
@@ -385,7 +386,7 @@ All questions are closed. Plan is ready to start building.
 
    **3b.** ✅ CoinGecko rate poller + `litkey_rate` schema + admin rate-override UI — IMPLEMENTED IN PR WORKTREE
    - [x] Background task in `lit-payments` polling `https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies=usd` every 5 min.
-   - [x] Migration adding the single-row `litkey_rate` table (`id PRIMARY KEY DEFAULT 1 CHECK (id = 1)`, `cents_per_litkey`, `source`, `fetched_at`, `updated_by_operator_id`).
+   - [x] Migration adding the single-row `litkey_rate` table (`id PRIMARY KEY DEFAULT 1 CHECK (id = 1)`, `usd_wei_per_litkey NUMERIC(78,0)`, `source`, `fetched_at`, `updated_by_operator_id`).
    - [x] Stale (>1hr) is surfaced on the API/UI and logs a warning so future 3c crediting can pause (no Slack alert — `fly logs` only).
    - [x] Admin UI section on the dashboard to view the current rate + override it (`source='manual'`).
    - [x] Env-configured LITKEY payment discount (`LITKEY_DISCOUNT_BASIS_POINTS`, default `0`; `2000` = 20% off vs credit card) exposed in the rate API/UI as the discount-adjusted effective credit rate.
@@ -396,8 +397,8 @@ All questions are closed. Plan is ready to start building.
    - 60s reconciliation poll for logs in `(last_processed_block, latest_block - 5)` as a safety net for WS gaps.
    - 5-confirmation depth on Base before crediting.
    - Idempotency on `(tx_hash, log_index)` unique in `litkey_payments`.
-   - For each Payment event: read `litkey_rate`, reject/hold crediting if `crediting_paused` is true, apply `LITKEY_DISCOUNT_BASIS_POINTS` to compute the effective credit rate, compute `cents = litkey_amount * effective_rate`, look up Stripe customer by `metadata.wallet_address == event.wallet`, write the credit via `lit_billing_core::balance::write_transaction`, persist a `litkey_payments` row.
-   - Before production listener crediting, upgrade rate math from whole cents/LITKEY to a higher-precision fixed-point representation and round only once at the final Stripe-cent amount. The current 3b admin UI/API is acceptable for quoting visibility, but final crediting should avoid systematic over/under-crediting from whole-cent spot-rate rounding.
+   - For each Payment event: read `litkey_rate`, reject/hold crediting if `crediting_paused` is true, apply `LITKEY_DISCOUNT_BASIS_POINTS`, compute Stripe cents from native LITKEY wei + `usd_wei_per_litkey` using BigInt-style integer math, look up Stripe customer by `metadata.wallet_address == event.wallet`, write the credit via `lit_billing_core::balance::write_transaction`, persist a `litkey_payments` row.
+   - [x] Rate precision prerequisite is handled in 3b: `litkey_rate.usd_wei_per_litkey` stores 18-decimal USD fixed point, CoinGecko parsing preserves arbitrary-precision JSON numbers, and the settlement helper rounds only once at final Stripe cents. Do not reintroduce whole-cent/LITKEY math in the listener.
    - Migrations: `litkey_payments`, `chain_checkpoint`.
    - **Depends on**: 3a contract deployed + address known (`0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b` on Base mainnet); 3b rate table existing.
 

@@ -1,8 +1,11 @@
 //! LITKEY/USD rate parsing, validation, persistence, admin API, and polling.
 
+use std::str::FromStr;
 use std::time::Duration as StdDuration;
 
 use anyhow::{Context, Result, anyhow};
+use num_bigint::BigUint;
+use num_traits::ToPrimitive;
 use reqwest::Client;
 use rocket::State;
 use rocket::http::Status;
@@ -20,12 +23,12 @@ pub const COINGECKO_URL: &str =
     "https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies=usd";
 pub const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 pub const STALE_AFTER: Duration = Duration::hours(1);
-pub const MAX_CENTS_PER_LITKEY: i64 = 1_000_000; // $10,000/LITKEY: reject obvious feed nonsense.
+pub const MAX_USD_WEI_PER_LITKEY: &str = "10000000000000000000000"; // $10,000/LITKEY scaled by 1e18: reject obvious feed nonsense.
 pub const MAX_DISCOUNT_BASIS_POINTS: i64 = 9_000; // Cap at 90% off to avoid effectively-free credits.
 
 #[derive(Debug, Clone, Serialize)]
 pub struct LitkeyRate {
-    pub cents_per_litkey: i64,
+    pub usd_wei_per_litkey: String,
     pub source: String,
     #[serde(with = "time::serde::rfc3339")]
     pub fetched_at: OffsetDateTime,
@@ -37,13 +40,13 @@ pub struct LitkeyRate {
 pub struct RateResponse {
     pub rate: Option<LitkeyRate>,
     pub discount_basis_points: i64,
-    pub effective_cents_per_litkey: Option<i64>,
+    pub effective_usd_wei_per_litkey: Option<String>,
     pub crediting_paused: bool,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct OverrideRateRequest {
-    pub cents_per_litkey: i64,
+    pub usd_wei_per_litkey: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,31 +73,105 @@ fn server_err(e: impl std::fmt::Display) -> ApiError {
     err(Status::InternalServerError, "internal error")
 }
 
-/// Parse CoinGecko's `simple/price` response and convert USD to integer cents.
-pub fn parse_coingecko_cents(body: &str) -> Result<i64> {
+const USD_FIXED_POINT_DECIMALS: usize = 18;
+const USD_FIXED_POINT_SCALE: &str = "1000000000000000000";
+const LITKEY_WEI_PER_TOKEN: &str = "1000000000000000000";
+
+fn max_usd_wei_per_litkey() -> BigUint {
+    BigUint::from_str(MAX_USD_WEI_PER_LITKEY).expect("valid MAX_USD_WEI_PER_LITKEY")
+}
+
+fn usd_scale() -> BigUint {
+    BigUint::from_str(USD_FIXED_POINT_SCALE).expect("valid USD_FIXED_POINT_SCALE")
+}
+
+fn litkey_scale() -> BigUint {
+    BigUint::from_str(LITKEY_WEI_PER_TOKEN).expect("valid LITKEY_WEI_PER_TOKEN")
+}
+
+fn parse_biguint_decimal(raw: &str, field: &str) -> Result<BigUint> {
+    if raw.is_empty() || raw.starts_with('+') || raw.starts_with('-') {
+        anyhow::bail!("{field} must be an unsigned integer string");
+    }
+    if !raw.bytes().all(|b| b.is_ascii_digit()) {
+        anyhow::bail!("{field} must contain only decimal digits");
+    }
+    BigUint::from_str(raw).with_context(|| format!("parsing {field}"))
+}
+
+fn parse_decimal_to_scaled_units(raw: &str, decimals: usize) -> Result<String> {
+    let raw = raw.trim();
+    if raw.is_empty() || raw.starts_with('+') || raw.starts_with('-') {
+        anyhow::bail!("USD rate must be positive, got {raw:?}");
+    }
+
+    let (mantissa, exponent) = if let Some((mantissa, exponent)) = raw.split_once(['e', 'E']) {
+        let exponent = exponent
+            .parse::<i32>()
+            .with_context(|| format!("USD rate has invalid exponent: {raw:?}"))?;
+        (mantissa, exponent)
+    } else {
+        (raw, 0)
+    };
+
+    let (whole, fractional) = mantissa.split_once('.').unwrap_or((mantissa, ""));
+    if whole.is_empty() && fractional.is_empty() {
+        anyhow::bail!("USD rate is empty");
+    }
+    if !whole.bytes().all(|b| b.is_ascii_digit()) || !fractional.bytes().all(|b| b.is_ascii_digit())
+    {
+        anyhow::bail!(
+            "USD rate must contain only digits, one decimal point, and optional exponent"
+        );
+    }
+
+    let mut digits = format!("{whole}{fractional}");
+    digits = digits.trim_start_matches('0').to_string();
+    if digits.is_empty() {
+        anyhow::bail!("USD rate is zero");
+    }
+
+    let power = exponent - i32::try_from(fractional.len()).expect("fraction length fits i32")
+        + i32::try_from(decimals).expect("scale decimals fit i32");
+    let units = if power >= 0 {
+        format!("{}{}", digits, "0".repeat(power as usize))
+    } else {
+        let keep_len = digits.len().saturating_sub((-power) as usize);
+        digits[..keep_len].to_string()
+    };
+    let units = units.trim_start_matches('0');
+    if units.is_empty() {
+        anyhow::bail!("USD rate rounds/truncates to zero at {decimals} decimals");
+    }
+    Ok(units.to_string())
+}
+
+/// Parse CoinGecko's `simple/price` response and convert USD to integer
+/// 18-decimal USD fixed-point units per 1 whole LITKEY.
+///
+/// Example: `$0.006/LITKEY` becomes `6000000000000000`.
+pub fn parse_coingecko_usd_wei(body: &str) -> Result<String> {
     let v: serde_json::Value = serde_json::from_str(body).context("parsing CoinGecko JSON")?;
     let usd = v
         .get("lit-protocol")
         .and_then(|obj| obj.get("usd"))
-        .and_then(|usd| usd.as_f64())
         .ok_or_else(|| anyhow!("CoinGecko response missing lit-protocol.usd"))?;
-
-    if !usd.is_finite() || usd <= 0.0 {
-        anyhow::bail!("CoinGecko returned non-positive or non-finite USD rate: {usd}");
-    }
-
-    let cents = (usd * 100.0).round();
-    if !cents.is_finite() || cents < 1.0 || cents > MAX_CENTS_PER_LITKEY as f64 {
-        anyhow::bail!("CoinGecko USD rate converts to invalid cents value: {cents}");
-    }
-    Ok(cents as i64)
+    let usd = match usd {
+        serde_json::Value::Number(n) => n.to_string(),
+        serde_json::Value::String(s) => s.clone(),
+        _ => anyhow::bail!("CoinGecko lit-protocol.usd was not a number"),
+    };
+    let usd_wei = parse_decimal_to_scaled_units(&usd, USD_FIXED_POINT_DECIMALS)?;
+    validate_manual_usd_wei(&usd_wei)?;
+    Ok(usd_wei)
 }
 
-pub fn validate_manual_cents(cents: i64) -> Result<()> {
-    if !(1..=MAX_CENTS_PER_LITKEY).contains(&cents) {
+pub fn validate_manual_usd_wei(usd_wei_per_litkey: &str) -> Result<()> {
+    let value = parse_biguint_decimal(usd_wei_per_litkey, "usd_wei_per_litkey")?;
+    if value == BigUint::from(0_u8) || value > max_usd_wei_per_litkey() {
         anyhow::bail!(
-            "cents_per_litkey must be between 1 and {}",
-            MAX_CENTS_PER_LITKEY
+            "usd_wei_per_litkey must be between 1 and {}",
+            MAX_USD_WEI_PER_LITKEY
         );
     }
     Ok(())
@@ -110,31 +187,62 @@ pub fn validate_discount_basis_points(discount_basis_points: i64) -> Result<()> 
     Ok(())
 }
 
-/// Convert market cents/LITKEY into Stripe credit cents/LITKEY after discount.
-///
-/// A 20% discount means paying $0.80 worth of LITKEY should buy $1.00 of
-/// Stripe credit, so the credit rate is market_rate / (1 - discount).
-pub fn apply_discount_to_cents(
-    market_cents_per_litkey: i64,
+fn div_round_half_up(numerator: BigUint, denominator: BigUint) -> BigUint {
+    (&numerator + (&denominator / 2_u8)) / denominator
+}
+
+/// Convert market USD wei/LITKEY into effective credit USD wei/LITKEY after
+/// the configured discount. A 20% discount means paying $0.80 worth of
+/// LITKEY buys $1.00 Stripe credit, so effective rate is market/(1-discount).
+pub fn apply_discount_to_usd_wei(
+    market_usd_wei_per_litkey: &str,
+    discount_basis_points: i64,
+) -> Result<String> {
+    validate_manual_usd_wei(market_usd_wei_per_litkey)?;
+    validate_discount_basis_points(discount_basis_points)?;
+    let denominator_bps = 10_000_i64 - discount_basis_points;
+    let numerator = parse_biguint_decimal(market_usd_wei_per_litkey, "usd_wei_per_litkey")?
+        * BigUint::from(10_000_u32);
+    let rounded = div_round_half_up(numerator, BigUint::from(denominator_bps as u32));
+    Ok(rounded.to_string())
+}
+
+/// Compute final Stripe credit cents from native token units and 18-decimal
+/// USD fixed-point price. This is the settlement helper for the future
+/// listener: keep LITKEY wei and USD wei as integers, apply discount, then
+/// round once at the final Stripe-cent boundary.
+pub fn litkey_wei_to_credit_cents(
+    litkey_amount_wei: &str,
+    usd_wei_per_litkey: &str,
     discount_basis_points: i64,
 ) -> Result<i64> {
-    validate_manual_cents(market_cents_per_litkey)?;
+    validate_manual_usd_wei(usd_wei_per_litkey)?;
     validate_discount_basis_points(discount_basis_points)?;
-    let denominator = 10_000_i128 - i128::from(discount_basis_points);
-    let numerator = i128::from(market_cents_per_litkey) * 10_000_i128;
-    let rounded = (numerator + denominator / 2) / denominator;
-    i64::try_from(rounded).context("discount-adjusted LITKEY cents overflowed i64")
+    let denominator_bps = 10_000_i64 - discount_basis_points;
+    let numerator = parse_biguint_decimal(litkey_amount_wei, "litkey_amount_wei")?
+        * parse_biguint_decimal(usd_wei_per_litkey, "usd_wei_per_litkey")?
+        * BigUint::from(100_u32)
+        * BigUint::from(10_000_u32);
+    let denominator = litkey_scale() * usd_scale() * BigUint::from(denominator_bps as u32);
+    let cents = div_round_half_up(numerator, denominator);
+    cents
+        .to_i64()
+        .context("computed Stripe cents overflowed i64")
 }
 
 /// Reject invalid candidates and feed spikes above 100x the most recent valid row.
-pub fn validate_candidate_cents(candidate: i64, recent_cents: Option<i64>) -> RateValidation {
-    if validate_manual_cents(candidate).is_err() {
+pub fn validate_candidate_usd_wei(candidate: &str, recent_usd_wei: Option<&str>) -> RateValidation {
+    if validate_manual_usd_wei(candidate).is_err() {
         return RateValidation::RejectInvalid;
     }
-    if let Some(recent) = recent_cents.filter(|r| *r > 0)
-        && candidate > recent.saturating_mul(100)
-    {
-        return RateValidation::RejectAbsurdJump;
+    if let Some(recent) = recent_usd_wei {
+        let candidate = parse_biguint_decimal(candidate, "candidate usd_wei_per_litkey")
+            .expect("already validated candidate");
+        if let Ok(recent) = parse_biguint_decimal(recent, "recent usd_wei_per_litkey")
+            && candidate > recent * BigUint::from(100_u32)
+        {
+            return RateValidation::RejectAbsurdJump;
+        }
     }
     RateValidation::Accept
 }
@@ -150,7 +258,7 @@ pub fn should_poll_coingecko(current: Option<&LitkeyRate>) -> bool {
     !matches!(current, Some(rate) if rate.source == "manual")
 }
 
-pub async fn fetch_coingecko_cents(client: &Client) -> Result<i64> {
+pub async fn fetch_coingecko_usd_wei(client: &Client) -> Result<String> {
     let body = client
         .get(COINGECKO_URL)
         .send()
@@ -161,12 +269,12 @@ pub async fn fetch_coingecko_cents(client: &Client) -> Result<i64> {
         .text()
         .await
         .context("reading CoinGecko response body")?;
-    parse_coingecko_cents(&body)
+    parse_coingecko_usd_wei(&body)
 }
 
 pub async fn get_current(pool: &PgPool) -> Result<Option<LitkeyRate>> {
-    let row = sqlx::query_as::<_, (i64, String, OffsetDateTime, Option<i64>)>(
-        "SELECT cents_per_litkey, source, fetched_at, updated_by_operator_id \
+    let row = sqlx::query_as::<_, (String, String, OffsetDateTime, Option<i64>)>(
+        "SELECT usd_wei_per_litkey::text, source, fetched_at, updated_by_operator_id \
          FROM litkey_rate WHERE id = 1",
     )
     .fetch_optional(pool)
@@ -175,8 +283,8 @@ pub async fn get_current(pool: &PgPool) -> Result<Option<LitkeyRate>> {
 
     let now = OffsetDateTime::now_utc();
     Ok(row.map(
-        |(cents_per_litkey, source, fetched_at, updated_by_operator_id)| LitkeyRate {
-            cents_per_litkey,
+        |(usd_wei_per_litkey, source, fetched_at, updated_by_operator_id)| LitkeyRate {
+            usd_wei_per_litkey,
             source,
             fetched_at,
             updated_by_operator_id,
@@ -187,19 +295,19 @@ pub async fn get_current(pool: &PgPool) -> Result<Option<LitkeyRate>> {
 
 pub async fn upsert_coingecko(
     pool: &PgPool,
-    cents_per_litkey: i64,
+    usd_wei_per_litkey: &str,
     fetched_at: OffsetDateTime,
 ) -> Result<()> {
     sqlx::query(
-        "INSERT INTO litkey_rate (id, cents_per_litkey, source, fetched_at, updated_by_operator_id) \
-         VALUES (1, $1, 'coingecko', $2, NULL) \
+        "INSERT INTO litkey_rate (id, usd_wei_per_litkey, source, fetched_at, updated_by_operator_id) \
+         VALUES (1, $1::numeric, 'coingecko', $2, NULL) \
          ON CONFLICT (id) DO UPDATE SET \
-           cents_per_litkey = EXCLUDED.cents_per_litkey, \
+           usd_wei_per_litkey = EXCLUDED.usd_wei_per_litkey, \
            source = EXCLUDED.source, \
            fetched_at = EXCLUDED.fetched_at, \
            updated_by_operator_id = NULL",
     )
-    .bind(cents_per_litkey)
+    .bind(usd_wei_per_litkey)
     .bind(fetched_at)
     .execute(pool)
     .await
@@ -207,18 +315,18 @@ pub async fn upsert_coingecko(
     Ok(())
 }
 
-pub async fn set_manual(pool: &PgPool, cents_per_litkey: i64, operator_id: i64) -> Result<()> {
-    validate_manual_cents(cents_per_litkey)?;
+pub async fn set_manual(pool: &PgPool, usd_wei_per_litkey: &str, operator_id: i64) -> Result<()> {
+    validate_manual_usd_wei(usd_wei_per_litkey)?;
     sqlx::query(
-        "INSERT INTO litkey_rate (id, cents_per_litkey, source, fetched_at, updated_by_operator_id) \
-         VALUES (1, $1, 'manual', now(), $2) \
+        "INSERT INTO litkey_rate (id, usd_wei_per_litkey, source, fetched_at, updated_by_operator_id) \
+         VALUES (1, $1::numeric, 'manual', now(), $2) \
          ON CONFLICT (id) DO UPDATE SET \
-           cents_per_litkey = EXCLUDED.cents_per_litkey, \
+           usd_wei_per_litkey = EXCLUDED.usd_wei_per_litkey, \
            source = EXCLUDED.source, \
            fetched_at = EXCLUDED.fetched_at, \
            updated_by_operator_id = EXCLUDED.updated_by_operator_id",
     )
-    .bind(cents_per_litkey)
+    .bind(usd_wei_per_litkey)
     .bind(operator_id)
     .execute(pool)
     .await
@@ -264,23 +372,28 @@ async fn poll_once(pool: &PgPool, client: &Client) {
         return;
     }
 
-    match fetch_coingecko_cents(client).await {
-        Ok(cents) => {
-            match validate_candidate_cents(cents, current.as_ref().map(|r| r.cents_per_litkey)) {
+    match fetch_coingecko_usd_wei(client).await {
+        Ok(usd_wei) => {
+            match validate_candidate_usd_wei(
+                &usd_wei,
+                current.as_ref().map(|r| r.usd_wei_per_litkey.as_str()),
+            ) {
                 RateValidation::Accept => {
-                    if let Err(e) = upsert_coingecko(pool, cents, OffsetDateTime::now_utc()).await {
+                    if let Err(e) =
+                        upsert_coingecko(pool, &usd_wei, OffsetDateTime::now_utc()).await
+                    {
                         tracing::warn!("litkey rate poller failed to save CoinGecko rate: {e}");
                     } else {
                         tracing::info!(
-                            cents_per_litkey = cents,
+                            usd_wei_per_litkey = %usd_wei,
                             "updated LITKEY rate from CoinGecko"
                         );
                     }
                 }
                 RateValidation::RejectInvalid | RateValidation::RejectAbsurdJump => {
                     tracing::warn!(
-                        candidate_cents = cents,
-                        recent_cents = current.as_ref().map(|r| r.cents_per_litkey),
+                        candidate_usd_wei_per_litkey = %usd_wei,
+                        recent_usd_wei_per_litkey = current.as_ref().map(|r| r.usd_wei_per_litkey.as_str()),
                         "CoinGecko LITKEY rate looked invalid/absurd; keeping last-known rate"
                     );
                 }
@@ -294,7 +407,7 @@ async fn poll_once(pool: &PgPool, client: &Client) {
     {
         tracing::warn!(
             fetched_at = %rate.fetched_at,
-            cents_per_litkey = rate.cents_per_litkey,
+            usd_wei_per_litkey = rate.usd_wei_per_litkey,
             source = %rate.source,
             "LITKEY rate is stale (>1h); future payment crediting must pause"
         );
@@ -336,9 +449,9 @@ pub async fn override_rate(
     if operator.role != Role::Admin {
         return Err(err(Status::Forbidden, "admin role required"));
     }
-    let cents = req.cents_per_litkey;
-    validate_manual_cents(cents).map_err(|e| err(Status::BadRequest, e.to_string()))?;
-    set_manual(pool, cents, operator.id)
+    let usd_wei = req.usd_wei_per_litkey.trim();
+    validate_manual_usd_wei(usd_wei).map_err(|e| err(Status::BadRequest, e.to_string()))?;
+    set_manual(pool, usd_wei, operator.id)
         .await
         .map_err(server_err)?;
     let rate = get_current(pool).await.map_err(server_err)?;
@@ -353,16 +466,16 @@ fn build_rate_response(
     discount_basis_points: i64,
 ) -> Result<RateResponse, ApiError> {
     let crediting_paused = rate.as_ref().is_none_or(|r| r.stale);
-    let effective_cents_per_litkey = rate
+    let effective_usd_wei_per_litkey = rate
         .as_ref()
         .filter(|_| !crediting_paused)
-        .map(|r| apply_discount_to_cents(r.cents_per_litkey, discount_basis_points))
+        .map(|r| apply_discount_to_usd_wei(&r.usd_wei_per_litkey, discount_basis_points))
         .transpose()
         .map_err(server_err)?;
     Ok(RateResponse {
         rate,
         discount_basis_points,
-        effective_cents_per_litkey,
+        effective_usd_wei_per_litkey,
         crediting_paused,
     })
 }
@@ -373,37 +486,64 @@ mod tests {
     use time::{Duration, OffsetDateTime};
 
     #[test]
-    fn parses_coingecko_usd_to_integer_cents_with_rounding() {
+    fn parses_coingecko_usd_to_18_decimal_usd_wei_without_losing_sub_cent_prices() {
         assert_eq!(
-            parse_coingecko_cents(r#"{"lit-protocol":{"usd":0.124}}"#).unwrap(),
-            12
+            parse_coingecko_usd_wei(r#"{"lit-protocol":{"usd":0.006}}"#).unwrap(),
+            "6000000000000000"
         );
         assert_eq!(
-            parse_coingecko_cents(r#"{"lit-protocol":{"usd":0.125}}"#).unwrap(),
-            13
+            parse_coingecko_usd_wei(r#"{"lit-protocol":{"usd":0.000000000000000001}}"#).unwrap(),
+            "1"
+        );
+        assert_eq!(
+            parse_coingecko_usd_wei(r#"{"lit-protocol":{"usd":0.1234567891234567894}}"#).unwrap(),
+            "123456789123456789"
+        );
+    }
+
+    #[test]
+    fn computes_stripe_cents_from_litkey_wei_with_final_step_rounding() {
+        let one_litkey_wei = "1000000000000000000";
+        let usd_wei_per_litkey = "6000000000000000"; // $0.006/LITKEY
+
+        assert_eq!(
+            litkey_wei_to_credit_cents(one_litkey_wei, usd_wei_per_litkey, 0).unwrap(),
+            1
+        );
+        assert_eq!(
+            litkey_wei_to_credit_cents(
+                "1000000000000000000000", // 1,000 LITKEY
+                usd_wei_per_litkey,
+                2_000,
+            )
+            .unwrap(),
+            750
         );
     }
 
     #[test]
     fn rejects_missing_zero_negative_non_finite_and_absurd_rates() {
-        assert!(parse_coingecko_cents(r#"{}"#).is_err());
-        assert!(parse_coingecko_cents(r#"{"lit-protocol":{"usd":0}}"#).is_err());
-        assert!(parse_coingecko_cents(r#"{"lit-protocol":{"usd":-1}}"#).is_err());
-        assert!(parse_coingecko_cents(r#"{"lit-protocol":{"usd":1e309}}"#).is_err());
-        assert!(parse_coingecko_cents(r#"{"lit-protocol":{"usd":10001}}"#).is_err());
+        assert!(parse_coingecko_usd_wei(r#"{}"#).is_err());
+        assert!(parse_coingecko_usd_wei(r#"{"lit-protocol":{"usd":0}}"#).is_err());
+        assert!(parse_coingecko_usd_wei(r#"{"lit-protocol":{"usd":-1}}"#).is_err());
+        assert!(parse_coingecko_usd_wei(r#"{"lit-protocol":{"usd":1e309}}"#).is_err());
+        assert!(parse_coingecko_usd_wei(r#"{"lit-protocol":{"usd":10001}}"#).is_err());
     }
 
     #[test]
     fn rejects_candidate_more_than_100x_recent_rate() {
         assert_eq!(
-            validate_candidate_cents(1_001, Some(10)),
+            validate_candidate_usd_wei("1001", Some("10")),
             RateValidation::RejectAbsurdJump
         );
         assert_eq!(
-            validate_candidate_cents(1_000, Some(10)),
+            validate_candidate_usd_wei("1000", Some("10")),
             RateValidation::Accept
         );
-        assert_eq!(validate_candidate_cents(50, None), RateValidation::Accept);
+        assert_eq!(
+            validate_candidate_usd_wei("50", None),
+            RateValidation::Accept
+        );
     }
 
     #[test]
@@ -420,7 +560,7 @@ mod tests {
     fn manual_override_pauses_coingecko_polling_until_admin_changes_it() {
         let now = OffsetDateTime::now_utc();
         let fresh_manual = LitkeyRate {
-            cents_per_litkey: 12,
+            usd_wei_per_litkey: "12".to_string(),
             source: "manual".to_string(),
             fetched_at: now,
             updated_by_operator_id: Some(1),
@@ -447,7 +587,7 @@ mod tests {
     fn stale_or_missing_rate_pauses_crediting_and_hides_effective_rate() {
         let now = OffsetDateTime::now_utc();
         let stale_rate = LitkeyRate {
-            cents_per_litkey: 100,
+            usd_wei_per_litkey: "100".to_string(),
             source: "coingecko".to_string(),
             fetched_at: now - Duration::hours(2),
             updated_by_operator_id: None,
@@ -456,18 +596,18 @@ mod tests {
 
         let missing = build_rate_response(None, 2_000).unwrap();
         assert!(missing.crediting_paused);
-        assert_eq!(missing.effective_cents_per_litkey, None);
+        assert_eq!(missing.effective_usd_wei_per_litkey, None);
 
         let stale = build_rate_response(Some(stale_rate), 2_000).unwrap();
         assert!(stale.crediting_paused);
-        assert_eq!(stale.effective_cents_per_litkey, None);
+        assert_eq!(stale.effective_usd_wei_per_litkey, None);
     }
 
     #[test]
     fn fresh_rate_exposes_discount_adjusted_effective_rate() {
         let now = OffsetDateTime::now_utc();
         let fresh_rate = LitkeyRate {
-            cents_per_litkey: 100,
+            usd_wei_per_litkey: "100".to_string(),
             source: "coingecko".to_string(),
             fetched_at: now,
             updated_by_operator_id: None,
@@ -476,24 +616,27 @@ mod tests {
 
         let response = build_rate_response(Some(fresh_rate), 2_000).unwrap();
         assert!(!response.crediting_paused);
-        assert_eq!(response.effective_cents_per_litkey, Some(125));
+        assert_eq!(
+            response.effective_usd_wei_per_litkey,
+            Some("125".to_string())
+        );
     }
 
     #[test]
-    fn manual_override_validation_accepts_positive_reasonable_cents_only() {
-        assert!(validate_manual_cents(1).is_ok());
-        assert!(validate_manual_cents(1_000_000).is_ok());
-        assert!(validate_manual_cents(0).is_err());
-        assert!(validate_manual_cents(1_000_001).is_err());
+    fn manual_override_validation_accepts_positive_reasonable_usd_wei_only() {
+        assert!(validate_manual_usd_wei("1").is_ok());
+        assert!(validate_manual_usd_wei(MAX_USD_WEI_PER_LITKEY).is_ok());
+        assert!(validate_manual_usd_wei("0").is_err());
+        assert!(validate_manual_usd_wei("10000000000000000000001").is_err());
     }
 
     #[test]
     fn applies_litkey_discount_as_extra_credit_per_token() {
-        assert_eq!(apply_discount_to_cents(100, 0).unwrap(), 100);
+        assert_eq!(apply_discount_to_usd_wei("100", 0).unwrap(), "100");
         // 20% off means paying $0.80 worth of LITKEY buys $1.00 credit,
         // so each token credits 1 / (1 - 0.20) = 1.25x spot value.
-        assert_eq!(apply_discount_to_cents(100, 2_000).unwrap(), 125);
-        assert_eq!(apply_discount_to_cents(33, 2_000).unwrap(), 41);
+        assert_eq!(apply_discount_to_usd_wei("100", 2_000).unwrap(), "125");
+        assert_eq!(apply_discount_to_usd_wei("33", 2_000).unwrap(), "41");
     }
 
     #[test]
