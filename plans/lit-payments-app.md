@@ -8,7 +8,7 @@ Date: 2026-05-18 (last updated: 2026-05-21)
 
 - **Shipped to `next`**: `lit-billing-core` extraction (PR #358), `lit-payments` foundation + magic-link auth (PR #359), admin credit portal + Fly.io deploy target (PR #370).
 - **Open**: `LitkeyPaymentGateway` Solidity contract + Hardhat project (PR #373).
-- **Not yet started**: rate poller (3b), Alchemy WSS listener (3c), Wagmi payment page + dashboard link (3d). See the Sequencing section near the bottom for what each entails and recommended order — start with 3b.
+- **In progress**: rate poller (3b) implemented in this PR worktree; Alchemy WSS listener (3c) and Wagmi payment page + dashboard link (3d) remain. See the Sequencing section near the bottom for what each entails and recommended order.
 
 The rest of this doc is the original design + decisions, kept for context. Implementation details that diverged from the plan are noted inline.
 
@@ -378,15 +378,15 @@ All questions are closed. Plan is ready to start building.
    - [x] 12 unit tests passing — constructor guards, every revert path, balance + event-arg assertions, multi-payer attribution, cross-wallet payments (payer ≠ credited), indexed-topic filtering.
    - [x] `scripts/deploy.ts` (env-driven, optional Basescan auto-verify) + README.
    - [x] CI workflow `.github/workflows/lit-payments-contracts-ci.yml`.
-   - [ ] Manual: deploy to Base Sepolia with a throwaway treasury, confirm `Payment` event shape via Basescan.
-   - [ ] Manual: deploy to Base mainnet with the company Safe as treasury after #373 merges and Sepolia testing is clean.
+   - [x] Manual: deployed to Base mainnet at `0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b` with the company Safe as treasury. Smoke test: 1 wei of LITKEY sent through the gateway arrived in the company Safe.
+   - [x] Deployment invariant documented: `litkey` and `treasury` are immutable constructor args. Changing the token or recipient Safe requires deploying a new `LitkeyPaymentGateway` and updating listener/dashboard config to the new address.
 
-   **3b.** ⏭️ CoinGecko rate poller + `litkey_rate` schema + admin rate-override UI — NOT STARTED
-   - Background task in `lit-payments` polling `https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies=usd` every 5 min.
-   - Migration adding the single-row `litkey_rate` table (`id PRIMARY KEY DEFAULT 1 CHECK (id = 1)`, `cents_per_litkey`, `source`, `fetched_at`, `updated_by_operator_id`).
-   - Stale (>1hr) pauses crediting + logs a warning (no Slack alert — `fly logs` only).
-   - Admin UI section on the dashboard to view the current rate + override it (`source='manual'`).
-   - **No on-chain dependency** — can ship before 3c.
+   **3b.** ✅ CoinGecko rate poller + `litkey_rate` schema + admin rate-override UI — IMPLEMENTED IN PR WORKTREE
+   - [x] Background task in `lit-payments` polling `https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies=usd` every 5 min.
+   - [x] Migration adding the single-row `litkey_rate` table (`id PRIMARY KEY DEFAULT 1 CHECK (id = 1)`, `cents_per_litkey`, `source`, `fetched_at`, `updated_by_operator_id`).
+   - [x] Stale (>1hr) is surfaced on the API/UI and logs a warning so future 3c crediting can pause (no Slack alert — `fly logs` only).
+   - [x] Admin UI section on the dashboard to view the current rate + override it (`source='manual'`).
+   - [x] **No on-chain dependency** — can ship before 3c.
 
    **3c.** ⏭️ Alchemy WSS listener + `litkey_payments` + `chain_checkpoint` — NOT STARTED
    - WSS subscription to `Payment` events from the deployed gateway contract; exponential backoff reconnect.
@@ -395,13 +395,13 @@ All questions are closed. Plan is ready to start building.
    - Idempotency on `(tx_hash, log_index)` unique in `litkey_payments`.
    - For each Payment event: read `litkey_rate`, compute `cents = litkey_amount * rate`, look up Stripe customer by `metadata.wallet_address == event.wallet`, write the credit via `lit_billing_core::balance::write_transaction`, persist a `litkey_payments` row.
    - Migrations: `litkey_payments`, `chain_checkpoint`.
-   - **Depends on**: 3a contract deployed + address known; 3b rate table existing.
+   - **Depends on**: 3a contract deployed + address known (`0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b` on Base mainnet); 3b rate table existing.
 
    **3d.** ⏭️ Wagmi `/payWithLitkey` page + dashboard "Pay with tokens" link — NOT STARTED
    - New page at `payments.litprotocol.com/payWithLitkey?wallet=<address>`. Wallet param is plain (no HMAC — see "URL spoofing" risk).
    - Flow: page validates the wallet has a Stripe customer → prominently shows the account-to-be-credited (email + wallet) → user confirms → Wagmi wallet connect → quote (refreshed every 30s, frozen at approve) → approve → pay → poll the listener's grants for credit confirmation.
    - Small change to `lit-static/dapps/dashboard/` to add the "Pay with tokens" button.
-   - **Depends on**: 3a contract address; 3c listener handling the resulting `Payment` events.
+   - **Depends on**: 3a contract address (`0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b` on Base mainnet); 3c listener handling the resulting `Payment` events.
 
    **Milestone (when 3a-d ship)**: users self-serve LITKEY payments end-to-end on Base mainnet; the manual "send LITKEY to the wallet and I'll credit you in Stripe" flow is retired.
 

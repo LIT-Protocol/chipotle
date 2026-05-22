@@ -7,3 +7,4 @@ pub mod config;
 pub mod db;
 pub mod mail;
 pub mod portal;
+pub mod rate;

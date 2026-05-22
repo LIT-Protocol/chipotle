@@ -50,6 +50,28 @@ npm run verify:base-sepolia -- <deployed_address> <LITKEY_ADDRESS> <TREASURY_ADD
 | `litkey`   | LITKEY on Base mainnet: `0xf732a566121fa6362e9e0fbdd6d66e5c8c925e49` |
 | `treasury` | Company Safe on Base. Set in `.env` as `TREASURY_ADDRESS`.         |
 
+## Base mainnet deployment
+
+The production Base mainnet gateway is deployed at:
+
+```text
+0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b
+```
+
+Deployment notes:
+
+- Chain: Base mainnet (`chainId` 8453).
+- LITKEY token: `0xf732a566121fa6362e9e0fbdd6d66e5c8c925e49`.
+- Treasury: company Safe on Base.
+- Smoke test: Chris sent 1 wei of LITKEY through the gateway and confirmed it
+  arrived in the company Safe.
+
+The `litkey` token address and `treasury` recipient address are constructor
+arguments stored as immutables. They cannot be changed in place. If either the
+accepted token or recipient Safe needs to change, deploy a new
+`LitkeyPaymentGateway` and update the lit-payments listener/dashboard config to
+point at the new address.
+
 ## Design
 
 See `plans/lit-payments-app.md` (under "Feature 2 — LITKEY → Stripe credit").

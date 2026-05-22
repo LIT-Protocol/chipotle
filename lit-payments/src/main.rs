@@ -4,6 +4,7 @@ use anyhow::Result;
 use lit_billing_core::StripeClient;
 use lit_payments::auth::routes as auth_routes;
 use lit_payments::portal::routes as portal_routes;
+use lit_payments::rate;
 use lit_payments::{auth, config, db, mail};
 use rocket::fs::{FileServer, NamedFile};
 use rocket::http::Status;
@@ -27,6 +28,7 @@ async fn rocket() -> _ {
         mail::Mailer::new(cfg.resend_api_key.clone(), cfg.mail_from.clone()).expect("mailer");
     let rate_limit = auth::rate_limit::RateLimiter::new();
     let stripe = StripeClient::new(cfg.stripe_secret_key.clone()).expect("stripe client");
+    rate::spawn_rate_poller(pool.clone());
 
     rocket::build()
         .manage(pool)
@@ -47,6 +49,8 @@ async fn rocket() -> _ {
                 portal_routes::lookup_customer,
                 portal_routes::grant_credit,
                 portal_routes::list_grants,
+                rate::get_rate,
+                rate::override_rate,
             ],
         )
         .mount("/static", FileServer::from("static"))

@@ -120,7 +120,8 @@ button.ghost {
   gap: 8px;
   margin-top: 12px;
 }
-.row-form input[type=text] {
+.row-form input[type=text],
+.row-form input[type=number] {
   flex: 1;
   width: auto;
   margin: 0;
@@ -134,6 +135,10 @@ button.ghost {
 .row-form button {
   width: auto;
   padding: 10px 16px;
+}
+.rate-current {
+  margin-top: 12px;
+  font-size: 14px;
 }
 
 /* Match cards */
