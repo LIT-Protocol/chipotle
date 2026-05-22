@@ -2,8 +2,12 @@
 # Paths artifacts/contracts and ../../src/... are relative to this directory.
 
 RUST_PROJECT := ../rust_generator_and_deployer
-GENERATOR_BIN := $(RUST_PROJECT)/target/debug/contract_generator
 DEPLOYER_BIN := $(RUST_PROJECT)/target/debug/contract_deployer
+FORGE ?= forge
+ACCOUNT_CONFIG_ARTIFACT := artifacts/contracts/AccountConfig.sol/AccountConfig.json
+ACCOUNT_CONFIG_BINDINGS_TMP := ../../src/accounts/contracts/.forge-bindings
+ACCOUNT_CONFIG_BINDING := ../../src/accounts/contracts/account_config_contract.rs
+ACCOUNT_CONFIG_ABI := ../../src/accounts/contracts/AccountConfig.json
 DEPLOYER_SECRET ?= $(error DEPLOYER_SECRET is not set — export it as an env var)
 ANVIL_SECRET ?= 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80
 
@@ -18,9 +22,25 @@ facade:
 
 # 2. Generate Rust bindings from artifacts.
 generate: compile facade
-	cd $(RUST_PROJECT) && cargo build --bin contract_generator
-	$(GENERATOR_BIN) --abifolder=artifacts/contracts --outputfolder=../../src/accounts/contracts/
-	mv ../../src/accounts/contracts/account_config.rs ../../src/accounts/contracts/account_config_contract.rs
+	find artifacts/contracts -name '*.dbg.json' -delete
+	rm -rf $(ACCOUNT_CONFIG_BINDINGS_TMP)
+	$(FORGE) bind \
+		--root . \
+		--out artifacts/contracts \
+		--bindings-path $(ACCOUNT_CONFIG_BINDINGS_TMP) \
+		--skip-build \
+		--module \
+		--single-file \
+		--select AccountConfig \
+		--overwrite \
+		--skip-cargo-toml \
+		--alloy-version 1.0
+	node postprocess-forge-bindings.mjs \
+		--forge-output $(ACCOUNT_CONFIG_BINDINGS_TMP)/mod.rs \
+		--binding-output $(ACCOUNT_CONFIG_BINDING) \
+		--abi-source $(ACCOUNT_CONFIG_ARTIFACT) \
+		--abi-output $(ACCOUNT_CONFIG_ABI)
+	rm -rf $(ACCOUNT_CONFIG_BINDINGS_TMP)
 	cd ../../ && cargo fmt -- src/accounts/contracts/account_config_contract.rs
 
 # 3. Deploy contracts to Base mainnet.

@@ -1,34 +1,90 @@
-use ethers::core::abi::AbiDecode;
+use alloy::primitives::keccak256;
+use alloy::sol_types::SolInterface;
 
 use crate::accounts::contracts::account_config_contract::AccountConfigErrors;
 
 /// Maximum bytes of unknown revert data to include in error messages.
 const MAX_HEX_DISPLAY_BYTES: usize = 64;
 
-/// Attempt to decode a human-readable revert reason from a contract error.
-///
-/// Tries the following, in order:
-/// 1. Standard `Error(string)` / `Panic(uint256)` via lit-core
-/// 2. Contract-specific custom errors (AccountConfigErrors)
-/// 3. Falls back to the raw error's `Display` output
-pub fn decode_contract_revert(
-    err: &ethers::contract::ContractError<impl ethers::providers::Middleware>,
-) -> String {
-    // Try to extract the revert data bytes from the error.
-    if let Some(data) = err.as_revert() {
+const ACCOUNT_CONFIG_ERROR_SIGNATURES: &[(&str, &str)] = &[
+    ("AccountAlreadyExists", "AccountAlreadyExists(uint256)"),
+    ("AccountDoesNotExist", "AccountDoesNotExist(uint256)"),
+    (
+        "ActionDoesNotExist",
+        "ActionDoesNotExist(uint256,uint256,uint256)",
+    ),
+    ("GroupDoesNotExist", "GroupDoesNotExist(uint256,uint256)"),
+    (
+        "InsufficientBalance",
+        "InsufficientBalance(uint256,uint256)",
+    ),
+    ("InvalidRequest", "InvalidRequest(string)"),
+    ("NoAccountAccess", "NoAccountAccess(uint256,address)"),
+    (
+        "NotAllowedToAddPkpToGroup",
+        "NotAllowedToAddPkpToGroup(uint256,uint256)",
+    ),
+    (
+        "NotAllowedToCreateGroup",
+        "NotAllowedToCreateGroup(uint256)",
+    ),
+    ("NotAllowedToCreatePkp", "NotAllowedToCreatePkp(uint256)"),
+    (
+        "NotAllowedToDeleteGroup",
+        "NotAllowedToDeleteGroup(uint256)",
+    ),
+    (
+        "NotAllowedToManageIPFSIdsInGroup",
+        "NotAllowedToManageIPFSIdsInGroup(uint256,uint256)",
+    ),
+    (
+        "NotAllowedToRemovePkpFromGroup",
+        "NotAllowedToRemovePkpFromGroup(uint256,uint256)",
+    ),
+    ("NotContractOwner", "NotContractOwner(address,address)"),
+    ("NotMasterAccount", "NotMasterAccount(uint256)"),
+    ("OnlyApiPayerOrOwner", "OnlyApiPayerOrOwner(address)"),
+    (
+        "OnlyApiPayerOrPricingOperator",
+        "OnlyApiPayerOrPricingOperator(address)",
+    ),
+    (
+        "OnlyConfigOperatorOrOwner",
+        "OnlyConfigOperatorOrOwner(address)",
+    ),
+    (
+        "PkpDoesNotExist",
+        "PkpDoesNotExist(uint256,uint256,address)",
+    ),
+    (
+        "UsageApiKeyDoesNotExist",
+        "UsageApiKeyDoesNotExist(uint256,uint256)",
+    ),
+];
+
+fn account_config_error_name(data: &[u8]) -> Option<&'static str> {
+    let selector = data.get(..4)?;
+    ACCOUNT_CONFIG_ERROR_SIGNATURES
+        .iter()
+        .find(|(_, signature)| &keccak256(signature.as_bytes()).as_slice()[..4] == selector)
+        .map(|(name, _)| *name)
+}
+
+/// Attempt to decode a human-readable revert reason from an alloy contract error.
+pub fn decode_contract_revert(err: &alloy::contract::Error) -> String {
+    if let Some(data) = err.as_revert_data() {
         // First, try standard Error(string) / Panic(uint256) so that standard
         // revert strings are labelled consistently as "Revert: ..." rather than
         // going through AccountConfigErrors::RevertString.
-        if let Some(reason) = lit_core::utils::decode_revert::decode_revert(data) {
+        if let Some(reason) = lit_core::utils::decode_revert::decode_revert(&data) {
             return format!("Revert: {reason}");
         }
 
-        // Then try contract-specific custom error decoding.
-        if let Ok(decoded) = AccountConfigErrors::decode(data) {
-            return format!("Contract error: {decoded}");
+        if AccountConfigErrors::abi_decode(&data).is_ok() {
+            let name = account_config_error_name(&data).unwrap_or("AccountConfigError");
+            return format!("Contract error: {name} (0x{})", hex::encode(data));
         }
 
-        // Unknown custom error — show truncated hex to avoid huge messages.
         if data.len() > MAX_HEX_DISPLAY_BYTES {
             return format!(
                 "Unknown revert data ({} bytes): 0x{}...",
@@ -39,6 +95,5 @@ pub fn decode_contract_revert(
         return format!("Unknown revert data: 0x{}", hex::encode(data));
     }
 
-    // No revert data available — use the error's Display.
     format!("{err}")
 }

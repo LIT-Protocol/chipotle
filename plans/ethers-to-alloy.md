@@ -93,29 +93,31 @@ Migrates the H160/U256 boundary files and the accounts/account_management public
 ### Phase 5 — `abigen!` → `sol!` in lit-api-server
 Pairs the contract-binding regeneration with the signer/middleware stack swap, since the two are tightly coupled (alloy contracts take alloy providers; `sol!`-generated bindings replace the abigen `M: ethers::Middleware` constraint with alloy `Provider`).
 
-- [ ] `src/restart.rs` — `EthEvent` subscription → alloy `Filter`/`Event::watch`
-- [ ] `src/accounts/contracts/account_config_contract.rs` — regenerate bindings via `sol!` from existing ABI JSON
-- [ ] `src/accounts/signer_pool.rs` — `LocalWallet` + `SignerMiddleware` + `NonceManagerMiddleware` → alloy `PrivateKeySigner` + `ProviderBuilder::new().with_recommended_fillers().wallet(...)`
-- [ ] `src/accounts/signable_contract.rs` — `ContractCall` → alloy `CallBuilder`; `SignerMiddleware`/`NonceManagerMiddleware` stack swap
-- [ ] `src/accounts/decode_revert.rs` — switch from ethers `ContractError` to alloy's equivalent
-- [ ] Remove `src/utils/alloy_ethers.rs` and all `ae_*` / `ea_*` call sites in `accounts/mod.rs`
-- [ ] `src/core/account_management.rs::metadata_to_item` — drop the temporary `ethers::types::U256::zero()` comparison once `Metadata.id` is alloy `U256`
-- [ ] Verify nonce-manager parity: alloy's `NonceFiller` has different cache/recovery semantics vs. ethers `NonceManagerMiddleware` — document any behavioral differences
+- [x] `src/restart.rs` — `EthEvent` subscription → alloy `Filter`/`Event::watch`
+- [x] `src/accounts/contracts/account_config_contract.rs` — regenerate bindings via `forge bind` from the generated AccountConfig ABI JSON
+- [x] `src/accounts/signer_pool.rs` — `LocalWallet` + `SignerMiddleware` + `NonceManagerMiddleware` → alloy `PrivateKeySigner` + `ProviderBuilder::new().wallet(...)` (recommended fillers are enabled by default in alloy 1.8)
+- [x] `src/accounts/signable_contract.rs` — `ContractCall` → alloy `CallBuilder`; `SignerMiddleware`/`NonceManagerMiddleware` stack swap
+- [x] `src/accounts/decode_revert.rs` — switch from ethers `ContractError` to alloy's equivalent
+- [x] Remove `src/utils/alloy_ethers.rs` and all `ae_*` / `ea_*` call sites in `accounts/mod.rs`
+- [x] `src/core/account_management.rs::metadata_to_item` — drop the temporary `ethers::types::U256::zero()` comparison once `Metadata.id` is alloy `U256`
+- [x] Verify nonce-manager parity: alloy's `NonceFiller` has different cache/recovery semantics vs. ethers `NonceManagerMiddleware` — documented in `src/accounts/signable_contract.rs`
 
-### Phase 6 — rust_generator_and_deployer (separate cargo workspace)
-Largest single PR but mostly mechanical regeneration.
+### Phase 6 — rust_generator_and_deployer deployer + diamond artifacts
+`contract_generator` no longer has an active caller after Phase 5 moved `lit_node_express/make generate` to `forge bind`. `git grep` shows remaining `contract_generator` mentions are docs/plan text only, with no Makefile or CI usage. Prefer deleting/de-scoping the stale generator instead of porting an unused ethers `Abigen` wrapper.
 
-- [ ] Bump `rust_generator_and_deployer/Cargo.toml` to alloy
-- [ ] Rewrite `src/bin/contract_generator.rs` to emit `sol!` macro invocations instead of `abigen!`
-- [ ] Rewrite `src/bin/contract_deployer.rs` — `ContractFactory` → alloy `DeploymentBuilder`
-- [ ] Rewrite `src/deployer/deploy.rs` + `src/deployer/diamond.rs`
-- [ ] Regenerate all 6 diamond facet bindings:
+- [ ] Delete `src/bin/contract_generator.rs` and remove/replace README usage docs for it
+- [ ] Bump `rust_generator_and_deployer/Cargo.toml` from ethers to alloy for the remaining deployer code
+- [ ] Rewrite `src/bin/contract_deployer.rs` — `ethers::types::Address` → alloy address parsing/types
+- [ ] Rewrite `src/deployer/deploy.rs` — `ContractFactory`/`Tokenize` → alloy artifact deployment path
+- [ ] Rewrite `src/deployer/diamond.rs` — signer/provider stack, selector extraction, `FacetCut` encoding, and diamond update/proposal calldata to alloy
+- [ ] Regenerate or replace the 6 checked-in diamond artifact/binding files used by the deployer and Hardhat helpers:
   - [ ] `c_diamond_cut_facet.rs`
   - [ ] `c_diamond_init.rs`
   - [ ] `c_diamond_loupe_facet.rs`
   - [ ] `c_diamond_loupe_facet_no_erc165.rs`
   - [ ] `c_diamond_multi_init.rs`
   - [ ] `c_ownership_facet.rs`
+- [ ] Preserve the JSON artifacts under `src/diamond/*.json`; `lit_node_express` tests/tasks load `DiamondCutFacet.json`, `DiamondLoupeFacet.json`, and `OwnershipFacet.json` directly
 
 ### Phase 7 — Drop Rust `ethers-rs`
 - [ ] Remove `ethers` + `ethers-providers` from `lit-api-server/Cargo.toml`
