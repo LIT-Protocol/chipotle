@@ -9,7 +9,7 @@
 //! address:   required for update and propose-update actions; the diamond contract address.
 //! output:    optional; path for the proposal JSON file (propose-update only). Defaults to diamond_cut_proposal.json.
 
-use ethers::types::Address;
+use alloy::primitives::Address;
 use lit_contracts_minimal_generator::args::{get_network_and_chain_id, parse_named_args};
 use lit_contracts_minimal_generator::deployer::diamond::{
     deploy_diamond, propose_update_diamond, update_diamond,
@@ -150,7 +150,7 @@ fn parse_diamond_address(
             std::process::exit(1);
         }
     };
-    let diamond_address_bytes =
-        hex::decode(diamond_address_str.trim_start_matches("0x")).expect("Invalid --address hex");
-    Address::from_slice(&diamond_address_bytes)
+    diamond_address_str
+        .parse::<Address>()
+        .expect("Invalid --address hex")
 }

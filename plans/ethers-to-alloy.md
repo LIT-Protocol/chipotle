@@ -105,19 +105,19 @@ Pairs the contract-binding regeneration with the signer/middleware stack swap, s
 ### Phase 6 — rust_generator_and_deployer deployer + diamond artifacts
 `contract_generator` no longer has an active caller after Phase 5 moved `lit_node_express/make generate` to `forge bind`. `git grep` shows remaining `contract_generator` mentions are docs/plan text only, with no Makefile or CI usage. Prefer deleting/de-scoping the stale generator instead of porting an unused ethers `Abigen` wrapper.
 
-- [ ] Delete `src/bin/contract_generator.rs` and remove/replace README usage docs for it
-- [ ] Bump `rust_generator_and_deployer/Cargo.toml` from ethers to alloy for the remaining deployer code
-- [ ] Rewrite `src/bin/contract_deployer.rs` — `ethers::types::Address` → alloy address parsing/types
-- [ ] Rewrite `src/deployer/deploy.rs` — `ContractFactory`/`Tokenize` → alloy artifact deployment path
-- [ ] Rewrite `src/deployer/diamond.rs` — signer/provider stack, selector extraction, `FacetCut` encoding, and diamond update/proposal calldata to alloy
-- [ ] Regenerate or replace the 6 checked-in diamond artifact/binding files used by the deployer and Hardhat helpers:
-  - [ ] `c_diamond_cut_facet.rs`
-  - [ ] `c_diamond_init.rs`
-  - [ ] `c_diamond_loupe_facet.rs`
-  - [ ] `c_diamond_loupe_facet_no_erc165.rs`
-  - [ ] `c_diamond_multi_init.rs`
-  - [ ] `c_ownership_facet.rs`
-- [ ] Preserve the JSON artifacts under `src/diamond/*.json`; `lit_node_express` tests/tasks load `DiamondCutFacet.json`, `DiamondLoupeFacet.json`, and `OwnershipFacet.json` directly
+- [x] Delete `src/bin/contract_generator.rs` and remove/replace README usage docs for it
+- [x] Bump `rust_generator_and_deployer/Cargo.toml` from ethers to alloy for the remaining deployer code
+- [x] Rewrite `src/bin/contract_deployer.rs` — `ethers::types::Address` → alloy address parsing/types
+- [x] Rewrite `src/deployer/deploy.rs` — `ContractFactory`/`Tokenize` → alloy artifact deployment path
+- [x] Rewrite `src/deployer/diamond.rs` — signer/provider stack, selector extraction, `FacetCut` encoding, and diamond update/proposal calldata to alloy
+- [x] Regenerate or replace the 6 checked-in diamond artifact/binding files used by the deployer and Hardhat helpers:
+  - [x] `c_diamond_cut_facet.rs`
+  - [x] `c_diamond_init.rs`
+  - [x] `c_diamond_loupe_facet.rs`
+  - [x] `c_diamond_loupe_facet_no_erc165.rs`
+  - [x] `c_diamond_multi_init.rs`
+  - [x] `c_ownership_facet.rs`
+- [x] Preserve the JSON artifacts under `src/diamond/*.json`; `lit_node_express` tests/tasks load `DiamondCutFacet.json`, `DiamondLoupeFacet.json`, and `OwnershipFacet.json` directly
 
 ### Phase 7 — Drop Rust `ethers-rs`
 - [ ] Remove `ethers` + `ethers-providers` from `lit-api-server/Cargo.toml`

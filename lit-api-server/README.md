@@ -31,7 +31,7 @@ Rust API server for the Lit Express Node. Exposes core Lit node operations (acco
    `http://localhost:8000/dapps/swps/` (PKP wallet), `http://localhost:8000/dapps/solver/` (swap solver). Set the API URL in the footer if needed.
 
 5. **Blockchain tooling**  
-   For generating Rust contract bindings and deploying contracts, see [Blockchain → rust_generator_and_deployer](#blockchainrust_generator_and_deployer) below.
+   For generating AccountConfig Rust bindings and deploying contracts, see [Blockchain](#blockchain) below.
 
 ---
 
@@ -57,7 +57,7 @@ Blockchain tooling and contracts used by the server.
 
 | Path | Description |
 |------|-------------|
-| **`rust_generator_and_deployer/`** | Rust CLI tools for deploying contract artifacts. The legacy ethers-based contract generator remains for the Phase 6 workspace migration. |
+| **`rust_generator_and_deployer/`** | Rust CLI tool for deploying/updating AccountConfig diamond artifacts with Alloy. |
 | **`lit_node_express/`** | Lit Node Express contracts and Makefile. `make generate` compiles Solidity and regenerates the checked-in Alloy AccountConfig binding via `forge bind` plus a small Node.js post-processing script. |
 | **`swaps/`** | Hardhat project with the **QuoteStorage** Solidity contract (swap requests, quotes). |
 
@@ -65,10 +65,9 @@ Blockchain tooling and contracts used by the server.
 
 ### `blockchain/rust_generator_and_deployer`
 
-Rust tools for generating contract bindings and deploying contracts.
+Rust tooling for deploying and updating contracts. AccountConfig Rust bindings are generated from `blockchain/lit_node_express` with `forge bind`; the old standalone Rust `contract_generator` binary has been removed.
 
-- **Contract generator** — The old standalone generator uses `ethers::contract::Abigen`; Phase 5 moved the checked-in `AccountConfig` binding to Alloy and regenerates it from `blockchain/lit_node_express` with `forge bind` (`make generate`). It no longer has an active Makefile/CI caller and should be deleted or de-scoped in Phase 6 rather than ported if no other usage appears.
-- **Contract deployer** — Reads a folder of contract artifact JSONs (Hardhat/Foundry-style: `abi` + `bytecode` or `evm.bytecode.object`), deploys each contract that has bytecode to a chosen network using a configurable or default wallet.
+- **Contract deployer** — Reads a folder of contract artifact JSONs (Hardhat/Foundry-style: `abi` + `bytecode` or `evm.bytecode.object`), deploys or updates the AccountConfig diamond using Alloy and a configurable or default wallet. The old standalone `contract_generator` binary was removed after binding generation moved to `forge bind` in `blockchain/lit_node_express`.
 
 **Build (from `blockchain/rust_generator_and_deployer`):**
 
@@ -76,43 +75,49 @@ Rust tools for generating contract bindings and deploying contracts.
 cargo build --release
 ```
 
-**1. Contract generator**
+**Contract deployer**
 
 ```bash
-cargo run --release --bin contract_generator -- <input_folder> <output_folder>
+cargo run --release --bin contract_deployer -- \
+  --action=<deploy|update|propose-update> \
+  --network=<anvil|yellowstone|base-sepolia|base> \
+  --abifolder=<artifacts_folder> \
+  [--secret=<private_key>] \
+  [--address=<diamond_address>] \
+  [--output=<proposal_json_path>]
 ```
 
-- **`<input_folder>`** — Directory containing ABI JSON files (subfolders processed recursively).
-- **`<output_folder>`** — Where generated `.rs` files and copied ABIs are written.
-
-**2. Contract deployer**
-
-```bash
-cargo run --release --bin contract_deployer -- <network> <abis_folder> [secret]
-```
-
-- **`<network>`** — `0` = Anvil, `1` = Yellowstone, `2` = Base Sepolia.
-- **`<abis_folder>`** — Folder of contract **artifact** JSONs (`abi` + `bytecode` or `evm.bytecode.object`).
-- **`[secret]`** — Optional. Deployer private key (hex). If omitted or blank, uses the default Anvil dev secret.
+- **`--action`** — `deploy`, `update`, or `propose-update`.
+- **`--network`** — `anvil`, `yellowstone`, `base-sepolia`, or `base`.
+- **`--abifolder`** — Folder of contract **artifact** JSONs (`abi` + `bytecode` or `evm.bytecode.object`).
+- **`--secret`** — Optional. Deployer private key (hex). If omitted or blank, uses the default Anvil dev secret.
+- **`--address`** — Existing diamond address for `update` / `propose-update`.
 
 Example (deploy to local Anvil with default secret):
 
 ```bash
 cd blockchain/rust_generator_and_deployer
 # Ensure Anvil is running on 127.0.0.1:8545, then:
-cargo run --release --bin contract_deployer -- 0 ../swaps/artifacts/contracts/quote.sol
+cargo run --release --bin contract_deployer -- \
+  --action=deploy \
+  --network=anvil \
+  --abifolder=../lit_node_express/artifacts/contracts
 ```
 
 Example (deploy with a custom key):
 
 ```bash
-cargo run --release --bin contract_deployer -- 0 ./artifacts 0xYourPrivateKeyHex
+cargo run --release --bin contract_deployer -- \
+  --action=deploy \
+  --network=base-sepolia \
+  --abifolder=../lit_node_express/artifacts/contracts \
+  --secret=0xYourPrivateKeyHex
 ```
 
 **Deployer details**
 
 - Uses the given secret or the default Anvil account #0 key; suitable for local/testnet.
-- Skips artifacts with no bytecode (e.g. interfaces).
+- The deployer uses checked-in diamond foundation artifacts from `rust_generator_and_deployer/src/diamond/*.json` and app facet artifacts from `--abifolder`.
 - RPC URLs: Anvil `http://127.0.0.1:8545`, Yellowstone `https://yellowstone-rpc.litprotocol.com`, Base Sepolia `https://sepolia.base.org`.
 
 ---
