@@ -67,7 +67,7 @@ Blockchain tooling and contracts used by the server.
 
 Rust tools for generating contract bindings and deploying contracts.
 
-- **Contract generator** — The old standalone generator uses `ethers::contract::Abigen`; Phase 5 moved the checked-in `AccountConfig` binding to Alloy and regenerates it from `blockchain/lit_node_express` with `forge bind` (`make generate`). The legacy generator stays here until the separate Phase 6 migration of this workspace.
+- **Contract generator** — The old standalone generator uses `ethers::contract::Abigen`; Phase 5 moved the checked-in `AccountConfig` binding to Alloy and regenerates it from `blockchain/lit_node_express` with `forge bind` (`make generate`). It no longer has an active Makefile/CI caller and should be deleted or de-scoped in Phase 6 rather than ported if no other usage appears.
 - **Contract deployer** — Reads a folder of contract artifact JSONs (Hardhat/Foundry-style: `abi` + `bytecode` or `evm.bytecode.object`), deploys each contract that has bytecode to a chosen network using a configurable or default wallet.
 
 **Build (from `blockchain/rust_generator_and_deployer`):**
