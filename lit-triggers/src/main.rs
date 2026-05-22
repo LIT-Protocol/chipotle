@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use lit_triggers::auth::routes as auth_routes;
-use lit_triggers::{auth, config, db, mail, triggers};
+use lit_triggers::{auth, config, db, dispatcher, mail, triggers, webhook, webhook_rate_limit};
 use rocket::fs::{FileServer, NamedFile};
 use rocket::http::Status;
 use rocket::response::Redirect;
@@ -23,12 +23,16 @@ async fn rocket() -> _ {
     let mailer =
         mail::Mailer::new(cfg.resend_api_key.clone(), cfg.mail_from.clone()).expect("mailer");
     let rate_limit = auth::rate_limit::RateLimiter::new();
+    let webhook_rate_limit = webhook_rate_limit::WebhookRateLimiter::new();
+
+    tokio::spawn(dispatcher::run(pool.clone(), cfg.clone()));
 
     rocket::build()
         .manage(pool)
         .manage(cfg)
         .manage(mailer)
         .manage(rate_limit)
+        .manage(webhook_rate_limit)
         .mount(
             "/",
             routes![
@@ -46,6 +50,7 @@ async fn rocket() -> _ {
                 triggers::delete_trigger,
                 triggers::list_runs,
                 triggers::test_trigger,
+                webhook::receive_webhook,
             ],
         )
         .mount("/static", FileServer::from("static"))

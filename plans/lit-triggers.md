@@ -336,7 +336,7 @@ Confirmed.
 ## Rough milestones
 
 1. ✅ **PR 1 — foundation (implemented 2026-05-22).** Crate skeleton, Postgres + sqlx, magic-link auth, encrypted scoped usage-key storage, `users` + `triggers` tables, CRUD API, no workers yet. Tests pass with `cargo +1.91 test`.
-2. **PR 2 — webhook trigger.** Public webhook endpoint + run dispatcher +
+2. ✅ **PR 2 — webhook trigger (implemented 2026-05-22).** Public webhook endpoint + run dispatcher +
    basic IP/user/trigger rate limits + async enqueue + call out to Chipotle.
    End-to-end first trigger type working.
 3. **PR 3 — scheduled trigger.** Cron scheduler + worker integration.

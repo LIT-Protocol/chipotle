@@ -12,6 +12,11 @@ pub struct Config {
     /// Base64-encoded AEAD key used to encrypt scoped Chipotle usage API keys.
     pub usage_key_encryption_key: Vec<u8>,
     pub chipotle_api_base_url: String,
+    pub webhook_max_body_bytes: usize,
+    pub webhook_ip_max_requests_per_minute: u32,
+    pub webhook_user_max_requests_per_minute: u32,
+    pub webhook_trigger_max_requests_per_minute: u32,
+    pub webhook_default_max_queued_runs: u32,
 }
 
 impl Config {
@@ -29,6 +34,23 @@ impl Config {
                 .unwrap_or_else(|| "https://api.chipotle.litprotocol.com".to_string())
                 .trim_end_matches('/')
                 .to_string(),
+            webhook_max_body_bytes: optional_parse("WEBHOOK_MAX_BODY_BYTES", 256 * 1024)?,
+            webhook_ip_max_requests_per_minute: optional_parse(
+                "WEBHOOK_IP_MAX_REQUESTS_PER_MINUTE",
+                60,
+            )?,
+            webhook_user_max_requests_per_minute: optional_parse(
+                "WEBHOOK_USER_MAX_REQUESTS_PER_MINUTE",
+                120,
+            )?,
+            webhook_trigger_max_requests_per_minute: optional_parse(
+                "WEBHOOK_TRIGGER_MAX_REQUESTS_PER_MINUTE",
+                60,
+            )?,
+            webhook_default_max_queued_runs: optional_parse(
+                "WEBHOOK_DEFAULT_MAX_QUEUED_RUNS",
+                100,
+            )?,
         })
     }
 }
@@ -43,6 +65,19 @@ fn required(name: &str) -> Result<String> {
 
 fn optional(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|v| !v.trim().is_empty())
+}
+
+fn optional_parse<T>(name: &str, default: T) -> Result<T>
+where
+    T: std::str::FromStr,
+    T::Err: std::fmt::Display,
+{
+    match optional(name) {
+        Some(value) => value
+            .parse::<T>()
+            .map_err(|e| anyhow::anyhow!("env var {name} has invalid value: {e}")),
+        None => Ok(default),
+    }
 }
 
 fn parse_b64_key(name: &str) -> Result<Vec<u8>> {

@@ -56,10 +56,13 @@ CREATE TABLE trigger_runs (
   input JSONB,
   response JSONB,
   error TEXT,
-  attempt INTEGER NOT NULL DEFAULT 1
+  attempt INTEGER NOT NULL DEFAULT 1,
+  claimed_at TIMESTAMPTZ,
+  next_attempt_at TIMESTAMPTZ
 );
 CREATE INDEX trigger_runs_trigger_id_started_at_idx ON trigger_runs(trigger_id, started_at DESC);
 CREATE INDEX trigger_runs_status_idx ON trigger_runs(status);
+CREATE INDEX trigger_runs_next_attempt_idx ON trigger_runs(status, next_attempt_at);
 
 CREATE TABLE chain_watermarks (
   trigger_id UUID PRIMARY KEY REFERENCES triggers(id) ON DELETE CASCADE,
