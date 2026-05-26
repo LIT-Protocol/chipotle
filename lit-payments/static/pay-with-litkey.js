@@ -55,6 +55,30 @@
   function amountWeiForCents(cents, effectiveRate) { return ceilDiv(cents * WEI * USD, BigInt(effectiveRate) * 100n); }
   function creditCentsForAmount(amountWei, effectiveRate) { return (amountWei * BigInt(effectiveRate) * 100n + (WEI * USD / 2n)) / (WEI * USD); }
   function formatToken(amountWei) { return ethers.formatUnits(amountWei, 18).replace(/(\.\d{6})\d+$/, '$1'); }
+  function formatDiscountBps(bps) {
+    const value = Number(bps || 0);
+    if (!Number.isFinite(value) || value <= 0) return 'No discount';
+    const whole = Math.trunc(value / 100);
+    const fractional = Math.abs(value % 100);
+    return (fractional ? whole + '.' + String(fractional).padStart(2, '0').replace(/0+$/, '') : String(whole)) + '% off';
+  }
+
+  function marketRate(quote) {
+    return quote && quote.rate && quote.rate.usd_wei_per_litkey ? quote.rate.usd_wei_per_litkey : null;
+  }
+
+  function setQuoteDisplays(quote, cents) {
+    const market = marketRate(quote);
+    setText('rate-display', market ? formatUsdWei(market) + ' / LITKEY' : '—');
+    setText('discount-display', formatDiscountBps(quote ? quote.discount_basis_points : 0));
+    setText('effective-rate-display', quote && quote.effective_usd_wei_per_litkey ? formatUsdWei(quote.effective_usd_wei_per_litkey) + ' credit / LITKEY' : '—');
+    if (!cents || !market || !quote || !quote.effective_usd_wei_per_litkey) {
+      setText('undiscounted-litkey-amount', '—');
+      return;
+    }
+    const undiscounted = amountWeiForCents(cents, market);
+    setText('undiscounted-litkey-amount', formatToken(undiscounted) + ' LITKEY');
+  }
 
   async function fetchJson(url) {
     const res = await fetch(url, { credentials: 'omit' });
@@ -107,6 +131,8 @@
     const quote = state.frozenQuote || state.quote;
     if (!quote || quote.crediting_paused || !quote.effective_usd_wei_per_litkey) {
       setText('quote-status', 'Crediting paused');
+      setQuoteDisplays(quote, null);
+      setText('litkey-amount', '—');
       $('approve').disabled = true;
       $('pay').disabled = true;
       return;
@@ -114,32 +140,36 @@
 
     if (!state.config) {
       setText('quote-status', 'Payments unavailable');
+      setQuoteDisplays(quote, null);
+      setText('litkey-amount', '—');
       $('approve').disabled = true;
       $('pay').disabled = true;
       return;
     }
 
+    const cents = parseCents($('credit-dollars').value);
+
     if (state.frozenAmountWei !== null) {
       state.amountWei = state.frozenAmountWei;
       setText('litkey-amount', formatToken(state.frozenAmountWei) + ' LITKEY');
-      setText('rate-display', formatUsdWei(quote.effective_usd_wei_per_litkey) + ' credit / LITKEY');
+      setQuoteDisplays(quote, cents);
       setText('quote-status', 'Frozen for approval');
       $('approve').disabled = true;
       $('pay').disabled = state.approvedAmountWei === null;
       return;
     }
 
-    const cents = parseCents($('credit-dollars').value);
     if (!cents || cents < MIN_CENTS) {
       setText('quote-status', 'Enter at least $5.00');
       setText('litkey-amount', '—');
+      setQuoteDisplays(quote, null);
       $('approve').disabled = true;
       $('pay').disabled = true;
       return;
     }
     state.amountWei = amountWeiForCents(cents, quote.effective_usd_wei_per_litkey);
     setText('litkey-amount', formatToken(state.amountWei) + ' LITKEY');
-    setText('rate-display', formatUsdWei(quote.effective_usd_wei_per_litkey) + ' credit / LITKEY');
+    setQuoteDisplays(quote, cents);
     setText('quote-status', 'Live');
     $('approve').disabled = !$('confirm-account').checked || !state.signer;
     $('pay').disabled = true;
