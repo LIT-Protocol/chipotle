@@ -6,8 +6,7 @@
   const MIN_CENTS = 500n;
   const WEI = 1000000000000000000n;
   const USD = 1000000000000000000n;
-  const POLL_INTERVAL_MS = 5000;
-  const POLL_SUPPORT_AFTER_MS = 5 * 60 * 1000;
+
   const ERC20_ABI = [
     'function approve(address spender,uint256 amount) returns (bool)',
     'function decimals() view returns (uint8)',
@@ -27,8 +26,7 @@
     signer: null,
     amountWei: 0n,
     txHash: null,
-    pollTimer: null,
-    pollStartedAt: null,
+
   };
 
   const $ = (id) => document.getElementById(id);
@@ -60,6 +58,18 @@
 
   async function fetchJson(url) {
     const res = await fetch(url, { credentials: 'omit' });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || ('Request failed: ' + res.status));
+    return body;
+  }
+
+  async function postJson(url, payload) {
+    const res = await fetch(url, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || ('Request failed: ' + res.status));
     return body;
@@ -225,29 +235,22 @@
     setStatus('Submit payment in your wallet…', 'info');
     const tx = await gateway.pay(state.approvedAmountWei, state.wallet);
     state.txHash = tx.hash;
-    state.pollStartedAt = Date.now();
     $('pay').disabled = true;
-    setStatus('Payment submitted. Waiting for confirmation listener…', 'info');
-    pollStatus();
-  }
-
-  async function pollStatus() {
-    clearTimeout(state.pollTimer);
-    try {
-      const data = await fetchJson('/api/litkey/payment-status?tx_hash=' + encodeURIComponent(state.txHash) + '&wallet=' + encodeURIComponent(state.wallet));
-      if (data.found) {
-        if (data.status === 'credited') setStatus('Credited ' + fmtUsd(data.cents_credited || 0) + ' to the account.', 'success');
-        else setStatus('Payment recorded with status: ' + data.status, 'warning');
-        return;
-      }
-    } catch (e) {
-      console.error(e);
-      setStatus('Still waiting for listener status. If this persists, contact support with tx ' + state.txHash + '.', 'warning');
+    setStatus('Payment submitted. Waiting for transaction receipt…', 'info');
+    await tx.wait();
+    setStatus('Payment mined. Verifying transaction and applying credit…', 'info');
+    const data = await postJson('/api/litkey/payment-claim', {
+      tx_hash: state.txHash,
+      wallet: state.wallet,
+    });
+    if (data.found) {
+      if (data.status === 'credited') setStatus('Credited ' + fmtUsd(data.cents_credited || 0) + ' to the account.', 'success');
+      else setStatus('Payment recorded with status: ' + data.status, 'warning');
+    } else if (data.status === 'tx_failed') {
+      setStatus('Payment transaction failed on-chain. No credit was applied.', 'error');
+    } else {
+      setStatus('Payment was mined, but the backend did not find the gateway event. Contact support with tx ' + state.txHash + '.', 'warning');
     }
-    if (state.pollStartedAt && Date.now() - state.pollStartedAt > POLL_SUPPORT_AFTER_MS) {
-      setStatus('Still waiting for listener confirmation. Keep this transaction hash for support: ' + state.txHash + '.', 'warning');
-    }
-    state.pollTimer = setTimeout(pollStatus, POLL_INTERVAL_MS);
   }
 
   function installWalletGuards() {
