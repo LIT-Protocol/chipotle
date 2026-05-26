@@ -5,15 +5,18 @@ use sqlx::PgPool;
 
 /// Sum of cents granted by this operator in the last 24 hours.
 pub async fn cents_granted_last_24h(pool: &PgPool, operator_id: i64) -> Result<i64> {
-    let row: (Option<i64>,) = sqlx::query_as(
-        "SELECT COALESCE(SUM(cents), 0) \
+    // PostgreSQL returns SUM(bigint) as NUMERIC, which sqlx will not decode into
+    // i64 directly. Cast after COALESCE so both the empty and non-empty cases
+    // return INT8 for Rust.
+    let cents: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(SUM(cents), 0)::bigint \
          FROM grants \
          WHERE operator_id = $1 AND created_at > now() - interval '24 hours'",
     )
     .bind(operator_id)
     .fetch_one(pool)
     .await?;
-    Ok(row.0.unwrap_or(0))
+    Ok(cents)
 }
 
 /// Outcome of a cap check. `Err(_)` is reserved for server errors; cap
