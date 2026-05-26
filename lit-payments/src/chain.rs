@@ -330,8 +330,8 @@ fn api_err(status: Status, message: impl Into<String>) -> ApiError {
     )
 }
 
-fn api_server_err(e: impl std::fmt::Display) -> ApiError {
-    tracing::warn!("litkey public route: {e}");
+fn api_server_err(e: impl std::fmt::Display + std::fmt::Debug) -> ApiError {
+    tracing::warn!(error = %e, error_debug = ?e, "litkey payment API route internal error");
     api_err(Status::InternalServerError, "internal error")
 }
 

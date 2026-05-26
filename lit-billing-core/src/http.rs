@@ -23,7 +23,25 @@ pub fn parse_stripe_response(status: StatusCode, body_text: &str) -> Result<Stri
             .get("message")
             .and_then(|m| m.as_str())
             .unwrap_or("unknown error");
-        anyhow::bail!("Stripe error (HTTP {status}): {msg}");
+        let error_type = e
+            .get("type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown_type");
+        let code = e
+            .get("code")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown_code");
+        let param = e
+            .get("param")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown_param");
+        let permission = e
+            .get("permission")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown_permission");
+        anyhow::bail!(
+            "Stripe error (HTTP {status}, type={error_type}, code={code}, param={param}, permission={permission}): {msg}"
+        );
     }
 
     Ok(StripeResponse { status, body })
@@ -47,11 +65,26 @@ mod tests {
 
     #[test]
     fn parse_stripe_response_4xx_with_error() {
-        let body =
-            r#"{"error": {"message": "Invalid API Key provided", "type": "authentication_error"}}"#;
+        let body = r#"{"error": {"message": "Invalid API Key provided", "type": "authentication_error", "code": "api_key_invalid", "param": "api_key", "permission": "customers_read"}}"#;
         let err = parse_stripe_response(StatusCode::UNAUTHORIZED, body).unwrap_err();
         let msg = err.to_string();
         assert!(msg.contains("HTTP 401"), "expected HTTP 401 in: {msg}");
+        assert!(
+            msg.contains("type=authentication_error"),
+            "expected error type in: {msg}"
+        );
+        assert!(
+            msg.contains("code=api_key_invalid"),
+            "expected error code in: {msg}"
+        );
+        assert!(
+            msg.contains("param=api_key"),
+            "expected error param in: {msg}"
+        );
+        assert!(
+            msg.contains("permission=customers_read"),
+            "expected missing permission in: {msg}"
+        );
         assert!(
             msg.contains("Invalid API Key provided"),
             "expected error message in: {msg}"

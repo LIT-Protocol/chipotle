@@ -19,8 +19,8 @@ use crate::auth::operator::Role;
 use crate::config::Config;
 use crate::portal::types::ErrorResponse;
 
-pub const COINGECKO_URL: &str =
-    "https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies=usd";
+pub const LITKEY_BASE_TOKEN_ADDRESS: &str = "0xf732a566121fa6362e9e0fbdd6d66e5c8c925e49";
+pub const COINGECKO_URL: &str = "https://api.coingecko.com/api/v3/simple/token_price/base?contract_addresses=0xf732a566121fa6362e9e0fbdd6d66e5c8c925e49&vs_currencies=usd";
 pub const POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
 pub const STALE_AFTER: Duration = Duration::hours(1);
 pub const MAX_USD_WEI_PER_LITKEY: &str = "10000000000000000000000"; // $10,000/LITKEY scaled by 1e18: reject obvious feed nonsense.
@@ -68,8 +68,8 @@ fn err(status: Status, message: impl Into<String>) -> ApiError {
     )
 }
 
-fn server_err(e: impl std::fmt::Display) -> ApiError {
-    tracing::warn!("rate route: {e}");
+fn server_err(e: impl std::fmt::Display + std::fmt::Debug) -> ApiError {
+    tracing::warn!(error = %e, error_debug = ?e, "rate route internal error");
     err(Status::InternalServerError, "internal error")
 }
 
@@ -153,9 +153,15 @@ fn parse_decimal_to_scaled_units(raw: &str, decimals: usize) -> Result<String> {
 pub fn parse_coingecko_usd_wei(body: &str) -> Result<String> {
     let v: serde_json::Value = serde_json::from_str(body).context("parsing CoinGecko JSON")?;
     let usd = v
-        .get("lit-protocol")
+        .get(LITKEY_BASE_TOKEN_ADDRESS)
+        .or_else(|| v.get("lit-protocol"))
         .and_then(|obj| obj.get("usd"))
-        .ok_or_else(|| anyhow!("CoinGecko response missing lit-protocol.usd"))?;
+        .ok_or_else(|| {
+            anyhow!(
+                "CoinGecko response missing {}.usd / lit-protocol.usd",
+                LITKEY_BASE_TOKEN_ADDRESS
+            )
+        })?;
     let usd = match usd {
         serde_json::Value::Number(n) => n.to_string(),
         serde_json::Value::String(s) => s.clone(),
@@ -259,17 +265,32 @@ pub fn should_poll_coingecko(current: Option<&LitkeyRate>) -> bool {
 }
 
 pub async fn fetch_coingecko_usd_wei(client: &Client) -> Result<String> {
-    let body = client
+    let resp = client
         .get(COINGECKO_URL)
+        .header(reqwest::header::ACCEPT, "application/json")
         .send()
         .await
-        .context("fetching CoinGecko LIT price")?
-        .error_for_status()
-        .context("CoinGecko returned non-success status")?
+        .context("fetching CoinGecko LIT price")?;
+    let status = resp.status();
+    let body = resp
         .text()
         .await
         .context("reading CoinGecko response body")?;
+    if !status.is_success() {
+        anyhow::bail!(
+            "CoinGecko returned non-success status {status}: {}",
+            truncate_for_log(&body, 500)
+        );
+    }
     parse_coingecko_usd_wei(&body)
+}
+
+fn truncate_for_log(s: &str, max_chars: usize) -> String {
+    let mut out = s.chars().take(max_chars).collect::<String>();
+    if s.chars().count() > max_chars {
+        out.push('…');
+    }
+    out
 }
 
 pub async fn get_current(pool: &PgPool) -> Result<Option<LitkeyRate>> {
@@ -336,6 +357,7 @@ pub async fn set_manual(pool: &PgPool, usd_wei_per_litkey: &str, operator_id: i6
 
 fn coingecko_client() -> Result<Client> {
     Client::builder()
+        .user_agent("lit-payments/0.1 (+https://litprotocol.com)")
         .connect_timeout(StdDuration::from_secs(5))
         .timeout(StdDuration::from_secs(10))
         .build()
@@ -492,6 +514,13 @@ mod tests {
             "6000000000000000"
         );
         assert_eq!(
+            parse_coingecko_usd_wei(
+                r#"{"0xf732a566121fa6362e9e0fbdd6d66e5c8c925e49":{"usd":0.00568693}}"#,
+            )
+            .unwrap(),
+            "5686930000000000"
+        );
+        assert_eq!(
             parse_coingecko_usd_wei(r#"{"lit-protocol":{"usd":0.000000000000000001}}"#).unwrap(),
             "1"
         );
@@ -528,6 +557,12 @@ mod tests {
         assert!(parse_coingecko_usd_wei(r#"{"lit-protocol":{"usd":-1}}"#).is_err());
         assert!(parse_coingecko_usd_wei(r#"{"lit-protocol":{"usd":1e309}}"#).is_err());
         assert!(parse_coingecko_usd_wei(r#"{"lit-protocol":{"usd":10001}}"#).is_err());
+    }
+
+    #[test]
+    fn truncates_long_external_error_bodies_for_logs() {
+        assert_eq!(truncate_for_log("abcdef", 3), "abc…");
+        assert_eq!(truncate_for_log("abc", 3), "abc");
     }
 
     #[test]
