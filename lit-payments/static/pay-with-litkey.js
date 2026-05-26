@@ -37,6 +37,15 @@
   const isAddress = (value) => /^0x[0-9a-fA-F]{40}$/.test(value || '');
   const fmtUsd = (cents) => '$' + (Number(cents) / 100).toFixed(2);
 
+  function formatUsdWei(usdWei) {
+    const value = BigInt(usdWei);
+    const whole = value / USD;
+    const fraction = value % USD;
+    if (fraction === 0n) return '$' + whole.toString();
+    const decimals = fraction.toString().padStart(18, '0').slice(0, 6).replace(/0+$/, '');
+    return '$' + whole.toString() + (decimals ? '.' + decimals : '');
+  }
+
   function parseCents(value) {
     const trimmed = String(value || '').trim();
     const match = trimmed.match(/^(\d+)(?:\.(\d{0,2}))?$/);
@@ -103,7 +112,7 @@
     if (state.frozenAmountWei !== null) {
       state.amountWei = state.frozenAmountWei;
       setText('litkey-amount', formatToken(state.frozenAmountWei) + ' LITKEY');
-      setText('rate-display', fmtUsd(creditCentsForAmount(WEI, quote.effective_usd_wei_per_litkey)) + ' credit / LITKEY');
+      setText('rate-display', formatUsdWei(quote.effective_usd_wei_per_litkey) + ' credit / LITKEY');
       setText('quote-status', 'Frozen for approval');
       $('approve').disabled = true;
       $('pay').disabled = state.approvedAmountWei === null;
@@ -120,7 +129,7 @@
     }
     state.amountWei = amountWeiForCents(cents, quote.effective_usd_wei_per_litkey);
     setText('litkey-amount', formatToken(state.amountWei) + ' LITKEY');
-    setText('rate-display', fmtUsd(creditCentsForAmount(WEI, quote.effective_usd_wei_per_litkey)) + ' credit / LITKEY');
+    setText('rate-display', formatUsdWei(quote.effective_usd_wei_per_litkey) + ' credit / LITKEY');
     setText('quote-status', 'Live');
     $('approve').disabled = !$('confirm-account').checked || !state.signer;
     $('pay').disabled = true;
@@ -157,12 +166,26 @@
 
   async function connectWallet() {
     if (!window.ethereum) throw new Error('No browser wallet found.');
-    await ensureBase();
-    state.provider = new ethers.BrowserProvider(window.ethereum);
-    await state.provider.send('eth_requestAccounts', []);
-    state.signer = await state.provider.getSigner();
-    setStatus('Wallet connected. Confirm the credited account, then approve exact LITKEY.', 'success');
-    renderQuote();
+    const button = $('connect-wallet');
+    if (button) button.disabled = true;
+    try {
+      setStatus('Opening wallet…', 'info');
+      await window.ethereum.request({ method: 'eth_requestAccounts' });
+      await ensureBase();
+      // Re-read accounts after a possible network switch. Some injected wallets
+      // briefly expose a null selected account/provider during the switch, which
+      // made ethers BrowserProvider.getSigner() throw on the first click.
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      const account = Array.isArray(accounts) && accounts[0] ? accounts[0] : null;
+      if (!account) throw new Error('No wallet account selected.');
+      state.provider = new ethers.BrowserProvider(window.ethereum);
+      await state.provider.getNetwork();
+      state.signer = await state.provider.getSigner(account);
+      setStatus('Wallet connected. Confirm the credited account, then approve exact LITKEY.', 'success');
+      renderQuote();
+    } finally {
+      if (button) button.disabled = false;
+    }
   }
 
   async function approve() {

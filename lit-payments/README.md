@@ -77,6 +77,9 @@ ROCKET_PORT=8000
 # LITKEY_CHAIN_ID=8453
 # LITKEY_CONFIRMATIONS=5
 # LITKEY_RECONCILIATION_INTERVAL_SECS=60
+# Optional deploy/redeploy catch-up floor. Set near the gateway deploy block or
+# just before a known missed payment block to avoid crawling Base from genesis.
+# LITKEY_RECONCILIATION_START_BLOCK=46516000
 ```
 
 ## LITKEY listener runtime status
@@ -97,7 +100,11 @@ smoke testing; for now operators can test the standalone page directly.
 
 When `ALCHEMY_WSS_URL`, `ALCHEMY_HTTPS_URL`, and `LITKEY_GATEWAY_ADDRESS` are
 configured, the app spawns both an Alchemy WSS logs subscription fast path and a
-confirmed-block HTTPS reconciliation loop. WSS waits for the `eth_subscribe`
+confirmed-block HTTPS reconciliation loop. Set `LITKEY_RECONCILIATION_START_BLOCK`
+to the gateway deploy block (or just before a known missed payment block) before
+first production deploy; without it, an empty checkpoint starts at block `1` and
+may spend a long time crawling old Base history in 2,000-block chunks before it
+reaches current payments. WSS waits for the `eth_subscribe`
 acknowledgement, subscribes to the configured gateway address plus the exact
 `Payment(indexed wallet,indexed payer,uint256 amount)` topic, buffers near-head
 logs until they reach the configured confirmation depth, evicts pending logs when

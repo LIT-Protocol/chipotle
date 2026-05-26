@@ -38,6 +38,7 @@ pub struct ChainConfig {
     pub gateway_address: Address,
     pub confirmations: u64,
     pub reconciliation_interval_secs: u64,
+    pub reconciliation_start_block: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -968,9 +969,10 @@ where
     R: ChainRpc,
     P: ConfirmedPaymentProcessor,
 {
-    let checkpoint = store
+    let stored_checkpoint = store
         .current_checkpoint(config.chain_id, config.gateway_address)
         .await?;
+    let checkpoint = stored_checkpoint.max(config.reconciliation_start_block.saturating_sub(1));
     let latest_block = rpc.latest_block().await?;
     let Some((from_block, to_block)) =
         reconciliation_range(checkpoint, latest_block, config.confirmations)
@@ -982,6 +984,15 @@ where
         from_block
             .saturating_add(MAX_RECONCILIATION_BLOCK_RANGE)
             .saturating_sub(1),
+    );
+    tracing::debug!(
+        stored_checkpoint,
+        effective_checkpoint = checkpoint,
+        from_block,
+        to_block = chunk_to_block,
+        latest_block,
+        confirmations = config.confirmations,
+        "LITKEY reconciliation scanning confirmed range"
     );
     let mut logs = rpc.payment_logs(from_block, chunk_to_block).await?;
     logs.sort_by_key(|log| (log.block_number, log.log_index));
@@ -1160,6 +1171,7 @@ pub fn spawn_litkey_listener(
         gateway_address = %format_address(config.gateway_address),
         confirmations = config.confirmations,
         reconciliation_interval_secs = config.reconciliation_interval_secs,
+        reconciliation_start_block = config.reconciliation_start_block,
         discount_basis_points,
         "LITKEY listener started with Alchemy WSS fast path and HTTPS reconciliation fallback"
     );
@@ -1619,6 +1631,7 @@ mod tests {
                 .unwrap(),
             confirmations: 5,
             reconciliation_interval_secs: 60,
+            reconciliation_start_block: 0,
         }
     }
 
@@ -1832,6 +1845,32 @@ mod tests {
             *store.advanced_to.lock().unwrap(),
             vec![MAX_RECONCILIATION_BLOCK_RANGE]
         );
+    }
+
+    #[tokio::test]
+    async fn reconciliation_once_uses_configured_start_block_when_checkpoint_is_behind() {
+        let store = FakeStore {
+            checkpoint: 2_000,
+            advanced_to: std::sync::Mutex::new(Vec::new()),
+        };
+        let rpc = FakeRpc {
+            latest: 46_516_500,
+            logs: vec![],
+            ranges: std::sync::Mutex::new(Vec::new()),
+        };
+        let processor = FakeProcessor {
+            processed: std::sync::Mutex::new(Vec::new()),
+            fail: false,
+        };
+        let mut config = sample_chain_config();
+        config.reconciliation_start_block = 46_516_000;
+
+        process_reconciliation_once(&store, &rpc, &processor, &config)
+            .await
+            .unwrap();
+
+        assert_eq!(*rpc.ranges.lock().unwrap(), vec![(46_516_000, 46_516_495)]);
+        assert_eq!(*store.advanced_to.lock().unwrap(), vec![46_516_495]);
     }
 
     #[tokio::test]

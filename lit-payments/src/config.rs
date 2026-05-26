@@ -134,6 +134,7 @@ fn parse_litkey_chain_config() -> Result<Option<chain::ChainConfig>> {
         "LITKEY_RECONCILIATION_INTERVAL_SECS",
         chain::DEFAULT_RECONCILIATION_INTERVAL_SECS,
     )?;
+    let reconciliation_start_block = optional_u64("LITKEY_RECONCILIATION_START_BLOCK", 0)?;
     validate_chain_runtime_config(chain_id, confirmations, reconciliation_interval_secs)?;
 
     Ok(Some(chain::ChainConfig {
@@ -143,6 +144,7 @@ fn parse_litkey_chain_config() -> Result<Option<chain::ChainConfig>> {
         gateway_address,
         confirmations,
         reconciliation_interval_secs,
+        reconciliation_start_block,
     }))
 }
 
