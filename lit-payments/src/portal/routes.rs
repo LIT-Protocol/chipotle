@@ -3,6 +3,7 @@
 //! All routes are gated by the [`Operator`] request guard so an unauthenticated
 //! caller forwards into the 401 catcher.
 
+use alloy_primitives::Address;
 use lit_billing_core::StripeClient;
 use lit_billing_core::balance;
 use lit_billing_core::customer;
@@ -18,8 +19,8 @@ use uuid::Uuid;
 use super::caps::{self, CapCheck};
 use super::db;
 use super::types::{
-    CustomerMatch, ErrorResponse, GrantRequest, GrantResponse, GrantRow, GrantsResponse,
-    LookupResponse,
+    CustomerMatch, CustomerPreviewResponse, ErrorResponse, GrantRequest, GrantResponse, GrantRow,
+    GrantsResponse, LookupResponse,
 };
 use crate::auth::Operator;
 use crate::config::Config;
@@ -51,6 +52,14 @@ fn balance_display(balance_cents: i64) -> String {
     } else {
         format!("{} credit", cents_to_display(credits))
     }
+}
+
+pub fn canonical_wallet_param(wallet: &str) -> Result<String, String> {
+    wallet
+        .trim()
+        .parse::<Address>()
+        .map(|address| format!("{address:#x}"))
+        .map_err(|_| "wallet must be a 0x Ethereum address".to_string())
 }
 
 async fn build_match(
@@ -115,6 +124,37 @@ pub async fn lookup_customer(
             Ok(Json(LookupResponse { matches }))
         }
     }
+}
+
+/// `GET /api/customer/preview?wallet=…`
+///
+/// Public wallet-only customer preview for the pay-with-LITKEY page. Exposes
+/// only the account identity the user is about to credit; never exposes Stripe
+/// customer ids or balances.
+#[get("/api/customer/preview?<wallet>")]
+pub async fn preview_customer(
+    wallet: Option<&str>,
+    stripe: &State<StripeClient>,
+) -> ApiResult<CustomerPreviewResponse> {
+    let Some(wallet) = wallet else {
+        return Err(err(Status::BadRequest, "wallet is required"));
+    };
+    let wallet = canonical_wallet_param(wallet).map_err(|e| err(Status::BadRequest, e))?;
+    let summary = customer::find_summary_by_wallet(stripe, &wallet)
+        .await
+        .map_err(server_err)?;
+    Ok(Json(match summary {
+        Some(summary) => CustomerPreviewResponse {
+            found: true,
+            email: summary.email,
+            wallet_address: summary.wallet_address.or(Some(wallet)),
+        },
+        None => CustomerPreviewResponse {
+            found: false,
+            email: None,
+            wallet_address: Some(wallet),
+        },
+    }))
 }
 
 /// `POST /api/grant` — apply a credit to a customer's Stripe balance.
@@ -284,4 +324,23 @@ pub async fn list_grants(
         .await
         .map_err(server_err)?;
     Ok(Json(GrantsResponse { grants }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn canonical_wallet_param_accepts_checksum_and_outputs_lowercase() {
+        assert_eq!(
+            canonical_wallet_param(" 0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b ").unwrap(),
+            "0xa2d54cd1d1df1735718a857ac49caf9ecab0093b"
+        );
+    }
+
+    #[test]
+    fn canonical_wallet_param_rejects_non_addresses() {
+        assert!(canonical_wallet_param("not-a-wallet").is_err());
+        assert!(canonical_wallet_param("0x1234").is_err());
+    }
 }

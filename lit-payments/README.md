@@ -1,7 +1,7 @@
 # lit-payments
 
-Ops-facing billing service. Magic-link auth + admin credit portal + (later)
-LITKEY payment gateway. Deployed outside the TEE, on Fly.io.
+Ops-facing billing service. Magic-link auth + admin credit portal + LITKEY
+payment gateway. Deployed outside the TEE, on Railway.
 
 See `plans/lit-payments-app.md` (in the repo root, on the planning branch)
 for the full design.
@@ -10,9 +10,13 @@ for the full design.
 
 Public:
 - `GET /login` — login page (form posts to `/auth/request`).
+- `GET /payWithLitkey?wallet=0x…` — end-user Base mainnet LITKEY payment page for an existing Stripe customer wallet.
 - `POST /auth/request` — send magic link (rate-limited per email, 60s cooldown).
 - `GET /auth/verify?token=…` — validate token, set session cookie, redirect.
+- `GET /api/customer/preview?wallet=0x…` — wallet-scoped customer identity preview for the LITKEY payment page. Returns only `found`, `email`, and `wallet_address`; it does not expose Stripe customer ids or balances.
 - `GET /api/litkey/quote` — public LITKEY quote for the end-user payment page; includes `crediting_paused` and omits an effective credit rate while paused.
+- `GET /api/litkey/payment-config` — public Base mainnet payment config: chain id, LITKEY token address, and payment gateway address. Fails closed with `503` if the on-chain listener is not configured.
+- `GET /api/litkey/payment-status?tx_hash=0x…&wallet=0x…` — wallet-scoped listener status for a submitted transaction; used by the payment page to poll for `credited`, `dust`, `paused`, or `no_customer` after submission.
 
 Authenticated (operator session cookie required):
 - `GET /` — admin dashboard.
@@ -77,6 +81,20 @@ ROCKET_PORT=8000
 
 ## LITKEY listener runtime status
 
+`/payWithLitkey?wallet=0x…` lets a user credit an existing Stripe customer by
+paying LITKEY to the deployed gateway on Base mainnet. The page validates that
+the URL wallet maps to a customer, prominently displays the email and wallet that
+will be credited, refreshes the quote every 30 seconds until approval starts,
+freezes the quote and LITKEY amount for exact-amount approval, calls
+`pay(amount, wallet)`, and polls the listener status endpoint scoped by
+transaction hash plus credited wallet. The public preview endpoint intentionally
+reveals whether the supplied wallet has a Stripe customer and the email that will
+be credited so payment-link recipients can verify the destination before
+spending. The payment config endpoint fails closed when the listener is disabled,
+so users cannot be directed to send LITKEY while automatic crediting is offline.
+The main dashboard entry point is intentionally deferred until after production
+smoke testing; for now operators can test the standalone page directly.
+
 When `ALCHEMY_WSS_URL`, `ALCHEMY_HTTPS_URL`, and `LITKEY_GATEWAY_ADDRESS` are
 configured, the app spawns both an Alchemy WSS logs subscription fast path and a
 confirmed-block HTTPS reconciliation loop. WSS waits for the `eth_subscribe`
@@ -108,81 +126,121 @@ Visit <http://localhost:8000/login>, enter `chris@litprotocol.com` (or
 whatever's seeded in `migrations/20260518000002_seed_operators.sql`),
 check your inbox, click the link.
 
-## Deploy to Fly.io
+## Deploy to Railway
 
-The `fly.toml` at the repo root configures this service. The build context
-is the repo root (so the lit-billing-core sibling crate is reachable from
-the Dockerfile). All `fly` commands run from the repo root.
+Railway config for this service lives in `lit-payments/railway.json` so other
+Railway services can add their own subfolder configs later. For this service,
+keep the Railway service root/build context at the repo root and set the service
+config file path to `lit-payments/railway.json`: the Dockerfile needs repo-root
+build context because `lit-payments` depends on the sibling `lit-billing-core`
+crate. The service must keep at least one replica running: the LITKEY listener
+includes WSS and reconciliation background loops, so do not enable
+scale-to-zero/sleep mode for production.
 
-### 1. Create the app
+### 1. Create the Railway project/service
 
-```sh
-fly apps create lit-payments
-```
+In the Railway dashboard:
 
-(Or `fly launch --no-deploy` to let flyctl walk you through it; reuse the
-existing `fly.toml` when prompted.)
+1. New Project → **Deploy from GitHub repo** → `LIT-Protocol/chipotle`.
+2. Select the branch you want to deploy from.
+3. Configure this Railway service for the monorepo:
+   - **Root Directory / build context:** repo root (`/`), not `lit-payments`.
+   - **Config file path:** `lit-payments/railway.json`.
+   - `lit-payments/railway.json` points at `lit-payments/Dockerfile`.
+4. In service settings, confirm the service is not configured to sleep/scale to
+   zero.
 
-### 2. Provision Postgres
-
-Pick one — both expose a `DATABASE_URL`-shaped connection string:
-
-- **Fly Postgres (Managed Postgres)**:
-  ```sh
-  fly postgres create --name lit-payments-db --region iad
-  fly postgres attach lit-payments-db --app lit-payments
-  ```
-  The attach command sets `DATABASE_URL` on the app automatically.
-
-- **External (Supabase / Neon / etc.)**: set `DATABASE_URL` manually:
-  ```sh
-  fly secrets set --app lit-payments DATABASE_URL='postgres://...'
-  ```
-
-### 3. Set the rest of the secrets
+Equivalent CLI flow if you prefer:
 
 ```sh
-fly secrets set --app lit-payments \
-  MAGIC_LINK_SIGNING_KEY="$(openssl rand -base64 32)" \
-  RESEND_API_KEY=re_... \
-  MAIL_FROM='noreply@mail.litprotocol.com' \
-  PUBLIC_BASE_URL='https://payments.litprotocol.com' \
-  STRIPE_SECRET_KEY=rk_... \
-  LITKEY_DISCOUNT_BASIS_POINTS=0 \
-  ROCKET_SECRET_KEY="$(openssl rand -base64 32)"
+railway login
+railway link        # choose or create the lit-payments project
+railway up          # from repo root; service config path should be lit-payments/railway.json
 ```
 
-`ROCKET_SECRET_KEY` is required by Rocket for private (encrypted) cookies
-in release builds. The other vars are documented above under
-"Local development."
+### 2. Add Postgres
 
-### 4. Custom domain
+Use Railway's Postgres plugin for the cheapest/simple path:
+
+1. Project → **New** → **Database** → **Add PostgreSQL**.
+2. In the `lit-payments` service variables, reference the plugin's connection
+   string as `DATABASE_URL`.
+
+Railway usually exposes the plugin URL as a variable you can reference from the
+service, for example:
 
 ```sh
-fly certs create --app lit-payments payments.litprotocol.com
+DATABASE_URL=${{Postgres.DATABASE_URL}}
 ```
 
-Fly prints the DNS records (CNAME or A/AAAA) to add. Once they propagate,
-the cert provisions automatically.
+External Postgres (Neon/Supabase/etc.) is also fine; set `DATABASE_URL` to that
+connection string instead.
 
-### 5. Deploy
+### 3. Set service variables
+
+Set these on the Railway `lit-payments` service. `PORT` is provided by Railway;
+`main.rs` translates it to Rocket's port at startup.
 
 ```sh
-fly deploy
+ROCKET_ADDRESS=0.0.0.0
+RUST_LOG=info
+PUBLIC_BASE_URL=https://<your-railway-domain-or-payments-domain>
+DATABASE_URL=${{Postgres.DATABASE_URL}}
+MAGIC_LINK_SIGNING_KEY=<openssl rand -base64 32>
+ROCKET_SECRET_KEY=<openssl rand -base64 32>
+RESEND_API_KEY=re_...
+MAIL_FROM=noreply@mail.litprotocol.com
+STRIPE_SECRET_KEY=rk_live_...
+
+# LITKEY pricing / listener
+LITKEY_DISCOUNT_BASIS_POINTS=0
+ALCHEMY_WSS_URL=wss://base-mainnet.g.alchemy.com/v2/...
+ALCHEMY_HTTPS_URL=https://base-mainnet.g.alchemy.com/v2/...
+LITKEY_GATEWAY_ADDRESS=0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b
+LITKEY_CHAIN_ID=8453
+LITKEY_CONFIRMATIONS=5
+LITKEY_RECONCILIATION_INTERVAL_SECS=60
 ```
 
-Migrations run on first boot of every release; safe to redeploy any time.
-Health checks hit `/health` (configured in `fly.toml`).
+Optional operator caps if you want non-default values:
 
-### Updating
+```sh
+MAX_GRANT_CENTS=2000
+MAX_DAILY_PER_OPERATOR_CENTS=10000
+```
 
-`fly deploy` again. Fly's blue-green deploy flips traffic when the new
-machine passes its health check.
+Generate secrets locally and paste the values into Railway:
 
-## Mail sender setup (Resend + `mail.litprotocol.com`)
+```sh
+openssl rand -base64 32   # MAGIC_LINK_SIGNING_KEY
+openssl rand -base64 32   # ROCKET_SECRET_KEY
+```
 
-The default sender is `noreply@mail.litprotocol.com`. To avoid touching
-the root-domain SPF/DKIM records that Google Workspace uses:
+### 4. Deploy and verify
+
+Deploy from the Railway dashboard or CLI, then verify:
+
+```sh
+curl -fsS https://<your-railway-domain-or-payments-domain>/health
+curl -fsS 'https://<your-railway-domain-or-payments-domain>/api/litkey/payment-config'
+```
+
+Expected:
+
+- `/health` returns `ok`.
+- `/api/litkey/payment-config` returns Base mainnet config when the listener env
+  is present; it returns `503` if listener config is intentionally absent.
+- `/payWithLitkey?wallet=0x...` loads the standalone payment page for smoke
+  testing.
+
+Railway deploys should run the binary continuously. If a smoke test submits a
+Base payment but status never changes, check Railway logs first for listener WSS
+or reconciliation errors.
+
+### Mail sender setup
+
+Use `MAIL_FROM=noreply@mail.litprotocol.com`. To avoid touching the root-domain
+SPF/DKIM records that Google Workspace uses:
 
 1. In Resend → Domains, add `mail.litprotocol.com`.
 2. Add the SPF (`TXT @ "v=spf1 include:_spf.resend.com ~all"`) and DKIM

@@ -1,0 +1,15 @@
+.litkey-pay-page { min-height: 100vh; display: grid; place-items: center; padding: 2rem; background: #f6f8fb; }
+.pay-card { width: min(760px, 100%); background: #fff; border: 1px solid #dfe6ef; border-radius: 18px; box-shadow: 0 20px 60px rgba(15, 23, 42, .12); padding: 2rem; }
+.pay-card h1 { margin: .25rem 0 .5rem; }
+.pay-card h2 { font-size: 1rem; margin: 0 0 1rem; }
+.eyebrow { color: #5b6ee1; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; font-size: .75rem; }
+.muted, .hint, .fine-print { color: #64748b; }
+.account-box, .payment-box { border: 1px solid #e2e8f0; border-radius: 14px; padding: 1rem; margin: 1rem 0; }
+.account-box dl, .quote-grid { display: grid; grid-template-columns: 150px 1fr; gap: .65rem 1rem; }
+.account-box dt, .quote-grid span { color: #64748b; }
+.account-box dd { margin: 0; overflow-wrap: anywhere; font-weight: 600; }
+.confirm-row { display: flex; gap: .5rem; align-items: center; margin-top: 1rem; font-weight: 600; }
+.amount-row { display: flex; align-items: center; gap: .5rem; max-width: 260px; border: 1px solid #cbd5e1; border-radius: 10px; padding: .65rem .8rem; }
+.amount-row input { border: 0; outline: 0; font: inherit; width: 100%; }
+.actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1rem; }
+.status.warning { background: #fff7ed; color: #9a3412; border-color: #fed7aa; }

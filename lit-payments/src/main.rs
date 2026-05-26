@@ -47,16 +47,20 @@ async fn rocket() -> _ {
             routes![
                 index,
                 login_page,
+                pay_with_litkey_page,
                 health,
                 auth_routes::request_link,
                 auth_routes::verify_link,
                 auth_routes::logout,
                 auth_routes::me,
                 portal_routes::lookup_customer,
+                portal_routes::preview_customer,
                 portal_routes::grant_credit,
                 portal_routes::list_grants,
                 rate::get_rate,
                 rate::get_quote,
+                chain::get_payment_config,
+                chain::get_payment_status,
                 rate::override_rate,
             ],
         )
@@ -113,6 +117,14 @@ async fn index(operator: Option<auth::Operator>) -> Result<NamedFile, Redirect> 
 #[get("/login")]
 async fn login_page() -> Result<NamedFile, Status> {
     NamedFile::open(static_path("login.html"))
+        .await
+        .map_err(|_| Status::NotFound)
+}
+
+/// `GET /payWithLitkey` — serve the public LITKEY token payment page.
+#[get("/payWithLitkey")]
+async fn pay_with_litkey_page() -> Result<NamedFile, Status> {
+    NamedFile::open(static_path("pay-with-litkey.html"))
         .await
         .map_err(|_| Status::NotFound)
 }

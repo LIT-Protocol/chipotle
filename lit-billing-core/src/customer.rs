@@ -61,6 +61,29 @@ pub async fn find_by_wallet(client: &StripeClient, wallet_address: &str) -> Resu
     Ok(id)
 }
 
+/// Find the Stripe customer summary for this wallet without creating one if missing.
+///
+/// Returns `Ok(None)` if no customer has `metadata.wallet_address == wallet`.
+pub async fn find_summary_by_wallet(
+    client: &StripeClient,
+    wallet_address: &str,
+) -> Result<Option<CustomerSummary>> {
+    let query = format!("metadata['wallet_address']:'{wallet_address}'");
+    let resp = client
+        .get(
+            "customers/search",
+            &[("query", query.as_str()), ("limit", "1")],
+        )
+        .await?;
+    let summary = resp
+        .body
+        .get("data")
+        .and_then(|d| d.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(parse_summary);
+    Ok(summary)
+}
+
 /// Find the Stripe customer for this wallet, creating one if none exists.
 ///
 /// Concurrency note: Stripe's Search API has indexing lag of several seconds

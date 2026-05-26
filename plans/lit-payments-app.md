@@ -6,9 +6,9 @@ Date: 2026-05-18 (last updated: 2026-05-21)
 
 ## Current state (TL;DR for a new session)
 
-- **Shipped to `next`**: `lit-billing-core` extraction (PR #358), `lit-payments` foundation + magic-link auth (PR #359), admin credit portal + Fly.io deploy target (PR #370).
-- **Open**: `LitkeyPaymentGateway` Solidity contract + Hardhat project (PR #373).
-- **In progress**: rate poller (3b) implemented in this PR worktree; Alchemy WSS listener (3c) and Wagmi payment page + dashboard link (3d) remain. See the Sequencing section near the bottom for what each entails and recommended order.
+- **Shipped to `main`**: `lit-billing-core` extraction (PR #358), `lit-payments` foundation + magic-link auth (PR #359), admin credit portal + initial deploy target (PR #370), LITKEY gateway/rate/listener scaffolding (PR #373), and listener runtime with WSS fast path + Alloy migration (PR #378).
+- **This PR worktree**: phase 3d implements `/payWithLitkey`, public wallet-scoped preview/config/status APIs, and Railway deployment config/docs. The dashboard entry point is intentionally held back until after production smoke testing.
+- **Remaining before retiring manual flow**: deploy/smoke-test the runtime + payment page in a controlled environment, monitor first live credits, add the dashboard `Pay with LITKEY` entry point, and add operational alerts/runbooks as needed.
 
 The rest of this doc is the original design + decisions, kept for context. Implementation details that diverged from the plan are noted inline.
 
@@ -107,10 +107,10 @@ Tech stack: **Rust + Rocket + vanilla HTML/JS**. Matches existing repo conventio
 ### Deployment
 
 - **Hostname**: `payments.litprotocol.com`.
-- **Platform**: Fly.io (app + Fly Postgres, or external Postgres via Supabase/Neon). `fly.toml` lives at the repo root so the Dockerfile can pull in the sibling `lit-billing-core/` crate via the repo-root build context.
-- **Outside the TEE.** No attestation pain; operators can `fly logs` / `fly ssh console` for diagnostics.
-- **Ingress**: Fly's default TLS + `fly certs create payments.litprotocol.com`.
-- **Secrets** (`fly secrets set …`): Stripe restricted key, DB URL, magic-link signing key, Resend API key, Alchemy WSS + HTTPS URLs, gateway contract address, treasury Safe address, LITKEY token address, CoinGecko ID. Plus `ROCKET_SECRET_KEY` for Rocket's private-cookie encryption.
+- **Platform**: Railway (service + Railway Postgres, or external Postgres via Supabase/Neon). `lit-payments/railway.json` keeps this service's Railway config scoped to the subfolder while pointing at `lit-payments/Dockerfile`; keep the Railway service build context at repo root so Docker can copy the sibling `lit-billing-core/` crate.
+- **Outside the TEE.** No attestation pain; operators can use Railway logs / shell for diagnostics. Keep one replica continuously running; do not sleep/scale-to-zero because the listener has WSS/reconciliation background loops.
+- **Ingress**: Railway-generated domain initially, then custom domain `payments.litprotocol.com` once smoke tests pass.
+- **Secrets** (Railway service variables): Stripe restricted key, DB URL, magic-link signing key, Resend API key, Alchemy WSS + HTTPS URLs, gateway contract address, and `ROCKET_SECRET_KEY` for Rocket's private-cookie encryption. LITKEY token address is fixed in the payment config endpoint for the current Base deployment; CoinGecko uses the hardcoded `lit-protocol` id.
 
 ### Auth tiers
 
@@ -324,10 +324,10 @@ GET https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies
 | # | Question | Decision |
 |---|---|---|
 | 1 | Hostname | `payments.litprotocol.com` |
-| 2 | Cloud provider | Fly.io (app + Fly Postgres, or external Postgres) |
+| 2 | Cloud provider | Railway (service + Railway Postgres, or external Postgres) |
 | 3 | Shared crate | Extract `lit-billing-core` now; both services depend on it |
 | 4 | Operator auth | Magic link via Resend, day 1; 15-min token, 7-day session |
-| 5 | Alerting | None — rely on server logs (`fly logs`) |
+| 5 | Alerting | None — rely on Railway logs |
 | 6 | Reconciliation report | Deferred |
 | 7 | Refund / clawback flow | Deferred — handle manually in Stripe dashboard |
 | 8 | LITKEY chain | Base |
@@ -365,13 +365,13 @@ All questions are closed. Plan is ready to start building.
 
 ### ✅ 2. Foundation + Feature 1: admin credit portal — DONE (PRs #359 + #370, merged to `next`)
    - [x] `lit-payments` crate skeleton (Rocket + sqlx-postgres + Dockerfile). Sibling crate to `lit-billing-core`.
-   - [x] Fly.io deploy config (`fly.toml` at the repo root). Originally targeted Railway; switched to Fly.io because Railway's reliability has degraded.
+   - [x] Deploy config. PR #370 added the initial Fly target; phase 3d switches deployment docs/config to Railway because the service is cheaper to run there.
    - [x] Magic-link auth end-to-end (Resend, HMAC-signed tokens, 15-min expiry, 7-day session cookies, operators + sessions Postgres tables, per-email rate limit, spawned email send for timing-leak resistance).
    - [x] Login UI (`/login` + `/`) in vanilla HTML/JS.
    - [x] Admin credit portal: `GET /api/customer/lookup`, `POST /api/grant`, `GET /api/grants`. Caps enforced (default $20/grant, $100/operator/day). End-to-end UUID idempotency (client → server → Stripe Idempotency-Key + DB `UNIQUE(idempotency_key)` + `ON CONFLICT DO NOTHING`).
    - [x] Three-section dashboard at `/`: lookup → match cards with inline grant form → recent grants table.
    - [x] `lit-billing-core` additions for the portal: `customer::find_by_wallet` (non-creating), `customer::search_by_email` + `CustomerSummary`, `balance::write_transaction`.
-   - **Milestone hit**: Discord mod can sign in via magic link and grant credits once the Fly app is provisioned.
+   - **Milestone hit**: Discord mod can sign in via magic link and grant credits once the payments app is provisioned.
 
 ### 🚧 3. Feature 2: LITKEY → Stripe credit — IN PROGRESS
 
@@ -387,7 +387,7 @@ All questions are closed. Plan is ready to start building.
    **3b.** ✅ CoinGecko rate poller + `litkey_rate` schema + admin rate-override UI — IMPLEMENTED IN PR WORKTREE
    - [x] Background task in `lit-payments` polling `https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies=usd` every 5 min.
    - [x] Migration adding the single-row `litkey_rate` table (`id PRIMARY KEY DEFAULT 1 CHECK (id = 1)`, `usd_wei_per_litkey NUMERIC(78,0)`, `source`, `fetched_at`, `updated_by_operator_id`).
-   - [x] Stale (>1hr) is surfaced on the API/UI and logs a warning so future 3c crediting can pause (no Slack alert — `fly logs` only).
+   - [x] Stale (>1hr) is surfaced on the API/UI and logs a warning so future 3c crediting can pause (no Slack alert — platform logs only).
    - [x] Admin UI section on the dashboard to view the current rate + override it (`source='manual'`).
    - [x] Env-configured LITKEY payment discount (`LITKEY_DISCOUNT_BASIS_POINTS`, default `0`; `2000` = 20% off vs credit card) exposed in the rate API/UI as the discount-adjusted effective credit rate.
    - [x] **No on-chain dependency** — can ship before 3c.
@@ -408,17 +408,19 @@ All questions are closed. Plan is ready to start building.
    - Migrations: `litkey_payments`, `chain_checkpoint`.
    - **Depends on**: 3a contract deployed + address known (`0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b` on Base mainnet); 3b rate table existing.
 
-   **3d.** ⏭️ Wagmi `/payWithLitkey` page + dashboard "Pay with tokens" link — NOT STARTED
-   - New page at `payments.litprotocol.com/payWithLitkey?wallet=<address>`. Wallet param is plain (no HMAC — see "URL spoofing" risk).
-   - Flow: page validates the wallet has a Stripe customer → prominently shows the account-to-be-credited (email + wallet) → user confirms → Wagmi wallet connect → quote (refreshed every 30s, frozen at approve) → approve → pay → poll the listener's grants for credit confirmation.
-   - Small change to `lit-static/dapps/dashboard/` to add the "Pay with tokens" button.
+   **3d.** 🚧 `/payWithLitkey` page — IMPLEMENTED IN THIS PR WORKTREE
+   - [x] New public page at `payments.litprotocol.com/payWithLitkey?wallet=<address>`. Wallet param is plain (no HMAC — see "URL spoofing" risk).
+   - [x] Public wallet-only account preview API exposes `{found,email,wallet_address}` without Stripe customer id or balance.
+   - [x] Public payment config/status APIs expose browser payment config and allow polling `litkey_payments` by `(tx_hash, wallet)` without leaking other customers' status.
+   - [x] Vanilla ethers/EIP-1193 page validates the account, prominently displays email + wallet, requires confirmation, switches to Base mainnet, refreshes the quote every 30s until approval starts, approves exact LITKEY, pays the gateway, and polls listener status.
+   - [ ] Dashboard `Pay with LITKEY` entry point is intentionally deferred until after production smoke testing so the new flow does not go live in the main dashboard before it is fully tested.
    - **Depends on**: 3a contract address (`0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b` on Base mainnet); 3c listener handling the resulting `Payment` events.
 
    **Milestone (when 3a-d ship)**: users self-serve LITKEY payments end-to-end on Base mainnet; the manual "send LITKEY to the wallet and I'll credit you in Stripe" flow is retired.
 
-### Suggested ordering for the remaining PRs
+### Follow-up after phase 3d
 
-`3b` (rate poller) → `3c` (listener) → `3d` (payment page). 3b is fully independent so it's the cleanest next slice. 3c needs the contract address (deploy on Sepolia first) and the rate table from 3b. 3d depends on both.
+After this PR lands, the remaining work is operational plus a small rollout slice: deploy the payments app with listener env configured, smoke-test a small Base mainnet LITKEY payment against the deployed gateway, verify Stripe crediting, then add the dashboard `Pay with LITKEY` entry point once Chris has fully tested the standalone page. After rollout, add monitoring/runbook coverage for stuck listener status or paused pricing.
 
 ## Risks
 

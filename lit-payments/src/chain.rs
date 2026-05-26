@@ -11,13 +11,18 @@ use async_trait::async_trait;
 use futures_util::{SinkExt, StreamExt};
 use lit_billing_core::{StripeClient, balance, customer};
 use reqwest::Client;
-use serde::Deserialize;
+use rocket::State;
+use rocket::http::Status;
+use rocket::serde::json::Json;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use std::{collections::HashMap, time::Duration as StdDuration};
 use tokio::time::{Duration, sleep, timeout};
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 pub const BASE_CHAIN_ID: i64 = 8453;
+pub const LITKEY_TOKEN_ADDRESS: &str = "0xf732a566121fa6362e9e0fbdd6d66e5c8c925e49";
+pub const DEFAULT_GATEWAY_ADDRESS: &str = "0xa2d54cd1d1df1735718a857ac49caf9ecab0093b";
 pub const DEFAULT_CONFIRMATIONS: u64 = 5;
 pub const DEFAULT_RECONCILIATION_INTERVAL_SECS: u64 = 60;
 pub const MAX_RECONCILIATION_BLOCK_RANGE: u64 = 2_000;
@@ -295,6 +300,127 @@ pub async fn insert_payment(pool: &PgPool, payment: &NewLitkeyPayment) -> Result
     .await
     .context("inserting litkey payment")?;
     Ok(inserted.is_some())
+}
+
+#[derive(Debug, Serialize)]
+pub struct LitkeyPaymentConfigResponse {
+    pub chain_id: i64,
+    pub token_address: String,
+    pub gateway_address: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct LitkeyPaymentStatusResponse {
+    pub found: bool,
+    pub status: Option<String>,
+    pub cents_credited: Option<i64>,
+    #[serde(with = "time::serde::rfc3339::option")]
+    pub credited_at: Option<time::OffsetDateTime>,
+}
+
+type ApiError = (Status, Json<crate::portal::types::ErrorResponse>);
+type ApiResult<T> = std::result::Result<Json<T>, ApiError>;
+
+fn api_err(status: Status, message: impl Into<String>) -> ApiError {
+    (
+        status,
+        Json(crate::portal::types::ErrorResponse {
+            error: message.into(),
+        }),
+    )
+}
+
+fn api_server_err(e: impl std::fmt::Display) -> ApiError {
+    tracing::warn!("litkey public route: {e}");
+    api_err(Status::InternalServerError, "internal error")
+}
+
+pub fn canonical_tx_hash_param(tx_hash: &str) -> std::result::Result<String, String> {
+    tx_hash
+        .trim()
+        .parse::<B256>()
+        .map(|hash| format!("{hash:#x}"))
+        .map_err(|_| "tx_hash must be a 0x transaction hash".to_string())
+}
+
+pub fn canonical_wallet_param(wallet: &str) -> std::result::Result<String, String> {
+    wallet
+        .trim()
+        .parse::<Address>()
+        .map(|address| format!("{address:#x}"))
+        .map_err(|_| "wallet must be a 0x Ethereum address".to_string())
+}
+
+/// `GET /api/litkey/payment-config` — public on-chain config for browser payments.
+#[rocket::get("/api/litkey/payment-config")]
+pub fn get_payment_config(
+    config: &State<crate::config::Config>,
+) -> ApiResult<LitkeyPaymentConfigResponse> {
+    let Some(chain) = config.litkey_chain.as_ref() else {
+        return Err(api_err(
+            Status::ServiceUnavailable,
+            "LITKEY payments are not configured",
+        ));
+    };
+    Ok(Json(LitkeyPaymentConfigResponse {
+        chain_id: chain.chain_id,
+        token_address: LITKEY_TOKEN_ADDRESS.to_string(),
+        gateway_address: format_address(chain.gateway_address),
+    }))
+}
+
+pub async fn lookup_payment_status(
+    pool: &PgPool,
+    tx_hash: &str,
+    wallet: &str,
+) -> Result<Option<(String, i64, time::OffsetDateTime)>> {
+    sqlx::query_as::<_, (String, i64, time::OffsetDateTime)>(
+        "SELECT status, cents_credited, credited_at
+         FROM litkey_payments
+         WHERE chain_id = $1 AND tx_hash = $2 AND wallet_address = $3
+         ORDER BY credited_at DESC
+         LIMIT 1",
+    )
+    .bind(BASE_CHAIN_ID)
+    .bind(tx_hash)
+    .bind(wallet)
+    .fetch_optional(pool)
+    .await
+    .context("looking up litkey payment status")
+}
+
+/// `GET /api/litkey/payment-status?tx_hash=…&wallet=…` — public status poller.
+#[rocket::get("/api/litkey/payment-status?<tx_hash>&<wallet>")]
+pub async fn get_payment_status(
+    tx_hash: Option<&str>,
+    wallet: Option<&str>,
+    pool: &State<PgPool>,
+) -> ApiResult<LitkeyPaymentStatusResponse> {
+    let Some(tx_hash) = tx_hash else {
+        return Err(api_err(Status::BadRequest, "tx_hash is required"));
+    };
+    let Some(wallet) = wallet else {
+        return Err(api_err(Status::BadRequest, "wallet is required"));
+    };
+    let tx_hash = canonical_tx_hash_param(tx_hash).map_err(|e| api_err(Status::BadRequest, e))?;
+    let wallet = canonical_wallet_param(wallet).map_err(|e| api_err(Status::BadRequest, e))?;
+    let row = lookup_payment_status(pool, &tx_hash, &wallet)
+        .await
+        .map_err(api_server_err)?;
+    Ok(Json(match row {
+        Some((status, cents_credited, credited_at)) => LitkeyPaymentStatusResponse {
+            found: true,
+            status: Some(status),
+            cents_credited: Some(cents_credited),
+            credited_at: Some(credited_at),
+        },
+        None => LitkeyPaymentStatusResponse {
+            found: false,
+            status: None,
+            cents_credited: None,
+            credited_at: None,
+        },
+    }))
 }
 
 pub async fn current_checkpoint(
@@ -1063,6 +1189,23 @@ mod tests {
             format_address(address),
             "0xa2d54cd1d1df1735718a857ac49caf9ecab0093b"
         );
+    }
+
+    #[test]
+    fn public_status_params_are_canonicalized_before_lookup() {
+        assert_eq!(
+            canonical_wallet_param(" 0xA2D54CD1D1dF1735718A857aC49CaF9ECaB0093b ").unwrap(),
+            "0xa2d54cd1d1df1735718a857ac49caf9ecab0093b"
+        );
+        assert_eq!(
+            canonical_tx_hash_param(
+                " 0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA "
+            )
+            .unwrap(),
+            "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        );
+        assert!(canonical_wallet_param("not-a-wallet").is_err());
+        assert!(canonical_tx_hash_param("0x1234").is_err());
     }
 
     #[test]

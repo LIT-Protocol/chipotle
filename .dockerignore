@@ -1,9 +1,19 @@
+# Keep Railway/Docker build context small.
+.git
+.gitignore
+
 # Build artifacts
 **/target/
 **/.cargo/
+**/node_modules/
 
-# IDE
+# Local env / temp files
+**/.env
+**/.env.*
+**/.DS_Store
+**/tmp/
+**/coverage/
+
+# IDE / tooling caches
 .vscode/
-
-# Trunk
 .trunk/
