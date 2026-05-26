@@ -2,7 +2,7 @@
 
 **Status:** draft for discussion
 **Owner:** chris@litprotocol.com
-**Target deploy:** fly.io (outside the TEE)
+**Target deploy:** Railway (outside the TEE)
 
 ## One-line pitch
 
@@ -21,9 +21,9 @@ the trust boundary is enforced by the scoped usage API key, not by being
 inside the enclave.
 
 This crate sits alongside `lit-payments/` in the workspace — same patterns
-(Rocket + Postgres + sqlx + tracing). Different deploy target (fly.io vs
-Railway) just because fly.io has better support for long-lived workers and
-machines-with-state.
+(Rocket + Postgres + sqlx + tracing). `lit-triggers` deploys on Railway
+for cost, with app sleeping disabled because scheduled and chain-event triggers
+need a continuously running process.
 
 ## Trust model
 
@@ -47,7 +47,7 @@ A user:
 If `lit-triggers` is compromised, the blast radius is "attacker can call the
 already-scoped action with whatever inputs they want." They cannot mint
 wallets, change groups, or pivot to other accounts. The service stores scoped
-usage keys encrypted at rest (envelope-encrypted with a fly secret) and never
+usage keys encrypted at rest (envelope-encrypted with a deploy secret) and never
 logs them.
 
 The capability boundary is the usage key + group permissions + PKP permissions.
@@ -76,7 +76,7 @@ We do not treat a Chipotle account link as part of the v1 security model.
 ### 3. Scheduled
 - Standard cron expression (5-field or 6-field with seconds).
 - Tokio-cron-scheduler or `tokio-cron-scheduler`-equivalent. Single-node
-  scheduling for v1; if we ever scale beyond one fly machine, leader-elect via
+  scheduling for v1; if we ever scale beyond one Railway replica, leader-elect via
   a Postgres advisory lock.
 
 All three trigger types fan in to the same code path: **build a Lit Action
@@ -165,7 +165,7 @@ POST   /api/triggers/:id/test     dry-run fire (uses recorded payload or a stub)
 
 ```
 POST   /webhook/:trigger_id       webhook receiver
-GET    /health                    fly health check
+GET    /health                    deployment health check
 ```
 
 ## Background workers
@@ -244,7 +244,7 @@ usage patterns justify it.
 
 ### 2. Multi-tenant.
 
-One fly app, many users. Per-user data isolation enforced at the SQL layer
+One Railway app, many users. Per-user data isolation enforced at the SQL layer
 via a `user_id` foreign key on every row, and at the Rocket layer via a
 request guard that derives `user_id` from the session cookie.
 
@@ -329,7 +329,7 @@ Confirmed.
 - Non-EVM chains (Solana, Bitcoin, Cosmos).
 - Action chaining / DAGs (output of one trigger feeds another).
 - A built-in template gallery / no-code action builder.
-- Multi-region failover. Single fly machine is fine until it isn't.
+- Multi-region failover. Single Railway replica is fine until it isn't.
 - A Slack/email destination that *isn't* a Lit Action. Everything goes
   through an action; if you want to email, write an action that emails.
 
@@ -343,4 +343,4 @@ Confirmed.
 4. ✅ **PR 4 — chain event trigger (implemented 2026-05-22).** EVM polling listener with watermarks, idempotent deliveries, chain-event validation, and best-effort decoding.
 5. ✅ **PR 5 — admin UI (implemented 2026-05-22).** Static HTML/JS dashboard for managing triggers, in
    the same spirit as `lit-payments/static/`.
-6. ✅ **PR 6 — fly.io deploy (implemented 2026-05-22).** `fly.toml`, secrets, health checks, docs.
+6. ✅ **PR 6 — Railway deploy (implemented 2026-05-22).** `railway.json`, variables/secrets, health checks, docs.

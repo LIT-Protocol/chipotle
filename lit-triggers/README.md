@@ -12,12 +12,12 @@ Required:
 - `RESEND_API_KEY` — Resend API key for magic links
 - `MAIL_FROM` — sender address
 - `PUBLIC_BASE_URL` — public service URL used in magic links
-- `ROCKET_SECRET_KEY` — base64, 32 bytes; required by Rocket private cookies in release/Fly deployments
+- `ROCKET_SECRET_KEY` — base64, 32 bytes; required by Rocket private cookies in release deployments
 
 Optional:
 
 - `CHIPOTLE_API_BASE_URL` — defaults to `https://api.chipotle.litprotocol.com`
-- `PORT` — mapped to `ROCKET_PORT` on startup for fly.io-style platforms
+- `PORT` — mapped to `ROCKET_PORT` on startup for Railway/container platforms
 - `WEBHOOK_MAX_BODY_BYTES` — defaults to `262144`
 - `WEBHOOK_IP_MAX_REQUESTS_PER_MINUTE` — defaults to `60`
 - `WEBHOOK_USER_MAX_REQUESTS_PER_MINUTE` — defaults to `120`
@@ -40,54 +40,75 @@ cargo +1.91 run
 
 Run Postgres locally and set the environment above before starting the server. Migrations run on boot.
 
-## Fly.io deployment
+## Railway deployment
 
-A dedicated Fly config lives at the repo root:
+The repo includes a root-level `railway.json` that tells Railway to build `lit-triggers/Dockerfile`, run `/app/lit-triggers`, keep one replica awake, and health-check `/health`.
+
+Create a Railway project with:
+
+1. One web service connected to this GitHub repo/branch.
+2. One Railway Postgres service in the same project.
+3. The web service root left as the repository root so `railway.json` and `lit-triggers/Dockerfile` are both visible.
+4. App sleeping disabled. `railway.json` sets `sleepApplication: false`; keep it disabled in the Railway UI too because scheduled and chain-event triggers rely on a continuously running worker.
+
+Set the web service variables before deploying:
 
 ```bash
-fly deploy -c fly.lit-triggers.toml
+DATABASE_URL='${{Postgres.DATABASE_URL}}'
+MAGIC_LINK_SIGNING_KEY='<base64-32-byte-key>'
+USAGE_KEY_ENCRYPTION_KEY='<base64-32-byte-key>'
+ROCKET_SECRET_KEY='<base64-32-byte-key>'
+RESEND_API_KEY='<resend-api-key>'
+MAIL_FROM='Lit Triggers <triggers@example.com>'
+PUBLIC_BASE_URL='https://<your-railway-domain>'
+RUST_LOG='info,lit_triggers=info'
+CHIPOTLE_API_BASE_URL='https://api.chipotle.litprotocol.com'
 ```
 
-Create or attach Postgres first and set secrets before deploying. Example:
+Generate the three base64 keys locally:
 
 ```bash
-fly apps create lit-triggers
-fly postgres create --name lit-triggers-db --region iad
-fly postgres attach --app lit-triggers lit-triggers-db
-
 openssl rand -base64 32  # MAGIC_LINK_SIGNING_KEY
 openssl rand -base64 32  # USAGE_KEY_ENCRYPTION_KEY
 openssl rand -base64 32  # ROCKET_SECRET_KEY
-
-fly secrets set --app lit-triggers \
-  MAGIC_LINK_SIGNING_KEY='<base64-32-byte-key>' \
-  USAGE_KEY_ENCRYPTION_KEY='<base64-32-byte-key>' \
-  ROCKET_SECRET_KEY='<base64-32-byte-key>' \
-  RESEND_API_KEY='<resend-api-key>' \
-  MAIL_FROM='Lit Triggers <triggers@example.com>' \
-  PUBLIC_BASE_URL='https://lit-triggers.fly.dev'
 ```
 
 Set chain RPC URLs only for chains you want to enable:
 
 ```bash
-fly secrets set --app lit-triggers \
-  BASE_RPC_URL='https://...' \
-  ETHEREUM_RPC_URL='https://...'
+BASE_RPC_URL='https://...'
+ETHEREUM_RPC_URL='https://...'
 ```
 
-Health check:
+Optional webhook/chain tuning variables can also be set on Railway if the defaults are not enough:
 
 ```bash
-curl https://lit-triggers.fly.dev/health
+WEBHOOK_MAX_BODY_BYTES='262144'
+WEBHOOK_IP_MAX_REQUESTS_PER_MINUTE='60'
+WEBHOOK_USER_MAX_REQUESTS_PER_MINUTE='120'
+WEBHOOK_TRIGGER_MAX_REQUESTS_PER_MINUTE='60'
+WEBHOOK_DEFAULT_MAX_QUEUED_RUNS='100'
+CHAIN_POLL_INTERVAL_SECS='15'
+CHAIN_CONFIRMATION_DEPTH='12'
+CHAIN_MAX_BLOCK_RANGE='500'
+CHAIN_RPC_TIMEOUT_SECS='10'
+CHAIN_INITIAL_LOOKBACK_BLOCKS='100'
+```
+
+Deploy from the Railway UI or CLI after variables are set. Migrations run on boot.
+
+Health check / smoke test:
+
+```bash
+curl https://<your-railway-domain>/health
 ```
 
 Operational notes:
 
-- Run one machine for v1. The scheduler and chain listener use Postgres advisory locks, but single-machine operation keeps timing and queue behavior easiest to reason about.
-- Do not set `auto_stop_machines=true` for this service; scheduled and chain-event triggers rely on a continuously running worker.
-- `DATABASE_URL`, signing keys, encryption keys, Resend credentials, and RPC URLs should be Fly secrets, not `[env]` values.
-- If you deploy under a different Fly app name, use `fly deploy -c fly.lit-triggers.toml -a <app>` and set `PUBLIC_BASE_URL` to that app's HTTPS URL.
+- Run one replica for v1. The scheduler and chain listener use Postgres advisory locks, but single-replica operation keeps timing and queue behavior easiest to reason about.
+- Do not enable app sleeping for this service; scheduled and chain-event triggers rely on a continuously running process.
+- `DATABASE_URL`, signing keys, encryption keys, Resend credentials, and RPC URLs should be Railway variables, not committed config values.
+- If Railway gives you a new public domain, update `PUBLIC_BASE_URL` to that exact HTTPS origin so magic links point back to the deployed app.
 
 ## API foundation
 
