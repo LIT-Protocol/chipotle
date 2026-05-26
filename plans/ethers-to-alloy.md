@@ -120,24 +120,25 @@ Pairs the contract-binding regeneration with the signer/middleware stack swap, s
 - [x] Preserve the JSON artifacts under `src/diamond/*.json`; `lit_node_express` tests/tasks load `DiamondCutFacet.json`, `DiamondLoupeFacet.json`, and `OwnershipFacet.json` directly
 
 ### Phase 7 — Drop Rust `ethers-rs`
-- [ ] Remove `ethers` + `ethers-providers` from `lit-api-server/Cargo.toml`
-- [ ] Remove `ethers` from `lit-core/Cargo.toml` workspace deps (no Rust code imports it; this is a stale workspace dependency only)
-- [ ] Remove `ethers` from `rust_generator_and_deployer/Cargo.toml`
-- [ ] Delete `ethers` / `ethers-providers` entries from the affected `Cargo.lock` files after dependency resolution
-- [ ] Delete the Phase 3 cross-implementation parity test in `lit-api-server/src/core/eip712.rs` (`cross_impl_parity_ethers_signed_verifies_under_alloy`), since it intentionally imports `ethers` until the final Rust drop
-- [ ] Verify `git grep -n -E 'ethers::|use ethers|abigen!|ethers-providers|^ethers[[:space:]]*=' -- ':*.rs' ':*.toml' ':!**/target/**'` only returns allowed historical docs/comments, not build inputs
-- [ ] Delete these entries from `deny.toml` ignore list:
-  - [ ] `RUSTSEC-2023-0071`
-  - [ ] `RUSTSEC-2026-0049`
-  - [ ] `RUSTSEC-2026-0098`
-  - [ ] `RUSTSEC-2026-0099`
-  - [ ] `RUSTSEC-2026-0104`
-- [ ] Update `deny.toml` history comment with the snapshot diff
-- [ ] `cargo deny check advisories` clean (modulo remaining unrelated advisories)
-- [ ] `cargo tree | grep -E '(ethers|rustls-webpki 0\.10|rsa)' ` returns nothing in each Rust workspace:
-  - [ ] `lit-core`
-  - [ ] `lit-api-server`
-  - [ ] `lit-api-server/blockchain/rust_generator_and_deployer`
+- [x] Remove `ethers` + `ethers-providers` from `lit-api-server/Cargo.toml`
+- [x] Remove `ethers` from `lit-core/Cargo.toml` workspace deps (no Rust code imports it; this is a stale workspace dependency only)
+- [x] Confirm `rust_generator_and_deployer/Cargo.toml` no longer has an `ethers` dependency after Phase 6
+- [x] Delete `ethers` / `ethers-providers` entries from the affected `Cargo.lock` files after dependency resolution
+- [x] Delete the Phase 3 cross-implementation parity test in `lit-api-server/src/core/eip712.rs` (`cross_impl_parity_ethers_signed_verifies_under_alloy`), since it intentionally imports `ethers` until the final Rust drop
+- [x] Verify `git grep -n -E 'ethers::|use ethers|abigen!|ethers-providers|^ethers[[:space:]]*=' -- ':*.rs' ':*.toml' ':!**/target/**'` returns nothing in Rust build inputs
+- [x] Check `deny.toml` advisories after ethers removal and update stale ethers-specific reasons
+- [x] Keep advisories that still have non-ethers dependency paths, with updated reasons:
+  - [x] `RUSTSEC-2023-0071` remains via `dcap-qvl` dev-dependencies
+  - [x] `RUSTSEC-2026-0049` remains via non-ethers rustls users
+  - [x] `RUSTSEC-2026-0098` remains via non-ethers rustls users
+  - [x] `RUSTSEC-2026-0099` remains via non-ethers rustls users
+  - [x] `RUSTSEC-2026-0104` remains via non-ethers rustls users
+- [x] Update `deny.toml` history comment with the snapshot diff
+- [x] `cargo deny check --config <repo-root>/deny.toml advisories sources` passes in each Rust workspace
+- [x] `cargo tree -i ethers` returns no ethers-rs package in each Rust workspace:
+  - [x] `lit-core`
+  - [x] `lit-api-server`
+  - [x] `lit-api-server/blockchain/rust_generator_and_deployer`
 
 ## Risk register
 

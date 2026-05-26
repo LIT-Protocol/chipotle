@@ -28,7 +28,6 @@ bulletproofs = { git = "https://github.com/LIT-Protocol/bulletproofs.git", branc
 bytes = { version = "1.10" }
 derive_more = { version = "2", features = ["display"] }
 elliptic-curve-tools = { version = "0.1", features = ["std"] }
-ethers = { version = "2.0", features = ["abigen", "legacy"] }
 futures = { version = "0.3" }
 generic-array = "=1.1.1"
 hex = "0.4"
