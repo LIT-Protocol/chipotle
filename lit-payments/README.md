@@ -56,7 +56,7 @@ MAGIC_LINK_SIGNING_KEY=$(openssl rand -base64 32)
 RESEND_API_KEY=re_...                    # https://resend.com → API keys
 MAIL_FROM=noreply@mail.litprotocol.com   # must be a verified Resend sender
 PUBLIC_BASE_URL=http://localhost:8000
-STRIPE_SECRET_KEY=rk_test_...            # Stripe restricted key
+STRIPE_SECRET_KEY=rk_test_...            # Stripe restricted key; needs Customers: Read plus Billing > Customer Balance Transaction: Write
 ROCKET_SECRET_KEY=$(openssl rand -base64 32)  # required for private cookies in release
 ROCKET_PORT=8000
 
@@ -190,7 +190,7 @@ MAGIC_LINK_SIGNING_KEY=<openssl rand -base64 32>
 ROCKET_SECRET_KEY=<openssl rand -base64 32>
 RESEND_API_KEY=re_...
 MAIL_FROM=noreply@mail.litprotocol.com
-STRIPE_SECRET_KEY=rk_live_...
+STRIPE_SECRET_KEY=rk_live_...   # restricted key: Customers Read + Billing > Customer Balance Transaction Write
 
 # LITKEY pricing / listener
 LITKEY_DISCOUNT_BASIS_POINTS=0

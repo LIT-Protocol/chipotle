@@ -40,8 +40,8 @@ fn err(status: Status, message: impl Into<String>) -> ApiError {
     )
 }
 
-fn server_err(e: impl std::fmt::Display) -> ApiError {
-    tracing::warn!("portal route: {e}");
+fn server_err(e: impl std::fmt::Display + std::fmt::Debug) -> ApiError {
+    tracing::warn!(error = %e, error_debug = ?e, "portal route internal error");
     err(Status::InternalServerError, "internal error")
 }
 
