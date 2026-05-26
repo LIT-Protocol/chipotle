@@ -81,9 +81,9 @@ ROCKET_PORT=8000
 paying LITKEY to the deployed gateway on Base mainnet. The page validates that
 the URL wallet maps to a customer, prominently displays the email and wallet that
 will be credited, refreshes the quote every 30 seconds until approval starts,
-shows the market LITKEY rate, configured discount percentage, discount-adjusted
-credit rate, and with/without-discount LITKEY amounts, freezes the quote and
-LITKEY amount for exact-amount approval, calls
+shows the market LITKEY rate, configured discount percentage,
+discount-adjusted credit rate, and discounted LITKEY amount, freezes the quote
+and LITKEY amount for exact-amount approval, calls
 `pay(amount, wallet)`, then posts the resulting transaction hash plus credited
 wallet to `/api/litkey/payment-claim`. The claim endpoint fetches that exact
 transaction receipt, verifies the configured gateway emitted the expected

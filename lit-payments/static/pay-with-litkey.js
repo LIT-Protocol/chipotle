@@ -67,17 +67,11 @@
     return quote && quote.rate && quote.rate.usd_wei_per_litkey ? quote.rate.usd_wei_per_litkey : null;
   }
 
-  function setQuoteDisplays(quote, cents) {
+  function setQuoteDisplays(quote) {
     const market = marketRate(quote);
     setText('rate-display', market ? formatUsdWei(market) + ' / LITKEY' : '—');
     setText('discount-display', formatDiscountBps(quote ? quote.discount_basis_points : 0));
     setText('effective-rate-display', quote && quote.effective_usd_wei_per_litkey ? formatUsdWei(quote.effective_usd_wei_per_litkey) + ' credit / LITKEY' : '—');
-    if (!cents || !market || !quote || !quote.effective_usd_wei_per_litkey) {
-      setText('undiscounted-litkey-amount', '—');
-      return;
-    }
-    const undiscounted = amountWeiForCents(cents, market);
-    setText('undiscounted-litkey-amount', formatToken(undiscounted) + ' LITKEY');
   }
 
   async function fetchJson(url) {
@@ -131,7 +125,7 @@
     const quote = state.frozenQuote || state.quote;
     if (!quote || quote.crediting_paused || !quote.effective_usd_wei_per_litkey) {
       setText('quote-status', 'Crediting paused');
-      setQuoteDisplays(quote, null);
+      setQuoteDisplays(quote);
       setText('litkey-amount', '—');
       $('approve').disabled = true;
       $('pay').disabled = true;
@@ -140,7 +134,7 @@
 
     if (!state.config) {
       setText('quote-status', 'Payments unavailable');
-      setQuoteDisplays(quote, null);
+      setQuoteDisplays(quote);
       setText('litkey-amount', '—');
       $('approve').disabled = true;
       $('pay').disabled = true;
@@ -152,7 +146,7 @@
     if (state.frozenAmountWei !== null) {
       state.amountWei = state.frozenAmountWei;
       setText('litkey-amount', formatToken(state.frozenAmountWei) + ' LITKEY');
-      setQuoteDisplays(quote, cents);
+      setQuoteDisplays(quote);
       setText('quote-status', 'Frozen for approval');
       $('approve').disabled = true;
       $('pay').disabled = state.approvedAmountWei === null;
@@ -162,14 +156,14 @@
     if (!cents || cents < MIN_CENTS) {
       setText('quote-status', 'Enter at least $5.00');
       setText('litkey-amount', '—');
-      setQuoteDisplays(quote, null);
+      setQuoteDisplays(quote);
       $('approve').disabled = true;
       $('pay').disabled = true;
       return;
     }
     state.amountWei = amountWeiForCents(cents, quote.effective_usd_wei_per_litkey);
     setText('litkey-amount', formatToken(state.amountWei) + ' LITKEY');
-    setQuoteDisplays(quote, cents);
+    setQuoteDisplays(quote);
     setText('quote-status', 'Live');
     $('approve').disabled = !$('confirm-account').checked || !state.signer;
     $('pay').disabled = true;
