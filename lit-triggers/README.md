@@ -42,3 +42,22 @@ Authenticated routes:
 - `POST /api/triggers/<id>/test` — returns `501 Not Implemented` until worker phases
 
 Usage API keys are accepted only on create/update and are never returned by API responses.
+
+## Static admin UI
+
+The dashboard at `/` is a plain HTML/CSS/JS app served from `lit-triggers/static/`.
+It supports profile display, logout, trigger creation/edit/delete, recent run
+inspection, and kind-specific config helpers for webhook, schedule, and EVM chain
+event triggers.
+
+For new triggers, users can either:
+
+1. Paste a Lit/Chipotle admin API key into the browser-only mint flow. The UI
+   calls Chipotle's `add_usage_api_key` endpoint directly with a narrow
+   `execute_in_groups` scope, clears the admin key field after the mint attempt,
+   and sends only the scoped usage key to lit-triggers.
+2. Paste a pre-minted scoped usage key manually and skip browser minting.
+
+The UI phrases CIDs as action code identities: a CID identifies the action code
+content that will be executed with the supplied scoped usage key and group
+permissions; it does not imply ownership of that CID.
