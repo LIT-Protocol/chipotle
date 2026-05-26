@@ -7,8 +7,8 @@ Date: 2026-05-18 (last updated: 2026-05-21)
 ## Current state (TL;DR for a new session)
 
 - **Shipped to `main`**: `lit-billing-core` extraction (PR #358), `lit-payments` foundation + magic-link auth (PR #359), admin credit portal + initial deploy target (PR #370), LITKEY gateway/rate/listener scaffolding (PR #373), and listener runtime with WSS fast path + Alloy migration (PR #378).
-- **This PR worktree**: phase 3d implements `/payWithLitkey`, public wallet-scoped preview/config/status APIs, and Railway deployment config/docs. The dashboard entry point is intentionally held back until after production smoke testing.
-- **Remaining before retiring manual flow**: deploy/smoke-test the runtime + payment page in a controlled environment, monitor first live credits, add the dashboard `Pay with LITKEY` entry point, and add operational alerts/runbooks as needed.
+- **This PR worktree**: dashboard entry point adds a `Pay with LITKEY for 25% off` option inside the Add Funds modal, routing users to the standalone `payments.litprotocol.com/payWithLitkey?wallet=…` flow with the account funding wallet prefilled.
+- **Remaining before retiring manual flow**: deploy/smoke-test the dashboard entry point, monitor first live credits from dashboard-launched LITKEY payments, and add operational alerts/runbooks as needed.
 
 The rest of this doc is the original design + decisions, kept for context. Implementation details that diverged from the plan are noted inline.
 
@@ -236,7 +236,7 @@ No separate `audit_log` table: every state-changing action is recorded on its ow
 
 ### User flow
 
-User in the dashboard at `dashboard.litprotocol.com` clicks "Pay with tokens" → opens `payments.litprotocol.com/payWithLitkey?wallet=<address>` in a new tab.
+User in the dashboard at `dashboard.litprotocol.com` opens Add Funds and clicks "Pay with LITKEY for 25% off" → navigates to `payments.litprotocol.com/payWithLitkey?wallet=<address>`.
 
 1. Page reads the wallet from the URL → looks up the Stripe customer → **prominently displays the account that will be credited** (email + wallet) for the user to confirm.
 2. User connects their paying wallet (Wagmi). May be the same as the credited wallet or a different one (e.g., a separate Metamask holding LITKEY).

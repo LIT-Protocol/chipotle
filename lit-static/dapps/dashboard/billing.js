@@ -33,6 +33,8 @@ import {
   getClient,
   getMode,
   hasUsageKeyOverride,
+  LIST_PAGE_SIZE,
+  setWalletsStore,
 } from './auth.js';
 import { formatError, logError } from './ui-utils.js';
 
@@ -46,6 +48,7 @@ let _billingAvailable = null;
 let _billingCheckedAt = 0;
 let _billingRetryTimer = null;
 const BILLING_RETRY_MS = 30000;
+const LITKEY_PAYMENT_URL = 'https://payments.litprotocol.com/payWithLitkey';
 
 // AbortController for in-flight billing fetches. Recreated lazily; aborted on
 // session change via clearBillingSession().
@@ -54,6 +57,55 @@ let _abortController = null;
 // Cached wallet-auth payload. Re-used across billing requests within the
 // timestamp window. { headerValue, expiresAtMs, walletAddress }
 let _walletAuthCache = null;
+
+function isAddress(value) {
+  return /^0x[0-9a-fA-F]{40}$/.test(value || '');
+}
+
+function walletAddressFromItem(item) {
+  return item && (item.wallet_address || item.address || item.name || '');
+}
+
+function pickAccountFundingWallet(wallets) {
+  if (!Array.isArray(wallets) || wallets.length === 0) return '';
+  const accountWallet = wallets.find((item) => {
+    const label = String(item.description || item.name || '').toLowerCase();
+    return label.includes('account master wallet') || label === 'amw';
+  });
+  return walletAddressFromItem(accountWallet);
+}
+
+async function resolveLitkeyPaymentWallet() {
+  const chainSecuredWallet = getChainSecuredWallet();
+  if (isAddress(chainSecuredWallet)) return chainSecuredWallet;
+
+  if (hasUsageKeyOverride()) throw new Error('Clear Usage Key Override before adding funds.');
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error('No account wallet is available for LITKEY payment.');
+  const client = await getClient();
+  const wallets = await client.listWallets({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
+  setWalletsStore(wallets || []);
+
+  const wallet = pickAccountFundingWallet(wallets);
+  if (!isAddress(wallet)) throw new Error('No account master wallet is available for LITKEY payment.');
+  return wallet;
+}
+
+async function openLitkeyPaymentPage() {
+  const btn = document.getElementById('billing-litkey-btn');
+  if (btn) btn.disabled = true;
+  setStatus('Preparing LITKEY payment link…', 'info');
+  try {
+    const wallet = await resolveLitkeyPaymentWallet();
+    const url = LITKEY_PAYMENT_URL + '?wallet=' + encodeURIComponent(wallet);
+    window.location.assign(url);
+  } catch (e) {
+    logError('openLitkeyPaymentPage', e);
+    setStatus('Could not open LITKEY payment: ' + formatError(e), 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
 
 /**
  * True when we have a valid (unexpired, current-wallet) wallet-auth header.
@@ -577,8 +629,10 @@ export function initBilling() {
   const continueBtn = document.getElementById('billing-continue-btn');
   const backBtn = document.getElementById('billing-back-btn');
   const payBtn = document.getElementById('billing-pay-btn');
+  const litkeyBtn = document.getElementById('billing-litkey-btn');
 
   if (addFundsBtn) addFundsBtn.addEventListener('click', openAddFundsModal);
+  if (litkeyBtn) litkeyBtn.addEventListener('click', openLitkeyPaymentPage);
   const noFundsLink = document.getElementById('no-funds-add-funds');
   if (noFundsLink) noFundsLink.addEventListener('click', (e) => { e.preventDefault(); openAddFundsModal(); });
   if (closeBtn) closeBtn.addEventListener('click', closeBillingModal);
