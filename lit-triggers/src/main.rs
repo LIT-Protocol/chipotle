@@ -44,6 +44,7 @@ async fn rocket() -> _ {
                 index,
                 login_page,
                 health,
+                skill_doc,
                 auth_routes::request_link,
                 auth_routes::verify_link,
                 auth_routes::logout,
@@ -84,6 +85,13 @@ fn init_tracing() {
 #[get("/health")]
 fn health() -> &'static str {
     "ok"
+}
+
+#[get("/SKILL.md")]
+async fn skill_doc() -> Result<NamedFile, Status> {
+    NamedFile::open("SKILL.md")
+        .await
+        .map_err(|_| Status::NotFound)
 }
 
 #[get("/")]

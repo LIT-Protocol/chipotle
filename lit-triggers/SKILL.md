@@ -38,7 +38,7 @@ Do not use this for:
 Set these locally before using the examples:
 
 ```bash
-export LT_BASE_URL='https://<deployed-lit-triggers-domain>'
+export LT_BASE_URL='https://triggers.litprotocol.com'
 export LT_EMAIL='<your-test-email>'
 export SCOPED_USAGE_API_KEY='<chipotle-usage-key-scoped-to-execute-in-the-target-group>'
 export COOKIE_JAR="$(mktemp)"

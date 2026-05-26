@@ -44,6 +44,8 @@ Run Postgres locally and set the environment above before starting the server. M
 
 `SKILL.md` is a handoff file for agents that need to test a deployed `lit-triggers` instance. It covers magic-link authentication, trigger CRUD, webhook firing, schedule polling, chain-event setup, run inspection, and cleanup.
 
+It is exposed publicly at `https://triggers.litprotocol.com/SKILL.md` and linked from the app as **Give this to your agent to get started**.
+
 Give a testing agent:
 
 - `lit-triggers/SKILL.md`
@@ -73,7 +75,7 @@ USAGE_KEY_ENCRYPTION_KEY='<base64-32-byte-key>'
 ROCKET_SECRET_KEY='<base64-32-byte-key>'
 RESEND_API_KEY='<resend-api-key>'
 MAIL_FROM='Lit Triggers <triggers@example.com>'
-PUBLIC_BASE_URL='https://<your-railway-domain>'
+PUBLIC_BASE_URL='https://triggers.litprotocol.com'
 RUST_LOG='info,lit_triggers=info'
 CHIPOTLE_API_BASE_URL='https://api.chipotle.litprotocol.com'
 ```
@@ -113,7 +115,7 @@ Deploy from the Railway UI or CLI after variables are set. Migrations run on boo
 Health check / smoke test:
 
 ```bash
-curl https://<your-railway-domain>/health
+curl https://triggers.litprotocol.com/health
 ```
 
 Operational notes:
