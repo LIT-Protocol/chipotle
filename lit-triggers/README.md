@@ -40,6 +40,17 @@ cargo +1.91 run
 
 Run Postgres locally and set the environment above before starting the server. Migrations run on boot.
 
+## Agent-consumable testing docs
+
+`SKILL.md` is a handoff file for agents that need to test a deployed `lit-triggers` instance. It covers magic-link authentication, trigger CRUD, webhook firing, schedule polling, chain-event setup, run inspection, and cleanup.
+
+Give a testing agent:
+
+- `lit-triggers/SKILL.md`
+- the deployed `LT_BASE_URL`
+- a test email that can receive magic links
+- a scoped Chipotle usage API key for the target group/action permissions
+
 ## Railway deployment
 
 The service owns its Railway config at `lit-triggers/railway.json`. In Railway, set this service's root directory to `lit-triggers` so multiple Railway services/projects can coexist in the monorepo without sharing one root config.
