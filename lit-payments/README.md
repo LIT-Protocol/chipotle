@@ -92,8 +92,8 @@ reveals whether the supplied wallet has a Stripe customer and the email that wil
 be credited so payment-link recipients can verify the destination before
 spending. The payment config endpoint fails closed when the listener is disabled,
 so users cannot be directed to send LITKEY while automatic crediting is offline.
-The dashboard exposes a conservative `Pay with LITKEY` entry point only when the
-signed-in user is in ChainSecured mode and the wallet address is known.
+The main dashboard entry point is intentionally deferred until after production
+smoke testing; for now operators can test the standalone page directly.
 
 When `ALCHEMY_WSS_URL`, `ALCHEMY_HTTPS_URL`, and `LITKEY_GATEWAY_ADDRESS` are
 configured, the app spawns both an Alchemy WSS logs subscription fast path and a

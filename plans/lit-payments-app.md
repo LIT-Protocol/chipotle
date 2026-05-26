@@ -7,8 +7,8 @@ Date: 2026-05-18 (last updated: 2026-05-21)
 ## Current state (TL;DR for a new session)
 
 - **Shipped to `main`**: `lit-billing-core` extraction (PR #358), `lit-payments` foundation + magic-link auth (PR #359), admin credit portal + Fly.io deploy target (PR #370), LITKEY gateway/rate/listener scaffolding (PR #373), and listener runtime with WSS fast path + Alloy migration (PR #378).
-- **This PR worktree**: phase 3d implements `/payWithLitkey`, public wallet-scoped preview/config/status APIs, and a dashboard `Pay with LITKEY` entry point for ChainSecured wallets.
-- **Remaining before retiring manual flow**: deploy/smoke-test the runtime + payment page in a controlled environment, monitor first live credits, and add operational alerts/runbooks as needed.
+- **This PR worktree**: phase 3d implements `/payWithLitkey` and public wallet-scoped preview/config/status APIs. The dashboard entry point is intentionally held back until after production smoke testing.
+- **Remaining before retiring manual flow**: deploy/smoke-test the runtime + payment page in a controlled environment, monitor first live credits, add the dashboard `Pay with LITKEY` entry point, and add operational alerts/runbooks as needed.
 
 The rest of this doc is the original design + decisions, kept for context. Implementation details that diverged from the plan are noted inline.
 
@@ -408,19 +408,19 @@ All questions are closed. Plan is ready to start building.
    - Migrations: `litkey_payments`, `chain_checkpoint`.
    - **Depends on**: 3a contract deployed + address known (`0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b` on Base mainnet); 3b rate table existing.
 
-   **3d.** 🚧 `/payWithLitkey` page + dashboard "Pay with LITKEY" link — IMPLEMENTED IN THIS PR WORKTREE
+   **3d.** 🚧 `/payWithLitkey` page — IMPLEMENTED IN THIS PR WORKTREE
    - [x] New public page at `payments.litprotocol.com/payWithLitkey?wallet=<address>`. Wallet param is plain (no HMAC — see "URL spoofing" risk).
    - [x] Public wallet-only account preview API exposes `{found,email,wallet_address}` without Stripe customer id or balance.
    - [x] Public payment config/status APIs expose browser payment config and allow polling `litkey_payments` by `(tx_hash, wallet)` without leaking other customers' status.
    - [x] Vanilla ethers/EIP-1193 page validates the account, prominently displays email + wallet, requires confirmation, switches to Base mainnet, refreshes the quote every 30s until approval starts, approves exact LITKEY, pays the gateway, and polls listener status.
-   - [x] Small change to `lit-static/dapps/dashboard/` to add the "Pay with LITKEY" button for ChainSecured wallets when billing is available and a wallet address is known.
+   - [ ] Dashboard `Pay with LITKEY` entry point is intentionally deferred until after production smoke testing so the new flow does not go live in the main dashboard before it is fully tested.
    - **Depends on**: 3a contract address (`0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b` on Base mainnet); 3c listener handling the resulting `Payment` events.
 
    **Milestone (when 3a-d ship)**: users self-serve LITKEY payments end-to-end on Base mainnet; the manual "send LITKEY to the wallet and I'll credit you in Stripe" flow is retired.
 
 ### Follow-up after phase 3d
 
-After this PR lands, the remaining work is operational rather than another planned build slice: deploy the payments app with listener env configured, smoke-test a small Base mainnet LITKEY payment against the deployed gateway, verify Stripe crediting and dashboard balance refresh, then add monitoring/runbook coverage for stuck listener status or paused pricing.
+After this PR lands, the remaining work is operational plus a small rollout slice: deploy the payments app with listener env configured, smoke-test a small Base mainnet LITKEY payment against the deployed gateway, verify Stripe crediting, then add the dashboard `Pay with LITKEY` entry point once Chris has fully tested the standalone page. After rollout, add monitoring/runbook coverage for stuck listener status or paused pricing.
 
 ## Risks
 
