@@ -1,6 +1,6 @@
 -- LITKEY on-chain payment records. Successful credits are idempotent by
--- chain + tx hash + log index so WSS and reconciliation poller races cannot
--- double-credit the same Payment event.
+-- chain + tx hash + log index so repeated browser tx-claim submissions cannot
+-- double-credit a payment.
 CREATE TABLE litkey_payments (
     id BIGSERIAL PRIMARY KEY,
     chain_id BIGINT NOT NULL,

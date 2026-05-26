@@ -78,7 +78,7 @@ lit-node-express/
 ├── lit-payments/           ← NEW (non-TEE)
 │   ├── src/
 │   │   ├── main.rs
-│   │   ├── chain.rs        ← LITKEY listener (WSS + poll)
+│   │   ├── chain.rs        ← LITKEY tx-hash claim verification
 │   │   ├── db.rs           ← Postgres
 │   │   ├── auth.rs         ← magic-link
 │   │   └── endpoints/
@@ -108,9 +108,9 @@ Tech stack: **Rust + Rocket + vanilla HTML/JS**. Matches existing repo conventio
 
 - **Hostname**: `payments.litprotocol.com`.
 - **Platform**: Railway (service + Railway Postgres, or external Postgres via Supabase/Neon). `lit-payments/railway.json` keeps this service's Railway config scoped to the subfolder while pointing at `lit-payments/Dockerfile`; keep the Railway service build context at repo root so Docker can copy the sibling `lit-billing-core/` crate.
-- **Outside the TEE.** No attestation pain; operators can use Railway logs / shell for diagnostics. Keep one replica continuously running; do not sleep/scale-to-zero because the listener has WSS/reconciliation background loops.
+- **Outside the TEE.** No attestation pain; operators can use Railway logs / shell for diagnostics. Keep one replica warm for user-facing payment confirmation latency; the browser claim path no longer depends on background listener loops.
 - **Ingress**: Railway-generated domain initially, then custom domain `payments.litprotocol.com` once smoke tests pass.
-- **Secrets** (Railway service variables): Stripe restricted key, DB URL, magic-link signing key, Resend API key, Alchemy WSS + HTTPS URLs, gateway contract address, and `ROCKET_SECRET_KEY` for Rocket's private-cookie encryption. LITKEY token address is fixed in the payment config endpoint for the current Base deployment; CoinGecko uses the hardcoded `lit-protocol` id.
+- **Secrets** (Railway service variables): Stripe restricted key, DB URL, magic-link signing key, Resend API key, Alchemy HTTPS URL, gateway contract address, and `ROCKET_SECRET_KEY` for Rocket's private-cookie encryption. LITKEY token address is fixed in the payment config endpoint for the current Base deployment; CoinGecko uses the hardcoded `lit-protocol` id.
 
 ### Auth tiers
 
@@ -190,7 +190,7 @@ Six tables, each justified:
 - `grants` — portal action log + idempotency.
 - `litkey_payments` — credit record + idempotency.
 - `litkey_rate` — current rate (single row) + who last touched it.
-- `chain_checkpoint` — listener resume point.
+- `chain_checkpoint` — legacy listener resume point; not used by the simplified browser tx-claim path.
 
 No separate `audit_log` table: every state-changing action is recorded on its own resource row with the actor (`operator_id`) and timestamp. Logins are server logs only.
 
@@ -227,9 +227,9 @@ No separate `audit_log` table: every state-changing action is recorded on its ow
 - **Token**: LITKEY at `0xf732a566121fa6362e9e0fbdd6d66e5c8c925e49` (Base bridge deployment, `OptimismMintableERC20`).
 - **No `permit` / no EIP-3009.** Two-tx flow: `approve` then `pay`.
 - **Approval pattern**: exact-amount only.
-- **Confirmation depth**: 5 blocks.
+- **Confirmation depth**: no separate backend confirmation wait for the browser claim path; the page waits for the wallet transaction receipt, then the backend verifies that exact receipt.
 - **Treasury**: existing company Safe on Base.
-- **Listener**: Alchemy WSS primary + 60s reconciliation poll.
+- **Crediting trigger**: browser submits the known gateway transaction hash to the backend; the backend fetches the receipt and verifies the `Payment` event directly.
 - **Rate source**: CoinGecko free public API, `id=lit-protocol`, polled every 5 min.
 - **Minimum payment**: $5 equivalent.
 - **Audit**: internal review (Chris) on the contract.
@@ -242,7 +242,7 @@ User in the dashboard at `dashboard.litprotocol.com` clicks "Pay with tokens" �
 2. User connects their paying wallet (Wagmi). May be the same as the credited wallet or a different one (e.g., a separate Metamask holding LITKEY).
 3. Page shows "You'll send N LITKEY (~$X credit at current rate)."
 4. User clicks Pay → wallet pops up twice (`approve`, then `pay`).
-5. Page polls for credit confirmation. On success: confirmation + link back to dashboard.
+5. Page waits for the transaction receipt, posts the tx hash to the backend once, and shows the credit result.
 
 **Note on URL spoofing.** The wallet in the URL is unauthenticated — anyone can craft a link to credit any account. We don't try to prevent that. The worst case is one of:
 - Someone gifts a credit to another account (no harm).
@@ -270,23 +270,22 @@ contract LitkeyPaymentGateway {
 }
 ```
 
-Dashboard Pay button calls `litkey.approve(gateway, amount)` then `gateway.pay(amount, walletToCredit)`. Listener watches `Payment` — `wallet` (which maps to a Stripe customer via `metadata.wallet_address`) is baked into every event. Zero ambiguity even under concurrent payments. Funds land directly in the Safe.
+Dashboard Pay button calls `litkey.approve(gateway, amount)` then `gateway.pay(amount, walletToCredit)`. The browser sends the resulting tx hash to the backend; `wallet` (which maps to a Stripe customer via `metadata.wallet_address`) is baked into the emitted `Payment` event. Zero ambiguity even under concurrent payments. Funds land directly in the Safe.
 
-**Direct sends to the Safe are unsupported.** If a user pastes the Safe address and sends LITKEY directly (skipping the contract), they bypass the listener entirely. Those tokens just sit in the Safe as company income. If a user complains, the mod uses the admin credit portal (Feature 1) to grant credit manually. The portal exists for exactly these one-off cases — we don't need a second machinery for them.
+**Direct sends to the Safe are unsupported.** If a user pastes the Safe address and sends LITKEY directly (skipping the contract), they bypass the gateway event entirely. Those tokens just sit in the Safe as company income. If a user complains, the mod uses the admin credit portal (Feature 1) to grant credit manually. The portal exists for exactly these one-off cases — we don't need a second machinery for them.
 
-### Listener
+### Payment claim
 
-WebSocket primary + 60s reconciliation poll:
+Browser-submitted tx hash, no background listener/poller:
 
-- **WSS subscription** (Alchemy) to `Payment` events from the gateway contract. Reconnect with exponential backoff (1s → 2s → 4s → … cap 30s).
-- **60s poll** for `Payment` logs in `(last_processed_block, latest_block - 5)`. Same handler, same idempotency check.
-- **Checkpoint**: `chain_checkpoint.last_processed_block` advanced only by the poll path.
-- **Confirmation depth**: defer crediting until `latest_block - event_block >= 5`.
-- **Idempotency**: `(tx_hash, log_index)` unique in `litkey_payments`.
+- **Claim endpoint**: `POST /api/litkey/payment-claim` with `{ tx_hash, wallet }`.
+- **Receipt verification**: backend fetches `eth_getTransactionReceipt`, rejects failed txs, and selects the configured gateway's `Payment(indexed wallet,indexed payer,uint256 amount)` log matching the credited wallet.
+- **No status endpoint / no polling loop**: the browser waits for its wallet receipt and submits the exact tx hash once.
+- **Idempotency**: `(chain_id, tx_hash, log_index)` unique in `litkey_payments`.
 
 ### Credit flow
 
-1. `Payment` event observed at confirmation depth.
+1. `Payment` event found in the submitted transaction receipt.
 2. Idempotency check on `(tx_hash, log_index)`.
 3. Look up Stripe customer by `metadata.wallet_address == event.wallet`. If none: log a warning and skip — do not credit, do not alert. Anyone calling `pay()` directly with a wallet that isn't a Lit customer is off the supported path; they'll reach out to support if it matters.
 4. Read `usd_wei_per_litkey` from `litkey_rate` (`1 USD = 1e18` fixed-point units). Compute Stripe cents from native `Payment.amount` LITKEY wei with BigInt-style integer math: `amount_wei * usd_wei_per_litkey * 100 * 10000 / (1e18 token scale * 1e18 USD scale * (10000 - discount_bps))`, rounded once at the final Stripe-cent boundary.
@@ -314,10 +313,10 @@ GET https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies
 
 - **`event.wallet` doesn't match any Stripe customer** → log + skip. No alert. If the payer cares, they'll contact support and a mod can grant via the credit portal.
 - **Direct send to the Safe** → unsupported; tokens just sit in the Safe. User contacts support → mod uses the credit portal.
-- **Reorgs** → 5-confirmation depth on Base prevents.
+- **Reorgs** → intentionally not modeled for the browser claim path; Base reorg risk is accepted here.
 - **Overpayment** → credit at current rate; no refund flow in v1.
 - **Rate drift between approve and pay** → contract executes whatever amount was approved; we credit at rate-at-event-time. Page warns "finalized at confirmation."
-- **Contract upgrade** → contract is intentionally minimal & immutable; if behavior changes, deploy a new contract and update the listener.
+- **Contract upgrade** → contract is intentionally minimal & immutable; if behavior changes, deploy a new contract and update the browser payment config.
 
 ## Decisions (locked in)
 
@@ -337,7 +336,7 @@ GET https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies
 | 12 | Treasury | Existing company Safe on Base |
 | 13 | Contract audit | Internal review only (Chris) |
 | 14 | Approval pattern | Exact-amount only |
-| 15 | RPC provider | Alchemy (WSS primary + HTTPS poll fallback) |
+| 15 | RPC provider | Alchemy HTTPS for tx receipt verification |
 
 ## Decisions table — extended (build-time config)
 
@@ -382,7 +381,7 @@ All questions are closed. Plan is ready to start building.
    - [x] `scripts/deploy.ts` (env-driven, optional Basescan auto-verify) + README.
    - [x] CI workflow `.github/workflows/lit-payments-contracts-ci.yml`.
    - [x] Manual: deployed to Base mainnet at `0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b` with the company Safe as treasury. Smoke test: 1 wei of LITKEY sent through the gateway arrived in the company Safe.
-   - [x] Deployment invariant documented: `litkey` and `treasury` are immutable constructor args. Changing the token or recipient Safe requires deploying a new `LitkeyPaymentGateway` and updating listener/dashboard config to the new address.
+   - [x] Deployment invariant documented: `litkey` and `treasury` are immutable constructor args. Changing the token or recipient Safe requires deploying a new `LitkeyPaymentGateway` and updating browser payment config to the new address.
 
    **3b.** ✅ CoinGecko rate poller + `litkey_rate` schema + admin rate-override UI — IMPLEMENTED IN PR WORKTREE
    - [x] Background task in `lit-payments` polling `https://api.coingecko.com/api/v3/simple/price?ids=lit-protocol&vs_currencies=usd` every 5 min.
@@ -392,35 +391,32 @@ All questions are closed. Plan is ready to start building.
    - [x] Env-configured LITKEY payment discount (`LITKEY_DISCOUNT_BASIS_POINTS`, default `0`; `2000` = 20% off vs credit card) exposed in the rate API/UI as the discount-adjusted effective credit rate.
    - [x] **No on-chain dependency** — can ship before 3c.
 
-   **3c.** 🚧 Alchemy WSS listener + `litkey_payments` + `chain_checkpoint` — STARTED IN PR WORKTREE
+   **3c.** 🚧 Browser tx-hash claim verification + `litkey_payments` — STARTED IN PR WORKTREE
    - [x] Added phase-3c schema: `litkey_payments` with `UNIQUE(chain_id, tx_hash, log_index)`, canonical address/hash checks, explicit `status` (`credited`, `dust`, `paused`, `no_customer`) so dust/paused/skipped events can still be audited, and `chain_checkpoint` keyed by `(chain_id, gateway_address)` so a replacement gateway cannot inherit the old checkpoint.
-   - [x] Added listener configuration/env parsing for `ALCHEMY_WSS_URL`, `ALCHEMY_HTTPS_URL`, `LITKEY_GATEWAY_ADDRESS`, `LITKEY_CHAIN_ID` (Base mainnet `8453` only), `LITKEY_CONFIRMATIONS` (default `5`, must be >0), and `LITKEY_RECONCILIATION_INTERVAL_SECS` (default `60`, must be >0). If the chain env vars are absent, the portal/rate poller still boot and LITKEY crediting stays disabled.
-   - [x] Added shared listener primitives/tests for deterministic Stripe idempotency keys, address normalization, confirmation depth, reconciliation ranges, reconnect backoff, and native wei amount formatting.
+   - [x] Added chain verification env parsing for `ALCHEMY_HTTPS_URL`, `LITKEY_GATEWAY_ADDRESS`, and `LITKEY_CHAIN_ID` (Base mainnet `8453` only). If the chain env vars are absent, the portal/rate poller still boot and LITKEY crediting stays disabled.
+   - [x] Added shared payment primitives/tests for deterministic Stripe idempotency keys, address normalization, and native wei amount formatting.
    - [x] Added pure payment classification/crediting helpers: missing/stale rate pauses crediting; zero-cent payments record as `dust`; missing Stripe customers record as `no_customer`; positive known-customer payments produce a Stripe credit action with deterministic idempotency and an audit-friendly description.
    - [x] Added DB helper layer for payment idempotency inserts and checkpoint read/advance; checkpoint advancement uses `GREATEST` so retries cannot move a gateway checkpoint backwards.
-   - [x] Started the runtime slice: `spawn_litkey_listener` now starts an HTTPS reconciliation loop when config exists. The loop reads the current checkpoint, computes the safe confirmed range, fetches latest block/logs through a testable RPC abstraction, processes each decoded gateway `Payment` event through the shared handler, and advances the checkpoint only after the full range succeeds.
-   - [x] WSS subscription to `Payment` events from the deployed gateway contract with subscription acknowledgement validation, removed-log pending eviction, pending-confirmation buffering, read/connect timeouts, and exponential backoff reconnect. WSS never advances checkpoints; it shares the parser, idempotency, and crediting handler with reconciliation.
-   - [x] 60s reconciliation poll for logs in `(last_processed_block, latest_block - 5)` as a safety net for WS gaps.
-   - [x] 5-confirmation depth on Base before crediting.
+   - [x] Runtime simplified after production smoke testing: the running app no longer starts the WSS/reconciliation listener. Browser payments submit the exact tx hash to `/api/litkey/payment-claim`, which fetches the receipt and credits from the matching gateway event.
    - [x] Idempotency on `(chain_id, tx_hash, log_index)` unique in `litkey_payments`.
    - [x] For each Payment event: read `litkey_rate`, reject/hold crediting if `crediting_paused` is true, apply `LITKEY_DISCOUNT_BASIS_POINTS`, compute Stripe cents from native LITKEY wei + `usd_wei_per_litkey` using BigInt-style integer math, look up Stripe customer by `metadata.wallet_address == event.wallet`, write the credit via `lit_billing_core::balance::write_transaction`, persist a `litkey_payments` row.
-   - [x] Rate precision prerequisite is handled in 3b: `litkey_rate.usd_wei_per_litkey` stores 18-decimal USD fixed point, CoinGecko parsing preserves arbitrary-precision JSON numbers, and the settlement helper rounds only once at final Stripe cents. Do not reintroduce whole-cent/LITKEY math in the listener.
+   - [x] Rate precision prerequisite is handled in 3b: `litkey_rate.usd_wei_per_litkey` stores 18-decimal USD fixed point, CoinGecko parsing preserves arbitrary-precision JSON numbers, and the settlement helper rounds only once at final Stripe cents. Do not reintroduce whole-cent/LITKEY math in the claim handler.
    - Migrations: `litkey_payments`, `chain_checkpoint`.
    - **Depends on**: 3a contract deployed + address known (`0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b` on Base mainnet); 3b rate table existing.
 
    **3d.** 🚧 `/payWithLitkey` page — IMPLEMENTED IN THIS PR WORKTREE
    - [x] New public page at `payments.litprotocol.com/payWithLitkey?wallet=<address>`. Wallet param is plain (no HMAC — see "URL spoofing" risk).
    - [x] Public wallet-only account preview API exposes `{found,email,wallet_address}` without Stripe customer id or balance.
-   - [x] Public payment config/status APIs expose browser payment config and allow polling `litkey_payments` by `(tx_hash, wallet)` without leaking other customers' status.
-   - [x] Vanilla ethers/EIP-1193 page validates the account, prominently displays email + wallet, requires confirmation, switches to Base mainnet, refreshes the quote every 30s until approval starts, approves exact LITKEY, pays the gateway, and polls listener status.
+   - [x] Public payment config and payment-claim APIs expose browser payment config and allow a one-shot wallet-scoped tx claim without leaking other customers' status.
+   - [x] Vanilla ethers/EIP-1193 page validates the account, prominently displays email + wallet, requires confirmation, switches to Base mainnet, refreshes the quote every 30s until approval starts, approves exact LITKEY, pays the gateway, waits for the receipt, and submits the tx hash once for backend crediting.
    - [ ] Dashboard `Pay with LITKEY` entry point is intentionally deferred until after production smoke testing so the new flow does not go live in the main dashboard before it is fully tested.
-   - **Depends on**: 3a contract address (`0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b` on Base mainnet); 3c listener handling the resulting `Payment` events.
+   - **Depends on**: 3a contract address (`0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b` on Base mainnet); 3c claim handler verifying submitted tx receipts.
 
    **Milestone (when 3a-d ship)**: users self-serve LITKEY payments end-to-end on Base mainnet; the manual "send LITKEY to the wallet and I'll credit you in Stripe" flow is retired.
 
 ### Follow-up after phase 3d
 
-After this PR lands, the remaining work is operational plus a small rollout slice: deploy the payments app with listener env configured, smoke-test a small Base mainnet LITKEY payment against the deployed gateway, verify Stripe crediting, then add the dashboard `Pay with LITKEY` entry point once Chris has fully tested the standalone page. After rollout, add monitoring/runbook coverage for stuck listener status or paused pricing.
+After this PR lands, the remaining work is operational plus a small rollout slice: deploy the payments app with chain verification env configured, smoke-test a small Base mainnet LITKEY payment against the deployed gateway, verify Stripe crediting, then add the dashboard `Pay with LITKEY` entry point once Chris has fully tested the standalone page. After rollout, add monitoring/runbook coverage for failed tx-claim attempts or paused pricing.
 
 ## Risks
 
@@ -430,4 +426,4 @@ After this PR lands, the remaining work is operational plus a small rollout slic
 - **PaymentGateway contract bug** — small surface but real money. Mitigations: keep contract minimal & immutable, internal review, deploy to Base Sepolia first, monitor on-chain.
 - **Rate staleness** — `>1hr` since `fetched_at` pauses crediting and logs a warning; admins manually update via the rate-override UI when they notice (via user reports or log monitoring).
 - **User sends LITKEY directly to the Safe** — funds sit unattributed in the Safe. Mitigation: mod uses the credit portal to grant manually when a user complains. Documented as unsupported.
-- **Reorg risk** — 5-confirmation depth on Base mitigates; risk is already near-zero past a handful of blocks.
+- **Reorg risk** — accepted for the simplified browser claim path on Base; if this becomes a concern later, reintroduce delayed confirmations rather than browser/status polling.

@@ -29,13 +29,6 @@ async fn rocket() -> _ {
     let rate_limit = auth::rate_limit::RateLimiter::new();
     let stripe = StripeClient::new(cfg.stripe_secret_key.clone()).expect("stripe client");
     rate::spawn_rate_poller(pool.clone());
-    chain::spawn_litkey_listener(
-        pool.clone(),
-        stripe.clone(),
-        cfg.litkey_chain.clone(),
-        cfg.litkey_discount_basis_points,
-    );
-
     rocket::build()
         .manage(pool)
         .manage(cfg)
@@ -60,7 +53,7 @@ async fn rocket() -> _ {
                 rate::get_rate,
                 rate::get_quote,
                 chain::get_payment_config,
-                chain::get_payment_status,
+                chain::claim_payment,
                 rate::override_rate,
             ],
         )

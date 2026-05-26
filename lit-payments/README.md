@@ -15,8 +15,8 @@ Public:
 - `GET /auth/verify?token=…` — validate token, set session cookie, redirect.
 - `GET /api/customer/preview?wallet=0x…` — wallet-scoped customer identity preview for the LITKEY payment page. Returns only `found`, `email`, and `wallet_address`; it does not expose Stripe customer ids or balances.
 - `GET /api/litkey/quote` — public LITKEY quote for the end-user payment page; includes `crediting_paused` and omits an effective credit rate while paused.
-- `GET /api/litkey/payment-config` — public Base mainnet payment config: chain id, LITKEY token address, and payment gateway address. Fails closed with `503` if the on-chain listener is not configured.
-- `GET /api/litkey/payment-status?tx_hash=0x…&wallet=0x…` — wallet-scoped listener status for a submitted transaction; used by the payment page to poll for `credited`, `dust`, `paused`, or `no_customer` after submission.
+- `GET /api/litkey/payment-config` — public Base mainnet payment config: chain id, LITKEY token address, and payment gateway address. Fails closed with `503` if chain verification is not configured.
+- `POST /api/litkey/payment-claim` — wallet-scoped transaction claim for the browser payment page. Accepts `{ "tx_hash": "0x…", "wallet": "0x…" }`, fetches the transaction receipt, verifies the configured gateway emitted the expected `Payment` event for that wallet, and applies credit idempotently from that receipt.
 
 Authenticated (operator session cookie required):
 - `GET /` — admin dashboard.
@@ -30,7 +30,7 @@ Authenticated (operator session cookie required):
 
 ## LITKEY rate precision
 
-LITKEY pricing is intentionally stored as 18-decimal USD fixed point instead of whole cents because LITKEY can trade below one cent. Example: `$0.006/LITKEY` is stored as `6000000000000000` (`0.006 * 1e18`). The listener settlement helper keeps the on-chain `Payment.amount` in native LITKEY wei, multiplies by `usd_wei_per_litkey` with `num-bigint`, applies `LITKEY_DISCOUNT_BASIS_POINTS`, and rounds only once at the final Stripe-cent boundary.
+LITKEY pricing is intentionally stored as 18-decimal USD fixed point instead of whole cents because LITKEY can trade below one cent. Example: `$0.006/LITKEY` is stored as `6000000000000000` (`0.006 * 1e18`). The settlement helper keeps the on-chain `Payment.amount` in native LITKEY wei, multiplies by `usd_wei_per_litkey` with `num-bigint`, applies `LITKEY_DISCOUNT_BASIS_POINTS`, and rounds only once at the final Stripe-cent boundary.
 
 ## Local development
 
@@ -69,58 +69,38 @@ ROCKET_PORT=8000
 # 1 / (1 - 0.20) = 1.25x the market-rate Stripe credit per LITKEY.
 # LITKEY_DISCOUNT_BASIS_POINTS=0
 
-# Optional — enable the LITKEY on-chain listener. The current 3c slice starts
-# the Alchemy WSS fast path plus HTTPS reconciliation fallback.
-# ALCHEMY_WSS_URL=wss://base-mainnet.g.alchemy.com/v2/...
+# Optional — enable LITKEY browser payment verification.
 # ALCHEMY_HTTPS_URL=https://base-mainnet.g.alchemy.com/v2/...
 # LITKEY_GATEWAY_ADDRESS=0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b
 # LITKEY_CHAIN_ID=8453
-# LITKEY_CONFIRMATIONS=5
-# LITKEY_RECONCILIATION_INTERVAL_SECS=60
-# Optional deploy/redeploy catch-up floor. Set near the gateway deploy block or
-# just before a known missed payment block to avoid crawling Base from genesis.
-# LITKEY_RECONCILIATION_START_BLOCK=46516000
 ```
 
-## LITKEY listener runtime status
+## LITKEY browser payment claim flow
 
 `/payWithLitkey?wallet=0x…` lets a user credit an existing Stripe customer by
 paying LITKEY to the deployed gateway on Base mainnet. The page validates that
 the URL wallet maps to a customer, prominently displays the email and wallet that
 will be credited, refreshes the quote every 30 seconds until approval starts,
 freezes the quote and LITKEY amount for exact-amount approval, calls
-`pay(amount, wallet)`, and polls the listener status endpoint scoped by
-transaction hash plus credited wallet. The public preview endpoint intentionally
+`pay(amount, wallet)`, then posts the resulting transaction hash plus credited
+wallet to `/api/litkey/payment-claim`. The claim endpoint fetches that exact
+transaction receipt, verifies the configured gateway emitted the expected
+`Payment` log for the wallet, and runs the idempotent crediting handler. There is
+no browser status poller and no background WSS/reconciliation loop in the running
+service; the user's known transaction hash is the source of truth. The public
+preview endpoint intentionally
 reveals whether the supplied wallet has a Stripe customer and the email that will
 be credited so payment-link recipients can verify the destination before
-spending. The payment config endpoint fails closed when the listener is disabled,
-so users cannot be directed to send LITKEY while automatic crediting is offline.
+spending. The payment config endpoint fails closed when chain verification is
+disabled, so users cannot be directed to send LITKEY while automatic crediting is
+offline.
 The main dashboard entry point is intentionally deferred until after production
 smoke testing; for now operators can test the standalone page directly.
 
-When `ALCHEMY_WSS_URL`, `ALCHEMY_HTTPS_URL`, and `LITKEY_GATEWAY_ADDRESS` are
-configured, the app spawns both an Alchemy WSS logs subscription fast path and a
-confirmed-block HTTPS reconciliation loop. Set `LITKEY_RECONCILIATION_START_BLOCK`
-to the gateway deploy block (or just before a known missed payment block) before
-first production deploy; without it, an empty checkpoint starts at block `1` and
-may spend a long time crawling old Base history in 2,000-block chunks before it
-reaches current payments. WSS waits for the `eth_subscribe`
-acknowledgement, subscribes to the configured gateway address plus the exact
-`Payment(indexed wallet,indexed payer,uint256 amount)` topic, buffers near-head
-logs until they reach the configured confirmation depth, evicts pending logs when
-Alchemy sends `removed: true` reorg notifications, credits confirmed logs through
-the shared handler, and never advances reconciliation checkpoints. Reconciliation
-remains the fallback: each
-pass reads the checkpoint, fetches Base logs for the safe range
-`(last_processed_block, latest - confirmations)`, processes decoded gateway
-`Payment` events through the shared crediting handler, and advances the checkpoint
-only after the whole range succeeds.
-
 Crediting pauses when the LITKEY rate row is missing or stale, records dust and
 no-customer events without a Stripe balance write, and credits known customers
-with the deterministic `PaymentLog::idempotency_key()`. WSS and reconciliation
-share the same parser, crediting handler, and `(chain_id, tx_hash, log_index)`
-idempotency.
+with the deterministic `PaymentLog::idempotency_key()` based on
+`(chain_id, tx_hash, log_index)`.
 
 ### 3. Run
 
@@ -140,9 +120,8 @@ Railway services can add their own subfolder configs later. For this service,
 keep the Railway service root/build context at the repo root and set the service
 config file path to `lit-payments/railway.json`: the Dockerfile needs repo-root
 build context because `lit-payments` depends on the sibling `lit-billing-core`
-crate. The service must keep at least one replica running: the LITKEY listener
-includes WSS and reconciliation background loops, so do not enable
-scale-to-zero/sleep mode for production.
+crate. Keep the service awake in production for fastest user-facing payment
+confirmation after a wallet transaction is mined.
 
 ### 1. Create the Railway project/service
 
@@ -154,8 +133,8 @@ In the Railway dashboard:
    - **Root Directory / build context:** repo root (`/`), not `lit-payments`.
    - **Config file path:** `lit-payments/railway.json`.
    - `lit-payments/railway.json` points at `lit-payments/Dockerfile`.
-4. In service settings, confirm the service is not configured to sleep/scale to
-   zero.
+4. In service settings, keep the service awake for fastest user-facing payment
+   confirmation.
 
 Equivalent CLI flow if you prefer:
 
@@ -199,14 +178,11 @@ RESEND_API_KEY=re_...
 MAIL_FROM=noreply@mail.litprotocol.com
 STRIPE_SECRET_KEY=rk_live_...   # restricted key: Customers Read + Billing > Customer Balance Transaction Write
 
-# LITKEY pricing / listener
+# LITKEY pricing / browser payment verification
 LITKEY_DISCOUNT_BASIS_POINTS=0
-ALCHEMY_WSS_URL=wss://base-mainnet.g.alchemy.com/v2/...
 ALCHEMY_HTTPS_URL=https://base-mainnet.g.alchemy.com/v2/...
 LITKEY_GATEWAY_ADDRESS=0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b
 LITKEY_CHAIN_ID=8453
-LITKEY_CONFIRMATIONS=5
-LITKEY_RECONCILIATION_INTERVAL_SECS=60
 ```
 
 Optional operator caps if you want non-default values:
@@ -235,14 +211,13 @@ curl -fsS 'https://<your-railway-domain-or-payments-domain>/api/litkey/payment-c
 Expected:
 
 - `/health` returns `ok`.
-- `/api/litkey/payment-config` returns Base mainnet config when the listener env
-  is present; it returns `503` if listener config is intentionally absent.
+- `/api/litkey/payment-config` returns Base mainnet config when chain verification
+  env is present; it returns `503` if that config is intentionally absent.
 - `/payWithLitkey?wallet=0x...` loads the standalone payment page for smoke
   testing.
 
-Railway deploys should run the binary continuously. If a smoke test submits a
-Base payment but status never changes, check Railway logs first for listener WSS
-or reconciliation errors.
+If a smoke test submits a Base payment but credit is not applied, keep the tx hash
+from the page and check Railway logs for `/api/litkey/payment-claim` errors.
 
 ### Mail sender setup
 
