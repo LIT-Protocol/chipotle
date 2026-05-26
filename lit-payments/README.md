@@ -128,12 +128,14 @@ check your inbox, click the link.
 
 ## Deploy to Railway
 
-Railway builds this service from the repo root using `railway.json`, which points
-to `lit-payments/Dockerfile`. The Dockerfile needs the repo root as build context
-because `lit-payments` depends on the sibling `lit-billing-core` crate. The
-service must keep at least one replica running: the LITKEY listener includes WSS
-and reconciliation background loops, so do not enable scale-to-zero/sleep mode for
-production.
+Railway config for this service lives in `lit-payments/railway.json` so other
+Railway services can add their own subfolder configs later. For this service,
+keep the Railway service root/build context at the repo root and set the service
+config file path to `lit-payments/railway.json`: the Dockerfile needs repo-root
+build context because `lit-payments` depends on the sibling `lit-billing-core`
+crate. The service must keep at least one replica running: the LITKEY listener
+includes WSS and reconciliation background loops, so do not enable
+scale-to-zero/sleep mode for production.
 
 ### 1. Create the Railway project/service
 
@@ -141,8 +143,10 @@ In the Railway dashboard:
 
 1. New Project → **Deploy from GitHub repo** → `LIT-Protocol/chipotle`.
 2. Select the branch you want to deploy from.
-3. Railway should detect `railway.json` and build with
-   `lit-payments/Dockerfile`.
+3. Configure this Railway service for the monorepo:
+   - **Root Directory / build context:** repo root (`/`), not `lit-payments`.
+   - **Config file path:** `lit-payments/railway.json`.
+   - `lit-payments/railway.json` points at `lit-payments/Dockerfile`.
 4. In service settings, confirm the service is not configured to sleep/scale to
    zero.
 
@@ -151,7 +155,7 @@ Equivalent CLI flow if you prefer:
 ```sh
 railway login
 railway link        # choose or create the lit-payments project
-railway up          # from the repo root; railway.json selects the Dockerfile
+railway up          # from repo root; service config path should be lit-payments/railway.json
 ```
 
 ### 2. Add Postgres

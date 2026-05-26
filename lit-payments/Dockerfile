@@ -3,7 +3,9 @@
 # Build context: the REPO ROOT (so the sibling `lit-billing-core/` crate is
 # reachable via the COPY commands below).
 #
-# Railway reads `railway.json` at the repo root and builds this Dockerfile.
+# Railway service config lives at `lit-payments/railway.json`; keep the Railway
+# service build context at the repo root so these COPY commands can see sibling
+# crates.
 
 # ── Build stage ────────────────────────────────────────────────────────────
 FROM rust:1.91-slim-bookworm AS builder

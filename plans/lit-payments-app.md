@@ -107,7 +107,7 @@ Tech stack: **Rust + Rocket + vanilla HTML/JS**. Matches existing repo conventio
 ### Deployment
 
 - **Hostname**: `payments.litprotocol.com`.
-- **Platform**: Railway (service + Railway Postgres, or external Postgres via Supabase/Neon). `railway.json` lives at the repo root and points at `lit-payments/Dockerfile`, which uses the repo root as build context so it can copy the sibling `lit-billing-core/` crate.
+- **Platform**: Railway (service + Railway Postgres, or external Postgres via Supabase/Neon). `lit-payments/railway.json` keeps this service's Railway config scoped to the subfolder while pointing at `lit-payments/Dockerfile`; keep the Railway service build context at repo root so Docker can copy the sibling `lit-billing-core/` crate.
 - **Outside the TEE.** No attestation pain; operators can use Railway logs / shell for diagnostics. Keep one replica continuously running; do not sleep/scale-to-zero because the listener has WSS/reconciliation background loops.
 - **Ingress**: Railway-generated domain initially, then custom domain `payments.litprotocol.com` once smoke tests pass.
 - **Secrets** (Railway service variables): Stripe restricted key, DB URL, magic-link signing key, Resend API key, Alchemy WSS + HTTPS URLs, gateway contract address, and `ROCKET_SECRET_KEY` for Rocket's private-cookie encryption. LITKEY token address is fixed in the payment config endpoint for the current Base deployment; CoinGecko uses the hardcoded `lit-protocol` id.
