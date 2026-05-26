@@ -1,8 +1,11 @@
 import { defineWalletSetup } from '@synthetixio/synpress';
 import { MetaMask } from '@synthetixio/synpress/playwright';
 
-// Anvil's default mnemonic. Account #0 is the deployer; account #1 is what we
-// use as the user wallet in tests so deploy-side state stays clean.
+// Anvil's default mnemonic. Synpress imports account #0 by default — that's
+// the same account local_test.sh uses as deployer, so tests that touch chain
+// state should be careful (snapshot/revert via the `anvilSnap` fixture
+// handles this). To use a fresh user wallet instead, switch inside the test
+// with `metamask.switchAccount(...)`.
 const ANVIL_MNEMONIC =
   'test test test test test test test test test test test junk';
 

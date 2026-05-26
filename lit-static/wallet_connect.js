@@ -177,11 +177,17 @@ async function _connectWalletConnect({ chainId, rpcUrl }) {
       showQrModal: true,
     });
     // Re-emit the WC SDK's `display_uri` event as a DOM event so e2e tests can
-    // pair a headless wallet without scraping the QR modal. The dashboard
-    // itself ignores it.
-    _wcProvider.on?.('display_uri', (uri) => {
-      window.dispatchEvent(new CustomEvent('lit:wc-display-uri', { detail: uri }));
-    });
+    // pair a headless wallet without scraping the QR modal. Gated on
+    // localhost — the pairing URI is effectively a pairing secret and other
+    // CDN-loaded scripts on a production origin shouldn't see it.
+    const isLocalE2eHost =
+      typeof window !== 'undefined' &&
+      ['localhost', '127.0.0.1', '::1'].includes(window.location?.hostname);
+    if (isLocalE2eHost) {
+      _wcProvider.on?.('display_uri', (uri) => {
+        window.dispatchEvent(new CustomEvent('lit:wc-display-uri', { detail: uri }));
+      });
+    }
     await _wcProvider.connect();
   } catch (err) {
     _wcProvider = null;

@@ -200,8 +200,9 @@ export class DashboardPage {
     const output = this.page.locator('#action-runner-output');
     await this.page.locator('#btn-execute-lit-action').click();
     // The runner writes "Executing…" then replaces it with JSON on success or
-    // a message starting with "Error: " on failure.
-    await expect(output).not.toHaveText(/^Executing/);
+    // a message starting with "Error: " on failure. Action execution can
+    // easily exceed the global expect timeout (15s) — pass our own.
+    await expect(output).not.toHaveText(/^Executing/, { timeout: 60_000 });
     const raw = (await output.textContent())?.trim() ?? '';
     if (raw.startsWith('Error:')) {
       throw new Error(`Action runner failed: ${raw}`);
@@ -224,7 +225,8 @@ export class DashboardPage {
     await this.fillCodeJar('action-runner-code', code);
     const output = this.page.locator('#action-runner-output');
     await this.page.locator('#btn-get-lit-action-ipfs-cid').click();
-    await expect(output).not.toHaveText(/^Fetching/);
+    // CID hashing/IPFS round-trip can exceed the 15s global expect timeout.
+    await expect(output).not.toHaveText(/^Fetching/, { timeout: 30_000 });
     const raw = (await output.textContent())?.trim() ?? '';
     if (raw.startsWith('Error:')) {
       throw new Error(`Get-CID failed: ${raw}`);

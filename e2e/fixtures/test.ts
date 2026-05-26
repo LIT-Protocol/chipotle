@@ -17,17 +17,12 @@ import type { Hex } from 'viem';
  * and `anvilSnap` fixtures so specs are mode-agnostic where they can be.
  */
 
-type WalletKind = 'api' | 'eoa' | 'walletconnect';
-
 export const test = base.extend<{
   apiClient: LitApiClient;
   dashboardPage: DashboardPage;
   wcWallet: TestWcWallet;
   anvilSnap: void;
-  walletKind: WalletKind;
 }>({
-  walletKind: ['api', { option: true }],
-
   apiClient: async ({}, use) => {
     await use(defaultApiClient);
   },

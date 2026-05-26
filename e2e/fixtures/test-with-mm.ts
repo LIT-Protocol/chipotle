@@ -17,17 +17,12 @@ import type { Hex } from 'viem';
  * `test.ts` exposes so EOA specs can share helpers with the rest of the suite.
  */
 
-type WalletKind = 'api' | 'eoa' | 'walletconnect';
-
 export const test = testWithSynpress(metaMaskFixtures(basicSetup)).extend<{
   apiClient: LitApiClient;
   dashboardPage: DashboardPage;
   wcWallet: TestWcWallet;
   anvilSnap: void;
-  walletKind: WalletKind;
 }>({
-  walletKind: ['eoa', { option: true }],
-
   apiClient: async ({}, use) => {
     await use(defaultApiClient);
   },

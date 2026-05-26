@@ -59,8 +59,10 @@ Everything needed by `local_test.sh`:
 - `pnpm` and Node 20+
 - A built `dstack-simulator` at `$SIMULATOR_DIR` (default
   `~/GitHub/dstack/sdk/simulator`)
-- Docker for the Jaeger container
 - `static-web-server` (`brew install static-web-server`)
+- Docker is optional — `local_test.sh` runs Jaeger for OTLP telemetry when
+  Docker is reachable, and skips it otherwise. Nothing in the test suite
+  depends on Jaeger being up.
 - A WalletConnect project id in `WC_PROJECT_ID` (free at
   https://cloud.reown.com) — only required for the `walletconnect` projects
 
@@ -93,26 +95,27 @@ make up-no-code
 
 ## How the projects map
 
-| Playwright project | Test dir              | Wallet stack                |
-| ------------------ | --------------------- | --------------------------- |
-| `api-mode`         | `tests/api`           | none                        |
-| `eoa`              | `tests/eoa`           | Synpress (MetaMask)         |
-| `walletconnect`    | `tests/walletconnect` | headless `@reown/walletkit` |
-| `flows-api`        | `tests/flows`         | none                        |
-| `flows-eoa`        | `tests/flows`         | Synpress (MetaMask)         |
-| `flows-wc`         | `tests/flows`         | headless `@reown/walletkit` |
+| Playwright project | Test dir / matcher              | Wallet stack                |
+| ------------------ | ------------------------------- | --------------------------- |
+| `api-mode`         | `tests/api/*.spec.ts`           | none                        |
+| `eoa`              | `tests/eoa/*.spec.ts`           | Synpress (MetaMask)         |
+| `walletconnect`    | `tests/walletconnect/*.spec.ts` | headless `@reown/walletkit` |
+| `flows-api`        | `tests/flows/api-*.spec.ts`     | none                        |
+| `flows-wc`         | `tests/flows/wc-*.spec.ts`      | headless `@reown/walletkit` |
 
-`flows-*` re-runs the same spec under all three wallet modes — branch on
-`walletKind` in the test (see `tests/flows/onboarding.spec.ts`).
+Flow specs split per-file so the API flow doesn't drag in the WalletConnect
+fixture (or require `WC_PROJECT_ID`). The EOA onboarding journey lives in
+`tests/eoa/new-chainsecured-account.spec.ts` — those specs need Synpress
+regardless.
 
 ## Adding a new test
 
 1. If it's wallet-specific, drop it in `tests/eoa/` or `tests/walletconnect/`.
 2. If it's pure UI / API mode, drop it in `tests/api/`.
-3. If it's a user journey that should work the same way regardless of how the
-   user authenticated, drop it in `tests/flows/` and branch on `walletKind`
-   the same way `onboarding.spec.ts` does — it'll automatically run under all
-   three wallet stacks.
+3. If it's a user journey, drop it in `tests/flows/` with an `api-` or `wc-`
+   prefix so the right project picks it up. Don't try to make a single file
+   serve both — destructuring `wcWallet` in an API-flow test forces the WC
+   fixture to run even when nothing uses it.
 4. Tests get an automatic Anvil snapshot/revert from the `anvilSnap`
    auto-fixture in `fixtures/test.ts`. Chain state is reset between tests
    without per-test cleanup code.

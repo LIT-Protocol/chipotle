@@ -50,17 +50,19 @@ export default defineConfig({
       testMatch: /walletconnect\/.*\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
-    // Flow specs branch on `walletKind`. The EOA branch lives in tests/eoa/
-    // so the flow projects don't need Synpress.
+    // Flow specs are split per mode (one file each under tests/flows/) so the
+    // API project doesn't pull in the WC fixture and the WC project doesn't
+    // hit the API account-creation path before its prereqs are ready. The
+    // EOA flow lives in tests/eoa/ — those specs need Synpress anyway.
     {
       name: 'flows-api',
-      testMatch: /flows\/.*\.spec\.ts/,
-      use: { ...devices['Desktop Chrome'], walletKind: 'api' } as any,
+      testMatch: /flows\/api-.*\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
     },
     {
       name: 'flows-wc',
-      testMatch: /flows\/.*\.spec\.ts/,
-      use: { ...devices['Desktop Chrome'], walletKind: 'walletconnect' } as any,
+      testMatch: /flows\/wc-.*\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
     },
   ],
 
