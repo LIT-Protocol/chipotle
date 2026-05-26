@@ -7,8 +7,8 @@ use std::time::Duration;
 use base64::Engine;
 use deno_core::error::ModuleLoaderError;
 use deno_core::{
-    ModuleLoadResponse, ModuleLoader, ModuleSource, ModuleSpecifier, RequestedModuleType,
-    ResolutionKind,
+    ModuleLoadOptions, ModuleLoadReferrer, ModuleLoadResponse, ModuleLoader, ModuleSource,
+    ModuleSpecifier, ResolutionKind,
 };
 use deno_error::JsErrorBox;
 use futures::FutureExt;
@@ -107,6 +107,8 @@ impl CdnModuleLoader {
 
     /// Build the default HTTP client with security-hardened settings.
     pub fn build_http_client() -> Arc<reqwest::Client> {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
         Arc::new(
             reqwest::Client::builder()
                 .timeout(FETCH_TIMEOUT)
@@ -274,16 +276,14 @@ impl CdnModuleLoader {
             return Err(JsErrorBox::generic(format!(
                 "Module {url} returned a redirect (HTTP {status}). \
                  Redirects are not allowed for CDN module imports."
-            ))
-            .into());
+            )));
         }
 
         if !status.is_success() {
             error!(module_url = %url, fetch = label, http_status = %status, "CDN module fetch failed: non-success status");
             return Err(JsErrorBox::generic(format!(
                 "{label} fetch failed for {url}: HTTP {status}"
-            ))
-            .into());
+            )));
         }
 
         // Extract SRI hash from CDN response headers (jsDelivr provides this)
@@ -305,8 +305,7 @@ impl CdnModuleLoader {
             error!(module_url = %url, fetch = label, content_length = len, max_bytes = MAX_MODULE_SIZE_BYTES, "CDN module rejected: exceeds size limit");
             return Err(JsErrorBox::generic(format!(
                 "Module {url} exceeds maximum size ({len} bytes > {MAX_MODULE_SIZE_BYTES} bytes)"
-            ))
-            .into());
+            )));
         }
 
         // Stream body with hard size cap to prevent OOM even if content-length is absent/wrong
@@ -320,8 +319,7 @@ impl CdnModuleLoader {
                 error!(module_url = %url, fetch = label, body_size = bytes.len() + chunk.len(), max_bytes = MAX_MODULE_SIZE_BYTES, "CDN module rejected: body exceeds size limit during streaming");
                 return Err(JsErrorBox::generic(format!(
                     "Module {url} exceeds maximum size (> {MAX_MODULE_SIZE_BYTES} bytes)"
-                ))
-                .into());
+                )));
             }
             bytes.extend_from_slice(&chunk);
         }
@@ -353,8 +351,7 @@ impl CdnModuleLoader {
             return Err(JsErrorBox::generic(format!(
                 "Maximum module count ({MAX_MODULE_COUNT}) exceeded. \
                  Reduce the number of imported modules."
-            ))
-            .into());
+            )));
         }
 
         // Parse the URL so we can separate the optional inline-hash fragment.
@@ -404,8 +401,7 @@ impl CdnModuleLoader {
                     return Err(JsErrorBox::generic(format!(
                         "Integrity check failed for cached {url}: \
                          expected sha384-{expected_b64}, got sha384-{cached_b64}"
-                    ))
-                    .into());
+                    )));
                 }
             }
 
@@ -463,8 +459,7 @@ impl CdnModuleLoader {
                 return Err(JsErrorBox::generic(format!(
                     "Integrity check failed for {url}: \
                      expected sha384-{expected_b64}, got sha384-{actual_b64}"
-                ))
-                .into());
+                )));
             }
             info!(
                 module_url = %url,
@@ -500,8 +495,7 @@ impl CdnModuleLoader {
                 return Err(JsErrorBox::generic(format!(
                     "TOFU: CDN returned inconsistent content for {url}. \
                      Hash mismatch between first and second fetch. Possible tampering."
-                ))
-                .into());
+                )));
             }
 
             info!(
@@ -531,8 +525,7 @@ impl CdnModuleLoader {
                     return Err(JsErrorBox::generic(format!(
                         "TOFU: computed hash does not match CDN SRI header for {url}. \
                          Computed sha384-{actual_b64}, CDN declared sha384-{sri_b64}."
-                    ))
-                    .into());
+                    )));
                 }
                 info!(
                     module_url = %url,
@@ -634,7 +627,7 @@ impl ModuleLoader for CdnModuleLoader {
                 "CDN module resolve: data: URI accepted (inlined dependency)"
             );
             return ModuleSpecifier::parse(specifier)
-                .map_err(|e| JsErrorBox::generic(format!("Invalid data: URI: {e}")).into());
+                .map_err(|e| JsErrorBox::generic(format!("Invalid data: URI: {e}")));
         }
 
         // Resolve relative imports against the referrer when the referrer is a jsDelivr npm URL.
@@ -675,8 +668,7 @@ impl ModuleLoader for CdnModuleLoader {
             return Err(JsErrorBox::generic(format!(
                 "Relative import \"{}\" resolved to {resolved}, which is outside the allowed /npm/ CDN path",
                 truncate_for_log(specifier)
-            ))
-            .into());
+            )));
         }
 
         // Handle root-relative /npm/ paths from jsDelivr's ESM output.
@@ -692,7 +684,7 @@ impl ModuleLoader for CdnModuleLoader {
                     "CDN module resolve: root-relative /npm/ import resolved to full jsDelivr URL"
                 );
                 return ModuleSpecifier::parse(&full_url).map_err(|e| {
-                    JsErrorBox::generic(format!("Invalid resolved URL: {full_url}: {e}")).into()
+                    JsErrorBox::generic(format!("Invalid resolved URL: {full_url}: {e}"))
                 });
             }
         }
@@ -705,7 +697,6 @@ impl ModuleLoader for CdnModuleLoader {
                     "Invalid module URL: {}: {e}",
                     truncate_for_log(specifier)
                 ))
-                .into()
             });
         }
 
@@ -716,9 +707,8 @@ impl ModuleLoader for CdnModuleLoader {
                 resolved_url = %cdn_url,
                 "CDN module resolve: npm specifier resolved to jsDelivr URL"
             );
-            return ModuleSpecifier::parse(&cdn_url).map_err(|e| {
-                JsErrorBox::generic(format!("Invalid resolved URL: {cdn_url}: {e}")).into()
-            });
+            return ModuleSpecifier::parse(&cdn_url)
+                .map_err(|e| JsErrorBox::generic(format!("Invalid resolved URL: {cdn_url}: {e}")));
         }
 
         // Reject everything else
@@ -732,16 +722,14 @@ impl ModuleLoader for CdnModuleLoader {
              Use an npm specifier with a pinned version (e.g. zod@3.22.4) \
              or a full jsDelivr URL (e.g. https://cdn.jsdelivr.net/npm/zod@3.22.4/+esm)",
             truncate_for_log(specifier)
-        ))
-        .into())
+        )))
     }
 
     fn load(
         &self,
         module_specifier: &ModuleSpecifier,
-        _maybe_referrer: Option<&ModuleSpecifier>,
-        is_dyn_import: bool,
-        _requested_module_type: RequestedModuleType,
+        _maybe_referrer: Option<&ModuleLoadReferrer>,
+        options: ModuleLoadOptions,
     ) -> ModuleLoadResponse {
         // With the pre-execution bundler inlining all imports, this method is
         // expected to be unreachable during user-action execution (CPL-262).
@@ -752,18 +740,15 @@ impl ModuleLoader for CdnModuleLoader {
         let url = module_specifier.to_string();
         warn!(
             module_url = %url,
-            is_dyn_import,
+            is_dyn_import = options.is_dynamic_import,
             "CDN module load invoked at execution time — bundler should have inlined this import"
         );
         let fut = async move {
-            Err::<ModuleSource, ModuleLoaderError>(
-                JsErrorBox::generic(format!(
-                    "Runtime import of {url} was rejected: all static imports must be \
+            Err::<ModuleSource, ModuleLoaderError>(JsErrorBox::generic(format!(
+                "Runtime import of {url} was rejected: all static imports must be \
                      resolved by the pre-execution bundler and dynamic `import()` is not \
                      permitted in lit-actions."
-                ))
-                .into(),
-            )
+            )))
         }
         .boxed_local();
 
@@ -1133,7 +1118,15 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
         );
         let specifier =
             ModuleSpecifier::parse("https://cdn.jsdelivr.net/npm/known@1.0.0/+esm").unwrap();
-        let response = loader.load(&specifier, None, false, RequestedModuleType::None);
+        let response = loader.load(
+            &specifier,
+            None,
+            ModuleLoadOptions {
+                is_dynamic_import: false,
+                is_synchronous: false,
+                requested_module_type: deno_core::RequestedModuleType::None,
+            },
+        );
         let fut = match response {
             ModuleLoadResponse::Async(fut) => fut,
             _ => panic!("load should always return Async after CPL-262"),

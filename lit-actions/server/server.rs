@@ -11,7 +11,7 @@ use crate::v8_code_cache::{SharedV8CodeCache, new_v8_code_cache};
 use crate::worker_pool::{WorkItem, WorkerPool};
 
 use anyhow::Result;
-use deno_core::error::CoreError;
+use deno_core::error::{CoreError, CoreErrorKind};
 use deno_core::futures::TryFutureExt as _;
 use deno_lib::util::result::any_and_jserrorbox_downcast_ref;
 use deno_runtime::tokio_util::create_and_run_current_thread;
@@ -428,10 +428,28 @@ fn pool_size_from_env() -> usize {
 }
 
 pub(crate) fn format_error(err: &anyhow::Error) -> String {
-    if let Some(CoreError::Js(js_err)) = any_and_jserrorbox_downcast_ref::<CoreError>(err) {
-        deno_runtime::fmt_errors::format_js_error(js_err)
+    if let Some(CoreError(kind)) = any_and_jserrorbox_downcast_ref::<CoreError>(err)
+        && let CoreErrorKind::Js(js_err) = kind.as_ref()
+    {
+        let formatted = deno_runtime::fmt_errors::format_js_error(js_err, None);
+        if formatted.starts_with("Uncaught ") {
+            formatted
+        } else {
+            format!("Uncaught {formatted}")
+        }
     } else {
-        format!("{err:#}")
+        let formatted = format!("{err:#}");
+        if formatted.starts_with("ReferenceError:")
+            || formatted.starts_with("TypeError:")
+            || formatted.starts_with("Error:")
+            || formatted.starts_with("NotCapable:")
+            || formatted.starts_with("PermissionDenied:")
+            || formatted.starts_with("NotSupported:")
+        {
+            format!("Uncaught {formatted}")
+        } else {
+            formatted
+        }
     }
 }
 

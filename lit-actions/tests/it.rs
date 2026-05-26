@@ -894,12 +894,14 @@ fn pool_test_setup() -> (TestClient, Arc<PoolHealth>, usize) {
 
 /// Coarse warmup wait. There's no "ready workers" counter today, so we
 /// just sleep long enough for snapshot-bootstrapped workers to land in
-/// the ready channel. With pool=10, 600ms is plenty under load.
+/// the ready channel. The newer Deno runtime has more lazy extension state to
+/// hydrate, so give warmup enough room when the integration suite is running
+/// several tests concurrently.
 async fn wait_for_warmup(target: usize) {
     if target == 0 {
         return;
     }
-    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(2_000)).await;
 }
 
 /// Pool hit on the warm path: after warmup, a request should be served by

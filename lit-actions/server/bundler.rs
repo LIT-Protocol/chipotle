@@ -338,7 +338,7 @@ impl VisitMut for DynamicImportRewriter {
             return;
         }
         let spec = match &*call.args[0].expr {
-            Expr::Lit(Lit::Str(s)) => s.value.to_string(),
+            Expr::Lit(Lit::Str(s)) => s.value.to_string_lossy().into_owned(),
             _ => {
                 // Span the offending argument expression so the snippet shows
                 // exactly what couldn't be evaluated at cache-write time.
@@ -402,11 +402,11 @@ fn extract_module_imports(source: &str) -> Result<Vec<String>> {
     for item in &module.body {
         if let ModuleItem::ModuleDecl(decl) = item {
             match decl {
-                ModuleDecl::Import(i) => out.push(i.src.value.to_string()),
-                ModuleDecl::ExportAll(e) => out.push(e.src.value.to_string()),
+                ModuleDecl::Import(i) => out.push(i.src.value.to_string_lossy().into_owned()),
+                ModuleDecl::ExportAll(e) => out.push(e.src.value.to_string_lossy().into_owned()),
                 ModuleDecl::ExportNamed(e) => {
                     if let Some(src) = e.src.as_ref() {
-                        out.push(src.value.to_string());
+                        out.push(src.value.to_string_lossy().into_owned());
                     }
                 }
                 _ => {}
