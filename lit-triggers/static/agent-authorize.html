@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Authorize Agent — Lit Triggers</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <main class="card">
+    <h1>Authorize your agent</h1>
+    <p class="subtitle">Approve this local agent to manage Lit Triggers using your signed-in account.</p>
+
+    <section class="panel callout">
+      <h2>What this allows</h2>
+      <p>
+        The agent will be able to use the Lit Triggers API as you: create triggers,
+        read trigger status, inspect runs, update triggers, and delete test triggers.
+        It will not receive your Lit/Chipotle admin API key.
+      </p>
+    </section>
+
+    <button id="authorize-btn" type="button">Authorize agent</button>
+    <p id="status" class="status" role="status" aria-live="polite"></p>
+    <p class="note"><a href="/SKILL.md">View the agent setup guide</a></p>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const challenge = params.get('challenge') || '';
+    const button = document.getElementById('authorize-btn');
+    const status = document.getElementById('status');
+
+    if (!challenge) {
+      button.disabled = true;
+      status.textContent = 'Missing agent challenge. Ask your agent to generate a fresh authorize URL.';
+      status.className = 'status error';
+    }
+
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      status.textContent = 'Authorizing agent…';
+      status.className = 'status';
+      try {
+        const resp = await fetch('/agent/authorize', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ challenge, label: 'local-agent' }),
+        });
+        if (resp.status === 401) {
+          window.location.href = `/login?next=${encodeURIComponent(`/agent/authorize?challenge=${encodeURIComponent(challenge)}`)}`;
+          return;
+        }
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        status.textContent = 'Agent authorized. You can return to your agent now.';
+        status.className = 'status ok';
+      } catch (_err) {
+        status.textContent = 'Could not authorize this agent. Ask it to generate a fresh authorization URL and try again.';
+        status.className = 'status error';
+        button.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

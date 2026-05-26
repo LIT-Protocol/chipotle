@@ -66,11 +66,6 @@ impl<'r> FromRequest<'r> for User {
     type Error = ();
 
     async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Self::Error> {
-        let Some(cookie) = req.cookies().get_private(SESSION_COOKIE_NAME) else {
-            return Outcome::Forward(Status::Unauthorized);
-        };
-        let token = cookie.value().to_string();
-
         let pool = match req.rocket().state::<PgPool>() {
             Some(p) => p,
             None => {
@@ -79,12 +74,27 @@ impl<'r> FromRequest<'r> for User {
             }
         };
 
-        let user_id = match lookup(pool, &token).await {
-            Ok(Some(id)) => id,
-            Ok(None) => return Outcome::Forward(Status::Unauthorized),
-            Err(e) => {
-                tracing::warn!("session lookup failed: {e}");
-                return Outcome::Error((Status::InternalServerError, ()));
+        let user_id = if let Some(token) = bearer_token(req) {
+            match super::agent::lookup(pool, token).await {
+                Ok(Some(id)) => id,
+                Ok(None) => return Outcome::Forward(Status::Unauthorized),
+                Err(e) => {
+                    tracing::warn!("agent token lookup failed: {e}");
+                    return Outcome::Forward(Status::Unauthorized);
+                }
+            }
+        } else {
+            let Some(cookie) = req.cookies().get_private(SESSION_COOKIE_NAME) else {
+                return Outcome::Forward(Status::Unauthorized);
+            };
+            let token = cookie.value().to_string();
+            match lookup(pool, &token).await {
+                Ok(Some(id)) => id,
+                Ok(None) => return Outcome::Forward(Status::Unauthorized),
+                Err(e) => {
+                    tracing::warn!("session lookup failed: {e}");
+                    return Outcome::Error((Status::InternalServerError, ()));
+                }
             }
         };
 
@@ -97,4 +107,13 @@ impl<'r> FromRequest<'r> for User {
             }
         }
     }
+}
+
+fn bearer_token<'a>(req: &'a Request<'_>) -> Option<&'a str> {
+    let value = req.headers().get_one("authorization")?.trim();
+    value
+        .strip_prefix("Bearer ")
+        .or_else(|| value.strip_prefix("bearer "))
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
 }

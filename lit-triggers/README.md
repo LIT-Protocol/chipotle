@@ -40,18 +40,17 @@ cargo +1.91 run
 
 Run Postgres locally and set the environment above before starting the server. Migrations run on boot.
 
-## Agent-consumable testing docs
+## Agent-consumable setup docs
 
-`SKILL.md` is a handoff file for agents that need to test a deployed `lit-triggers` instance. It covers magic-link authentication, trigger CRUD, webhook firing, schedule polling, chain-event setup, run inspection, and cleanup.
+`SKILL.md` is a handoff file for agents that need to help users set up triggers on the deployed `lit-triggers` instance. It covers browser-based agent authorization, trigger CRUD, webhook URLs, schedule config, chain-event config, run inspection, and cleanup.
 
 It is exposed publicly at `https://triggers.litprotocol.com/SKILL.md` and linked from the app as **Give this to your agent to get started**.
 
-Give a testing agent:
+Give a setup agent:
 
-- `lit-triggers/SKILL.md`
-- the deployed `LT_BASE_URL`
-- a test email that can receive magic links
-- a scoped Chipotle usage API key for the target group/action permissions
+- `https://triggers.litprotocol.com/SKILL.md`
+- the trigger goal/action the user wants
+- a scoped Chipotle usage API key, or have the user mint one in the browser UI
 
 ## Railway deployment
 

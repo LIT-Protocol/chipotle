@@ -4,21 +4,22 @@ use rocket::form::Form;
 use rocket::http::{Cookie, CookieJar, SameSite, Status};
 use rocket::response::Redirect;
 use rocket::serde::json::Json;
+use rocket::serde::{Deserialize, Serialize};
 use rocket::State;
 use rocket::{get, post};
-use serde::Serialize;
 use sqlx::PgPool;
 use time::OffsetDateTime;
 
 use super::rate_limit::RateLimiter;
-use super::user::User;
-use super::{session, token, user, MAGIC_LINK_TTL_SECONDS, SESSION_COOKIE_NAME};
+use super::user::{self, User};
+use super::{agent, session, token, MAGIC_LINK_TTL_SECONDS, SESSION_COOKIE_NAME};
 use crate::config::Config;
 use crate::mail::Mailer;
 
 #[derive(rocket::FromForm)]
 pub struct RequestLinkForm<'r> {
     pub email: &'r str,
+    pub next: Option<&'r str>,
 }
 
 #[derive(Serialize)]
@@ -35,6 +36,7 @@ pub async fn request_link(
     rate_limit: &State<RateLimiter>,
 ) -> Json<RequestLinkResponse> {
     let email = form.email.trim().to_lowercase();
+    let redirect_path = agent::sanitize_next_path(form.next);
     if email.is_empty() || rate_limit.check_and_record(&email).await {
         return Json(RequestLinkResponse { ok: true });
     }
@@ -48,7 +50,16 @@ pub async fn request_link(
         expires_at.unix_timestamp(),
         &nonce,
     );
-    match store_magic_link(pool, &tok, &nonce, &email, expires_at).await {
+    match store_magic_link(
+        pool,
+        &tok,
+        &nonce,
+        &email,
+        expires_at,
+        redirect_path.as_deref(),
+    )
+    .await
+    {
         Ok(()) => {
             let link = format!("{}/auth/verify?token={tok}", config.public_base_url);
             let subject = "Sign in to Lit Triggers";
@@ -97,14 +108,14 @@ pub async fn verify_link(
         return Err(Redirect::to("/login?error=invalid"));
     }
 
-    let consumed = match consume_magic_link(pool, token, &claims.nonce, &claims.email).await {
-        Ok(consumed) => consumed,
+    let redirect_path = match consume_magic_link(pool, token, &claims.nonce, &claims.email).await {
+        Ok(redirect_path) => redirect_path,
         Err(e) => {
             tracing::warn!("magic-link consume failed in /auth/verify: {e}");
             return Err(Redirect::to("/login?error=server"));
         }
     };
-    if !consumed {
+    if redirect_path.is_none() {
         tracing::info!("magic-link verify rejected: missing, expired, or already consumed token");
         return Err(Redirect::to("/login?error=invalid"));
     }
@@ -132,7 +143,9 @@ pub async fn verify_link(
         .build();
     cookies.add_private(cookie);
 
-    Ok(Redirect::to("/"))
+    Ok(Redirect::to(
+        redirect_path.unwrap_or_else(|| "/".to_string()),
+    ))
 }
 
 #[post("/auth/logout")]
@@ -147,6 +160,37 @@ pub async fn logout(pool: &State<PgPool>, cookies: &CookieJar<'_>) -> Status {
     Status::NoContent
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AgentAuthorizeRequest {
+    pub challenge: String,
+    pub label: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AgentAuthorizeResponse {
+    pub ok: bool,
+    pub user_email: String,
+}
+
+#[post("/agent/authorize", data = "<req>")]
+pub async fn authorize_agent(
+    user: User,
+    pool: &State<PgPool>,
+    req: Json<AgentAuthorizeRequest>,
+) -> Result<Json<AgentAuthorizeResponse>, Status> {
+    let req = req.into_inner();
+    agent::authorize_hash(pool.inner(), &req.challenge, user.id, req.label.as_deref())
+        .await
+        .map_err(|e| {
+            tracing::warn!(user_id = %user.id, "agent token authorize failed: {e}");
+            Status::BadRequest
+        })?;
+    Ok(Json(AgentAuthorizeResponse {
+        ok: true,
+        user_email: user.email,
+    }))
+}
+
 #[get("/api/me")]
 pub fn me(user: User) -> Json<User> {
     Json(user)
@@ -158,14 +202,16 @@ async fn store_magic_link(
     nonce: &str,
     email: &str,
     expires_at: OffsetDateTime,
+    redirect_path: Option<&str>,
 ) -> anyhow::Result<()> {
     sqlx::query(
-        "INSERT INTO magic_links (token_hash, nonce, email, expires_at) VALUES ($1, $2, $3, $4)",
+        "INSERT INTO magic_links (token_hash, nonce, email, expires_at, redirect_path) VALUES ($1, $2, $3, $4, $5)",
     )
     .bind(token::token_hash(raw_token))
     .bind(nonce)
     .bind(email)
     .bind(expires_at)
+    .bind(redirect_path)
     .execute(pool)
     .await?;
     Ok(())
@@ -176,20 +222,21 @@ async fn consume_magic_link(
     raw_token: &str,
     nonce: &str,
     email: &str,
-) -> anyhow::Result<bool> {
-    let result = sqlx::query(
+) -> anyhow::Result<Option<String>> {
+    let row = sqlx::query_as::<_, (Option<String>,)>(
         "UPDATE magic_links
          SET consumed_at = now()
          WHERE token_hash = $1
            AND nonce = $2
            AND email = $3
            AND consumed_at IS NULL
-           AND expires_at > now()",
+           AND expires_at > now()
+         RETURNING redirect_path",
     )
     .bind(token::token_hash(raw_token))
     .bind(nonce)
     .bind(email)
-    .execute(pool)
+    .fetch_optional(pool)
     .await?;
-    Ok(result.rows_affected() == 1)
+    Ok(row.map(|(redirect_path,)| redirect_path.unwrap_or_else(|| "/".to_string())))
 }
