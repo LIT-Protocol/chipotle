@@ -34,17 +34,22 @@ yanked = "warn"
 #   re-export the removed `serde::__private` module). Real fix is bumping
 #   deno_runtime; until then time stays at 0.3.44 in lit-actions and
 #   RUSTSEC-2026-0009 stays in the ignore list. Net: 31 active.
+# - 2026-05-25: removed Rust ethers-rs from lit-api-server and lit-core.
+#   RUSTSEC-2023-0071 remains via `dcap-qvl` dev deps, and
+#   RUSTSEC-2026-{0049,0098,0099,0104} remain via non-ethers rustls users
+#   (`rocket`/`reqwest`/Alloy chains). Net remains 31 active, but no remaining
+#   ignored advisory is justified by ethers.
 #
 # Suggested triage order: vulnerabilities > unsound > unmaintained.
 ignore = [
     # ── vulnerabilities ───────────────────────────────────────────────────────
-    { id = "RUSTSEC-2023-0071", reason = "Marvin Attack timing sidechannel in rsa — transitive via ethers; no upstream fix" },
+    { id = "RUSTSEC-2023-0071", reason = "Marvin Attack timing sidechannel in rsa — still present via dcap-qvl dev dependency; pre-existing" },
     { id = "RUSTSEC-2025-0009", reason = "AES panic on overflow check — transitive; pre-existing" },
     { id = "RUSTSEC-2026-0009", reason = "time DoS via stack exhaustion — still present in lit-actions (time 0.3.47 cascades serde 1.0.228 which breaks swc_config/swc_common from deno chain); cleared in lit-core and lit-api-server" },
-    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki CRL distribution-point matching — pinned by rustls 0.21 via ethers chain" },
-    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki URI name constraints — pinned by rustls 0.21 via ethers chain" },
-    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki wildcard name constraints — pinned by rustls 0.21 via ethers chain" },
-    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki CRL parsing panic — pinned by rustls 0.21 via ethers chain" },
+    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki CRL distribution-point matching — still present via non-ethers rustls users; pre-existing" },
+    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki URI name constraints — still present via non-ethers rustls 0.21 users; pre-existing" },
+    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki wildcard name constraints — still present via non-ethers rustls 0.21 users; pre-existing" },
+    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki CRL parsing panic — still present via non-ethers rustls 0.21 users; pre-existing" },
     { id = "RUSTSEC-2026-0118", reason = "hickory NSEC3 unbounded loop — no upstream fix yet" },
     { id = "RUSTSEC-2026-0119", reason = "hickory DNS O(n^2) name compression — pinned by deno_runtime chain" },
 
