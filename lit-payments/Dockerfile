@@ -3,8 +3,7 @@
 # Build context: the REPO ROOT (so the sibling `lit-billing-core/` crate is
 # reachable via the COPY commands below).
 #
-# On Fly.io: fly.toml at the repo root points `[build] dockerfile` here, so
-# `fly deploy` from the repo root just works. See lit-payments/README.md.
+# Railway reads `railway.json` at the repo root and builds this Dockerfile.
 
 # ── Build stage ────────────────────────────────────────────────────────────
 FROM rust:1.91-slim-bookworm AS builder
