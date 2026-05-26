@@ -21,6 +21,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /build/lit-triggers/target/release/lit-triggers /app/lit-triggers
+COPY SKILL.md ./SKILL.md
 COPY static ./static
 COPY migrations ./migrations
 

@@ -10,6 +10,7 @@
   <main class="card">
     <h1>Lit Triggers</h1>
     <p class="subtitle">Sign in to manage reactive Lit Action triggers.</p>
+    <p class="agent-doc-link"><a href="/SKILL.md">Give this to your agent to get started</a></p>
 
     <form id="request-form">
       <label for="email">Email</label>
@@ -18,6 +19,7 @@
     </form>
 
     <p id="status" class="status" role="status" aria-live="polite"></p>
+    <p id="next-note" class="note hidden">After sign-in, you will return to the agent authorization page.</p>
   </main>
 
   <script>
@@ -26,6 +28,8 @@
     const button = document.getElementById('submit-btn');
 
     const params = new URLSearchParams(window.location.search);
+    const next = params.get('next') || '';
+    if (next) document.getElementById('next-note').classList.remove('hidden');
     if (params.get('error') === 'invalid') {
       status.textContent = 'That link is invalid or expired. Request a new one.';
       status.className = 'status error';
@@ -43,6 +47,7 @@
       status.className = 'status';
       try {
         const body = new URLSearchParams({ email });
+        if (next) body.set('next', next);
         const resp = await fetch('/auth/request', {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
