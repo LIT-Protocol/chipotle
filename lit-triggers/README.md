@@ -42,14 +42,16 @@ Run Postgres locally and set the environment above before starting the server. M
 
 ## Railway deployment
 
-The repo includes a root-level `railway.json` that tells Railway to build `lit-triggers/Dockerfile`, run `/app/lit-triggers`, keep one replica awake, and health-check `/health`.
+The service owns its Railway config at `lit-triggers/railway.json`. In Railway, set this service's root directory to `lit-triggers` so multiple Railway services/projects can coexist in the monorepo without sharing one root config.
+
+With the service root set to `lit-triggers`, Railway uses `railway.json` to build `Dockerfile`, run `/app/lit-triggers`, keep one replica awake, and health-check `/health`.
 
 Create a Railway project with:
 
 1. One web service connected to this GitHub repo/branch.
 2. One Railway Postgres service in the same project.
-3. The web service root left as the repository root so `railway.json` and `lit-triggers/Dockerfile` are both visible.
-4. App sleeping disabled. `railway.json` sets `sleepApplication: false`; keep it disabled in the Railway UI too because scheduled and chain-event triggers rely on a continuously running worker.
+3. The web service root directory set to `lit-triggers`.
+4. App sleeping disabled. `lit-triggers/railway.json` sets `sleepApplication: false`; keep it disabled in the Railway UI too because scheduled and chain-event triggers rely on a continuously running worker.
 
 Set the web service variables before deploying:
 

@@ -343,4 +343,4 @@ Confirmed.
 4. ✅ **PR 4 — chain event trigger (implemented 2026-05-22).** EVM polling listener with watermarks, idempotent deliveries, chain-event validation, and best-effort decoding.
 5. ✅ **PR 5 — admin UI (implemented 2026-05-22).** Static HTML/JS dashboard for managing triggers, in
    the same spirit as `lit-payments/static/`.
-6. ✅ **PR 6 — Railway deploy (implemented 2026-05-22).** `railway.json`, variables/secrets, health checks, docs.
+6. ✅ **PR 6 — Railway deploy (implemented 2026-05-22).** `lit-triggers/railway.json`, variables/secrets, health checks, docs.
