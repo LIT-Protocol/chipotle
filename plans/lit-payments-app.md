@@ -236,7 +236,7 @@ No separate `audit_log` table: every state-changing action is recorded on its ow
 
 ### User flow
 
-User in the dashboard at `dashboard.litprotocol.com` opens Add Funds and clicks "Pay with LITKEY for 25% off" → navigates to `payments.litprotocol.com/payWithLitkey?wallet=<address>`.
+User in the dashboard at `dashboard.litprotocol.com` opens Add Funds and clicks "Pay with LITKEY for 25% off" → opens `payments.litprotocol.com/payWithLitkey?wallet=<address>` in a new tab.
 
 1. Page reads the wallet from the URL → looks up the Stripe customer → **prominently displays the account that will be credited** (email + wallet) for the user to confirm.
 2. User connects their paying wallet (Wagmi). May be the same as the credited wallet or a different one (e.g., a separate Metamask holding LITKEY).

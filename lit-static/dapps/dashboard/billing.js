@@ -98,7 +98,7 @@ async function openLitkeyPaymentPage() {
   try {
     const wallet = await resolveLitkeyPaymentWallet();
     const url = LITKEY_PAYMENT_URL + '?wallet=' + encodeURIComponent(wallet);
-    window.location.assign(url);
+    window.open(url, '_blank', 'noopener,noreferrer');
   } catch (e) {
     logError('openLitkeyPaymentPage', e);
     setStatus('Could not open LITKEY payment: ' + formatError(e), 'error');
