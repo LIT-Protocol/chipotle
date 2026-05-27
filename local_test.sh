@@ -228,22 +228,23 @@ EOF
 echo "    NodeConfig.toml written."
 
 # --------------------------------------------------------------------------
-# 4. Start Jaeger (docker)
+# 4. Start Jaeger (docker) — optional; telemetry only
 # --------------------------------------------------------------------------
 echo "==> Step 4: Starting Jaeger (docker)..."
 
+SKIP_JAEGER=false
 if ! command -v docker &>/dev/null; then
-    echo "ERROR: docker is not installed or not on PATH."
-    echo ""
-    echo "Install Docker Desktop from https://www.docker.com/products/docker-desktop/"
-    echo "and ensure the daemon is running, then re-run this script."
-    exit 1
+    echo "    docker not on PATH — skipping Jaeger (telemetry only)."
+    SKIP_JAEGER=true
+elif ! docker info >/dev/null 2>&1; then
+    echo "    docker daemon unreachable — skipping Jaeger (telemetry only)."
+    SKIP_JAEGER=true
 fi
 
-if ! docker info >/dev/null 2>&1; then
-    echo "ERROR: docker daemon is not reachable. Start Docker Desktop and re-run."
-    exit 1
+if [ "$SKIP_JAEGER" = true ]; then
+    LIT_TELEMETRY_ENDPOINT_URL=""
 fi
+if [ "$SKIP_JAEGER" != true ]; then
 
 # If a container with our name already exists, reuse it (start if stopped).
 if docker ps -a --format '{{.Names}}' | grep -qx "$JAEGER_CONTAINER_NAME"; then
@@ -275,6 +276,7 @@ else
 fi
 
 LIT_TELEMETRY_ENDPOINT_URL="http://127.0.0.1:${JAEGER_OTLP_GRPC_PORT}"
+fi  # end "$SKIP_JAEGER" != true
 
 # --------------------------------------------------------------------------
 # --no_code: print summary + cargo commands and wait
