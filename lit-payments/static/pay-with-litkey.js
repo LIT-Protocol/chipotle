@@ -1,11 +1,25 @@
 (function () {
   'use strict';
 
-  const BASE_CHAIN_ID_HEX = '0x2105';
   const BASE_CHAIN_ID_DEC = 8453;
+  const BASE_RPC_URL = 'https://mainnet.base.org';
+  const BASE_ADD_PARAMS = {
+    chainName: 'Base',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    rpcUrls: [BASE_RPC_URL],
+    blockExplorerUrls: ['https://basescan.org'],
+  };
   const MIN_CENTS = 500n;
   const WEI = 1000000000000000000n;
   const USD = 1000000000000000000n;
+
+  // Lazy-loaded ESM wallet helper (shared with the dashboard).
+  // Provides a MetaMask / WalletConnect picker on first connect.
+  let _walletModule = null;
+  async function getWalletModule() {
+    if (!_walletModule) _walletModule = await import('/static/wallet_connect.js');
+    return _walletModule;
+  }
 
   const ERC20_ABI = [
     'function approve(address spender,uint256 amount) returns (bool)',
@@ -172,51 +186,44 @@
   async function loadConfig() { state.config = await fetchJson('/api/litkey/payment-config'); }
 
   async function ensureBase() {
-    if (!window.ethereum) throw new Error('No browser wallet found.');
-    let chainId = await window.ethereum.request({ method: 'eth_chainId' });
-    if (chainId === BASE_CHAIN_ID_HEX) return;
-    try {
-      await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BASE_CHAIN_ID_HEX }] });
-    } catch (e) {
-      if (e && e.code === 4902) {
-        await window.ethereum.request({
-          method: 'wallet_addEthereumChain',
-          params: [{
-            chainId: BASE_CHAIN_ID_HEX,
-            chainName: 'Base',
-            nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-            rpcUrls: ['https://mainnet.base.org'],
-            blockExplorerUrls: ['https://basescan.org'],
-          }],
-        });
-        await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BASE_CHAIN_ID_HEX }] });
-      } else {
-        throw e;
-      }
-    }
-    chainId = await window.ethereum.request({ method: 'eth_chainId' });
-    if (chainId !== BASE_CHAIN_ID_HEX) throw new Error('Switch to Base mainnet to pay with LITKEY.');
+    const mod = await getWalletModule();
+    const snap = mod.snapshotState();
+    if (snap.connected && snap.chainId === BASE_CHAIN_ID_DEC) return;
+    // Route through the shared switchChain so the call goes to the active
+    // provider (injected OR WalletConnect), with EIP-3085 add params for
+    // wallets that don't know Base yet.
+    const { signer } = await mod.switchChain(BASE_CHAIN_ID_DEC, BASE_ADD_PARAMS);
+    state.signer = signer;
+    state.provider = mod.getProvider();
   }
 
   async function connectWallet() {
-    if (!window.ethereum) throw new Error('No browser wallet found.');
     const button = $('connect-wallet');
     if (button) button.disabled = true;
     try {
       setStatus('Opening wallet…', 'info');
-      await window.ethereum.request({ method: 'eth_requestAccounts' });
-      await ensureBase();
-      // Re-read accounts after a possible network switch. Some injected wallets
-      // briefly expose a null selected account/provider during the switch, which
-      // made ethers BrowserProvider.getSigner() throw on the first click.
-      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
-      const account = Array.isArray(accounts) && accounts[0] ? accounts[0] : null;
-      if (!account) throw new Error('No wallet account selected.');
-      state.provider = new ethers.BrowserProvider(window.ethereum);
-      await state.provider.getNetwork();
-      state.signer = await state.provider.getSigner(account);
+      const mod = await getWalletModule();
+      const { signer, chainId } = await mod.connectWallet({
+        chainId: BASE_CHAIN_ID_DEC,
+        rpcUrl: BASE_RPC_URL,
+      });
+      state.signer = signer;
+      state.provider = mod.getProvider();
+      if (chainId !== BASE_CHAIN_ID_DEC) {
+        try {
+          await ensureBase();
+        } catch (e) {
+          throw new Error('Switch to Base mainnet to pay with LITKEY.');
+        }
+      }
       setStatus('Wallet connected. Confirm the credited account, then approve exact LITKEY.', 'success');
       renderQuote();
+    } catch (e) {
+      if (e && e.cancelled) {
+        setStatus('Wallet connection cancelled.', 'info');
+        return;
+      }
+      throw e;
     } finally {
       if (button) button.disabled = false;
     }
@@ -277,19 +284,36 @@
     }
   }
 
-  function installWalletGuards() {
-    if (!window.ethereum || !window.ethereum.on) return;
-    window.ethereum.on('chainChanged', (chainId) => {
-      state.provider = null;
-      state.signer = null;
-      resetApproval(chainId === BASE_CHAIN_ID_HEX
-        ? 'Network changed. Reconnect wallet before paying.'
-        : 'Wallet switched away from Base. Switch back to Base and reconnect before paying.');
-    });
-    window.ethereum.on('accountsChanged', () => {
-      state.provider = null;
-      state.signer = null;
-      resetApproval('Wallet account changed. Reconnect before paying.');
+  async function installWalletGuards() {
+    const mod = await getWalletModule();
+    let prevAddress = null;
+    let prevChainId = null;
+    mod.onWalletChange((snap) => {
+      if (!snap.connected) {
+        state.provider = null;
+        state.signer = null;
+        resetApproval('Wallet disconnected. Reconnect before paying.');
+        prevAddress = null;
+        prevChainId = null;
+        return;
+      }
+      const addressChanged = prevAddress && snap.address && prevAddress.toLowerCase() !== snap.address.toLowerCase();
+      const chainChanged = prevChainId !== null && snap.chainId !== prevChainId;
+      prevAddress = snap.address;
+      prevChainId = snap.chainId;
+      if (chainChanged) {
+        state.provider = null;
+        state.signer = null;
+        resetApproval(snap.chainId === BASE_CHAIN_ID_DEC
+          ? 'Network changed. Reconnect wallet before paying.'
+          : 'Wallet switched away from Base. Switch back to Base and reconnect before paying.');
+        return;
+      }
+      if (addressChanged) {
+        state.provider = null;
+        state.signer = null;
+        resetApproval('Wallet account changed. Reconnect before paying.');
+      }
     });
   }
 
@@ -297,7 +321,7 @@
     try {
       await Promise.all([loadAccount(), loadConfig(), refreshQuote()]);
       if (state.config.chain_id !== BASE_CHAIN_ID_DEC) throw new Error('Payment backend is not configured for Base mainnet.');
-      installWalletGuards();
+      await installWalletGuards();
       setStatus('Confirm the credited account, then connect your wallet.', 'info');
       setInterval(refreshQuote, 30000);
     } catch (e) {
