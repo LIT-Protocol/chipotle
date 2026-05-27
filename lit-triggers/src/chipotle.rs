@@ -45,7 +45,7 @@ impl ChipotleClient {
     }
 
     pub fn lit_action_url(&self) -> String {
-        format!("{}/lit_action", self.base_url)
+        format!("{}/core/v1/lit_action", self.base_url)
     }
 
     pub fn build_lit_action_request(action_code: String, params: Value) -> LitActionRequest {
@@ -62,9 +62,11 @@ impl ChipotleClient {
         params: Value,
     ) -> Result<Value, ChipotleError> {
         let body = Self::build_lit_action_request(action_code, params);
+        let url = self.lit_action_url();
+        tracing::debug!(target: "chipotle", url = %url, "dispatching lit action");
         let response = self
             .http
-            .post(self.lit_action_url())
+            .post(&url)
             .bearer_auth(usage_api_key)
             .header("X-Api-Key", usage_api_key)
             .json(&body)
@@ -85,9 +87,17 @@ impl ChipotleClient {
         let parsed = parse_response_body(&text);
 
         if status.is_success() {
+            tracing::debug!(target: "chipotle", url = %url, status = %status, "lit action succeeded");
             return Ok(parsed.unwrap_or_else(|| json!({ "raw": text })));
         }
 
+        tracing::warn!(
+            target: "chipotle",
+            url = %url,
+            status = %status,
+            body_preview = %text.chars().take(256).collect::<String>(),
+            "lit action failed"
+        );
         Err(ChipotleError {
             message: format!("chipotle returned HTTP {status}"),
             transient: is_transient_status(status),
@@ -116,7 +126,7 @@ mod tests {
         let client = ChipotleClient::new("https://api.example.test/".to_string());
         assert_eq!(
             client.lit_action_url(),
-            "https://api.example.test/lit_action"
+            "https://api.example.test/core/v1/lit_action"
         );
     }
 

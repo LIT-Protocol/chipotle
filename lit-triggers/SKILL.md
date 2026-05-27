@@ -152,9 +152,11 @@ AUTH = 'authorization: ' + 'Bearer ' + TOKEN
 BASE = 'https://triggers.litprotocol.com'
 USAGE_KEY = input('Paste scoped Chipotle usage key: ').strip()
 ACTION = r'''
-(async () => {
+const main = async () => {
   Lit.Actions.setResponse({ response: JSON.stringify({ ok: true, params }) });
-})();
+};
+
+main();
 '''.strip()
 body = {
     'name': 'Agent-created webhook',
