@@ -1,7 +1,3 @@
-# Keep Railway/Docker build context small.
-.git
-.gitignore
-
 # Build artifacts
 **/target/
 **/.cargo/
