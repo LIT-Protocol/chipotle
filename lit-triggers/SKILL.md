@@ -152,11 +152,17 @@ AUTH = 'authorization: ' + 'Bearer ' + TOKEN
 BASE = 'https://triggers.litprotocol.com'
 USAGE_KEY = input('Paste scoped Chipotle usage key: ').strip()
 ACTION = r'''
-const main = async () => {
-  Lit.Actions.setResponse({ response: JSON.stringify({ ok: true, params }) });
+// The runtime wraps your code and invokes `main(params)` itself.
+// Do NOT call `main()` at the bottom — the wrapper does it.
+// If `main` returns a value, the runtime auto-wraps it in
+// `Lit.Actions.setResponse({ response: <returned value> })`.
+const main = async (params) => {
+  return {
+    ok: true,
+    source: params && params.source,
+    event: params && params.event,
+  };
 };
-
-main();
 '''.strip()
 body = {
     'name': 'Agent-created webhook',
@@ -206,17 +212,17 @@ Example body differences from webhook:
 }
 ```
 
-Schedule runs include input like:
+Schedule runs include input like (note: keys are flat, not nested under `event`):
 
 ```json
 {
   "source": "schedule",
-  "event": {
-    "scheduled_at": "<RFC3339 timestamp>",
-    "cron": "*/5 * * * *"
-  }
+  "scheduled_at": "<RFC3339 timestamp>",
+  "cron": "*/5 * * * *"
 }
 ```
+
+The action accesses them as `params.source`, `params.cron`, `params.scheduled_at`.
 
 ## 6. Create a Chain Event Trigger
 
@@ -264,14 +270,32 @@ Chain-event runs include input like:
 {
   "source": "chain_event",
   "event": {
-    "chain": "base",
+    "source": "chain_event",
+    "chain_key": "base",
     "chain_id": 8453,
+    "block_number": 46561426,
+    "address": "0x...",
     "contract_address": "0x...",
     "event_signature": "Transfer(address,address,uint256)",
-    "log": { "transactionHash": "0x...", "logIndex": "0x..." }
+    "transaction_hash": "0x...",
+    "log_index": 7,
+    "topic0": "0xddf252ad...",
+    "topics": ["0xddf252ad...", "0x000...sender", "0x000...receiver"],
+    "data": "0x...",
+    "decoded": { "arg0": "0xsender", "arg1": "0xreceiver", "arg2": "214935" },
+    "raw_log": {
+      "address": "0x...",
+      "blockNumber": "0x...",
+      "logIndex": "0x...",
+      "transactionHash": "0x...",
+      "topics": ["..."],
+      "data": "0x..."
+    }
   }
 }
 ```
+
+The action accesses these as `params.event.decoded.arg0`, `params.event.transaction_hash`, `params.event.block_number`, etc. `decoded.argN` are ABI-decoded values keyed by argument index (addresses normalized to lowercase hex strings, `uint256` values as decimal strings).
 
 ## 7. Inspect and Manage Triggers
 
@@ -353,8 +377,12 @@ Endpoints:
 - `401` from `/api/*`: the local agent token has not been authorized, was mistyped, or was revoked. Repeat the authorize URL flow.
 - Browser lands on login instead of authorization: expected if the user is logged out. After magic-link login it should return to `/agent/authorize?...`.
 - `400` from `/agent/authorize`: generated challenge was invalid. Regenerate the URL with the command in this skill.
-- `400 {"error":"usage_api_key_required"}`: trigger creation needs a scoped usage key.
-- Run reaches `failed` with Chipotle `401`/`403`: scoped usage key is invalid or not scoped for this action/group.
+- `422 Unprocessable Entity` (empty body) when creating a trigger: a required field is missing or malformed — most commonly `usage_api_key`.
+- `400 {"error":"invalid_cron"}`: cron expression is malformed or sub-30-second.
+- `400 {"error":"invalid_chain_event_config"}`: `chain` is not in the supported list, or `contract_address`/`event_signature` is malformed.
+- Run reaches `failed` with `chipotle returned HTTP 402 Payment Required`: the scoped usage key is unknown to Chipotle, expired, or has no billing balance.
+- Run reaches `failed` with Chipotle `401`/`403`: the scoped usage key is authenticated but not authorized for this action/group.
+- Run reaches `failed` with Chipotle `500 Internal Server Error` and `attempt: 3`: the Lit Action itself threw; the JS stack trace is preserved in `response`. Transient 5xxs are retried up to 3 times with exponential-ish backoff (1s, 5s, 30s).
 - No chain-event runs: verify RPC env var, start block/lookback, confirmation depth, and that matching logs exist.
 
 ## Verification Checklist
