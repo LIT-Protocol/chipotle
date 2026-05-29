@@ -13,6 +13,7 @@ contract PriceConsumer {
     int256 public answer;
     uint256 public roundId;
     uint256 public updatedAt;
+    bool public initialized;
 
     event PriceUpdated(int256 answer, uint256 roundId, uint256 updatedAt);
 
@@ -25,9 +26,12 @@ contract PriceConsumer {
 
     function setPrice(int256 _answer, uint256 _roundId, uint256 _updatedAt) external {
         if (msg.sender != updater) revert NotUpdater();
-        // Accept only newer rounds (Chainlink roundIds are monotonic). The first
-        // write (roundId == 0) is always allowed.
-        if (roundId != 0 && _roundId <= roundId) revert StaleRound();
+        // Accept only newer rounds (Chainlink roundIds are monotonic). Use an
+        // explicit `initialized` flag rather than `roundId != 0` as the
+        // first-write sentinel, so a legitimate roundId of 0 can't repeatedly
+        // bypass the stale-round check.
+        if (initialized && _roundId <= roundId) revert StaleRound();
+        initialized = true;
         answer = _answer;
         roundId = _roundId;
         updatedAt = _updatedAt;

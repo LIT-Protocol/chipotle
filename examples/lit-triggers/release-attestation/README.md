@@ -45,6 +45,30 @@ authorization for a caller to submit. That's because a trigger has no
 downstream caller — the webhook delivery is the end of the line. So the action
 wallet needs gas; `setup` funds it.
 
+### Where the trust actually sits (read this before copying)
+
+The HMAC check is **not** the security boundary against everyone. The action
+computes the expected signature from `params.secret`, and for a webhook *trigger*
+run that secret is injected server-side from `default_params`. But anyone holding
+the scoped **usage key** can call the Lit Action directly with params of their
+choosing — including their own `secret`, body, and matching `x-hub-signature-256`.
+For such a caller the HMAC is trivially satisfiable.
+
+So, precisely:
+
+- The HMAC authenticates the **public webhook path** — someone who discovers the
+  webhook URL but does *not* hold the usage key cannot forge an attestation. That
+  is real and useful (the webhook URL is not a secret).
+- The **usage key is the trust root.** Whoever holds it can make this action
+  attest anything. Treat it like a signing credential: scope it tightly, rotate
+  it, never commit it.
+- To also defend against a usage-key holder, the secret must be something the
+  caller can't supply — i.e. **encrypt it with `Lit.Actions.Encrypt`** (requires
+  a PKP in the group) and decrypt inside the action. Then a direct caller can't
+  produce a matching signature because they never learn the plaintext secret.
+  This example keeps the plaintext-secret form for clarity; the encrypted form is
+  the production shape.
+
 ## Files
 
 | Path | Purpose |
@@ -117,8 +141,14 @@ path — GitHub does the signing.
 ## Production considerations
 
 - **Secret handling.** This example stores the webhook secret in the trigger's
-  `default_params`. In production, encrypt it with `Lit.Actions.Encrypt` and
-  decrypt inside the action so it never sits in plaintext config.
+  `default_params`, which (see "Where the trust actually sits") means a usage-key
+  holder can substitute their own. In production, encrypt it with
+  `Lit.Actions.Encrypt` and decrypt inside the action so it never sits in
+  plaintext config and can't be caller-supplied.
+- **Commitish is not a commit.** GitHub's `release.target_commitish` may be a
+  branch name (e.g. `main`), not an immutable 40-hex SHA. For a real integrity
+  anchor, resolve the tag to its commit SHA (and/or record the release asset
+  checksums) before attesting, rather than storing whatever GitHub sends.
 - **Action wallet gas.** Because the action broadcasts, its wallet must stay
   funded. Meter trigger runs and top it up, or move to a "sign authorization,
   caller submits" model if a submitter exists.

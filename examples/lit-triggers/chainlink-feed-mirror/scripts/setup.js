@@ -94,6 +94,18 @@ async function main() {
   const aggregator = await resolveAggregator(FEED_SOURCE_RPC, FEED_SOURCE_PROXY);
   env.upsert("FEED_AGGREGATOR", aggregator);
   console.log(`  aggregator=${aggregator}`);
+  // The action pins the expected aggregator in its SOURCE constant. If the
+  // proxy has rotated to a new underlying aggregator, the trigger would watch
+  // one address while the action only accepts another — every run would fail
+  // verification. Warn loudly so the user updates SOURCE.aggregator in the action.
+  const bakedAgg = (actionCode.match(/aggregator:\s*"(0x[0-9a-fA-F]{40})"/) || [])[1];
+  if (bakedAgg && bakedAgg.toLowerCase() !== aggregator.toLowerCase()) {
+    console.log("\n  ⚠️  WARNING: proxy aggregator does not match the action's pinned SOURCE.aggregator:");
+    console.log(`      proxy resolves: ${aggregator}`);
+    console.log(`      action pins:    ${bakedAgg}`);
+    console.log("      Update SOURCE.aggregator in action/feedMirror.js (this changes the");
+    console.log("      action CID + relayer, so re-run setup) or runs will fail verification.\n");
+  }
 
   console.log("Step 10/11: Authorizing this machine with lit-triggers...");
   const agentToken = await authorizeAgent(TRIGGERS_BASE);
@@ -105,6 +117,7 @@ async function main() {
     kind: "chain_event",
     action_code: actionCode,
     default_params: {
+      srcRpcUrl: FEED_SOURCE_RPC,
       destRpcUrl: BASE_SEPOLIA_RPC_URL,
       destChainId: DEST_CHAIN_ID,
       consumer,

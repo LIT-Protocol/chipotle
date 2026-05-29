@@ -112,14 +112,28 @@ async function main() {
   });
   env.upsert("TRIGGER_ID", trigger.id);
 
+  // Create the trigger DISABLED. With DEMO_FORCE_DOWN it pays out every single
+  // tick, so an always-on demo would drain the pool. `npm run claim` enables it,
+  // catches one payout, and disables it again. Flip this off for a real policy
+  // (where the live status, not a forced indicator, gates payouts).
+  await patchTrigger(TRIGGERS_BASE, agentToken, trigger.id, { enabled: false });
+
   console.log("\n✓ Setup complete.\n");
   console.log("  Action CID:    ", process.env.ACTION_IPFS_CID);
   console.log("  Pool wallet:   ", poolAddr);
   console.log("  Policyholder:  ", policyholder);
   console.log("  Cron:          ", CRON, DEMO_FORCE_DOWN === "true" ? "(DEMO: forcing 'critical')" : "");
-  console.log("  Trigger:       ", trigger.id);
-  console.log("\nWatch a payout fire on the next tick:");
-  console.log("  npm run claim");
+  console.log("  Trigger:       ", trigger.id, "(created DISABLED — see below)");
+  console.log("\nThe trigger is disabled so it can't drain the pool. To watch one payout:");
+  console.log("  npm run claim       # enables it, catches a payout, disables it again");
+}
+
+async function patchTrigger(base, token, triggerId, body) {
+  await fetch(`${base}/api/triggers/${triggerId}`, {
+    method: "PATCH",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
 }
 
 // --- on-chain ---

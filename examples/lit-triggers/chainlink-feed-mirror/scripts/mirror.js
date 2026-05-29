@@ -1,10 +1,12 @@
 // End-to-end client for the feed mirror.
 //
-//   npm run mirror -- --simulate    (default-friendly: deterministic + fast)
-//     Spins up a TEMPORARY webhook trigger running the SAME action, feeds it a
-//     synthetic AnswerUpdated payload, confirms PriceConsumer was written, then
-//     deletes the temp trigger. Proves the relay logic without waiting for a
-//     real on-chain Chainlink update.
+//   npm run mirror -- --simulate    (deterministic + fast)
+//     Finds the most recent REAL AnswerUpdated log on the source aggregator,
+//     then replays its (tx hash, log index) through a TEMPORARY webhook trigger
+//     running the SAME action. Because the action re-verifies the log against
+//     the pinned source RPC, this proves the relay end-to-end without waiting
+//     for the next Chainlink update — and a forged price would simply be
+//     rejected (the action ignores supplied values and reads the chain itself).
 //
 //   npm run mirror                  (the real thing)
 //     Watches the chain-event trigger created by setup and prints the next
@@ -15,6 +17,7 @@ const { ethers } = require("ethers");
 const env = require("./_env");
 
 const SIMULATE = process.argv.includes("--simulate");
+const ANSWER_UPDATED_TOPIC = ethers.utils.id("AnswerUpdated(int256,uint256,uint256)");
 
 async function main() {
   env.load();
@@ -26,6 +29,8 @@ async function main() {
     PRICE_CONSUMER_BASE_SEPOLIA,
     BASE_SEPOLIA_RPC_URL = "https://sepolia.base.org",
     DEST_CHAIN_ID = "84532",
+    FEED_SOURCE_RPC = "https://mainnet.base.org",
+    FEED_AGGREGATOR,
   } = process.env;
 
   for (const k of ["LIT_TRIGGERS_AGENT_TOKEN", "PRICE_CONSUMER_BASE_SEPOLIA"]) {
@@ -47,13 +52,14 @@ async function main() {
 
   let run;
   if (SIMULATE) {
-    run = await simulate(TRIGGERS_BASE, TOKEN, USAGE, {
+    run = await simulate(TRIGGERS_BASE, TOKEN, USAGE, FEED_SOURCE_RPC, FEED_AGGREGATOR, {
+      srcRpcUrl: FEED_SOURCE_RPC,
       destRpcUrl: BASE_SEPOLIA_RPC_URL,
       destChainId: DEST_CHAIN_ID,
       consumer: PRICE_CONSUMER_BASE_SEPOLIA,
       gasLimit: "150000",
       dryRun: false,
-    }, before);
+    });
   } else {
     if (!TRIGGER_ID) throw new Error("TRIGGER_ID missing — run setup, or use --simulate.");
     console.log("Watching the chain-event trigger for the next real AnswerUpdated...");
@@ -74,12 +80,30 @@ async function main() {
   }
 }
 
-// Run the same action via a throwaway webhook trigger fed a synthetic event.
-async function simulate(base, token, usage, defaultParams, beforeRound) {
+// Replay the most recent REAL AnswerUpdated through a throwaway webhook trigger.
+async function simulate(base, token, usage, srcRpcUrl, aggregator, defaultParams) {
   if (!usage) throw new Error("LIT_USAGE_API_KEY missing — needed to create the temp trigger.");
+  if (!aggregator) throw new Error("FEED_AGGREGATOR missing — run `npm run setup` first.");
   const fs = require("fs");
   const path = require("path");
   const actionCode = fs.readFileSync(path.join(__dirname, "..", "action", "feedMirror.js"), "utf8");
+
+  // Find the latest real AnswerUpdated log on the source aggregator.
+  console.log(`Finding the latest AnswerUpdated on ${aggregator}...`);
+  const srcProvider = new ethers.providers.JsonRpcProvider(srcRpcUrl);
+  const head = await srcProvider.getBlockNumber();
+  let logs = [];
+  for (let span = 2000; span <= 20000 && logs.length === 0; span += 6000) {
+    logs = await srcProvider.getLogs({
+      address: aggregator,
+      topics: [ANSWER_UPDATED_TOPIC],
+      fromBlock: head - span,
+      toBlock: head,
+    }).catch(() => []);
+  }
+  if (!logs.length) throw new Error("no recent AnswerUpdated found to replay — try the real `npm run mirror`.");
+  const latest = logs[logs.length - 1];
+  console.log(`  replaying tx ${latest.transactionHash} log ${latest.logIndex} (block ${latest.blockNumber})`);
 
   console.log("Creating temporary webhook trigger with the same action...");
   const created = await api(base, token, "POST", "/api/triggers", {
@@ -92,18 +116,18 @@ async function simulate(base, token, usage, defaultParams, beforeRound) {
   });
   const tid = created.id;
   try {
-    // Synthetic AnswerUpdated shaped exactly like a real chain_event delivery.
-    const synthetic = {
+    // chain_event-shaped event pointing at the REAL log. The action ignores any
+    // decoded values and re-reads (tx hash, log index) from the source chain, so
+    // this is a faithful replay, not a forgery.
+    const event = {
       source: "chain_event",
       chain_key: "base",
       chain_id: 8453,
-      decoded: {
-        arg0: "200000000000",                 // price (e.g. $2000.00000000)
-        arg1: String(beforeRound.add(1)),     // strictly-newer roundId
-        arg2: String(Math.floor(Date.now() / 1000) - (Date.now() % 1000 === 0 ? 0 : 1)),
-      },
+      contract_address: aggregator,
+      transaction_hash: latest.transactionHash,
+      log_index: latest.logIndex,
     };
-    const queued = await api(base, token, "POST", `/webhook/${tid}`, synthetic, true);
+    const queued = await api(base, token, "POST", `/webhook/${tid}`, event, true);
     console.log(`  queued: ${JSON.stringify(queued)}`);
     // We know the exact run id here, so wait for that specific run to finish
     // (don't use the "fresh/seen" baseline — the run already exists by now).

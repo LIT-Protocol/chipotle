@@ -31,9 +31,18 @@ async function main() {
   console.log(`Policyholder ${policyholder}`);
   console.log(`  balance before: ${ethers.utils.formatEther(before)} ETH`);
   console.log(`Pool ${POOL_WALLET_ADDRESS}: ${ethers.utils.formatEther(await provider.getBalance(POOL_WALLET_ADDRESS))} ETH`);
-  console.log("Waiting for the next scheduled run (cron tick)...");
 
-  const run = await waitForFreshRun(TRIGGERS_BASE, TOKEN, TRIGGER_ID);
+  // setup leaves the trigger disabled so it can't drain the pool. Enable it,
+  // catch one scheduled payout, then disable again (in the finally below).
+  console.log("Enabling the trigger and waiting for the next scheduled run (cron tick)...");
+  await patch(TRIGGERS_BASE, TOKEN, TRIGGER_ID, { enabled: true });
+
+  let run;
+  try {
+    run = await waitForFreshRun(TRIGGERS_BASE, TOKEN, TRIGGER_ID);
+  } finally {
+    await patch(TRIGGERS_BASE, TOKEN, TRIGGER_ID, { enabled: false });
+  }
   const inner = run && run.response && run.response.response;
   console.log(`  run status: ${run && run.status}`);
   console.log(`  action result: ${JSON.stringify(inner)}`);

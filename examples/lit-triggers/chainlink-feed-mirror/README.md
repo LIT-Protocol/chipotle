@@ -33,13 +33,25 @@ copies the event it was triggered on," not "this relayer operator is honest."
 
 ## Hardening
 
-- **Destination pin.** The action calls `eth_chainId` on `destRpcUrl` and
-  refuses to write unless it matches `destChainId` — a swapped or hostile RPC
-  can't redirect the relayed price to another chain.
+- **Source re-verification (the important one).** The action does **not** trust
+  the price the trigger hands it. A chain-event trigger supplies a decoded log,
+  but anyone holding the usage key could execute the action with a fabricated
+  `decoded` payload. So the action takes only the `transaction_hash` and
+  `log_index`, re-fetches that receipt from a **hostname-pinned, https-only**
+  source RPC (`SOURCE.rpcHost`), and verifies the log was emitted by the expected
+  **`SOURCE.aggregator`** with the `AnswerUpdated` topic and enough confirmations.
+  It decodes the price from that verified log. The aggregator/chain/host are baked
+  constants — editing them changes the action CID + signer, so a modified action
+  can't write to the existing `PriceConsumer`. A fabricated price is simply
+  ignored (and a wrong-emitter tx is rejected).
+- **Destination pin.** `destChainId` is required; the action calls `eth_chainId`
+  on `destRpcUrl` and refuses to write unless it matches — a swapped RPC can't
+  redirect the relayed price to another chain.
 - **Updater pin.** `PriceConsumer.setPrice` reverts unless `msg.sender` is the
   relayer (the action's derived wallet).
-- **Stale-round reject.** `setPrice` accepts only strictly-newer `roundId`s,
-  matching Chainlink semantics, so a replayed or out-of-order relay reverts.
+- **Stale-round reject.** `setPrice` accepts only strictly-newer `roundId`s
+  (gated by an explicit `initialized` flag so a `roundId == 0` write can't bypass
+  it), matching Chainlink semantics.
 
 ## Files
 

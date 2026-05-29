@@ -39,22 +39,28 @@ collects premiums and caps payouts; see below.)
 | Path | Purpose |
 | --- | --- |
 | `action/uptimeInsurance.js` | The Lit Action: check the status page, pay out if the service is down. |
-| `scripts/setup.js` | One-shot: action CID → group → scoped key → derive + fund the pool wallet → authorize lit-triggers → create the schedule trigger. |
-| `scripts/claim.js` | Watches for the next scheduled payout, shows the balance delta, then disables the trigger so the demo pool stops draining. |
+| `scripts/setup.js` | One-shot: action CID → group → scoped key → derive + fund the pool wallet → authorize lit-triggers → create the schedule trigger (left DISABLED). |
+| `scripts/claim.js` | Enables the trigger, catches one scheduled payout, shows the balance delta, then disables it again so the demo pool stops draining. |
 | `scripts/_env.js` | Tiny shared `.env` reader / upserter. |
+
+> **Demo safety:** with `DEMO_FORCE_DOWN=true` the action pays out on *every*
+> cron tick (no per-incident dedup — see Production considerations). So `setup`
+> creates the trigger **disabled**, and `npm run claim` enables it, catches a
+> single payout, and disables it again. An always-on demo would drain the pool.
 
 ## Walkthrough
 
 ```bash
 cp .env.example .env      # set LIT_API_KEY (master) + DEPLOYER_PRIVATE_KEY
 npm install
-npm run setup             # opens a browser — click "Authorize agent"
-npm run claim             # watch a payout fire on the next tick
+npm run setup             # opens a browser — click "Authorize agent" (trigger created disabled)
+npm run claim             # enables it, catches one payout, disables it again
 ```
 
-`setup` runs the schedule trigger every minute and (for the demo) forces the
-"down" branch so a payout reliably fires. `claim` records the policyholder
-balance, waits for the next run, prints the payout tx + balance delta, then
+`setup` configures the schedule trigger to run every minute and (for the demo)
+forces the "down" branch so a payout reliably fires — but leaves it disabled.
+`claim` enables it, records the policyholder balance, waits for the next run,
+prints the payout tx + balance delta, then
 disables the trigger.
 
 Expected `claim` output:
