@@ -90,8 +90,8 @@ function verifyWarrant(warrantMessage, signatures, authorities, threshold) {
   if (!warrant.noteCommitment) {
     return { ok: false, reason: "warrant missing noteCommitment" };
   }
-  if (typeof warrant.expiry !== "number") {
-    return { ok: false, reason: "warrant has no numeric expiry" };
+  if (typeof warrant.expiry !== "number" || !Number.isFinite(warrant.expiry)) {
+    return { ok: false, reason: "warrant has no finite numeric expiry" };
   }
   if (Date.now() / 1000 > warrant.expiry) {
     return { ok: false, reason: "warrant expired" };

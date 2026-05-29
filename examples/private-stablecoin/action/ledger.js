@@ -130,6 +130,13 @@ async function mint(p) {
 async function transfer(p) {
   const { inputs, outputs, caller } = p;
 
+  // Reject no-op transfers. An empty transfer changes no balances but still
+  // consumes the (global) nonce, which lets an attacker who learns a pending
+  // nonce front-run it and grief the victim's tx into NonceAlreadyUsed.
+  if (!inputs.length || !outputs.length) {
+    return { ok: false, reason: "transfer requires at least one input and one output" };
+  }
+
   const owned = checkOwnership(inputs, caller);
   if (!owned.ok) return owned;
 
@@ -172,8 +179,9 @@ async function redeem(p) {
   const owned = checkOwnership(inputs, caller);
   if (!owned.ok) return owned;
 
-  // KYC the identity cashing out — redeem moves real dollars off the ledger.
-  const kyc = verifyKyc(kycAttestation, kycSigner, caller);
+  // KYC the dollar edge: the party RECEIVING real USDC. Binding to `caller`
+  // instead would let a KYC'd holder cash out to an unverified recipient.
+  const kyc = verifyKyc(kycAttestation, kycSigner, recipient);
   if (!kyc.ok) return kyc;
 
   const live = await checkInputsLive(inputs, p.contractAddress, p.contractRpcUrl);
@@ -224,14 +232,19 @@ function checkOwnership(inputs, caller) {
 // against live chain state before authorizing the spend. The RPC host is
 // pinned (see ALLOWED_CONTRACT_HOST) so the state it reads cannot be forged.
 async function checkInputsLive(inputs, contract, rpcUrl) {
-  let host;
+  let url;
   try {
-    host = new URL(rpcUrl).hostname;
+    url = new URL(rpcUrl);
   } catch {
     return { ok: false, reason: "contractRpcUrl is not a valid URL" };
   }
-  if (!ALLOWED_CONTRACT_HOST.test(host)) {
-    return { ok: false, reason: `contract RPC host not whitelisted: ${host}` };
+  // Require TLS — over http: a network-position attacker could forge the
+  // commitment/nullifier responses the pin is meant to protect.
+  if (url.protocol !== "https:") {
+    return { ok: false, reason: "contractRpcUrl must be https" };
+  }
+  if (!ALLOWED_CONTRACT_HOST.test(url.hostname)) {
+    return { ok: false, reason: `contract RPC host not whitelisted: ${url.hostname}` };
   }
 
   const COMMITMENTS_SEL = ethers.utils.id("commitments(bytes32)").slice(0, 10);
@@ -278,10 +291,11 @@ function verifyKyc(attestation, kycSigner, subject) {
   if (ethers.utils.getAddress(claims.subject) !== ethers.utils.getAddress(subject)) {
     return { ok: false, reason: "KYC attestation subject != expected subject" };
   }
-  // Expiry is mandatory and must be numeric. A missing / string / null exp
-  // must NOT silently mean "never expires".
-  if (typeof claims.exp !== "number") {
-    return { ok: false, reason: "KYC attestation has no numeric exp" };
+  // Expiry is mandatory and must be a finite number. A missing / string /
+  // null exp — or a non-finite one like 1e999 (Infinity) — must NOT silently
+  // mean "never expires".
+  if (typeof claims.exp !== "number" || !Number.isFinite(claims.exp)) {
+    return { ok: false, reason: "KYC attestation has no finite numeric exp" };
   }
   if (Date.now() / 1000 > claims.exp) {
     return { ok: false, reason: "KYC attestation expired" };
@@ -290,14 +304,17 @@ function verifyKyc(attestation, kycSigner, subject) {
 }
 
 async function screenAll(addresses, screeningRpcUrl) {
-  let host;
+  let url;
   try {
-    host = new URL(screeningRpcUrl).hostname;
+    url = new URL(screeningRpcUrl);
   } catch {
     return { ok: false, reason: "screeningRpcUrl is not a valid URL" };
   }
-  if (!ALLOWED_SCREENING_HOST.test(host)) {
-    return { ok: false, reason: `screening RPC host not whitelisted: ${host}` };
+  if (url.protocol !== "https:") {
+    return { ok: false, reason: "screeningRpcUrl must be https" };
+  }
+  if (!ALLOWED_SCREENING_HOST.test(url.hostname)) {
+    return { ok: false, reason: `screening RPC host not whitelisted: ${url.hostname}` };
   }
   for (const addr of [...new Set(addresses.map((a) => a.toLowerCase()))]) {
     const padded = addr.replace(/^0x/, "").padStart(64, "0");

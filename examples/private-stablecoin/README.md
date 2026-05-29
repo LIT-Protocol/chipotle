@@ -136,9 +136,10 @@ chain id would be theater.
 An adversarial pass (`/codex challenge`) found real issues beyond the
 demo-grade simplifications below; these are fixed and regression-tested:
 
-- **Contract RPC is pinned** (`ALLOWED_CONTRACT_HOST`) so the action can't be
-  fed forged chain state to authorize a redeem against a non-existent note
-  (was: reserve-drain).
+- **Both RPCs are pinned to an https Alchemy host** (`ALLOWED_CONTRACT_HOST`,
+  `ALLOWED_SCREENING_HOST`) so the action can't be fed forged chain/OFAC state
+  to authorize a redeem against a non-existent note (was: reserve-drain), and
+  can't be downgraded to cleartext http for a MITM.
 - **Ledger PKP is baked into the action source** at setup, not taken from
   `js_params` — a caller can't redirect note encryption to a PKP they control
   (which would make a note undisclosable to a regulator).
@@ -146,12 +147,15 @@ demo-grade simplifications below; these are fixed and regression-tested:
   the authority count (was: `threshold=0` decrypted with zero signatures), and
   the decrypted note must match `warrant.noteCommitment` (was: a warrant for
   one note could open another's blob).
-- **Expiry is mandatory + numeric** for both KYC attestations and warrants (was:
-  a missing/string `exp` meant "never expires").
+- **Expiry is mandatory, numeric, and finite** for both KYC attestations and
+  warrants (was: a missing/string `exp`, or a non-finite `1e999`, meant
+  "never expires").
 - **`SafeERC20` + a balance-delta check** on the reserve, so a fee-on-transfer
   or no-return token can't credit more privUSD than USDC actually arrived.
-- **KYC is enforced on `redeem`**, not just `mint` (the dollar edge in both
-  directions).
+- **KYC is enforced on `redeem`**, bound to the payout **recipient** (the party
+  receiving real dollars), not just on `mint`.
+- **No-op transfers are rejected** (empty input/output sets), so an attacker
+  can't burn a victim's pending nonce to grief their transaction.
 
 ## What's demo-grade
 
