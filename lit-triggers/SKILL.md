@@ -187,10 +187,30 @@ print('Webhook URL:', BASE + '/webhook/' + trigger['id'])
 PY
 ```
 
-The webhook receives JSON bodies as `params.event`, and selected safe headers as `params.headers`. Fire it with:
+The webhook receives JSON bodies as `params.event`, the exact raw request body
+as `params.event_raw` (a string), and selected safe headers as `params.headers`.
+Fire it with:
 
 ```bash
 curl -fsS -X POST 'https://triggers.litprotocol.com/webhook/<trigger-id>'   -H 'content-type: application/json'   -d '{"hello":"world"}'
+```
+
+To authenticate the sender, verify a signature over `params.event_raw`. Most
+verification headers are passed through (e.g. `x-hub-signature-256`,
+`x-github-event`, `stripe-signature`, `x-slack-signature`); secret-bearing
+headers like `authorization`, `cookie`, and `x-api-key` are stripped. Example
+GitHub HMAC check inside an action:
+
+```js
+const sigHeader = (params.headers["x-hub-signature-256"] || [])[0] || "";
+const expected =
+  "sha256=" +
+  ethers.utils.computeHmac(
+    ethers.utils.SupportedAlgorithm.sha256,
+    ethers.utils.toUtf8Bytes(SECRET),
+    ethers.utils.toUtf8Bytes(params.event_raw)
+  ).slice(2);
+// constant-time compare expected vs sigHeader before trusting params.event
 ```
 
 ## 5. Create a Schedule Trigger
