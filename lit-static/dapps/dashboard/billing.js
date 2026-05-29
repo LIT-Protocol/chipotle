@@ -460,13 +460,11 @@ async function handleContinue() {
     _paymentIntentId = intent.payment_intent_id;
 
     _elements = _stripe.elements({ clientSecret: intent.client_secret });
-    // Suppress billing-address collection — credits are scoped to the
-    // account/wallet, not to a postal address. `address: 'never'` hides the
-    // address fields entirely; Stripe still gathers any name/email that a
-    // specific payment method strictly needs.
-    _paymentElement = _elements.create('payment', {
-      fields: { billingDetails: { address: 'never' } },
-    });
+    // Let Stripe render the minimal address fields each payment method needs
+    // (country + postal for cards, nothing for most crypto). Card networks
+    // require postal_code for AVS, so we can't suppress it without breaking
+    // real charges.
+    _paymentElement = _elements.create('payment');
     _paymentElement.mount('#stripe-payment-element');
     setModalStep('payment');
   } catch (e) {
@@ -506,16 +504,7 @@ async function handlePay() {
   try {
     const result = await _stripe.confirmPayment({
       elements: _elements,
-      confirmParams: {
-        return_url: returnUrl,
-        // We tell the Payment Element not to render address fields
-        // (`fields.billingDetails.address: 'never'`), so Stripe requires us
-        // to pass a billing-address country here for methods that need one
-        // (e.g. card AVS). Default to 'US'; crypto methods ignore this.
-        payment_method_data: {
-          billing_details: { address: { country: 'US' } },
-        },
-      },
+      confirmParams: { return_url: returnUrl },
       redirect: 'if_required',
     });
 
