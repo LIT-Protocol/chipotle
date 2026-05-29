@@ -40,7 +40,7 @@ async function main({ pkpId, secret }) {
 }
 ```
 
-Store the returned `ciphertext` anywhere — IPFS, a smart contract, a database — and retrieve the plaintext only when needed using the Decrypt action below.
+Store the returned `ciphertext` anywhere — IPFS, a smart contract, a database — and retrieve the plaintext only when needed from an action that is permitted to use the same PKP.
 
 ---
 
@@ -206,7 +206,7 @@ The Chainalysis oracle is free and keyless — it's just a smart contract at `0x
 
 The signature uses `Lit.Actions.getLitActionPrivateKey()` — an identity derived from the action's IPFS CID. See [Action-Identity Signing](./patterns#action-identity-signing--immutable-proofs).
 
-The trust anchor is a hardcoded hostname whitelist. Anyone calling the action supplies `screeningRpcUrl` via `js_params`, so a caller-supplied `chainId` check would just be theater (pair a malicious RPC with a matching chain id, gate passes). Instead the action checks the URL's hostname against `eth-mainnet.g.alchemy.com` — TLS guarantees we're actually talking to Alchemy. Trust shifts to "Alchemy is honest about Ethereum mainnet."
+The trust anchor is a hardcoded hostname whitelist. Anyone calling the action supplies `screeningRpcUrl` via `js_params`, so a caller-supplied `chainId` check would just be theater (pair a malicious RPC with a matching chain id, gate passes). Instead the action checks the URL's hostname against `eth-mainnet.g.alchemy.com` — TLS guarantees we're actually talking to Alchemy. Trust shifts to "Alchemy is honest about Ethereum mainnet." See [Hostname-Pinned RPC Trust Anchors](./patterns#hostname-pinned-rpc-trust-anchors).
 
 ```javascript
 // js_params: {
@@ -384,7 +384,7 @@ To move the median an attacker needs to influence two of three sources at the sa
 
 ## 10. Resolve a Prediction Market by AI Consensus
 
-Poll multiple LLM providers in parallel with the same yes/no question and only sign the resolution when every model agrees. Same multi-source idea as example 9, but the parallel sources are AI models instead of price feeds — and the aggregation is *strict agreement* rather than a median, because the output is categorical YES/NO/UNCLEAR.
+Poll multiple LLM providers in parallel with the same yes/no question and only sign the resolution when every model agrees. This uses the [Multi-Source Consensus](./patterns#multi-source-consensus) pattern with AI providers as the parallel sources. The aggregation is *strict agreement* rather than a median, because the output is categorical YES/NO/UNCLEAR.
 
 **Perplexity Sonar is required** because its built-in web search lets it answer questions about events that happened after a frontier model's training cutoff. **OpenAI and Anthropic are optional second opinions** — independent training corpora mean a confident-but-wrong frontier answer is unlikely to be confirmed by another frontier model. Configuring all three gives you 3-of-3 agreement before anything reaches the chain.
 
@@ -464,7 +464,7 @@ Honest caveats: frontier models share training corpora, so a wrong answer that's
 
 Deploy the same `BridgeToken` contract on two chains. The holder calls `burn` on chain A, which destroys the local supply and emits `BurnInitiated(from, recipient, amount, destChainId, nonce)`. A Lit Action reads that event via `eth_getTransactionReceipt` against a hostname-whitelisted RPC, validates it, and signs a mint authorization for chain B. Anyone can submit the mint — the signature is the authorization, not the caller.
 
-Same content-addressed trust property as the compliance gate: the signer key comes from `Lit.Actions.getLitActionPrivateKey()`, which derives the key from the action's IPFS CID. Edit the action by a byte and the signer changes, and every deployed `BridgeToken` refuses the modified action. The trust collapses from "trust this federation of relayers" to "trust this exact piece of code."
+The signer key comes from `Lit.Actions.getLitActionPrivateKey()`, which derives the key from the action's IPFS CID. Edit the action by a byte and the signer changes, and every deployed `BridgeToken` refuses the modified action. The trust collapses from "trust this federation of relayers" to "trust this exact piece of code." See [Action-Identity Signing](./patterns#action-identity-signing--immutable-proofs) and [Hostname-Pinned RPC Trust Anchors](./patterns#hostname-pinned-rpc-trust-anchors).
 
 ```javascript
 // js_params: {
@@ -568,4 +568,40 @@ This is the permissionless half: any wallet can submit the mint tx (sponsored by
 
 <Info>
   The full runnable example — `BridgeToken` contract, two-chain deploy script, `setBridgePartner` wiring, and an end-to-end `npm run bridge` runner that burns on one chain and mints on the other — lives at [`examples/cross-chain-token/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/cross-chain-token) in the repo. Defaults to Base Sepolia ↔ Arbitrum Sepolia; the `RPC_HOSTS` table is the only thing you'd touch to add more chains.
+</Info>
+
+## 12. Policy-Gated Key Custody for a Solver / Filler
+
+Intent-system solvers and fillers (UniswapX, Across, CoW, 1inch Fusion, ERC-7683, bridge relayers) run a bot that holds a hot key and signs fills against an inventory balance. Compromise the box, drain the inventory. This example removes the hot key: inventory lives in a `SolverVault` contract, and the only signature that releases a fill comes from a Lit Action that *is* the policy. The bot can *ask* Lit to authorize a fill; it can't authorize one itself.
+
+The action reads the real order/deposit from a **pinned, trusted** settlement contract on-chain and reconstructs the fill from it — so the recipient and amount come from what the order actually says, not from anything the (possibly compromised) caller supplies. Only then does it sign, using its CID-derived identity (see [Action-Identity Signing](./patterns#action-identity-signing--immutable-proofs)). Edit the policy and the signer address changes, so the vault stops trusting the modified action.
+
+```javascript
+// Abridged core — the action pins the settlement source, binds the fill to the
+// on-chain order, enforces policy, then signs. Full multi-file example in the repo.
+async function main({ vaultAddress, chainId, token, recipient, amount, nonce, deadline, settlementContract, depositId, rpcUrl }) {
+  // 1. Trust anchors: whitelist the RPC host AND only read a pinned/allowlisted
+  //    settlement — otherwise a compromised caller points us at a contract that
+  //    emits a forged order and we'd sign a fill paying the attacker.
+  // 2. Bind to the real order: read it on-chain and require the requested
+  //    recipient/token/amount to match what the order actually says.
+  const order = await readOrder(rpcUrl, settlementContract, depositId);
+  if (getAddress(recipient) !== getAddress(order.recipient)) {
+    return { authorized: false, reason: "recipient does not match the on-chain order" };
+  }
+  // 3. Enforce policy (notional cap, kill switch, allowlist), then sign the
+  //    exact tuple the vault's executeFill verifies.
+  const digest = ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["address", "address", "uint256", "bytes32", "uint256", "address", "uint256"],
+      [token, recipient, amount, nonce, deadline, vaultAddress, chainId]
+    )
+  );
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  return { authorized: true, signature: await wallet.signMessage(ethers.utils.arrayify(digest)) };
+}
+```
+
+<Info>
+  The full runnable example — `SolverVault` / `AcrossSolverVault` contracts, the policy actions, attacker scripts that prove exfiltration is impossible, an `exit()` cold-wallet path, and a **live Across testnet relayer** (deposit on Sepolia → Lit authorizes → vault fills on Base Sepolia, ~355 ms round-trip), plus a read-only ops dashboard — lives at [`examples/lit-solver-vault/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/lit-solver-vault) in the repo.
 </Info>

@@ -5,6 +5,16 @@ on:
     paths:
       - 'lit-static/**'
       - '.github/workflows/deploy-static.yml'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Which deploy job to run'
+        required: true
+        default: 'deploy-next'
+        type: choice
+        options:
+          - deploy-next
+          - deploy-main
 
 permissions:
   contents: read
@@ -12,7 +22,9 @@ permissions:
 
 jobs:
   deploy-main:
-    if: github.ref == 'refs/heads/main'
+    if: >
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'deploy-main')
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -23,6 +35,9 @@ jobs:
 
       - name: Inject API URL
         run: sed -i "s|__LIT_API_BASE_URL__|https://test.chipotle.litprotocol.com|g" lit-static/dapps/dashboard/auth.js
+
+      - name: Inject dashboard git commit
+        run: sed -i "s|__LIT_DASHBOARD_GIT_COMMIT__|${GITHUB_SHA}|g" lit-static/dapps/dashboard/about.js
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
@@ -32,7 +47,9 @@ jobs:
           command: pages deploy lit-static --project-name=lit-static-dev --branch=main
 
   deploy-next:
-    if: github.ref == 'refs/heads/next'
+    if: >
+      (github.event_name == 'push' && github.ref == 'refs/heads/next') ||
+      (github.event_name == 'workflow_dispatch' && inputs.target == 'deploy-next')
     runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
@@ -43,6 +60,9 @@ jobs:
 
       - name: Inject API URL
         run: sed -i "s|__LIT_API_BASE_URL__|https://test.chipotle.litprotocol.com|g" lit-static/dapps/dashboard/auth.js
+
+      - name: Inject dashboard git commit
+        run: sed -i "s|__LIT_DASHBOARD_GIT_COMMIT__|${GITHUB_SHA}|g" lit-static/dapps/dashboard/about.js
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
@@ -50,25 +70,3 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
           command: pages deploy lit-static --project-name=lit-static-next --branch=main
-
-  deploy-preview:
-    if: >
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.head.repo.full_name == github.repository
-    runs-on: self-hosted
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Inject API URL
-        run: sed -i "s|__LIT_API_BASE_URL__|https://test.chipotle.litprotocol.com|g" lit-static/dapps/dashboard/auth.js
-
-      - name: Deploy to Cloudflare Pages
-        uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy lit-static --project-name=lit-static-dev --branch=${{ github.head_ref }}

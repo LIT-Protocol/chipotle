@@ -11,6 +11,7 @@ import { initKeys, loadUsageKeys } from './keys.js';
 import { initActions, loadActions } from './actions.js';
 import { initWallets, loadWallets } from './wallets.js';
 import { initActionRunner } from './runner.js';
+import { initAbout } from './about.js';
 
 // ----- Preload all tables (with error visibility) -----
 
@@ -314,6 +315,7 @@ function init() {
   initBilling();
   initUsageKeyOverride();
   initChainSecuredRpc();
+  initAbout();
 }
 
 init();

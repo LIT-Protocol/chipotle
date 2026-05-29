@@ -207,8 +207,7 @@ decoupled.
 The current action trusts one provider (Alchemy). If Alchemy itself ever lied
 about an `isSanctioned` reading — buggy upgrade, hijacked endpoint, deliberate
 fraud — the gate would happily sign a malicious transfer. To eliminate that
-single point of failure, apply the multi-source pattern used in
-[`../multi-source-price-oracle`](../multi-source-price-oracle): fan the
+single point of failure, apply the multi-source consensus pattern: fan the
 `eth_call` out to two or three independently-hostnamed providers (Alchemy +
 Infura + QuickNode) and only sign when they all return the same bool. Edit
 the action to keep three regexes instead of one and require all three URLs
