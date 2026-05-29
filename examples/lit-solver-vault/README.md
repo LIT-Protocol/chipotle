@@ -20,11 +20,10 @@ every fill (recipient binding, notional cap, settlement allowlist, kill switch)
 and signs only when it passes. The solver bot never holds that key. It can
 *ask* Lit to authorize a fill; it can't authorize one itself.
 
-> This example is the runnable backbone of the plan in
-> [`plans/lit-solver-custody-demo.md`](../../plans/lit-solver-custody-demo.md).
-> It covers the contracts, the policy action, and the attack/exit demo scripts
-> (plan phases 1–2 + the exit story). The live dashboard (plan phase 3) and the
-> real Across-testnet integration (plan phase 5) are noted as next steps below.
+> This example implements the plan in
+> [`plans/lit-solver-custody-demo.md`](../../plans/lit-solver-custody-demo.md):
+> the contracts, the policy action, the attack/exit demo scripts, a live Across
+> testnet relayer, and an ops dashboard.
 
 ## How it works
 
@@ -371,9 +370,3 @@ npm run across:attack     # exfiltration is impossible by construction
 A read-only ops view (live fills, policy state, inventory, kill-switch toggle)
 lives in [`dashboard/`](./dashboard) — a small Next.js app pointed at the
 `AcrossSolverVault`. Good for a screenshot / Loom frame. See its README to run it.
-
-## Next steps (from the plan)
-
-- **More routes / chains**: the Across path is wired for Sepolia → Base Sepolia;
-  add origin chains by allowlisting them on the vault and pointing the action's
-  origin RPC + SpokePool at them.
