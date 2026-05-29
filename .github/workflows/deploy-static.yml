@@ -36,6 +36,9 @@ jobs:
       - name: Inject API URL
         run: sed -i "s|__LIT_API_BASE_URL__|https://test.chipotle.litprotocol.com|g" lit-static/dapps/dashboard/auth.js
 
+      - name: Inject dashboard git commit
+        run: sed -i "s|__LIT_DASHBOARD_GIT_COMMIT__|${GITHUB_SHA}|g" lit-static/dapps/dashboard/about.js
+
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
         with:
@@ -57,6 +60,9 @@ jobs:
 
       - name: Inject API URL
         run: sed -i "s|__LIT_API_BASE_URL__|https://test.chipotle.litprotocol.com|g" lit-static/dapps/dashboard/auth.js
+
+      - name: Inject dashboard git commit
+        run: sed -i "s|__LIT_DASHBOARD_GIT_COMMIT__|${GITHUB_SHA}|g" lit-static/dapps/dashboard/about.js
 
       - name: Deploy to Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
