@@ -3,9 +3,8 @@
 // sign an attestation the PriceOracle contract can verify.
 //
 // Median-of-three is the right aggregation for live market prices:
-//   * Different venues disagree by a few cents at any moment, so the strict
-//     byte-equality used by the multi-RPC consensus example would never
-//     pass.
+//   * Different venues disagree by a few cents at any moment, so strict
+//     byte-equality would never pass for this kind of continuous value.
 //   * Median naturally rejects one outlier — a single exchange returning a
 //     stale, frozen, or manipulated price doesn't shift the result.
 //   * We also check the spread between the lowest and highest reported

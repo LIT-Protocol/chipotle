@@ -40,7 +40,7 @@ async function main({ pkpId, secret }) {
 }
 ```
 
-Store the returned `ciphertext` anywhere — IPFS, a smart contract, a database — and retrieve the plaintext only when needed using the Decrypt action below.
+Store the returned `ciphertext` anywhere — IPFS, a smart contract, a database — and retrieve the plaintext only when needed from an action that is permitted to use the same PKP.
 
 ---
 
@@ -206,7 +206,7 @@ The Chainalysis oracle is free and keyless — it's just a smart contract at `0x
 
 The signature uses `Lit.Actions.getLitActionPrivateKey()` — an identity derived from the action's IPFS CID. See [Action-Identity Signing](./patterns#action-identity-signing--immutable-proofs).
 
-The trust anchor is a hardcoded hostname whitelist. Anyone calling the action supplies `screeningRpcUrl` via `js_params`, so a caller-supplied `chainId` check would just be theater (pair a malicious RPC with a matching chain id, gate passes). Instead the action checks the URL's hostname against `eth-mainnet.g.alchemy.com` — TLS guarantees we're actually talking to Alchemy. Trust shifts to "Alchemy is honest about Ethereum mainnet."
+The trust anchor is a hardcoded hostname whitelist. Anyone calling the action supplies `screeningRpcUrl` via `js_params`, so a caller-supplied `chainId` check would just be theater (pair a malicious RPC with a matching chain id, gate passes). Instead the action checks the URL's hostname against `eth-mainnet.g.alchemy.com` — TLS guarantees we're actually talking to Alchemy. Trust shifts to "Alchemy is honest about Ethereum mainnet." See [Hostname-Pinned RPC Trust Anchors](./patterns#hostname-pinned-rpc-trust-anchors).
 
 ```javascript
 // js_params: {
@@ -384,7 +384,7 @@ To move the median an attacker needs to influence two of three sources at the sa
 
 ## 10. Resolve a Prediction Market by AI Consensus
 
-Poll multiple LLM providers in parallel with the same yes/no question and only sign the resolution when every model agrees. Same multi-source idea as example 9, but the parallel sources are AI models instead of price feeds — and the aggregation is *strict agreement* rather than a median, because the output is categorical YES/NO/UNCLEAR.
+Poll multiple LLM providers in parallel with the same yes/no question and only sign the resolution when every model agrees. This uses the [Multi-Source Consensus](./patterns#multi-source-consensus) pattern with AI providers as the parallel sources. The aggregation is *strict agreement* rather than a median, because the output is categorical YES/NO/UNCLEAR.
 
 **Perplexity Sonar is required** because its built-in web search lets it answer questions about events that happened after a frontier model's training cutoff. **OpenAI and Anthropic are optional second opinions** — independent training corpora mean a confident-but-wrong frontier answer is unlikely to be confirmed by another frontier model. Configuring all three gives you 3-of-3 agreement before anything reaches the chain.
 
@@ -464,7 +464,7 @@ Honest caveats: frontier models share training corpora, so a wrong answer that's
 
 Deploy the same `BridgeToken` contract on two chains. The holder calls `burn` on chain A, which destroys the local supply and emits `BurnInitiated(from, recipient, amount, destChainId, nonce)`. A Lit Action reads that event via `eth_getTransactionReceipt` against a hostname-whitelisted RPC, validates it, and signs a mint authorization for chain B. Anyone can submit the mint — the signature is the authorization, not the caller.
 
-Same content-addressed trust property as the compliance gate: the signer key comes from `Lit.Actions.getLitActionPrivateKey()`, which derives the key from the action's IPFS CID. Edit the action by a byte and the signer changes, and every deployed `BridgeToken` refuses the modified action. The trust collapses from "trust this federation of relayers" to "trust this exact piece of code."
+The signer key comes from `Lit.Actions.getLitActionPrivateKey()`, which derives the key from the action's IPFS CID. Edit the action by a byte and the signer changes, and every deployed `BridgeToken` refuses the modified action. The trust collapses from "trust this federation of relayers" to "trust this exact piece of code." See [Action-Identity Signing](./patterns#action-identity-signing--immutable-proofs) and [Hostname-Pinned RPC Trust Anchors](./patterns#hostname-pinned-rpc-trust-anchors).
 
 ```javascript
 // js_params: {

@@ -1,7 +1,6 @@
 // Minimal .env reader / upserter shared across all the scripts.
 //
-// See the other example folders for the same helper — kept inline here
-// so each example folder is fully self-contained.
+// Kept inline so this example folder is fully self-contained.
 
 const fs = require("fs");
 const path = require("path");
