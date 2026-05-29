@@ -267,6 +267,15 @@ let _clientInstance = null;
 let _clientBaseUrl = null;
 let _clientMode = null;
 
+// Fires after every successful client method call (Proxy below). Used by
+// billing.js to refresh the credit balance display after any API activity
+// (NODE-4971). Registered via setOnApiCallSuccess() from initBilling().
+let _onApiCallSuccess = null;
+
+export function setOnApiCallSuccess(cb) {
+  _onApiCallSuccess = cb;
+}
+
 export async function getClient() {
   const baseUrl = getBaseUrl();
   const mode = getMode();
@@ -323,7 +332,11 @@ export async function getClient() {
             const sovereignLifecycle = await buildSovereignLifecycle(target, prop);
             args = [{ ...args[0], sovereignLifecycle }];
           }
-          return val.apply(target, args);
+          const result = await val.apply(target, args);
+          if (_onApiCallSuccess) {
+            try { _onApiCallSuccess(prop); } catch (cbErr) { console.error('onApiCallSuccess', cbErr); }
+          }
+          return result;
         };
       },
     });

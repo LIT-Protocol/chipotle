@@ -35,6 +35,7 @@ import {
   hasUsageKeyOverride,
   LIST_PAGE_SIZE,
   setWalletsStore,
+  setOnApiCallSuccess,
 } from './auth.js';
 import { formatError, logError } from './ui-utils.js';
 
@@ -151,6 +152,10 @@ export function clearBillingSession() {
     _abortController = null;
   }
   _walletAuthCache = null;
+  if (_balanceRefreshDebounceTimer) {
+    clearTimeout(_balanceRefreshDebounceTimer);
+    _balanceRefreshDebounceTimer = null;
+  }
 }
 
 /**
@@ -301,6 +306,48 @@ export function refreshBillingUI() {
       }, BILLING_RETRY_MS);
     }
   }).catch((e) => console.error('billing check failed', e));
+}
+
+// Billing endpoints we must NOT re-trigger from the post-call hook below —
+// refreshing the balance after `getBillingBalance` would recurse forever, and
+// firing during the Stripe payment dance (`createPaymentIntent` /
+// `confirmPayment`) would race the modal's own balance refresh on completion.
+const BILLING_METHODS = new Set([
+  'getBillingBalance',
+  'getStripeConfig',
+  'createPaymentIntent',
+  'confirmPayment',
+]);
+
+// Debounce timer so a burst of API calls (e.g. preloadAllTables fires 4 in
+// parallel on sign-in) coalesces into a single balance refresh.
+let _balanceRefreshDebounceTimer = null;
+const BALANCE_REFRESH_DEBOUNCE_MS = 200;
+
+/**
+ * Called after every successful client API call (NODE-4971). Refreshes the
+ * Stripe credit balance display so the topbar reflects the latest balance
+ * after any dashboard activity. No-op when:
+ *   - the method itself is a billing endpoint (would recurse),
+ *   - no auth key / billing not yet known to be available,
+ *   - a usage-key override is active (the topbar balance belongs to the
+ *     account key, not the override, and is hidden in this mode anyway),
+ *   - we're in sovereign mode without a cached wallet-auth header (we won't
+ *     trigger a wallet popup just to refresh the topbar — same rule as
+ *     refreshBillingUI()).
+ */
+function refreshBalanceFromApiCall(methodName) {
+  if (BILLING_METHODS.has(methodName)) return;
+  if (!billingAuthKey()) return;
+  if (hasUsageKeyOverride()) return;
+  if (_billingAvailable !== true) return;
+  if (getMode() === 'sovereign' && !hasValidWalletAuthCache()) return;
+
+  if (_balanceRefreshDebounceTimer) return;
+  _balanceRefreshDebounceTimer = setTimeout(() => {
+    _balanceRefreshDebounceTimer = null;
+    loadBillingBalance();
+  }, BALANCE_REFRESH_DEBOUNCE_MS);
 }
 
 async function loadBillingBalance() {
@@ -640,4 +687,6 @@ export function initBilling() {
   if (continueBtn) continueBtn.addEventListener('click', handleContinue);
   if (backBtn) backBtn.addEventListener('click', handleBack);
   if (payBtn) payBtn.addEventListener('click', handlePay);
+
+  setOnApiCallSuccess(refreshBalanceFromApiCall);
 }

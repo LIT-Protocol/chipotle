@@ -1,0 +1,29 @@
+{
+  "name": "lit-solver-vault",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Lit Action + vault example: policy-gated key custody for intent-system solvers/fillers. The fill-authorizing key lives in a Lit Action, not on the solver's box.",
+  "scripts": {
+    "compile": "hardhat compile",
+    "setup": "node scripts/setup.js",
+    "deploy:baseSepolia": "hardhat run scripts/deploy.js --network baseSepolia",
+    "fill": "node scripts/fill.js",
+    "attack:exfiltrate": "node scripts/attack-exfiltrate.js",
+    "attack:bad-fill": "node scripts/attack-bad-fill.js",
+    "policy": "node scripts/set-policy.js",
+    "exit": "node scripts/exit.js",
+    "across:setup": "node scripts/setup-across.js",
+    "across:deposit": "node scripts/across-deposit.js",
+    "across:fill": "node scripts/across-fill.js",
+    "across:attack": "node scripts/across-attack.js"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.2",
+    "dotenv": "^16.4.5",
+    "ethers": "^5.7.2"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^2.0.2",
+    "hardhat": "^2.22.10"
+  }
+}
