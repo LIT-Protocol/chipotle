@@ -370,3 +370,5 @@ npm run across:attack     # exfiltration is impossible by construction
 A read-only ops view (live fills, policy state, inventory, kill-switch toggle)
 lives in [`dashboard/`](./dashboard) — a small Next.js app pointed at the
 `AcrossSolverVault`. Good for a screenshot / Loom frame. See its README to run it.
+
+![Lit Solver Vault dashboard](./dashboard/screenshot.png)
