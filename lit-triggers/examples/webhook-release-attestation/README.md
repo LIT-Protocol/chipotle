@@ -75,7 +75,28 @@ cast call 0x57b88E15f3e9b2aB62f4114a873a19F6EFEfD375 \
 # → commitish, attester (the action wallet), timestamp
 ```
 
-## Status
+## Verified end-to-end (Base Sepolia)
+
+With the raw-body/header passthrough deployed, all four branches behaved
+correctly and the valid case wrote on-chain:
+
+| case | result |
+|------|--------|
+| valid signature + `release`/`published` | `verified: true` → `attest()` broadcast |
+| tampered body (sig no longer matches) | `signature_mismatch`, no chain write |
+| wrong secret | `signature_mismatch` |
+| valid sig, wrong action (`edited`) | `skipped: release/edited` |
+
+Valid-case broadcast `0x0cde96f4…` (block 42123743), signer (action wallet)
+`0x493EDF9E4Da845e4f819EccD91BA8001DCE655d9`. Reading the registry back:
+
+```
+$ cast call 0x57b88E15f3e9b2aB62f4114a873a19F6EFEfD375 \
+    'getRelease(string,string)(string,address,uint256)' \
+    'LIT-Protocol/chipotle' 'v9.9.9' --rpc-url https://sepolia.base.org
+"main"
+0x493EDF9E4Da845e4f819EccD91BA8001DCE655d9   # attester = the keyless action wallet
+1780015774
+```
 
 Contract deployed at `0x57b88E15f3e9b2aB62f4114a873a19F6EFEfD375` (Base Sepolia).
-End-to-end HMAC verification + on-chain write pending the deploy of PR #404.
