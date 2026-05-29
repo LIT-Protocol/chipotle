@@ -76,10 +76,31 @@ function pickAccountFundingWallet(wallets) {
   return walletAddressFromItem(accountWallet);
 }
 
+/**
+ * Resolve the wallet to prefill on the pay-with-LITKEY page. This MUST be the
+ * account's billing wallet — the address the Stripe customer is keyed on
+ * (`metadata.wallet_address`) — because the payments service maps the URL
+ * wallet straight to a customer with no further resolution. The billing wallet
+ * is preserved across admin-wallet rotation (CPL-313/CPL-324), so it can differ
+ * from the currently connected wallet.
+ */
 async function resolveLitkeyPaymentWallet() {
-  const chainSecuredWallet = getChainSecuredWallet();
-  if (isAddress(chainSecuredWallet)) return chainSecuredWallet;
+  // ChainSecured / sovereign: the connected wallet may have rotated away from
+  // the billing wallet, so read the authoritative value on-chain rather than
+  // assuming the login wallet.
+  if (getMode() === 'sovereign') {
+    if (!isAddress(getChainSecuredWallet())) {
+      throw new Error('No connected ChainSecured wallet — sign in first.');
+    }
+    const client = await getClient();
+    const wallet = await client.getBillingWalletAddress({ apiKey: '' });
+    if (!isAddress(wallet)) throw new Error('No billing wallet is available for LITKEY payment.');
+    return wallet;
+  }
 
+  // API-key mode: managed accounts never rotate their admin wallet, so the
+  // billing wallet equals the Account Master Wallet from listWallets (on-chain
+  // `getBillingWalletAddress` falls back to the admin wallet for these accounts).
   if (hasUsageKeyOverride()) throw new Error('Clear Usage Key Override before adding funds.');
   const apiKey = getApiKey();
   if (!apiKey) throw new Error('No account wallet is available for LITKEY payment.');
@@ -88,7 +109,7 @@ async function resolveLitkeyPaymentWallet() {
   setWalletsStore(wallets || []);
 
   const wallet = pickAccountFundingWallet(wallets);
-  if (!isAddress(wallet)) throw new Error('No account master wallet is available for LITKEY payment.');
+  if (!isAddress(wallet)) throw new Error('No billing wallet is available for LITKEY payment.');
   return wallet;
 }
 

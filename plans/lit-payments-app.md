@@ -7,7 +7,7 @@ Date: 2026-05-18 (last updated: 2026-05-21)
 ## Current state (TL;DR for a new session)
 
 - **Shipped to `main`**: `lit-billing-core` extraction (PR #358), `lit-payments` foundation + magic-link auth (PR #359), admin credit portal + initial deploy target (PR #370), LITKEY gateway/rate/listener scaffolding (PR #373), and listener runtime with WSS fast path + Alloy migration (PR #378).
-- **This PR worktree**: dashboard entry point adds a `Pay with LITKEY for 25% off` option inside the Add Funds modal, routing users to the standalone `payments.litprotocol.com/payWithLitkey?wallet=…` flow with the account funding wallet prefilled.
+- **This PR worktree**: dashboard entry point adds a `Pay with LITKEY for 25% off` option inside the Add Funds modal, routing users to the standalone `payments.litprotocol.com/payWithLitkey?wallet=…` flow with the account's billing wallet — the address the Stripe customer is keyed on, read on-chain via `getBillingWalletAddress` in sovereign mode — prefilled.
 - **Remaining before retiring manual flow**: deploy/smoke-test the dashboard entry point, monitor first live credits from dashboard-launched LITKEY payments, and add operational alerts/runbooks as needed.
 
 The rest of this doc is the original design + decisions, kept for context. Implementation details that diverged from the plan are noted inline.
