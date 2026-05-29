@@ -11,6 +11,7 @@ don't cover.
 | [`cross-chain-token`](./cross-chain-token) | Burn/mint cross-chain ERC-20. The action observes burn events on one chain (Base Sepolia) and signs the matching mint on another (Arbitrum Sepolia) — permissionless bridging, any chain. Keyless. |
 | [`multi-source-price-oracle`](./multi-source-price-oracle) | Spot-price oracle. Fetches from Coinbase, Kraken, and Bitstamp in parallel, takes the median, rejects if the spread is too wide, signs the result for any EVM chain. Keyless. |
 | [`prediction-market-oracle`](./prediction-market-oracle) | AI consensus for prediction-market resolution. Polls Perplexity (required, web-grounded) plus OpenAI and Anthropic (optional second opinions); only signs when every configured model agrees. |
+| [`dark-pool`](./dark-pool) | Confidential sealed-bid batch auction. Orders are submitted encrypted, stored as ciphertext in Postgres, matched blind inside the TEE at a single uniform clearing price, and settled on-chain — order contents never exist in plaintext outside the enclave. The first example to use encryption + confidential state, not just compute + signing. |
 
 If you're looking for a one-file recipe (sign a message, decrypt a secret,
 fetch a price and sign it), start with the docs page. Examples here are for

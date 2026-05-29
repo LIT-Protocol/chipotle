@@ -1,0 +1,21 @@
+{
+  "name": "dark-pool",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Confidential sealed-bid batch auction: encrypted orders, blind matching inside a TEE, on-chain settlement at a uniform clearing price.",
+  "scripts": {
+    "compile": "hardhat compile",
+    "setup": "node scripts/setup.js",
+    "submit": "node scripts/submitOrder.js",
+    "run-epoch": "node scripts/runEpoch.js"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.2",
+    "dotenv": "^16.4.5",
+    "ethers": "^5.7.2"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^2.0.2",
+    "hardhat": "^2.22.10"
+  }
+}
