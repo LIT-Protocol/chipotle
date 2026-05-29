@@ -995,7 +995,7 @@ async function promptForNewAdminAddress() {
          <input type="text" id="change-ownership-address-input" class="input" placeholder="0x…" autocomplete="off" spellcheck="false" autocapitalize="off" style="font-family:ui-monospace,'JetBrains Mono',monospace;" />
        </div>
        <div id="change-ownership-error" class="status error" style="display:none; margin-top:0.5rem;"></div>`,
-      `<button type="button" class="btn btn-secondary" id="change-ownership-cancel-btn">Cancel</button>
+      `<button type="button" class="btn btn-outline" id="change-ownership-cancel-btn">Cancel</button>
        <button type="button" class="btn btn-primary" id="change-ownership-accept-btn">Accept</button>`,
     );
     const input = document.getElementById('change-ownership-address-input');
