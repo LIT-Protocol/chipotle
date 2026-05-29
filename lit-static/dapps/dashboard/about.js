@@ -10,7 +10,7 @@
  */
 
 import { getBaseUrl } from './auth.js';
-import { openModal, escapeHtml, logError } from './ui-utils.js';
+import { openModal, closeModal, escapeHtml, logError } from './ui-utils.js';
 
 const GITHUB_REPO_URL = 'https://github.com/LIT-Protocol/chipotle';
 const DASHBOARD_COMMIT_RAW = '__LIT_DASHBOARD_GIT_COMMIT__';
@@ -34,10 +34,17 @@ function extractSha(s) {
   return '';
 }
 
-function commitLinkHtml(commit) {
-  if (!commit) return '<span class="mono">local</span>';
+// Render a commit value as a (possibly-linked) short label.
+// `emptyLabel` controls the fallback when `commit` is empty — "local" for the
+// dashboard build placeholder, "unknown" for an API response missing the field.
+function commitLinkHtml(commit, emptyLabel) {
+  if (!commit) return `<span class="mono">${escapeHtml(emptyLabel)}</span>`;
   const sha = extractSha(commit);
-  const label = commit.length > 16 ? commit.slice(0, 12) : commit;
+  // When a SHA is present, the label is the short SHA so it matches the link
+  // target. Otherwise fall back to truncating the raw string.
+  const label = sha
+    ? sha.slice(0, 12)
+    : (commit.length > 16 ? commit.slice(0, 12) : commit);
   if (!sha) return `<span class="mono">${escapeHtml(label)}</span>`;
   const href = `${GITHUB_REPO_URL}/commit/${encodeURIComponent(sha)}`;
   return `<a class="mono" href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`;
@@ -51,7 +58,7 @@ async function fetchApiVersion() {
 }
 
 function bodyHtml(apiVersionHtml) {
-  const dashHtml = commitLinkHtml(dashboardCommit());
+  const dashHtml = commitLinkHtml(dashboardCommit(), 'local');
   return `
     <p style="margin:0 0 0.75rem;">
       The Chipotle Dashboard is a web interface for managing your Lit accounts, wallets, groups, IPFS actions, and usage API keys.
@@ -73,20 +80,16 @@ const FOOTER_HTML = `<button type="button" class="btn btn-primary" id="about-clo
 
 function openAboutModal() {
   openModal('About Dashboard', bodyHtml('<span class="mono">Loading…</span>'), FOOTER_HTML);
-  document.getElementById('about-close-btn')?.addEventListener('click', () => {
-    const overlay = document.getElementById('modal-overlay');
-    if (overlay) {
-      overlay.classList.remove('is-open');
-      overlay.setAttribute('aria-hidden', 'true');
-    }
-  });
+  // The shared modal X and overlay-click are wired by initModalClose();
+  // we only need to wire our explicit footer Close button.
+  document.getElementById('about-close-btn')?.addEventListener('click', closeModal);
 
   fetchApiVersion().then((v) => {
     const el = document.getElementById('about-api-version');
     if (!el) return;
     const commit = (v && v.commit_version) ? String(v.commit_version) : '';
     const pkgVersion = (v && v.version) ? String(v.version) : '';
-    const link = commitLinkHtml(commit);
+    const link = commitLinkHtml(commit, 'unknown');
     el.innerHTML = pkgVersion
       ? `${link} <span class="muted">(v${escapeHtml(pkgVersion)})</span>`
       : link;
