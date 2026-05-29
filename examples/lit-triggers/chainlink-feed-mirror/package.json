@@ -1,0 +1,20 @@
+{
+  "name": "chainlink-feed-mirror",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Lit Triggers example: a chain-event trigger mirrors a Chainlink price feed to a chain Chainlink doesn't serve, signed by a keyless relayer wallet.",
+  "scripts": {
+    "compile": "hardhat compile",
+    "setup": "node scripts/setup.js",
+    "deploy:baseSepolia": "hardhat run scripts/deploy.js --network baseSepolia",
+    "mirror": "node scripts/mirror.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "ethers": "^5.7.2"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^2.0.2",
+    "hardhat": "^2.22.10"
+  }
+}

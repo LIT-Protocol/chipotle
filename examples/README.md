@@ -26,6 +26,8 @@ no caller. See [`lit-triggers/`](./lit-triggers).
 | Example | Trigger | What it shows |
 | --- | --- | --- |
 | [`lit-triggers/release-attestation`](./lit-triggers/release-attestation) | webhook | Verify a GitHub release webhook (HMAC over the raw body) and anchor the release on-chain via a keyless signer. |
+| [`lit-triggers/uptime-insurance`](./lit-triggers/uptime-insurance) | schedule | Parametric insurance: an autonomous ETH payout from a keyless pool when a monitored service is down. |
+| [`lit-triggers/chainlink-feed-mirror`](./lit-triggers/chainlink-feed-mirror) | chain_event | Relay a Chainlink price feed to a chain Chainlink doesn't support, with no trusted relayer. |
 
 If you're looking for a one-file recipe (sign a message, decrypt a secret,
 fetch a price and sign it), start with the docs page. Examples here are for

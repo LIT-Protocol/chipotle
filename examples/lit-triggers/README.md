@@ -13,8 +13,8 @@ for concepts and the API.
 | Example | Trigger | What it shows |
 | --- | --- | --- |
 | [`release-attestation`](./release-attestation) | webhook | Verify a GitHub release webhook (HMAC over the raw body) and anchor the release on-chain via a keyless signer. |
-| `uptime-insurance` *(coming soon)* | schedule | Parametric insurance: an autonomous ETH payout from a pool key nobody holds when a monitored service is down. |
-| `chainlink-feed-mirror` *(coming soon)* | chain_event | Relay a Chainlink price feed to a chain Chainlink doesn't support, with no trusted relayer. |
+| [`uptime-insurance`](./uptime-insurance) | schedule | Parametric insurance: an autonomous ETH payout from a pool key nobody holds when a monitored service is down. |
+| [`chainlink-feed-mirror`](./chainlink-feed-mirror) | chain_event | Relay a Chainlink price feed to a chain Chainlink doesn't support, with no trusted relayer. |
 
 Each ships a hardened action, a one-shot `setup` script (action CID, scoped
 key, contract deploy, trigger creation), a `deploy` script, and an end-to-end
