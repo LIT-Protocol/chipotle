@@ -6,7 +6,7 @@ compromised bot can't drain the vault, and operational guardrails are enforced
 at signing time.**
 
 **Fast enough to fill with: ~355 ms** for a full policy authorization round-trip
-(on-chain deposit read + policy checks + threshold sign), measured live on the
+(on-chain deposit read + policy checks + Lit Action signing), measured live on the
 Across testnet path. See [Latency](#notes-from-the-live-run).
 
 Solvers and fillers (UniswapX, Across, CoW, 1inch Fusion, ERC-7683, bridge
@@ -214,9 +214,9 @@ npm run exit
 
 `npm run fill` prints the policy authorization latency in milliseconds. The
 action fires its on-chain reads concurrently (`Promise.all`), so the full
-authorization round-trip — reads plus threshold sign — measured **~335 ms warm**
+authorization round-trip — reads plus Lit Action signing — measured **~335 ms warm**
 against the live Across path (see the Across section for the numbers and the
-before/after of parallelizing). Pure threshold signing is a fraction of that.
+before/after of parallelizing). The signing step itself is a fraction of that.
 
 ## Liveness & exit
 
@@ -358,7 +358,7 @@ npm run across:attack     # exfiltration is impossible by construction
   the exclusive relayer for a window. This is also the realistic solver setup.
 - **Latency.** Full authorization round-trip — an `eth_getLogs` on the origin
   chain, three `eth_call`s for the vault's policy config on the destination
-  chain, and the threshold sign — measured **~335 ms warm, ~355 ms median**
+  chain, and the Lit Action signing step — measured **~335 ms warm, ~355 ms median**
   (Base/Eth Sepolia + Lit testnet).
 - **RPC consistency.** Alchemy is load-balanced and lags read-after-write; a
   freshly-mined balance/state may be invisible to the next call for a few
