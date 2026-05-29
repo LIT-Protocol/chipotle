@@ -26,6 +26,23 @@ const SENSITIVE_HEADERS: &[&str] = &[
     "proxy-authorization",
 ];
 
+/// Non-secret verification headers that webhook senders attach so the receiver
+/// can authenticate the request (HMAC signatures, event type/delivery ids).
+/// These are safe to expose to the action — they are the receiver's to verify,
+/// and require a shared secret (not present in the header) to forge.
+const VERIFICATION_HEADERS: &[&str] = &[
+    "x-hub-signature-256",
+    "x-hub-signature",
+    "x-github-event",
+    "x-github-delivery",
+    "x-github-hook-id",
+    "stripe-signature",
+    "x-slack-signature",
+    "x-slack-request-timestamp",
+    "x-webhook-signature",
+    "x-signature",
+];
+
 #[derive(Debug, Serialize)]
 pub struct WebhookAcceptedResponse {
     pub run_id: Uuid,
@@ -250,10 +267,16 @@ async fn build_run_input(
         return Err(err(Status::PayloadTooLarge, "body_too_large"));
     }
 
+    // Preserve the exact raw body so actions can verify signatures (GitHub
+    // X-Hub-Signature-256, Stripe Stripe-Signature, etc.) that are computed as
+    // an HMAC over the original bytes. parse_event borrows the bytes, so this
+    // lossy copy is independent of the parsed `event`.
+    let event_raw = String::from_utf8_lossy(bytes.value.as_ref()).into_owned();
     let event = parse_event(bytes.value.as_ref(), content_type)?;
     Ok(json!({
         "source": "webhook",
         "event": event,
+        "event_raw": event_raw,
         "headers": safe_headers(headers),
     }))
 }
@@ -287,6 +310,7 @@ fn safe_headers(headers: &[(String, String)]) -> Value {
             || name == "content-type"
             || name == "user-agent"
             || name == "x-request-id"
+            || VERIFICATION_HEADERS.contains(&name.as_str())
         {
             grouped
                 .entry(name.to_string())
@@ -338,6 +362,27 @@ mod tests {
             json!({
                 "content-type": ["application/json"],
                 "user-agent": ["test"]
+            })
+        );
+    }
+
+    #[test]
+    fn safe_headers_passes_verification_headers() {
+        let headers = vec![
+            (
+                "x-hub-signature-256".to_string(),
+                "sha256=abc123".to_string(),
+            ),
+            ("x-github-event".to_string(), "release".to_string()),
+            ("authorization".to_string(), "Bearer secret".to_string()),
+        ];
+
+        let safe = safe_headers(&headers);
+        assert_eq!(
+            safe,
+            json!({
+                "x-hub-signature-256": ["sha256=abc123"],
+                "x-github-event": ["release"]
             })
         );
     }
