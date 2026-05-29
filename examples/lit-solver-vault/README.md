@@ -5,6 +5,10 @@ moves inventory lives in a Lit Action, not on the solver's box — so a
 compromised bot can't drain the vault, and operational guardrails are enforced
 at signing time.**
 
+**Fast enough to fill with: ~355 ms** for a full policy authorization round-trip
+(on-chain deposit read + policy checks + threshold sign), measured live on the
+Across testnet path. See [Latency](#notes-from-the-live-run).
+
 Solvers and fillers (UniswapX, Across, CoW, 1inch Fusion, ERC-7683, bridge
 relayers) run a bot that holds a hot key and signs fills against an inventory
 balance. Compromise the box, drain the inventory. That's the threat this
@@ -356,12 +360,7 @@ npm run across:attack     # exfiltration is impossible by construction
 - **Latency.** Full authorization round-trip — an `eth_getLogs` on the origin
   chain, three `eth_call`s for the vault's policy config on the destination
   chain, and the threshold sign — measured **~335 ms warm, ~355 ms median**
-  (Base/Eth Sepolia + Lit testnet). It was ~0.9–1.1 s before the reads were
-  parallelized: `acrossPolicy.js` fires all four reads with `Promise.all`,
-  collapsing four sequential RPC round-trips into roughly one, which is the bulk
-  of the latency. Cite it as "policy authorization round-trip including on-chain
-  reads" — pure threshold signing is a fraction of it, and measure that
-  separately if you need the standalone number for the one-pager.
+  (Base/Eth Sepolia + Lit testnet).
 - **RPC consistency.** Alchemy is load-balanced and lags read-after-write; a
   freshly-mined balance/state may be invisible to the next call for a few
   seconds. `deploy-across.js` polls past it; the post-fill balance print can
