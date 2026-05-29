@@ -44,6 +44,14 @@
             ]
           },
           {
+            "group": "Lit Triggers",
+            "pages": [
+              "lit-triggers/index",
+              "lit-triggers/triggers",
+              "lit-triggers/examples"
+            ]
+          },
+          {
             "group": "Architecture",
             "pages": [
               "architecture/index",

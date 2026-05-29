@@ -1,0 +1,130 @@
+---
+title: "Examples"
+description: "Copy-paste Lit Action examples for triggers — echo a webhook payload, notarize it with a keyless signature — plus links to full runnable demos with contracts, setup, and end-to-end clients."
+---
+
+The actions below are complete: paste the code as a trigger's `action_code`
+(see [Creating Triggers](/lit-triggers/triggers)). For flows that need a
+contract, a deploy step, and an off-chain client, see the
+[full demos](#full-demos).
+
+---
+
+## 1. Echo a webhook payload
+
+The simplest trigger action — returns what it received. Useful to confirm a
+webhook is wired up and to see the exact `params` shape.
+
+```javascript
+const main = async (params) => {
+  return {
+    ok: true,
+    received_at: new Date().toISOString(),
+    source: (params && params.source) || null,
+    event: (params && params.event) || null,
+    header_keys: params && params.headers ? Object.keys(params.headers) : [],
+  };
+};
+```
+
+Create it as a webhook trigger, then `POST /webhook/<id>` with any JSON body —
+the body comes back under `event`, and the safe request headers under
+`header_keys`.
+
+---
+
+## 2. Notarize a payload with a keyless signature
+
+Take any webhook payload, compute a deterministic digest, and sign it with the
+action's own wallet — a key held by the Lit network, not by any server. The
+result is a tamper-evident receipt that only this exact action code could have
+produced. This is the building block the on-chain demos extend.
+
+```javascript
+// Deterministic JSON (sorted keys, recursive) so any verifier reproduces
+// the exact bytes that were signed.
+const stableStringify = (v) => {
+  if (Array.isArray(v)) return "[" + v.map(stableStringify).join(",") + "]";
+  if (v && typeof v === "object") {
+    return "{" + Object.keys(v).sort()
+      .map((k) => JSON.stringify(k) + ":" + stableStringify(v[k]))
+      .join(",") + "}";
+  }
+  return JSON.stringify(v);
+};
+
+const main = async (params) => {
+  const payload = (params && params.event) || {};
+  const digest = ethers.utils.id(stableStringify(payload)); // keccak256(utf8)
+
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  const signature = await wallet.signMessage(ethers.utils.arrayify(digest));
+
+  return { signer: wallet.address, digest, signature, payload };
+};
+```
+
+Verify a receipt anywhere:
+
+```javascript
+const recovered = ethers.utils.verifyMessage(ethers.utils.arrayify(digest), signature);
+// recovered === signer  →  payload is authentic and unmodified
+```
+
+---
+
+## 3. Sign a scheduled heartbeat
+
+A schedule trigger that signs a timestamped heartbeat each tick — a minimal
+"signed cron" you can post on-chain or to an external monitor.
+
+```javascript
+const main = async (params) => {
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  const message = `heartbeat ${params.scheduled_at}`;
+  return {
+    cron: params.cron,
+    scheduled_at: params.scheduled_at,
+    signer: wallet.address,
+    signature: await wallet.signMessage(message),
+  };
+};
+```
+
+---
+
+## 4. React to a chain event
+
+A chain-event trigger that reads ABI-decoded args from a matched log. Pair the
+`Transfer(address,address,uint256)` signature with an ERC-20 contract to watch
+transfers; `decoded.arg2` is the amount.
+
+```javascript
+const main = async (params) => {
+  const e = params.event;
+  return {
+    chain: e.chain_key,
+    tx: e.transaction_hash,
+    from: e.decoded.arg0,
+    to: e.decoded.arg1,
+    amount: e.decoded.arg2,
+  };
+};
+```
+
+---
+
+## Full demos
+
+These need more than one file to run — a Solidity contract, a deploy script,
+an end-to-end client — and live in the
+[`examples/` folder in the repo](https://github.com/LIT-Protocol/chipotle/tree/main/examples):
+
+| Example | Trigger | What it shows |
+| --- | --- | --- |
+| `release-attestation` | webhook | Verify a GitHub release webhook (HMAC over the raw body), then anchor the release on-chain via a keyless signer. |
+| `uptime-insurance` | schedule | Parametric insurance: an autonomous ETH payout from a pool key nobody holds when a monitored service is down. |
+| `chainlink-feed-mirror` | chain_event | Relay a Chainlink price feed to a chain Chainlink doesn't support, with no trusted relayer. |
+
+Each ships a hardened action, a one-shot `setup` script (action CID, scoped key,
+contract deploy, trigger creation), and an end-to-end client.
