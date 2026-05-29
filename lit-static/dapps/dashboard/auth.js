@@ -1043,17 +1043,27 @@ async function runPostConnectDriftCheck(client) {
 
 function showNewAccountBanner(apiKey) {
   const banner = document.getElementById('new-account-banner');
-  const keyEl = document.getElementById('new-account-key-text');
-  const copyBtn = document.getElementById('new-account-copy-btn');
   const dismissBtn = document.getElementById('new-account-dismiss-btn');
-  if (!banner || !keyEl || !copyBtn || !dismissBtn) return;
-  keyEl.textContent = apiKey;
+  if (!banner || !dismissBtn) return;
+  // Rewrite the full body innerHTML rather than mutating in place — a prior
+  // call to showChainSecuredBanner() in the same session leaves wallet-signing
+  // copy in the body, and we'd otherwise display it above the API key row.
+  const body = banner.querySelector('.new-account-banner-body');
+  if (body) {
+    body.innerHTML = `<strong>Account created.</strong> Save your API key now — it will not be shown again.
+      <div class="new-account-key-row">
+        <code id="new-account-key-text" class="new-account-key mono">${escapeHtml(apiKey)}</code>
+        <button type="button" id="new-account-copy-btn" class="btn btn-sm btn-outline">Copy</button>
+      </div>`;
+  }
   banner.style.display = '';
-  copyBtn.textContent = 'Copy';
-  copyBtn.onclick = async () => {
-    const { copyToClipboard } = await import('./ui-utils.js');
-    await copyToClipboard(apiKey, copyBtn);
-  };
+  const freshCopy = document.getElementById('new-account-copy-btn');
+  if (freshCopy) {
+    freshCopy.onclick = async () => {
+      const { copyToClipboard } = await import('./ui-utils.js');
+      await copyToClipboard(apiKey, freshCopy);
+    };
+  }
   dismissBtn.onclick = () => { banner.style.display = 'none'; };
 }
 
