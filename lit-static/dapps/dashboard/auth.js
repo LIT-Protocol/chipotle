@@ -989,9 +989,11 @@ async function promptForNewAdminAddress() {
     };
     openModal(
       'Change account ownership',
-      `<p>Enter the Ethereum address of the wallet that should become the new admin for this ChainSecured account.</p>
-       <label class="form-label" for="change-ownership-address-input">New admin wallet address</label>
-       <input type="text" id="change-ownership-address-input" class="form-input" placeholder="0x…" autocomplete="off" spellcheck="false" />
+      `<p class="modal-action-desc" style="margin-bottom:1rem;">Enter the Ethereum address of the wallet that should become the new admin for this ChainSecured account.</p>
+       <div class="form-group">
+         <label for="change-ownership-address-input">New admin wallet address</label>
+         <input type="text" id="change-ownership-address-input" class="input" placeholder="0x…" autocomplete="off" spellcheck="false" autocapitalize="off" style="font-family:ui-monospace,'JetBrains Mono',monospace;" />
+       </div>
        <div id="change-ownership-error" class="status error" style="display:none; margin-top:0.5rem;"></div>`,
       `<button type="button" class="btn btn-secondary" id="change-ownership-cancel-btn">Cancel</button>
        <button type="button" class="btn btn-primary" id="change-ownership-accept-btn">Accept</button>`,
