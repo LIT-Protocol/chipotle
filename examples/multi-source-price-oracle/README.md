@@ -16,9 +16,10 @@ single venue can manipulate.
 
 ## Why median, not strict equality
 
-The [`compliance-transfer-gate`](../compliance-transfer-gate) example uses
-strict byte-equality across three sources because the underlying data
-(an `isSanctioned(addr) → bool`) doesn't drift between observations.
+Strict byte-equality works for discrete facts because the underlying data
+doesn't drift between observations. For example, an `isSanctioned(addr) → bool`
+answer should be identical across independent reads of the same canonical
+source.
 Spot prices drift between exchanges every second, so the same approach
 would never accept a reading. Median instead:
 

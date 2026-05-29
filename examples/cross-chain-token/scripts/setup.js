@@ -207,7 +207,7 @@ function rpcForNetwork(network) {
 }
 
 // ---------------------------------------------------------------------------
-// Lit Chipotle REST helpers — same shape as the other examples'.
+// Lit Chipotle REST helpers.
 // ---------------------------------------------------------------------------
 
 async function call(base, apiKey, path, init = {}) {
