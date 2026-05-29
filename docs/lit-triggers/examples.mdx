@@ -117,12 +117,12 @@ const main = async (params) => {
 ## Full demos
 
 These need more than one file to run — a Solidity contract, a deploy script,
-an end-to-end client — and live in the
-[`examples/` folder in the repo](https://github.com/LIT-Protocol/chipotle/tree/main/examples):
+an end-to-end client — and live under
+[`examples/lit-triggers/` in the repo](https://github.com/LIT-Protocol/chipotle/tree/main/examples/lit-triggers):
 
 | Example | Trigger | What it shows |
 | --- | --- | --- |
-| `release-attestation` | webhook | Verify a GitHub release webhook (HMAC over the raw body), then anchor the release on-chain via a keyless signer. |
+| [`release-attestation`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/lit-triggers/release-attestation) | webhook | Verify a GitHub release webhook (HMAC over the raw body), then anchor the release on-chain via a keyless signer. |
 | `uptime-insurance` | schedule | Parametric insurance: an autonomous ETH payout from a pool key nobody holds when a monitored service is down. |
 | `chainlink-feed-mirror` | chain_event | Relay a Chainlink price feed to a chain Chainlink doesn't support, with no trusted relayer. |
 
