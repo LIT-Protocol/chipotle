@@ -36,10 +36,12 @@ copies the event it was triggered on," not "this relayer operator is honest."
 - **Source re-verification (the important one).** The action does **not** trust
   the price the trigger hands it. A chain-event trigger supplies a decoded log,
   but anyone holding the usage key could execute the action with a fabricated
-  `decoded` payload. So the action takes only the `transaction_hash` and
-  `log_index`, re-fetches that receipt from a **hostname-pinned, https-only**
-  source RPC (`SOURCE.rpcHost`), and verifies the log was emitted by the expected
-  **`SOURCE.aggregator`** with the `AnswerUpdated` topic and enough confirmations.
+  `decoded` payload. So the action applies the hostname-pinned RPC trust-anchor
+  pattern (see [Lit Action Patterns](../../../docs/lit-actions/patterns.mdx)):
+  it takes only the `transaction_hash` and `log_index`, re-fetches that receipt
+  from a **hostname-pinned, https-only** source RPC (`SOURCE.rpcHost`), and
+  verifies the log was emitted by the expected **`SOURCE.aggregator`** with the
+  `AnswerUpdated` topic and enough confirmations.
   It decodes the price from that verified log. The aggregator/chain/host are baked
   constants — editing them changes the action CID + signer, so a modified action
   can't write to the existing `PriceConsumer`. A fabricated price is simply

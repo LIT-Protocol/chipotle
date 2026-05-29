@@ -1,9 +1,7 @@
-// Minimal .env reader / upserter shared across the cross-chain-token scripts.
+// Minimal .env reader / upserter shared across the release-attestation scripts.
 //
-// Same shape as the helper used by the other examples — see
-// ../../compliance-transfer-gate/scripts/_env.js for the full rationale.
-// Reproduced here so each example folder is self-contained and you can
-// clone just one of them without copying siblings.
+// Kept inline so this example folder is self-contained and you can clone it
+// without copying siblings.
 
 const fs = require("fs");
 const path = require("path");
