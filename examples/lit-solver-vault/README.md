@@ -84,19 +84,27 @@ Four roles, deliberately separated:
 | --- | --- | --- | --- |
 | **solver bot** | a scoped Lit usage key | *request* a fill authorization | move inventory; change policy; exit |
 | **policySigner** | CID-derived key, inside Lit | authorize good fills, refuse bad ones | be edited without changing its own address |
-| **owner** | a local key (recommend a Safe) | restrict policy (kill switch, lower cap); `exit` to cold wallet | redirect a fill; change the exit destination quickly |
+| **owner** | a key, **recommend a Safe** | change policy (cap, kill switch, allowlist); `exit` to cold wallet | redirect a fill; change the exit destination without the timelock |
 | **coldWallet** | — | receive emergency exits | — |
 
 The headline property: **a compromised solver bot** (attacker has the usage key
 *and* the box) can ask for fills, but the policy action refuses anything that
 doesn't match a real on-chain order under the cap. No signature, no movement.
 To actually steal you'd need to compromise the `owner` key too — and even then
-you can only sweep to the pinned `coldWallet`.
+you can only sweep to the pinned `coldWallet` (changing that destination is
+timelocked).
+
+**`owner` is fully trusted** — treat it like a treasury key and use a Safe. The
+config setters let it *expand* policy (raise the cap, disable the kill switch,
+add a settlement), not just restrict it, so a compromised owner key can widen
+the gate. The security story is about removing the *hot signing key from the
+bot*, not about constraining the owner.
 
 The anti-exfiltration check is the load-bearing one: the action reads the order
-from the settlement contract on-chain and binds the fill to *that* recipient.
-The bot can put any recipient in `js_params`, but it can't rewrite the order, so
-the mismatch is caught.
+from a **pinned, trusted** settlement/SpokePool on-chain and binds the fill to
+*that* recipient. The bot can put any recipient in `js_params`, but it can't
+rewrite the order, and the action will only read the pinned contract — so a
+forged or self-posted order doesn't get signed.
 
 ## Files
 
@@ -239,11 +247,38 @@ period" is a strictly better promise than "unless Lit decides otherwise."
   plan phase 5.)
 - **Per-chain caps and rate limits.** Add a `min_interval` and per-chain cap to
   the policy for production guardrails beyond the single notional cap shown here.
-- **Audit.** `SolverVault` holds real inventory — it needs an audit before any
-  mainnet deployment. It is unaudited here.
+- **Economic policy is minimal.** `acrossPolicy` enforces a single per-fill cap
+  plus `outputAmount <= inputAmount` (never fill at a loss). A production solver
+  needs a real fee floor (`output <= input * (1 - feeBps)`), a quote/orderbook
+  check, an output-token allowlist, and a **cumulative** exposure budget — the
+  per-fill cap alone doesn't bound total drain across many fills.
+- **Audit.** `SolverVault` / `AcrossSolverVault` hold real inventory — they need
+  an audit before any mainnet deployment. They are unaudited here.
 - **Settlement compatibility.** Inventory lives in a contract, not an EOA.
   Across / UniswapX / ERC-7683 all support contract fillers, but verify your
   target system's `msg.sender` assumptions before mainnet.
+
+### What an adversarial review flagged (and how this addresses it)
+
+A `codex` adversarial pass against the threat model surfaced these; the fixes
+are in this example, with the production-depth items called out above:
+
+- **Pin the trusted source.** `acrossPolicy` allowlists the origin SpokePool
+  (the caller can't point it at a contract that emits forged deposits), and
+  `MockSettlement.postOrder` is restricted to its deployer. Without this, a
+  compromised usage key could mint a fake "deposit" paying itself and the vault
+  would fill it.
+- **Re-enforce time-sensitive policy on-chain.** `executeFill` /
+  `executeAcrossFill` re-check `killSwitch` and `maxFillAmount` and cap the
+  authorization TTL (`MAX_AUTH_TTL`), so a signature minted while policy was
+  permissive can't execute after the owner engages the kill switch or lowers the
+  cap.
+- **No silent address truncation.** bytes32 deposit fields are rejected (not
+  truncated) if their high 12 bytes are non-zero — i.e. real non-EVM addresses
+  can't be narrowed to a different EVM address.
+- **Honest owner model + dashboard.** The owner is documented as fully trusted
+  (above); the dashboard kill-switch route is unauthenticated and therefore
+  off by default (`DASHBOARD_ENABLE_WRITES`).
 
 ## Across testnet integration (the real-fill variant)
 

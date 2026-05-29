@@ -131,6 +131,7 @@ async function getState() {
     spokePool,
     fills,
     asOfBlock: head,
+    writesEnabled: process.env.DASHBOARD_ENABLE_WRITES === "true",
   };
 }
 

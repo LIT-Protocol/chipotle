@@ -13,8 +13,14 @@ A small read-only ops view for an `AcrossSolverVault`, meant as sales collateral
 
 The vault reads happen server-side (Next.js API routes), so the RPC URL and the
 owner key never reach the browser. The kill-switch toggle posts to a server
-route that signs with the owner key; omit the key to keep the dashboard fully
-read-only.
+route that signs with the owner key.
+
+> **Security:** the kill-switch route has **no authentication**. It is disabled
+> by default and only works when `DASHBOARD_ENABLE_WRITES=true`. Set that ONLY
+> when the dashboard is on localhost or a trusted network — anyone who can reach
+> the route can flip the kill switch with the owner key. Put real auth in front
+> before exposing it. With writes off (the default), the dashboard is fully
+> read-only and the toggle shows "Read-only".
 
 ## Run
 

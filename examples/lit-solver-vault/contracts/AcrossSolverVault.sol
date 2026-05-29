@@ -66,6 +66,11 @@ contract AcrossSolverVault {
     /// @notice Origin chains (by chain id) this vault will fill deposits from.
     mapping(uint256 => bool) public allowedOriginChain;
 
+    /// @notice Longest a policy signature may stay valid. Bounds the window in
+    ///         which a pre-minted authorization can be replayed after policy
+    ///         tightens (kill switch / lower cap).
+    uint256 public constant MAX_AUTH_TTL = 1 hours;
+
     // --- cold-wallet change timelock ---
     uint256 public constant COLD_WALLET_TIMELOCK = 7 days;
     address public pendingColdWallet;
@@ -73,6 +78,9 @@ contract AcrossSolverVault {
 
     error NotOwner();
     error AuthExpired();
+    error AuthDeadlineTooFar();
+    error KillSwitchEngaged();
+    error OverCap();
     error InvalidPolicySignature();
     error NoPendingColdWalletChange();
     error TimelockNotElapsed();
@@ -136,6 +144,12 @@ contract AcrossSolverVault {
         bytes calldata signature
     ) external {
         if (block.timestamp > authDeadline) revert AuthExpired();
+        if (authDeadline > block.timestamp + MAX_AUTH_TTL) revert AuthDeadlineTooFar();
+        // Re-enforce the time-sensitive policy on-chain so an authorization
+        // minted while policy was permissive can't execute after the owner
+        // engages the kill switch or lowers the cap.
+        if (killSwitch) revert KillSwitchEngaged();
+        if (relayData.outputAmount > maxFillAmount) revert OverCap();
 
         bytes32 digest = keccak256(
             abi.encode(relayData, repaymentChainId, authDeadline, address(this), block.chainid)

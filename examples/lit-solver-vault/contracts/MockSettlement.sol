@@ -26,16 +26,30 @@ contract MockSettlement {
 
     mapping(bytes32 => Order) public orders;
 
+    /// @notice Who may post orders. A real settlement contract is a protocol
+    ///         contract an attacker can't write favorable orders into; this mock
+    ///         restricts posting to its deployer so the demo's recipient-binding
+    ///         claim holds (otherwise a holder of the usage key could post an
+    ///         order paying themselves and have the policy bind to it).
+    address public immutable poster;
+
+    error NotPoster();
+
     event OrderPosted(bytes32 indexed id, address recipient, address token, uint256 amount);
 
-    /// @notice Post an order the solver can fill. Permissionless on purpose —
-    ///         in this demo the "intent stream" is just whatever's been posted.
+    constructor() {
+        poster = msg.sender;
+    }
+
+    /// @notice Post an order the solver can fill. Restricted to the deployer —
+    ///         see `poster`.
     function postOrder(
         bytes32 id,
         address recipient,
         address token,
         uint256 amount
     ) external {
+        if (msg.sender != poster) revert NotPoster();
         orders[id] = Order(recipient, token, amount, true);
         emit OrderPosted(id, recipient, token, amount);
     }

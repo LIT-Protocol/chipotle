@@ -63,6 +63,11 @@ contract SolverVault {
     /// @notice Replay protection: each fill nonce may be spent once.
     mapping(bytes32 => bool) public usedNonces;
 
+    /// @notice Longest a policy signature may stay valid. Bounds the window in
+    ///         which a pre-minted authorization can be replayed after policy
+    ///         tightens (kill switch / lower cap).
+    uint256 public constant MAX_AUTH_TTL = 1 hours;
+
     // --- cold-wallet change timelock ---
 
     uint256 public constant COLD_WALLET_TIMELOCK = 7 days;
@@ -71,6 +76,9 @@ contract SolverVault {
 
     error NotOwner();
     error FillExpired();
+    error DeadlineTooFar();
+    error KillSwitchEngaged();
+    error OverCap();
     error NonceAlreadyUsed();
     error InvalidPolicySignature();
     error NoPendingColdWalletChange();
@@ -134,7 +142,14 @@ contract SolverVault {
         bytes calldata signature
     ) external {
         if (block.timestamp > deadline) revert FillExpired();
+        if (deadline > block.timestamp + MAX_AUTH_TTL) revert DeadlineTooFar();
         if (usedNonces[nonce]) revert NonceAlreadyUsed();
+        // Re-enforce the time-sensitive policy on-chain. The action checks
+        // these at signing time, but a signature minted while policy was
+        // permissive must not execute after the owner engages the kill switch
+        // or lowers the cap.
+        if (killSwitch) revert KillSwitchEngaged();
+        if (amount > maxFillAmount) revert OverCap();
 
         bytes32 digest = keccak256(
             abi.encode(

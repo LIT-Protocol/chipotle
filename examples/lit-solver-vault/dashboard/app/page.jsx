@@ -117,9 +117,16 @@ export default function Page() {
                 <button
                   className={`toggle ${state.killSwitch ? "resume" : "danger"}`}
                   onClick={toggleKill}
-                  disabled={busy}
+                  disabled={busy || !state.writesEnabled}
+                  title={state.writesEnabled ? "" : "read-only: set DASHBOARD_ENABLE_WRITES=true to enable"}
                 >
-                  {busy ? "…" : state.killSwitch ? "Resume fills" : "Engage kill switch"}
+                  {busy
+                    ? "…"
+                    : !state.writesEnabled
+                    ? "Read-only"
+                    : state.killSwitch
+                    ? "Resume fills"
+                    : "Engage kill switch"}
                 </button>
               </div>
               <div className="meta">signer {short(state.policySigner)} · cold {short(state.coldWallet)}</div>

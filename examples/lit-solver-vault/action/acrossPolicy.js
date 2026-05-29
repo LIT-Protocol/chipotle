@@ -47,6 +47,18 @@
 const ALLOWED_ORIGIN_HOST = /^eth-sepolia\.g\.alchemy\.com$/i;
 const ALLOWED_VAULT_HOST = /^base-sepolia\.g\.alchemy\.com$/i;
 
+// Canonical Across SpokePool per origin chain. The caller passes
+// originSpokePool, but it MUST match the pinned address for the claimed
+// origin chain — otherwise a compromised usage key could point the action at
+// an attacker contract that emits a forged FundsDeposited log, and the action
+// would happily sign a relay reconstructed from that fake "deposit." The
+// destination SpokePool does not verify the origin at fill time, so without
+// this pin a fake deposit drains the vault. Adding a chain here changes the
+// action's CID (and therefore its signer), which is the intended property.
+const ALLOWED_ORIGIN_SPOKES = {
+  "11155111": "0x5ef6C01E11889d86803e0B23e3cB3F9E9d97B662", // Sepolia
+};
+
 // The deployed Across SpokePools emit the bytes32-addressed `FundsDeposited`
 // (uint256 depositId) — the SVM-compatible event, newer than the address-based
 // `V3FundsDeposited` in the published deployment ABIs. We decode that and
@@ -56,9 +68,16 @@ const depositIface = new ethers.utils.Interface([
   "event FundsDeposited(bytes32 inputToken, bytes32 outputToken, uint256 inputAmount, uint256 outputAmount, uint256 indexed destinationChainId, uint256 indexed depositId, uint32 quoteTimestamp, uint32 fillDeadline, uint32 exclusivityDeadline, bytes32 indexed depositor, bytes32 recipient, bytes32 exclusiveRelayer, bytes message)",
 ]);
 
-// An EVM address padded into a bytes32 -> checksummed address.
+// An EVM address padded into a bytes32 -> checksummed address. Rejects values
+// whose high 12 bytes are non-zero: those are real (non-EVM / SVM) addresses,
+// and silently truncating them to 20 bytes would sign a relay paying a
+// different address than the deposit actually names.
 function b32ToAddress(b32) {
-  return ethers.utils.getAddress("0x" + b32.slice(-40));
+  const clean = b32.toLowerCase().replace(/^0x/, "").padStart(64, "0");
+  if (clean.slice(0, 24) !== "0".repeat(24)) {
+    throw new Error(`bytes32 field is not an EVM address (non-zero high bytes): 0x${clean}`);
+  }
+  return ethers.utils.getAddress("0x" + clean.slice(24));
 }
 
 const vaultIface = new ethers.utils.Interface([
@@ -94,6 +113,20 @@ async function main({
     return { authorized: false, reason: "vault rpc host not whitelisted" };
   }
 
+  // Pin the origin SpokePool: the caller chooses originSpokePool, so it must
+  // match the canonical address for the claimed chain or it could be an
+  // attacker contract emitting forged deposits.
+  const pinnedSpoke = ALLOWED_ORIGIN_SPOKES[String(originChainId)];
+  if (!pinnedSpoke) {
+    return { authorized: false, reason: `origin chain not supported: ${originChainId}` };
+  }
+  if (ethers.utils.getAddress(originSpokePool) !== ethers.utils.getAddress(pinnedSpoke)) {
+    return {
+      authorized: false,
+      reason: `originSpokePool ${originSpokePool} is not the pinned SpokePool for chain ${originChainId}`,
+    };
+  }
+
   // All four reads are independent, so fire them concurrently rather than in
   // series: three eth_calls for the vault's policy config plus one eth_getLogs
   // for the deposit on the origin chain. This collapses ~4 sequential RPC
@@ -126,6 +159,17 @@ async function main({
     return {
       authorized: false,
       reason: `outputAmount ${outputAmount.toString()} exceeds maxFillAmount ${maxFillAmount.toString()}`,
+    };
+  }
+  // Never fill at a loss: the relayer pays outputAmount and is reimbursed at
+  // most inputAmount. Without this, a compromised bot could create a deposit
+  // with a tiny input and a huge output to itself and drain the vault on the
+  // spread, all under the per-fill cap. A real solver also applies a fee floor
+  // (output <= input * (1 - feeBps)); we keep the minimal invariant here.
+  if (outputAmount.gt(deposit.inputAmount)) {
+    return {
+      authorized: false,
+      reason: `outputAmount ${outputAmount.toString()} exceeds inputAmount ${deposit.inputAmount.toString()} (loss-making fill)`,
     };
   }
 
