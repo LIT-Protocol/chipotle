@@ -17,34 +17,6 @@ const SETTLEMENT_ABI = [
   "function settleEpoch(uint256 epoch, uint256 clearingPx, (address trader,bool isBuy,uint256 quantity)[] fills, bytes signature)",
 ];
 
-// Inline action used only after settlement confirms, to flip orders to settled.
-// (Keeps raw DB creds out of this orchestrator — the action decrypts them.)
-const MARK_SETTLED_CODE = `
-async function main({ pkpId, encryptedDbUrl, ids, epoch, clearingPx, txHash }) {
-  const dbUrl = await Lit.Actions.Decrypt({ pkpId, ciphertext: encryptedDbUrl });
-  const host = new URL(dbUrl).host;
-  async function q(query, params) {
-    const res = await fetch("https://" + host + "/sql", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Neon-Connection-String": dbUrl, "Neon-Array-Mode": "true" },
-      body: JSON.stringify({ query, params: params || [] }),
-    });
-    if (!res.ok) throw new Error("sql " + res.status + ": " + (await res.text()));
-    return res.json();
-  }
-  if (ids && ids.length) {
-    await q("update orders set settled = true where id = any($1)", [ids]);
-  }
-  await q(
-    "insert into epochs (epoch, pair, status, clearing_px, settled_tx, closed_at) " +
-    "values ($1, $2, 'settled', $3, $4, now()) " +
-    "on conflict (epoch) do update set status='settled', clearing_px=$3, settled_tx=$4, closed_at=now()",
-    [epoch, $PAIR, clearingPx, txHash]
-  );
-  return { ok: true };
-}
-`;
-
 function arg(name, def) {
   const i = process.argv.indexOf(`--${name}`);
   return i >= 0 ? process.argv[i + 1] : def;
@@ -75,15 +47,19 @@ async function main() {
   const chainId = Number(process.env.CHAIN_ID || "84532");
   const maxBatch = Number(process.env.MAX_BATCH || "200");
   const epoch = Number(arg("epoch", "1"));
-  const settlement = process.env.SETTLEMENT_ADDRESS || ethers.constants.AddressZero;
+  // Orders are signed bound to the settlement address, so the matcher must
+  // authenticate against the real one (a zero-address fallback would reject
+  // every order).
+  const settlement = process.env.SETTLEMENT_ADDRESS;
 
   for (const [k, v] of [
     ["LIT_USAGE_API_KEY", usageKey],
     ["VAULT_PKP_ADDRESS", pkpId],
     ["ENCRYPTED_DATABASE_URL", encryptedDbUrl],
     ["MATCH_ACTION_ADDRESS", matcher],
+    ["SETTLEMENT_ADDRESS", settlement],
   ]) {
-    if (!v) throw new Error(`${k} missing — run \`npm run setup\` first`);
+    if (!v) throw new Error(`${k} missing — run \`npm run setup\` (with DEPLOYER_PRIVATE_KEY set) first`);
   }
 
   // 1. Match inside the enclave.
@@ -98,7 +74,11 @@ async function main() {
     maxBatch,
   });
 
-  console.log(`epoch ${epoch}: ${res.matchedOrders} orders, clearing price ${ethers.utils.formatUnits(res.clearingPx, 18)}`);
+  console.log(
+    `epoch ${epoch}: ${res.matchedOrders} authenticated orders` +
+      (res.rejectedOrders ? `, ${res.rejectedOrders} rejected` : "") +
+      `, clearing price ${ethers.utils.formatUnits(res.clearingPx, 18)}`
+  );
   for (const f of res.fills) {
     console.log(`  ${f.isBuy ? "BUY " : "SELL"} ${ethers.utils.formatUnits(f.quantity, 18)} -> ${f.trader}`);
   }
@@ -126,13 +106,15 @@ async function main() {
     const rcpt = await tx.wait();
     console.log(`settled on-chain: ${rcpt.transactionHash}`);
 
-    // Flip the matched orders + epoch to settled (via the action, over HTTP).
-    const markCode = MARK_SETTLED_CODE.replace("$PAIR", JSON.stringify(pair));
+    // Flip the matched orders + epoch to settled (via the pinned markSettled
+    // action, so this orchestrator never handles raw DB credentials).
+    const markCode = fs.readFileSync(path.join(__dirname, "..", "action", "markSettled.js"), "utf8");
     await runAction(base, usageKey, markCode, {
       pkpId,
       encryptedDbUrl,
       ids: res.orderIds,
       epoch,
+      pair,
       clearingPx: res.clearingPx,
       txHash: rcpt.transactionHash,
     });

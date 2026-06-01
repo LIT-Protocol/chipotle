@@ -11,17 +11,20 @@ import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/Messa
 ///
 /// Orders never touch this contract. They are submitted encrypted, stored as
 /// ciphertext off-chain, and matched blind inside a Lit Action running in a TEE.
-/// The action computes a single uniform clearing price for the epoch and signs
-/// the resulting fills with a key derived from its own IPFS CID
-/// (`Lit.Actions.getLitActionPrivateKey()`). This contract pins that key as
-/// `matcher` at deploy time: edit the action by a byte and its CID changes, its
-/// derived address changes, and this contract stops trusting its settlements.
+/// The action verifies each order's trader signature, computes a single uniform
+/// clearing price for the epoch, and signs the resulting fills with a key derived
+/// from its own IPFS CID (`Lit.Actions.getLitActionPrivateKey()`). This contract
+/// pins that key as `matcher` at deploy time: edit the action by a byte and its
+/// CID changes, its derived address changes, and this contract stops trusting its
+/// settlements.
 ///
-/// Custody is modelled as internal balances. Traders `depositBase` /
-/// `depositQuote` before an epoch closes; `settleEpoch` moves those internal
-/// balances according to the signed fills at the clearing price; traders
-/// `withdraw` afterwards. Unfilled and over-collateralised amounts simply remain
-/// as a withdrawable balance.
+/// CUSTODY — escrow is locked PER EPOCH. A trader `depositBase`/`depositQuote`s
+/// against a specific epoch; those funds are locked until that epoch settles, so
+/// a matched trader cannot withdraw out from under a pending settlement. On
+/// settlement, spent escrow becomes the counterparty's withdrawable proceeds, and
+/// any unspent escrow becomes withdrawable by the trader once the epoch is
+/// settled. This bounds the blast radius of any single order to that epoch's
+/// escrow.
 ///
 /// PRICE CONVENTION: `clearingPx` is quote smallest-units per ONE base
 /// smallest-unit, scaled by `PRICE_SCALE` (1e18). The cost in quote units of
@@ -38,19 +41,22 @@ contract DarkPoolSettlement {
     IERC20 public immutable baseToken;
     IERC20 public immutable quoteToken;
 
-    /// @notice keccak256(bytes(pair)) — e.g. keccak256("BASE/QUOTE"). Bound into
-    ///         the settlement digest so a signature for one pool can't be
-    ///         replayed against another.
+    /// @notice keccak256(bytes(pair)) — bound into the settlement digest and the
+    ///         per-order trader signature so neither can be replayed across pools.
     bytes32 public immutable pairHash;
 
     /// @notice Address derived from the match action's IPFS CID. Only its
     ///         signatures are accepted by `settleEpoch`.
     address public immutable matcher;
 
-    /// @notice Internal escrow balances, credited by deposit, moved by
-    ///         settlement, drained by withdraw.
-    mapping(address => uint256) public baseBalance;
-    mapping(address => uint256) public quoteBalance;
+    /// @notice Escrow locked to a specific epoch: epoch => trader => amount.
+    ///         Locked until that epoch settles.
+    mapping(uint256 => mapping(address => uint256)) public baseEscrow;
+    mapping(uint256 => mapping(address => uint256)) public quoteEscrow;
+
+    /// @notice Settlement proceeds, withdrawable any time.
+    mapping(address => uint256) public baseProceeds;
+    mapping(address => uint256) public quoteProceeds;
 
     /// @notice Each epoch may be settled exactly once.
     mapping(uint256 => bool) public epochSettled;
@@ -64,14 +70,15 @@ contract DarkPoolSettlement {
     }
 
     error EpochAlreadySettled();
+    error EpochNotSettled();
     error InvalidMatcherSignature();
     error ConservationViolated(); // base bought != base sold
     error ZeroAmount();
 
-    event BaseDeposited(address indexed trader, uint256 amount);
-    event QuoteDeposited(address indexed trader, uint256 amount);
-    event BaseWithdrawn(address indexed trader, uint256 amount);
-    event QuoteWithdrawn(address indexed trader, uint256 amount);
+    event BaseDeposited(uint256 indexed epoch, address indexed trader, uint256 amount);
+    event QuoteDeposited(uint256 indexed epoch, address indexed trader, uint256 amount);
+    event EscrowRefunded(uint256 indexed epoch, address indexed trader, uint256 base, uint256 quote);
+    event ProceedsWithdrawn(address indexed trader, uint256 base, uint256 quote);
     event EpochSettled(uint256 indexed epoch, uint256 clearingPx, uint256 fillCount);
     event Filled(uint256 indexed epoch, address indexed trader, bool isBuy, uint256 quantity, uint256 quoteAmount);
 
@@ -83,35 +90,49 @@ contract DarkPoolSettlement {
     }
 
     // -----------------------------------------------------------------------
-    // Escrow
+    // Escrow (locked per epoch until that epoch settles)
     // -----------------------------------------------------------------------
 
-    /// @notice Deposit base tokens to back sell orders. Caller must approve first.
-    function depositBase(uint256 amount) external {
+    /// @notice Escrow base to back sell orders in `epoch`. Caller approves first.
+    function depositBase(uint256 epoch, uint256 amount) external {
         if (amount == 0) revert ZeroAmount();
+        if (epochSettled[epoch]) revert EpochAlreadySettled();
         baseToken.safeTransferFrom(msg.sender, address(this), amount);
-        baseBalance[msg.sender] += amount;
-        emit BaseDeposited(msg.sender, amount);
+        baseEscrow[epoch][msg.sender] += amount;
+        emit BaseDeposited(epoch, msg.sender, amount);
     }
 
-    /// @notice Deposit quote tokens to back buy orders. Caller must approve first.
-    function depositQuote(uint256 amount) external {
+    /// @notice Escrow quote to back buy orders in `epoch`. Caller approves first.
+    function depositQuote(uint256 epoch, uint256 amount) external {
         if (amount == 0) revert ZeroAmount();
+        if (epochSettled[epoch]) revert EpochAlreadySettled();
         quoteToken.safeTransferFrom(msg.sender, address(this), amount);
-        quoteBalance[msg.sender] += amount;
-        emit QuoteDeposited(msg.sender, amount);
+        quoteEscrow[epoch][msg.sender] += amount;
+        emit QuoteDeposited(epoch, msg.sender, amount);
     }
 
-    function withdrawBase(uint256 amount) external {
-        baseBalance[msg.sender] -= amount; // reverts on underflow (0.8.x)
-        baseToken.safeTransfer(msg.sender, amount);
-        emit BaseWithdrawn(msg.sender, amount);
+    /// @notice After an epoch settles, reclaim any escrow that wasn't spent
+    ///         (unfilled or over-collateralised amounts).
+    function withdrawEscrow(uint256 epoch) external {
+        if (!epochSettled[epoch]) revert EpochNotSettled();
+        uint256 b = baseEscrow[epoch][msg.sender];
+        uint256 q = quoteEscrow[epoch][msg.sender];
+        baseEscrow[epoch][msg.sender] = 0;
+        quoteEscrow[epoch][msg.sender] = 0;
+        if (b > 0) baseToken.safeTransfer(msg.sender, b);
+        if (q > 0) quoteToken.safeTransfer(msg.sender, q);
+        emit EscrowRefunded(epoch, msg.sender, b, q);
     }
 
-    function withdrawQuote(uint256 amount) external {
-        quoteBalance[msg.sender] -= amount;
-        quoteToken.safeTransfer(msg.sender, amount);
-        emit QuoteWithdrawn(msg.sender, amount);
+    /// @notice Withdraw settlement proceeds (base bought / quote received).
+    function withdrawProceeds() external {
+        uint256 b = baseProceeds[msg.sender];
+        uint256 q = quoteProceeds[msg.sender];
+        baseProceeds[msg.sender] = 0;
+        quoteProceeds[msg.sender] = 0;
+        if (b > 0) baseToken.safeTransfer(msg.sender, b);
+        if (q > 0) quoteToken.safeTransfer(msg.sender, q);
+        emit ProceedsWithdrawn(msg.sender, b, q);
     }
 
     // -----------------------------------------------------------------------
@@ -123,7 +144,8 @@ contract DarkPoolSettlement {
     ///      keccak256(abi.encode(epoch, pairHash, clearingPx,
     ///                            keccak256(abi.encode(fills)),
     ///                            address(this), block.chainid)).
-    ///      The match action signs the same bytes with its CID-derived key.
+    ///      The match action signs the same bytes with its CID-derived key, and
+    ///      has already verified every fill's trader signature off-chain.
     function settleEpoch(
         uint256 epoch,
         uint256 clearingPx,
@@ -145,8 +167,7 @@ contract DarkPoolSettlement {
 
         if (digest.recover(signature) != matcher) revert InvalidMatcherSignature();
 
-        // Mark settled before moving funds (checks-effects-interactions; the
-        // moves below are internal-balance updates, but keep the discipline).
+        // Effects before interactions (the moves are internal-balance updates).
         epochSettled[epoch] = true;
 
         uint256 baseBought;
@@ -157,14 +178,14 @@ contract DarkPoolSettlement {
             uint256 quoteAmount = (f.quantity * clearingPx) / PRICE_SCALE;
 
             if (f.isBuy) {
-                // Buyer pays quote, receives base.
-                quoteBalance[f.trader] -= quoteAmount; // reverts if under-collateralised
-                baseBalance[f.trader] += f.quantity;
+                // Buyer spends locked quote escrow, receives base proceeds.
+                quoteEscrow[epoch][f.trader] -= quoteAmount; // reverts if under-collateralised
+                baseProceeds[f.trader] += f.quantity;
                 baseBought += f.quantity;
             } else {
-                // Seller delivers base, receives quote.
-                baseBalance[f.trader] -= f.quantity;
-                quoteBalance[f.trader] += quoteAmount;
+                // Seller delivers locked base escrow, receives quote proceeds.
+                baseEscrow[epoch][f.trader] -= f.quantity;
+                quoteProceeds[f.trader] += quoteAmount;
                 baseSold += f.quantity;
             }
 

@@ -325,6 +325,34 @@ PRICE CONVENTION (locked): `clearingPx` = quote-units per 1 base-unit × 1e18;
 
 ---
 
+## Security hardening (post-codex adversarial review, 2026-05-29)
+
+Codex challenge flagged 6 P1 + 3 P2. All addressed:
+
+- **#1 forged orders / unauthenticated trader (P1)** → orders are now **trader-signed**
+  (EIP-191 over `chainId, settlement, epoch, pairHash, isBuy, limitPrice, quantity, nonce`).
+  `matchEpoch` verifies the sig recovers to `order.trader` in-enclave; forged/foreign
+  orders are dropped. Proven live: a forged sell-1000 order for the buyer's address was
+  rejected ("1 rejected"), epoch settled with only the 2 valid orders.
+- **#3 attacker-fed DB / #4 row replay (P1)** → same signature + `(trader, nonce)` dedup
+  in `matchEpoch`; nonce + settlement/epoch/pair binding kill cross-context replay.
+- **#5 dead MAX_BATCH check (P1)** → query `LIMIT cap+1`; guard now actually trips.
+- **#6 withdraw-before-settle griefing (P1)** → contract redesigned to **per-epoch locked
+  escrow** (`baseEscrow`/`quoteEscrow[epoch][trader]`), withdrawable only after the epoch
+  settles; proceeds in a separate balance. New tests cover the lock + over-collateral refund.
+- **#2 wildcard group (P1)** → `setup.js` now **pins the exact CIDs** (encryptOrder,
+  matchEpoch, markSettled + 2 setup helpers); no wildcard. A new/modified action is rejected.
+- **#P2 order magnitude** → bounded `< 2^128` in both actions (no uint256 overflow).
+- **#P2 error leakage** → Neon error bodies no longer thrown; only status code surfaced.
+- **#P2 "only ciphertext" overstatement** → README privacy table + wording corrected
+  (epoch/pair/created_at/settled are plaintext row metadata; only order *contents* are sealed)
+  and a "Security model & limitations" section added (operator liveness, single matcher, etc.).
+
+Tests: **21 passing** (9 contract incl. escrow-lock + refund, 6 auction, 6 auth).
+Live re-validation (new pinned setup + Base Sepolia): epoch 1 + epoch 2 settled with auth;
+`markSettled` runs as a pinned action (no raw DB creds in the orchestrator). Also hardened
+`submitOrder` to wait for the approval to be visible (public-RPC lag) before depositing.
+
 ## Decisions (locked in office hours 2026-05-28)
 1. Sealed-bid batch auction, uniform clearing price — not a continuous book.
 2. Approach A: encrypt-to-vault-PKP + ciphertext in Postgres; orchestrator owns DB I/O, action is pure.
