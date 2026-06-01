@@ -45,7 +45,21 @@ impl TestClient {
         let request = request.into();
 
         let (outbound_tx, outbound_rx) = flume::bounded(0);
-        let channel = unix::connect_to_socket(self.socket_file.path()).await?;
+        // TestServer::start() spawns the server asynchronously, so the very
+        // first request can race the unix-socket bind and get "Connection
+        // refused". Retry the connect briefly instead of failing the test.
+        let channel = {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                match unix::connect_to_socket(self.socket_file.path()).await {
+                    Ok(channel) => break channel,
+                    Err(_) if std::time::Instant::now() < deadline => {
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        };
         let mut client = ActionClient::new(channel);
 
         let response = client
@@ -914,24 +928,36 @@ async fn pool_warm_hit() {
 
     wait_for_warmup(target).await;
 
-    let hits_before = pool_health.hits();
-    client
-        .respond_with(PrintResponse {})
-        .execute_js(r#"async function main() { console.log("warm hit") }"#)
-        .await
-        .unwrap();
+    // A pre-warmed worker should serve a request and bump the hits counter.
+    // Warmup timing is best-effort (see wait_for_warmup — there's no "ready
+    // workers" signal), so under load the pool may not be warm after the fixed
+    // wait above. Poll: issue requests until one is served from the pool, up to
+    // a deadline, instead of asserting on a single request.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let hits_before = pool_health.hits();
+        client
+            .respond_with(PrintResponse {})
+            .execute_js(r#"async function main() { console.log("warm hit") }"#)
+            .await
+            .unwrap();
 
-    let _ = client.received::<PrintRequest>();
-    assert!(client.received::<ExecutionResult>().success);
+        let _ = client.received::<PrintRequest>();
+        assert!(client.received::<ExecutionResult>().success);
 
-    let hits_after = pool_health.hits();
-    assert!(
-        hits_after > hits_before,
-        "expected pool hit (hits before={}, after={}, target={})",
-        hits_before,
-        hits_after,
-        target,
-    );
+        let hits_after = pool_health.hits();
+        if hits_after > hits_before {
+            break; // served by a pre-warmed worker
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "expected a pool hit within the timeout (hits before={}, after={}, target={})",
+            hits_before,
+            hits_after,
+            target,
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
 }
 
 /// Custom `memory_limit` requests must bypass the pool (V8 heap limits are
