@@ -242,6 +242,16 @@ Execute a lit-action by sending JavaScript code and optional params. Use a usage
   </Tab>
 </Tabs>
 
+<Warning>
+**Newly-granted permissions are eventually consistent — verify the real path before you depend on it.** After `add_usage_api_key` (or `add_action_to_group` / `add_pkp_to_group`), there is a short, *variable* delay before the grant is usable on `/lit_action`. In a one-shot setup script this shows up as the first execute call failing immediately after you mint the key.
+
+Don't paper over it with a fixed sleep — the delay tracks backend propagation, so any constant either flakes (too short) or wastes time (too long). Instead, **poll the exact path you depend on**: run the actual action with the actual key in a loop, and proceed the moment it returns successfully. Exercising the real key + group + action (not a stand-in like an inline probe action) is the only check that can't pass-then-fail.
+
+Separately, management and execute calls can occasionally return a transient `5xx` (for example `add_usage_api_key` returning a null response) that succeeds on an immediate retry. Wrap these calls in a small retry that backs off on network errors and `5xx`, but surfaces `4xx` (bad key/payload) right away.
+
+A worked version of both — a `waitForUsageKeyReady` readiness poll plus a transient-retry wrapper — is in [`examples/action-bound-wallet`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/action-bound-wallet) (`scripts/_lit.js`, `scripts/setup.js`).
+</Warning>
+
 ### Other useful endpoints
 
 <Info>

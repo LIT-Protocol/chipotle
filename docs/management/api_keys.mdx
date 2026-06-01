@@ -42,6 +42,10 @@ Usage keys are scoped, rotatable keys intended for day-to-day operations — for
 | Delete usage key | Account key only |
 | Run a lit-action | Account key or usage key (subject to group permissions) |
 
+<Note>
+A freshly-created usage key's group permissions are eventually consistent — the first `/lit_action` call right after `add_usage_api_key` can fail for a beat while the grant propagates. Don't sleep a fixed amount; poll the real execution path until it succeeds. See [Verify the real path before you depend on it](/management/api_direct#7-run-lit-action).
+</Note>
+
 ---
 
 ### Managing Usage Keys
