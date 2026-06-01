@@ -546,7 +546,7 @@ P0,P1,P2,Watchlist
 
 ## Open research questions for v0.2
 
-The first pass on these questions is captured in `plans/cross-chain-solver-p0-profiles.md` and the outreach tracker in `plans/cross-chain-solver-outreach-tracker.csv`.
+The first pass on these questions is captured in `plans/cross-chain-solver-p0-profiles.md`, `plans/cross-chain-solver-p1-profiles.md`, and the outreach tracker in `plans/cross-chain-solver-outreach-tracker.csv`.
 
 | Question | First-pass answer | Follow-up needed |
 |---|---|---|
@@ -560,7 +560,7 @@ The first pass on these questions is captured in `plans/cross-chain-solver-p0-pr
 
 ## Suggested next steps
 
-1. Expand P1 profiles: UniswapX, CoW, LI.FI, Socket/Bungee, Synapse, Router OGA, Hashflow, Bebop, Enso, Everclear.
+1. Expand P2 / infrastructure profiles: LayerZero/Stargate, Axelar, Hyperlane, CCTP, CCIP, Hop, THORChain, Maya, Anoma, Essential, SUAVE, Khalani.
 2. Customize the generic Mermaid diagrams above for priority company profiles.
 3. Use `plans/cross-chain-solver-outreach-tracker.csv` to assign owners and send verification outreach to P0 prospects.
 4. Convert Chipotle `examples/lit-solver-vault/` into a polished demo page for the report.
