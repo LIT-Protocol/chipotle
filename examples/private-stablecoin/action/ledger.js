@@ -119,6 +119,9 @@ async function main(params) {
         // Readiness probe: confirms THIS registered action can use the ledger
         // PKP (i.e. its add_action_to_group authorization has propagated to the
         // execution node). Setup polls this before declaring itself done.
+        // Unauthenticated by design and benign: it only Encrypts a fixed string
+        // and returns {ok}. It never returns the ciphertext, decrypts anything,
+        // or signs contract state — so it leaks nothing beyond "setup is ready."
         await Lit.Actions.Encrypt({ pkpId: LEDGER_PKP_ID, message: "readiness-probe" });
         return { ok: true, op: "ping" };
       case "mint":
@@ -140,6 +143,14 @@ async function main(params) {
 // ---------------------------------------------------------------------------
 async function mint(p) {
   const { depositor, depositAmount, outputs, kycAttestation, kycSigner } = p;
+
+  // Reject no-op mints. A zero/empty mint moves no value but still consumes the
+  // (global) nonce, so an attacker who learns a pending nonce could front-run
+  // it and grief the victim's tx into NonceAlreadyUsed (same class as the empty
+  // transfer guard).
+  if (BigInt(depositAmount) === 0n || !outputs.length) {
+    return { ok: false, reason: "mint requires depositAmount > 0 and at least one output note" };
+  }
 
   const kyc = verifyKyc(kycAttestation, kycSigner, depositor);
   if (!kyc.ok) return kyc;
@@ -325,9 +336,19 @@ async function buildNotes(notes) {
   const commitments = [];
   const encryptedBlobs = [];
   for (const n of notes) {
-    commitments.push(commitmentOf(n));
+    // Canonicalize before encrypting. The commitment only binds
+    // {owner, amount, salt}, so encrypting the raw note object would let a
+    // relayer smuggle extra fields into the blob the owner never authorized
+    // (surfaced later by disclose). Encrypt exactly the canonical note the
+    // commitment commits to — nothing more.
+    const canonical = {
+      owner: ethers.utils.getAddress(n.owner),
+      amount: String(BigInt(n.amount)),
+      salt: n.salt,
+    };
+    commitments.push(commitmentOf(canonical));
     encryptedBlobs.push(
-      await Lit.Actions.Encrypt({ pkpId: LEDGER_PKP_ID, message: JSON.stringify(n) })
+      await Lit.Actions.Encrypt({ pkpId: LEDGER_PKP_ID, message: JSON.stringify(canonical) })
     );
   }
   return { commitments, encryptedBlobs };
