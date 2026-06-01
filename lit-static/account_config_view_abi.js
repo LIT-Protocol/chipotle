@@ -15,6 +15,13 @@ export const ACCOUNT_CONFIG_VIEW_ABI = [
     type: 'function',
   },
   {
+    inputs: [{ internalType: 'uint256', name: 'apiKeyHash', type: 'uint256' }],
+    name: 'getBillingWalletAddress',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
     inputs: [
       { internalType: 'uint256', name: 'accountApiKeyHash', type: 'uint256' },
       { internalType: 'uint256', name: 'pageNumber', type: 'uint256' },

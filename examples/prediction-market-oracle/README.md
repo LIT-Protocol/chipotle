@@ -4,9 +4,8 @@
 models and only signing the answer when they all agree.**
 
 This is the "use AI on-chain via Lit" example. Single-frontier-model
-resolution is too easy to hallucinate; this example uses the same
-multi-source pattern as [`../multi-source-price-oracle`](../multi-source-price-oracle),
-but the parallel sources are AI providers instead of price feeds.
+resolution is too easy to hallucinate; this example uses a multi-source
+consensus pattern where the parallel sources are AI providers.
 Strict agreement (rather than median) is used here because the output
 is categorical YES/NO/UNCLEAR — there's nothing to take a median of.
 
