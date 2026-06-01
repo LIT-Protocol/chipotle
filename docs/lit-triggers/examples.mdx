@@ -112,6 +112,16 @@ const main = async (params) => {
 };
 ```
 
+<Warning>
+This reads `decoded` directly, which is fine for **observing** (notifying,
+logging). But anyone with the usage key can run the action with a fabricated
+`decoded` payload, so do **not** sign or transact on these values as-is. If the
+action acts on the event, re-fetch the log by `transaction_hash` + `log_index`
+from a pinned source RPC and verify the emitter — the
+[hostname-pinned RPC trust-anchor pattern](/lit-actions/patterns), as the
+`chainlink-feed-mirror` demo below does.
+</Warning>
+
 ---
 
 ## Full demos
@@ -127,7 +137,8 @@ an end-to-end client — and live under
 | [`chainlink-feed-mirror`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/lit-triggers/chainlink-feed-mirror) | chain_event | Relay a Chainlink price feed to a chain Chainlink doesn't support, with no trusted relayer. |
 
 Each ships a hardened action, a one-shot `setup` script (action CID, scoped key,
-contract deploy, trigger creation), and an end-to-end client.
+contract deploy where applicable, trigger creation), and an end-to-end client.
+(`uptime-insurance` has no contract — its "pool" is the action wallet's balance.)
 
 <Tip>
 Want an agent to wire any of these up for you? Point it at
