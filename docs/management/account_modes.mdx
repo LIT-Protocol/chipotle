@@ -368,9 +368,10 @@ involvement.
 - Admin write authority moves entirely to the new wallet. The previous
   admin wallet can no longer authorize writes on this account, effective
   immediately on confirmation.
-- A new lookup entry — `keccak256(newAdminWalletAddress)` →
-  master `apiKeyHash` — is registered so the new wallet resolves to the
-  account on login.
+- A new lookup entry — `uint256(keccak256(abi.encodePacked(newAdminWalletAddress)))`
+  → master `apiKeyHash` — is registered so the new wallet resolves to the
+  account on login. (In ethers this is
+  `ethers.solidityPackedKeccak256(['address'], [newAdminWalletAddress])`.)
 
 ### The contract function
 
@@ -382,10 +383,13 @@ WritesFacet.transferChainSecuredAccountOwnership(
 ```
 
 `apiKeyHash` may be the master hash or any hash that resolves to it
-(e.g. `keccak256(currentAdminWalletAddress)` for an account that has
-already been transferred once); the contract maps it to the master via
-`allApiKeyHashesToMaster`. On success it emits
-`ChainSecuredAccountOwnershipTransferred(apiKeyHash, previousAdminWalletAddress, newAdminWalletAddress)`.
+(e.g. `uint256(keccak256(abi.encodePacked(currentAdminWalletAddress)))`
+for an account that has already been transferred once); the contract maps
+it to the master via `allApiKeyHashesToMaster`. On success it emits
+`ChainSecuredAccountOwnershipTransferred(masterApiKeyHash, previousAdminWalletAddress, newAdminWalletAddress)`
+— note the first topic is the **resolved master** hash, not the
+`apiKeyHash` argument you passed in (they differ whenever you pass an
+alias).
 
 The call reverts if:
 
@@ -432,6 +436,7 @@ import { ethers } from 'ethers';
 // Connect the CURRENT admin wallet in sovereign mode.
 const provider = new ethers.BrowserProvider(window.ethereum);
 const signer = await provider.getSigner();
+const address = await signer.getAddress();
 
 const client = new LitNodeSimpleApiClient({
   baseUrl: 'https://api.chipotle.litprotocol.com',
@@ -439,6 +444,11 @@ const client = new LitNodeSimpleApiClient({
   rpcUrl: 'https://mainnet.base.org',
   contractAddress: '0xYourAccountConfigDiamond',
   signer,
+  // Identity hash for the connected wallet. Required for ChainSecured
+  // sessions — without it the SDK hashes an empty apiKey string and the
+  // transfer reverts with AccountDoesNotExist. The dashboard sets this
+  // automatically at login.
+  adminHashOverride: ethers.solidityPackedKeccak256(['address'], [address]),
 });
 
 const res = await client.transferChainSecuredAccountOwnership({
@@ -451,19 +461,22 @@ console.log('Tx hash:', res.transaction_hash);
 
 `transferChainSecuredAccountOwnership` is **sovereign-mode only** and
 throws if called from an API-mode client. It validates and checksums
-`newAdminWalletAddress`, resolves the current admin's `apiKeyHash`
-automatically from the connected signer, and submits the wallet-signed
-transaction. After it resolves, the connected signer is no longer
-authorized for the account — reconnect with the new wallet to keep
-managing it.
+`newAdminWalletAddress`, then resolves the current admin's `apiKeyHash`
+from the client's `adminHashOverride` — so a ChainSecured session must
+have that set to `keccak256(abi.encodePacked(address))` (the dashboard
+does this at login; set it via the constructor as above when driving the
+SDK directly, otherwise the call reverts with `AccountDoesNotExist`).
+After it resolves, the connected signer is no longer authorized for the
+account — reconnect with the new wallet to keep managing it.
 
 ### Things to verify after a transfer
 
 - An admin write signed by the **new** wallet succeeds.
 - An admin write signed by the **previous** wallet fails — the contract
   rejects it now that it is no longer the admin.
-- `accountExistsByHash(keccak256(newAdminWalletAddress))` returns `true`
-  from the new wallet's context.
+- `accountExistsByHash(ethers.solidityPackedKeccak256(['address'], [newAdminWalletAddress]))`
+  returns `true` from the new wallet's context (the on-chain key is
+  `uint256(keccak256(abi.encodePacked(newAdminWalletAddress)))`).
 - All groups, PKPs, action CIDs, and existing usage API keys are visible
   under the new wallet session, and a Lit Action run with one of those
   usage keys still succeeds.
