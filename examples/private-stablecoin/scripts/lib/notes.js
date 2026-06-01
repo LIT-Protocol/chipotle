@@ -56,4 +56,30 @@ function sumAmounts(notes) {
   );
 }
 
-module.exports = { randomSalt, makeNote, commitmentOf, nullifierOf, sumAmounts };
+// Spend-authorization digests. The note owner signs one of these (EIP-191) to
+// prove they authorize a specific spend; the action recovers the signer and
+// requires it to equal every input note's owner. This is what makes a note
+// owned (not just "claimed") — knowing the opening is not enough to spend it.
+// MUST stay identical to the copies inlined in action/ledger.js.
+function transferAuthDigest({ inputNullifiers, outputCommitments, nonce, deadline, contractAddress, chainId }) {
+  return ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["string", "bytes32[]", "bytes32[]", "bytes32", "uint256", "address", "uint256"],
+      ["PRIVUSD_TRANSFER_AUTH", inputNullifiers, outputCommitments, nonce, deadline, contractAddress, chainId]
+    )
+  );
+}
+
+function redeemAuthDigest({ inputNullifiers, changeCommitments, withdrawAmount, recipient, nonce, deadline, contractAddress, chainId }) {
+  return ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["string", "bytes32[]", "bytes32[]", "uint256", "address", "bytes32", "uint256", "address", "uint256"],
+      ["PRIVUSD_REDEEM_AUTH", inputNullifiers, changeCommitments, withdrawAmount, recipient, nonce, deadline, contractAddress, chainId]
+    )
+  );
+}
+
+module.exports = {
+  randomSalt, makeNote, commitmentOf, nullifierOf, sumAmounts,
+  transferAuthDigest, redeemAuthDigest,
+};

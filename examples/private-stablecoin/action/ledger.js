@@ -14,10 +14,14 @@
 //   - OFAC sanctions screening runs on EVERY operation, on every recipient.
 //   - KYC is required at the dollar edge: BOTH mint and redeem.
 //
+// Spend authorization: to spend input notes (transfer/redeem) the note OWNER
+// must sign an EIP-191 authorization over the exact spend (nullifiers +
+// outputs + nonce + contract + chain). The action recovers the signer and
+// requires it to equal every input note's owner. The API key only authorizes
+// *calling* the endpoint; it does not authorize moving anyone's notes — and
+// knowing a note's opening (owner, amount, salt) is not enough to spend it.
+//
 // DEMO-GRADE simplifications, all production-hardenable:
-//   - `caller` is trusted from js_params to assert note ownership. Production
-//     uses Lit.Auth.authSigAddress (the cryptographically authenticated
-//     caller) instead.
 //   - The KYC attestation is an EIP-191 signed message verified against a
 //     `kycSigner` address from js_params. Production pins the KYC provider's
 //     key via a hostname-anchored JWKS endpoint (same trust trick as the RPC
@@ -70,6 +74,35 @@ function nullifierOf(note) {
 
 function sum(notes) {
   return notes.reduce((a, n) => a + BigInt(n.amount), 0n);
+}
+
+// Spend-authorization digests — MUST stay identical to scripts/lib/notes.js.
+function transferAuthDigest(inputNullifiers, outputCommitments, nonce, deadline, contractAddress, chainId) {
+  return ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["string", "bytes32[]", "bytes32[]", "bytes32", "uint256", "address", "uint256"],
+      ["PRIVUSD_TRANSFER_AUTH", inputNullifiers, outputCommitments, nonce, deadline, contractAddress, chainId]
+    )
+  );
+}
+
+function redeemAuthDigest(inputNullifiers, changeCommitments, withdrawAmount, recipient, nonce, deadline, contractAddress, chainId) {
+  return ethers.utils.keccak256(
+    ethers.utils.defaultAbiCoder.encode(
+      ["string", "bytes32[]", "bytes32[]", "uint256", "address", "bytes32", "uint256", "address", "uint256"],
+      ["PRIVUSD_REDEEM_AUTH", inputNullifiers, changeCommitments, withdrawAmount, recipient, nonce, deadline, contractAddress, chainId]
+    )
+  );
+}
+
+// Recover the address that authorized the spend from the owner's signature.
+function recoverSpender(digest, ownerSig) {
+  if (!ownerSig) return { ok: false, reason: "missing ownerSig — the note owner must authorize the spend" };
+  try {
+    return { ok: true, spender: ethers.utils.verifyMessage(ethers.utils.arrayify(digest), ownerSig) };
+  } catch {
+    return { ok: false, reason: "ownerSig is not a valid signature" };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -128,7 +161,7 @@ async function mint(p) {
 // transfer: private, value-preserving. OFAC on recipients; no KYC.
 // ---------------------------------------------------------------------------
 async function transfer(p) {
-  const { inputs, outputs, caller } = p;
+  const { inputs, outputs, ownerSig } = p;
 
   // Reject no-op transfers. An empty transfer changes no balances but still
   // consumes the (global) nonce, which lets an attacker who learns a pending
@@ -137,7 +170,18 @@ async function transfer(p) {
     return { ok: false, reason: "transfer requires at least one input and one output" };
   }
 
-  const owned = checkOwnership(inputs, caller);
+  const inputNullifiers = inputs.map(nullifierOf);
+  const outputCommitments = outputs.map(commitmentOf);
+
+  // The note owner must have signed THIS spend. Recover the signer and require
+  // it to own every input note. This is the real ownership check — `caller` is
+  // no longer trusted from js_params.
+  const auth = recoverSpender(
+    transferAuthDigest(inputNullifiers, outputCommitments, p.nonce, p.deadline, p.contractAddress, p.chainId),
+    ownerSig
+  );
+  if (!auth.ok) return auth;
+  const owned = checkOwnership(inputs, auth.spender);
   if (!owned.ok) return owned;
 
   const live = await checkInputsLive(inputs, p.contractAddress, p.contractRpcUrl);
@@ -150,7 +194,6 @@ async function transfer(p) {
   const ofac = await screenAll(outputs.map((o) => o.owner), p.screeningRpcUrl);
   if (!ofac.ok) return ofac;
 
-  const inputNullifiers = inputs.map(nullifierOf);
   const { commitments, encryptedBlobs } = await buildNotes(outputs);
 
   const digest = ethers.utils.keccak256(
@@ -174,12 +217,26 @@ async function transfer(p) {
 // redeem: privUSD -> USDC. The dollar edge: KYC the redeemer + OFAC the payout.
 // ---------------------------------------------------------------------------
 async function redeem(p) {
-  const { inputs, changeOutputs, withdrawAmount, recipient, caller, kycAttestation, kycSigner } = p;
+  const { inputs, changeOutputs, withdrawAmount, recipient, kycAttestation, kycSigner, ownerSig } = p;
 
-  const owned = checkOwnership(inputs, caller);
+  if (!inputs.length) {
+    return { ok: false, reason: "redeem requires at least one input note" };
+  }
+
+  const inputNullifiers = inputs.map(nullifierOf);
+  const changeCommitments = changeOutputs.map(commitmentOf);
+
+  // The note owner must have signed THIS redemption (binds the payout recipient
+  // and amount too, so a signature can't be repurposed to a different payout).
+  const auth = recoverSpender(
+    redeemAuthDigest(inputNullifiers, changeCommitments, withdrawAmount, recipient, p.nonce, p.deadline, p.contractAddress, p.chainId),
+    ownerSig
+  );
+  if (!auth.ok) return auth;
+  const owned = checkOwnership(inputs, auth.spender);
   if (!owned.ok) return owned;
 
-  // KYC the dollar edge: the party RECEIVING real USDC. Binding to `caller`
+  // KYC the dollar edge: the party RECEIVING real USDC. Binding to the spender
   // instead would let a KYC'd holder cash out to an unverified recipient.
   const kyc = verifyKyc(kycAttestation, kycSigner, recipient);
   if (!kyc.ok) return kyc;
@@ -194,7 +251,6 @@ async function redeem(p) {
     return { ok: false, reason: "withdrawAmount + change must equal sum(inputs)" };
   }
 
-  const inputNullifiers = inputs.map(nullifierOf);
   const { commitments, encryptedBlobs } = await buildNotes(changeOutputs);
 
   const digest = ethers.utils.keccak256(

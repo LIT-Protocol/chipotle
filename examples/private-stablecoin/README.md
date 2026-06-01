@@ -140,11 +140,15 @@ Each of these is a deliberate simplification with a known production path
   contract's public `commitments`/`nullifiers` mappings (over the *pinned* RPC).
   Production uses an incremental Merkle tree. The action is trusted as prover —
   the TEE + threshold network is the trust anchor, not a succinct proof.
-- **`caller` is trusted from `js_params`** to assert note ownership. Production
-  uses `Lit.Auth.authSigAddress` (the authenticated caller). Note this compounds
-  with disclosure returning plaintext: in the demo, a disclosed `{owner, amount,
-  salt}` is effectively a bearer note. Production's `authSigAddress` +
-  re-encrypt-to-regulator closes this.
+- **No dedicated spending key.** Spends are authorized by an EIP-191 signature
+  from the note owner's wallet over the exact operation (the action recovers it
+  and requires it to match each input note's owner), so knowing a note's opening
+  is *not* enough to spend it — and a disclosed `{owner, amount, salt}` is not a
+  bearer note. The residual: the nullifier is `keccak(owner, salt)`, and the
+  sender knows both, so a sender can *link* the notes she sent as they're later
+  spent (a privacy leak, not a theft vector). A production scheme derives the
+  nullifier from a PRF under the recipient's secret spending key (Zcash/Aztec
+  style) so even the sender can't link or spend.
 - **Disclosure authority set is passed in `js_params`** (only a threshold floor
   is enforced in-action). Production pins the exact authority set on-chain or
   bakes it into the action's CID.

@@ -131,11 +131,25 @@ async function main() {
   const aliceChange = notes.makeNote(alice, USDC(750));
   const xferNonce = rand32();
   const xferDeadline = deadlineIn(600);
+  const xferInputs = [aliceNote];
+  const xferOutputs = [bobNote, aliceChange];
+
+  // Alice authorizes the spend with her own wallet key. The action recovers
+  // this signer and requires it to own every input note — so knowing a note's
+  // opening is not enough to move it.
+  const xferAuthDigest = notes.transferAuthDigest({
+    inputNullifiers: xferInputs.map(notes.nullifierOf),
+    outputCommitments: xferOutputs.map(notes.commitmentOf),
+    nonce: xferNonce, deadline: xferDeadline,
+    contractAddress: PRIVUSD_ADDRESS, chainId: Number(CHAIN_ID),
+  });
+  const xferOwnerSig = await operator.signMessage(ethers.utils.arrayify(xferAuthDigest));
+
   const xferRes = await callAction({
     base: LIT_API_BASE, usageKey: LIT_USAGE_API_KEY, code: ledgerCode,
     jsParams: {
-      ...common, op: "transfer", caller: alice,
-      inputs: [aliceNote], outputs: [bobNote, aliceChange],
+      ...common, op: "transfer",
+      inputs: xferInputs, outputs: xferOutputs, ownerSig: xferOwnerSig,
       nonce: xferNonce, deadline: xferDeadline,
     },
   });
