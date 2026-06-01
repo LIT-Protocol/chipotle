@@ -358,27 +358,210 @@ Thanks,
 - Flashbots SUAVE essay: https://writings.flashbots.net/the-future-of-mev-is-suave
 - Khalani site: https://khalani.network/
 
+## Technique diagram additions for v0.2
+
+The diagrams below are intentionally generic and can be reused in company profiles with protocol-specific labels substituted.
+
+### Dutch auction / resolver fill
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant Orderbook as Orderbook / Reactor
+  participant Resolver
+  participant Lit as Lit policy signer
+  participant Dest as Execution / Escrow
+
+  User->>Orderbook: Sign order with decaying price
+  Resolver->>Orderbook: Watch auction state
+  Resolver->>Lit: Request fill authorization
+  Lit->>Lit: Check order, auction age, route, limits, inventory
+  alt policy passes
+    Lit-->>Resolver: Signature / authorization
+    Resolver->>Dest: Fill or create escrow
+    Resolver->>Orderbook: Settle / claim user funds
+  else policy fails
+    Lit-->>Resolver: Deny; no inventory signature
+  end
+```
+
+### Batch auction / solver settlement
+
+```mermaid
+flowchart LR
+  Users[User intents / signed orders] --> Auction[Batch auction]
+  Auction --> Solver[Solver builds settlement]
+  Solver --> Lit[Lit policy action]
+  Lit --> Checks{Policy checks}
+  Checks -->|contracts, tokens, limits, strategy ok| Sig[Settlement signature]
+  Checks -->|risk violation| Deny[Deny]
+  Sig --> Settlement[Settlement contract]
+  Settlement --> Users
+  Settlement --> Venues[DEX / liquidity venues]
+```
+
+### Fast-fill then settle
+
+```mermaid
+sequenceDiagram
+  participant User
+  participant Source as Source chain order/deposit
+  participant SolverBot as Solver bot
+  participant Lit as Lit policy signer
+  participant Vault as Destination inventory vault
+  participant Dest as Destination chain recipient
+  participant Settle as Bridge / settlement / claim rail
+
+  User->>Source: Create cross-chain order/deposit
+  SolverBot->>Lit: Request destination fill
+  Lit->>Source: Reconstruct order/deposit state
+  Lit->>Lit: Check recipient, amount, route, profit, caps, kill switch
+  alt valid fill
+    Lit-->>SolverBot: Fill authorization
+    SolverBot->>Vault: Present authorization
+    Vault->>Dest: Release/send destination funds
+    SolverBot->>Settle: Claim/refund/rebalance later
+  else invalid or risky
+    Lit-->>SolverBot: Deny
+  end
+```
+
+### RFQ / professional market maker
+
+```mermaid
+sequenceDiagram
+  participant Taker
+  participant API as RFQ API / quote engine
+  participant MM as Market maker bot
+  participant Lit as Lit secrets + policy
+  participant Wallet as Maker wallet / vault
+
+  Taker->>API: Request quote
+  API->>MM: Quote opportunity
+  MM->>Lit: Request quote/fill signature
+  Lit->>Lit: Use private inventory, venue, risk, API secrets
+  alt quote within policy
+    Lit-->>MM: Signed quote or fill authorization
+    MM-->>Taker: Firm quote
+    Taker->>Wallet: Execute against quote
+  else outside policy
+    Lit-->>MM: Deny / no quote
+  end
+```
+
+### Aggregator / route orchestration
+
+```mermaid
+flowchart TD
+  User[User request] --> Router[Aggregator / route engine]
+  Router --> Quotes[Bridge, DEX, intent quotes]
+  Quotes --> Candidate[Chosen route]
+  Candidate --> Lit[Lit policy action]
+  Lit --> Verify{Verify route}
+  Verify -->|allowed chains, venues, calldata, slippage| Exec[Executor wallet signs]
+  Verify -->|bad route or stale quote| Block[Block execution]
+  Exec --> Protocols[DEXs / bridges / messaging rails]
+  Protocols --> UserOutcome[Destination outcome]
+```
+
+### Messaging / canonical transfer rail used by solvers
+
+```mermaid
+flowchart LR
+  SourceEvent[Source event / burn / message] --> Rail[Messaging or canonical transfer rail]
+  Rail --> Attestation[VAA / attestation / proof]
+  Attestation --> Lit[Lit verifies proof + local policy]
+  Lit --> Decision{Authorize downstream action?}
+  Decision -->|yes| Sign[Sign mint, claim, rebalance, or execute]
+  Decision -->|no| Hold[Hold funds / alert operator]
+  Sign --> Destination[Destination execution]
+```
+
+## One-page Lit integration menu for solver teams
+
+| Integration option | What Lit protects | Where it plugs in | Best fit | Proof / demo hook | Key validation questions |
+|---|---|---|---|---|---|
+| Policy-gated inventory vault | Destination-chain inventory and vault withdrawals | Vault contract, relayer wallet, or smart account module | Fast-fill solvers, relayers, managed bridge executors | `examples/lit-solver-vault/contracts/SolverVault.sol` | Which bot actions can move inventory? What is the maximum hot exposure per chain? |
+| CID-derived policy signer | Policy immutability and signer rotation on code changes | Contracts or backends pin the Lit Action signer address | Teams that need auditable, non-silent policy upgrades | `getLitActionPrivateKey()` action-identity pattern | Who approves policy updates? Should signer changes require on-chain governance or multisig approval? |
+| PKP-backed solver wallet | Cross-chain execution authority without raw private keys on the bot | EOA-like solver wallet, smart account owner, or executor key | Operators currently using hot EOAs/API signing keys | PKP signing + scoped permissions | Which chains/actions need the wallet? Are claims, fills, quotes, and rebalances separate keys? |
+| Scoped usage keys | Least-privilege bot access to specific policies/actions | Bot runtime, CI/deploy system, solver worker fleet | Teams with many bots or delegated operators | Chipotle setup scripts for scoped usage keys | Can each bot be scoped by chain, action, notional, or strategy? How are keys revoked? |
+| Private risk/strategy secrets | Inventory thresholds, API keys, route preferences, risk models | Lit Action encrypted secrets and policy runtime | RFQ makers, resolvers, proprietary routers | Lit secrets / PKP-as-data-vault patterns | Which data must remain hidden from bot hosts, contractors, or infra providers? |
+| Multi-source verification | Source order state, destination state, bridge attestations, RPC/API quorum | Pre-sign checks in the Lit Action | Cross-chain fills where bad state causes loss | Across-style policy reconstructing source deposit | Which fields must be reconstructed before signing? Which RPC/API sources are trusted? |
+| Emergency kill switch, caps, allowlists | Blast-radius controls during incidents or market stress | Policy config, contract allowlists, external status source | Any solver with meaningful inventory | Policy checks for caps, allowlists, deadlines | Who can trigger pause? Are caps global, per chain, per token, or per counterparty? |
+
+## Verification outreach and contact tracking schema
+
+Use this table in the report or an issue tracker for verification status:
+
+| Project | Category | Priority | Target contact/team | Contact source | Outreach owner | Status | Last touch | Next action | Architecture claims to verify | Custody/key questions | Latency/policy questions | Lit fit hypothesis | Evidence/source links | Notes |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Across / Risk Labs | Fast-fill solver network | P0 | TBD engineering/BD | TBD | TBD | Not started |  | Identify reviewer | Relayer fill + settlement lifecycle | Where relayer inventory keys live | Is 300-500 ms policy auth acceptable for fills? | Policy-gated relayer inventory vault | Existing report sources + Chipotle demo |  |
+
+CSV column definitions:
+
+| Column | Definition |
+|---|---|
+| `project` | Protocol/company/operator being verified. |
+| `category` | Taxonomy bucket: fast-fill solver, RFQ, aggregator, rail, etc. |
+| `priority` | Outreach priority: `P0`, `P1`, `P2`, or `Watchlist`. |
+| `target_contact_team` | Person, team, Discord/TG handle, or role to contact. |
+| `contact_source` | How the contact was found: intro, docs, website, prior relationship, conference, etc. |
+| `outreach_owner` | Internal owner responsible for outreach and follow-up. |
+| `status` | Current outreach/review state from the status values below. |
+| `last_touch` | Date of last email/DM/call/comment. |
+| `next_action` | Concrete next step and owner. |
+| `architecture_claims_to_verify` | Claims in the report that need protocol confirmation. |
+| `custody_key_questions` | Questions about hot keys, inventory custody, vaults, and signing authority. |
+| `latency_policy_questions` | Questions about acceptable signing latency and feasible runtime checks. |
+| `lit_fit_hypothesis` | Short statement of the likely Lit integration wedge. |
+| `evidence_source_links` | Docs, source URLs, demo links, call notes, or correction links. |
+| `notes` | Freeform notes, objections, or follow-up context. |
+
+Ready-to-paste CSV header:
+
+```csv
+project,category,priority,target_contact_team,contact_source,outreach_owner,status,last_touch,next_action,architecture_claims_to_verify,custody_key_questions,latency_policy_questions,lit_fit_hypothesis,evidence_source_links,notes
+```
+
+Starter rows:
+
+```csv
+project,category,priority,target_contact_team,contact_source,outreach_owner,status,last_touch,next_action,architecture_claims_to_verify,custody_key_questions,latency_policy_questions,lit_fit_hypothesis,evidence_source_links,notes
+Across / Risk Labs,Fast-fill solver network,P0,TBD engineering/BD,TBD,TBD,Not started,,Identify reviewer,Relayer fill + settlement lifecycle,Where relayer inventory keys live,Is 300-500 ms policy auth acceptable for fills?,Policy-gated relayer inventory vault,Existing report sources + Chipotle demo,
+deBridge DLN,Fast-fill solver network,P0,TBD engineering/BD,TBD,TBD,Not started,,Identify reviewer,Order fulfillment and claim flow,Where taker/filler signing keys live,Which checks fit before fill vs before claim,Lit-gated taker/filler signing,Existing report sources,
+Wormhole Settlement / Mayan / MCTP,Settlement / solver ecosystem,P0,TBD engineering/BD,TBD,TBD,Not started,,Identify reviewer,Solver responsibilities and attestation flow,Where solver custody sits,Which VAA/CCTP checks are latency-safe,Policy-gated solver signing with attestation verification,Existing report sources,
+```
+
+Suggested status values:
+
+```csv
+Not started,Contact identified,Outreach sent,Follow-up sent,Review scheduled,Reviewed,Corrections needed,Approved,No response,Declined
+```
+
+Suggested priority values:
+
+```csv
+P0,P1,P2,Watchlist
+```
+
 ## Open research questions for v0.2
 
-1. Which projects have permissionless solver onboarding vs allowlisted/professional solver sets?
-2. Which teams/operators hold meaningful hot inventory versus only submit calldata?
-3. Latency budgets per protocol: is 300-500 ms acceptable for fills, claims, quotes, or only slower settlement paths?
-4. Whether each protocol has standardized order formats compatible with ERC-7683.
-5. Where Lit should integrate: solver wallet, vault contract, quote engine, relayer, API executor, or clearing/rebalancing system.
-6. Which projects have public solver docs vs private partner programs.
-7. Who the likely BD/engineering contacts are for each company.
+The first pass on these questions is captured in `plans/cross-chain-solver-p0-profiles.md` and the outreach tracker in `plans/cross-chain-solver-outreach-tracker.csv`.
+
+| Question | First-pass answer | Follow-up needed |
+|---|---|---|
+| Which projects have permissionless solver onboarding vs allowlisted/professional solver sets? | Across appears most permissionless; deBridge DLN docs describe an open solver market. Relay has public solver docs but coordinated production oracle/signer onboarding. Wormhole/Mayan, 1inch Fusion+, and Squid Coral appear curated, portal-gated, or partner/private for production solvers. | Ask each team to verify current production onboarding path and whether there is a private solver program. |
+| Which teams/operators hold meaningful hot inventory versus only submit calldata? | Clear hot inventory: Across relayers, deBridge DLN solvers, Wormhole/Mayan drivers, 1inch Fusion+ resolvers, Relay solvers. Likely hot inventory: Squid Coral solvers. Integrator APIs may only surface calldata, but underlying solver/relayer still bears custody risk. | Confirm actual custody model and whether inventory is in EOAs, vaults, CEX accounts, smart accounts, or protocol balances. |
+| Is 300-500 ms Lit policy authorization acceptable? | Likely plausible for destination fill signing in Across/deBridge/Relay if checks are efficient. Claims, unlocks, withdrawals, rebalances, oracle signing, and secret reveal paths likely tolerate more latency. Mayan's 3-second auctions and Squid's sub-5-second UX need careful hot-path design. | Ask teams which checks must run before bidding/filling vs which can run after fill, before claim, or during rebalance. |
+| Which protocols have standardized order formats compatible with ERC-7683? | Across clearly supports ERC-7683. No primary-doc evidence found for ERC-7683 support in deBridge DLN, Wormhole/Mayan, 1inch Fusion+, Squid, or Relay. | Ask whether each team supports ERC-7683, plans to, or intentionally uses a protocol-specific order format. |
+| Where should Lit integrate? | Across: relayer fill signer + inventory vault. deBridge: destination fill signer + source claim signer. Wormhole/Mayan: driver bid/fill/unlock signer + VAA/CCTP policy. 1inch: resolver escrow signer + maker secret custody. Squid: solver quote signer / inventory policy. Relay: solver fill signer + oracle signer + withdrawal/rebalance signer. | Validate whether each integration point is in the latency-critical path and what minimal policy checks are acceptable. |
+| Which projects have public solver docs vs private partner programs? | Most public: Across, Relay, and deBridge protocol mechanics. Public architecture but private/curated onboarding: Wormhole/Mayan drivers, 1inch resolver production access, Squid solver side. | Ask for permission to cite any non-public corrections before publishing. |
+| Who are likely BD/engineering contacts? | P0 tracker has initial public channels: Across `sales@across.to`; deBridge Discord/X; Mayan `support@mayan.finance`; 1inch Business Portal / `support@1inch.com`; Squid `support@squidrouter.com`; Relay `support@relay.link`. | Replace public channels with warm intros or named technical reviewers where Chris/Lit has relationships. |
 
 ## Suggested next steps
 
-1. Expand each company row into a 1-2 page profile.
-2. Add diagrams for each technique bucket: Dutch auction, batch auction, fast-fill settlement, RFQ, aggregator, messaging rail.
-3. Build a contact list and send verification outreach.
+1. Expand P1 profiles: UniswapX, CoW, LI.FI, Socket/Bungee, Synapse, Router OGA, Hashflow, Bebop, Enso, Everclear.
+2. Customize the generic Mermaid diagrams above for priority company profiles.
+3. Use `plans/cross-chain-solver-outreach-tracker.csv` to assign owners and send verification outreach to P0 prospects.
 4. Convert Chipotle `examples/lit-solver-vault/` into a polished demo page for the report.
-5. Add a one-page Lit integration menu for solver teams:
-   - policy-gated inventory vault,
-   - CID-derived policy signer,
-   - PKP-backed solver wallet,
-   - scoped usage keys,
-   - private risk/strategy secrets,
-   - multi-source verification,
-   - emergency kill switch / caps / allowlists.
+5. Validate the one-page Lit integration menu with solver teams and turn the strongest options into demo-specific calls to action.
