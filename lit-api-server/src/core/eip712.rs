@@ -767,7 +767,15 @@ mod tests {
     fn rejects_timestamp_too_far_future() {
         let chain_id = ensure_test_chain_id();
         let wallet = PrivateKeySigner::random();
-        let future = now_secs() + TIMESTAMP_SKEW_SECONDS + 1;
+        // Pick a timestamp comfortably past the skew window. A tight `+ 1`
+        // margin is flaky: the validator reads its own `now`, and if the wall
+        // clock advances even one second between here and that read (easy under
+        // CI load), `|now - issued_at|` lands exactly on TIMESTAMP_SKEW_SECONDS,
+        // which passes the strict `>` check and the timestamp is wrongly
+        // accepted. An hour of headroom can't be eroded by test-execution slop.
+        // (The mirror test `rejects_timestamp_too_old` is naturally robust —
+        // elapsed time only makes its timestamp staler.)
+        let future = now_secs() + TIMESTAMP_SKEW_SECONDS + 3600;
         let (typed, sig) = sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, future, chain_id);
         let err = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET)
             .expect_err("must reject — issued_at too far in future");
