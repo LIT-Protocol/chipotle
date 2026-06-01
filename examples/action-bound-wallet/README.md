@@ -77,9 +77,17 @@ trades the PKP's flexibility for near-zero setup.
   different wallet. There is no code path from one user's action to another's
   balance.
 - **Replay-safe withdrawals.** The owner signs over `(wallet, chainId, token,
-  to, amount, nonce, deadline)`. The action requires the signed `nonce` to equal
-  the wallet's current on-chain nonce, so a used authorization is dead the moment
-  its tx lands; `deadline` bounds how long an unused one is valid.
+  to, amount, nonce, deadline)`. The action reads the wallet's nonce from a
+  **pinned** RPC (see below) and requires the signed `nonce` to equal it, so a
+  used authorization is dead the moment its tx lands; `deadline` bounds how long
+  the authorization can be turned into a signed tx.
+- **Pinned RPC host.** The action reads nonce + gas price from the caller's
+  `rpcUrl`, so it pins the host (`ALLOWED_RPC_HOST` in `userWallet.js`). Without
+  that, a caller could point the action at a hostile node that returns a bogus
+  gas price (burning the wallet's native gas on broadcast) or a future nonce
+  (so the signed tx lingers and executes later). Editing the host changes the
+  CID and therefore every derived wallet — the same immutability that binds the
+  owner. A gas-price cap is enforced too, as defense-in-depth.
 
 ## Files
 
@@ -107,7 +115,9 @@ Set in `.env`:
 - `LIT_API_KEY` — your **account-level (master) API key** from the
   [Chipotle dashboard](https://dashboard.chipotle.litprotocol.com), *not* a
   scoped usage key (setup calls `/add_group`, which rejects scoped keys).
-- `RPC_URL` — a Base-Sepolia RPC URL (`https://sepolia.base.org` works).
+- `RPC_URL` — a Base-Sepolia RPC URL (`https://sepolia.base.org` works). The
+  action pins this host (`ALLOWED_RPC_HOST`); to use Alchemy/Infura, edit that
+  regex too (which changes the derived wallet addresses).
 - `DEPLOYER_PRIVATE_KEY` — an EOA with Base-Sepolia gas. It deploys the token
   and funds the demo wallets. Keep this one private — it is *not* a demo user.
 
@@ -160,8 +170,17 @@ npm run attack:wrong-user -- 0 1
 - **The wallet pays its own gas.** It's an EOA under the hood, so fund a little
   native gas alongside the ERC-20 (as `deposit.js` does), or add a relayer/
   paymaster if you want gasless withdrawals.
-- **Trust on the RPC is low-stakes.** Recipient and amount come from the signed
-  tuple, so a malicious RPC can at worst make a withdrawal fail to land — never
-  redirect funds. If you want to harden anyway, whitelist the RPC host inside
-  the action (see the `lit-solver-vault` example for that pattern).
+- **The RPC is a trust input — pin it.** Recipient and amount are signature-bound
+  and can never be redirected by the RPC. But the action reads nonce + gas price
+  from the caller's `rpcUrl`, so a hostile node could still grief: a bogus gas
+  price burns the wallet's native gas on broadcast, and a future nonce lets the
+  signed tx execute later than intended. This example pins the RPC host
+  (`ALLOWED_RPC_HOST`) and caps the gas price (`MAX_GAS_PRICE_WEI`) to close
+  both; harden further by binding fee bounds into the signed authorization.
+- **Verify the action source/CID before depositing.** `address.js` runs whatever
+  source the client builds, and the group allows any CID (`["0"]`). A malicious
+  *client* could therefore show a depositor a wallet derived from a different
+  action than advertised — it can't touch funds already in the real CID's wallet,
+  but it can misdirect a fresh deposit. Before funding, confirm the exact action
+  source (and resulting CID via `/get_lit_action_ipfs_id`) you expect.
 - **`DemoToken` is a faucet token** and is unaudited — for demos only.
