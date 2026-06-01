@@ -1568,6 +1568,34 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
+   * Read the on-chain billing wallet address for the authenticated account.
+   *
+   * This is the wallet the Stripe customer is keyed on (`metadata.wallet_address`),
+   * and therefore the address that must be passed to the pay-with-LITKEY page so
+   * credits land on the correct customer. It is set at account creation and
+   * PRESERVED across conversion to ChainSecured and admin-wallet rotation
+   * (CPL-313/CPL-324), so it can differ from the currently connected admin /
+   * ChainSecured wallet. Mirrors the server's
+   * `accounts::get_billing_wallet_address`.
+   *
+   * Sovereign mode only — reads the AccountConfig view contract. API-mode
+   * clients have no on-chain provider configured; for managed (never-converted)
+   * accounts the billing wallet equals the Account Master Wallet, which callers
+   * can read from `listWallets`.
+   *
+   * @param {{ apiKey?: string }} [options]
+   * @returns {Promise<string>} 0x-prefixed billing wallet address.
+   */
+  async getBillingWalletAddress({ apiKey = '' } = {}) {
+    if (this.mode !== 'sovereign') {
+      throw new Error('getBillingWalletAddress requires sovereign mode');
+    }
+    const contract = await this._getViewContract();
+    const hash = await this._adminHash(apiKey);
+    return contract.getBillingWalletAddress(hash);
+  }
+
+  /**
    * GET /core/v1/list_wallets_in_group
    * List wallets in a group (paginated). Returns WalletItem for each wallet in the group.
    * @param {ListPageWithGroupOptions} options

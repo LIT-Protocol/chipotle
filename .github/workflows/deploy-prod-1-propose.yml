@@ -260,49 +260,28 @@ jobs:
           fi
           echo "app_auth_address=$APP_AUTH" >> "$GITHUB_OUTPUT"
 
-          # The provision API's compose_hash is a reference key for the
-          # PATCH/commit call — it does not match the hash the CVM computes
-          # at boot (SHA-256 of the full app-compose.json including server-
-          # managed fields like pre_launch_script, features, etc.).
-          # We fetch the full compose and compute the deploy hash client-side
-          # using the @phala/cloud SDK so the Safe proposal uses the correct
-          # value that the KMS will check via allowedComposeHashes.
-          echo "Fetching full app_compose from Phala API..."
-          FULL_COMPOSE=$(phala api /cvms/chipotle-prod-rep-r68r6/compose_file --json 2>&1) || {
-            echo "::error::Failed to fetch compose file: $FULL_COMPOSE"
-            exit 1
-          }
-
-          # Sanity check: the fetched compose's docker_compose_file should
-          # match what we just provisioned (if provision updated the server).
-          FETCHED_DC=$(echo "$FULL_COMPOSE" | jq -r '.docker_compose_file')
-          if [ "$FETCHED_DC" != "$COMPOSE_CONTENT" ]; then
-            echo "::warning::Fetched docker_compose_file does not match provisioned content. The provision may not have updated the compose file yet."
-            echo "Constructing full app_compose by merging server defaults with our compose..."
-            FULL_COMPOSE=$(echo "$FULL_COMPOSE" | jq --arg dc "$COMPOSE_CONTENT" '.docker_compose_file = $dc')
-          fi
-
-          # Compute the correct compose hash using the @phala/cloud SDK.
-          COMPOSE_HASH=$(echo "$FULL_COMPOSE" | node -e '
-            const path = require("path");
-            const prefix = require("child_process").execSync("npm prefix -g").toString().trim();
-            const { getComposeHash } = require(
-              require.resolve("@phala/cloud", { paths: [path.join(prefix, "lib/node_modules/phala")] })
-            );
-            let data = "";
-            process.stdin.on("data", chunk => data += chunk);
-            process.stdin.on("end", () => {
-              const appCompose = JSON.parse(data);
-              process.stdout.write(getComposeHash(appCompose));
-            });
-          ')
-          if [ -z "$COMPOSE_HASH" ]; then
-            echo "::error::Failed to compute compose hash client-side"
-            exit 1
-          fi
-          echo "Provision hash (API reference): $PROVISION_HASH"
-          echo "Compose hash (deploy/on-chain): $COMPOSE_HASH"
-          echo "compose_hash=$COMPOSE_HASH" >> "$GITHUB_OUTPUT"
+          # The on-chain whitelist hash MUST equal the hash the CVM commits
+          # and recomputes at boot — otherwise the KMS refuses to issue keys
+          # ("Compose hash not allowed") and the CVM cannot start.
+          #
+          # Phala's provision API already returns exactly that value: it is
+          # getComposeHash() over the full app_compose the server will store,
+          # and Phase 2 (commit-deploy) commits the deployment by referencing
+          # this same provision_hash. So the provision_hash IS the deploy and
+          # on-chain hash — we whitelist it directly.
+          #
+          # Do NOT recompute the hash client-side from a locally-assembled
+          # app_compose. The post-provision GET often hasn't caught up yet
+          # (the docker_compose_file won't byte-match what we sent), so any
+          # client-side reconstruction hashes a different object than the one
+          # that actually boots. That divergence is what whitelisted the wrong
+          # hash and broke the v1.1.4 prod boot: proposed
+          # c9b51bbf0a11bdff4f47aa2bbaf61b6bd5603d4775b1697d9b99afe1dd59427a
+          # but the CVM booted (and was committed with)
+          # c40639829920a7ab202492e182d6c5e9d439fd7fa742f50e9a2248226af5ee8b.
+          # See architectureDocs/deployment/vm-code-upgrade.md.
+          echo "Compose hash (provision = deploy = on-chain): $PROVISION_HASH"
+          echo "compose_hash=$PROVISION_HASH" >> "$GITHUB_OUTPUT"
 
       - name: Fetch CVM encryption public key
         id: fetch-pubkey

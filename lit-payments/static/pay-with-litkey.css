@@ -1,5 +1,8 @@
-.litkey-pay-page { min-height: 100vh; display: grid; place-items: center; padding: 2rem; background: #f6f8fb; }
-.pay-card { width: min(760px, 100%); background: #fff; border: 1px solid #dfe6ef; border-radius: 18px; box-shadow: 0 20px 60px rgba(15, 23, 42, .12); padding: 2rem; }
+/* The pay card is always light, so pin a light scheme and dark text rather than
+   inheriting --fg from style.css, which flips to near-white in dark mode. */
+.litkey-pay-page { color-scheme: light; min-height: 100vh; display: grid; place-items: center; padding: 2rem; background: #f6f8fb; color: #0f172a; }
+.pay-card { width: min(760px, 100%); background: #fff; border: 1px solid #dfe6ef; border-radius: 18px; box-shadow: 0 20px 60px rgba(15, 23, 42, .12); padding: 2rem; color: #0f172a; }
+.pay-card h1, .pay-card h2 { color: #0f172a; }
 .pay-card h1 { margin: .25rem 0 .5rem; }
 .pay-card h2 { font-size: 1rem; margin: 0 0 1rem; }
 .eyebrow { color: #5b6ee1; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; font-size: .75rem; }

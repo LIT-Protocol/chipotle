@@ -103,9 +103,9 @@ trust whatever it reports. That's broken: anyone with the usage API key
 could supply a hostile RPC that returns a fake "BurnInitiated" log for a
 burn that never happened, and the action would happily sign a mint.
 
-The fix is the same as in [`compliance-transfer-gate`](../compliance-transfer-gate):
-the action enforces a **per-chain hostname whitelist** baked into the
-source, plus **mandatory `https://`** so a plain-HTTP URL can't be paired
+The fix is the hostname-pinned RPC trust-anchor pattern: the action enforces
+a **per-chain hostname whitelist** baked into the source, plus **mandatory
+`https://`** so a plain-HTTP URL can't be paired
 with a path-level MITM. For `srcChainId=84532` (Base Sepolia) the URL must
 resolve to `base-sepolia.g.alchemy.com`; for `srcChainId=421614` (Arb
 Sepolia) it must be `arb-sepolia.g.alchemy.com`. Hostnames are anchored

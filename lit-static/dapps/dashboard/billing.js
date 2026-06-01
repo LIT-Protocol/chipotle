@@ -33,6 +33,9 @@ import {
   getClient,
   getMode,
   hasUsageKeyOverride,
+  LIST_PAGE_SIZE,
+  setWalletsStore,
+  setOnApiCallSuccess,
 } from './auth.js';
 import { formatError, logError } from './ui-utils.js';
 
@@ -46,6 +49,7 @@ let _billingAvailable = null;
 let _billingCheckedAt = 0;
 let _billingRetryTimer = null;
 const BILLING_RETRY_MS = 30000;
+const LITKEY_PAYMENT_URL = 'https://payments.litprotocol.com/payWithLitkey';
 
 // AbortController for in-flight billing fetches. Recreated lazily; aborted on
 // session change via clearBillingSession().
@@ -54,6 +58,76 @@ let _abortController = null;
 // Cached wallet-auth payload. Re-used across billing requests within the
 // timestamp window. { headerValue, expiresAtMs, walletAddress }
 let _walletAuthCache = null;
+
+function isAddress(value) {
+  return /^0x[0-9a-fA-F]{40}$/.test(value || '');
+}
+
+function walletAddressFromItem(item) {
+  return item && (item.wallet_address || item.address || item.name || '');
+}
+
+function pickAccountFundingWallet(wallets) {
+  if (!Array.isArray(wallets) || wallets.length === 0) return '';
+  const accountWallet = wallets.find((item) => {
+    const label = String(item.description || item.name || '').toLowerCase();
+    return label.includes('account master wallet') || label === 'amw';
+  });
+  return walletAddressFromItem(accountWallet);
+}
+
+/**
+ * Resolve the wallet to prefill on the pay-with-LITKEY page. This MUST be the
+ * account's billing wallet — the address the Stripe customer is keyed on
+ * (`metadata.wallet_address`) — because the payments service maps the URL
+ * wallet straight to a customer with no further resolution. The billing wallet
+ * is preserved across admin-wallet rotation (CPL-313/CPL-324), so it can differ
+ * from the currently connected wallet.
+ */
+async function resolveLitkeyPaymentWallet() {
+  // ChainSecured / sovereign: the connected wallet may have rotated away from
+  // the billing wallet, so read the authoritative value on-chain rather than
+  // assuming the login wallet.
+  if (getMode() === 'sovereign') {
+    if (!isAddress(getChainSecuredWallet())) {
+      throw new Error('No connected ChainSecured wallet — sign in first.');
+    }
+    const client = await getClient();
+    const wallet = await client.getBillingWalletAddress({ apiKey: '' });
+    if (!isAddress(wallet)) throw new Error('No billing wallet is available for LITKEY payment.');
+    return wallet;
+  }
+
+  // API-key mode: managed accounts never rotate their admin wallet, so the
+  // billing wallet equals the Account Master Wallet from listWallets (on-chain
+  // `getBillingWalletAddress` falls back to the admin wallet for these accounts).
+  if (hasUsageKeyOverride()) throw new Error('Clear Usage Key Override before adding funds.');
+  const apiKey = getApiKey();
+  if (!apiKey) throw new Error('No account wallet is available for LITKEY payment.');
+  const client = await getClient();
+  const wallets = await client.listWallets({ apiKey, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
+  setWalletsStore(wallets || []);
+
+  const wallet = pickAccountFundingWallet(wallets);
+  if (!isAddress(wallet)) throw new Error('No billing wallet is available for LITKEY payment.');
+  return wallet;
+}
+
+async function openLitkeyPaymentPage() {
+  const btn = document.getElementById('billing-litkey-btn');
+  if (btn) btn.disabled = true;
+  setStatus('Preparing LITKEY payment link…', 'info');
+  try {
+    const wallet = await resolveLitkeyPaymentWallet();
+    const url = LITKEY_PAYMENT_URL + '?wallet=' + encodeURIComponent(wallet);
+    window.open(url, '_blank', 'noopener,noreferrer');
+  } catch (e) {
+    logError('openLitkeyPaymentPage', e);
+    setStatus('Could not open LITKEY payment: ' + formatError(e), 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
 
 /**
  * True when we have a valid (unexpired, current-wallet) wallet-auth header.
@@ -99,6 +173,10 @@ export function clearBillingSession() {
     _abortController = null;
   }
   _walletAuthCache = null;
+  if (_balanceRefreshDebounceTimer) {
+    clearTimeout(_balanceRefreshDebounceTimer);
+    _balanceRefreshDebounceTimer = null;
+  }
 }
 
 /**
@@ -249,6 +327,48 @@ export function refreshBillingUI() {
       }, BILLING_RETRY_MS);
     }
   }).catch((e) => console.error('billing check failed', e));
+}
+
+// Billing endpoints we must NOT re-trigger from the post-call hook below —
+// refreshing the balance after `getBillingBalance` would recurse forever, and
+// firing during the Stripe payment dance (`createPaymentIntent` /
+// `confirmPayment`) would race the modal's own balance refresh on completion.
+const BILLING_METHODS = new Set([
+  'getBillingBalance',
+  'getStripeConfig',
+  'createPaymentIntent',
+  'confirmPayment',
+]);
+
+// Debounce timer so a burst of API calls (e.g. preloadAllTables fires 4 in
+// parallel on sign-in) coalesces into a single balance refresh.
+let _balanceRefreshDebounceTimer = null;
+const BALANCE_REFRESH_DEBOUNCE_MS = 200;
+
+/**
+ * Called after every successful client API call (NODE-4971). Refreshes the
+ * Stripe credit balance display so the topbar reflects the latest balance
+ * after any dashboard activity. No-op when:
+ *   - the method itself is a billing endpoint (would recurse),
+ *   - no auth key / billing not yet known to be available,
+ *   - a usage-key override is active (the topbar balance belongs to the
+ *     account key, not the override, and is hidden in this mode anyway),
+ *   - we're in sovereign mode without a cached wallet-auth header (we won't
+ *     trigger a wallet popup just to refresh the topbar — same rule as
+ *     refreshBillingUI()).
+ */
+function refreshBalanceFromApiCall(methodName) {
+  if (BILLING_METHODS.has(methodName)) return;
+  if (!billingAuthKey()) return;
+  if (hasUsageKeyOverride()) return;
+  if (_billingAvailable !== true) return;
+  if (getMode() === 'sovereign' && !hasValidWalletAuthCache()) return;
+
+  if (_balanceRefreshDebounceTimer) return;
+  _balanceRefreshDebounceTimer = setTimeout(() => {
+    _balanceRefreshDebounceTimer = null;
+    loadBillingBalance();
+  }, BALANCE_REFRESH_DEBOUNCE_MS);
 }
 
 async function loadBillingBalance() {
@@ -413,13 +533,11 @@ async function handleContinue() {
     _paymentIntentId = intent.payment_intent_id;
 
     _elements = _stripe.elements({ clientSecret: intent.client_secret });
-    // Suppress billing-address collection — credits are scoped to the
-    // account/wallet, not to a postal address. `address: 'never'` hides the
-    // address fields entirely; Stripe still gathers any name/email that a
-    // specific payment method strictly needs.
-    _paymentElement = _elements.create('payment', {
-      fields: { billingDetails: { address: 'never' } },
-    });
+    // Let Stripe render the minimal address fields each payment method needs
+    // (country + postal for cards, nothing for most crypto). Card networks
+    // require postal_code for AVS, so we can't suppress it without breaking
+    // real charges.
+    _paymentElement = _elements.create('payment');
     _paymentElement.mount('#stripe-payment-element');
     setModalStep('payment');
   } catch (e) {
@@ -459,16 +577,7 @@ async function handlePay() {
   try {
     const result = await _stripe.confirmPayment({
       elements: _elements,
-      confirmParams: {
-        return_url: returnUrl,
-        // We tell the Payment Element not to render address fields
-        // (`fields.billingDetails.address: 'never'`), so Stripe requires us
-        // to pass a billing-address country here for methods that need one
-        // (e.g. card AVS). Default to 'US'; crypto methods ignore this.
-        payment_method_data: {
-          billing_details: { address: { country: 'US' } },
-        },
-      },
+      confirmParams: { return_url: returnUrl },
       redirect: 'if_required',
     });
 
@@ -577,8 +686,10 @@ export function initBilling() {
   const continueBtn = document.getElementById('billing-continue-btn');
   const backBtn = document.getElementById('billing-back-btn');
   const payBtn = document.getElementById('billing-pay-btn');
+  const litkeyBtn = document.getElementById('billing-litkey-btn');
 
   if (addFundsBtn) addFundsBtn.addEventListener('click', openAddFundsModal);
+  if (litkeyBtn) litkeyBtn.addEventListener('click', openLitkeyPaymentPage);
   const noFundsLink = document.getElementById('no-funds-add-funds');
   if (noFundsLink) noFundsLink.addEventListener('click', (e) => { e.preventDefault(); openAddFundsModal(); });
   if (closeBtn) closeBtn.addEventListener('click', closeBillingModal);
@@ -586,4 +697,6 @@ export function initBilling() {
   if (continueBtn) continueBtn.addEventListener('click', handleContinue);
   if (backBtn) backBtn.addEventListener('click', handleBack);
   if (payBtn) payBtn.addEventListener('click', handlePay);
+
+  setOnApiCallSuccess(refreshBalanceFromApiCall);
 }
