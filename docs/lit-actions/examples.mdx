@@ -605,3 +605,37 @@ async function main({ vaultAddress, chainId, token, recipient, amount, nonce, de
 <Info>
   The full runnable example — `SolverVault` / `AcrossSolverVault` contracts, the policy actions, attacker scripts that prove exfiltration is impossible, an `exit()` cold-wallet path, and a **live Across testnet relayer** (deposit on Sepolia → Lit authorizes → vault fills on Base Sepolia, ~355 ms round-trip), plus a read-only ops dashboard — lives at [`examples/lit-solver-vault/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/lit-solver-vault) in the repo.
 </Info>
+
+## 13. A Unique, Immutable Wallet Per User (Bound to the Action)
+
+A common request: *"bind a wallet to an action immutably, and give each user their own."* You can do this with a ChainSecured account and a contract that mints and binds PKPs to a group — but there's a lighter pattern that gets the same "only this exact code can sign" property with no PKP and no contracts.
+
+Every action has a key derived from its IPFS CID via [`getLitActionPrivateKey()`](./patterns#action-identity-signing--immutable-proofs) — so the wallet is *bound to the code*. To get a different wallet per user, make the code different per user: **hardcode the user's address into the action**. That one line is part of what the CID hashes, so each user gets a different CID and therefore a different, immutable wallet. Authorize spending by recovering a signature inside the action and comparing it to the hardcoded owner — the usage key that runs the action grants no spending power.
+
+```javascript
+// OWNER_ADDRESS is stamped in per user. Two users => two CIDs => two wallets.
+const OWNER_ADDRESS = "0xUSERS_ADDRESS";
+
+async function main({ action, token, to, amount, nonce, deadline, signature, chainId, rpcUrl }) {
+  // The wallet's key is derived from THIS action's CID (unique per user).
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  if (action === "address") return { walletAddress: wallet.address }; // no auth: where to deposit
+
+  // Withdraw: only if the owner signed THIS exact transfer. The nonce must equal
+  // the wallet's current on-chain nonce, so a used authorization can't replay.
+  const message = [ "withdraw", wallet.address, chainId, token, to, amount, nonce, deadline ].join(":");
+  if (ethers.utils.verifyMessage(message, signature).toLowerCase() !== OWNER_ADDRESS.toLowerCase()) {
+    return { ok: false, reason: "signer is not the bound owner" };
+  }
+  const data = new ethers.utils.Interface(["function transfer(address,uint256)"])
+    .encodeFunctionData("transfer", [to, amount]);
+  const rawTx = await wallet.signTransaction({ to: token, data, nonce, gasLimit: 100000, chainId });
+  return { ok: true, rawTx }; // caller broadcasts
+}
+```
+
+Each user's action has a different CID and therefore a different wallet, so there's no code path from one user's action to another's balance — and the usage key can *run* any action but can only relay a withdrawal the real owner already signed.
+
+<Info>
+  The full runnable example — the per-user action template, a `DemoToken` ERC-20, a one-shot setup, deposit/balance/withdraw scripts, and a wrong-user attack that the action refuses — lives at [`examples/action-bound-wallet/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/action-bound-wallet) in the repo.
+</Info>

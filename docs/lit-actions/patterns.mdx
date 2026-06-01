@@ -246,6 +246,33 @@ async function main({ signature, message }) {
 
 Note that someone could always copy your publicly available Lit Action source code, strip out the gating logic, and deploy it as a new action. This is completely safe from the original creator's perspective — the modified action produces a different IPFS CID, which means a different key pair and a different identity. It cannot produce signatures that appear to come from your original action.
 
+### A Wallet Bound to the Action — and a Unique One Per User
+
+The flip side of "edit a byte, get a new key" is that you can use the action-derived key as a **wallet that can only ever be operated by this exact code**. The key from `getLitActionPrivateKey()` is deterministically derived from the CID and never leaves the TEE, so the action *is* the only thing that can sign for that address. This is a lightweight alternative to converting an account to ChainSecured and using a contract to mint and bind PKPs to a group — you get the same "only this code can sign" property without minting a PKP.
+
+To give **each user their own** such wallet, make the code differ per user by hardcoding the user's address into the action:
+
+```javascript
+const OWNER_ADDRESS = "0xUSERS_ADDRESS"; // stamped in per user
+
+async function main({ action, to, amount, signature, message }) {
+  // Derived from THIS action's CID — so a different OWNER_ADDRESS yields a
+  // different CID and therefore a different, immutable wallet per user.
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  if (action === "address") return { walletAddress: wallet.address };
+
+  // Spending is gated on the owner's signature, not on who ran the action.
+  if (ethers.utils.verifyMessage(message, signature).toLowerCase() !== OWNER_ADDRESS.toLowerCase()) {
+    throw new Error("unauthorized: signer is not the bound owner");
+  }
+  // ... sign the transfer/transaction the owner authorized
+}
+```
+
+Because `OWNER_ADDRESS` is part of the hashed source, two users produce two CIDs, two keys, and two wallet addresses — there is no code path from one user's action to another's wallet. Authorize spending by recovering a signature and comparing it to the hardcoded owner (include a nonce/deadline in the signed `message` for replay protection, as in the [caller-signature check above](#what-if-someone-else-runs-my-action)). The Lit usage key that *runs* the action grants no spending power — it can only read the address or relay a withdrawal the real owner already signed.
+
+A full runnable version — deposit an ERC-20 into the wallet, withdraw by signing, and a wrong-user attack the action refuses — is in [`examples/action-bound-wallet/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/action-bound-wallet) (walkthrough in [Examples §13](./examples#13-a-unique-immutable-wallet-per-user-bound-to-the-action)).
+
 ---
 
 ## Encrypt / Decrypt — PKP Wallets as Data Vaults
