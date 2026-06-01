@@ -381,7 +381,7 @@ sequenceDiagram
     Resolver->>Dest: Fill or create escrow
     Resolver->>Orderbook: Settle / claim user funds
   else policy fails
-    Lit-->>Resolver: Deny; no inventory signature
+    Lit-->>Resolver: Deny - no inventory signature
   end
 ```
 
