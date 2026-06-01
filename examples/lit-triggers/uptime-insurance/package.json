@@ -1,0 +1,14 @@
+{
+  "name": "uptime-insurance",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Lit Triggers example: a schedule trigger pays out ETH from a keyless pool wallet when a monitored service is down (parametric uptime insurance).",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "claim": "node scripts/claim.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "ethers": "^5.7.2"
+  }
+}
