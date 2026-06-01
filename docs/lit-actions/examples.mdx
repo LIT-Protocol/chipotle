@@ -640,3 +640,42 @@ async function transfer({ inputs, outputs, caller, contractAddress, contractRpcU
 <Info>
   The full runnable example — the `PrivUSD` contract (commitments, nullifiers, encrypted blobs, reserve proof), the ledger action (mint/transfer/redeem prover with OFAC + KYC baked in), a warrant-gated `disclose` action, a 2-minute scripted demo, and a Hardhat test suite — lives at [`examples/private-stablecoin/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/private-stablecoin) in the repo. It builds on the [sanctions gate](#8-gate-an-erc-20-transfer-on-on-chain-sanctions-data-cross-chain) (§8) and runs live on Base Sepolia.
 </Info>
+
+## 14. Confidential Dark Pool (Encrypted Orders, Matched in the Enclave)
+
+A dark pool is a venue where orders stay hidden until they match, so large orders can't be front-run. Every other example on this page is *compute + sign*; this one is the first to use **encryption** and to hold **confidential state**, which is what a dark pool actually needs. Traders submit orders **encrypted** to a vault PKP; they're stored as ciphertext in ordinary Postgres (so the database operator only ever sees gibberish — even the DB connection string is an encrypted secret the action decrypts at runtime); at the end of each epoch a Lit Action decrypts the whole batch **inside the TEE**, runs a single-clearing-price sealed-bid auction, and signs the resulting fills for an on-chain settlement contract that pins the action's CID-derived address.
+
+It's a sealed-bid **batch auction**, not a continuous order book, on purpose: a uniform clearing price removes time-priority, so there's no ordering advantage to front-run, and the whole batch matches in one atomic enclave run (no per-call sequencing on top of stateless actions). Each order is **signed by its trader** and the matcher verifies that signature in-enclave, so nobody — not even the operator holding the usage key — can forge an order against someone else's escrow.
+
+<Note>
+  This is hardware privacy, not MPC-grade cryptographic privacy: the enclave sees the book but doesn't leak it, in exchange for far less complexity and real async batching. The privacy is **pre-trade** — orders are hidden until they match; settled fills are public on-chain, like a real dark pool's trade reporting. See the example's "Security model & limitations" for the full trust picture.
+</Note>
+
+```javascript
+// Abridged core of the epoch matcher. Full multi-file example in the repo.
+// js_params: { pkpId, encryptedDbUrl, epoch, pair, settlement, chainId, maxBatch }
+async function main({ pkpId, encryptedDbUrl, epoch, pair, settlement, chainId }) {
+  // 1. Decrypt the DB credential, then pull the epoch's ciphertext orders over HTTP.
+  const dbUrl = await Lit.Actions.Decrypt({ pkpId, ciphertext: encryptedDbUrl });
+  const rows = await sqlOverHttp(dbUrl, "select id, ciphertext from orders where epoch=$1 and pair=$2 and not settled", [epoch, pair]);
+
+  // 2. Decrypt each order INSIDE the enclave and keep only the ones the named
+  //    trader actually signed (forged / replayed orders are dropped).
+  const orders = [];
+  for (const row of rows) {
+    const o = JSON.parse(await Lit.Actions.Decrypt({ pkpId, ciphertext: row.ciphertext }));
+    if (verifyOrderSignature(o, { chainId, settlement, epoch, pair })) orders.push(o);
+  }
+
+  // 3. Uniform-price sealed-bid auction → one clearing price + conserving fills,
+  //    then sign the fills with the action's CID-derived key for on-chain settlement.
+  const { clearingPx, fills } = runAuction(orders);
+  const digest = settlementDigest(epoch, pair, clearingPx, fills, settlement, chainId);
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  return { clearingPx, fills, signature: await wallet.signMessage(ethers.utils.arrayify(digest)) };
+}
+```
+
+<Info>
+  The full runnable example — `DarkPoolSettlement` (per-epoch locked escrow + signed-fill settlement) and `TestToken` contracts, the `encryptOrder` / `matchEpoch` / `markSettled` actions, a setup that mints the vault PKP, **pins the action CIDs**, encrypts the DB connection string, and deploys the contracts, plus trader-signed `submit` and epoch `run` scripts and a `Hardhat` test suite (contract + auction + order-authentication) — lives at [`examples/dark-pool/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/dark-pool) in the repo. It uses [Neon](https://neon.com) Postgres because a Lit Action reaches the DB over HTTP, not a raw socket.
+</Info>

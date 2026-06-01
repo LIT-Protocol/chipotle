@@ -1,0 +1,170 @@
+---
+title: "Creating Triggers"
+description: "Authorize access, create webhook / schedule / chain-event triggers, fire them, and inspect run history against the Lit Triggers API."
+---
+
+All API calls are authenticated with a bearer token and target
+`https://triggers.litprotocol.com`. Every trigger needs a **scoped Chipotle
+usage API key** permitted to execute the action — mint one in the
+[Dashboard](https://dashboard.chipotle.litprotocol.com) or via the management API.
+
+<Note>
+If you are an AI agent setting this up on a user's behalf, a machine-readable
+guide lives at [`https://triggers.litprotocol.com/SKILL.md`](https://triggers.litprotocol.com/SKILL.md).
+It covers the browser-based authorization handshake step by step.
+</Note>
+
+## Authorize
+
+Access is granted from a logged-in browser session. Generate a local random
+bearer token, build an authorization URL containing only a hash challenge of it,
+and have the user approve it in the browser:
+
+```bash
+# 1. create a local token
+mkdir -p ~/.lit-triggers
+python3 - <<'PY'
+import pathlib, secrets
+p = pathlib.Path.home() / '.lit-triggers' / 'agent-token'
+if not p.exists():
+    p.write_text(secrets.token_urlsafe(48)); p.chmod(0o600)
+print(p.read_text().strip())
+PY
+
+# 2. build the authorize URL (open in a logged-in browser, click "Authorize")
+python3 - <<'PY'
+import base64, hashlib, pathlib, urllib.parse
+raw = (pathlib.Path.home() / '.lit-triggers' / 'agent-token').read_text().strip()
+challenge = base64.urlsafe_b64encode(hashlib.sha256(raw.encode()).digest()).rstrip(b'=').decode()
+print('https://triggers.litprotocol.com/agent/authorize?' + urllib.parse.urlencode({'challenge': challenge}))
+PY
+```
+
+The raw token never leaves your machine — only its SHA-256 challenge is in the
+URL. After approval, the token works as `Authorization: Bearer <token>`:
+
+```bash
+curl -fsS -H "authorization: Bearer $TOKEN" https://triggers.litprotocol.com/api/me
+# { "id": "...", "email": "you@example.com" }
+```
+
+## Create a webhook trigger
+
+An external service POSTs JSON (or text) to a generated URL; each POST fires a run.
+
+```bash
+curl -fsS -X POST https://triggers.litprotocol.com/api/triggers \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{
+    "name": "my-webhook",
+    "kind": "webhook",
+    "action_code": "const main = async (params) => ({ ok: true, event: params.event });",
+    "default_params": {},
+    "usage_api_key": "<scoped usage key>",
+    "max_runs_per_minute": 10,
+    "max_queued_runs": 20,
+    "config": {}
+  }'
+# -> { "id": "<trigger-id>", ... }
+```
+
+Fire it at `POST /webhook/<trigger-id>` (public; returns `202` with a run id):
+
+```bash
+curl -fsS -X POST https://triggers.litprotocol.com/webhook/<trigger-id> \
+  -H 'content-type: application/json' -d '{"hello":"world"}'
+```
+
+The action receives the parsed body as `params.event`, the exact raw bytes as
+`params.event_raw`, and safe headers as `params.headers`. Verification headers
+(`x-hub-signature-256`, `x-github-event`, `stripe-signature`,
+`x-slack-signature`, …) are passed through so you can verify the sender;
+secret-bearing headers (`authorization`, `cookie`, `x-api-key`) are stripped.
+
+## Create a schedule trigger
+
+`config.cron` is a 5-field cron (or 6-field with seconds). Sub-30-second
+schedules are rejected — the scheduler scans every 30 seconds.
+
+```bash
+curl -fsS -X POST https://triggers.litprotocol.com/api/triggers \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{
+    "name": "every-5-min",
+    "kind": "schedule",
+    "action_code": "const main = async (params) => ({ ranAt: params.scheduled_at });",
+    "usage_api_key": "<scoped usage key>",
+    "config": { "cron": "*/5 * * * *" }
+  }'
+```
+
+Schedule runs pass `params` flat: `{ source: "schedule", scheduled_at, cron }`.
+
+## Create a chain-event trigger
+
+Fires when a log matching the contract + event signature appears on a supported
+chain: `ethereum`, `base`, `arbitrum`, `bsc`, `polygon`. The deployment must
+have the chain's RPC configured.
+
+```bash
+curl -fsS -X POST https://triggers.litprotocol.com/api/triggers \
+  -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{
+    "name": "base-usdc-transfers",
+    "kind": "chain_event",
+    "action_code": "const main = async (p) => ({ from: p.event.decoded.arg0, amount: p.event.decoded.arg2 });",
+    "usage_api_key": "<scoped usage key>",
+    "config": {
+      "chain": "base",
+      "contract_address": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "event_signature": "Transfer(address,address,uint256)"
+    }
+  }'
+```
+
+Optional config:
+
+- `start_block` — integer or hex string to backfill from.
+- `topic_filters` — up to three entries after `topic0`; each is a 32-byte topic,
+  an array of topics, or `null` (wildcard).
+
+Chain-event runs include ABI-decoded args (`event.decoded.arg0`, `arg1`, …)
+alongside the raw log, transaction hash, block number, and topics.
+
+## Inspect and manage
+
+```bash
+# list / get
+curl -fsS -H "authorization: Bearer $TOKEN" https://triggers.litprotocol.com/api/triggers
+curl -fsS -H "authorization: Bearer $TOKEN" https://triggers.litprotocol.com/api/triggers/<id>
+
+# recent runs (input, status, response, error)
+curl -fsS -H "authorization: Bearer $TOKEN" \
+  "https://triggers.litprotocol.com/api/triggers/<id>/runs?limit=20"
+
+# disable (stop firing) / re-enable
+curl -fsS -X PATCH -H "authorization: Bearer $TOKEN" -H 'content-type: application/json' \
+  -d '{"enabled": false}' https://triggers.litprotocol.com/api/triggers/<id>
+
+# delete
+curl -fsS -X DELETE -H "authorization: Bearer $TOKEN" \
+  https://triggers.litprotocol.com/api/triggers/<id>
+```
+
+A run progresses `queued` → `running` → `success` | `failed`. Transient (5xx)
+failures from the Lit network are retried up to 3 times with backoff; the run's
+`response`/`error` captures the action's output or the failure (including a JS
+stack trace when the action throws).
+
+## API reference
+
+| Method & path | Purpose |
+| --- | --- |
+| `GET /api/me` | Identity check for the bearer token |
+| `POST /api/triggers` | Create a trigger |
+| `GET /api/triggers` | List triggers |
+| `GET /api/triggers/<id>` | Get one trigger |
+| `PATCH /api/triggers/<id>` | Update (e.g. `enabled`) |
+| `DELETE /api/triggers/<id>` | Delete a trigger |
+| `GET /api/triggers/<id>/runs` | Run history (`?limit=&offset=`) |
+| `POST /webhook/<id>` | Public webhook endpoint (webhook triggers) |

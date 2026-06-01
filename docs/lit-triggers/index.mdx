@@ -1,0 +1,96 @@
+---
+title: "Overview"
+description: "Lit Triggers runs a Lit Action when something happens — an inbound webhook, a cron tick, or a matching EVM chain event — turning an action into an autonomous, event-driven agent that can fetch data, sign, and transact with a key no human holds."
+---
+
+## What is Lit Triggers?
+
+A [Lit Action](/lit-actions/index) runs when you call it. **Lit Triggers** runs one for you when something happens:
+
+- **Webhook** — an external service POSTs to a generated URL.
+- **Schedule** — a cron expression fires the action automatically.
+- **Chain event** — an EVM log matching a chain / contract / event signature fires the action.
+
+The service is hosted at:
+
+```text
+https://triggers.litprotocol.com
+```
+
+<Tip>
+**Setting this up with an AI agent?** Hand it
+[`https://triggers.litprotocol.com/SKILL.md`](https://triggers.litprotocol.com/SKILL.md) —
+a machine-readable guide that walks any coding agent through authorizing,
+creating webhook/schedule/chain-event triggers, and inspecting runs on your
+behalf.
+</Tip>
+
+Because the action signs with a key derived from its own IPFS CID (via
+`Lit.Actions.getLitActionPrivateKey()`), a trigger turns a Lit Action into an
+**autonomous actor**: it reacts to an event, evaluates trusted data, and signs
+or sends a transaction — with no server or human holding the signing key, and
+no separate keeper or oracle to trust. Edit the action by a byte and its CID,
+signer address, and every downstream authorization change with it.
+
+## How it fits together
+
+```
+ trigger source                lit-triggers              Lit network (Chipotle)
+ ─────────────                 ────────────              ──────────────────────
+ webhook POST  ─┐
+ cron tick      ├──►  match → enqueue run  ──►  POST /core/v1/lit_action  ──►  main(params)
+ chain event   ─┘                                (your scoped usage key)        │ fetch / sign / tx
+                                                                                 ▼
+                       run history  ◄──────────────  response  ◄──────────────  return value
+```
+
+You create a trigger with the action code, a trigger config (webhook / cron /
+chain event), and a **scoped Chipotle usage API key** that is allowed to execute
+the action. When the trigger fires, lit-triggers enqueues a run and dispatches it
+to the Lit network, which runs your action and returns the result. Every run is
+recorded with its input, status, and response.
+
+## The action contract
+
+The runtime **wraps your code and invokes `main(params)` itself**, then wraps the
+returned value in `Lit.Actions.setResponse()`. Define `main` and return a value —
+do not call `main()` yourself.
+
+```javascript
+const main = async (params) => {
+  // params is the trigger payload (shape depends on the trigger type)
+  return { ok: true };
+};
+```
+
+The shape of `params` depends on the trigger type:
+
+| Trigger | `params` |
+| --- | --- |
+| webhook | `{ source: "webhook", event: <parsed JSON body>, event_raw: <raw body string>, headers: { ... } }` |
+| schedule | `{ source: "schedule", scheduled_at: "<RFC3339>", cron: "<expr>" }` |
+| chain_event | `{ source: "chain_event", event: { chain_key, chain_id, decoded: { arg0, arg1, ... }, raw_log, transaction_hash, log_index, topic0, topics, block_number, ... } }` |
+
+Inside the action you have `ethers` (v5), `fetch`, `crypto`, and the
+[`Lit.Actions` SDK](/lit-actions/chipotle) (`getLitActionPrivateKey`,
+`getLitActionWalletAddress`, `Encrypt`, `Decrypt`, `setResponse`). `viem` is not
+available — use `ethers`.
+
+## Security model
+
+- Your Lit/Chipotle **admin API key stays with you** — never send it to the
+  lit-triggers backend.
+- lit-triggers stores only **scoped usage API keys**, encrypted at rest. A scoped
+  key must be permitted to execute the target action's group. Mint one in the
+  [Dashboard](https://dashboard.chipotle.litprotocol.com) or via the API.
+- The action's **signing key is never configured** — it is derived from the
+  action's CID by the Lit network at run time.
+- For secrets the action needs (e.g. a webhook HMAC secret), prefer
+  `Lit.Actions.Encrypt`/`Decrypt` over plaintext trigger params.
+
+## Next steps
+
+- [Creating Triggers](/lit-triggers/triggers) — authorize an agent, create
+  webhook / schedule / chain-event triggers, inspect runs.
+- [Examples](/lit-triggers/examples) — copy-paste actions, plus links to full
+  runnable demos (contracts + setup + e2e) in the repo.
