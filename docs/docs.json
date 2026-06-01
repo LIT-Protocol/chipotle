@@ -22,6 +22,7 @@
               "management/account_modes",
               "management/pricing",
               "management/crypto",
+              "management/litkey",
               "management/api_keys"
             ]
           },
