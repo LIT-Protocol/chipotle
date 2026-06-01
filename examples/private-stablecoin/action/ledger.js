@@ -115,6 +115,12 @@ async function main(params) {
   }
   try {
     switch (params.op) {
+      case "ping":
+        // Readiness probe: confirms THIS registered action can use the ledger
+        // PKP (i.e. its add_action_to_group authorization has propagated to the
+        // execution node). Setup polls this before declaring itself done.
+        await Lit.Actions.Encrypt({ pkpId: LEDGER_PKP_ID, message: "readiness-probe" });
+        return { ok: true, op: "ping" };
       case "mint":
         return await mint(params);
       case "transfer":

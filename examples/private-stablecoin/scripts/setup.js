@@ -28,12 +28,38 @@ const { buildActions } = require("./lib/buildAction");
 
 const DEPLOY_NETWORK = process.env.DEPLOY_NETWORK || "baseSepolia";
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 const ADDRESS_DERIVER_CODE = `
   async function main({ ipfsId }) {
     const walletAddress = await Lit.Actions.getLitActionWalletAddress({ ipfsId });
     return { walletAddress };
   }
 `;
+
+// Poll the EXACT dependency until it works, rather than guessing a sleep. We
+// run the real (registered) ledger action with op:"ping" — which just Encrypts
+// with the ledger PKP — because the binding propagation is this action's
+// add_action_to_group authorization, not the PKP-to-group one (an inline probe
+// would pass while the registered action still can't use the PKP).
+async function waitForPkpUsable(base, usageKey, ledgerCode, { tries = 40, intervalMs = 3000 } = {}) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      const body = await call(base, usageKey, "lit_action", {
+        method: "POST",
+        body: JSON.stringify({ code: ledgerCode, js_params: { op: "ping" } }),
+      });
+      if (!body.has_error && body.response && body.response.ok) {
+        console.log(`  ledger action can use the PKP after ~${Math.round((i * intervalMs) / 1000)}s`);
+        return;
+      }
+    } catch {
+      // transient API error — keep polling
+    }
+    await sleep(intervalMs);
+  }
+  throw new Error("ledger action never became able to use the PKP (timed out)");
+}
 
 async function main() {
   env.load();
@@ -102,6 +128,16 @@ async function main() {
   console.log("Step 9/11: Adding actions to group...");
   await addActionToGroup(LIT_API_BASE, LIT_API_KEY, groupId, ledgerCid);
   await addActionToGroup(LIT_API_BASE, LIT_API_KEY, groupId, discloseCid);
+
+  // Group membership (the PKP + action CIDs) is written on-chain, and the
+  // execution node reads it via a Base RPC that lags the sequencer. The lag is
+  // variable (it tracks when the underlying tx confirms), so a fixed sleep is
+  // unreliable. Instead poll the exact dependency: run a throwaway action that
+  // Encrypts with the ledger PKP using the scoped usage key, and wait until it
+  // succeeds. Until then a real call fails "API key cannot use selected wallet
+  // in selected action".
+  console.log("Step 9.5/11: Waiting for the ledger action to be able to use the PKP...");
+  await waitForPkpUsable(LIT_API_BASE, usageKey, ledgerCode);
 
   // Step 10: Deploy MockUSDC + PrivUSD.
   console.log(`Step 10/11: Deploying contracts to ${DEPLOY_NETWORK}...`);
