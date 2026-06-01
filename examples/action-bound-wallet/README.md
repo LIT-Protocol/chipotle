@@ -97,7 +97,7 @@ trades the PKP's flexibility for near-zero setup.
 | `contracts/DemoToken.sol` | Plain ERC-20 with an open faucet `mint` so the demo has something to move. |
 | `scripts/_users.js` | The three public Hardhat test keys used as demo users, and the function that stamps an address into the template to make a user's action source. |
 | `scripts/_canonical.js` | The canonical withdrawal message — kept identical to the action's copy so signatures verify. |
-| `scripts/_lit.js` | Runs a given user's action against the Lit API with the scoped usage key. |
+| `scripts/_lit.js` | Runs a given user's action against the Lit API with the scoped usage key; retries transient errors and exposes `waitForUsageKeyReady` (poll the real path until the key's group grant propagates). |
 | `scripts/setup.js` | One-shot: create the wildcard group, mint a scoped usage key, deploy the token. |
 | `scripts/address.js` / `deposit.js` / `balance.js` / `withdraw.js` | The demo flow: find the wallet, fund it, check it, withdraw from it. |
 | `scripts/attack-wrong-user.js` | A different user tries to drain someone else's wallet → the action refuses. |
@@ -132,9 +132,14 @@ Set in `.env`:
 npm run setup
 ```
 
-Three steps: create a wildcard permission group (each user's action has a
+Four steps: create a wildcard permission group (each user's action has a
 different CID, so we allowlist by group rather than enumerate CIDs), mint a
-scoped usage key, deploy `DemoToken`.
+scoped usage key, deploy `DemoToken`, then **verify the usage key can actually
+execute** by polling the real action path until it succeeds. That grant
+propagates with a short, variable delay after it's created; the poll self-tunes
+(it returns the instant the key is live) so the demo never starts before the
+key works. The demo scripts also retry transient network errors and 5xx
+responses, so an occasional API blip self-heals instead of aborting a run.
 
 ### 3. Walk the demo
 

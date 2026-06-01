@@ -17,6 +17,9 @@
 //   1. Create a permission group (wildcard action allowlist)
 //   2. Create a scoped usage API key with execute_in_groups: [groupId]
 //   3. Deploy the DemoToken ERC-20 (scripts/deploy.js)
+//   4. Verify the usage key can actually execute an action in the group, by
+//      polling the real path until it succeeds (the grant propagates with a
+//      short, variable delay — see waitForUsageKeyReady in _lit.js)
 //
 // Re-running does a fresh setup and overwrites the derived values in .env; the
 // previously-minted group/usage key/token become orphaned. Fine for a docs
@@ -25,6 +28,8 @@
 const path = require("path");
 const { execSync } = require("child_process");
 const env = require("./_env");
+const { userWallet } = require("./_users");
+const { waitForUsageKeyReady } = require("./_lit");
 
 const DEPLOY_NETWORK = process.env.DEPLOY_NETWORK || "baseSepolia";
 
@@ -42,22 +47,28 @@ async function main() {
     }
   }
 
-  console.log("Step 1/3: Creating group (wildcard action allowlist)...");
+  console.log("Step 1/4: Creating group (wildcard action allowlist)...");
   const groupId = await addGroup(LIT_API_BASE, LIT_API_KEY);
   env.upsert("GROUP_ID", String(groupId));
   console.log(`  GROUP_ID=${groupId}`);
 
-  console.log("Step 2/3: Creating scoped usage API key...");
+  console.log("Step 2/4: Creating scoped usage API key...");
   const usageKey = await createUsageApiKey(LIT_API_BASE, LIT_API_KEY, groupId);
   env.upsert("LIT_USAGE_API_KEY", usageKey);
   console.log(`  LIT_USAGE_API_KEY=${usageKey.slice(0, 12)}... (full key written to .env)`);
 
-  console.log(`Step 3/3: Deploying DemoToken on ${DEPLOY_NETWORK}...`);
+  console.log(`Step 3/4: Deploying DemoToken on ${DEPLOY_NETWORK}...`);
   execSync(`npx hardhat run scripts/deploy.js --network ${DEPLOY_NETWORK}`, {
     stdio: "inherit",
     cwd: path.join(__dirname, ".."),
   });
   env.load();
+
+  console.log("Step 4/4: Verifying the usage key can execute in the group...");
+  // env.upsert already set process.env.LIT_USAGE_API_KEY, so this runs the real
+  // action path with the key we just minted, retrying until the grant lands.
+  const probeWallet = await waitForUsageKeyReady(userWallet(0).address);
+  console.log(`  usage key is live (user 0 wallet derived: ${probeWallet})`);
 
   console.log("\n✓ Setup complete.\n");
   console.log("  Group ID:    ", process.env.GROUP_ID);
@@ -74,24 +85,48 @@ async function main() {
 // Lit Chipotle REST helpers.
 // ---------------------------------------------------------------------------
 
-async function call(base, apiKey, path, init = {}) {
-  const res = await fetch(`${base}/core/v1/${path}`, {
-    ...init,
-    headers: {
-      "X-Api-Key": apiKey,
-      "Content-Type": "application/json",
-      ...(init.headers || {}),
-    },
-  });
-  const body = await res.json();
-  if (!res.ok) {
+// Retries transient failures: network errors (node's "fetch failed") and 5xx
+// responses. The Lit API occasionally 500s on a management call (e.g.
+// add_usage_api_key returning a null) and succeeds on an immediate retry, so we
+// don't want the one-shot setup to abort on a blip. 4xx errors are permanent
+// (bad key, bad payload) and surface right away.
+async function call(base, apiKey, path, init = {}, attempts = 4) {
+  let lastErr;
+  for (let i = 1; i <= attempts; i++) {
+    let res;
+    try {
+      res = await fetch(`${base}/core/v1/${path}`, {
+        ...init,
+        headers: {
+          "X-Api-Key": apiKey,
+          "Content-Type": "application/json",
+          ...(init.headers || {}),
+        },
+      });
+    } catch (err) {
+      lastErr = err;
+      if (i === attempts) throw err;
+      console.warn(`  ${path} network error (${err.message}); retrying...`);
+      await new Promise((r) => setTimeout(r, 1500 * i));
+      continue;
+    }
+
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) return body;
+
     const msg = body.message || body.error || JSON.stringify(body);
     const err = new Error(`${path} -> ${res.status}: ${msg}`);
     err.status = res.status;
     err.body = body;
+    if (res.status >= 500 && i < attempts) {
+      lastErr = err;
+      console.warn(`  ${path} -> ${res.status}; retrying...`);
+      await new Promise((r) => setTimeout(r, 1500 * i));
+      continue;
+    }
     throw err;
   }
-  return body;
+  throw lastErr;
 }
 
 async function addGroup(base, apiKey) {
