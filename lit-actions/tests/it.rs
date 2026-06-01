@@ -892,14 +892,27 @@ fn pool_test_setup() -> (TestClient, Arc<PoolHealth>, usize) {
     (client, pool_health, pool_target)
 }
 
-/// Coarse warmup wait. There's no "ready workers" counter today, so we
-/// just sleep long enough for snapshot-bootstrapped workers to land in
-/// the ready channel. With pool=10, 600ms is plenty under load.
-async fn wait_for_warmup(target: usize) {
+/// Wait until at least one pre-warmed worker has landed in the ready
+/// channel. Polls the live `ready` gauge instead of sleeping a fixed
+/// duration — snapshot bootstrap is fast locally but can be starved for
+/// hundreds of ms on a loaded CI runner, which made a blind sleep flaky.
+/// Returns once a worker is ready; panics if none appears within the
+/// timeout (a genuine warmup failure worth surfacing).
+async fn wait_for_warmup(pool_health: &Arc<PoolHealth>, target: usize) {
     if target == 0 {
         return;
     }
-    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        if pool_health.ready() >= 1 {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no pre-warmed worker became ready within 15s (target={target})",
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 }
 
 /// Pool hit on the warm path: after warmup, a request should be served by
@@ -912,7 +925,7 @@ async fn pool_warm_hit() {
         return;
     }
 
-    wait_for_warmup(target).await;
+    wait_for_warmup(&pool_health, target).await;
 
     let hits_before = pool_health.hits();
     client
@@ -943,7 +956,7 @@ async fn pool_memory_limit_bypass() {
         return;
     }
 
-    wait_for_warmup(target).await;
+    wait_for_warmup(&pool_health, target).await;
 
     let hits_before = pool_health.hits();
     let misses_before = pool_health.misses();
