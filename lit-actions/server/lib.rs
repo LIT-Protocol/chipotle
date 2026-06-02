@@ -7,7 +7,7 @@ pub mod worker_pool;
 
 pub mod server;
 
-pub use runtime::init_v8;
+pub use runtime::{get_lit_action_ipfs_id, init_v8};
 pub use server::*;
 
 // Re-exports

@@ -5,7 +5,7 @@ use anyhow::{Result, bail};
 use indoc::{formatdoc, indoc};
 use lit_actions_server::proto::execute_js_request::AesEncryptResponse;
 use lit_actions_server::worker_pool::PoolHealth;
-use lit_actions_server::{TestServer, init_v8, proto::*, unix};
+use lit_actions_server::{TestServer, get_lit_action_ipfs_id, init_v8, proto::*, unix};
 use pretty_assertions::assert_eq;
 use rstest::*;
 use temp_file::TempFile;
@@ -576,24 +576,29 @@ async fn async_await(mut client: TestClient) {
 #[rstest]
 #[tokio::test]
 async fn reference_error(mut client: TestClient) {
-    let res = client
-        .execute_js("async function main() { nonexisting_function() }")
-        .await;
+    let code = "async function main() { nonexisting_function() }";
+    let res = client.execute_js(code).await;
 
     // User code now runs through `__litEvalCached` (op_eval_context) so V8's
     // script code cache is reachable for the bundled action (CPL-264). Side
     // effects on error output: the script name is the URL specifier used by
-    // op_eval_context, and two wrapper frames appear at the tail.
+    // op_eval_context, and two wrapper frames appear at the tail. The specifier
+    // is content-derived (the action's IPFS id) so distinct actions can't
+    // collide on V8's length-based code-cache hash.
+    let script = format!(
+        "file:///user_provided_script_{}.js",
+        get_lit_action_ipfs_id(code)
+    );
     assert_eq!(
         res.unwrap_err().to_string(),
-        indoc! {r#"
+        formatdoc! {r#"
             Uncaught (in promise) ReferenceError: nonexisting_function is not defined
-                at main (file:///user_provided_script.js:2:33)
-                at file:///user_provided_script.js:6:28
-                at file:///user_provided_script.js:10:11
-                at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:52:21)
+                at main ({script}:2:33)
+                at {script}:6:28
+                at {script}:10:11
+                at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:56:21)
                 at <user_provided_script>:1:1
-        "#}
+        "#, script = script}
         .trim()
     );
     assert_eq!(client.received::<ExecutionResult>().success, false);
@@ -611,17 +616,21 @@ async fn throw_error(mut client: TestClient) {
         let res = client.execute_js(code).await;
 
         // See `reference_error` for why the stack format differs from
-        // pre-CPL-264 output.
+        // pre-CPL-264 output and why the specifier is content-derived.
+        let script = format!(
+            "file:///user_provided_script_{}.js",
+            get_lit_action_ipfs_id(code)
+        );
         assert_eq!(
             res.unwrap_err().to_string(),
-            indoc! {r#"
+            formatdoc! {r#"
                 Uncaught (in promise) Error: boom
-                    at main (file:///user_provided_script.js:3:7)
-                    at file:///user_provided_script.js:9:28
-                    at file:///user_provided_script.js:13:11
-                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:52:21)
+                    at main ({script}:3:7)
+                    at {script}:9:28
+                    at {script}:13:11
+                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:56:21)
                     at <user_provided_script>:1:1
-            "#}
+            "#, script = script}
             .trim(),
         );
         assert_eq!(client.received::<ExecutionResult>().success, false);
@@ -635,16 +644,20 @@ async fn throw_error(mut client: TestClient) {
         "#};
         let res = client.execute_js(code).await;
 
+        let script = format!(
+            "file:///user_provided_script_{}.js",
+            get_lit_action_ipfs_id(code)
+        );
         assert_eq!(
             res.unwrap_err().to_string(),
-            indoc! {r#"
+            formatdoc! {r#"
                 Uncaught (in promise) Error: boom
-                    at main (file:///user_provided_script.js:3:11)
-                    at file:///user_provided_script.js:9:28
-                    at file:///user_provided_script.js:13:11
-                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:52:21)
+                    at main ({script}:3:11)
+                    at {script}:9:28
+                    at {script}:13:11
+                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:56:21)
                     at <user_provided_script>:1:1
-            "#}
+            "#, script = script}
             .trim(),
         );
         assert_eq!(client.received::<ExecutionResult>().success, false);

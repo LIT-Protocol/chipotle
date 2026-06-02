@@ -261,7 +261,12 @@ fn deno_isolate_init() -> Option<&'static [u8]> {
     Some(RUNTIME_SNAPSHOT)
 }
 
-fn get_lit_action_ipfs_id(code: &str) -> String {
+/// Compute the IPFS CID for a Lit Action's source. This is the action's
+/// canonical content identity: it keys the action-code cache and, via the
+/// op_eval_context specifier, the V8 code cache (so distinct actions can't
+/// collide on V8's length-based source hash). Exposed for tests that assert on
+/// the specifier (it appears in user-facing stack traces).
+pub fn get_lit_action_ipfs_id(code: &str) -> String {
     let ipfs_hasher = IpfsHasher::default();
     ipfs_hasher.compute(code.as_bytes())
 }
@@ -836,10 +841,22 @@ async fn execute_with_worker_inner(
     // execution, but its body is one string literal, so V8 only pays for
     // source-string scanning rather than compiling the bundled action body
     // (CPL-264).
+    //
+    // The specifier is content-derived (the action's IPFS id) rather than a
+    // constant. Deno's code-cache key is `(specifier, kind, source_hash)`, and
+    // `source_hash` degenerates to V8's length-based string identity hash for
+    // large sources — so two *different* actions of equal length would share a
+    // `source_hash` and collide under a shared specifier, handing one action
+    // the other's compiled bytecode. Keying the specifier on the action id puts
+    // each action in its own keyspace: same action -> same specifier -> still
+    // reuses bytecode (CPL-264); different action -> different specifier -> a
+    // clean miss, so V8 is never offered a mismatched cache entry to accept.
     let user_code_literal =
         serde_json::to_string(&user_code).context("Could not serialize user code for eval stub")?;
-    let stub =
-        format!("__litEvalCached({user_code_literal}, \"file:///user_provided_script.js\");");
+    let specifier = format!("file:///user_provided_script_{action_ipfs_id}.js");
+    let specifier_literal = serde_json::to_string(&specifier)
+        .context("Could not serialize eval specifier for eval stub")?;
+    let stub = format!("__litEvalCached({user_code_literal}, {specifier_literal});");
 
     if let Err(e) = worker
         .js_runtime

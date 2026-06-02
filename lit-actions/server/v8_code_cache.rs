@@ -230,6 +230,36 @@ mod tests {
         assert!(cache.get_sync(&s, CodeCacheType::Script, 2).is_none());
     }
 
+    /// The specifier is part of the key. Two actions that collide on
+    /// `source_hash` (V8's length-based string identity hash degenerates to the
+    /// length for large sources, so equal-length actions share a hash) must
+    /// still occupy independent entries when given distinct, content-derived
+    /// specifiers — otherwise one action would be served the other's bytecode.
+    #[test]
+    fn specifier_is_part_of_key() {
+        let cache = V8CodeCache::default();
+        let action_a = specifier_n(1);
+        let action_b = specifier_n(2);
+
+        // Same kind, same colliding source_hash, different specifiers.
+        cache.set_sync(action_a.clone(), CodeCacheType::Script, 42, b"bytecode-a");
+        cache.set_sync(action_b.clone(), CodeCacheType::Script, 42, b"bytecode-b");
+
+        // Each specifier retrieves its own bytecode; no cross-contamination.
+        assert_eq!(
+            cache
+                .get_sync(&action_a, CodeCacheType::Script, 42)
+                .as_deref(),
+            Some(b"bytecode-a".as_ref())
+        );
+        assert_eq!(
+            cache
+                .get_sync(&action_b, CodeCacheType::Script, 42)
+                .as_deref(),
+            Some(b"bytecode-b".as_ref())
+        );
+    }
+
     #[test]
     fn set_replaces_existing_entry() {
         let cache = V8CodeCache::default();
