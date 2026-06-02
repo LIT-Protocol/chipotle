@@ -44,13 +44,13 @@ async function main() {
   const scheme = recovery ? "2-of-3 (hot + Lit + cold recovery)" : "2-of-2 (hot + Lit)";
 
   console.log(`Running ${scheme} distributed key generation (5 rounds)...`);
-  // The interactive DKG occasionally fails mid-protocol on the live network
-  // (a transient node-side hiccup surfaces as "Missing message"; the protocol,
-  // relay, and client are verified-correct offline). A retry is a fresh,
-  // independent run, so restart the whole keygen on failure — with backoff so a
-  // batch of attempts spans a bad window rather than hammering it. The 2-of-3
-  // (multi-peer) DKG hits this far more than 2-of-2; see the README.
-  const ATTEMPTS = 8;
+  // A retry is a fresh, independent DKG run, so on failure we restart the whole
+  // keygen with backoff. This guards against ordinary transient network errors.
+  // It also used to cover a node-side js_params-caching bug that made the
+  // multi-peer 2-of-3 DKG fail intermittently ("Missing message" / "Invalid
+  // commitment hash"); that's fixed on prod now (see the README), so failures
+  // here should be rare.
+  const ATTEMPTS = 3;
   let result;
   for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
     try {

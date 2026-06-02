@@ -196,24 +196,22 @@ sign, and the hot share alone can't either. But because the user holds 2 of 3,
 fixing the 2-of-2 "lose either share and it's gone forever" failure mode.
 
 All three quorums ({hot,Lit}, {hot,cold}, {Lit,cold}) produce signatures
-verifiable by the same address — confirmed locally.
+verifiable by the same address. The two the scripts expose — {hot,Lit} and
+{hot,cold} — are verified on prod; {Lit,cold} is confirmed in the offline harness.
 
-> **⚠️ Prod status — 2-of-3 keygen is blocked on a Lit runtime bug.**
-> The 2-of-3 DKG is **proven correct offline** — 30/30 with the real client,
-> 15/15 sequential and 64/64 concurrent in a prod-faithful Deno harness (same
-> web wasm build, same gzip+relay, same message routing). On the **live
-> network**, the multi-party DKG intermittently fails mid-protocol — `handleMessages`
-> throws **"Missing message"** (round 2) or **"Invalid commitment hash"** (round 4),
-> both from inside the wasm while processing the peer messages / commitment array
-> the action passed it. The failures are sometimes sustained (whole windows of
-> 100% failure), so `keygen`'s whole-DKG retry helps but is **not** reliable.
-> **2-of-2 has none of this** (single peer per round; reliable end-to-end incl.
-> on-chain) — the trigger is specifically the multi-peer (≥2 incoming messages /
-> commitment-array) rounds that only t-of-n with n>2 exercises. Root cause is
-> therefore **node-side** (the `lit_actions` worker's wasm execution / object
-> handling), not the example. The recovery (`--recovery`) sign path is fully
-> local and unaffected. Filed for infra investigation; the offline harnesses in
-> `wasm-poc/` are a minimal reproduction of the working path.
+> **✅ Prod status — 2-of-3 works end-to-end on the live network.**
+> The multi-party DKG used to fail intermittently mid-protocol — `handleMessages`
+> threw **"Missing message"** (round 2) or **"Invalid commitment hash"** (round 4)
+> from inside the wasm. The root cause was **node-side**: the `lit_actions` worker
+> cached `js_params` across executions, so a multi-peer round could read another
+> request's messages / commitment array. That is exactly why **2-of-2 never hit it**
+> (single peer per round) — the trigger was specifically the multi-peer (≥2 incoming
+> messages / commitment-array) rounds that only t-of-n with n>2 exercises. The
+> node-side fix is now deployed: 2-of-3 keygen completes on the **first attempt**
+> (verified 7/7 on prod), and both signing quorums produce `ecrecover`-valid
+> signatures. `keygen` keeps its whole-DKG retry as belt-and-suspenders for ordinary
+> transient network errors. The offline harnesses in `wasm-poc/` remain a minimal
+> reproduction of the working path.
 
 ## Production considerations
 
@@ -245,12 +243,12 @@ Run against the live Lit network and Base Sepolia:
   (raised) response limit ✓ **— reliable.**
 - **2-of-2** `sign` — the 4-round signing; both the local `--dry` `ecrecover`
   check and a real on-chain `MpcVault.exec` verified via `ecrecover` ✓
-- **2-of-3** `keygen` — proven correct offline (30/30 real client, 15/15
-  sequential, 64/64 concurrent) and has completed against prod, but the
-  multi-party DKG **intermittently fails on the live network** ("Missing message"
-  / "Invalid commitment hash") and retry is not reliable. **Blocked on a node-side
-  runtime bug** — see the boxed status in the 2-of-3 section. The recovery
-  (`--recovery`) sign path is fully local and works.
+- **2-of-3** `keygen` — the multi-party 5-round DKG, now **reliable on the live
+  network** after the node-side `js_params`-caching fix (see the 2-of-3 section):
+  **7/7 first-attempt on prod**, plus offline 30/30 real client / 64/64 concurrent. ✓
+- **2-of-3** `sign` — both quorums produce `ecrecover`-valid signatures recovering
+  to the DKG address: {hot, Lit} via the 4-round MPC path and {hot, cold} via the
+  fully-local `--recovery` path (verified with `--dry`). ✓
 
 Requires the response-payload limit raised on your account (see the prerequisite
 above) — production has been raised to 16 MB. The Deno proof in
