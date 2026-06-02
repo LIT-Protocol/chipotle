@@ -682,7 +682,7 @@ A dark pool is a venue where orders stay hidden until they match, so large order
 It's a sealed-bid **batch auction**, not a continuous order book, on purpose: a uniform clearing price removes time-priority, so there's no ordering advantage to front-run, and the whole batch matches in one atomic enclave run (no per-call sequencing on top of stateless actions). Each order is **signed by its trader** and the matcher verifies that signature in-enclave, so nobody — not even the operator holding the usage key — can forge an order against someone else's escrow.
 
 <Note>
-  This is hardware privacy, not MPC-grade cryptographic privacy: the enclave sees the book but doesn't leak it, in exchange for far less complexity and real async batching. The privacy is **pre-trade** — orders are hidden until they match; settled fills are public on-chain, like a real dark pool's trade reporting. See the example's "Security model & limitations" for the full trust picture.
+  Privacy here is enforced by the TEE: orders are decrypted only inside an attested enclave and are never exposed to the operator, the database, or other traders — the book is matched in hardware isolation, with true async batching. The privacy is **pre-trade** — orders are hidden until they match; settled fills are public on-chain, like a real dark pool's trade reporting. See the example's "Security model & limitations" for the full trust picture, including what trusting the enclave entails.
 </Note>
 
 ```javascript

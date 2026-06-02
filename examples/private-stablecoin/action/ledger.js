@@ -1,6 +1,6 @@
 // privUSD ledger action — the prover that replaces a ZK circuit.
 //
-// Runs across the Lit threshold network in TEEs. For each operation it reads
+// Runs in the Lit TEE. For each operation it reads
 // chain state, decrypts/validates the relevant notes, enforces compliance,
 // and signs the state update the PrivUSD contract will accept. The contract
 // trusts exactly one key: this action's CID-derived signer

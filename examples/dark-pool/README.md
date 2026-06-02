@@ -18,22 +18,19 @@ once:
 3. **Sign** — the match result is signed with the match action's CID-derived key
    and verified on-chain by the settlement contract.
 
-## Honest trust model (read this first)
+## Trust model (read this first)
 
-This is **not** "more private than an MPC dark pool like Renegade." It's a
-different trade:
+Privacy here is enforced by the **TEE**: orders are decrypted and matched only
+inside an attested enclave, so no party — not the operator, the database, nor
+other traders — ever sees the book. You're trusting the enclave's hardware
+isolation to hold that boundary (TEEs have known side-channel attacks; see
+"Security model & limitations" below for the full picture).
 
-- An MPC dark pool gives *cryptographic* privacy — no single party ever sees the
-  book.
-- This gives *hardware* privacy — the TEE sees the book but doesn't leak it. You
-  are trusting the enclave (and TEEs have known side-channel attacks).
-
-What you get for that trade: no MPC ceremony, true async batching, confidential
-state on a $0 hobby-tier Postgres, and an exchange you can stand up in an
-afternoon. The privacy property delivered is **pre-trade**: orders are hidden
-until they match, so resting orders can't be front-run. **Post-trade, fills
-settle on-chain and are public** — exactly like a real dark pool reports
-executed trades after the fact.
+What this gets you: confidential order state on a $0 hobby-tier Postgres, true
+async batching, and an exchange you can stand up in an afternoon. The privacy
+property delivered is **pre-trade**: orders are hidden until they match, so
+resting orders can't be front-run. **Post-trade, fills settle on-chain and are
+public** — exactly like a real dark pool reports executed trades after the fact.
 
 ## Why a sealed-bid batch auction (not a continuous order book)
 
@@ -179,8 +176,7 @@ Be honest about what you're trusting:
 
 - **You trust the TEE and the matcher.** Order privacy rests on the enclave not
   leaking; settlement integrity rests on the contract trusting whatever the
-  matchEpoch CID signs. That's the hardware-privacy trade from the trust section.
-  TEEs have known side-channel attacks.
+  matchEpoch CID signs. TEEs have known side-channel attacks.
 - **Operator liveness is assumed.** Escrow for an epoch is locked until that
   epoch settles. If the operator never calls `run-epoch`, those funds stay
   locked. A production version needs a timeout/cancel path so traders can
