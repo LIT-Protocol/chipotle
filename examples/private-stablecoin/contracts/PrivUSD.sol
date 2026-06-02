@@ -13,10 +13,10 @@ import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/Messa
 ///         only inside a Lit Action). No amounts or addresses appear in
 ///         cleartext for transfers.
 ///
-///         There are no ZK circuits. A Lit Action — running across the Lit
-///         threshold network in TEEs — is the prover: it reads chain state,
-///         decrypts the relevant notes, checks the arithmetic and OFAC/KYC,
-///         and signs the state update with its CID-derived key. This contract
+///         There are no ZK circuits. A Lit Action — running in the Lit TEE —
+///         is the prover: it reads chain state, decrypts the relevant notes,
+///         checks the arithmetic and OFAC/KYC, and signs the state update with
+///         its CID-derived key. This contract
 ///         verifies that one signature (`ecrecover`) and applies the update.
 ///         Edit the action by a byte and its CID — and therefore its signer
 ///         address — changes, so this contract stops trusting it.
@@ -24,10 +24,9 @@ import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/Messa
 ///         Reserve proof: `reserveBacked()` is public and continuous. Anyone
 ///         can confirm the USDC held here covers every privUSD in circulation.
 ///
-///         DEMO-GRADE. Real production hardening (incremental Merkle tree +
-///         membership checks, per-recipient encryption, multi-source OFAC,
-///         oracle rotation behind a multisig) is described in
-///         plans/private-stablecoin.md.
+///         DEMO-GRADE. Real production hardening (per-recipient encryption,
+///         multi-source OFAC, oracle rotation behind a multisig) is described
+///         in plans/private-stablecoin.md.
 contract PrivUSD {
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;

@@ -98,8 +98,8 @@ invoice, every payment to a contractor is on a public ledger forever.
 The gap in the market is: **a stablecoin where balances and transfers are
 hidden from the public chain, but the issuer can prove reserves and a
 regulator can decrypt specific transactions with a warrant.** That is the
-exact shape Lit is good at: programmable threshold signing + access-control
-encryption + Lit Actions as a trusted bookkeeper running in TEEs.
+exact shape Lit is good at: programmable signing + access-control
+encryption + Lit Actions as a trusted bookkeeper running in the Lit TEE.
 
 We have a structural advantage over both pure-ZK projects (no circuits to
 write, compliance hooks are just JavaScript) and over centralized "private"
@@ -141,8 +141,11 @@ A balance is not a number in a mapping — it's a set of **notes** the owner
 controls. The `PrivUSDPool` contract on Base stores only:
 
 - **Commitments** — `hash(ownerPubkey, amount, salt)`. A note worth some
-  amount that reveals nothing. Stored in an append-only Merkle tree; the
-  tree root is the public state root.
+  amount that reveals nothing. Stored in a `mapping(bytes32 => bool)` the
+  action reads directly to confirm a note exists. No Merkle tree: because the
+  action (not a ZK circuit) is the prover, it legitimately knows which note
+  it's checking, so an O(1) mapping lookup is the right primitive — there's no
+  index to hide.
 - **Nullifiers** — when a note is spent, a one-way `hash(noteSecret)` tag is
   published so the same note can't be spent twice. Unlinkable to its
   commitment.
@@ -174,8 +177,8 @@ accessControlConditions: [
 
 ### The four core Lit Actions
 
-Everything user-facing routes through one of these. Each runs across the Lit
-threshold network in TEEs and produces a CID-derived signature the contract
+Everything user-facing routes through one of these. Each runs in the Lit TEE
+and produces a CID-derived signature the contract
 verifies with `ecrecover` — the exact trust model already proven in
 `examples/compliance-transfer-gate` (signer address is derived from the
 action's IPFS CID; edit a byte → new address → old contract rejects it).
@@ -279,7 +282,7 @@ add a hosted reserve-dashboard page.
 ### Phase 1 — Internal alpha (4–6 weeks)
 
 - [ ] **`PrivUSDPool` contract**, production version of the Phase 0
-      contract on Base. Merkle tree of commitments, nullifier set,
+      contract on Base. Commitment mapping, nullifier set,
       `totalSupply`, issuer-vault USDC custody, oracle-rotation setter
       behind a multisig.
 - [ ] **Lit Actions** hardened for the four flows above, living in
@@ -503,8 +506,9 @@ off-chain ledger), OFAC posture (baked in). Remaining:
 - Note-scanning UX: how does a fresh client reconstruct its balance fast
   without an indexer it has to trust? Acceptable to ship an optional caching
   indexer as long as the trustless path exists.
-- Merkle tree growth / gas: append-only tree on Base — model the cost per
-  transfer at scale before quoting issuers a per-tx price.
+- Commitment/nullifier storage growth / gas: each note writes a new mapping
+  slot on Base — model the cost per transfer at scale before quoting issuers
+  a per-tx price.
 
 ## Decision needed before starting
 

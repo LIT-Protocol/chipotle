@@ -17,7 +17,7 @@ default, compliant by construction.**
 ## The idea in one picture
 
 ```
-        PUBLIC CHAIN (Base)                    LIT THRESHOLD NETWORK (TEEs)
+        PUBLIC CHAIN (Base)                    THE LIT TEE
   ┌───────────────────────────┐          ┌────────────────────────────────────┐
   │ PrivUSD.sol                │          │ action/ledger.js  (the "prover")     │
   │  • commitments (hashes)    │◄────┐    │  • reads chain state                 │
@@ -126,14 +126,22 @@ chain id) is what makes this real: a caller could pair a malicious RPC with a
 matching fake chain id, so the chain id proves nothing — the TLS hostname is
 the anchor.
 
+**The action is the prover — by design, not as a stopgap.** A shielded pool
+needs *something* that can see plaintext amounts to enforce value conservation
+(`sum(inputs) == sum(outputs)`): Zcash/Aztec use a ZK circuit, privUSD uses the
+Lit Action running in the Lit TEE. The trust anchor is the enclave's attestation
+plus the CID→signer binding — only the exact, content-addressed `ledger.js` can
+produce a signature the contract accepts, and it can only run unmodified inside
+the TEE. The contract independently enforces double-spend (nullifiers),
+commitment uniqueness, replay, and 1:1 reserve backing, so the action's trusted
+surface narrows to value conservation plus the OFAC/KYC checks. This is the
+whole reason to build it on Lit: Aztec-grade privacy with no ZK circuit and no
+circuit team — not a temporary substitute for one.
+
 ## What's demo-grade
 
 Each of these is a deliberate simplification with a known production path:
 
-- **No Merkle membership / ZK.** The action validates inputs by reading the
-  contract's public `commitments`/`nullifiers` mappings (over the *pinned* RPC).
-  Production uses an incremental Merkle tree. The action is trusted as prover —
-  the TEE + threshold network is the trust anchor, not a succinct proof.
 - **No dedicated spending key.** Spends are authorized by an EIP-191 signature
   from the note owner's wallet over the exact operation (the action recovers it
   and requires it to match each input note's owner), so knowing a note's opening
