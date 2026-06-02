@@ -716,7 +716,42 @@ async function main({ pkpId, encryptedDbUrl, epoch, pair, settlement, chainId })
 
 ---
 
-## 16. Sign a Solana Transaction (Keyless ed25519 Wallet)
+## 16. Non-Custodial Co-Signer: Threshold ECDSA Split Between Lit and You
+
+Every other example on this page is a "Lit signs on your behalf" flow: the action holds a key and can sign whenever its code decides to. This one is the first where **you are a required co-signer**. The signing key is real **threshold ECDSA** (the [DKLs23](https://dkls.info/) protocol, via Silence Laboratories' Trail-of-Bits-audited WASM), split **2-of-3** by a distributed key generation: Lit holds one share, you hold a **hot** share (this machine) and a **cold** recovery share (offline). Any two shares can sign. **Lit literally cannot produce a signature without you co-signing, and the full private key is never assembled anywhere** — not even momentarily inside the action. The output is a standard secp256k1 ECDSA signature any EVM contract verifies with plain `ecrecover`.
+
+Because you hold 2 of the 3 shares, the cold share is a self-custody escape hatch: if Lit ever disappears you sign with **hot + cold entirely client-side** (no Lit, no network), so funds never freeze. The action is stateless across calls — each round it seals its MPC session with `Lit.Actions.Encrypt({ pkpId })` and the user relays that opaque blob back the next round; neither party's share alone can sign.
+
+```javascript
+// Abridged: one stateless MPC round of the Lit-side signing party (party 1).
+// The action holds ONE share and cannot sign without the user's rounds.
+// js_params: { op, round, sessionId, pkpId, encState, encKeyshare, inMsgs, messageHash, ... }
+async function main({ round, sessionId, pkpId, encState, encKeyshare, inMsgs, messageHash }) {
+  await ensureWasm(); // DKLs23 threshold-ECDSA, run in WASM inside the node
+
+  // The node is stateless, so the action's own session/keyshare is sealed to the
+  // PKP and relayed back by the user each round — never reconstructed server-side.
+  const session = round === 1
+    ? new SignSession(Keyshare.fromBytes(await unseal(pkpId, encKeyshare, "keyshare")), "m")
+    : SignSession.fromBytes(await unseal(pkpId, encState, "sign-state", round, { sessionId, messageHash }));
+
+  // Advance one round. The final round signs the digest committed in round 1 —
+  // and ONLY that digest, so a replayed presignature can't reuse the nonce.
+  const out = round < 4 ? session.handleMessages(decode(inMsgs))
+                        : [session.lastMessage(b64ToU8(messageHash))];
+
+  // Reseal the advanced session and hand it back to the user for the next round.
+  return { outMsgs: encode(out), encState: await seal(pkpId, session.toBytes(), "sign-state", round + 1, { sessionId, messageHash }) };
+}
+```
+
+<Info>
+  The full runnable example — the stateless `mpcSigner` action, a user-side client + local share store, `MpcVault.sol` (verifies the MPC signature with plain `ecrecover`), `setup` / `keygen` / `deploy` / `sign` scripts covering the interactive DKG and both signing quorums (hot + Lit, and the no-Lit hot + cold recovery path) — lives at [`examples/mpc-signing-ecdsa/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/mpc-signing-ecdsa) in the repo. Verified end-to-end on Base Sepolia; `npm run keygen -- --basic` does a simpler 2-of-2 (Lit + hot, no recovery).
+</Info>
+
+---
+
+## 17. Sign a Solana Transaction (Keyless ed25519 Wallet)
 
 Every other signing example on this page targets an EVM chain, where the action's identity key is already a secp256k1 EVM key. **Solana uses ed25519**, so this example shows the small bridge: that identity key is a 32-byte secp256k1 private key, and 32 bytes is exactly an ed25519 *seed* — which is what Solana's `Keypair.fromSeed` consumes. So you can derive a Solana keypair from the action's CID-bound identity, giving a **keyless Solana wallet that only this exact code can ever operate** — no PKP to mint, no key to hold.
 
