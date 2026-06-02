@@ -141,22 +141,21 @@ they sign with hot + cold entirely client-side** — funds never freeze.
 `keygen --basic` produces a plain 2-of-2 (no cold share) for users handling
 backups another way.
 
-## The one real constraint: response payload size
+## Response payload size
 
 The action is stateless, so each round it returns its (encrypted) session to the
-user in the **response**, and the default response cap is **100 KB**
-(`docs/lit-actions/limits.mdx`). Measured blob sizes (raw / gzipped):
+user in the **response**. Measured blob sizes (raw / gzipped):
 
-| Phase | raw | gzip | vs 100 KB |
-| --- | --- | --- | --- |
-| DKG, all rounds | ≤122 KB | ≤79 KB | ✅ fits gzipped |
-| Long-lived keyshare (stored between sessions) | 121 KB | 78 KB | ✅ fits gzipped |
-| Heavy signing rounds (keyshare + OT/MtA precompute) | 214 KB | 138 KB | ❌ over, even gzipped |
+| Phase | raw | gzip |
+| --- | --- | --- |
+| DKG, all rounds | ≤122 KB | ≤79 KB |
+| Long-lived keyshare (stored between sessions) | 121 KB | 78 KB |
+| Heavy signing rounds (keyshare + OT/MtA precompute) | 214 KB | 138 KB |
 
-Resolution: every relayed blob is gzipped before `Lit.Actions.Encrypt` (the
-runtime has `CompressionStream`), and the example needs its account's response
-limit raised (~256 KB; prod is raised to 16 MB). Presigning would remove the
-heavy online rounds structurally.
+Every relayed blob is gzipped before `Lit.Actions.Encrypt` (the runtime has
+`CompressionStream`), and all of it fits comfortably under the 1 MB default
+response cap (`docs/lit-actions/limits.mdx`). Presigning would shrink the heavy
+online rounds further.
 
 ## File layout
 
@@ -239,5 +238,5 @@ binding, and on-chain verification are identical across both.
 - [DKLs23 overview](https://dkls.info/)
 - [`@silencelaboratories/ecdsa-tss`](https://www.npmjs.com/package/@silencelaboratories/ecdsa-tss) — pure-JS Lindell17 2-of-2. Considered, rejected (2-of-2 only).
 - [`lit-frost`](https://github.com/LIT-Protocol/lit-frost) / [`cait-sith`](https://github.com/LIT-Protocol/cait-sith) — Lit's first-party threshold crates (future work).
-- Limits: `docs/lit-actions/limits.mdx` — 16 MB code+params, 100 KB response (the constraint above), 64 MB memory, 15 min, 10 sig requests/action.
+- Limits: `docs/lit-actions/limits.mdx` — 16 MB code+params, 1 MB response, 64 MB memory, 15 min, 10 sig requests/action.
 - WASM in actions: `docs/lit-actions/wasm.mdx`. Standalone demo: [`examples/mpc-signing-ecdsa/wasm-demo/`](../examples/mpc-signing-ecdsa/wasm-demo/).

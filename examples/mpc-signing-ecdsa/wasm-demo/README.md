@@ -25,9 +25,9 @@ you can use as a template for getting any WASM module working in an action.
    **EVM address** — i.e. plain `ecrecover` accepts it.
 
 `measure.ts` — measures the relayed session-blob size per round, raw and
-gzipped, against the action's 100 KB response-payload limit. This is how we
-found that signing rounds 1–2 (~138 KB gzipped) exceed the default cap while
-everything else fits.
+gzipped, against the action's response-payload limit. The largest are the heavy
+signing rounds (~138 KB gzipped); everything fits comfortably under the 1 MB
+default cap.
 
 ## Run it
 

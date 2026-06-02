@@ -1,5 +1,5 @@
 // Measure the relayed session-blob size at every round, raw and gzipped,
-// against the 100KB action response limit.
+// against the 1 MB action response limit.
 import { initSync, KeygenSession, SignSession, Message } from "./dkls-wasm-ll-web.js";
 const rawWasm = await Deno.readFile(new URL("./dkls-wasm-ll-web_bg.wasm", import.meta.url));
 initSync(rawWasm);
@@ -15,7 +15,7 @@ async function gz(b: Uint8Array): Promise<number> {
 const k = (n: number) => (n / 1024).toFixed(1) + "KB";
 async function report(label: string, b: Uint8Array) {
   const g = await gz(b);
-  const flag = g > 100 * 1024 ? "  ⚠️ >100KB even gzipped" : g <= 100 * 1024 && b.length > 100 * 1024 ? "  ✓ fits after gzip" : "";
+  const flag = g > 1024 * 1024 ? "  ⚠️ >1MB even gzipped" : "";
   console.log(`  ${label.padEnd(22)} raw ${k(b.length).padStart(8)}  gzip ${k(g).padStart(8)}${flag}`);
 }
 

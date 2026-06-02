@@ -74,10 +74,10 @@ initSync(Uint8Array.from(atob(WASM_B64), (c) => c.charCodeAt(0)));
 - **It's Deno, not Node.** You get web APIs (`fetch`, streams, `WebAssembly`,
   `crypto`), not Node built-ins. Use the **web** build of a wasm-bindgen package
   (e.g. `…-web`), not the `…-node` build.
-- **Size and response limits.** A big module plus its working state can bump into
+- **Size and response limits.** A big module plus its working state count against
   action size and the response-payload cap — see [Limits](./limits). The
-  mpc-signing-ecdsa example relays large sealed blobs each round and documents the
-  limit it needs raised.
+  mpc-signing-ecdsa example relays a large sealed session each round, well within
+  the default response cap.
 - **Stateless across calls.** An action holds no memory between invocations, so a
   wasm session that must span multiple calls has to be serialized out and passed
   back in (mpc-signing-ecdsa seals its session with `Lit.Actions.Encrypt` and relays

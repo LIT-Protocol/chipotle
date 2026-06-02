@@ -722,10 +722,6 @@ Every other example on this page is a "Lit signs on your behalf" flow: the actio
 
 Because you hold 2 of the 3 shares, the cold share is a self-custody escape hatch: if Lit ever disappears you sign with **hot + cold entirely client-side** (no Lit, no network), so funds never freeze. The action is stateless across calls — each round it seals its MPC session with `Lit.Actions.Encrypt({ pkpId })` and the user relays that opaque blob back the next round; neither party's share alone can sign.
 
-<Note>
-  This needs a raised response-payload limit. The action returns its sealed session in the response each round, and the heavy signing rounds exceed the default 100 KB cap (see [Limits](./limits)) — contact Lit to raise it before signing. Keygen and most rounds fit under the default.
-</Note>
-
 ```javascript
 // Abridged: one stateless MPC round of the Lit-side signing party (party 1).
 // The action holds ONE share and cannot sign without the user's rounds.

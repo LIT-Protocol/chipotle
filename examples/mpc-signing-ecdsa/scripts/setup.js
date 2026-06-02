@@ -21,12 +21,6 @@
 // Re-running does a fresh setup top-to-bottom; previously-minted PKP / group /
 // usage key become orphaned. Re-running setup invalidates any existing
 // keyshare (it was sealed to the old PKP), so re-run keygen afterwards.
-//
-// IMPORTANT — response size: the MPC relay returns the action's sealed session
-// each round, and a few rounds exceed the default 100 KB response-payload
-// limit (see docs/lit-actions/limits.mdx and the README). This example needs
-// that limit raised (~256 KB) for your account; there is no API for it — reach
-// out to Lit (support@litprotocol.com / Discord) to raise it.
 
 const fs = require("fs");
 const path = require("path");

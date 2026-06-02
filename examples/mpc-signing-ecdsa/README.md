@@ -110,20 +110,6 @@ strictly more than a per-chain Safe gives you.
   action could not otherwise detect it. DKLs's own per-round commitments catch
   fabricated protocol messages.
 
-## ⚠️ Prerequisite: a raised response-payload limit
-
-The action returns its sealed session to the user **in the response** each round
-(it has nowhere else to put it). A few rounds — notably signing rounds 2–3,
-which carry the OT precomputation — exceed the **default 100 KB response limit**
-(`docs/lit-actions/limits.mdx`); even gzipped they're ~140 KB, ~190 KB after the
-base64+encryption the seal requires.
-
-There is no API to raise this — **contact Lit (support@litprotocol.com / Discord)
-to raise your account's response-payload limit to ~256 KB** before running the
-sign step. Keygen and most rounds fit under the default; the heavy signing
-rounds do not. (A future presigning variant moves that precompute out of the
-online path and removes the requirement.)
-
 ## How it works
 
 Both parties run the same DKLs23 library — the action in WASM inside the node,
@@ -269,9 +255,8 @@ becomes unavailable. Use it only if you're handling backups some other way.
   machine. (With `--basic` 2-of-2 there is no cold share, so back up the hot store
   some other way — lose it and the key is gone.)
 - **Presigning.** DKLs23 supports a presign phase that moves the heavy OT
-  precompute out of the online signing path — shrinking the relayed blobs (and
-  removing the raised-response-limit requirement) and making online signing
-  close to non-interactive.
+  precompute out of the online signing path — shrinking the relayed blobs and
+  making online signing close to non-interactive.
 - **Seal binding.** The action's keyshare is sealed to the group **PKP**, so it
   survives action edits as long as the PKP + group are unchanged (verified). If
   you want the seal bound to a specific action's bytes, restrict the group's
@@ -284,10 +269,10 @@ Run against the live Lit network and Base Sepolia:
 - `setup` — PKP, group, scoped usage key, action registration ✓
 - **2-of-3** `keygen` (the default) — the multi-party 5-round DKG, exercising the
   action's jsDelivr import + runtime wasm fetch + `initSync`,
-  `Lit.Actions.Encrypt`/`Decrypt`, `CompressionStream` gzip, the per-round
-  encrypted-session relay, and the (raised) response limit. **Reliable on the live
-  network** after the node-side `js_params`-caching fix: **7/7 first-attempt on
-  prod**, plus offline 30/30 real client / 64/64 concurrent ✓
+  `Lit.Actions.Encrypt`/`Decrypt`, `CompressionStream` gzip, and the per-round
+  encrypted-session relay. **Reliable on the live network** after the node-side
+  `js_params`-caching fix: **7/7 first-attempt on prod**, plus offline 30/30 real
+  client / 64/64 concurrent ✓
 - **2-of-3** `sign` (hot + Lit) — the 4-round signing submitted a real on-chain
   `MpcVault.exec` on Base Sepolia, verified via `ecrecover`; the vault paid out
   and bumped its nonce ✓
@@ -299,14 +284,12 @@ Run against the live Lit network and Base Sepolia:
   presignature into round 4 with a *different* `messageHash` is refused inside the
   action ("nonce-reuse guard"), while the committed hash signs normally ✓
 
-Requires the response-payload limit raised on your account (see the prerequisite
-above) — production has been raised to 16 MB. The Deno scripts in
-[`wasm-demo/`](./wasm-demo/) are a standalone, offline demonstration of the WASM +
-relay mechanics.
+The Deno scripts in [`wasm-demo/`](./wasm-demo/) are a standalone, offline
+demonstration of the WASM + relay mechanics.
 
 ## References
 
 - [DKLs23](https://dkls.info/) — the threshold-ECDSA protocol.
 - [`@silencelaboratories/dkls-wasm-ll-web`](https://www.npmjs.com/package/@silencelaboratories/dkls-wasm-ll-web) / [`-node`](https://www.npmjs.com/package/@silencelaboratories/dkls-wasm-ll-node) — the WASM library (audited by Trail of Bits, Feb 2024).
-- `docs/lit-actions/limits.mdx` — action limits, incl. the 100 KB response cap.
+- `docs/lit-actions/limits.mdx` — action limits, incl. the response-payload cap.
 - `docs/lit-actions/imports.mdx` — how the action imports the library from jsDelivr.
