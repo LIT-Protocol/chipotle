@@ -58,6 +58,12 @@ on:
   push:
     branches: [main, next]
   workflow_dispatch:
+    inputs:
+      phala_cvm_name:
+        description: "Target Phala CVM name or id to deploy to (e.g. chipotle-next-rep-xxxxx). Leave blank to use the branch default. Use this to deploy onto a freshly-provisioned replica on a new Phala node during a zero-downtime migration."
+        required: false
+        type: string
+        default: ""
 
 jobs:
   validate-secrets:
@@ -101,17 +107,19 @@ jobs:
         id: set
         run: |
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            echo "phala_app_name=chipotle-dev" >> "$GITHUB_OUTPUT"
+            DEFAULT_APP_NAME="chipotle-dev"
             echo "instance_type=tdx.large" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-dev" >> "$GITHUB_OUTPUT"
             echo "node_config=NodeConfig.main.toml" >> "$GITHUB_OUTPUT"
             DOMAIN="test.chipotle.litprotocol.com"
           elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
-            # Targets the prod2 instance provisioned via `phala instances add`
-            # during the prod6→prod2 migration. Shares the same app_id
-            # (0x969a8c14...) and derived keys as previous chipotle-next
-            # instances.
-            echo "phala_app_name=chipotle-next-rep-sa6xj" >> "$GITHUB_OUTPUT"
+            # Default targets the current prod replica provisioned via
+            # `phala instances add`. Shares the same app_id (0x969a8c14...)
+            # and derived keys as previous chipotle-next instances. To roll a
+            # new replica onto a different Phala node (zero-downtime upgrade),
+            # supply the `phala_cvm_name` input on a manual run instead of
+            # editing this default.
+            DEFAULT_APP_NAME="chipotle-next-rep-sa6xj"
             echo "instance_type=tdx.small" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-next" >> "$GITHUB_OUTPUT"
             echo "node_config=NodeConfig.next.toml" >> "$GITHUB_OUTPUT"
@@ -120,6 +128,17 @@ jobs:
             echo "Unsupported branch for deployment"
             exit 1
           fi
+
+          # A manual workflow_dispatch run may override the target CVM via the
+          # phala_cvm_name input. This is empty on push events, so automated
+          # deploys keep using the branch default selected above.
+          PHALA_APP_NAME="${{ inputs.phala_cvm_name }}"
+          if [ -z "$PHALA_APP_NAME" ]; then
+            PHALA_APP_NAME="$DEFAULT_APP_NAME"
+          fi
+          echo "Deploying to Phala CVM: ${PHALA_APP_NAME}"
+          echo "phala_app_name=${PHALA_APP_NAME}" >> "$GITHUB_OUTPUT"
+
           echo "domain=${DOMAIN}" >> "$GITHUB_OUTPUT"
           echo "base_url=https://${DOMAIN}" >> "$GITHUB_OUTPUT"
           echo "api_root_url=https://${DOMAIN}/core/v1" >> "$GITHUB_OUTPUT"

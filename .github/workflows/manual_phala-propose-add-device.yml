@@ -1,0 +1,88 @@
+# Propose an addDevice allowlisting to a Safe-owned DstackApp (AppAuth) contract.
+#
+# Use this for Safe-owned apps (e.g. chipotle-prod), where the simple
+# "Phala Add Device (manual)" workflow / `phala allow-devices add` fail with
+# "Sender ... is not the owner of contract ...": addDevice is onlyOwner and the
+# owner is a Safe multisig. This workflow proposes the addDevice call to the
+# Safe Transaction Service so signers can approve + execute it in the Safe UI.
+#
+# For single-key (EOA) DstackApp owners (chipotle-next / chipotle-dev), use
+# "Phala Add Device (manual)" instead — it signs the addDevice tx directly.
+#
+# After this workflow runs, open the printed Safe UI queue link, have signers
+# confirm, and Execute once the threshold is met. Then confirm with:
+#   phala allow-devices list <app_id>
+#
+# Required secrets:
+#   SAFE_PROPOSER_PRIVATE_KEY - EOA key registered as a Safe owner or delegate
+#   BASE_CHAIN_RPC            - Base mainnet RPC URL (optional; falls back to public)
+#
+# Required vars (defaults for chipotle-prod when the inputs are left blank):
+#   SAFE_ADDRESS_CHIPOTLE_PROD     - Safe multisig address (the AppAuth owner)
+#   APP_AUTH_ADDRESS_CHIPOTLE_PROD - AppAuth (DstackApp) contract address (= app_id)
+
+name: Phala Propose Add Device via Safe (manual)
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      device_id:
+        description: "Device ID to allowlist (0x... bytes32), from `phala instances add --prepare-only`"
+        required: true
+        type: string
+      app_auth:
+        description: "AppAuth (DstackApp) contract address. Leave blank to use the chipotle-prod default (APP_AUTH_ADDRESS_CHIPOTLE_PROD)."
+        required: false
+        type: string
+        default: ""
+      safe:
+        description: "Safe multisig address that owns the AppAuth. Leave blank to use the chipotle-prod default (SAFE_ADDRESS_CHIPOTLE_PROD)."
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  propose-add-device:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install contract dependencies
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npm ci
+
+      - name: Compile contracts
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npx hardhat compile
+
+      - name: Propose addDevice to Safe
+        working-directory: lit-api-server/blockchain/lit_node_express
+        env:
+          PROPOSER_PRIVATE_KEY: ${{ secrets.SAFE_PROPOSER_PRIVATE_KEY }}
+          BASE_RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
+        run: |
+          APP_AUTH="${{ inputs.app_auth }}"
+          if [ -z "$APP_AUTH" ]; then
+            APP_AUTH="${{ vars.APP_AUTH_ADDRESS_CHIPOTLE_PROD }}"
+          fi
+          SAFE_ADDR="${{ inputs.safe }}"
+          if [ -z "$SAFE_ADDR" ]; then
+            SAFE_ADDR="${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}"
+          fi
+          if [ -z "$APP_AUTH" ] || [ -z "$SAFE_ADDR" ]; then
+            echo "::error::app_auth and safe must be provided (no chipotle-prod default var is set)"
+            exit 1
+          fi
+          echo "Proposing addDevice(${{ inputs.device_id }}) on AppAuth $APP_AUTH via Safe $SAFE_ADDR"
+          npx hardhat propose-add-device \
+            --network base \
+            --safe "$SAFE_ADDR" \
+            --app-auth "$APP_AUTH" \
+            --device-id "${{ inputs.device_id }}"
