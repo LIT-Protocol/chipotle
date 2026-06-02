@@ -187,13 +187,18 @@ impl CachedActionCode {
                 .sum::<usize>()
     }
 
-    fn to_executable_code(&self, js_func_params: &str) -> String {
+    // NB: js_params are NOT baked in here — they are injected separately as the
+    // `globalThis.__litJsParams` global (see `inject_params_globals`). Keeping
+    // them out makes this source stable per bundled action, so the
+    // eval-context code cache keys/compiles correctly across requests instead
+    // of crossing one request's params into another's execution.
+    fn to_executable_code(&self) -> String {
         format!(
             "
         {code}
         ;
         (async () => {{
-        const params = {js_func_params} ;
+        const params = globalThis.__litJsParams;
         const data = await main(params);
         if (typeof data !== \"undefined\") {{
           LitActions.setResponse( {{ response: data }} );
@@ -537,8 +542,11 @@ fn execute_patch_deno(worker: &mut MainWorker) -> Result<()> {
     Ok(())
 }
 
-/// Inject caller-supplied globals via `Params.js`. Reserved for future use:
-/// `execute_js` always passes `None` today, so this is normally a no-op.
+/// Inject the caller-supplied js_params as a single global, `__litJsParams`,
+/// which the per-execution wrapper (see `to_executable_code`) reads and passes
+/// to `main(params)`. Injected via `execute_script` so it is NOT part of the
+/// source compiled through the eval-context code cache. No-op when params are
+/// absent.
 fn inject_params_globals(
     worker: &mut MainWorker,
     globals_to_inject: &Option<serde_json::Value>,
@@ -554,23 +562,22 @@ fn inject_params_globals(
         .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
         .is_some_and(|v| v == "true")
     {
-        debug!("Injecting params as globals: **PRIVACY MODE**");
+        debug!("Injecting js_params global: **PRIVACY MODE**");
     } else {
-        debug!("Injecting params as globals: {params:?}");
+        debug!("Injecting js_params global: {params:?}");
     }
 
-    let _ = params
-        .as_object()
-        .context("Could not convert params to map")?;
-
+    // Bind the whole params object to a single internal global. JSON is a
+    // valid JS expression, so this is a literal assignment (no parsing of
+    // untrusted code — `params` came from serde_json, not the caller's source).
     let code = formatdoc! {r#"
         "use strict";
-        Object.assign(globalThis, {params});
+        globalThis.__litJsParams = {params};
     "#};
 
     worker
         .execute_script("Params.js", code.into())
-        .context("Error injecting params as globals")?;
+        .context("Error injecting js_params global")?;
 
     Ok(())
 }
@@ -733,10 +740,16 @@ async fn execute_with_worker_inner(
     // PatchDeno.js must run AFTER LitNamespace.js (which the caller already
     // injected) to preserve the original bootstrap order.
     execute_patch_deno(&mut worker)?;
-    // Reserved hook: today's call sites always pass globals=None; preserved
-    // here so re-enabling globals injection drops in at the historical spot
-    // (between PatchDeno.js and op-state wiring).
-    inject_params_globals(&mut worker, &None, &http_headers)?;
+    // Inject the caller's js_params as a single global (`__litJsParams`) here,
+    // via execute_script — which deliberately bypasses the eval-context code
+    // cache. This keeps js_params OUT of the source that flows through
+    // `op_eval_context`/`SharedV8CodeCache`, so the cached/compiled form is the
+    // stable, param-free bundled action code. Baking params into that source
+    // (the previous behavior) was unsafe: Deno's `op_eval_context` computes the
+    // same `source_hash` for different sources of equal length, so the code
+    // cache returned a *different* request's compiled bytecode — crossing
+    // js_params between executions (see CPL / the mpc-signing investigation).
+    inject_params_globals(&mut worker, &js_params, &http_headers)?;
 
     // Check the action code cache early so we can skip prepare_action_code
     // on cache hit (the real performance win). We always use CdnModuleLoader
@@ -792,13 +805,13 @@ async fn execute_with_worker_inner(
     )
     .await?;
 
-    let js_params = js_params.as_ref().unwrap_or_default();
-    let js_func_params = js_params.to_string();
+    // js_params were already injected as the `__litJsParams` global (see
+    // `inject_params_globals` above); they are intentionally NOT part of the
+    // cached/compiled source below.
 
-    // Params are injected per-execution and MUST NOT be part of the cached
-    // form: they change between invocations while the bundled JS stays the
-    // same. On cache hit we reuse the prepared form; on miss we prepare it
-    // (bundle CDN deps, snapshot loaded modules, cache the result).
+    // The bundled JS is cached and stable across invocations. On cache hit we
+    // reuse the prepared form; on miss we prepare it (bundle CDN deps, snapshot
+    // loaded modules, cache the result).
     let cached_code = if let Some(cached) = cached_code {
         cached
     } else {
@@ -813,7 +826,7 @@ async fn execute_with_worker_inner(
             .await?
     };
     record_loaded_modules(&loaded_modules, &cached_code);
-    let user_code = cached_code.to_executable_code(&js_func_params);
+    let user_code = cached_code.to_executable_code();
 
     // Route user code through op_eval_context (via the __litEvalCached helper
     // baked into 99_patches.js) so Deno's `eval_context_code_cache_cbs` —
