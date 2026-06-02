@@ -5,7 +5,7 @@ use anyhow::{Result, bail};
 use indoc::{formatdoc, indoc};
 use lit_actions_server::proto::execute_js_request::AesEncryptResponse;
 use lit_actions_server::worker_pool::PoolHealth;
-use lit_actions_server::{TestServer, init_v8, proto::*, unix};
+use lit_actions_server::{TestServer, get_lit_action_ipfs_id, init_v8, proto::*, unix};
 use pretty_assertions::assert_eq;
 use rstest::*;
 use temp_file::TempFile;
@@ -416,6 +416,95 @@ async fn js_params(mut client: TestClient) {
     // }
 }
 
+/// End-to-end proof of the code-cache fix on a *large* action — one whose
+/// bundled source is well past V8's `String::kMaxHashCalcLength` (16383), the
+/// regime where V8's string identity hash (and therefore Deno's code-cache
+/// key) degenerates to a length-only hash.
+///
+/// The same action is executed twice with *different but equal-length*
+/// `js_params`, asserting both halves of the fix:
+///   1. **caching worked** — the second run is served from the V8 code cache
+///      (compiled bytecode reused), so CPL-264 is genuinely active here;
+///   2. **params were NOT cached** — each run sees its own params, even though
+///      the two param payloads are byte-for-byte the same length. Before the
+///      fix baked params into the cached source, equal-length payloads produced
+///      equal-length sources that collided on the length-based hash, handing
+///      the second run the first run's params.
+#[tokio::test]
+async fn large_action_caches_code_but_not_params() {
+    let server = TestServer::start();
+    let v8_code_cache = server.v8_code_cache.clone();
+    let mut client = TestClient::new(server.socket_file);
+
+    // ~20 KB of payload, referenced from main() so a bundler/minifier can't
+    // drop it, pushes the bundled source comfortably past the 16383-char cutoff.
+    let padding = "x".repeat(20 * 1024);
+    let code = format!(
+        r#"
+        const PADDING = "{padding}";
+        async function main({{ token }}) {{
+            if (PADDING.length === 0) throw new Error("unreachable");
+            console.log(token);
+        }}
+        "#
+    );
+
+    // Equal-length, different-value tokens => equal-length JSON param payloads.
+    let token_a = "A".repeat(16);
+    let token_b = "B".repeat(16);
+    let params_a = format!(r#"{{"token":"{token_a}"}}"#);
+    let params_b = format!(r#"{{"token":"{token_b}"}}"#);
+    assert_eq!(
+        params_a.len(),
+        params_b.len(),
+        "the two param payloads must be equal length to exercise the collision"
+    );
+
+    // First run: misses the V8 code cache, compiles, and stores the bytecode.
+    client
+        .respond_with(PrintResponse {})
+        .execute_js(ExecutionRequest {
+            code: code.clone(),
+            js_params: Some(params_a.into_bytes()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        client.received::<PrintRequest>().message,
+        format!("{token_a}\n")
+    );
+    assert!(client.received::<ExecutionResult>().success);
+
+    // Second run: identical code => must HIT the V8 code cache; different
+    // params => must still observe ITS OWN params.
+    let hits_before = v8_code_cache.hits();
+    client
+        .respond_with(PrintResponse {})
+        .execute_js(ExecutionRequest {
+            code: code.clone(),
+            js_params: Some(params_b.into_bytes()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        client.received::<PrintRequest>().message,
+        format!("{token_b}\n"),
+        "second execution must see its own params, not the first run's"
+    );
+    assert!(client.received::<ExecutionResult>().success);
+
+    // Caching worked: the second run reused compiled bytecode.
+    assert!(
+        v8_code_cache.hits() > hits_before,
+        "second execution of the same action must reuse compiled bytecode \
+         (V8 code cache hit); hits before={}, after={}",
+        hits_before,
+        v8_code_cache.hits(),
+    );
+}
+
 #[rstest]
 #[tokio::test]
 async fn set_response(mut client: TestClient) {
@@ -576,24 +665,29 @@ async fn async_await(mut client: TestClient) {
 #[rstest]
 #[tokio::test]
 async fn reference_error(mut client: TestClient) {
-    let res = client
-        .execute_js("async function main() { nonexisting_function() }")
-        .await;
+    let code = "async function main() { nonexisting_function() }";
+    let res = client.execute_js(code).await;
 
     // User code now runs through `__litEvalCached` (op_eval_context) so V8's
     // script code cache is reachable for the bundled action (CPL-264). Side
     // effects on error output: the script name is the URL specifier used by
-    // op_eval_context, and two wrapper frames appear at the tail.
+    // op_eval_context, and two wrapper frames appear at the tail. The specifier
+    // is content-derived (the action's IPFS id) so distinct actions can't
+    // collide on V8's length-based code-cache hash.
+    let script = format!(
+        "file:///user_provided_script_{}.js",
+        get_lit_action_ipfs_id(code)
+    );
     assert_eq!(
         res.unwrap_err().to_string(),
-        indoc! {r#"
+        formatdoc! {r#"
             Uncaught (in promise) ReferenceError: nonexisting_function is not defined
-                at main (file:///user_provided_script.js:2:33)
-                at file:///user_provided_script.js:6:28
-                at file:///user_provided_script.js:10:11
-                at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:52:21)
+                at main ({script}:2:33)
+                at {script}:6:28
+                at {script}:10:11
+                at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:56:21)
                 at <user_provided_script>:1:1
-        "#}
+        "#, script = script}
         .trim()
     );
     assert_eq!(client.received::<ExecutionResult>().success, false);
@@ -611,17 +705,21 @@ async fn throw_error(mut client: TestClient) {
         let res = client.execute_js(code).await;
 
         // See `reference_error` for why the stack format differs from
-        // pre-CPL-264 output.
+        // pre-CPL-264 output and why the specifier is content-derived.
+        let script = format!(
+            "file:///user_provided_script_{}.js",
+            get_lit_action_ipfs_id(code)
+        );
         assert_eq!(
             res.unwrap_err().to_string(),
-            indoc! {r#"
+            formatdoc! {r#"
                 Uncaught (in promise) Error: boom
-                    at main (file:///user_provided_script.js:3:7)
-                    at file:///user_provided_script.js:9:28
-                    at file:///user_provided_script.js:13:11
-                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:52:21)
+                    at main ({script}:3:7)
+                    at {script}:9:28
+                    at {script}:13:11
+                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:56:21)
                     at <user_provided_script>:1:1
-            "#}
+            "#, script = script}
             .trim(),
         );
         assert_eq!(client.received::<ExecutionResult>().success, false);
@@ -635,16 +733,20 @@ async fn throw_error(mut client: TestClient) {
         "#};
         let res = client.execute_js(code).await;
 
+        let script = format!(
+            "file:///user_provided_script_{}.js",
+            get_lit_action_ipfs_id(code)
+        );
         assert_eq!(
             res.unwrap_err().to_string(),
-            indoc! {r#"
+            formatdoc! {r#"
                 Uncaught (in promise) Error: boom
-                    at main (file:///user_provided_script.js:3:11)
-                    at file:///user_provided_script.js:9:28
-                    at file:///user_provided_script.js:13:11
-                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:52:21)
+                    at main ({script}:3:11)
+                    at {script}:9:28
+                    at {script}:13:11
+                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:56:21)
                     at <user_provided_script>:1:1
-            "#}
+            "#, script = script}
             .trim(),
         );
         assert_eq!(client.received::<ExecutionResult>().success, false);
