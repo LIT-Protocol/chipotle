@@ -11,9 +11,8 @@ issuers won't touch them. This example is the missing middle: **private by
 default, compliant by construction.**
 
 > **Demo-grade.** Runs on Base Sepolia with a mock USDC. The cryptography and
-> trust model are real, but several pieces are simplified for clarity (noted
-> throughout and listed under "What's demo-grade"). Production hardening is in
-> the plan.
+> trust model are real, but several pieces are simplified for clarity — each is
+> listed under "What's demo-grade" below, with its production hardening.
 
 ## The idea in one picture
 
@@ -51,9 +50,8 @@ privacy with no circuit team.**
 
 ## Compliance model — identity at the edges, privacy in the middle
 
-- **OFAC screening runs on every operation**, on every recipient — the same
-  on-chain Chainalysis lookup as `compliance-transfer-gate`, baked in and
-  non-optional.
+- **OFAC screening runs on every operation**, on every recipient — an on-chain
+  Chainalysis sanctions-oracle lookup, baked in and non-optional.
 - **KYC runs only at the dollar edge** (`mint`/`redeem`), never on private
   transfers. You verify once when dollars enter; your transfers stay private.
   Same as real money: you KYC to open a bank account, not for each payment.
@@ -106,7 +104,7 @@ npm run demo
 
 ## Trust model
 
-Two cryptographic identities, mirroring `compliance-transfer-gate`:
+Two cryptographic identities:
 
 - **The ledger action's CID-derived signer** is the contract's only authority.
   It comes from `Lit.Actions.getLitActionPrivateKey()`, derived from the
@@ -123,13 +121,14 @@ caller: `ALLOWED_SCREENING_HOST` (Alchemy Ethereum-mainnet, for OFAC) and
 commitment/nullifier state). Pinning the contract RPC is load-bearing — a
 caller-supplied RPC could otherwise feed the action fabricated "this note
 exists and is unspent" answers and get a redeem signed against a note that was
-never minted. See `compliance-transfer-gate`'s README for why a caller-supplied
-chain id would be theater.
+never minted. Pinning by *hostname* (rather than trusting a caller-supplied
+chain id) is what makes this real: a caller could pair a malicious RPC with a
+matching fake chain id, so the chain id proves nothing — the TLS hostname is
+the anchor.
 
 ## What's demo-grade
 
-Each of these is a deliberate simplification with a known production path
-(detailed in [the plan](../../plans/private-stablecoin.md)):
+Each of these is a deliberate simplification with a known production path:
 
 - **No Merkle membership / ZK.** The action validates inputs by reading the
   contract's public `commitments`/`nullifiers` mappings (over the *pinned* RPC).
@@ -148,7 +147,7 @@ Each of these is a deliberate simplification with a known production path
   is enforced in-action). Production pins the exact authority set on-chain or
   bakes it into the action's CID.
 - **The Lit group uses a wildcard action allowlist** (`cid_hashes_permitted:
-  ["0"]`, inherited from `compliance-transfer-gate`). Anyone holding the scoped
+  ["0"]`, i.e. any action may run in the group). Anyone holding the scoped
   usage key can run a custom action that calls `Lit.Actions.Decrypt` with the
   ledger PKP, bypassing `disclose.js`. Production pins only the ledger + disclose
   CIDs so only those actions can use the PKP. This is the main remaining gap
@@ -156,17 +155,17 @@ Each of these is a deliberate simplification with a known production path
 - **KYC attestation is an EIP-191 signed message** verified against an address
   in `js_params`. Production pins the provider's key via a hostname-anchored
   JWKS endpoint.
-- **Single OFAC provider.** Production fans out to 2–3 (multi-source consensus,
-  see `../multi-source-price-oracle`).
+- **Single OFAC provider.** Production fans out to 2–3 independent providers
+  and signs only when they agree.
 - **Disclosure returns plaintext over the response channel.** Production
   re-encrypts to the regulator's pubkey and logs the disclosure event
   (warrantHash, timestamp) on-chain for accountability.
 - **MockUSDC** instead of canonical USDC; **single signer** instead of an
   oracle-rotation setter behind a multisig.
 
-## Why this is the sales demo
+## Why this matters
 
-It's the one artifact that closes a regulated buyer: a live system showing
-private transfers *and* a warrant decrypting exactly one of them while the rest
-stay dark — the capability no other private stablecoin can demonstrate. See the
-"Sales collateral" section of the plan.
+It's a live system showing private transfers *and* a warrant decrypting exactly
+one of them while the rest stay dark — the combination of confidentiality and
+accountable, selective disclosure that a transparent stablecoin can't offer and
+an uncompliant shielded pool won't.
