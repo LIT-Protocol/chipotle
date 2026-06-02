@@ -40,6 +40,18 @@ cargo +1.91 run
 
 Run Postgres locally and set the environment above before starting the server. Migrations run on boot.
 
+## Agent-consumable setup docs
+
+`SKILL.md` is a handoff file for agents that need to help users set up triggers on the deployed `lit-triggers` instance. It covers browser-based agent authorization, trigger CRUD, webhook URLs, schedule config, chain-event config, run inspection, and cleanup.
+
+It is exposed publicly at `https://triggers.litprotocol.com/SKILL.md` and linked from the app as **Give this to your agent to get started**.
+
+Give a setup agent:
+
+- `https://triggers.litprotocol.com/SKILL.md`
+- the trigger goal/action the user wants
+- a scoped Chipotle usage API key, or have the user mint one in the browser UI
+
 ## Railway deployment
 
 The service owns its Railway config at `lit-triggers/railway.json`. In Railway, set this service's root directory to `lit-triggers` so multiple Railway services/projects can coexist in the monorepo without sharing one root config.
@@ -62,7 +74,7 @@ USAGE_KEY_ENCRYPTION_KEY='<base64-32-byte-key>'
 ROCKET_SECRET_KEY='<base64-32-byte-key>'
 RESEND_API_KEY='<resend-api-key>'
 MAIL_FROM='Lit Triggers <triggers@example.com>'
-PUBLIC_BASE_URL='https://<your-railway-domain>'
+PUBLIC_BASE_URL='https://triggers.litprotocol.com'
 RUST_LOG='info,lit_triggers=info'
 CHIPOTLE_API_BASE_URL='https://api.chipotle.litprotocol.com'
 ```
@@ -102,7 +114,7 @@ Deploy from the Railway UI or CLI after variables are set. Migrations run on boo
 Health check / smoke test:
 
 ```bash
-curl https://<your-railway-domain>/health
+curl https://triggers.litprotocol.com/health
 ```
 
 Operational notes:

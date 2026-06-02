@@ -39,6 +39,10 @@ globalThis.LitTest = { op_panic };
 // parses per execution but its body is one string literal, so V8 only pays
 // for source-string scanning, not for compiling the bundled action body.
 //
+// The caller passes a content-derived `specifier` (the action's IPFS id) so
+// distinct actions occupy distinct code-cache keys; see the call site in
+// runtime.rs for why a shared specifier would let equal-length actions collide.
+//
 // The helper deletes itself from globalThis as its first action so user code
 // (which runs inside op_eval_context below) cannot reach it; this preserves
 // the `--disallow-code-generation-from-strings` posture by not handing actions

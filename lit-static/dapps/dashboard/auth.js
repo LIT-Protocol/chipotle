@@ -267,6 +267,15 @@ let _clientInstance = null;
 let _clientBaseUrl = null;
 let _clientMode = null;
 
+// Fires after every successful client method call (Proxy below). Used by
+// billing.js to refresh the credit balance display after any API activity
+// (NODE-4971). Registered via setOnApiCallSuccess() from initBilling().
+let _onApiCallSuccess = null;
+
+export function setOnApiCallSuccess(cb) {
+  _onApiCallSuccess = cb;
+}
+
 export async function getClient() {
   const baseUrl = getBaseUrl();
   const mode = getMode();
@@ -323,7 +332,11 @@ export async function getClient() {
             const sovereignLifecycle = await buildSovereignLifecycle(target, prop);
             args = [{ ...args[0], sovereignLifecycle }];
           }
-          return val.apply(target, args);
+          const result = await val.apply(target, args);
+          if (_onApiCallSuccess) {
+            try { _onApiCallSuccess(prop); } catch (cbErr) { console.error('onApiCallSuccess', cbErr); }
+          }
+          return result;
         };
       },
     });
@@ -976,11 +989,13 @@ async function promptForNewAdminAddress() {
     };
     openModal(
       'Change account ownership',
-      `<p>Enter the Ethereum address of the wallet that should become the new admin for this ChainSecured account.</p>
-       <label class="form-label" for="change-ownership-address-input">New admin wallet address</label>
-       <input type="text" id="change-ownership-address-input" class="form-input" placeholder="0x…" autocomplete="off" spellcheck="false" />
+      `<p class="modal-action-desc" style="margin-bottom:1rem;">Enter the Ethereum address of the wallet that should become the new admin for this ChainSecured account.</p>
+       <div class="form-group">
+         <label for="change-ownership-address-input">New admin wallet address</label>
+         <input type="text" id="change-ownership-address-input" class="input" placeholder="0x…" autocomplete="off" spellcheck="false" autocapitalize="off" style="font-family:ui-monospace,'JetBrains Mono',monospace;" />
+       </div>
        <div id="change-ownership-error" class="status error" style="display:none; margin-top:0.5rem;"></div>`,
-      `<button type="button" class="btn btn-secondary" id="change-ownership-cancel-btn">Cancel</button>
+      `<button type="button" class="btn btn-outline" id="change-ownership-cancel-btn">Cancel</button>
        <button type="button" class="btn btn-primary" id="change-ownership-accept-btn">Accept</button>`,
     );
     const input = document.getElementById('change-ownership-address-input');
@@ -1043,17 +1058,27 @@ async function runPostConnectDriftCheck(client) {
 
 function showNewAccountBanner(apiKey) {
   const banner = document.getElementById('new-account-banner');
-  const keyEl = document.getElementById('new-account-key-text');
-  const copyBtn = document.getElementById('new-account-copy-btn');
   const dismissBtn = document.getElementById('new-account-dismiss-btn');
-  if (!banner || !keyEl || !copyBtn || !dismissBtn) return;
-  keyEl.textContent = apiKey;
+  if (!banner || !dismissBtn) return;
+  // Rewrite the full body innerHTML rather than mutating in place — a prior
+  // call to showChainSecuredBanner() in the same session leaves wallet-signing
+  // copy in the body, and we'd otherwise display it above the API key row.
+  const body = banner.querySelector('.new-account-banner-body');
+  if (body) {
+    body.innerHTML = `<strong>Account created.</strong> Save your API key now — it will not be shown again.
+      <div class="new-account-key-row">
+        <code id="new-account-key-text" class="new-account-key mono">${escapeHtml(apiKey)}</code>
+        <button type="button" id="new-account-copy-btn" class="btn btn-sm btn-outline">Copy</button>
+      </div>`;
+  }
   banner.style.display = '';
-  copyBtn.textContent = 'Copy';
-  copyBtn.onclick = async () => {
-    const { copyToClipboard } = await import('./ui-utils.js');
-    await copyToClipboard(apiKey, copyBtn);
-  };
+  const freshCopy = document.getElementById('new-account-copy-btn');
+  if (freshCopy) {
+    freshCopy.onclick = async () => {
+      const { copyToClipboard } = await import('./ui-utils.js');
+      await copyToClipboard(apiKey, freshCopy);
+    };
+  }
   dismissBtn.onclick = () => { banner.style.display = 'none'; };
 }
 

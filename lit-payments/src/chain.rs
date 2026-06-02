@@ -1,43 +1,30 @@
-//! LITKEY on-chain payment listener primitives.
+//! LITKEY on-chain payment helpers.
 //!
-//! Phase 3c uses these helpers from both the WSS fast path and the HTTPS
-//! reconciliation poller so confirmation depth, idempotency, and checkpoint
-//! behavior cannot drift between paths.
+//! Browser payments submit the exact transaction hash to the backend. The backend
+//! fetches that receipt, verifies the configured gateway emitted the expected
+//! `Payment` event, and credits idempotently from that event.
 
 use alloy_dyn_abi::DynSolType;
 use alloy_primitives::{Address, B256, Bytes, U256, keccak256};
 use anyhow::{Context, Result};
-use async_trait::async_trait;
-use futures_util::{SinkExt, StreamExt};
 use lit_billing_core::{StripeClient, balance, customer};
 use reqwest::Client;
 use rocket::State;
 use rocket::http::Status;
 use rocket::serde::json::Json;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::json;
 use sqlx::PgPool;
-use std::{collections::HashMap, time::Duration as StdDuration};
-use tokio::time::{Duration, sleep, timeout};
-use tokio_tungstenite::{connect_async, tungstenite::Message};
+use std::time::Duration as StdDuration;
 pub const BASE_CHAIN_ID: i64 = 8453;
 pub const LITKEY_TOKEN_ADDRESS: &str = "0xf732a566121fa6362e9e0fbdd6d66e5c8c925e49";
 pub const DEFAULT_GATEWAY_ADDRESS: &str = "0xa2d54cd1d1df1735718a857ac49caf9ecab0093b";
-pub const DEFAULT_CONFIRMATIONS: u64 = 5;
-pub const DEFAULT_RECONCILIATION_INTERVAL_SECS: u64 = 60;
-pub const MAX_RECONCILIATION_BLOCK_RANGE: u64 = 2_000;
-const WSS_CONNECT_TIMEOUT_SECS: u64 = 15;
-const WSS_SUBSCRIBE_ACK_TIMEOUT_SECS: u64 = 15;
-const WSS_READ_IDLE_TIMEOUT_SECS: u64 = 20;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ChainConfig {
     pub chain_id: i64,
-    pub alchemy_wss_url: String,
     pub alchemy_https_url: String,
     pub gateway_address: Address,
-    pub confirmations: u64,
-    pub reconciliation_interval_secs: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -50,12 +37,6 @@ pub struct PaymentLog {
     pub tx_hash: B256,
     pub log_index: u64,
     pub block_number: u64,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum WssPaymentNotification {
-    Added(PaymentLog),
-    Removed(PaymentLog),
 }
 
 impl PaymentLog {
@@ -86,24 +67,6 @@ pub fn payment_idempotency_key(chain_id: i64, tx_hash: B256, log_index: u64) -> 
 
 pub fn format_address(address: Address) -> String {
     format!("{address:#x}")
-}
-
-pub fn is_confirmed(event_block: u64, latest_block: u64, confirmations: u64) -> bool {
-    latest_block.saturating_sub(event_block) >= confirmations
-}
-
-pub fn reconciliation_range(
-    last_processed_block: u64,
-    latest_block: u64,
-    confirmations: u64,
-) -> Option<(u64, u64)> {
-    let safe_to_block = latest_block.checked_sub(confirmations)?;
-    let from_block = last_processed_block.saturating_add(1);
-    (from_block <= safe_to_block).then_some((from_block, safe_to_block))
-}
-
-pub fn backoff_delay_secs(attempt: u32) -> u64 {
-    2_u64.saturating_pow(attempt).clamp(1, 30)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -318,6 +281,12 @@ pub struct LitkeyPaymentStatusResponse {
     pub credited_at: Option<time::OffsetDateTime>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct LitkeyPaymentClaimRequest {
+    pub tx_hash: String,
+    pub wallet: String,
+}
+
 type ApiError = (Status, Json<crate::portal::types::ErrorResponse>);
 type ApiResult<T> = std::result::Result<Json<T>, ApiError>;
 
@@ -359,7 +328,7 @@ pub fn get_payment_config(
     let Some(chain) = config.litkey_chain.as_ref() else {
         return Err(api_err(
             Status::ServiceUnavailable,
-            "LITKEY payments are not configured",
+            "LITKEY chain verification is not configured",
         ));
     };
     Ok(Json(LitkeyPaymentConfigResponse {
@@ -389,150 +358,43 @@ pub async fn lookup_payment_status(
     .context("looking up litkey payment status")
 }
 
-/// `GET /api/litkey/payment-status?tx_hash=…&wallet=…` — public status poller.
-#[rocket::get("/api/litkey/payment-status?<tx_hash>&<wallet>")]
-pub async fn get_payment_status(
-    tx_hash: Option<&str>,
-    wallet: Option<&str>,
+/// `POST /api/litkey/payment-claim` — verify a submitted tx hash and credit it.
+///
+/// The browser already has the exact payment tx hash after `gateway.pay(...)`.
+/// This endpoint fetches that receipt directly, verifies the configured gateway
+/// emitted `Payment(wallet, payer, amount)`, and then runs the shared idempotent
+/// crediting handler. Base reorg risk is intentionally not modeled in this
+/// browser-driven claim path.
+#[rocket::post("/api/litkey/payment-claim", format = "json", data = "<req>")]
+pub async fn claim_payment(
+    req: Json<LitkeyPaymentClaimRequest>,
     pool: &State<PgPool>,
+    stripe: &State<StripeClient>,
+    config: &State<crate::config::Config>,
 ) -> ApiResult<LitkeyPaymentStatusResponse> {
-    let Some(tx_hash) = tx_hash else {
-        return Err(api_err(Status::BadRequest, "tx_hash is required"));
+    let Some(chain_config) = config.litkey_chain.as_ref() else {
+        return Err(api_err(
+            Status::ServiceUnavailable,
+            "LITKEY chain verification is not configured",
+        ));
     };
-    let Some(wallet) = wallet else {
-        return Err(api_err(Status::BadRequest, "wallet is required"));
-    };
-    let tx_hash = canonical_tx_hash_param(tx_hash).map_err(|e| api_err(Status::BadRequest, e))?;
-    let wallet = canonical_wallet_param(wallet).map_err(|e| api_err(Status::BadRequest, e))?;
-    let row = lookup_payment_status(pool, &tx_hash, &wallet)
-        .await
-        .map_err(api_server_err)?;
-    Ok(Json(match row {
-        Some((status, cents_credited, credited_at)) => LitkeyPaymentStatusResponse {
-            found: true,
-            status: Some(status),
-            cents_credited: Some(cents_credited),
-            credited_at: Some(credited_at),
-        },
-        None => LitkeyPaymentStatusResponse {
-            found: false,
-            status: None,
-            cents_credited: None,
-            credited_at: None,
-        },
-    }))
-}
+    let tx_hash =
+        canonical_tx_hash_param(&req.tx_hash).map_err(|e| api_err(Status::BadRequest, e))?;
+    let wallet = canonical_wallet_param(&req.wallet).map_err(|e| api_err(Status::BadRequest, e))?;
 
-pub async fn current_checkpoint(
-    pool: &PgPool,
-    chain_id: i64,
-    gateway_address: Address,
-) -> Result<u64> {
-    let block = sqlx::query_scalar::<_, Option<i64>>(
-        "SELECT last_processed_block FROM chain_checkpoint WHERE chain_id = $1 AND gateway_address = $2",
+    let rpc = HttpGatewayRpc::new(chain_config);
+    let claimed = claim_litkey_payment_tx(
+        pool,
+        stripe,
+        &rpc,
+        chain_config,
+        &tx_hash,
+        &wallet,
+        config.litkey_discount_basis_points,
     )
-    .bind(chain_id)
-    .bind(format_address(gateway_address))
-    .fetch_optional(pool)
     .await
-    .context("reading chain checkpoint")?
-    .flatten()
-    .unwrap_or(0);
-    u64::try_from(block).context("chain checkpoint was negative")
-}
-
-pub async fn advance_checkpoint(
-    pool: &PgPool,
-    chain_id: i64,
-    gateway_address: Address,
-    last_processed_block: u64,
-) -> Result<()> {
-    sqlx::query(
-        "INSERT INTO chain_checkpoint (chain_id, gateway_address, last_processed_block)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (chain_id, gateway_address) DO UPDATE SET
-           last_processed_block = GREATEST(chain_checkpoint.last_processed_block, EXCLUDED.last_processed_block),
-           updated_at = now()",
-    )
-    .bind(chain_id)
-    .bind(format_address(gateway_address))
-    .bind(last_processed_block as i64)
-    .execute(pool)
-    .await
-    .context("advancing chain checkpoint")?;
-    Ok(())
-}
-
-#[async_trait]
-pub trait ChainRpc: Send + Sync {
-    async fn latest_block(&self) -> Result<u64>;
-    async fn payment_logs(&self, from_block: u64, to_block: u64) -> Result<Vec<PaymentLog>>;
-}
-
-#[async_trait]
-pub trait ReconciliationStore: Send + Sync {
-    async fn current_checkpoint(&self, chain_id: i64, gateway_address: Address) -> Result<u64>;
-    async fn advance_checkpoint(
-        &self,
-        chain_id: i64,
-        gateway_address: Address,
-        last_processed_block: u64,
-    ) -> Result<()>;
-}
-
-#[async_trait]
-pub trait ConfirmedPaymentProcessor: Send + Sync {
-    async fn process_confirmed_payment(&self, log: PaymentLog) -> Result<()>;
-}
-
-pub struct PgReconciliationStore {
-    pool: PgPool,
-}
-
-impl PgReconciliationStore {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
-    }
-}
-
-#[async_trait]
-impl ReconciliationStore for PgReconciliationStore {
-    async fn current_checkpoint(&self, chain_id: i64, gateway_address: Address) -> Result<u64> {
-        current_checkpoint(&self.pool, chain_id, gateway_address).await
-    }
-
-    async fn advance_checkpoint(
-        &self,
-        chain_id: i64,
-        gateway_address: Address,
-        last_processed_block: u64,
-    ) -> Result<()> {
-        advance_checkpoint(&self.pool, chain_id, gateway_address, last_processed_block).await
-    }
-}
-
-pub struct StripePaymentProcessor {
-    pool: PgPool,
-    stripe: StripeClient,
-    discount_basis_points: i64,
-}
-
-impl StripePaymentProcessor {
-    pub fn new(pool: PgPool, stripe: StripeClient, discount_basis_points: i64) -> Self {
-        Self {
-            pool,
-            stripe,
-            discount_basis_points,
-        }
-    }
-}
-
-#[async_trait]
-impl ConfirmedPaymentProcessor for StripePaymentProcessor {
-    async fn process_confirmed_payment(&self, log: PaymentLog) -> Result<()> {
-        handle_confirmed_litkey_payment(&self.pool, &self.stripe, &log, self.discount_basis_points)
-            .await
-    }
+    .map_err(api_server_err)?;
+    Ok(Json(claimed))
 }
 
 #[derive(Debug, Deserialize)]
@@ -563,6 +425,13 @@ struct RpcLog {
     removed: Option<bool>,
 }
 
+#[derive(Debug, Deserialize)]
+struct RpcReceipt {
+    #[serde(with = "alloy_serde::quantity::opt")]
+    status: Option<u64>,
+    logs: Vec<RpcLog>,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Log {
     pub address: Address,
@@ -591,8 +460,6 @@ impl From<RpcLog> for Log {
 pub struct HttpGatewayRpc {
     client: Client,
     https_url: String,
-    chain_id: i64,
-    gateway_address: Address,
 }
 
 impl HttpGatewayRpc {
@@ -600,8 +467,6 @@ impl HttpGatewayRpc {
         Self {
             client: rpc_http_client(),
             https_url: config.alchemy_https_url.clone(),
-            chain_id: config.chain_id,
-            gateway_address: config.gateway_address,
         }
     }
 }
@@ -651,36 +516,10 @@ impl HttpGatewayRpc {
     }
 }
 
-#[async_trait]
-impl ChainRpc for HttpGatewayRpc {
-    async fn latest_block(&self) -> Result<u64> {
-        #[derive(Deserialize)]
-        struct BlockNumber(#[serde(with = "alloy_serde::quantity")] u64);
-
-        let block: BlockNumber = self.rpc("eth_blockNumber", json!([])).await?;
-        Ok(block.0)
-    }
-
-    async fn payment_logs(&self, from_block: u64, to_block: u64) -> Result<Vec<PaymentLog>> {
-        let logs: Vec<RpcLog> = self
-            .rpc(
-                "eth_getLogs",
-                json!([{
-                    "address": format_address(self.gateway_address),
-                    "fromBlock": format!("0x{from_block:x}"),
-                    "toBlock": format!("0x{to_block:x}"),
-                    "topics": [format!("{:#x}", payment_event_topic())]
-                }]),
-            )
-            .await?;
-        logs.into_iter()
-            .map(|log| parse_gateway_payment_log(self.chain_id, self.gateway_address, log.into()))
-            .filter_map(|result| match result {
-                Ok(Some(payment)) => Some(Ok(payment)),
-                Ok(None) => None,
-                Err(err) => Some(Err(err)),
-            })
-            .collect()
+impl HttpGatewayRpc {
+    async fn transaction_receipt(&self, tx_hash: &str) -> Result<Option<RpcReceipt>> {
+        self.rpc("eth_getTransactionReceipt", json!([tx_hash]))
+            .await
     }
 }
 
@@ -688,188 +527,6 @@ pub const PAYMENT_EVENT_SIGNATURE: &str = "Payment(address,address,uint256)";
 
 pub fn payment_event_topic() -> B256 {
     keccak256(PAYMENT_EVENT_SIGNATURE.as_bytes())
-}
-
-pub fn wss_payment_log_subscribe_request(gateway_address: Address) -> Value {
-    json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "eth_subscribe",
-        "params": [
-            "logs",
-            {
-                "address": format_address(gateway_address),
-                "topics": [format!("{:#x}", payment_event_topic())]
-            }
-        ]
-    })
-}
-
-pub fn parse_wss_subscription_ack(message: &str, request_id: u64) -> Result<Option<String>> {
-    let value: Value = serde_json::from_str(message).context("decoding LITKEY WSS JSON message")?;
-    if value.get("id").and_then(Value::as_u64) != Some(request_id) {
-        return Ok(None);
-    }
-
-    if let Some(error) = value.get("error") {
-        let message = error
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown JSON-RPC error");
-        let code = error
-            .get("code")
-            .and_then(Value::as_i64)
-            .unwrap_or_default();
-        anyhow::bail!("LITKEY WSS eth_subscribe failed: {message} ({code})");
-    }
-
-    let subscription_id = value
-        .get("result")
-        .and_then(Value::as_str)
-        .context("LITKEY WSS eth_subscribe response missing subscription id")?;
-    Ok(Some(subscription_id.to_string()))
-}
-
-fn wss_notification_result(message: &str, subscription_id: &str) -> Result<Option<Value>> {
-    let value: Value = serde_json::from_str(message).context("decoding LITKEY WSS JSON message")?;
-    if value.get("method").and_then(Value::as_str) != Some("eth_subscription") {
-        return Ok(None);
-    }
-
-    let params = value
-        .get("params")
-        .context("LITKEY WSS subscription message missing params")?;
-    let actual_subscription = params
-        .get("subscription")
-        .and_then(Value::as_str)
-        .context("LITKEY WSS subscription message missing subscription id")?;
-    if actual_subscription != subscription_id {
-        return Ok(None);
-    }
-
-    Ok(Some(params.get("result").cloned().context(
-        "LITKEY WSS subscription message missing result",
-    )?))
-}
-
-pub fn parse_wss_payment_log_notification(
-    chain_id: i64,
-    gateway_address: Address,
-    subscription_id: &str,
-    message: &str,
-) -> Result<Option<WssPaymentNotification>> {
-    let Some(result) = wss_notification_result(message, subscription_id)? else {
-        return Ok(None);
-    };
-
-    let removed = result
-        .get("removed")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let rpc_log: RpcLog =
-        serde_json::from_value(result).context("decoding LITKEY WSS payment log")?;
-    let Some(payment_log) = parse_gateway_payment_log(chain_id, gateway_address, rpc_log.into())?
-    else {
-        return Ok(None);
-    };
-    if removed {
-        tracing::warn!(
-            tx_hash = %format!("{:#x}", payment_log.tx_hash),
-            log_index = payment_log.log_index,
-            block_number = payment_log.block_number,
-            "LITKEY WSS received removed/reorged payment log"
-        );
-        return Ok(Some(WssPaymentNotification::Removed(payment_log)));
-    }
-    Ok(Some(WssPaymentNotification::Added(payment_log)))
-}
-
-fn pending_payment_key(log: &PaymentLog) -> String {
-    log.idempotency_key()
-}
-
-pub async fn drain_confirmed_wss_payments<R, P>(
-    rpc: &R,
-    processor: &P,
-    config: &ChainConfig,
-    pending: &mut HashMap<String, PaymentLog>,
-) -> Result<usize>
-where
-    R: ChainRpc,
-    P: ConfirmedPaymentProcessor,
-{
-    if pending.is_empty() {
-        return Ok(0);
-    }
-
-    let latest_block = rpc.latest_block().await?;
-    let mut confirmed_keys = Vec::new();
-    for (key, log) in pending.iter() {
-        if is_confirmed(log.block_number, latest_block, config.confirmations) {
-            confirmed_keys.push(key.clone());
-        }
-    }
-    confirmed_keys.sort();
-
-    let mut processed = 0;
-    for key in confirmed_keys {
-        let Some(log) = pending.get(&key).cloned() else {
-            continue;
-        };
-        processor.process_confirmed_payment(log).await?;
-        pending.remove(&key);
-        processed += 1;
-    }
-    Ok(processed)
-}
-
-pub async fn process_wss_payment_notification<R, P>(
-    rpc: &R,
-    processor: &P,
-    config: &ChainConfig,
-    subscription_id: &str,
-    message: &str,
-    pending: &mut HashMap<String, PaymentLog>,
-) -> Result<bool>
-where
-    R: ChainRpc,
-    P: ConfirmedPaymentProcessor,
-{
-    let Some(notification) = parse_wss_payment_log_notification(
-        config.chain_id,
-        config.gateway_address,
-        subscription_id,
-        message,
-    )?
-    else {
-        return Ok(false);
-    };
-
-    let log = match notification {
-        WssPaymentNotification::Added(log) => log,
-        WssPaymentNotification::Removed(log) => {
-            pending.remove(&pending_payment_key(&log));
-            return Ok(false);
-        }
-    };
-
-    let latest_block = rpc.latest_block().await?;
-    if is_confirmed(log.block_number, latest_block, config.confirmations) {
-        processor.process_confirmed_payment(log).await?;
-        return Ok(true);
-    }
-
-    let key = pending_payment_key(&log);
-    tracing::debug!(
-        tx_hash = %format!("{:#x}", log.tx_hash),
-        log_index = log.log_index,
-        block_number = log.block_number,
-        latest_block,
-        confirmations = config.confirmations,
-        "LITKEY WSS payment log is pending confirmations"
-    );
-    pending.insert(key, log);
-    Ok(false)
 }
 
 pub fn parse_gateway_payment_log(
@@ -920,6 +577,106 @@ pub fn parse_gateway_payment_log(
     }))
 }
 
+pub fn select_matching_payment_log(
+    chain_id: i64,
+    gateway_address: Address,
+    logs: Vec<Log>,
+    wallet: Address,
+) -> Result<Option<PaymentLog>> {
+    let mut matches = Vec::new();
+    for log in logs {
+        let Some(payment) = parse_gateway_payment_log(chain_id, gateway_address, log)? else {
+            continue;
+        };
+        if payment.wallet == wallet {
+            matches.push(payment);
+        }
+    }
+    matches.sort_by_key(|log| log.log_index);
+    Ok(matches.into_iter().next())
+}
+
+fn payment_status_response_from_row(
+    row: Option<(String, i64, time::OffsetDateTime)>,
+) -> LitkeyPaymentStatusResponse {
+    match row {
+        Some((status, cents_credited, credited_at)) => LitkeyPaymentStatusResponse {
+            found: true,
+            status: Some(status),
+            cents_credited: Some(cents_credited),
+            credited_at: Some(credited_at),
+        },
+        None => LitkeyPaymentStatusResponse {
+            found: false,
+            status: None,
+            cents_credited: None,
+            credited_at: None,
+        },
+    }
+}
+
+async fn claim_litkey_payment_tx(
+    pool: &PgPool,
+    stripe: &StripeClient,
+    rpc: &HttpGatewayRpc,
+    config: &ChainConfig,
+    tx_hash: &str,
+    wallet: &str,
+    discount_basis_points: i64,
+) -> Result<LitkeyPaymentStatusResponse> {
+    if let Some(row) = lookup_payment_status(pool, tx_hash, wallet).await? {
+        return Ok(payment_status_response_from_row(Some(row)));
+    }
+
+    let Some(receipt) = rpc.transaction_receipt(tx_hash).await? else {
+        return Ok(LitkeyPaymentStatusResponse {
+            found: false,
+            status: Some("pending_receipt".to_string()),
+            cents_credited: None,
+            credited_at: None,
+        });
+    };
+    if receipt.status != Some(1) {
+        return Ok(LitkeyPaymentStatusResponse {
+            found: false,
+            status: Some("tx_failed".to_string()),
+            cents_credited: None,
+            credited_at: None,
+        });
+    }
+
+    let wallet_address = wallet
+        .parse::<Address>()
+        .context("canonical wallet failed to parse as address")?;
+    let logs = receipt.logs.into_iter().map(Into::into).collect();
+    let Some(payment) = select_matching_payment_log(
+        config.chain_id,
+        config.gateway_address,
+        logs,
+        wallet_address,
+    )?
+    else {
+        return Ok(LitkeyPaymentStatusResponse {
+            found: false,
+            status: None,
+            cents_credited: None,
+            credited_at: None,
+        });
+    };
+
+    tracing::info!(
+        tx_hash,
+        log_index = payment.log_index,
+        block_number = payment.block_number,
+        wallet,
+        "claiming LITKEY payment from submitted tx hash"
+    );
+    handle_confirmed_litkey_payment(pool, stripe, &payment, discount_basis_points).await?;
+    Ok(payment_status_response_from_row(
+        lookup_payment_status(pool, tx_hash, wallet).await?,
+    ))
+}
+
 pub async fn handle_confirmed_litkey_payment(
     pool: &PgPool,
     stripe: &StripeClient,
@@ -955,214 +712,6 @@ pub async fn handle_confirmed_litkey_payment(
 
     insert_payment(pool, &decision.payment).await?;
     Ok(())
-}
-
-pub async fn process_reconciliation_once<S, R, P>(
-    store: &S,
-    rpc: &R,
-    processor: &P,
-    config: &ChainConfig,
-) -> Result<()>
-where
-    S: ReconciliationStore,
-    R: ChainRpc,
-    P: ConfirmedPaymentProcessor,
-{
-    let checkpoint = store
-        .current_checkpoint(config.chain_id, config.gateway_address)
-        .await?;
-    let latest_block = rpc.latest_block().await?;
-    let Some((from_block, to_block)) =
-        reconciliation_range(checkpoint, latest_block, config.confirmations)
-    else {
-        return Ok(());
-    };
-
-    let chunk_to_block = to_block.min(
-        from_block
-            .saturating_add(MAX_RECONCILIATION_BLOCK_RANGE)
-            .saturating_sub(1),
-    );
-    let mut logs = rpc.payment_logs(from_block, chunk_to_block).await?;
-    logs.sort_by_key(|log| (log.block_number, log.log_index));
-    for log in logs {
-        processor.process_confirmed_payment(log).await?;
-    }
-    store
-        .advance_checkpoint(config.chain_id, config.gateway_address, chunk_to_block)
-        .await?;
-    Ok(())
-}
-
-pub async fn reconciliation_loop<S, R, P>(store: S, rpc: R, processor: P, config: ChainConfig)
-where
-    S: ReconciliationStore,
-    R: ChainRpc,
-    P: ConfirmedPaymentProcessor,
-{
-    let mut attempt = 0_u32;
-    loop {
-        match process_reconciliation_once(&store, &rpc, &processor, &config).await {
-            Ok(()) => {
-                attempt = 0;
-                sleep(Duration::from_secs(config.reconciliation_interval_secs)).await;
-            }
-            Err(err) => {
-                tracing::warn!(error = %err, "LITKEY reconciliation pass failed");
-                let delay = backoff_delay_secs(attempt);
-                attempt = attempt.saturating_add(1);
-                sleep(Duration::from_secs(delay)).await;
-            }
-        }
-    }
-}
-
-async fn next_wss_text<S>(socket: &mut S) -> Result<String>
-where
-    S: StreamExt<Item = std::result::Result<Message, tokio_tungstenite::tungstenite::Error>>
-        + Unpin,
-{
-    let message = timeout(
-        Duration::from_secs(WSS_READ_IDLE_TIMEOUT_SECS),
-        socket.next(),
-    )
-    .await
-    .map_err(|_| anyhow::anyhow!("LITKEY WSS read timed out"))?
-    .context("LITKEY WSS stream ended")?
-    .context("reading LITKEY WSS message")?;
-
-    match message {
-        Message::Text(text) => Ok(text.to_string()),
-        Message::Binary(bytes) => std::str::from_utf8(&bytes)
-            .context("decoding LITKEY WSS binary JSON")
-            .map(str::to_owned),
-        Message::Close(frame) => anyhow::bail!("LITKEY WSS closed: {frame:?}"),
-        Message::Ping(_) | Message::Pong(_) | Message::Frame(_) => Ok(String::new()),
-    }
-}
-
-async fn wait_for_wss_subscription_ack<S>(socket: &mut S, request_id: u64) -> Result<String>
-where
-    S: StreamExt<Item = std::result::Result<Message, tokio_tungstenite::tungstenite::Error>>
-        + Unpin,
-{
-    timeout(Duration::from_secs(WSS_SUBSCRIBE_ACK_TIMEOUT_SECS), async {
-        loop {
-            let text = next_wss_text(socket).await?;
-            if text.is_empty() {
-                continue;
-            }
-            if let Some(subscription_id) = parse_wss_subscription_ack(&text, request_id)? {
-                return Ok(subscription_id);
-            }
-        }
-    })
-    .await
-    .context("timed out waiting for LITKEY WSS subscription ack")?
-}
-
-async fn wss_listener_connection_once<P>(processor: &P, config: &ChainConfig) -> Result<()>
-where
-    P: ConfirmedPaymentProcessor,
-{
-    let latest_rpc = HttpGatewayRpc::new(config);
-    let (mut socket, _) = timeout(
-        Duration::from_secs(WSS_CONNECT_TIMEOUT_SECS),
-        connect_async(&config.alchemy_wss_url),
-    )
-    .await
-    .context("timed out connecting LITKEY Alchemy WSS")?
-    .context("connecting LITKEY Alchemy WSS")?;
-
-    socket
-        .send(Message::Text(
-            wss_payment_log_subscribe_request(config.gateway_address)
-                .to_string()
-                .into(),
-        ))
-        .await
-        .context("subscribing to LITKEY Payment logs over WSS")?;
-
-    let subscription_id = wait_for_wss_subscription_ack(&mut socket, 1).await?;
-    tracing::info!(subscription_id, "LITKEY WSS subscription acknowledged");
-
-    let mut pending = HashMap::new();
-    loop {
-        let text = next_wss_text(&mut socket).await?;
-        if text.is_empty() {
-            drain_confirmed_wss_payments(&latest_rpc, processor, config, &mut pending).await?;
-            continue;
-        }
-        process_wss_payment_notification(
-            &latest_rpc,
-            processor,
-            config,
-            &subscription_id,
-            &text,
-            &mut pending,
-        )
-        .await?;
-        drain_confirmed_wss_payments(&latest_rpc, processor, config, &mut pending).await?;
-    }
-}
-
-pub async fn wss_listener_loop<P>(processor: P, config: ChainConfig)
-where
-    P: ConfirmedPaymentProcessor,
-{
-    let mut attempt = 0_u32;
-    loop {
-        match wss_listener_connection_once(&processor, &config).await {
-            Ok(()) => attempt = 0,
-            Err(err) => {
-                tracing::warn!(error = %err, "LITKEY WSS listener connection failed");
-                let delay = backoff_delay_secs(attempt);
-                attempt = attempt.saturating_add(1);
-                sleep(Duration::from_secs(delay)).await;
-            }
-        }
-    }
-}
-
-/// Register the phase-3c LITKEY listener when chain config is present.
-///
-/// Starts both the Alchemy WSS fast path and the confirmed-block HTTPS
-/// reconciliation poller. Both paths share the same parser, handler, and
-/// idempotency key; WSS never advances reconciliation checkpoints.
-pub fn spawn_litkey_listener(
-    pool: PgPool,
-    stripe: StripeClient,
-    config: Option<ChainConfig>,
-    discount_basis_points: i64,
-) {
-    let Some(config) = config else {
-        tracing::info!("LITKEY listener disabled; ALCHEMY_* and LITKEY_GATEWAY_ADDRESS not set");
-        return;
-    };
-
-    let rpc = HttpGatewayRpc::new(&config);
-    let store = PgReconciliationStore::new(pool.clone());
-    let reconciliation_processor =
-        StripePaymentProcessor::new(pool.clone(), stripe.clone(), discount_basis_points);
-    let task_config = config.clone();
-    tokio::spawn(async move {
-        reconciliation_loop(store, rpc, reconciliation_processor, task_config).await;
-    });
-
-    let wss_processor = StripePaymentProcessor::new(pool, stripe, discount_basis_points);
-    let task_config = config.clone();
-    tokio::spawn(async move {
-        wss_listener_loop(wss_processor, task_config).await;
-    });
-
-    tracing::info!(
-        chain_id = config.chain_id,
-        gateway_address = %format_address(config.gateway_address),
-        confirmations = config.confirmations,
-        reconciliation_interval_secs = config.reconciliation_interval_secs,
-        discount_basis_points,
-        "LITKEY listener started with Alchemy WSS fast path and HTTPS reconciliation fallback"
-    );
 }
 
 #[cfg(test)]
@@ -1206,174 +755,6 @@ mod tests {
         );
         assert!(canonical_wallet_param("not-a-wallet").is_err());
         assert!(canonical_tx_hash_param("0x1234").is_err());
-    }
-
-    #[test]
-    fn confirmation_depth_is_inclusive() {
-        assert!(is_confirmed(100, 105, 5));
-        assert!(!is_confirmed(100, 104, 5));
-        assert!(is_confirmed(100, 100, 0));
-    }
-
-    #[test]
-    fn reconciliation_range_starts_after_checkpoint_and_stops_at_safe_block() {
-        assert_eq!(reconciliation_range(100, 110, 5), Some((101, 105)));
-        assert_eq!(reconciliation_range(100, 105, 5), None);
-        assert_eq!(reconciliation_range(0, 3, 5), None);
-        assert_eq!(reconciliation_range(0, 5, 5), None);
-        assert_eq!(reconciliation_range(0, 6, 5), Some((1, 1)));
-    }
-
-    #[test]
-    fn reconnect_backoff_caps_at_thirty_seconds() {
-        let delays: Vec<u64> = (0..8).map(backoff_delay_secs).collect();
-        assert_eq!(delays, vec![1, 2, 4, 8, 16, 30, 30, 30]);
-    }
-
-    #[test]
-    fn builds_alchemy_wss_payment_log_subscription_for_configured_gateway() {
-        let config = sample_chain_config();
-        let payload = wss_payment_log_subscribe_request(config.gateway_address);
-
-        assert_eq!(payload["jsonrpc"], "2.0");
-        assert_eq!(payload["id"], 1);
-        assert_eq!(payload["method"], "eth_subscribe");
-        assert_eq!(payload["params"][0], "logs");
-        assert_eq!(
-            payload["params"][1]["address"],
-            format_address(config.gateway_address)
-        );
-        assert_eq!(
-            payload["params"][1]["topics"][0],
-            format!("{:#x}", payment_event_topic())
-        );
-    }
-
-    #[test]
-    fn parses_wss_subscription_ack_and_errors() {
-        assert_eq!(
-            parse_wss_subscription_ack(r#"{"jsonrpc":"2.0","id":1,"result":"0xsub"}"#, 1).unwrap(),
-            Some("0xsub".to_string())
-        );
-        assert!(
-            parse_wss_subscription_ack(r#"{"jsonrpc":"2.0","id":2,"result":"0xother"}"#, 1)
-                .unwrap()
-                .is_none()
-        );
-        let err = parse_wss_subscription_ack(
-            r#"{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"nope"}}"#,
-            1,
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("eth_subscribe failed"));
-    }
-
-    #[test]
-    fn parses_eth_subscription_payment_log_notification_with_existing_parser() {
-        let expected = sample_payment_log();
-        let message = sample_subscription_message(&expected);
-
-        let parsed = parse_wss_payment_log_notification(
-            expected.chain_id,
-            expected.gateway_address,
-            "0xsub",
-            &message.to_string(),
-        )
-        .unwrap()
-        .unwrap();
-
-        assert_eq!(parsed, WssPaymentNotification::Added(expected));
-    }
-
-    #[test]
-    fn ignores_unrelated_wss_messages_but_errors_on_malformed_subscribed_logs() {
-        let expected = sample_payment_log();
-        assert!(
-            parse_wss_payment_log_notification(
-                expected.chain_id,
-                expected.gateway_address,
-                "0xsub",
-                r#"{"jsonrpc":"2.0","id":1,"result":"0xsub"}"#,
-            )
-            .unwrap()
-            .is_none()
-        );
-        assert!(
-            parse_wss_payment_log_notification(
-                expected.chain_id,
-                expected.gateway_address,
-                "0xsub",
-                r#"{"jsonrpc":"2.0","method":"eth_subscription","params":{"subscription":"0xother","result":{}}}"#,
-            )
-            .unwrap()
-            .is_none()
-        );
-
-        let missing_topics = json!({
-            "jsonrpc": "2.0",
-            "method": "eth_subscription",
-            "params": {
-                "subscription": "0xsub",
-                "result": {
-                    "address": format_address(expected.gateway_address),
-                    "blockNumber": format!("0x{:x}", expected.block_number),
-                    "logIndex": format!("0x{:x}", expected.log_index),
-                    "transactionHash": format!("{:#x}", expected.tx_hash),
-                    "data": format!("0x{}", hex::encode(encode_uint256(expected.amount_wei)))
-                }
-            }
-        });
-        let err = parse_wss_payment_log_notification(
-            expected.chain_id,
-            expected.gateway_address,
-            "0xsub",
-            &missing_topics.to_string(),
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("decoding LITKEY WSS payment log"));
-
-        let malformed = json!({
-            "jsonrpc": "2.0",
-            "method": "eth_subscription",
-            "params": {
-                "subscription": "0xsub",
-                "result": {
-                    "address": format_address(expected.gateway_address),
-                    "blockNumber": format!("0x{:x}", expected.block_number),
-                    "logIndex": format!("0x{:x}", expected.log_index),
-                    "transactionHash": format!("{:#x}", expected.tx_hash),
-                    "topics": [format!("{:#x}", payment_event_topic()), indexed_address_topic(expected.wallet)],
-                    "data": format!("0x{}", hex::encode(encode_uint256(expected.amount_wei)))
-                }
-            }
-        });
-
-        let err = parse_wss_payment_log_notification(
-            expected.chain_id,
-            expected.gateway_address,
-            "0xsub",
-            &malformed.to_string(),
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("exactly 3 topics"));
-    }
-
-    #[test]
-    fn parses_removed_wss_logs_for_pending_eviction() {
-        let expected = sample_payment_log();
-        let mut message = sample_subscription_message(&expected);
-        message["params"]["result"]["removed"] = json!(true);
-
-        assert_eq!(
-            parse_wss_payment_log_notification(
-                expected.chain_id,
-                expected.gateway_address,
-                "0xsub",
-                &message.to_string(),
-            )
-            .unwrap(),
-            Some(WssPaymentNotification::Removed(expected))
-        );
     }
 
     #[test]
@@ -1434,6 +815,54 @@ mod tests {
             .unwrap();
 
         assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn selects_matching_payment_log_from_submitted_tx_receipt() {
+        let expected = sample_payment_log();
+        let wrong_wallet = Address::from_str("0x9999999999999999999999999999999999999999").unwrap();
+        let unrelated_transfer = Log {
+            address: Address::from_str(LITKEY_TOKEN_ADDRESS).unwrap(),
+            topics: vec![B256::ZERO],
+            ..Default::default()
+        };
+        let wrong_wallet_payment = Log {
+            address: expected.gateway_address,
+            topics: vec![
+                payment_event_topic(),
+                indexed_address_topic(wrong_wallet),
+                indexed_address_topic(expected.payer),
+            ],
+            data: encode_uint256(expected.amount_wei).into(),
+            transaction_hash: Some(expected.tx_hash),
+            log_index: Some((expected.log_index - 1).into()),
+            block_number: Some(expected.block_number.into()),
+            ..Default::default()
+        };
+        let matching_payment = Log {
+            address: expected.gateway_address,
+            topics: vec![
+                payment_event_topic(),
+                indexed_address_topic(expected.wallet),
+                indexed_address_topic(expected.payer),
+            ],
+            data: encode_uint256(expected.amount_wei).into(),
+            transaction_hash: Some(expected.tx_hash),
+            log_index: Some(expected.log_index.into()),
+            block_number: Some(expected.block_number.into()),
+            ..Default::default()
+        };
+
+        let selected = select_matching_payment_log(
+            expected.chain_id,
+            expected.gateway_address,
+            vec![unrelated_transfer, wrong_wallet_payment, matching_payment],
+            expected.wallet,
+        )
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(selected, expected);
     }
 
     #[test]
@@ -1515,28 +944,6 @@ mod tests {
         }
     }
 
-    fn sample_subscription_message(log: &PaymentLog) -> Value {
-        json!({
-            "jsonrpc": "2.0",
-            "method": "eth_subscription",
-            "params": {
-                "subscription": "0xsub",
-                "result": {
-                    "address": format_address(log.gateway_address),
-                    "blockNumber": format!("0x{:x}", log.block_number),
-                    "logIndex": format!("0x{:x}", log.log_index),
-                    "transactionHash": format!("{:#x}", log.tx_hash),
-                    "topics": [
-                        format!("{:#x}", payment_event_topic()),
-                        format!("{:#x}", indexed_address_topic(log.wallet)),
-                        format!("{:#x}", indexed_address_topic(log.payer))
-                    ],
-                    "data": format!("0x{}", hex::encode(encode_uint256(log.amount_wei)))
-                }
-            }
-        })
-    }
-
     fn fresh_rate() -> crate::rate::LitkeyRate {
         crate::rate::LitkeyRate {
             usd_wei_per_litkey: "1000000000000000000".to_string(),
@@ -1545,317 +952,6 @@ mod tests {
             updated_by_operator_id: Some(1),
             stale: false,
         }
-    }
-
-    struct FakeStore {
-        checkpoint: u64,
-        advanced_to: std::sync::Mutex<Vec<u64>>,
-    }
-
-    #[async_trait]
-    impl ReconciliationStore for FakeStore {
-        async fn current_checkpoint(
-            &self,
-            _chain_id: i64,
-            _gateway_address: Address,
-        ) -> Result<u64> {
-            Ok(self.checkpoint)
-        }
-
-        async fn advance_checkpoint(
-            &self,
-            _chain_id: i64,
-            _gateway_address: Address,
-            last_processed_block: u64,
-        ) -> Result<()> {
-            self.advanced_to.lock().unwrap().push(last_processed_block);
-            Ok(())
-        }
-    }
-
-    struct FakeRpc {
-        latest: u64,
-        logs: Vec<PaymentLog>,
-        ranges: std::sync::Mutex<Vec<(u64, u64)>>,
-    }
-
-    #[async_trait]
-    impl ChainRpc for FakeRpc {
-        async fn latest_block(&self) -> Result<u64> {
-            Ok(self.latest)
-        }
-
-        async fn payment_logs(&self, from_block: u64, to_block: u64) -> Result<Vec<PaymentLog>> {
-            self.ranges.lock().unwrap().push((from_block, to_block));
-            Ok(self.logs.clone())
-        }
-    }
-
-    struct FakeProcessor {
-        processed: std::sync::Mutex<Vec<(u64, u64)>>,
-        fail: bool,
-    }
-
-    #[async_trait]
-    impl ConfirmedPaymentProcessor for FakeProcessor {
-        async fn process_confirmed_payment(&self, log: PaymentLog) -> Result<()> {
-            if self.fail {
-                anyhow::bail!("boom");
-            }
-            self.processed
-                .lock()
-                .unwrap()
-                .push((log.block_number, log.log_index));
-            Ok(())
-        }
-    }
-
-    fn sample_chain_config() -> ChainConfig {
-        ChainConfig {
-            chain_id: 8453,
-            alchemy_wss_url: "wss://example.invalid".to_string(),
-            alchemy_https_url: "https://example.invalid".to_string(),
-            gateway_address: Address::from_str("0x1000000000000000000000000000000000000000")
-                .unwrap(),
-            confirmations: 5,
-            reconciliation_interval_secs: 60,
-        }
-    }
-
-    #[tokio::test]
-    async fn wss_notification_processes_only_confirmed_payment_logs() {
-        let log = sample_payment_log();
-        let message = sample_subscription_message(&log).to_string();
-        let mut config = sample_chain_config();
-        config.gateway_address = log.gateway_address;
-
-        let rpc = FakeRpc {
-            latest: log.block_number + config.confirmations,
-            logs: vec![],
-            ranges: std::sync::Mutex::new(Vec::new()),
-        };
-        let processor = FakeProcessor {
-            processed: std::sync::Mutex::new(Vec::new()),
-            fail: false,
-        };
-        let mut pending = HashMap::new();
-
-        assert!(
-            process_wss_payment_notification(
-                &rpc,
-                &processor,
-                &config,
-                "0xsub",
-                &message,
-                &mut pending,
-            )
-            .await
-            .unwrap()
-        );
-        assert_eq!(
-            *processor.processed.lock().unwrap(),
-            vec![(log.block_number, log.log_index)]
-        );
-        assert!(pending.is_empty());
-        assert!(rpc.ranges.lock().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn wss_notification_buffers_unconfirmed_logs_and_drains_when_confirmed() {
-        let log = sample_payment_log();
-        let message = sample_subscription_message(&log).to_string();
-        let mut config = sample_chain_config();
-        config.gateway_address = log.gateway_address;
-
-        let unconfirmed_rpc = FakeRpc {
-            latest: log.block_number + config.confirmations - 1,
-            logs: vec![],
-            ranges: std::sync::Mutex::new(Vec::new()),
-        };
-        let processor = FakeProcessor {
-            processed: std::sync::Mutex::new(Vec::new()),
-            fail: false,
-        };
-        let mut pending = HashMap::new();
-
-        assert!(
-            !process_wss_payment_notification(
-                &unconfirmed_rpc,
-                &processor,
-                &config,
-                "0xsub",
-                &message,
-                &mut pending,
-            )
-            .await
-            .unwrap()
-        );
-        assert!(processor.processed.lock().unwrap().is_empty());
-        assert_eq!(pending.len(), 1);
-        assert!(unconfirmed_rpc.ranges.lock().unwrap().is_empty());
-
-        let confirmed_rpc = FakeRpc {
-            latest: log.block_number + config.confirmations,
-            logs: vec![],
-            ranges: std::sync::Mutex::new(Vec::new()),
-        };
-        assert_eq!(
-            drain_confirmed_wss_payments(&confirmed_rpc, &processor, &config, &mut pending)
-                .await
-                .unwrap(),
-            1
-        );
-        assert_eq!(
-            *processor.processed.lock().unwrap(),
-            vec![(log.block_number, log.log_index)]
-        );
-        assert!(pending.is_empty());
-    }
-
-    #[tokio::test]
-    async fn wss_removed_notification_evicts_pending_log_before_drain() {
-        let log = sample_payment_log();
-        let message = sample_subscription_message(&log).to_string();
-        let mut removed_message = sample_subscription_message(&log);
-        removed_message["params"]["result"]["removed"] = json!(true);
-        let mut config = sample_chain_config();
-        config.gateway_address = log.gateway_address;
-
-        let unconfirmed_rpc = FakeRpc {
-            latest: log.block_number + config.confirmations - 1,
-            logs: vec![],
-            ranges: std::sync::Mutex::new(Vec::new()),
-        };
-        let processor = FakeProcessor {
-            processed: std::sync::Mutex::new(Vec::new()),
-            fail: false,
-        };
-        let mut pending = HashMap::new();
-
-        process_wss_payment_notification(
-            &unconfirmed_rpc,
-            &processor,
-            &config,
-            "0xsub",
-            &message,
-            &mut pending,
-        )
-        .await
-        .unwrap();
-        assert_eq!(pending.len(), 1);
-
-        process_wss_payment_notification(
-            &unconfirmed_rpc,
-            &processor,
-            &config,
-            "0xsub",
-            &removed_message.to_string(),
-            &mut pending,
-        )
-        .await
-        .unwrap();
-        assert!(pending.is_empty());
-
-        let confirmed_rpc = FakeRpc {
-            latest: log.block_number + config.confirmations,
-            logs: vec![],
-            ranges: std::sync::Mutex::new(Vec::new()),
-        };
-        assert_eq!(
-            drain_confirmed_wss_payments(&confirmed_rpc, &processor, &config, &mut pending)
-                .await
-                .unwrap(),
-            0
-        );
-        assert!(processor.processed.lock().unwrap().is_empty());
-    }
-
-    #[tokio::test]
-    async fn reconciliation_once_processes_safe_range_and_advances_checkpoint_after_success() {
-        let mut later = sample_payment_log();
-        later.block_number = 105;
-        later.log_index = 2;
-        let mut earlier = sample_payment_log();
-        earlier.block_number = 101;
-        earlier.log_index = 1;
-        let store = FakeStore {
-            checkpoint: 100,
-            advanced_to: std::sync::Mutex::new(Vec::new()),
-        };
-        let rpc = FakeRpc {
-            latest: 110,
-            logs: vec![later, earlier],
-            ranges: std::sync::Mutex::new(Vec::new()),
-        };
-        let processor = FakeProcessor {
-            processed: std::sync::Mutex::new(Vec::new()),
-            fail: false,
-        };
-
-        process_reconciliation_once(&store, &rpc, &processor, &sample_chain_config())
-            .await
-            .unwrap();
-
-        assert_eq!(*rpc.ranges.lock().unwrap(), vec![(101, 105)]);
-        assert_eq!(
-            *processor.processed.lock().unwrap(),
-            vec![(101, 1), (105, 2)]
-        );
-        assert_eq!(*store.advanced_to.lock().unwrap(), vec![105]);
-    }
-
-    #[tokio::test]
-    async fn reconciliation_once_chunks_large_catchup_ranges() {
-        let store = FakeStore {
-            checkpoint: 0,
-            advanced_to: std::sync::Mutex::new(Vec::new()),
-        };
-        let rpc = FakeRpc {
-            latest: MAX_RECONCILIATION_BLOCK_RANGE + 10,
-            logs: vec![],
-            ranges: std::sync::Mutex::new(Vec::new()),
-        };
-        let processor = FakeProcessor {
-            processed: std::sync::Mutex::new(Vec::new()),
-            fail: false,
-        };
-
-        process_reconciliation_once(&store, &rpc, &processor, &sample_chain_config())
-            .await
-            .unwrap();
-
-        assert_eq!(
-            *rpc.ranges.lock().unwrap(),
-            vec![(1, MAX_RECONCILIATION_BLOCK_RANGE)]
-        );
-        assert_eq!(
-            *store.advanced_to.lock().unwrap(),
-            vec![MAX_RECONCILIATION_BLOCK_RANGE]
-        );
-    }
-
-    #[tokio::test]
-    async fn reconciliation_once_does_not_advance_checkpoint_when_processing_fails() {
-        let store = FakeStore {
-            checkpoint: 100,
-            advanced_to: std::sync::Mutex::new(Vec::new()),
-        };
-        let rpc = FakeRpc {
-            latest: 110,
-            logs: vec![sample_payment_log()],
-            ranges: std::sync::Mutex::new(Vec::new()),
-        };
-        let processor = FakeProcessor {
-            processed: std::sync::Mutex::new(Vec::new()),
-            fail: true,
-        };
-
-        let err = process_reconciliation_once(&store, &rpc, &processor, &sample_chain_config())
-            .await
-            .unwrap_err();
-
-        assert!(err.to_string().contains("boom"));
-        assert!(store.advanced_to.lock().unwrap().is_empty());
     }
 
     #[test]

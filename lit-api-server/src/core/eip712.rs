@@ -613,93 +613,6 @@ mod tests {
         }
     }
 
-    /// Parity check: a payload signed by the legacy ethers stack must verify
-    /// under the alloy-based verifier. This catches any divergence in digest
-    /// computation between the two libraries (typehash, field encoding,
-    /// domain separator). The ethers side is still in tree during phases
-    /// 3-6; this test will be removed in Phase 7 alongside the dep itself.
-    #[test]
-    fn cross_impl_parity_ethers_signed_verifies_under_alloy() {
-        use ethers::core::types::H256 as EthersH256;
-        use ethers::core::types::transaction::eip712::{
-            EIP712Domain, Eip712, Eip712DomainType, TypedData as EthersTypedData,
-        };
-        use ethers::signers::{LocalWallet as EthersLocalWallet, Signer};
-        use std::collections::BTreeMap as EthersBTreeMap;
-
-        let chain_id = ensure_test_chain_id();
-        let primary_type = PRIMARY_TYPE_CREATE_WALLET;
-        let issued_at = now_secs();
-        let ethers_wallet = EthersLocalWallet::new(&mut rand::thread_rng());
-        let ethers_addr = ethers_wallet.address();
-
-        // Build the typed data using ethers, exactly as a JS wallet would.
-        let mut types: EthersBTreeMap<String, Vec<Eip712DomainType>> = EthersBTreeMap::new();
-        types.insert(
-            "EIP712Domain".to_string(),
-            vec![
-                Eip712DomainType {
-                    name: "name".to_string(),
-                    r#type: "string".to_string(),
-                },
-                Eip712DomainType {
-                    name: "version".to_string(),
-                    r#type: "string".to_string(),
-                },
-                Eip712DomainType {
-                    name: "chainId".to_string(),
-                    r#type: "uint256".to_string(),
-                },
-            ],
-        );
-        types.insert(
-            primary_type.to_string(),
-            vec![
-                Eip712DomainType {
-                    name: "address".to_string(),
-                    r#type: "address".to_string(),
-                },
-                Eip712DomainType {
-                    name: "issuedAt".to_string(),
-                    r#type: "uint256".to_string(),
-                },
-            ],
-        );
-        let mut message: EthersBTreeMap<String, serde_json::Value> = EthersBTreeMap::new();
-        message.insert(
-            "address".to_string(),
-            serde_json::Value::String(format!("0x{:x}", ethers_addr)),
-        );
-        message.insert(
-            "issuedAt".to_string(),
-            serde_json::Value::String(issued_at.to_string()),
-        );
-        let ethers_typed = EthersTypedData {
-            domain: EIP712Domain {
-                name: Some(EIP712_DOMAIN_NAME.to_string()),
-                version: Some(EIP712_DOMAIN_VERSION.to_string()),
-                chain_id: Some(ethers::core::types::U256::from(chain_id)),
-                verifying_contract: None,
-                salt: None,
-            },
-            types,
-            primary_type: primary_type.to_string(),
-            message,
-        };
-        let digest = ethers_typed.encode_eip712().unwrap();
-        let sig = ethers_wallet.sign_hash(EthersH256::from(digest)).unwrap();
-        let json = serde_json::to_value(&ethers_typed).unwrap();
-
-        // Verify via the alloy-based verifier.
-        let recovered =
-            verify_eip712_signature(&json, &format!("0x{}", sig), primary_type).unwrap();
-        let expected = Address::from_slice(ethers_addr.as_bytes());
-        assert_eq!(
-            recovered, expected,
-            "alloy verifier did not recover the ethers signer — digest divergence",
-        );
-    }
-
     /// The core CPL-286 promise: a signature minted for one flow must not
     /// recover when the server hashes the typed data against a different
     /// primaryType. This is rejected at the schema layer (we check
@@ -854,7 +767,15 @@ mod tests {
     fn rejects_timestamp_too_far_future() {
         let chain_id = ensure_test_chain_id();
         let wallet = PrivateKeySigner::random();
-        let future = now_secs() + TIMESTAMP_SKEW_SECONDS + 1;
+        // Pick a timestamp comfortably past the skew window. A tight `+ 1`
+        // margin is flaky: the validator reads its own `now`, and if the wall
+        // clock advances even one second between here and that read (easy under
+        // CI load), `|now - issued_at|` lands exactly on TIMESTAMP_SKEW_SECONDS,
+        // which passes the strict `>` check and the timestamp is wrongly
+        // accepted. An hour of headroom can't be eroded by test-execution slop.
+        // (The mirror test `rejects_timestamp_too_old` is naturally robust —
+        // elapsed time only makes its timestamp staler.)
+        let future = now_secs() + TIMESTAMP_SKEW_SECONDS + 3600;
         let (typed, sig) = sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, future, chain_id);
         let err = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET)
             .expect_err("must reject — issued_at too far in future");

@@ -1,13 +1,26 @@
 (function () {
   'use strict';
 
-  const BASE_CHAIN_ID_HEX = '0x2105';
   const BASE_CHAIN_ID_DEC = 8453;
+  const BASE_RPC_URL = 'https://mainnet.base.org';
+  const BASE_ADD_PARAMS = {
+    chainName: 'Base',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
+    rpcUrls: [BASE_RPC_URL],
+    blockExplorerUrls: ['https://basescan.org'],
+  };
   const MIN_CENTS = 500n;
   const WEI = 1000000000000000000n;
   const USD = 1000000000000000000n;
-  const POLL_INTERVAL_MS = 5000;
-  const POLL_SUPPORT_AFTER_MS = 5 * 60 * 1000;
+
+  // Lazy-loaded ESM wallet helper (shared with the dashboard).
+  // Provides a MetaMask / WalletConnect picker on first connect.
+  let _walletModule = null;
+  async function getWalletModule() {
+    if (!_walletModule) _walletModule = await import('/static/wallet_connect.js');
+    return _walletModule;
+  }
+
   const ERC20_ABI = [
     'function approve(address spender,uint256 amount) returns (bool)',
     'function decimals() view returns (uint8)',
@@ -27,8 +40,7 @@
     signer: null,
     amountWei: 0n,
     txHash: null,
-    pollTimer: null,
-    pollStartedAt: null,
+
   };
 
   const $ = (id) => document.getElementById(id);
@@ -36,6 +48,15 @@
   const setStatus = (message, kind) => { const el = $('status'); if (!el) return; el.textContent = message; el.className = 'status ' + (kind || 'info'); };
   const isAddress = (value) => /^0x[0-9a-fA-F]{40}$/.test(value || '');
   const fmtUsd = (cents) => '$' + (Number(cents) / 100).toFixed(2);
+
+  function formatUsdWei(usdWei) {
+    const value = BigInt(usdWei);
+    const whole = value / USD;
+    const fraction = value % USD;
+    if (fraction === 0n) return '$' + whole.toString();
+    const decimals = fraction.toString().padStart(18, '0').slice(0, 6).replace(/0+$/, '');
+    return '$' + whole.toString() + (decimals ? '.' + decimals : '');
+  }
 
   function parseCents(value) {
     const trimmed = String(value || '').trim();
@@ -48,9 +69,39 @@
   function amountWeiForCents(cents, effectiveRate) { return ceilDiv(cents * WEI * USD, BigInt(effectiveRate) * 100n); }
   function creditCentsForAmount(amountWei, effectiveRate) { return (amountWei * BigInt(effectiveRate) * 100n + (WEI * USD / 2n)) / (WEI * USD); }
   function formatToken(amountWei) { return ethers.formatUnits(amountWei, 18).replace(/(\.\d{6})\d+$/, '$1'); }
+  function formatDiscountBps(bps) {
+    const value = Number(bps || 0);
+    if (!Number.isFinite(value) || value <= 0) return 'No discount';
+    const whole = Math.trunc(value / 100);
+    const fractional = Math.abs(value % 100);
+    return (fractional ? whole + '.' + String(fractional).padStart(2, '0').replace(/0+$/, '') : String(whole)) + '% off';
+  }
+
+  function marketRate(quote) {
+    return quote && quote.rate && quote.rate.usd_wei_per_litkey ? quote.rate.usd_wei_per_litkey : null;
+  }
+
+  function setQuoteDisplays(quote) {
+    const market = marketRate(quote);
+    setText('rate-display', market ? formatUsdWei(market) + ' / LITKEY' : '—');
+    setText('discount-display', formatDiscountBps(quote ? quote.discount_basis_points : 0));
+    setText('effective-rate-display', quote && quote.effective_usd_wei_per_litkey ? formatUsdWei(quote.effective_usd_wei_per_litkey) + ' credit / LITKEY' : '—');
+  }
 
   async function fetchJson(url) {
     const res = await fetch(url, { credentials: 'omit' });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(body.error || ('Request failed: ' + res.status));
+    return body;
+  }
+
+  async function postJson(url, payload) {
+    const res = await fetch(url, {
+      method: 'POST',
+      credentials: 'omit',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(body.error || ('Request failed: ' + res.status));
     return body;
@@ -88,6 +139,8 @@
     const quote = state.frozenQuote || state.quote;
     if (!quote || quote.crediting_paused || !quote.effective_usd_wei_per_litkey) {
       setText('quote-status', 'Crediting paused');
+      setQuoteDisplays(quote);
+      setText('litkey-amount', '—');
       $('approve').disabled = true;
       $('pay').disabled = true;
       return;
@@ -95,32 +148,36 @@
 
     if (!state.config) {
       setText('quote-status', 'Payments unavailable');
+      setQuoteDisplays(quote);
+      setText('litkey-amount', '—');
       $('approve').disabled = true;
       $('pay').disabled = true;
       return;
     }
 
+    const cents = parseCents($('credit-dollars').value);
+
     if (state.frozenAmountWei !== null) {
       state.amountWei = state.frozenAmountWei;
       setText('litkey-amount', formatToken(state.frozenAmountWei) + ' LITKEY');
-      setText('rate-display', fmtUsd(creditCentsForAmount(WEI, quote.effective_usd_wei_per_litkey)) + ' credit / LITKEY');
+      setQuoteDisplays(quote);
       setText('quote-status', 'Frozen for approval');
       $('approve').disabled = true;
       $('pay').disabled = state.approvedAmountWei === null;
       return;
     }
 
-    const cents = parseCents($('credit-dollars').value);
     if (!cents || cents < MIN_CENTS) {
       setText('quote-status', 'Enter at least $5.00');
       setText('litkey-amount', '—');
+      setQuoteDisplays(quote);
       $('approve').disabled = true;
       $('pay').disabled = true;
       return;
     }
     state.amountWei = amountWeiForCents(cents, quote.effective_usd_wei_per_litkey);
     setText('litkey-amount', formatToken(state.amountWei) + ' LITKEY');
-    setText('rate-display', fmtUsd(creditCentsForAmount(WEI, quote.effective_usd_wei_per_litkey)) + ' credit / LITKEY');
+    setQuoteDisplays(quote);
     setText('quote-status', 'Live');
     $('approve').disabled = !$('confirm-account').checked || !state.signer;
     $('pay').disabled = true;
@@ -129,40 +186,47 @@
   async function loadConfig() { state.config = await fetchJson('/api/litkey/payment-config'); }
 
   async function ensureBase() {
-    if (!window.ethereum) throw new Error('No browser wallet found.');
-    let chainId = await window.ethereum.request({ method: 'eth_chainId' });
-    if (chainId === BASE_CHAIN_ID_HEX) return;
-    try {
-      await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BASE_CHAIN_ID_HEX }] });
-    } catch (e) {
-      if (e && e.code === 4902) {
-        await window.ethereum.request({
-          method: 'wallet_addEthereumChain',
-          params: [{
-            chainId: BASE_CHAIN_ID_HEX,
-            chainName: 'Base',
-            nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
-            rpcUrls: ['https://mainnet.base.org'],
-            blockExplorerUrls: ['https://basescan.org'],
-          }],
-        });
-        await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: BASE_CHAIN_ID_HEX }] });
-      } else {
-        throw e;
-      }
-    }
-    chainId = await window.ethereum.request({ method: 'eth_chainId' });
-    if (chainId !== BASE_CHAIN_ID_HEX) throw new Error('Switch to Base mainnet to pay with LITKEY.');
+    const mod = await getWalletModule();
+    const snap = mod.snapshotState();
+    if (snap.connected && snap.chainId === BASE_CHAIN_ID_DEC) return;
+    // Route through the shared switchChain so the call goes to the active
+    // provider (injected OR WalletConnect), with EIP-3085 add params for
+    // wallets that don't know Base yet.
+    const { signer } = await mod.switchChain(BASE_CHAIN_ID_DEC, BASE_ADD_PARAMS);
+    state.signer = signer;
+    state.provider = mod.getProvider();
   }
 
   async function connectWallet() {
-    if (!window.ethereum) throw new Error('No browser wallet found.');
-    await ensureBase();
-    state.provider = new ethers.BrowserProvider(window.ethereum);
-    await state.provider.send('eth_requestAccounts', []);
-    state.signer = await state.provider.getSigner();
-    setStatus('Wallet connected. Confirm the credited account, then approve exact LITKEY.', 'success');
-    renderQuote();
+    const button = $('connect-wallet');
+    if (button) button.disabled = true;
+    try {
+      setStatus('Opening wallet…', 'info');
+      const mod = await getWalletModule();
+      const { signer, chainId } = await mod.connectWallet({
+        chainId: BASE_CHAIN_ID_DEC,
+        rpcUrl: BASE_RPC_URL,
+      });
+      state.signer = signer;
+      state.provider = mod.getProvider();
+      if (chainId !== BASE_CHAIN_ID_DEC) {
+        try {
+          await ensureBase();
+        } catch (e) {
+          throw new Error('Switch to Base mainnet to pay with LITKEY.');
+        }
+      }
+      setStatus('Wallet connected. Confirm the credited account, then approve exact LITKEY.', 'success');
+      renderQuote();
+    } catch (e) {
+      if (e && e.cancelled) {
+        setStatus('Wallet connection cancelled.', 'info');
+        return;
+      }
+      throw e;
+    } finally {
+      if (button) button.disabled = false;
+    }
   }
 
   async function approve() {
@@ -202,44 +266,54 @@
     setStatus('Submit payment in your wallet…', 'info');
     const tx = await gateway.pay(state.approvedAmountWei, state.wallet);
     state.txHash = tx.hash;
-    state.pollStartedAt = Date.now();
     $('pay').disabled = true;
-    setStatus('Payment submitted. Waiting for confirmation listener…', 'info');
-    pollStatus();
+    setStatus('Payment submitted. Waiting for transaction receipt…', 'info');
+    await tx.wait();
+    setStatus('Payment mined. Verifying transaction and applying credit…', 'info');
+    const data = await postJson('/api/litkey/payment-claim', {
+      tx_hash: state.txHash,
+      wallet: state.wallet,
+    });
+    if (data.found) {
+      if (data.status === 'credited') setStatus('Credited ' + fmtUsd(data.cents_credited || 0) + ' to the account.', 'success');
+      else setStatus('Payment recorded with status: ' + data.status, 'warning');
+    } else if (data.status === 'tx_failed') {
+      setStatus('Payment transaction failed on-chain. No credit was applied.', 'error');
+    } else {
+      setStatus('Payment was mined, but the backend did not find the gateway event. Contact support with tx ' + state.txHash + '.', 'warning');
+    }
   }
 
-  async function pollStatus() {
-    clearTimeout(state.pollTimer);
-    try {
-      const data = await fetchJson('/api/litkey/payment-status?tx_hash=' + encodeURIComponent(state.txHash) + '&wallet=' + encodeURIComponent(state.wallet));
-      if (data.found) {
-        if (data.status === 'credited') setStatus('Credited ' + fmtUsd(data.cents_credited || 0) + ' to the account.', 'success');
-        else setStatus('Payment recorded with status: ' + data.status, 'warning');
+  async function installWalletGuards() {
+    const mod = await getWalletModule();
+    let prevAddress = null;
+    let prevChainId = null;
+    mod.onWalletChange((snap) => {
+      if (!snap.connected) {
+        state.provider = null;
+        state.signer = null;
+        resetApproval('Wallet disconnected. Reconnect before paying.');
+        prevAddress = null;
+        prevChainId = null;
         return;
       }
-    } catch (e) {
-      console.error(e);
-      setStatus('Still waiting for listener status. If this persists, contact support with tx ' + state.txHash + '.', 'warning');
-    }
-    if (state.pollStartedAt && Date.now() - state.pollStartedAt > POLL_SUPPORT_AFTER_MS) {
-      setStatus('Still waiting for listener confirmation. Keep this transaction hash for support: ' + state.txHash + '.', 'warning');
-    }
-    state.pollTimer = setTimeout(pollStatus, POLL_INTERVAL_MS);
-  }
-
-  function installWalletGuards() {
-    if (!window.ethereum || !window.ethereum.on) return;
-    window.ethereum.on('chainChanged', (chainId) => {
-      state.provider = null;
-      state.signer = null;
-      resetApproval(chainId === BASE_CHAIN_ID_HEX
-        ? 'Network changed. Reconnect wallet before paying.'
-        : 'Wallet switched away from Base. Switch back to Base and reconnect before paying.');
-    });
-    window.ethereum.on('accountsChanged', () => {
-      state.provider = null;
-      state.signer = null;
-      resetApproval('Wallet account changed. Reconnect before paying.');
+      const addressChanged = prevAddress && snap.address && prevAddress.toLowerCase() !== snap.address.toLowerCase();
+      const chainChanged = prevChainId !== null && snap.chainId !== prevChainId;
+      prevAddress = snap.address;
+      prevChainId = snap.chainId;
+      if (chainChanged) {
+        state.provider = null;
+        state.signer = null;
+        resetApproval(snap.chainId === BASE_CHAIN_ID_DEC
+          ? 'Network changed. Reconnect wallet before paying.'
+          : 'Wallet switched away from Base. Switch back to Base and reconnect before paying.');
+        return;
+      }
+      if (addressChanged) {
+        state.provider = null;
+        state.signer = null;
+        resetApproval('Wallet account changed. Reconnect before paying.');
+      }
     });
   }
 
@@ -247,7 +321,7 @@
     try {
       await Promise.all([loadAccount(), loadConfig(), refreshQuote()]);
       if (state.config.chain_id !== BASE_CHAIN_ID_DEC) throw new Error('Payment backend is not configured for Base mainnet.');
-      installWalletGuards();
+      await installWalletGuards();
       setStatus('Confirm the credited account, then connect your wallet.', 'info');
       setInterval(refreshQuote, 30000);
     } catch (e) {

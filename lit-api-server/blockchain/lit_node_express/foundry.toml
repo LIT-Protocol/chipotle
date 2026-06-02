@@ -1,0 +1,20 @@
+[profile.default]
+src = "contracts"
+test = "test"
+out = "out"
+libs = ["lib", "node_modules"]
+cache_path = "cache_forge"
+solc_version = "0.8.28"
+optimizer = true
+optimizer_runs = 100
+via_ir = true
+fs_permissions = [{ access = "read", path = "./" }]
+
+# Match Hardhat's compilation surface so we don't drift.
+auto_detect_solc = false
+
+[fmt]
+line_length = 100
+tab_width = 4
+bracket_spacing = false
+int_types = "long"

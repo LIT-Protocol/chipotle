@@ -35,8 +35,6 @@ alloy = { version = "1.0", features = [
     "signer-local",
     "sol-types",
 ] }
-ethers = { version = "2.0.8", features = ["abigen", "legacy"] }
-ethers-providers = "2"
 git-version = "0.3.9"
 flume = "0.11.0"
 futures = "0.3.31"

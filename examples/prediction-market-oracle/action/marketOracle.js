@@ -6,10 +6,9 @@
 // hallucinate. Three independent models with different training and
 // (importantly) one of them — Perplexity — grounded in live web search
 // have to all return the same single-word answer before we attest
-// anything on-chain. Same multi-source pattern as the
-// multi-source-price-oracle example, applied to AI sources instead of
-// price feeds. We require strict agreement here (rather than a median)
-// because the output is categorical YES/NO/UNCLEAR.
+// anything on-chain. This is multi-source consensus applied to AI sources:
+// strict agreement is required (rather than a median) because the output is
+// categorical YES/NO/UNCLEAR.
 //
 // Required: Perplexity (web-grounded baseline — Sonar Pro indexes the web
 // at query time, so it can answer questions about events that happened

@@ -3,6 +3,84 @@ title: "Patterns"
 description: "Common design patterns for Lit Actions: writing gating logic in plain JavaScript, using action-identity signing to produce immutable proofs, and structuring encrypt/decrypt flows around PKP wallets."
 ---
 
+## Hostname-Pinned RPC Trust Anchors
+
+When a Lit Action reads chain state through a caller-supplied RPC URL, do not trust a caller-supplied `chainId` by itself. A malicious caller can point the action at a fake RPC and make that RPC consistently report whatever chain id, receipt, log, or contract state helps the attack.
+
+Use a source-level policy instead:
+
+1. Hardcode the expected RPC hostnames in the action source.
+2. Require `https://` so TLS binds the request to that hostname.
+3. Reject redirects, so a whitelisted host cannot bounce the action to attacker-controlled JSON-RPC.
+4. For multi-chain actions, map each supported `chainId` to its allowed host and any chain-specific safety policy, such as minimum confirmations.
+
+```javascript
+const RPC_HOSTS = {
+  84532:  { host: /^base-sepolia\.g\.alchemy\.com$/i, minConfirmations: 5 },
+  421614: { host: /^arb-sepolia\.g\.alchemy\.com$/i,  minConfirmations: 5 },
+};
+
+function assertAllowedRpc(chainId, rpcUrl) {
+  const policy = RPC_HOSTS[Number(chainId)];
+  if (!policy) throw new Error(`chainId ${chainId} not whitelisted`);
+
+  const parsed = new URL(rpcUrl);
+  if (parsed.protocol !== "https:") throw new Error("RPC URL must use https://");
+  if (!policy.host.test(parsed.hostname)) throw new Error("RPC host not whitelisted");
+
+  return policy;
+}
+
+async function rpc(url, method, params) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    redirect: "error",
+  });
+  const body = await res.json();
+  if (body.error) throw new Error(body.error.message);
+  return body.result;
+}
+```
+
+Because the whitelist is part of the action code, changing providers or adding chains changes the IPFS CID and therefore the action-derived signer address. That is a feature: contracts that verify action-identity signatures are explicitly trusting this exact code and these exact external data sources.
+
+---
+
+## Multi-Source Consensus
+
+When a Lit Action signs data from outside the chain it is serving, decide how independent sources should agree before any signature is produced. The right aggregation depends on the data shape:
+
+- **Discrete facts** such as `isSanctioned(address) -> bool`, event presence, or yes/no market outcomes should usually require strict agreement across independent sources.
+- **Continuous values** such as market prices should usually use a median or trimmed mean plus a maximum-spread check, because honest sources will naturally differ by small amounts.
+- **Fallback availability** should fail closed: if too few sources respond, return an unsigned denial instead of signing from a single source.
+
+Hardcode the source list, minimum source count, and spread/agreement policy in the action. If a caller can lower `MIN_SOURCES`, widen a spread cap, or choose arbitrary sources via `js_params`, the policy is no longer the trust anchor.
+
+```javascript
+const SOURCES = ["source-a", "source-b", "source-c"];
+const MIN_SOURCES = 2;
+
+async function requireStrictAgreement(fetchSource) {
+  const settled = await Promise.allSettled(SOURCES.map(fetchSource));
+  const ok = settled
+    .filter((r) => r.status === "fulfilled" && r.value != null)
+    .map((r) => r.value);
+
+  if (ok.length < MIN_SOURCES) return { authorized: false, reason: "too few sources" };
+  if (!ok.every((value) => value === ok[0])) {
+    return { authorized: false, reason: "sources disagree", values: ok };
+  }
+
+  return { authorized: true, value: ok[0] };
+}
+```
+
+For continuous values, sort the successful observations, take the median, and refuse to sign if `(max - min) / median` exceeds a hardcoded spread cap.
+
+---
+
 ## Gating Logic — AKA Access Control Conditions
 
 The older Datil / Naga Lit SDK offered a fluent builder for declaring access control conditions (ACCs): structured objects that describe *who* may decrypt ciphertext or call an action. A typical condition using the SDK looks like this:
@@ -167,6 +245,33 @@ async function main({ signature, message }) {
 ```
 
 Note that someone could always copy your publicly available Lit Action source code, strip out the gating logic, and deploy it as a new action. This is completely safe from the original creator's perspective — the modified action produces a different IPFS CID, which means a different key pair and a different identity. It cannot produce signatures that appear to come from your original action.
+
+### A Wallet Bound to the Action — and a Unique One Per User
+
+The flip side of "edit a byte, get a new key" is that you can use the action-derived key as a **wallet that can only ever be operated by this exact code**. The key from `getLitActionPrivateKey()` is deterministically derived from the CID and never leaves the TEE, so the action *is* the only thing that can sign for that address. This is a lightweight alternative to converting an account to ChainSecured and using a contract to mint and bind PKPs to a group — you get the same "only this code can sign" property without minting a PKP.
+
+To give **each user their own** such wallet, make the code differ per user by hardcoding the user's address into the action:
+
+```javascript
+const OWNER_ADDRESS = "0xUSERS_ADDRESS"; // stamped in per user
+
+async function main({ action, to, amount, signature, message }) {
+  // Derived from THIS action's CID — so a different OWNER_ADDRESS yields a
+  // different CID and therefore a different, immutable wallet per user.
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  if (action === "address") return { walletAddress: wallet.address };
+
+  // Spending is gated on the owner's signature, not on who ran the action.
+  if (ethers.utils.verifyMessage(message, signature).toLowerCase() !== OWNER_ADDRESS.toLowerCase()) {
+    throw new Error("unauthorized: signer is not the bound owner");
+  }
+  // ... sign the transfer/transaction the owner authorized
+}
+```
+
+Because `OWNER_ADDRESS` is part of the hashed source, two users produce two CIDs, two keys, and two wallet addresses — there is no code path from one user's action to another's wallet. Authorize spending by recovering a signature and comparing it to the hardcoded owner (include a nonce/deadline in the signed `message` for replay protection, as in the [caller-signature check above](#what-if-someone-else-runs-my-action)). The Lit usage key that *runs* the action grants no spending power — it can only read the address or relay a withdrawal the real owner already signed.
+
+A full runnable version — deposit an ERC-20 into the wallet, withdraw by signing, and a wrong-user attack the action refuses — is in [`examples/action-bound-wallet/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/action-bound-wallet) (walkthrough in [Examples §13](./examples#13-a-unique-immutable-wallet-per-user-bound-to-the-action)).
 
 ---
 

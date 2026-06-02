@@ -44,9 +44,12 @@ async fn rocket() -> _ {
                 index,
                 login_page,
                 health,
+                skill_doc,
+                agent_authorize_page,
                 auth_routes::request_link,
                 auth_routes::verify_link,
                 auth_routes::logout,
+                auth_routes::authorize_agent,
                 auth_routes::me,
                 triggers::create_trigger,
                 triggers::list_triggers,
@@ -84,6 +87,34 @@ fn init_tracing() {
 #[get("/health")]
 fn health() -> &'static str {
     "ok"
+}
+
+#[get("/SKILL.md")]
+async fn skill_doc() -> Result<NamedFile, Status> {
+    NamedFile::open("SKILL.md")
+        .await
+        .map_err(|_| Status::NotFound)
+}
+
+#[get("/agent/authorize?<challenge>")]
+async fn agent_authorize_page(
+    user: Option<auth::User>,
+    challenge: Option<&str>,
+) -> Result<NamedFile, Redirect> {
+    let Some(challenge) = challenge else {
+        return Err(Redirect::to("/login?error=invalid"));
+    };
+    if auth::agent::validate_agent_token_hash(challenge).is_err() {
+        return Err(Redirect::to("/login?error=invalid"));
+    }
+    match user {
+        Some(_) => NamedFile::open(static_path("agent-authorize.html"))
+            .await
+            .map_err(|_| Redirect::to("/login?error=missing_static")),
+        None => Err(Redirect::to(format!(
+            "/login?next=/agent/authorize%3Fchallenge%3D{challenge}"
+        ))),
+    }
 }
 
 #[get("/")]

@@ -88,6 +88,9 @@ h3 { margin: 0; font-size: 16px; }
 p { line-height: 1.45; }
 .subtitle { margin: 0 0 24px; color: var(--muted); }
 .subtitle.tight { margin-bottom: 0; }
+.agent-doc-link { margin: -12px 0 24px; font-size: 14px; }
+.agent-doc-link.tight { margin: 6px 0 0; }
+a { color: var(--accent); }
 .note { margin: 8px 0 16px; color: var(--muted); font-size: 14px; }
 .hidden { display: none !important; }
 

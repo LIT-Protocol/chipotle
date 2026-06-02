@@ -529,6 +529,10 @@ pub struct TestServer {
     /// inside the running gRPC service.
     pub pool_health: Arc<crate::worker_pool::PoolHealth>,
     pub pool_target_size: usize,
+    /// Shared V8 code cache (same `Arc` the running server hands to its
+    /// workers). Cloned at construction so tests can assert on hit/miss
+    /// counters — e.g. that a repeated action reuses compiled bytecode.
+    pub v8_code_cache: SharedV8CodeCache,
 }
 
 impl TestServer {
@@ -542,6 +546,7 @@ impl TestServer {
         let pool = server.pool();
         let pool_health = pool.health();
         let pool_target_size = pool.target_size();
+        let v8_code_cache = server.v8_code_cache.clone();
 
         std::thread::spawn(move || {
             create_and_run_current_thread(async move {
@@ -568,6 +573,7 @@ impl TestServer {
             socket_file,
             pool_health,
             pool_target_size,
+            v8_code_cache,
         }
     }
 

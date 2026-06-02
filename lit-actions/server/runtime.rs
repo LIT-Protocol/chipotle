@@ -206,13 +206,18 @@ impl CachedActionCode {
                 .sum::<usize>()
     }
 
-    fn to_executable_code(&self, js_func_params: &str) -> String {
+    // NB: js_params are NOT baked in here — they are injected separately as the
+    // `globalThis.__litJsParams` global (see `inject_params_globals`). Keeping
+    // them out makes this source stable per bundled action, so the
+    // eval-context code cache keys/compiles correctly across requests instead
+    // of crossing one request's params into another's execution.
+    fn to_executable_code(&self) -> String {
         format!(
             "
         {code}
         ;
         (async () => {{
-        const params = {js_func_params} ;
+        const params = globalThis.__litJsParams;
         const data = await main(params);
         if (typeof data !== \"undefined\") {{
           LitActions.setResponse( {{ response: data }} );
@@ -275,7 +280,12 @@ fn deno_isolate_init() -> Option<&'static [u8]> {
     Some(RUNTIME_SNAPSHOT)
 }
 
-fn get_lit_action_ipfs_id(code: &str) -> String {
+/// Compute the IPFS CID for a Lit Action's source. This is the action's
+/// canonical content identity: it keys the action-code cache and, via the
+/// op_eval_context specifier, the V8 code cache (so distinct actions can't
+/// collide on V8's length-based source hash). Exposed for tests that assert on
+/// the specifier (it appears in user-facing stack traces).
+pub fn get_lit_action_ipfs_id(code: &str) -> String {
     let ipfs_hasher = IpfsHasher::default();
     ipfs_hasher.compute(code.as_bytes())
 }
@@ -559,16 +569,24 @@ fn execute_patch_deno(worker: &mut MainWorker) -> Result<()> {
     Ok(())
 }
 
-/// Inject caller-supplied globals via `Params.js`. Reserved for future use:
-/// `execute_js` always passes `None` today, so this is normally a no-op.
+/// Inject the caller-supplied js_params as a single global, `__litJsParams`,
+/// which the per-execution wrapper (see `to_executable_code`) reads and passes
+/// to `main(params)`. Injected via `execute_script` so it is NOT part of the
+/// source compiled through the eval-context code cache.
+///
+/// When js_params is absent we still define the global as `null` (not leave it
+/// `undefined`): the previous code path serialized `Value::Null` into the
+/// wrapper, so actions that branch on `params === null` for the no-params case
+/// keep working.
 fn inject_params_globals(
     worker: &mut MainWorker,
     globals_to_inject: &Option<serde_json::Value>,
     http_headers: &BTreeMap<String, String>,
 ) -> Result<()> {
-    let Some(params) = globals_to_inject else {
-        return Ok(());
-    };
+    // Omitted js_params => inject `null`, matching the pre-change `main(null)`
+    // semantics rather than handing user code `undefined`.
+    let null = serde_json::Value::Null;
+    let params = globals_to_inject.as_ref().unwrap_or(&null);
 
     let _span = info_span!("Params.js").entered();
 
@@ -576,23 +594,22 @@ fn inject_params_globals(
         .get(&HEADER_KEY_X_PRIVACY_MODE.to_ascii_lowercase())
         .is_some_and(|v| v == "true")
     {
-        debug!("Injecting params as globals: **PRIVACY MODE**");
+        debug!("Injecting js_params global: **PRIVACY MODE**");
     } else {
-        debug!("Injecting params as globals: {params:?}");
+        debug!("Injecting js_params global: {params:?}");
     }
 
-    let _ = params
-        .as_object()
-        .context("Could not convert params to map")?;
-
+    // Bind the whole params object to a single internal global. JSON is a
+    // valid JS expression, so this is a literal assignment (no parsing of
+    // untrusted code — `params` came from serde_json, not the caller's source).
     let code = formatdoc! {r#"
         "use strict";
-        Object.assign(globalThis, {params});
+        globalThis.__litJsParams = {params};
     "#};
 
     worker
         .execute_script("Params.js", code.into())
-        .context("Error injecting params as globals")?;
+        .context("Error injecting js_params global")?;
 
     Ok(())
 }
@@ -757,10 +774,6 @@ async fn execute_with_worker_inner(
     // PatchDeno.js must run AFTER LitNamespace.js (which the caller already
     // injected) to preserve the original bootstrap order.
     execute_patch_deno(&mut worker)?;
-    // Reserved hook: today's call sites always pass globals=None; preserved
-    // here so re-enabling globals injection drops in at the historical spot
-    // (between PatchDeno.js and op-state wiring).
-    inject_params_globals(&mut worker, &None, &http_headers)?;
 
     // Check the action code cache early so we can skip prepare_action_code
     // on cache hit (the real performance win). We always use CdnModuleLoader
@@ -805,6 +818,22 @@ async fn execute_with_worker_inner(
             current_limit * 2
         });
 
+    // Inject the caller's js_params as a single global (`__litJsParams`), via
+    // execute_script — which deliberately bypasses the eval-context code cache.
+    // This keeps js_params OUT of the source that flows through
+    // `op_eval_context`/`SharedV8CodeCache`, so the cached/compiled form is the
+    // stable, param-free bundled action code. Baking params into that source
+    // (the previous behavior) was unsafe: Deno's `op_eval_context` computes the
+    // same `source_hash` for different sources of equal length, so the code
+    // cache returned a *different* request's compiled bytecode — crossing
+    // js_params between executions (see CPL / the mpc-signing investigation).
+    //
+    // Must run AFTER the controller thread and near-heap-limit callback above:
+    // materializing a large params object into V8 is subject to the same
+    // timeout/OOM guards as user code, so an oversized params blob surfaces as
+    // a normal resource-exhausted/timeout error instead of a hard V8 abort.
+    inject_params_globals(&mut worker, &js_params, &http_headers)?;
+
     let mut interval = tokio::time::interval(Duration::from_millis(MEMORY_SAMPLE_INTERVAL_MS));
 
     // we try to take a sample prior to event starting execution to get a baseline to charge - if the action is fast enough, we'll never get a tick !
@@ -815,13 +844,13 @@ async fn execute_with_worker_inner(
     )
     .await?;
 
-    let js_params = js_params.as_ref().unwrap_or_default();
-    let js_func_params = js_params.to_string();
+    // js_params were already injected as the `__litJsParams` global (see
+    // `inject_params_globals` above); they are intentionally NOT part of the
+    // cached/compiled source below.
 
-    // Params are injected per-execution and MUST NOT be part of the cached
-    // form: they change between invocations while the bundled JS stays the
-    // same. On cache hit we reuse the prepared form; on miss we prepare it
-    // (bundle CDN deps, snapshot loaded modules, cache the result).
+    // The bundled JS is cached and stable across invocations. On cache hit we
+    // reuse the prepared form; on miss we prepare it (bundle CDN deps, snapshot
+    // loaded modules, cache the result).
     let cached_code = if let Some(cached) = cached_code {
         cached
     } else {
@@ -836,7 +865,7 @@ async fn execute_with_worker_inner(
             .await?
     };
     record_loaded_modules(&loaded_modules, &cached_code);
-    let user_code = cached_code.to_executable_code(&js_func_params);
+    let user_code = cached_code.to_executable_code();
 
     // Route user code through op_eval_context (via the __litEvalCached helper
     // baked into 99_patches.js) so Deno's `eval_context_code_cache_cbs` —
@@ -846,10 +875,22 @@ async fn execute_with_worker_inner(
     // execution, but its body is one string literal, so V8 only pays for
     // source-string scanning rather than compiling the bundled action body
     // (CPL-264).
+    //
+    // The specifier is content-derived (the action's IPFS id) rather than a
+    // constant. Deno's code-cache key is `(specifier, kind, source_hash)`, and
+    // `source_hash` degenerates to V8's length-based string identity hash for
+    // large sources — so two *different* actions of equal length would share a
+    // `source_hash` and collide under a shared specifier, handing one action
+    // the other's compiled bytecode. Keying the specifier on the action id puts
+    // each action in its own keyspace: same action -> same specifier -> still
+    // reuses bytecode (CPL-264); different action -> different specifier -> a
+    // clean miss, so V8 is never offered a mismatched cache entry to accept.
     let user_code_literal =
         serde_json::to_string(&user_code).context("Could not serialize user code for eval stub")?;
-    let stub =
-        format!("__litEvalCached({user_code_literal}, \"file:///user_provided_script.js\");");
+    let specifier = format!("file:///user_provided_script_{action_ipfs_id}.js");
+    let specifier_literal = serde_json::to_string(&specifier)
+        .context("Could not serialize eval specifier for eval stub")?;
+    let stub = format!("__litEvalCached({user_code_literal}, {specifier_literal});");
 
     if let Err(e) = worker
         .js_runtime

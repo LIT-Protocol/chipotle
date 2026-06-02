@@ -621,8 +621,6 @@ fn metadata_to_item(
     wildcard_name: &str,
     wildcard_description: &str,
 ) -> ListMetadataItem {
-    // `accounts::Metadata` is still an ethers-generated struct (Phase 5 will
-    // regenerate it via sol!); compare against ethers' zero until then.
     if m.id == alloy::primitives::U256::ZERO {
         return ListMetadataItem {
             id: wildcard_id.to_string(),

@@ -1,0 +1,17 @@
+{
+  "name": "lit-solver-vault-dashboard",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Read-only ops dashboard for an AcrossSolverVault: live fills, policy state, kill switch.",
+  "scripts": {
+    "dev": "next dev -p 3030",
+    "build": "next build",
+    "start": "next start -p 3030"
+  },
+  "dependencies": {
+    "ethers": "^5.7.2",
+    "next": "^14.2.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  }
+}
