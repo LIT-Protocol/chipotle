@@ -1,5 +1,5 @@
 {
-  "name": "mpc-signing",
+  "name": "mpc-signing-ecdsa",
   "version": "0.0.1",
   "private": true,
   "description": "A 2-of-3 threshold-ECDSA (DKLs23) signer split between a Lit Action and the user (hot + cold recovery share) — Lit literally cannot sign without the user co-signing, the full key never exists anywhere, and the user can always recover without Lit.",

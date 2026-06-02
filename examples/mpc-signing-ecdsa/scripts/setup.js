@@ -1,4 +1,4 @@
-// One-shot setup for the mpc-signing example.
+// One-shot setup for the mpc-signing-ecdsa example.
 //
 // What you provide (in .env before running):
 //   LIT_API_KEY              Account-level (master) Lit API key
@@ -156,7 +156,7 @@ async function addGroup(base, apiKey) {
   const body = await call(base, apiKey, "add_group", {
     method: "POST",
     body: JSON.stringify({
-      group_name: "mpc-signing",
+      group_name: "mpc-signing-ecdsa",
       group_description: "2-of-3 threshold-ECDSA: Lit Action + user (hot + cold recovery)",
       pkp_ids_permitted: [],
       cid_hashes_permitted: ["0"],
@@ -194,7 +194,7 @@ async function createUsageApiKey(base, apiKey, groupId) {
   const body = await call(base, apiKey, "add_usage_api_key", {
     method: "POST",
     body: JSON.stringify({
-      name: "mpc-signing-executor",
+      name: "mpc-signing-ecdsa-executor",
       description: "Scoped key used by keygen.js / sign.js for /lit_action calls",
       can_create_groups: false,
       can_delete_groups: false,

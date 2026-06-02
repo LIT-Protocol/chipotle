@@ -1,4 +1,4 @@
-# `mpc-signing` — design notes
+# `mpc-signing-ecdsa` — design notes
 
 A signing flow where **Lit literally cannot produce a signature on its own.** A
 DKLs23 threshold-ECDSA DKG splits the key into shares held by the Lit Action and
@@ -17,7 +17,7 @@ This fills a gap in `examples/`: every other example is a "Lit signs on your
 behalf" flow where the action can sign whenever its code decides to. This is the
 first where the user is a **required co-signer**.
 
-**Owner:** chris@litprotocol.com · **Location:** `examples/mpc-signing/`
+**Owner:** chris@litprotocol.com · **Location:** `examples/mpc-signing-ecdsa/`
 
 ## Design decisions
 
@@ -161,7 +161,7 @@ heavy online rounds structurally.
 ## File layout
 
 ```
-examples/mpc-signing/
+examples/mpc-signing-ecdsa/
 ├── README.md
 ├── package.json / package-lock.json
 ├── hardhat.config.js
@@ -240,4 +240,4 @@ binding, and on-chain verification are identical across both.
 - [`@silencelaboratories/ecdsa-tss`](https://www.npmjs.com/package/@silencelaboratories/ecdsa-tss) — pure-JS Lindell17 2-of-2. Considered, rejected (2-of-2 only).
 - [`lit-frost`](https://github.com/LIT-Protocol/lit-frost) / [`cait-sith`](https://github.com/LIT-Protocol/cait-sith) — Lit's first-party threshold crates (future work).
 - Limits: `docs/lit-actions/limits.mdx` — 16 MB code+params, 100 KB response (the constraint above), 64 MB memory, 15 min, 10 sig requests/action.
-- WASM in actions: `docs/lit-actions/wasm.mdx`. Standalone demo: [`examples/mpc-signing/wasm-demo/`](../examples/mpc-signing/wasm-demo/).
+- WASM in actions: `docs/lit-actions/wasm.mdx`. Standalone demo: [`examples/mpc-signing-ecdsa/wasm-demo/`](../examples/mpc-signing-ecdsa/wasm-demo/).

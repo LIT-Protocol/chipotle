@@ -1,4 +1,7 @@
-# MPC Signing
+# MPC Signing (ECDSA)
+
+Threshold **ECDSA** (DKLs23). A FROST/Schnorr variant for Bitcoin Taproot and
+Solana is a separate example.
 
 **A signing key split between a Lit Action and the user, where Lit literally
 cannot produce a signature on its own — and the full private key never exists

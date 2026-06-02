@@ -13,7 +13,7 @@ service. Anything that compiles to wasm (Rust, C/C++, Go, AssemblyScript) and
 anything published as a wasm-bindgen package on npm works.
 
 This is what makes heavyweight, audited cryptography practical inside an action:
-the [mpc-signing example](./examples#16-non-custodial-co-signer-threshold-ecdsa-split-between-lit-and-you)
+the [mpc-signing-ecdsa example](./examples#16-non-custodial-co-signer-threshold-ecdsa-split-between-lit-and-you)
 runs the [DKLs23](https://dkls.info/) threshold-ECDSA protocol (a Trail-of-Bits-audited
 Rust library compiled to wasm) entirely inside the action to co-sign with the user.
 
@@ -76,19 +76,19 @@ initSync(Uint8Array.from(atob(WASM_B64), (c) => c.charCodeAt(0)));
   (e.g. `…-web`), not the `…-node` build.
 - **Size and response limits.** A big module plus its working state can bump into
   action size and the response-payload cap — see [Limits](./limits). The
-  mpc-signing example relays large sealed blobs each round and documents the
+  mpc-signing-ecdsa example relays large sealed blobs each round and documents the
   limit it needs raised.
 - **Stateless across calls.** An action holds no memory between invocations, so a
   wasm session that must span multiple calls has to be serialized out and passed
-  back in (mpc-signing seals its session with `Lit.Actions.Encrypt` and relays
+  back in (mpc-signing-ecdsa seals its session with `Lit.Actions.Encrypt` and relays
   it through the user each round).
 
 ## See it run
 
 <Info>
-  The [mpc-signing example](https://github.com/LIT-Protocol/chipotle/tree/main/examples/mpc-signing)
+  The [mpc-signing-ecdsa example](https://github.com/LIT-Protocol/chipotle/tree/main/examples/mpc-signing-ecdsa)
   runs DKLs23 threshold ECDSA in wasm inside the action. Its
-  [`wasm-demo/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/mpc-signing/wasm-demo)
+  [`wasm-demo/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/mpc-signing-ecdsa/wasm-demo)
   folder is a minimal, standalone demonstration you can run under Deno: it
   instantiates the wasm, runs a full key-generation + signing round-trip with the
   module serialized and rebuilt between every round (the stateless-relay pattern),

@@ -3,7 +3,7 @@
 These two scripts are a minimal, standalone demonstration that **WebAssembly runs
 inside the Lit Action runtime** — specifically that the DKLs23 threshold-ECDSA
 library works there and survives the stateless per-round relay the
-[mpc-signing example](../README.md) is built on. They run under Deno, the same
+[mpc-signing-ecdsa example](../README.md) is built on. They run under Deno, the same
 engine the Lit Action runtime uses (`lit-actions` is Deno v2.2.2; verified here on
 Deno 1.44), so what passes locally is what runs in the action.
 

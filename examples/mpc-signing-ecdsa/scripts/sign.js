@@ -114,7 +114,7 @@ async function main() {
   if (dry) {
     if (!VAULT_SIGNER_ADDRESS) throw new Error("VAULT_SIGNER_ADDRESS is required (run `npm run keygen` first)");
     expected = VAULT_SIGNER_ADDRESS;
-    const inner = ethers.utils.keccak256(ethers.utils.toUtf8Bytes(`mpc-signing ${recovery ? "recovery " : ""}dry run`));
+    const inner = ethers.utils.keccak256(ethers.utils.toUtf8Bytes(`mpc-signing-ecdsa ${recovery ? "recovery " : ""}dry run`));
     ethSigned = ethers.utils.hashMessage(ethers.utils.arrayify(inner));
     messageHash = ethers.utils.arrayify(ethSigned);
     console.log(`Dry run (${recovery ? "recovery: hot+cold" : "normal: hot+Lit"}) — no chain.\n`);
