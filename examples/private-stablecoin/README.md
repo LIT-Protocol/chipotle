@@ -10,11 +10,6 @@ Shielded pools (Zcash, Aztec) fix the privacy but have no compliance story, so
 issuers won't touch them. This example is the missing middle: **private by
 default, compliant by construction.**
 
-It is the Phase 0 demo from [`plans/private-stablecoin.md`](../../plans/private-stablecoin.md).
-It builds directly on [`../compliance-transfer-gate`](../compliance-transfer-gate)
-— same CID-pinned-oracle trust model, extended from "gate a transfer" to "run a
-private ledger."
-
 > **Demo-grade.** Runs on Base Sepolia with a mock USDC. The cryptography and
 > trust model are real, but several pieces are simplified for clarity (noted
 > throughout and listed under "What's demo-grade"). Production hardening is in
