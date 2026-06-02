@@ -6,8 +6,8 @@
 // and forth across /core/v1/lit_action. The action is stateless: it returns
 // its own session sealed to its CID (encState / encKeyshare), which we store
 // and replay on the next round — we are just the transport for its secret
-// state, and it is the transport for ours is unnecessary because we keep ours
-// in memory for the duration of one keygen/sign.
+// state. No reverse transport is needed for our own state: we keep it in
+// memory for the duration of one keygen/sign.
 //
 // Uses the Node build of the same DKLs23 library the action uses; the two
 // builds are wire-compatible (identical Rust/serialization at the same
