@@ -52,6 +52,12 @@ on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      phala_cvm_name:
+        description: "Target chipotle-prod CVM name or id (e.g. chipotle-prod-rep-xxxxx). Leave blank to use the current prod replica default. Set this to provision + propose against a freshly-added replica on a new Phala node during a zero-downtime upgrade."
+        required: false
+        type: string
+        default: ""
 
 jobs:
   validate-secrets:
@@ -150,6 +156,7 @@ jobs:
       provision_hash: ${{ steps.prepare.outputs.provision_hash }}
       app_auth_address: ${{ steps.prepare.outputs.app_auth_address }}
       encrypted_env: ${{ steps.encrypt-env.outputs.encrypted_env }}
+      cvm_name: ${{ steps.prepare.outputs.cvm_name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -189,6 +196,18 @@ jobs:
         run: |
           set -euo pipefail
 
+          # Resolve the target CVM. A manual workflow_dispatch run may override
+          # it via the phala_cvm_name input (e.g. to provision + propose against
+          # a freshly-added replica on a new Phala node for a zero-downtime
+          # upgrade). Empty on tag pushes, so tagged prod releases keep using
+          # the current replica default below.
+          CVM_NAME="${{ inputs.phala_cvm_name }}"
+          if [ -z "$CVM_NAME" ]; then
+            CVM_NAME="chipotle-prod-rep-r68r6"
+          fi
+          echo "Target prod CVM: $CVM_NAME"
+          echo "cvm_name=$CVM_NAME" >> "$GITHUB_OUTPUT"
+
           # Build the API request payload with the docker-compose content and
           # the list of allowed environment variable keys. The actual secret
           # values are encrypted client-side in a separate step and sent
@@ -216,8 +235,8 @@ jobs:
             }' > "$PROVISION_FILE"
           echo "Request payload size: $(wc -c < "$PROVISION_FILE") bytes"
 
-          echo "Calling POST /cvms/chipotle-prod-rep-r68r6/compose_file/provision ..."
-          OUTPUT=$(phala api /cvms/chipotle-prod-rep-r68r6/compose_file/provision \
+          echo "Calling POST /cvms/$CVM_NAME/compose_file/provision ..."
+          OUTPUT=$(phala api "/cvms/$CVM_NAME/compose_file/provision" \
             -X POST \
             --input "$PROVISION_FILE" \
             2>&1) || {
@@ -247,7 +266,7 @@ jobs:
 
           # Extract the AppAuth (dstack_app) address from the CVM's KMS info.
           # This is the per-app contract that controls compose-hash whitelisting.
-          CVM_INFO=$(phala api /cvms/chipotle-prod-rep-r68r6 --json 2>&1) || true
+          CVM_INFO=$(phala api "/cvms/$CVM_NAME" --json 2>&1) || true
           echo "CVM info (kms): $(echo "$CVM_INFO" | jq '.kms_info // .detail' 2>/dev/null)"
           APP_AUTH=$(echo "$CVM_INFO" | jq -r '.kms_info.dstack_app_address // empty')
           if [ -z "$APP_AUTH" ]; then
@@ -415,7 +434,7 @@ jobs:
           jq -n \
             --arg compose_hash "${{ needs.prepare-deploy.outputs.compose_hash }}" \
             --arg safe_tx_hash "${{ needs.propose-compose-hash.outputs.safe_tx_hash }}" \
-            --arg phala_app_name "chipotle-prod-rep-r68r6" \
+            --arg phala_app_name "${{ needs.prepare-deploy.outputs.cvm_name }}" \
             --arg base_url "https://api.chipotle.litprotocol.com" \
             --arg api_root_url "https://api.chipotle.litprotocol.com/core/v1" \
             --arg safe_address "${{ vars.SAFE_ADDRESS_CHIPOTLE_PROD }}" \
