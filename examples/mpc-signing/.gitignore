@@ -6,6 +6,6 @@ node_modules/
 # Hardhat
 artifacts/
 cache/
-# Vendored wasm/js fetched by the poc runner
-wasm-poc/dkls-wasm-ll-web.js
-wasm-poc/dkls-wasm-ll-web_bg.wasm
+# Vendored wasm/js fetched by the wasm-demo runner
+wasm-demo/dkls-wasm-ll-web.js
+wasm-demo/dkls-wasm-ll-web_bg.wasm

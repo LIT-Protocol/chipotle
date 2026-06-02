@@ -2,7 +2,7 @@
 
 **Status:** ✅ Built and verified end-to-end on production. Full flow run against the live Lit network + Base Sepolia: `setup` → `keygen` (5-round DKG) → `sign --dry` → `deploy` (`MpcVault`) → on-chain `exec` (contract `ecrecover` accepted the 2-of-2 signature). All previously-unverified pieces confirmed: action's jsDelivr import + runtime wasm fetch, `Lit.Actions.Encrypt`/`Decrypt`, `CompressionStream` gzip, the per-round relay, and the 16 MB responses (prod limit raised from the default 100 KB).
 
-**2-of-3 + cold-storage recovery added** (`keygen --with-recovery`, `sign --recovery`; cold share stored separately and moved offline; recovery signs hot+cold entirely client-side with no Lit). The user runs two parties (hot=0, cold=2), Lit runs party 1. Correct + reliable locally (15/15 in a prod-faithful Deno harness; all three quorums {hot,Lit}/{hot,cold}/{Lit,cold} recover the same address). On prod it has completed but the **multi-party DKG intermittently fails — and retry is not reliable** (sustained 100%-failure windows observed). Two distinct symptoms, both thrown from inside the wasm during `handleMessages`: **"Missing message"** (round 2, peer-message array) and **"Invalid commitment hash"** (round 4, commitment array). 2-of-2 (single peer per round, no commitment-array round in the same way) is fully reliable incl. on-chain. Offline the 2-of-3 path is bulletproof: **30/30 real client, 15/15 sequential, 64/64 concurrent** in a prod-faithful Deno harness (same web wasm build, gzip+relay, routing). Tried and ruled out as fixes: client bug (no), wasm-instance reuse (no), concurrency/heap reentrancy (no), a "touch each incoming message before handleMessages" probe (helped round-2 in some runs but a different symptom appeared and it's not reliable — removed), and aggressive retry with backoff (rides over short windows, fails on sustained ones). **Conclusion: node-side runtime bug** in the `lit_actions` worker's execution / wasm-object handling for the multi-peer (n>2) DKG rounds — needs infra investigation, not an example-code change. `wasm-poc/` is a minimal repro of the working path; the failure only appears on the live worker. The recovery (`--recovery`) sign path is fully local and unaffected.
+**2-of-3 + cold-storage recovery added** (`keygen --with-recovery`, `sign --recovery`; cold share stored separately and moved offline; recovery signs hot+cold entirely client-side with no Lit). The user runs two parties (hot=0, cold=2), Lit runs party 1. Correct + reliable locally (15/15 in a prod-faithful Deno harness; all three quorums {hot,Lit}/{hot,cold}/{Lit,cold} recover the same address). On prod it has completed but the **multi-party DKG intermittently fails — and retry is not reliable** (sustained 100%-failure windows observed). Two distinct symptoms, both thrown from inside the wasm during `handleMessages`: **"Missing message"** (round 2, peer-message array) and **"Invalid commitment hash"** (round 4, commitment array). 2-of-2 (single peer per round, no commitment-array round in the same way) is fully reliable incl. on-chain. Offline the 2-of-3 path is bulletproof: **30/30 real client, 15/15 sequential, 64/64 concurrent** in a prod-faithful Deno harness (same web wasm build, gzip+relay, routing). Tried and ruled out as fixes: client bug (no), wasm-instance reuse (no), concurrency/heap reentrancy (no), a "touch each incoming message before handleMessages" probe (helped round-2 in some runs but a different symptom appeared and it's not reliable — removed), and aggressive retry with backoff (rides over short windows, fails on sustained ones). **Conclusion: node-side runtime bug** in the `lit_actions` worker's execution / wasm-object handling for the multi-peer (n>2) DKG rounds — needs infra investigation, not an example-code change. `wasm-demo/` is a minimal repro of the working path; the failure only appears on the live worker. The recovery (`--recovery`) sign path is fully local and unaffected.
 
 ### Node-side investigation (deno version angle)
 
@@ -110,7 +110,7 @@ signing where the user is a required co-signer.**
 
 Before writing the example, the risky mechanics were validated end-to-end in
 Deno (the action runtime is Deno v2.2.2; verified on Deno 1.44). Scripts live in
-[`examples/mpc-signing/wasm-poc/`](../examples/mpc-signing/wasm-poc/).
+[`examples/mpc-signing/wasm-demo/`](../examples/mpc-signing/wasm-demo/).
 
 What's proven:
 
@@ -263,7 +263,7 @@ examples/mpc-signing/
 │   ├── keygen.js             # run DKG with the action; store shares; print address
 │   ├── deploy.js             # deploy MpcVault pinning the DKG address
 │   └── sign.js               # run signing with the action; submit vault.exec()
-└── wasm-poc/                 # ✅ the de-risk scripts (already committed)
+└── wasm-demo/                 # ✅ the de-risk scripts (already committed)
     ├── README.md
     ├── smoke.ts
     └── measure.ts
@@ -308,7 +308,7 @@ point of doing real threshold ECDSA: full `ecrecover` compatibility.
 
 ## Milestones
 
-1. ✅ **PR 0 — WASM de-risk (done).** `wasm-poc/` proves wasm loads in Deno from
+1. ✅ **PR 0 — WASM de-risk (done).** `wasm-demo/` proves wasm loads in Deno from
    inlined bytes, the relay pattern works for DKG + signing, and the output is
    `ecrecover`-compatible. Found + resolved the 100 KB response-size constraint.
 2. **PR 1 — action keygen.** `action/mpcSigner.js` DKG modes + `client/mpcClient.js`
@@ -373,4 +373,4 @@ across both.
 - [`lit-frost`](https://github.com/LIT-Protocol/lit-frost) / [`cait-sith`](https://github.com/LIT-Protocol/cait-sith) — Lit's first-party threshold crates (demo #2 / future ECDSA).
 - Lit runtime is Deno: `lit-actions/Cargo.toml` (Deno v2.2.2). WASM support: `lit-actions/tests/it.rs:785`.
 - Limits: `docs/lit-actions/limits.mdx` — 16 MB code+params, **100 KB response** (the constraint above), 64 MB memory, 15 min, 10 sig requests/action.
-- Proof scripts: [`examples/mpc-signing/wasm-poc/`](../examples/mpc-signing/wasm-poc/).
+- Proof scripts: [`examples/mpc-signing/wasm-demo/`](../examples/mpc-signing/wasm-demo/).

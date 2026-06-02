@@ -1,12 +1,17 @@
-# WASM proof-of-concept (de-risk)
+# WASM demo (standalone)
 
-These two scripts proved the hard parts of the
-[mpc-signing plan](../../../plans/mpc-signing-example.md)
-before any of the real example was written. They run under Deno, which is the
-same engine the Lit Action runtime uses (`lit-actions` is Deno v2.2.2; this was
-verified on Deno 1.44).
+These two scripts are a minimal, standalone demonstration that **WebAssembly runs
+inside the Lit Action runtime** — specifically that the DKLs23 threshold-ECDSA
+library works there and survives the stateless per-round relay the
+[mpc-signing example](../README.md) is built on. They run under Deno, the same
+engine the Lit Action runtime uses (`lit-actions` is Deno v2.2.2; verified here on
+Deno 1.44), so what passes locally is what runs in the action.
 
-## What they prove
+They started life as the de-risk for the example; the concept is proven now (the
+example runs end-to-end on prod), so they stay as a runnable, offline WASM demo
+you can use as a template for getting any WASM module working in an action.
+
+## What they show
 
 `smoke.ts` — end-to-end, mirroring exactly what the Lit Action will do:
 
