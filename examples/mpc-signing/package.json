@@ -1,0 +1,24 @@
+{
+  "name": "mpc-signing",
+  "version": "0.0.1",
+  "private": true,
+  "description": "A 2-of-2 threshold-ECDSA (DKLs23) signer split between a Lit Action and the user — Lit literally cannot sign without the user co-signing, and the full key never exists anywhere.",
+  "scripts": {
+    "compile": "hardhat compile",
+    "setup": "node scripts/setup.js",
+    "keygen": "node scripts/keygen.js",
+    "deploy:baseSepolia": "hardhat run scripts/deploy.js --network baseSepolia",
+    "deploy:base": "hardhat run scripts/deploy.js --network base",
+    "sign": "node scripts/sign.js"
+  },
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.0.2",
+    "@silencelaboratories/dkls-wasm-ll-node": "^1.2.0",
+    "dotenv": "^16.4.5",
+    "ethers": "^5.7.2"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^2.0.2",
+    "hardhat": "^2.22.10"
+  }
+}
