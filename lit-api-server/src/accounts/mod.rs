@@ -331,15 +331,15 @@ pub async fn add_usage_api_key(
 ) -> Result<bool> {
     let (contract, signer_address, client) =
         get_signable_account_config_contract(signer_pool.clone()).await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let usage_api_key_hash = api_key_hash(usage_api_key);
     tracing::info!(
-        "Adding usage API key to account: {}, usage_api_key: {}, expiration: {}, balance: {}",
-        api_key,
-        usage_api_key,
+        "Adding usage API key to account: account_api_key_hash={:#x}, usage_api_key_hash={:#x}, expiration: {}, balance: {}",
+        account_api_key_hash,
+        usage_api_key_hash,
         expiration,
         balance
     );
-    let account_api_key_hash = api_key_hash(api_key);
-    let usage_api_key_hash = api_key_hash(usage_api_key);
 
     let function_call = contract.setUsageApiKey(
         account_api_key_hash,
