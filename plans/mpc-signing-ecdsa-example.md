@@ -172,16 +172,12 @@ examples/mpc-signing-ecdsa/
 │   │                       # holds the hot (and cold) share
 │   └── store.js            # local JSON store (hot store + cold share file)
 ├── contracts/MpcVault.sol  # minimal vault: exec() requires ecrecover(sig)==signer
-├── scripts/
-│   ├── _env.js
-│   ├── setup.js            # PKP + group + scoped usage key + action registration
-│   ├── keygen.js           # interactive DKG (2-of-3 default; --basic = 2-of-2)
-│   ├── deploy.js           # deploy MpcVault pinning the DKG address
-│   └── sign.js             # signing (hot+Lit, or --recovery hot+cold) + exec
-└── wasm-demo/              # standalone Deno demo that DKLs23 runs in the runtime
-    ├── README.md
-    ├── smoke.ts            # full DKG+sign round-trip, serialize/restore each round
-    └── measure.ts          # relayed blob sizes vs the response limit
+└── scripts/
+    ├── _env.js
+    ├── setup.js            # PKP + group + scoped usage key + action registration
+    ├── keygen.js           # interactive DKG (2-of-3 default; --basic = 2-of-2)
+    ├── deploy.js           # deploy MpcVault pinning the DKG address
+    └── sign.js             # signing (hot+Lit, or --recovery hot+cold) + exec
 ```
 
 New vs the other examples: `client/` (first example with a stateful user-side
@@ -239,4 +235,4 @@ binding, and on-chain verification are identical across both.
 - [`@silencelaboratories/ecdsa-tss`](https://www.npmjs.com/package/@silencelaboratories/ecdsa-tss) — pure-JS Lindell17 2-of-2. Considered, rejected (2-of-2 only).
 - [`lit-frost`](https://github.com/LIT-Protocol/lit-frost) / [`cait-sith`](https://github.com/LIT-Protocol/cait-sith) — Lit's first-party threshold crates (future work).
 - Limits: `docs/lit-actions/limits.mdx` — 16 MB code+params, 1 MB response, 64 MB memory, 15 min, 10 sig requests/action.
-- WASM in actions: `docs/lit-actions/wasm.mdx`. Standalone demo: [`examples/mpc-signing-ecdsa/wasm-demo/`](../examples/mpc-signing-ecdsa/wasm-demo/).
+- WASM in actions: `docs/lit-actions/wasm.mdx`.

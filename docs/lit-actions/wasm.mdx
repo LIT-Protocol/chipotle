@@ -87,11 +87,9 @@ initSync(Uint8Array.from(atob(WASM_B64), (c) => c.charCodeAt(0)));
 
 <Info>
   The [mpc-signing-ecdsa example](https://github.com/LIT-Protocol/chipotle/tree/main/examples/mpc-signing-ecdsa)
-  runs DKLs23 threshold ECDSA in wasm inside the action. Its
-  [`wasm-demo/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/mpc-signing-ecdsa/wasm-demo)
-  folder is a minimal, standalone demonstration you can run under Deno: it
-  instantiates the wasm, runs a full key-generation + signing round-trip with the
-  module serialized and rebuilt between every round (the stateless-relay pattern),
-  and verifies the result with plain `ecrecover`. Use it as a template for getting
-  any wasm module working in an action.
+  runs DKLs23 threshold ECDSA in wasm inside the action: it instantiates the wasm,
+  serializes and rebuilds the module's session between every protocol round (the
+  stateless-relay pattern), and produces a signature plain `ecrecover` accepts. Its
+  `action/mpcSigner.js` is a working template for getting any wasm module running in
+  an action.
 </Info>

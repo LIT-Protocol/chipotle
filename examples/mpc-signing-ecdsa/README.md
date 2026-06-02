@@ -136,7 +136,6 @@ the user via the Node build locally. The user drives; the action is one stateles
 | `scripts/keygen.js` | Runs the interactive DKG; writes the shares + address. |
 | `scripts/deploy.js` | Deploys the vault, pinning the DKG address as signer. |
 | `scripts/sign.js` | Builds the digest, runs the signing (hot + Lit, or `--recovery` hot + cold), submits `exec()`. |
-| `wasm-demo/` | Standalone Deno scripts that show DKLs23 running in the action runtime and surviving the per-round relay — a minimal, offline WASM demo. |
 
 ## Walkthrough
 
@@ -225,8 +224,7 @@ verifiable by the same address. The two the scripts expose — {hot,Lit} and
 > node-side fix is now deployed: 2-of-3 keygen completes on the **first attempt**
 > (verified 7/7 on prod), and both signing quorums produce `ecrecover`-valid
 > signatures. `keygen` keeps its whole-DKG retry as belt-and-suspenders for ordinary
-> transient network errors. The offline harnesses in `wasm-demo/` are a minimal
-> reproduction of the working path.
+> transient network errors.
 
 ## The minimal 2-of-2 variant
 
@@ -283,9 +281,6 @@ Run against the live Lit network and Base Sepolia:
 - **Nonce-reuse guard** — adversarially tested on prod: replaying a built
   presignature into round 4 with a *different* `messageHash` is refused inside the
   action ("nonce-reuse guard"), while the committed hash signs normally ✓
-
-The Deno scripts in [`wasm-demo/`](./wasm-demo/) are a standalone, offline
-demonstration of the WASM + relay mechanics.
 
 ## References
 
