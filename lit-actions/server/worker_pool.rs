@@ -90,6 +90,12 @@ pub struct PoolHealth {
     refill_failed: AtomicUsize,
     hits: AtomicUsize,
     misses: AtomicUsize,
+    /// Live gauge of workers currently sitting in the ready channel,
+    /// available to be acquired. Incremented just before a worker publishes
+    /// its handle and decremented when that handle is acquired. Lets callers
+    /// (and tests) observe warmup progress deterministically instead of
+    /// guessing with a sleep.
+    ready: AtomicUsize,
 }
 
 impl Default for PoolHealth {
@@ -102,6 +108,7 @@ impl Default for PoolHealth {
             refill_failed: AtomicUsize::new(0),
             hits: AtomicUsize::new(0),
             misses: AtomicUsize::new(0),
+            ready: AtomicUsize::new(0),
         }
     }
 }
@@ -112,6 +119,10 @@ impl PoolHealth {
     }
     pub fn misses(&self) -> usize {
         self.misses.load(Ordering::Relaxed)
+    }
+    /// Number of pre-warmed workers currently ready to be acquired.
+    pub fn ready(&self) -> usize {
+        self.ready.load(Ordering::Relaxed)
     }
     pub fn refill_failed(&self) -> usize {
         self.refill_failed.load(Ordering::Relaxed)
@@ -185,6 +196,7 @@ impl WorkerPool {
         }
         match self.ready_rx.try_recv() {
             Ok(handle) => {
+                self.health.ready.fetch_sub(1, Ordering::Relaxed);
                 self.health.hits.fetch_add(1, Ordering::Relaxed);
                 self.spawn_worker();
                 Some(handle)
@@ -337,8 +349,14 @@ fn run_worker_thread(pool: Arc<WorkerPool>) {
     let (work_tx, work_rx) = flume::bounded::<WorkItem>(1);
     let handle = WorkerHandle { work_tx };
 
+    // Increment the ready gauge before publishing the handle. The handle
+    // only becomes visible (and acquirable) once `send` returns, so the
+    // matching decrement in `try_acquire` can never run before this add —
+    // no underflow window.
+    pool.health.ready.fetch_add(1, Ordering::Relaxed);
     if pool.ready_tx.send(handle).is_err() {
         // Pool was dropped before this worker could publish itself.
+        pool.health.ready.fetch_sub(1, Ordering::Relaxed);
         return;
     }
 
