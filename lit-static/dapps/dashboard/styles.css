@@ -1783,10 +1783,6 @@ textarea.input.textarea-sm {
   flex-direction: column;
 }
 
-.modal-dialog-sm {
-  max-width: 360px;
-}
-
 .modal-header {
   display: flex;
   align-items: center;
