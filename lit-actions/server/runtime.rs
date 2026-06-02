@@ -550,16 +550,21 @@ fn execute_patch_deno(worker: &mut MainWorker) -> Result<()> {
 /// Inject the caller-supplied js_params as a single global, `__litJsParams`,
 /// which the per-execution wrapper (see `to_executable_code`) reads and passes
 /// to `main(params)`. Injected via `execute_script` so it is NOT part of the
-/// source compiled through the eval-context code cache. No-op when params are
-/// absent.
+/// source compiled through the eval-context code cache.
+///
+/// When js_params is absent we still define the global as `null` (not leave it
+/// `undefined`): the previous code path serialized `Value::Null` into the
+/// wrapper, so actions that branch on `params === null` for the no-params case
+/// keep working.
 fn inject_params_globals(
     worker: &mut MainWorker,
     globals_to_inject: &Option<serde_json::Value>,
     http_headers: &BTreeMap<String, String>,
 ) -> Result<()> {
-    let Some(params) = globals_to_inject else {
-        return Ok(());
-    };
+    // Omitted js_params => inject `null`, matching the pre-change `main(null)`
+    // semantics rather than handing user code `undefined`.
+    let null = serde_json::Value::Null;
+    let params = globals_to_inject.as_ref().unwrap_or(&null);
 
     let _span = info_span!("Params.js").entered();
 
@@ -745,16 +750,6 @@ async fn execute_with_worker_inner(
     // PatchDeno.js must run AFTER LitNamespace.js (which the caller already
     // injected) to preserve the original bootstrap order.
     execute_patch_deno(&mut worker)?;
-    // Inject the caller's js_params as a single global (`__litJsParams`) here,
-    // via execute_script — which deliberately bypasses the eval-context code
-    // cache. This keeps js_params OUT of the source that flows through
-    // `op_eval_context`/`SharedV8CodeCache`, so the cached/compiled form is the
-    // stable, param-free bundled action code. Baking params into that source
-    // (the previous behavior) was unsafe: Deno's `op_eval_context` computes the
-    // same `source_hash` for different sources of equal length, so the code
-    // cache returned a *different* request's compiled bytecode — crossing
-    // js_params between executions (see CPL / the mpc-signing investigation).
-    inject_params_globals(&mut worker, &js_params, &http_headers)?;
 
     // Check the action code cache early so we can skip prepare_action_code
     // on cache hit (the real performance win). We always use CdnModuleLoader
@@ -798,6 +793,22 @@ async fn execute_with_worker_inner(
             let _ = memory_limit_tx.send(current_limit);
             current_limit * 2
         });
+
+    // Inject the caller's js_params as a single global (`__litJsParams`), via
+    // execute_script — which deliberately bypasses the eval-context code cache.
+    // This keeps js_params OUT of the source that flows through
+    // `op_eval_context`/`SharedV8CodeCache`, so the cached/compiled form is the
+    // stable, param-free bundled action code. Baking params into that source
+    // (the previous behavior) was unsafe: Deno's `op_eval_context` computes the
+    // same `source_hash` for different sources of equal length, so the code
+    // cache returned a *different* request's compiled bytecode — crossing
+    // js_params between executions (see CPL / the mpc-signing investigation).
+    //
+    // Must run AFTER the controller thread and near-heap-limit callback above:
+    // materializing a large params object into V8 is subject to the same
+    // timeout/OOM guards as user code, so an oversized params blob surfaces as
+    // a normal resource-exhausted/timeout error instead of a hard V8 abort.
+    inject_params_globals(&mut worker, &js_params, &http_headers)?;
 
     let mut interval = tokio::time::interval(Duration::from_millis(MEMORY_SAMPLE_INTERVAL_MS));
     let mut heap_stats = v8::HeapStatistics::default();
