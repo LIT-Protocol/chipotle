@@ -100,6 +100,11 @@ scoped usage key, **derive the Solana address by running the action's
 `"address"` branch**, register the action, and add its CID to the group. The
 address is written to `.env` as `SOLANA_ADDRESS`.
 
+A freshly-minted usage key's group grant is eventually consistent, so the
+first action call (step 4) polls with retries until the grant propagates
+rather than aborting on a transient miss — you may see a few
+`...action not ready yet` lines before it succeeds.
+
 ### 3. Fund the wallet
 
 ```bash

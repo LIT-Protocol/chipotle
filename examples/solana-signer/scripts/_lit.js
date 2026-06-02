@@ -9,7 +9,9 @@ const path = require("path");
 
 const ACTION_FILE = path.join(__dirname, "..", "action", "solanaSigner.js");
 
-async function runAction(jsParams) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function runActionOnce(jsParams) {
   const {
     LIT_API_BASE = "https://api.chipotle.litprotocol.com",
     LIT_USAGE_API_KEY,
@@ -35,6 +37,30 @@ async function runAction(jsParams) {
     throw new Error(`action errored: ${envelope.logs || JSON.stringify(envelope)}`);
   }
   return envelope.response;
+}
+
+// Run the action, retrying on failure. A freshly-minted usage key's
+// execute-in-group grant is eventually consistent, so the *first* call right
+// after `add_usage_api_key` can fail for a beat while the grant propagates.
+// The docs say not to sleep a fixed amount but to poll the real execution path
+// until it succeeds — so `setup.js` calls this with retries on its first run.
+// Steady-state callers (address/airdrop/transfer) leave retries at 0.
+async function runAction(jsParams, { retries = 0, delayMs = 2500 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await runActionOnce(jsParams);
+    } catch (err) {
+      lastErr = err;
+      if (attempt < retries) {
+        console.log(
+          `  ...action not ready yet (attempt ${attempt + 1}/${retries + 1}), retrying in ${delayMs}ms`
+        );
+        await sleep(delayMs);
+      }
+    }
+  }
+  throw lastErr;
 }
 
 module.exports = { runAction, ACTION_FILE };

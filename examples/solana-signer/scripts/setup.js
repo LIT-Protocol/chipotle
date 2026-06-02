@@ -62,7 +62,13 @@ async function main() {
   // -------------------------------------------------------------------------
   console.log("Step 4/6: Deriving the action's Solana address...");
   // Use the scoped key we just minted to run the action's "address" branch.
-  const { address } = await runAction({ action: "address" });
+  // This is the first use of a brand-new usage key, whose execute-in-group
+  // grant is eventually consistent — so poll with retries until it propagates
+  // rather than aborting setup (and half-populating .env) on a transient miss.
+  const { address } = await runAction(
+    { action: "address" },
+    { retries: 10, delayMs: 3000 }
+  );
   if (!address) throw new Error("action did not return an address");
   env.upsert("SOLANA_ADDRESS", address);
   console.log(`  SOLANA_ADDRESS=${address}`);
