@@ -29,7 +29,9 @@
 //   inMsgs       [{ p:<b64 payload>, f:<from_id>, t:<to_id|null> }] the user's
 //                messages this round needs
 //   commitments  [<b64>, <b64>] chain-code commitments [user, action] (keygen r4)
-//   messageHash  <b64> 32-byte digest to sign (sign round 4)
+//   messageHash  <b64> 32-byte digest to sign. Sent in sign round 1, where it is
+//                committed into the sealed state, and re-sent in round 4 where
+//                it must match (nonce-reuse guard). Carried in the seal between.
 //   participants, threshold   (keygen round 1; defaults to 3, 2 for 2-of-3 — or
 //                              2, 2 for the --basic 2-of-2 variant)
 //   chainPath    HD path for the SignSession (sign round 1; "m" = none)
@@ -94,21 +96,26 @@ const jsonToMsg = (j) => new Message(b64ToU8(j.p), j.f, j.t === null ? undefined
 const fromJsonList = (arr) => (arr || []).map(jsonToMsg);
 
 // --- seal / unseal the action's secret state to its own CID -----------------
-// Wrap = { kind, round, gz:<b64 of gzipped bytes> }, gzipped+encrypted.
-async function seal(pkpId, bytes, kind, round) {
+// Wrap = { kind, round, gz:<b64 of gzipped bytes>, ...bound }, gzipped+encrypted.
+// `bound` carries integrity-checked metadata (sessionId, and for signing the
+// committed messageHash) that the action verifies on the way back in.
+// Lit.Actions.Encrypt is the only way to produce a ciphertext the action will
+// accept, so the user can relay these blobs but cannot forge or alter the bound
+// fields — that is what makes the sessionId / messageHash binding trustworthy.
+async function seal(pkpId, bytes, kind, round, bound = {}) {
   const gz = await gzip(bytes);
-  const wrapped = JSON.stringify({ kind, round, gz: u8ToB64(gz) });
+  const wrapped = JSON.stringify({ kind, round, gz: u8ToB64(gz), ...bound });
   return await Lit.Actions.Encrypt({ pkpId, message: wrapped });
 }
 async function unseal(pkpId, ciphertext, expectKind, expectRound) {
-  const wrapped = JSON.parse(await Lit.Actions.Decrypt({ pkpId, ciphertext }));
-  if (wrapped.kind !== expectKind) {
-    throw new Error(`sealed-state kind mismatch: got ${wrapped.kind}, want ${expectKind}`);
+  const w = JSON.parse(await Lit.Actions.Decrypt({ pkpId, ciphertext }));
+  if (w.kind !== expectKind) {
+    throw new Error(`sealed-state kind mismatch: got ${w.kind}, want ${expectKind}`);
   }
-  if (expectRound !== undefined && wrapped.round !== expectRound) {
-    throw new Error(`sealed-state round mismatch: got ${wrapped.round}, want ${expectRound}`);
+  if (expectRound !== undefined && w.round !== expectRound) {
+    throw new Error(`sealed-state round mismatch: got ${w.round}, want ${expectRound}`);
   }
-  return await gunzip(b64ToU8(wrapped.gz));
+  return { bytes: await gunzip(b64ToU8(w.gz)), meta: w };
 }
 
 async function main(params) {
@@ -133,7 +140,11 @@ async function keygenRound({ round, sessionId, pkpId, encState, inMsgs, commitme
     const m1a = session.createFirstMessage();
     out.outMsgs = [msgToJson(m1a)];
   } else {
-    session = KeygenSession.fromBytes(await unseal(pkpId, encState, "kg-state", round));
+    const { bytes, meta } = await unseal(pkpId, encState, "kg-state", round);
+    if (meta.sessionId !== sessionId) {
+      throw new Error("sealed-state sessionId mismatch — refusing cross-session splice");
+    }
+    session = KeygenSession.fromBytes(bytes);
     const incoming = fromJsonList(inMsgs);
 
     if (round === 2) {
@@ -160,7 +171,7 @@ async function keygenRound({ round, sessionId, pkpId, encState, inMsgs, commitme
     }
   }
 
-  out.encState = await seal(pkpId, session.toBytes(), "kg-state", round + 1);
+  out.encState = await seal(pkpId, session.toBytes(), "kg-state", round + 1, { sessionId });
   return out;
 }
 
@@ -171,21 +182,39 @@ async function keygenRound({ round, sessionId, pkpId, encState, inMsgs, commitme
 // ---------------------------------------------------------------------------
 async function signRound({ round, sessionId, pkpId, encState, encKeyshare, inMsgs, messageHash, chainPath }) {
   let session;
+  // The message to sign is committed in round 1 and carried (integrity-checked)
+  // in the sealed state through every round. The presignature/nonce is fixed
+  // after rounds 1–3, so finalizing it for two different messages would reuse
+  // the ECDSA nonce and leak the private key. Binding the hash here means a
+  // replayed presignature can only ever produce a signature for the one hash it
+  // was built for — the stateless action cannot otherwise detect the replay.
+  let boundHash = messageHash;
   let out = { ok: true, op: "sign", round, sessionId };
 
   if (round === 1) {
-    const keyshare = Keyshare.fromBytes(await unseal(pkpId, encKeyshare, "keyshare"));
-    session = new SignSession(keyshare, chainPath || "m");
+    if (!messageHash) {
+      throw new Error("sign round 1 requires messageHash (committed for the whole signing session)");
+    }
+    const { bytes } = await unseal(pkpId, encKeyshare, "keyshare");
+    session = new SignSession(Keyshare.fromBytes(bytes), chainPath || "m");
     out.outMsgs = [msgToJson(session.createFirstMessage())];
   } else {
-    session = SignSession.fromBytes(await unseal(pkpId, encState, "sign-state", round));
+    const { bytes, meta } = await unseal(pkpId, encState, "sign-state", round);
+    if (meta.sessionId !== sessionId) {
+      throw new Error("sealed-state sessionId mismatch — refusing cross-session splice");
+    }
+    boundHash = meta.messageHash;
+    session = SignSession.fromBytes(bytes);
     const incoming = fromJsonList(inMsgs);
 
     if (round === 2 || round === 3) {
       out.outMsgs = session.handleMessages(incoming).map(msgToJson);
     } else if (round === 4) {
+      if (messageHash !== undefined && messageHash !== boundHash) {
+        throw new Error("sign round 4 messageHash differs from the hash committed in round 1 — refusing (nonce-reuse guard)");
+      }
       session.handleMessages(incoming); // final handleMessages, output unused
-      const last = session.lastMessage(b64ToU8(messageHash));
+      const last = session.lastMessage(b64ToU8(boundHash));
       out.outMsgs = [msgToJson(last)];
       return out; // user combines; nothing more to relay
     } else {
@@ -193,7 +222,7 @@ async function signRound({ round, sessionId, pkpId, encState, encKeyshare, inMsg
     }
   }
 
-  out.encState = await seal(pkpId, session.toBytes(), "sign-state", round + 1);
+  out.encState = await seal(pkpId, session.toBytes(), "sign-state", round + 1, { sessionId, messageHash: boundHash });
   return out;
 }
 

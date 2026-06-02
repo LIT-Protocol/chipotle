@@ -29,7 +29,10 @@ function upsert(key, value) {
   } else {
     next = text.endsWith("\n") || text.length === 0 ? text + line + "\n" : text + "\n" + line + "\n";
   }
-  fs.writeFileSync(ENV_PATH, next);
+  // 0600: .env holds the scoped usage API key and deployer/executor private
+  // keys — keep it owner-only, and enforce it on pre-existing files too.
+  fs.writeFileSync(ENV_PATH, next, { mode: 0o600 });
+  fs.chmodSync(ENV_PATH, 0o600);
   process.env[key] = value;
 }
 

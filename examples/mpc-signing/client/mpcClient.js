@@ -154,7 +154,9 @@ class MpcClient {
 
     const s1u = user.createFirstMessage();
     onRound && onRound(1);
-    const r1 = await this.callAction({ op: "sign", round: 1, sessionId, encKeyshare: encActionKeyshare, chainPath });
+    // messageHash is committed in round 1 so the action binds it to this
+    // presignature; round 4 will refuse to finalize for any other hash.
+    const r1 = await this.callAction({ op: "sign", round: 1, sessionId, encKeyshare: encActionKeyshare, chainPath, messageHash: hashB64 });
     const s1a = fromJsonList(r1.outMsgs);
 
     const s2u = user.handleMessages(others([s1u, ...s1a], 0));

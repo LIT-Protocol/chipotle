@@ -30,7 +30,10 @@ function load() {
 }
 
 function save(data) {
-  fs.writeFileSync(STORE_PATH, JSON.stringify(data, null, 2) + "\n");
+  // 0600: this holds the user's hot keyshare — keep it owner-only. chmod after
+  // write enforces it even if the file already existed with looser perms.
+  fs.writeFileSync(STORE_PATH, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
+  fs.chmodSync(STORE_PATH, 0o600);
   return STORE_PATH;
 }
 
@@ -49,7 +52,9 @@ function loadCold() {
 }
 
 function saveCold(data) {
-  fs.writeFileSync(COLD_PATH, JSON.stringify(data, null, 2) + "\n");
+  // 0600: the cold recovery share is half a recovery quorum — owner-only.
+  fs.writeFileSync(COLD_PATH, JSON.stringify(data, null, 2) + "\n", { mode: 0o600 });
+  fs.chmodSync(COLD_PATH, 0o600);
   return COLD_PATH;
 }
 

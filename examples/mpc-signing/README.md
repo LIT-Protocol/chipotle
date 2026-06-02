@@ -98,9 +98,14 @@ strictly more than a per-chain Safe gives you.
   key can run could decrypt; to bind the seal to this exact action, restrict the
   group's permitted CIDs to its CID. That's the tighter production setup.) The
   user stores these blobs and relays them back each round.
-- **Relay integrity.** Each sealed blob carries a `kind` + `round` tag the action
-  checks, so the user can't splice rounds or replay an earlier session. DKLs's
-  own per-round commitments catch fabricated protocol messages.
+- **Relay integrity.** Each sealed blob carries `kind` + `round` + `sessionId`
+  tags the action checks, so the user can't splice rounds or mix state across
+  sessions. Critically, **the message to sign is committed in sign round 1 and
+  bound into the sealed presignature**: round 4 refuses to finalize for any other
+  hash. Without that, a malicious user could replay one presignature against two
+  digests — reusing the ECDSA nonce, which leaks the key — and the stateless
+  action could not otherwise detect it. DKLs's own per-round commitments catch
+  fabricated protocol messages.
 
 ## ⚠️ Prerequisite: a raised response-payload limit
 
@@ -287,6 +292,9 @@ Run against the live Lit network and Base Sepolia:
   `ecrecover`-valid signature against the same address ✓
 - **2-of-2** (`--basic`) — `keygen` and `sign` verified the same way, including a
   real on-chain `MpcVault.exec` (single peer per round; reliable throughout) ✓
+- **Nonce-reuse guard** — adversarially tested on prod: replaying a built
+  presignature into round 4 with a *different* `messageHash` is refused inside the
+  action ("nonce-reuse guard"), while the committed hash signs normally ✓
 
 Requires the response-payload limit raised on your account (see the prerequisite
 above) — production has been raised to 16 MB. The Deno proof in
