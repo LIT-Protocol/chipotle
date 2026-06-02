@@ -2,7 +2,7 @@
   "name": "mpc-signing",
   "version": "0.0.1",
   "private": true,
-  "description": "A 2-of-2 threshold-ECDSA (DKLs23) signer split between a Lit Action and the user — Lit literally cannot sign without the user co-signing, and the full key never exists anywhere.",
+  "description": "A 2-of-3 threshold-ECDSA (DKLs23) signer split between a Lit Action and the user (hot + cold recovery share) — Lit literally cannot sign without the user co-signing, the full key never exists anywhere, and the user can always recover without Lit.",
   "scripts": {
     "compile": "hardhat compile",
     "setup": "node scripts/setup.js",

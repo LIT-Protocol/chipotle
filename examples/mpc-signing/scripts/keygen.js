@@ -1,13 +1,15 @@
 // Run the interactive distributed key generation between this machine (the
 // user) and the Lit Action (party 1).
 //
-//   node scripts/keygen.js                  2-of-2: user holds party 0, Lit holds party 1.
-//   node scripts/keygen.js --with-recovery  2-of-3: user holds parties 0 (hot)
-//                                            and 2 (cold recovery), Lit holds party 1.
+//   node scripts/keygen.js           2-of-3 (default): user holds party 0 (hot)
+//                                     and party 2 (cold recovery); Lit holds party 1.
+//   node scripts/keygen.js --basic   2-of-2: user holds party 0, Lit holds party 1.
+//                                     No recovery share — lose either and it's gone.
 //
-// 2-of-3 buys a self-custody escape hatch: the user holds 2 of 3 shares, so if
-// Lit ever disappears, hot + cold can still sign (see `npm run sign -- --recovery`).
-// Normal day-to-day signing is always hot + Lit; the cold share stays offline.
+// The default is 2-of-3 because it buys a self-custody escape hatch: the user
+// holds 2 of 3 shares, so if Lit ever disappears, hot + cold can still sign
+// (see `npm run sign -- --recovery`). Day-to-day signing is still hot + Lit; the
+// cold share stays offline. The `--basic` 2-of-2 is the minimal variant.
 //
 // Output:
 //   * Hot store ../.mpc-store.json — hot share (party 0) + the action's keyshare
@@ -29,7 +31,7 @@ const {
 } = process.env;
 
 async function main() {
-  const recovery = process.argv.includes("--with-recovery");
+  const recovery = !process.argv.includes("--basic"); // 2-of-3 w/ cold recovery is the default
   for (const k of ["LIT_USAGE_API_KEY", "MPC_PKP_ADDRESS"]) {
     if (!process.env[k]) throw new Error(`${k} is required (run \`npm run setup\` first)`);
   }
@@ -41,7 +43,7 @@ async function main() {
   const cfg = recovery
     ? { participants: 3, threshold: 2, userParties: [0, 2] } // hot + cold; Lit = 1
     : { participants: 2, threshold: 2, userParties: [0] };
-  const scheme = recovery ? "2-of-3 (hot + Lit + cold recovery)" : "2-of-2 (hot + Lit)";
+  const scheme = recovery ? "2-of-3 (hot + Lit + cold recovery)" : "2-of-2 (hot + Lit, no recovery)";
 
   console.log(`Running ${scheme} distributed key generation (5 rounds)...`);
   // A retry is a fresh, independent DKG run, so on failure we restart the whole

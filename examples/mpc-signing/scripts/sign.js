@@ -4,8 +4,8 @@
 //   Modes:
 //     (default)    hot share + Lit Action  — the normal path (4 MPC rounds).
 //     --recovery   hot share + cold share  — NO Lit Action; entirely local.
-//                  The 2-of-3 self-custody escape hatch (run `keygen
-//                  --with-recovery` first, and restore the cold share).
+//                  The 2-of-3 self-custody escape hatch (the default `keygen`
+//                  writes the cold share; restore it before recovery signing).
 //   Targets:
 //     (default)    submit vault.exec(...) on-chain.
 //     --dry        produce + verify the signature locally; no chain, no funds.

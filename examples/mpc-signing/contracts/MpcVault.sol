@@ -6,10 +6,10 @@ import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/Messa
 
 /// @title MpcVault
 /// @notice A vault controlled by a threshold-ECDSA key whose shares are split
-///         between a Lit Action and the user (2-of-2 by default; the example
-///         generalizes to 2-of-3). Neither party can sign alone; every `exec`
-///         requires a signature produced by the interactive MPC protocol
-///         between them.
+///         between a Lit Action and the user (2-of-3 by default: Lit + the
+///         user's hot share + a cold recovery share; also runs 2-of-2). Neither
+///         party can sign alone; every `exec` requires a signature produced by
+///         the interactive MPC protocol between a signing quorum.
 ///
 /// The contract has no idea MPC was involved: the signer is a normal
 /// secp256k1 address and the signature verifies with plain `ecrecover`. That
@@ -41,7 +41,7 @@ contract MpcVault {
         return keccak256(abi.encode(address(this), block.chainid, nonce, to, value, data));
     }
 
-    /// @notice Execute a call authorized by the 2-of-2 MPC signature.
+    /// @notice Execute a call authorized by the threshold MPC signature.
     function exec(address to, uint256 value, bytes calldata data, bytes calldata signature) external {
         bytes32 ethSigned = digest(to, value, data).toEthSignedMessageHash();
         if (ethSigned.recover(signature) != signer) revert InvalidSignature();

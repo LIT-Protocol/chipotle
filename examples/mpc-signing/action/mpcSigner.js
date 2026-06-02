@@ -1,4 +1,6 @@
-// Lit Action: the Lit-side party of a 2-of-2 threshold-ECDSA (DKLs23) signer.
+// Lit Action: the Lit-side party of a threshold-ECDSA (DKLs23) signer. The
+// example defaults to 2-of-3 (Lit + the user's hot share + a cold recovery
+// share); the protocol here is t-of-n generic, so it also runs 2-of-2.
 //
 // THE WHOLE POINT: this action can never produce a signature on its own. The
 // signing key is split between this action and the user. Each signature (and
@@ -28,7 +30,8 @@
 //                messages this round needs
 //   commitments  [<b64>, <b64>] chain-code commitments [user, action] (keygen r4)
 //   messageHash  <b64> 32-byte digest to sign (sign round 4)
-//   participants, threshold   (keygen round 1; this example uses 2, 2)
+//   participants, threshold   (keygen round 1; defaults to 3, 2 for 2-of-3 — or
+//                              2, 2 for the --basic 2-of-2 variant)
 //   chainPath    HD path for the SignSession (sign round 1; "m" = none)
 
 // Import the DKLs23 wasm-bindgen glue from jsDelivr by EXPLICIT FILE PATH so

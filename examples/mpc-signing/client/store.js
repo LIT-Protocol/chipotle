@@ -42,7 +42,7 @@ function loadCold() {
   if (!coldExists()) {
     throw new Error(
       `No cold share at ${COLD_PATH}. Recovery signing needs the cold share — ` +
-        "restore it from wherever you backed it up (it's created by `keygen --with-recovery`)."
+        "restore it from wherever you backed it up (the default `keygen` writes it; `--basic` does not)."
     );
   }
   return JSON.parse(fs.readFileSync(COLD_PATH, "utf8"));

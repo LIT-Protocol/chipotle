@@ -104,9 +104,9 @@ async function main() {
   console.log("  Action CID:         ", process.env.ACTION_IPFS_CID);
   console.log("  Group ID:           ", process.env.GROUP_ID);
   console.log("\nNext:");
-  console.log("  npm run keygen                       # interactive 2-of-2 DKG; prints your address");
+  console.log("  npm run keygen                       # interactive 2-of-3 DKG; prints your address");
   console.log("  npm run deploy:baseSepolia           # deploy the vault to that address");
-  console.log("  npm run sign -- --to 0x.. --value 0  # 2-of-2 sign + exec");
+  console.log("  npm run sign -- --to 0x.. --value 0  # hot + Lit sign + exec");
 }
 
 // ---------------------------------------------------------------------------
@@ -157,7 +157,7 @@ async function addGroup(base, apiKey) {
     method: "POST",
     body: JSON.stringify({
       group_name: "mpc-signing",
-      group_description: "2-of-2 threshold-ECDSA: Lit Action + user co-signer",
+      group_description: "2-of-3 threshold-ECDSA: Lit Action + user (hot + cold recovery)",
       pkp_ids_permitted: [],
       cid_hashes_permitted: ["0"],
     }),
@@ -178,7 +178,7 @@ async function addAction(base, apiKey, cid) {
     body: JSON.stringify({
       action_ipfs_cid: cid,
       name: "mpcSigner",
-      description: "Lit-side party of a 2-of-2 threshold-ECDSA (DKLs23) signer",
+      description: "Lit-side party of a 2-of-3 threshold-ECDSA (DKLs23) signer",
     }),
   });
 }

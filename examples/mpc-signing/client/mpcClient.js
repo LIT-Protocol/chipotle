@@ -1,4 +1,5 @@
-// The USER-side party of the 2-of-2 threshold-ECDSA signer (party 0).
+// The USER-side party of the threshold-ECDSA signer: the hot party (0), plus
+// the cold recovery party (2) in the default 2-of-3.
 //
 // This runs locally on the user's machine and holds the user's keyshare
 // (share_B) in plaintext, never uploaded anywhere. It drives the interactive
@@ -59,11 +60,11 @@ class MpcClient {
   // -------------------------------------------------------------------------
   // Distributed key generation. 5 interactive rounds. The user may hold more
   // than one share: `userParties` lists the party ids this machine runs
-  // (default [0] = 2-of-2; [0, 2] = 2-of-3 with a cold recovery share). The
-  // Lit Action is always party 1. Returns one keyshare per user party, the
-  // action's sealed keyshare, and the shared public key + EVM address.
+  // (default [0, 2] = 2-of-3 with a cold recovery share; [0] = the --basic
+  // 2-of-2). The Lit Action is always party 1. Returns one keyshare per user
+  // party, the action's sealed keyshare, and the shared public key + EVM address.
   // -------------------------------------------------------------------------
-  async keygen({ participants = 2, threshold = 2, userParties = [0], onRound } = {}) {
+  async keygen({ participants = 3, threshold = 2, userParties = [0, 2], onRound } = {}) {
     const ACTION = 1;
     if (userParties.includes(ACTION)) throw new Error("party 1 is the Lit Action; the user cannot hold it");
     const sessionId = crypto.randomBytes(16).toString("hex");
