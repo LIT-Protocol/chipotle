@@ -416,6 +416,95 @@ async fn js_params(mut client: TestClient) {
     // }
 }
 
+/// End-to-end proof of the code-cache fix on a *large* action — one whose
+/// bundled source is well past V8's `String::kMaxHashCalcLength` (16383), the
+/// regime where V8's string identity hash (and therefore Deno's code-cache
+/// key) degenerates to a length-only hash.
+///
+/// The same action is executed twice with *different but equal-length*
+/// `js_params`, asserting both halves of the fix:
+///   1. **caching worked** — the second run is served from the V8 code cache
+///      (compiled bytecode reused), so CPL-264 is genuinely active here;
+///   2. **params were NOT cached** — each run sees its own params, even though
+///      the two param payloads are byte-for-byte the same length. Before the
+///      fix baked params into the cached source, equal-length payloads produced
+///      equal-length sources that collided on the length-based hash, handing
+///      the second run the first run's params.
+#[tokio::test]
+async fn large_action_caches_code_but_not_params() {
+    let server = TestServer::start();
+    let v8_code_cache = server.v8_code_cache.clone();
+    let mut client = TestClient::new(server.socket_file);
+
+    // ~20 KB of payload, referenced from main() so a bundler/minifier can't
+    // drop it, pushes the bundled source comfortably past the 16383-char cutoff.
+    let padding = "x".repeat(20 * 1024);
+    let code = format!(
+        r#"
+        const PADDING = "{padding}";
+        async function main({{ token }}) {{
+            if (PADDING.length === 0) throw new Error("unreachable");
+            console.log(token);
+        }}
+        "#
+    );
+
+    // Equal-length, different-value tokens => equal-length JSON param payloads.
+    let token_a = "A".repeat(16);
+    let token_b = "B".repeat(16);
+    let params_a = format!(r#"{{"token":"{token_a}"}}"#);
+    let params_b = format!(r#"{{"token":"{token_b}"}}"#);
+    assert_eq!(
+        params_a.len(),
+        params_b.len(),
+        "the two param payloads must be equal length to exercise the collision"
+    );
+
+    // First run: misses the V8 code cache, compiles, and stores the bytecode.
+    client
+        .respond_with(PrintResponse {})
+        .execute_js(ExecutionRequest {
+            code: code.clone(),
+            js_params: Some(params_a.into_bytes()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        client.received::<PrintRequest>().message,
+        format!("{token_a}\n")
+    );
+    assert!(client.received::<ExecutionResult>().success);
+
+    // Second run: identical code => must HIT the V8 code cache; different
+    // params => must still observe ITS OWN params.
+    let hits_before = v8_code_cache.hits();
+    client
+        .respond_with(PrintResponse {})
+        .execute_js(ExecutionRequest {
+            code: code.clone(),
+            js_params: Some(params_b.into_bytes()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        client.received::<PrintRequest>().message,
+        format!("{token_b}\n"),
+        "second execution must see its own params, not the first run's"
+    );
+    assert!(client.received::<ExecutionResult>().success);
+
+    // Caching worked: the second run reused compiled bytecode.
+    assert!(
+        v8_code_cache.hits() > hits_before,
+        "second execution of the same action must reuse compiled bytecode \
+         (V8 code cache hit); hits before={}, after={}",
+        hits_before,
+        v8_code_cache.hits(),
+    );
+}
+
 #[rstest]
 #[tokio::test]
 async fn set_response(mut client: TestClient) {

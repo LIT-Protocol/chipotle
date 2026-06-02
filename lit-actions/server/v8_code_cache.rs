@@ -13,6 +13,7 @@ use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::mem::size_of;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use deno_core::ModuleSpecifier;
@@ -29,6 +30,25 @@ pub fn new_v8_code_cache() -> SharedV8CodeCache {
 #[derive(Default)]
 pub struct V8CodeCache {
     inner: RwLock<V8CodeCacheState>,
+    /// `get_sync` lookups that returned cached bytecode / that missed.
+    /// Observability only — lets tests prove compiled bytecode was actually
+    /// reused across executions (vs. recompiled every run).
+    hits: AtomicU64,
+    misses: AtomicU64,
+}
+
+impl V8CodeCache {
+    /// Number of `get_sync` lookups served from cache (compiled bytecode
+    /// reused). See [`Self::misses`].
+    pub fn hits(&self) -> u64 {
+        self.hits.load(Ordering::Relaxed)
+    }
+
+    /// Number of `get_sync` lookups that found nothing (forcing a fresh
+    /// compile, whose result is then stored via `set_sync`).
+    pub fn misses(&self) -> u64 {
+        self.misses.load(Ordering::Relaxed)
+    }
 }
 
 #[derive(Default)]
@@ -136,10 +156,16 @@ impl CodeCache for V8CodeCache {
             kind: kind_to_u8(code_cache_type),
             source_hash,
         };
-        inner
+        let hit = inner
             .entries
             .get(&key_ref as &dyn V8CodeCacheKeyAccess)
-            .cloned()
+            .cloned();
+        if hit.is_some() {
+            self.hits.fetch_add(1, Ordering::Relaxed);
+        } else {
+            self.misses.fetch_add(1, Ordering::Relaxed);
+        }
+        hit
     }
 
     fn set_sync(
@@ -258,6 +284,22 @@ mod tests {
                 .as_deref(),
             Some(b"bytecode-b".as_ref())
         );
+    }
+
+    #[test]
+    fn hit_and_miss_counters_track_lookups() {
+        let cache = V8CodeCache::default();
+        let s = specifier();
+        assert_eq!((cache.hits(), cache.misses()), (0, 0));
+
+        // Miss: nothing stored yet.
+        assert!(cache.get_sync(&s, CodeCacheType::Script, 1).is_none());
+        assert_eq!((cache.hits(), cache.misses()), (0, 1));
+
+        // Store, then hit.
+        cache.set_sync(s.clone(), CodeCacheType::Script, 1, b"bytecode");
+        assert!(cache.get_sync(&s, CodeCacheType::Script, 1).is_some());
+        assert_eq!((cache.hits(), cache.misses()), (1, 1));
     }
 
     #[test]
