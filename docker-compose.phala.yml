@@ -79,6 +79,15 @@ services:
       otel-collector:
         condition: service_healthy
         required: false
+    # Gates the zero-downtime cutover: dstack-ingress only auto-claims the
+    # custom domain once this reports healthy (see dstack-ingress depends_on
+    # below), so the public DNS never flips to a not-yet-ready API.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 90s
     restart: unless-stopped
 
   # OTel Collector — receives OTLP (gRPC/HTTP) on 0.0.0.0:4317/4318 from all
@@ -133,7 +142,10 @@ services:
       - cert-data:/etc/letsencrypt
     depends_on:
       lit-api-server:
-        condition: service_started
+        # service_healthy (not service_started): hold the domain auto-claim
+        # until lit-api-server passes its /health check, so a freshly-deployed
+        # cold replica only takes the public DNS once it is actually serving.
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:

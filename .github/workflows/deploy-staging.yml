@@ -37,6 +37,17 @@
 #                    ${DOCKER_IMAGE}-otel-collector
 #   DOCKERHUB_USERNAME - Docker Hub username
 #
+# Optional GitHub vars — enable zero-downtime ping-pong (else legacy single-CVM in-place deploy):
+#   NEXT_CVM_A / NEXT_CVM_B - the two long-lived `next` instance names (same app_id, prod2 + prod4)
+#   NEXT_LIVE_CVM           - which of NEXT_CVM_A/B currently serves the public domain (CI updates it)
+#   DEV_CVM_A / DEV_CVM_B / DEV_LIVE_CVM - same, for the `main`/dev app
+#   Both instances' Phala devices MUST be allowlisted on the app's AppAuth contract
+#   (`phala cvms device-allowlist`) so the shared app_id derives keys on either node.
+#
+# Optional secret (only for ping-pong, to update the *_LIVE_CVM var after cutover):
+#   PINGPONG_VARS_TOKEN - fine-grained PAT with Variables: write on this repo
+#                         (the default GITHUB_TOKEN cannot manage Actions variables)
+#
 # Required Phala CVM encrypted env vars (per instance, set via Phala Cloud Dashboard):
 #   BASE_CHAIN_RPC             - RPC endpoint for the chain
 #   GCP_SERVICE_ACCOUNT_JSON   - GCP service account key (raw JSON or base64-encoded)
@@ -95,7 +106,16 @@ jobs:
   determine-target:
     runs-on: self-hosted
     outputs:
-      phala_app_name: ${{ steps.set.outputs.phala_app_name }}
+      # target_cvm = the CVM this run deploys to (the COLD one in ping-pong mode).
+      # phala_app_name is kept as an alias of target_cvm for backward compat.
+      phala_app_name: ${{ steps.set.outputs.target_cvm }}
+      target_cvm: ${{ steps.set.outputs.target_cvm }}
+      # prev_live_cvm = the instance that was live before this deploy; stopped
+      # after the new one is confirmed serving the public domain. Empty in
+      # legacy single-CVM mode (nothing to retire).
+      prev_live_cvm: ${{ steps.set.outputs.prev_live_cvm }}
+      # pingpong = "true" when the instance-pair vars are configured.
+      pingpong: ${{ steps.set.outputs.pingpong }}
       base_url: ${{ steps.set.outputs.base_url }}
       api_root_url: ${{ steps.set.outputs.api_root_url }}
       instance_type: ${{ steps.set.outputs.instance_type }}
@@ -105,21 +125,27 @@ jobs:
     steps:
       - name: Set deployment target
         id: set
+        env:
+          INPUT_CVM: ${{ inputs.phala_cvm_name }}
+          # Instance-pair + live pointer per branch (set as repo Actions vars to
+          # enable ping-pong; leave unset for legacy single-CVM in-place deploy).
+          NEXT_CVM_A: ${{ vars.NEXT_CVM_A }}
+          NEXT_CVM_B: ${{ vars.NEXT_CVM_B }}
+          NEXT_LIVE_CVM: ${{ vars.NEXT_LIVE_CVM }}
+          DEV_CVM_A: ${{ vars.DEV_CVM_A }}
+          DEV_CVM_B: ${{ vars.DEV_CVM_B }}
+          DEV_LIVE_CVM: ${{ vars.DEV_LIVE_CVM }}
         run: |
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
             DEFAULT_APP_NAME="chipotle-dev"
+            CVM_A="$DEV_CVM_A"; CVM_B="$DEV_CVM_B"; LIVE="$DEV_LIVE_CVM"
             echo "instance_type=tdx.large" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-dev" >> "$GITHUB_OUTPUT"
             echo "node_config=NodeConfig.main.toml" >> "$GITHUB_OUTPUT"
             DOMAIN="test.chipotle.litprotocol.com"
           elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
-            # Default targets the current prod replica provisioned via
-            # `phala instances add`. Shares the same app_id (0x969a8c14...)
-            # and derived keys as previous chipotle-next instances. To roll a
-            # new replica onto a different Phala node (zero-downtime upgrade),
-            # supply the `phala_cvm_name` input on a manual run instead of
-            # editing this default.
             DEFAULT_APP_NAME="chipotle-next-rep-sa6xj"
+            CVM_A="$NEXT_CVM_A"; CVM_B="$NEXT_CVM_B"; LIVE="$NEXT_LIVE_CVM"
             echo "instance_type=tdx.small" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-next" >> "$GITHUB_OUTPUT"
             echo "node_config=NodeConfig.next.toml" >> "$GITHUB_OUTPUT"
@@ -129,15 +155,33 @@ jobs:
             exit 1
           fi
 
-          # A manual workflow_dispatch run may override the target CVM via the
-          # phala_cvm_name input. This is empty on push events, so automated
-          # deploys keep using the branch default selected above.
-          PHALA_APP_NAME="${{ inputs.phala_cvm_name }}"
-          if [ -z "$PHALA_APP_NAME" ]; then
-            PHALA_APP_NAME="$DEFAULT_APP_NAME"
+          # --- Ping-pong target selection ---
+          # If the instance-pair vars (…_CVM_A / …_CVM_B) are configured, deploy
+          # to the COLD instance (the one that is NOT currently live). The live
+          # one keeps serving until the cold one auto-claims the domain on boot;
+          # we then stop the old one. The two instances share one app_id (same
+          # KMS identity / keys) — both nodes' devices must be allowlisted
+          # on-chain (`phala cvms device-allowlist`). If the pair vars are unset
+          # we fall back to a legacy single-CVM in-place deploy (with downtime).
+          PINGPONG="false"; PREV=""
+          if [ -n "$CVM_A" ] && [ -n "$CVM_B" ]; then
+            PINGPONG="true"
+            if [ "$LIVE" = "$CVM_A" ]; then TARGET="$CVM_B"; PREV="$CVM_A";
+            elif [ "$LIVE" = "$CVM_B" ]; then TARGET="$CVM_A"; PREV="$CVM_B";
+            else TARGET="$CVM_A"; PREV="$LIVE"; fi   # unknown/empty LIVE → pick A, retire whatever was live
+          else
+            TARGET="$DEFAULT_APP_NAME"
           fi
-          echo "Deploying to Phala CVM: ${PHALA_APP_NAME}"
-          echo "phala_app_name=${PHALA_APP_NAME}" >> "$GITHUB_OUTPUT"
+          # Manual override (workflow_dispatch) always wins; retire the old live.
+          if [ -n "$INPUT_CVM" ]; then TARGET="$INPUT_CVM"; PREV="$LIVE"; fi
+          # Never retire the box we just deployed to.
+          if [ "$PREV" = "$TARGET" ]; then PREV=""; fi
+
+          echo "Ping-pong mode: $PINGPONG"
+          echo "Deploying to (cold) CVM: $TARGET ; retire after cutover: ${PREV:-<none>}"
+          echo "target_cvm=${TARGET}" >> "$GITHUB_OUTPUT"
+          echo "prev_live_cvm=${PREV}" >> "$GITHUB_OUTPUT"
+          echo "pingpong=${PINGPONG}" >> "$GITHUB_OUTPUT"
 
           echo "domain=${DOMAIN}" >> "$GITHUB_OUTPUT"
           echo "base_url=https://${DOMAIN}" >> "$GITHUB_OUTPUT"
@@ -344,15 +388,22 @@ jobs:
     if: ${{ !cancelled() && needs.determine-target.result == 'success' && needs.detect-changes.result == 'success' && (needs.deploy.result == 'success' || needs.deploy.result == 'skipped') }}
     uses: ./.github/workflows/wait-for-api-restart.yml
     with:
-      api_root_url: ${{ needs.determine-target.outputs.api_root_url }}
+      # Verify the freshly-deployed (cold) CVM on its OWN default Phala URL
+      # (*-8000.*.phala.network), not the shared public domain — which the old
+      # instance still owns until cutover. wait-for-api-restart resolves the
+      # direct URL from the CVM name via `phala cvms get`.
+      phala_app_name: ${{ needs.determine-target.outputs.target_cvm }}
       expected_sha: ${{ needs.detect-changes.outputs.deploy_needed == 'true' && github.sha || '' }}
       runner: '["self-hosted"]'
+    secrets:
+      PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
 
   verify-attestation:
     needs: [wait-for-api-available, determine-target]
     uses: ./.github/workflows/verify-attestation.yml
     with:
-      base_url: ${{ needs.determine-target.outputs.base_url }}
+      # Attest the cold box directly (its resolved default URL), pre-cutover.
+      base_url: ${{ needs.wait-for-api-available.outputs.base_url }}
       runner: '["self-hosted"]'
 
   openapi-spec-check:
@@ -373,3 +424,74 @@ jobs:
     uses: ./.github/workflows/k6-correctness.yml
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+
+  # ───────────────────────── Zero-downtime cutover (ping-pong) ─────────────────────────
+  # The cold CVM's dstack-ingress auto-claims the public domain on boot (gated
+  # on its /health via docker-compose service_healthy). After the cold box has
+  # passed all checks above on its direct URL, confirm the PUBLIC domain now
+  # serves the new version (DNS cutover propagated), THEN stop the old instance
+  # and record the new live pointer. All three are no-ops outside ping-pong mode.
+
+  confirm-cutover:
+    needs: [determine-target, detect-changes, wait-for-api-available, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness]
+    if: ${{ needs.determine-target.outputs.pingpong == 'true' && needs.detect-changes.outputs.deploy_needed == 'true' }}
+    uses: ./.github/workflows/wait-for-api-restart.yml
+    with:
+      # PUBLIC domain this time — wait until the cold box's auto-claim has rolled
+      # over and the live domain reports the new SHA + /health.
+      api_root_url: ${{ needs.determine-target.outputs.api_root_url }}
+      expected_sha: ${{ github.sha }}
+      timeout: 300
+      runner: '["self-hosted"]'
+
+  stop-old-cvm:
+    needs: [determine-target, confirm-cutover]
+    if: ${{ needs.determine-target.outputs.pingpong == 'true' && needs.determine-target.outputs.prev_live_cvm != '' }}
+    runs-on: self-hosted
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Phala CLI
+        run: npm install -g phala
+      - name: Stop the previously-live CVM
+        # Only after the public domain is confirmed on the new box. Use `stop`
+        # (not delete) so the cert volume + identity persist as a warm rollback
+        # and as the target for the next flip-back.
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+        run: |
+          OLD="${{ needs.determine-target.outputs.prev_live_cvm }}"
+          echo "Cutover confirmed; stopping previously-live CVM: $OLD"
+          phala cvms stop "$OLD"
+
+  record-live-cvm:
+    needs: [determine-target, confirm-cutover]
+    if: ${{ needs.determine-target.outputs.pingpong == 'true' }}
+    runs-on: self-hosted
+    steps:
+      - name: Install GitHub CLI
+        run: |
+          if command -v gh >/dev/null 2>&1; then exit 0; fi
+          curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+            | sudo dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg 2>/dev/null
+          echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+            | sudo tee /etc/apt/sources.list.d/github-cli.list > /dev/null
+          sudo apt-get update && sudo apt-get install -y gh
+      - name: Record the new live CVM (so the next deploy flips from it)
+        # Updates the {DEV,NEXT}_LIVE_CVM repo variable. Needs a token with
+        # Variables: write — the default GITHUB_TOKEN cannot manage variables,
+        # so set a fine-grained PAT secret PINGPONG_VARS_TOKEN (Variables RW on
+        # this repo). Alternative (stateless): derive the live node from the
+        # public domain's CNAME (ALIAS → node gateway) at deploy time instead.
+        env:
+          GH_TOKEN: ${{ secrets.PINGPONG_VARS_TOKEN }}
+        run: |
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::warning::PINGPONG_VARS_TOKEN not set — skipping live-pointer update. Set {DEV,NEXT}_LIVE_CVM manually until the PAT is configured."
+            exit 0
+          fi
+          VAR_NAME="${{ github.ref == 'refs/heads/main' && 'DEV_LIVE_CVM' || 'NEXT_LIVE_CVM' }}"
+          NEW="${{ needs.determine-target.outputs.target_cvm }}"
+          echo "Recording $VAR_NAME=$NEW"
+          gh variable set "$VAR_NAME" --body "$NEW" --repo "${{ github.repository }}"
