@@ -605,3 +605,111 @@ async function main({ vaultAddress, chainId, token, recipient, amount, nonce, de
 <Info>
   The full runnable example — `SolverVault` / `AcrossSolverVault` contracts, the policy actions, attacker scripts that prove exfiltration is impossible, an `exit()` cold-wallet path, and a **live Across testnet relayer** (deposit on Sepolia → Lit authorizes → vault fills on Base Sepolia, ~355 ms round-trip), plus a read-only ops dashboard — lives at [`examples/lit-solver-vault/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/lit-solver-vault) in the repo.
 </Info>
+
+## 13. Compliant Private Stablecoin
+
+Every public stablecoin (USDC, USDT, PYUSD) puts your whole financial life on a public ledger: payroll, vendor payments, who paid whom and how much, forever. Shielded pools (Zcash, Aztec) fix the privacy but have no compliance story, so issuers won't touch them. This example is the missing middle — private by default, compliant by construction — and it gets there without a ZK circuit.
+
+Balances aren't a public mapping; a wallet's balance is a set of **notes** (`{owner, amount, salt}`). On-chain you only ever see a note's **commitment** (`keccak256(owner, amount, salt)`), its **nullifier** when spent, and its contents **encrypted** to a ledger PKP (decryptable only inside an authorized Lit Action). A private transfer publishes new commitments + a nullifier + ciphertext — no amount, no parties. The Lit Action plays the role a ZK circuit plays in Zcash/Aztec: it reads chain state over a **pinned** RPC, validates the input notes exist and are unspent, checks `sum(inputs) == sum(outputs)`, runs OFAC screening (the [sanctions gate](#8-gate-an-erc-20-transfer-on-on-chain-sanctions-data-cross-chain) from §8), then signs the state update with its CID-derived identity (see [Action-Identity Signing](./patterns#action-identity-signing--immutable-proofs)). KYC runs only at the dollar edges (mint/redeem), reserves are publicly provable (`usdc.balanceOf(vault) ≥ totalSupply()`), and a regulator holding a threshold-signed warrant can decrypt exactly one note while every other balance stays dark.
+
+```javascript
+// Abridged core of the shieldedTransfer op — the action is the prover.
+// Full multi-file example (mint / transfer / redeem / disclose) in the repo.
+async function transfer({ inputs, outputs, caller, contractAddress, contractRpcUrl, screeningRpcUrl, nonce, deadline, chainId }) {
+  // 1. Validate against REAL chain state over a pinned (https, whitelisted-host)
+  //    RPC — a caller-supplied RPC could forge "this note exists" and mint value.
+  const live = await checkInputsLive(inputs, contractAddress, contractRpcUrl);
+  if (!live.ok) return live;
+  if (sum(inputs) !== sum(outputs)) return { ok: false, reason: "value not conserved" };
+
+  // 2. OFAC-screen every recipient; 3. encrypt each output note to the ledger PKP.
+  const ofac = await screenAll(outputs.map((o) => o.owner), screeningRpcUrl);
+  if (!ofac.ok) return ofac;
+  const { commitments, encryptedBlobs } = await buildNotes(outputs); // Lit.Actions.Encrypt
+
+  // 4. Sign the exact tuple PrivUSD.shieldedTransfer verifies (ecrecover == CID signer).
+  const digest = ethers.utils.keccak256(ethers.utils.defaultAbiCoder.encode(
+    ["string", "bytes32[]", "bytes32[]", "string[]", "bytes32", "uint256", "address", "uint256"],
+    ["TRANSFER", inputs.map(nullifierOf), commitments, encryptedBlobs, nonce, deadline, contractAddress, chainId]
+  ));
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  return { ok: true, signature: await wallet.signMessage(ethers.utils.arrayify(digest)), inputNullifiers: inputs.map(nullifierOf), outputCommitments: commitments, encryptedBlobs };
+}
+```
+
+<Info>
+  The full runnable example — the `PrivUSD` contract (commitments, nullifiers, encrypted blobs, reserve proof), the ledger action (mint/transfer/redeem prover with OFAC + KYC baked in), a warrant-gated `disclose` action, a 2-minute scripted demo, and a Hardhat test suite — lives at [`examples/private-stablecoin/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/private-stablecoin) in the repo. It builds on the [sanctions gate](#8-gate-an-erc-20-transfer-on-on-chain-sanctions-data-cross-chain) (§8) and runs live on Base Sepolia.
+</Info>
+
+## 14. A Unique, Immutable Wallet Per User (Bound to the Action)
+
+A common request: *"bind a wallet to an action immutably, and give each user their own."* You can do this with a ChainSecured account and a contract that mints and binds PKPs to a group — but there's a lighter pattern that gets the same "only this exact code can sign" property with no PKP and no contracts.
+
+Every action has a key derived from its IPFS CID via [`getLitActionPrivateKey()`](./patterns#action-identity-signing--immutable-proofs) — so the wallet is *bound to the code*. To get a different wallet per user, make the code different per user: **hardcode the user's address into the action**. That one line is part of what the CID hashes, so each user gets a different CID and therefore a different, immutable wallet. Authorize spending by recovering a signature inside the action and comparing it to the hardcoded owner — the usage key that runs the action grants no spending power.
+
+```javascript
+// OWNER_ADDRESS is stamped in per user. Two users => two CIDs => two wallets.
+const OWNER_ADDRESS = "0xUSERS_ADDRESS";
+
+async function main({ action, token, to, amount, nonce, deadline, signature, chainId, rpcUrl }) {
+  // The wallet's key is derived from THIS action's CID (unique per user).
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  if (action === "address") return { walletAddress: wallet.address }; // no auth: where to deposit
+
+  // Withdraw: only if the owner signed THIS exact transfer. The nonce must equal
+  // the wallet's current on-chain nonce, so a used authorization can't replay.
+  const message = [ "withdraw", wallet.address, chainId, token, to, amount, nonce, deadline ].join(":");
+  if (ethers.utils.verifyMessage(message, signature).toLowerCase() !== OWNER_ADDRESS.toLowerCase()) {
+    return { ok: false, reason: "signer is not the bound owner" };
+  }
+  const data = new ethers.utils.Interface(["function transfer(address,uint256)"])
+    .encodeFunctionData("transfer", [to, amount]);
+  const rawTx = await wallet.signTransaction({ to: token, data, nonce, gasLimit: 100000, chainId });
+  return { ok: true, rawTx }; // caller broadcasts
+}
+```
+
+Each user's action has a different CID and therefore a different wallet, so there's no code path from one user's action to another's balance — and the usage key can *run* any action but can only relay a withdrawal the real owner already signed.
+
+<Info>
+  The full runnable example — the per-user action template, a `DemoToken` ERC-20, a one-shot setup, deposit/balance/withdraw scripts, and a wrong-user attack that the action refuses — lives at [`examples/action-bound-wallet/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/action-bound-wallet) in the repo.
+</Info>
+
+## 15. Confidential Dark Pool (Encrypted Orders, Matched in the Enclave)
+
+A dark pool is a venue where orders stay hidden until they match, so large orders can't be front-run. Every other example on this page is *compute + sign*; this one is the first to use **encryption** and to hold **confidential state**, which is what a dark pool actually needs. Traders submit orders **encrypted** to a vault PKP; they're stored as ciphertext in ordinary Postgres (so the database operator only ever sees gibberish — even the DB connection string is an encrypted secret the action decrypts at runtime); at the end of each epoch a Lit Action decrypts the whole batch **inside the TEE**, runs a single-clearing-price sealed-bid auction, and signs the resulting fills for an on-chain settlement contract that pins the action's CID-derived address.
+
+It's a sealed-bid **batch auction**, not a continuous order book, on purpose: a uniform clearing price removes time-priority, so there's no ordering advantage to front-run, and the whole batch matches in one atomic enclave run (no per-call sequencing on top of stateless actions). Each order is **signed by its trader** and the matcher verifies that signature in-enclave, so nobody — not even the operator holding the usage key — can forge an order against someone else's escrow.
+
+<Note>
+  Privacy here is enforced by the TEE: orders are decrypted only inside an attested enclave and are never exposed to the operator, the database, or other traders — the book is matched in hardware isolation, with true async batching. The privacy is **pre-trade** — orders are hidden until they match; settled fills are public on-chain, like a real dark pool's trade reporting. See the example's "Security model & limitations" for the full trust picture, including what trusting the enclave entails.
+</Note>
+
+```javascript
+// Abridged core of the epoch matcher. Full multi-file example in the repo.
+// js_params: { pkpId, encryptedDbUrl, epoch, pair, settlement, chainId, maxBatch }
+async function main({ pkpId, encryptedDbUrl, epoch, pair, settlement, chainId }) {
+  // 1. Decrypt the DB credential, then pull the epoch's ciphertext orders over HTTP.
+  const dbUrl = await Lit.Actions.Decrypt({ pkpId, ciphertext: encryptedDbUrl });
+  const rows = await sqlOverHttp(dbUrl, "select id, ciphertext from orders where epoch=$1 and pair=$2 and not settled", [epoch, pair]);
+
+  // 2. Decrypt each order INSIDE the enclave and keep only the ones the named
+  //    trader actually signed (forged / replayed orders are dropped).
+  const orders = [];
+  for (const row of rows) {
+    const o = JSON.parse(await Lit.Actions.Decrypt({ pkpId, ciphertext: row.ciphertext }));
+    if (verifyOrderSignature(o, { chainId, settlement, epoch, pair })) orders.push(o);
+  }
+
+  // 3. Uniform-price sealed-bid auction → one clearing price + conserving fills,
+  //    then sign the fills with the action's CID-derived key for on-chain settlement.
+  const { clearingPx, fills } = runAuction(orders);
+  const digest = settlementDigest(epoch, pair, clearingPx, fills, settlement, chainId);
+  const wallet = new ethers.Wallet(await Lit.Actions.getLitActionPrivateKey());
+  return { clearingPx, fills, signature: await wallet.signMessage(ethers.utils.arrayify(digest)) };
+}
+```
+
+<Info>
+  The full runnable example — `DarkPoolSettlement` (per-epoch locked escrow + signed-fill settlement) and `TestToken` contracts, the `encryptOrder` / `matchEpoch` / `markSettled` actions, a setup that mints the vault PKP, **pins the action CIDs**, encrypts the DB connection string, and deploys the contracts, plus trader-signed `submit` and epoch `run` scripts and a `Hardhat` test suite (contract + auction + order-authentication) — lives at [`examples/dark-pool/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/dark-pool) in the repo. It uses [Neon](https://neon.com) Postgres because a Lit Action reaches the DB over HTTP, not a raw socket.
+</Info>

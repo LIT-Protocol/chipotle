@@ -203,7 +203,7 @@ Use `[0]` as wildcard for "all groups" in any group array.
 | Max execution time | 15 minutes |
 | Max memory | 64 MB |
 | Max HTTP fetches per action | 50 |
-| Max response payload | 100 KB |
+| Max response payload | 1 MB |
 | Max console log output | 100 KB |
 | Max key/signature operations | 10 |
 

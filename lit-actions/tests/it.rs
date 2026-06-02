@@ -5,7 +5,7 @@ use anyhow::{Result, bail};
 use indoc::{formatdoc, indoc};
 use lit_actions_server::proto::execute_js_request::AesEncryptResponse;
 use lit_actions_server::worker_pool::PoolHealth;
-use lit_actions_server::{TestServer, init_v8, proto::*, unix};
+use lit_actions_server::{TestServer, get_lit_action_ipfs_id, init_v8, proto::*, unix};
 use pretty_assertions::assert_eq;
 use rstest::*;
 use temp_file::TempFile;
@@ -45,7 +45,21 @@ impl TestClient {
         let request = request.into();
 
         let (outbound_tx, outbound_rx) = flume::bounded(0);
-        let channel = unix::connect_to_socket(self.socket_file.path()).await?;
+        // TestServer::start() spawns the server asynchronously, so the very
+        // first request can race the unix-socket bind and get "Connection
+        // refused". Retry the connect briefly instead of failing the test.
+        let channel = {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                match unix::connect_to_socket(self.socket_file.path()).await {
+                    Ok(channel) => break channel,
+                    Err(_) if std::time::Instant::now() < deadline => {
+                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        };
         let mut client = ActionClient::new(channel);
 
         let response = client
@@ -402,6 +416,95 @@ async fn js_params(mut client: TestClient) {
     // }
 }
 
+/// End-to-end proof of the code-cache fix on a *large* action — one whose
+/// bundled source is well past V8's `String::kMaxHashCalcLength` (16383), the
+/// regime where V8's string identity hash (and therefore Deno's code-cache
+/// key) degenerates to a length-only hash.
+///
+/// The same action is executed twice with *different but equal-length*
+/// `js_params`, asserting both halves of the fix:
+///   1. **caching worked** — the second run is served from the V8 code cache
+///      (compiled bytecode reused), so CPL-264 is genuinely active here;
+///   2. **params were NOT cached** — each run sees its own params, even though
+///      the two param payloads are byte-for-byte the same length. Before the
+///      fix baked params into the cached source, equal-length payloads produced
+///      equal-length sources that collided on the length-based hash, handing
+///      the second run the first run's params.
+#[tokio::test]
+async fn large_action_caches_code_but_not_params() {
+    let server = TestServer::start();
+    let v8_code_cache = server.v8_code_cache.clone();
+    let mut client = TestClient::new(server.socket_file);
+
+    // ~20 KB of payload, referenced from main() so a bundler/minifier can't
+    // drop it, pushes the bundled source comfortably past the 16383-char cutoff.
+    let padding = "x".repeat(20 * 1024);
+    let code = format!(
+        r#"
+        const PADDING = "{padding}";
+        async function main({{ token }}) {{
+            if (PADDING.length === 0) throw new Error("unreachable");
+            console.log(token);
+        }}
+        "#
+    );
+
+    // Equal-length, different-value tokens => equal-length JSON param payloads.
+    let token_a = "A".repeat(16);
+    let token_b = "B".repeat(16);
+    let params_a = format!(r#"{{"token":"{token_a}"}}"#);
+    let params_b = format!(r#"{{"token":"{token_b}"}}"#);
+    assert_eq!(
+        params_a.len(),
+        params_b.len(),
+        "the two param payloads must be equal length to exercise the collision"
+    );
+
+    // First run: misses the V8 code cache, compiles, and stores the bytecode.
+    client
+        .respond_with(PrintResponse {})
+        .execute_js(ExecutionRequest {
+            code: code.clone(),
+            js_params: Some(params_a.into_bytes()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        client.received::<PrintRequest>().message,
+        format!("{token_a}\n")
+    );
+    assert!(client.received::<ExecutionResult>().success);
+
+    // Second run: identical code => must HIT the V8 code cache; different
+    // params => must still observe ITS OWN params.
+    let hits_before = v8_code_cache.hits();
+    client
+        .respond_with(PrintResponse {})
+        .execute_js(ExecutionRequest {
+            code: code.clone(),
+            js_params: Some(params_b.into_bytes()),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        client.received::<PrintRequest>().message,
+        format!("{token_b}\n"),
+        "second execution must see its own params, not the first run's"
+    );
+    assert!(client.received::<ExecutionResult>().success);
+
+    // Caching worked: the second run reused compiled bytecode.
+    assert!(
+        v8_code_cache.hits() > hits_before,
+        "second execution of the same action must reuse compiled bytecode \
+         (V8 code cache hit); hits before={}, after={}",
+        hits_before,
+        v8_code_cache.hits(),
+    );
+}
+
 #[rstest]
 #[tokio::test]
 async fn set_response(mut client: TestClient) {
@@ -562,24 +665,29 @@ async fn async_await(mut client: TestClient) {
 #[rstest]
 #[tokio::test]
 async fn reference_error(mut client: TestClient) {
-    let res = client
-        .execute_js("async function main() { nonexisting_function() }")
-        .await;
+    let code = "async function main() { nonexisting_function() }";
+    let res = client.execute_js(code).await;
 
     // User code now runs through `__litEvalCached` (op_eval_context) so V8's
     // script code cache is reachable for the bundled action (CPL-264). Side
     // effects on error output: the script name is the URL specifier used by
-    // op_eval_context, and two wrapper frames appear at the tail.
+    // op_eval_context, and two wrapper frames appear at the tail. The specifier
+    // is content-derived (the action's IPFS id) so distinct actions can't
+    // collide on V8's length-based code-cache hash.
+    let script = format!(
+        "file:///user_provided_script_{}.js",
+        get_lit_action_ipfs_id(code)
+    );
     assert_eq!(
         res.unwrap_err().to_string(),
-        indoc! {r#"
+        formatdoc! {r#"
             Uncaught (in promise) ReferenceError: nonexisting_function is not defined
-                at main (file:///user_provided_script.js:2:33)
-                at file:///user_provided_script.js:6:28
-                at file:///user_provided_script.js:10:11
-                at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:52:21)
+                at main ({script}:2:33)
+                at {script}:6:28
+                at {script}:10:11
+                at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:56:21)
                 at <user_provided_script>:1:1
-        "#}
+        "#, script = script}
         .trim()
     );
     assert_eq!(client.received::<ExecutionResult>().success, false);
@@ -597,17 +705,21 @@ async fn throw_error(mut client: TestClient) {
         let res = client.execute_js(code).await;
 
         // See `reference_error` for why the stack format differs from
-        // pre-CPL-264 output.
+        // pre-CPL-264 output and why the specifier is content-derived.
+        let script = format!(
+            "file:///user_provided_script_{}.js",
+            get_lit_action_ipfs_id(code)
+        );
         assert_eq!(
             res.unwrap_err().to_string(),
-            indoc! {r#"
+            formatdoc! {r#"
                 Uncaught (in promise) Error: boom
-                    at main (file:///user_provided_script.js:3:7)
-                    at file:///user_provided_script.js:9:28
-                    at file:///user_provided_script.js:13:11
-                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:52:21)
+                    at main ({script}:3:7)
+                    at {script}:9:28
+                    at {script}:13:11
+                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:56:21)
                     at <user_provided_script>:1:1
-            "#}
+            "#, script = script}
             .trim(),
         );
         assert_eq!(client.received::<ExecutionResult>().success, false);
@@ -621,16 +733,20 @@ async fn throw_error(mut client: TestClient) {
         "#};
         let res = client.execute_js(code).await;
 
+        let script = format!(
+            "file:///user_provided_script_{}.js",
+            get_lit_action_ipfs_id(code)
+        );
         assert_eq!(
             res.unwrap_err().to_string(),
-            indoc! {r#"
+            formatdoc! {r#"
                 Uncaught (in promise) Error: boom
-                    at main (file:///user_provided_script.js:3:11)
-                    at file:///user_provided_script.js:9:28
-                    at file:///user_provided_script.js:13:11
-                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:52:21)
+                    at main ({script}:3:11)
+                    at {script}:9:28
+                    at {script}:13:11
+                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:56:21)
                     at <user_provided_script>:1:1
-            "#}
+            "#, script = script}
             .trim(),
         );
         assert_eq!(client.received::<ExecutionResult>().success, false);
@@ -892,14 +1008,27 @@ fn pool_test_setup() -> (TestClient, Arc<PoolHealth>, usize) {
     (client, pool_health, pool_target)
 }
 
-/// Coarse warmup wait. There's no "ready workers" counter today, so we
-/// just sleep long enough for snapshot-bootstrapped workers to land in
-/// the ready channel. With pool=10, 600ms is plenty under load.
-async fn wait_for_warmup(target: usize) {
+/// Wait until at least one pre-warmed worker has landed in the ready
+/// channel. Polls the live `ready` gauge instead of sleeping a fixed
+/// duration — snapshot bootstrap is fast locally but can be starved for
+/// hundreds of ms on a loaded CI runner, which made a blind sleep flaky.
+/// Returns once a worker is ready; panics if none appears within the
+/// timeout (a genuine warmup failure worth surfacing).
+async fn wait_for_warmup(pool_health: &Arc<PoolHealth>, target: usize) {
     if target == 0 {
         return;
     }
-    tokio::time::sleep(std::time::Duration::from_millis(600)).await;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        if pool_health.ready() >= 1 {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no pre-warmed worker became ready within 15s (target={target})",
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
 }
 
 /// Pool hit on the warm path: after warmup, a request should be served by
@@ -912,26 +1041,38 @@ async fn pool_warm_hit() {
         return;
     }
 
-    wait_for_warmup(target).await;
+    wait_for_warmup(&pool_health, target).await;
 
-    let hits_before = pool_health.hits();
-    client
-        .respond_with(PrintResponse {})
-        .execute_js(r#"async function main() { console.log("warm hit") }"#)
-        .await
-        .unwrap();
+    // A pre-warmed worker should serve a request and bump the hits counter.
+    // Warmup timing is best-effort (see wait_for_warmup — there's no "ready
+    // workers" signal), so under load the pool may not be warm after the fixed
+    // wait above. Poll: issue requests until one is served from the pool, up to
+    // a deadline, instead of asserting on a single request.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let hits_before = pool_health.hits();
+        client
+            .respond_with(PrintResponse {})
+            .execute_js(r#"async function main() { console.log("warm hit") }"#)
+            .await
+            .unwrap();
 
-    let _ = client.received::<PrintRequest>();
-    assert!(client.received::<ExecutionResult>().success);
+        let _ = client.received::<PrintRequest>();
+        assert!(client.received::<ExecutionResult>().success);
 
-    let hits_after = pool_health.hits();
-    assert!(
-        hits_after > hits_before,
-        "expected pool hit (hits before={}, after={}, target={})",
-        hits_before,
-        hits_after,
-        target,
-    );
+        let hits_after = pool_health.hits();
+        if hits_after > hits_before {
+            break; // served by a pre-warmed worker
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "expected a pool hit within the timeout (hits before={}, after={}, target={})",
+            hits_before,
+            hits_after,
+            target,
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
 }
 
 /// Custom `memory_limit` requests must bypass the pool (V8 heap limits are
@@ -943,7 +1084,7 @@ async fn pool_memory_limit_bypass() {
         return;
     }
 
-    wait_for_warmup(target).await;
+    wait_for_warmup(&pool_health, target).await;
 
     let hits_before = pool_health.hits();
     let misses_before = pool_health.misses();

@@ -180,6 +180,9 @@ credits fund Lit Action execution either way.
 
 API-mode users see one extra item in the account dropdown: **Convert to
 ChainSecured**, which kicks off the conversion flow described below.
+ChainSecured-mode users instead see **Change Ownership**, which transfers
+the account to a different admin wallet (see
+[Transferring ownership of a ChainSecured account](#transferring-ownership-of-a-chainsecured-account)).
 
 ## Converting an API account to ChainSecured
 
@@ -320,6 +323,164 @@ There is no path back from ChainSecured to API mode. The contract reverts
 `convertToChainSecuredAccount` if the account is already unmanaged. If
 you need a managed account again, create a new one with `newAccount`
 and re-add resources manually.
+
+## Transferring ownership of a ChainSecured account
+
+Once an account is ChainSecured, you can hand it to a different admin
+wallet — for example, to rotate a compromised key, move control to a new
+team wallet, or migrate from an EOA to a fresh address. The transfer
+reassigns the on-chain admin in a single transaction while preserving the
+master `apiKeyHash` and the billing wallet, so groups, PKPs, action
+metadata, usage API keys, and the Stripe credit balance all stay attached
+to the same account.
+
+This is the *ChainSecured-to-ChainSecured* counterpart of conversion. It
+does **not** change the `managed` flag — the account is unmanaged before
+and after — it only swaps which wallet holds admin authority.
+
+### How it differs from conversion
+
+Conversion is api_payer-relayed because a managed account has no on-chain
+admin to sign with. A ChainSecured account already has one, so the
+transfer is signed **directly by the current admin wallet** — there is no
+server endpoint, no EIP-712 typed-data envelope, and no api_payer
+involvement.
+
+| Dimension          | Convert to ChainSecured                          | Transfer ChainSecured ownership                       |
+| ------------------ | ------------------------------------------------ | ----------------------------------------------------- |
+| Starting mode      | API (managed)                                    | ChainSecured (unmanaged)                              |
+| Who signs          | api_payer relays on your behalf                  | The current admin wallet, directly                    |
+| Server endpoint    | `POST /core/v1/convert_to_chain_secured_account` | None — direct contract call                           |
+| Signature scheme   | EIP-712 ownership proof (`ConvertAccount`)       | Plain transaction signature from the current admin    |
+| `managed` flag     | `true` → `false`                                 | Stays `false`                                         |
+| Requires API key   | Yes (your existing master key)                   | No — wallet signature is the only credential          |
+
+### What's preserved
+
+- The master on-chain `apiKeyHash` (so all child resources stay attached).
+- The **billing wallet** and Stripe credit balance.
+- **Groups**, **PKPs**, **action metadata**, and **usage API keys** —
+  they continue to authorize Lit Action execution exactly as before.
+
+### What changes
+
+- `account.adminWalletAddress` becomes the new wallet.
+- Admin write authority moves entirely to the new wallet. The previous
+  admin wallet can no longer authorize writes on this account, effective
+  immediately on confirmation.
+- A new lookup entry — `uint256(keccak256(abi.encodePacked(newAdminWalletAddress)))`
+  → master `apiKeyHash` — is registered so the new wallet resolves to the
+  account on login. (In ethers this is
+  `ethers.solidityPackedKeccak256(['address'], [newAdminWalletAddress])`.)
+
+### The contract function
+
+```solidity
+WritesFacet.transferChainSecuredAccountOwnership(
+    uint256 apiKeyHash,
+    address newAdminWalletAddress
+)
+```
+
+`apiKeyHash` may be the master hash or any hash that resolves to it
+(e.g. `uint256(keccak256(abi.encodePacked(currentAdminWalletAddress)))`
+for an account that has already been transferred once); the contract maps
+it to the master via `allApiKeyHashesToMaster`. On success it emits
+`ChainSecuredAccountOwnershipTransferred(masterApiKeyHash, previousAdminWalletAddress, newAdminWalletAddress)`
+— note the first topic is the **resolved master** hash, not the
+`apiKeyHash` argument you passed in (they differ whenever you pass an
+alias).
+
+The call reverts if:
+
+- `newAdminWalletAddress` is the zero address.
+- No account resolves from `apiKeyHash` (`AccountDoesNotExist`).
+- The account is managed (`InvalidRequest` — use
+  `convertToChainSecuredAccount` instead).
+- The caller is not the current admin wallet (`NoAccountAccess`). The
+  api_payer has **no** authority here.
+- `newAdminWalletAddress` equals the current admin.
+- `newAdminWalletAddress` already owns an account
+  (`AccountAlreadyExists`).
+
+<Warning>
+The previous admin's lookup entry is intentionally left in place, so a
+wallet that has *ever* been admin of any account can't become the target
+of a transfer — even the wallet you just transferred away from. Plan
+rotations forward to fresh addresses; you cannot transfer ownership back.
+</Warning>
+
+### Step-by-step (dashboard)
+
+1. **Sign in to the dashboard in ChainSecured mode** by connecting the
+   current admin wallet.
+2. Open the account dropdown and click **Change Ownership** (this item is
+   hidden in API mode).
+3. **Enter the new admin wallet address** in the prompt. It must be a
+   valid Ethereum address and must not already own an account.
+4. **Confirm the irreversible-transfer prompt.** Your connected wallet
+   loses admin access the moment the transaction confirms and the new
+   wallet becomes the sole admin.
+5. **Sign the transaction** with your current wallet when prompted. The
+   dashboard shows a transaction preview before the wallet signs and a
+   status banner while it confirms.
+6. On success the dashboard signs you out and reloads. Log back in by
+   connecting the **new** admin wallet to continue managing the account.
+
+### Step-by-step (SDK)
+
+```javascript
+import { LitNodeSimpleApiClient } from './core_sdk.js';
+import { ethers } from 'ethers';
+
+// Connect the CURRENT admin wallet in sovereign mode.
+const provider = new ethers.BrowserProvider(window.ethereum);
+const signer = await provider.getSigner();
+const address = await signer.getAddress();
+
+const client = new LitNodeSimpleApiClient({
+  baseUrl: 'https://api.chipotle.litprotocol.com',
+  mode: 'sovereign',
+  rpcUrl: 'https://mainnet.base.org',
+  contractAddress: '0xYourAccountConfigDiamond',
+  signer,
+  // Identity hash for the connected wallet. Required for ChainSecured
+  // sessions — without it the SDK hashes an empty apiKey string and the
+  // transfer reverts with AccountDoesNotExist. The dashboard sets this
+  // automatically at login.
+  adminHashOverride: ethers.solidityPackedKeccak256(['address'], [address]),
+});
+
+const res = await client.transferChainSecuredAccountOwnership({
+  newAdminWalletAddress: '0xNewAdminWallet',
+});
+console.log('Previous admin:', res.previous_admin);
+console.log('New admin:', res.new_admin);
+console.log('Tx hash:', res.transaction_hash);
+```
+
+`transferChainSecuredAccountOwnership` is **sovereign-mode only** and
+throws if called from an API-mode client. It validates and checksums
+`newAdminWalletAddress`, then resolves the current admin's `apiKeyHash`
+from the client's `adminHashOverride` — so a ChainSecured session must
+have that set to `keccak256(abi.encodePacked(address))` (the dashboard
+does this at login; set it via the constructor as above when driving the
+SDK directly, otherwise the call reverts with `AccountDoesNotExist`).
+After it resolves, the connected signer is no longer authorized for the
+account — reconnect with the new wallet to keep managing it.
+
+### Things to verify after a transfer
+
+- An admin write signed by the **new** wallet succeeds.
+- An admin write signed by the **previous** wallet fails — the contract
+  rejects it now that it is no longer the admin.
+- `accountExistsByHash(ethers.solidityPackedKeccak256(['address'], [newAdminWalletAddress]))`
+  returns `true` from the new wallet's context (the on-chain key is
+  `uint256(keccak256(abi.encodePacked(newAdminWalletAddress)))`).
+- All groups, PKPs, action CIDs, and existing usage API keys are visible
+  under the new wallet session, and a Lit Action run with one of those
+  usage keys still succeeds.
+- The Stripe credit balance is unchanged.
 
 ## Further reading
 

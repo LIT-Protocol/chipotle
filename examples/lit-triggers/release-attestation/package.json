@@ -1,0 +1,20 @@
+{
+  "name": "release-attestation",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Lit Triggers example: a webhook trigger verifies a GitHub release webhook (HMAC over the raw body) and anchors the release on-chain via a keyless action wallet.",
+  "scripts": {
+    "compile": "hardhat compile",
+    "setup": "node scripts/setup.js",
+    "deploy:baseSepolia": "hardhat run scripts/deploy.js --network baseSepolia",
+    "attest": "node scripts/attest.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "ethers": "^5.7.2"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^2.0.2",
+    "hardhat": "^2.22.10"
+  }
+}
