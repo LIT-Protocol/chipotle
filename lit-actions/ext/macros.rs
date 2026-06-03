@@ -20,9 +20,15 @@ macro_rules! remote_op {
         tx.send(Ok($send.into()))
             .map_err(|e| error_box(format!("{op_name}: {e}")))?;
 
-        let (msg, _span) = rx
-            .recv()
-            .map_err(|e| error_box(format!("{op_name}: {e}")))?;
+        // Span covering the blocking wait for the lit-node's response — where
+        // an op spends nearly all of its wall-clock time. It nests under the
+        // op's own `#[instrument]` span, so Jaeger shows per-op node round-trip
+        // latency separately from the op's local processing.
+        let (msg, _span) = {
+            let _node_wait = ::tracing::info_span!("op_node_wait", op = op_name).entered();
+            rx.recv()
+                .map_err(|e| error_box(format!("{op_name}: {e}")))?
+        };
 
         let resp = msg.data().to_owned();
         match resp.union {
@@ -59,14 +65,25 @@ macro_rules! remote_op_async {
         };
 
         let op_name = stringify!($name);
-        tx.send_async(Ok($send.into()))
-            .await
-            .map_err(|e| error_box(format!("{op_name}: {e}")))?;
+        // DIAGNOSTIC: time the outbound handoff (worker -> tonic response
+        // stream). Pairs with `op_node_wait` (the reply wait) so Jaeger shows
+        // whether the per-hop stall is on send or receive.
+        {
+            use ::tracing::Instrument as _;
+            tx.send_async(Ok($send.into()))
+                .instrument(::tracing::info_span!("op_node_send", op = op_name))
+                .await
+                .map_err(|e| error_box(format!("{op_name}: {e}")))?;
+        }
 
-        // Must be blocking to preserve ops order
-        let (msg, _span) = rx
-            .recv()
-            .map_err(|e| error_box(format!("{op_name}: {e}")))?;
+        // Must be blocking to preserve ops order. The span wraps only this
+        // synchronous wait (never an `.await`), so holding the entered guard
+        // here is safe and it surfaces per-op node round-trip latency in Jaeger.
+        let (msg, _span) = {
+            let _node_wait = ::tracing::info_span!("op_node_wait", op = op_name).entered();
+            rx.recv()
+                .map_err(|e| error_box(format!("{op_name}: {e}")))?
+        };
 
         let resp = msg.data().to_owned();
         match resp.union {

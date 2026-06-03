@@ -482,7 +482,23 @@ pub(crate) fn build_worker_base(shared: &PoolSharedState) -> Result<PreparedWork
 
     let main_module =
         deno_core::resolve_url_or_path("./$lit$actions.js", Path::new(env!("CARGO_MANIFEST_DIR")))?;
-    let worker = MainWorker::bootstrap_from_options(&main_module, services, options);
+
+    // Time the snapshot deserialize + extension/op registration — this is the
+    // "Deno environment load" cost. The `deno_env_bootstrap` span (and its
+    // `elapsed_ms` field) shows up in Jaeger as a child of `build_worker_base`,
+    // isolating the heavy V8 bootstrap from the cheap option/permission setup
+    // above. For pool workers this happens at warm-time, off the request path;
+    // for the legacy cold path it sits inline before user code runs.
+    let worker = {
+        let bootstrap_span = info_span!("deno_env_bootstrap", elapsed_ms = tracing::field::Empty);
+        let _enter = bootstrap_span.enter();
+        let started = Instant::now();
+        let worker = MainWorker::bootstrap_from_options(&main_module, services, options);
+        let elapsed_ms = started.elapsed().as_millis() as u64;
+        bootstrap_span.record("elapsed_ms", elapsed_ms);
+        debug!(elapsed_ms, "Deno environment bootstrapped from snapshot");
+        worker
+    };
 
     Ok(PreparedWorker {
         worker,

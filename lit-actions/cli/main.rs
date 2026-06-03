@@ -149,6 +149,45 @@ async fn init_observability() -> ObservabilityProviders {
         global::set_tracer_provider(tracing_provider.clone());
         global::set_meter_provider(metrics_provider.clone());
 
+        // Rate-limited OpenTelemetry error handler. The default handler
+        // `eprintln!`s on every export failure; a flaky/unreachable collector
+        // then floods stderr, and each line takes the process-global stderr
+        // lock — stalling request-handling threads that are also logging. This
+        // throttles those writes to at most one per interval (with a suppressed
+        // count) and, crucially, never routes through `tracing`, so an export
+        // failure cannot re-enter the OTEL log/trace pipeline and feed back on
+        // itself.
+        let _ = global::set_error_handler(|err| {
+            use std::sync::Mutex;
+            use std::time::{Duration, Instant};
+
+            static THROTTLE: Mutex<Option<(Instant, u64)>> = Mutex::new(None);
+            const INTERVAL: Duration = Duration::from_secs(5);
+
+            let Ok(mut guard) = THROTTLE.lock() else {
+                return;
+            };
+            let now = Instant::now();
+            let suppressed = match *guard {
+                // Inside the quiet window: count it and stay silent.
+                Some((last, n)) if now.duration_since(last) < INTERVAL => {
+                    *guard = Some((last, n + 1));
+                    return;
+                }
+                Some((_, n)) => n,
+                None => 0,
+            };
+            *guard = Some((now, 0));
+            if suppressed > 0 {
+                eprintln!(
+                    "OpenTelemetry export error: {err} (+{suppressed} suppressed in last {}s)",
+                    INTERVAL.as_secs()
+                );
+            } else {
+                eprintln!("OpenTelemetry export error: {err}");
+            }
+        });
+
         let tracer = tracing_provider.tracer("lit-actions");
         let otel_trace_layer =
             lit_observability::tracing_opentelemetry::layer().with_tracer(tracer);
