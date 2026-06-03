@@ -1,6 +1,6 @@
 ---
 title: "Examples"
-description: "Common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, sending ETH, gating ERC-20 transfers on sanctions data, multi-source price oracles, AI-consensus prediction-market resolution, and permissionless cross-chain token bridging."
+description: "Common Lit Action patterns covering signing, encryption, decryption, HTTP fetching, contract calls, sending ETH, gating ERC-20 transfers on sanctions data, multi-source price oracles, AI-consensus prediction-market resolution, permissionless cross-chain token bridging, non-custodial threshold-ECDSA co-signing, and keyless Solana (ed25519) transaction signing."
 ---
 
 Each example below is a self-contained Lit Action. Pass the code string to the `/core/v1/lit_action` endpoint with any required `js_params`. The `pkpId` parameter is the wallet address of the PKP you want to use, passed in via `js_params`.
@@ -747,4 +747,46 @@ async function main({ round, sessionId, pkpId, encState, encKeyshare, inMsgs, me
 
 <Info>
   The full runnable example — the stateless `mpcSigner` action, a user-side client + local share store, `MpcVault.sol` (verifies the MPC signature with plain `ecrecover`), `setup` / `keygen` / `deploy` / `sign` scripts covering the interactive DKG and both signing quorums (hot + Lit, and the no-Lit hot + cold recovery path) — lives at [`examples/mpc-signing-ecdsa/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/mpc-signing-ecdsa) in the repo. Verified end-to-end on Base Sepolia; `npm run keygen -- --basic` does a simpler 2-of-2 (Lit + hot, no recovery).
+</Info>
+
+---
+
+## 17. Sign a Solana Transaction (Keyless ed25519 Wallet)
+
+Every other signing example on this page targets an EVM chain, where the action's identity key is already a secp256k1 EVM key. **Solana uses ed25519**, so this example shows the small bridge: that identity key is a 32-byte secp256k1 private key, and 32 bytes is exactly an ed25519 *seed* — which is what Solana's `Keypair.fromSeed` consumes. So you can derive a Solana keypair from the action's CID-bound identity, giving a **keyless Solana wallet that only this exact code can ever operate** — no PKP to mint, no key to hold.
+
+The action also **inspects what it signs**: rather than blindly signing whatever bytes it's handed, it parses the serialized transaction message and signs only a single `SystemProgram` transfer whose fee payer is its own address and whose amount is under a hardcoded cap. The canonical message bytes are built client-side by `@solana/web3.js`; the parse inside the action is read-only validation, so a parser quirk can only ever *reject* — it can never sign something other than the exact bytes the client broadcasts. ed25519 + base58 come from pinned [ESM imports](./imports) (jsDelivr).
+
+```javascript
+// Abridged. Full multi-file example (devnet client + policy parser) in the repo.
+// js_params: { action: "address" | "sign", message /* base64 tx message */, recipient }
+import * as ed from "@noble/ed25519@2.1.0";
+import { sha512 } from "@noble/hashes@1.4.0/sha512/+esm";
+import { base58 } from "@scure/base@1.1.6";
+ed.etc.sha512Sync = (...m) => sha512(ed.etc.concatBytes(...m)); // wire sync hashing
+
+const MAX_LAMPORTS = 500_000_000n; // 0.5 SOL — part of the source, so part of the CID
+
+async function main({ action, message, recipient }) {
+  // The secp256k1 identity key (32 bytes) doubles as the ed25519 seed — the
+  // same 32 bytes Solana's Keypair.fromSeed uses. Bound to the CID, never
+  // leaves the TEE.
+  const seed = ed.etc.hexToBytes((await Lit.Actions.getLitActionPrivateKey()).replace(/^0x/, ""));
+  const publicKey = ed.getPublicKey(seed);
+  const address = base58.encode(publicKey);
+  if (action === "address") return { address };
+
+  // Parse + enforce policy (one SystemProgram transfer, fee payer == self,
+  // amount <= MAX_LAMPORTS). Full parser is in the repo.
+  const { lamports } = inspectTransfer(message, publicKey, recipient); // throws / returns reason if not allowed
+  if (lamports > MAX_LAMPORTS) return { authorized: false, reason: "exceeds cap" };
+
+  // Sign the EXACT message bytes the client will broadcast.
+  const signature = ed.sign(base64ToBytes(message), seed);
+  return { authorized: true, address, signature: bytesToBase64(signature) };
+}
+```
+
+<Info>
+  The full runnable example — the policy-enforcing `solanaSigner` action (with a from-scratch legacy-message parser), a one-shot setup that derives the wallet's Solana address, and `airdrop` / `transfer` client scripts that fund the wallet and round-trip a signed transfer on **devnet** (including an over-cap send the action refuses) — lives at [`examples/solana-signer/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/solana-signer) in the repo.
 </Info>
