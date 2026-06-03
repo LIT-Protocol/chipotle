@@ -31,6 +31,7 @@
             "pages": [
               "lit-actions/index",
               "lit-actions/imports",
+              "lit-actions/wasm",
               "lit-actions/examples",
               "lit-actions/patterns",
               "lit-actions/secrets",
