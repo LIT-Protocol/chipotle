@@ -1157,6 +1157,12 @@ mod tests {
             v8_code_cache: crate::v8_code_cache::new_v8_code_cache(),
         };
 
+        // `build_worker_base` bootstraps a `MainWorker`, whose Node TTY compat
+        // layer registers process stdio via `AsyncFd::new` and therefore needs
+        // a Tokio reactor on the current thread (see `run_worker_thread`).
+        let rt = deno_runtime::tokio_util::create_basic_runtime();
+        let _enter = rt.enter();
+
         let w1 = build_worker_base(&shared).expect("first worker built");
         let w2 = build_worker_base(&shared).expect("second worker built");
 
