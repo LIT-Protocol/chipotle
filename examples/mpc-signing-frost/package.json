@@ -1,0 +1,20 @@
+{
+  "name": "mpc-signing-frost",
+  "version": "0.0.1",
+  "private": true,
+  "description": "A 2-of-3 threshold-FROST (Ed25519) signer split between a Lit Action and the user (hot + cold recovery share) — Lit literally cannot sign without the user co-signing, the full key never exists anywhere, and the user can always recover without Lit. Targets Solana.",
+  "scripts": {
+    "build:action": "node scripts/build-action.js",
+    "setup": "node scripts/setup.js",
+    "keygen": "node scripts/keygen.js",
+    "fund": "node scripts/fund.js",
+    "sign": "node scripts/sign.js"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.3",
+    "bs58": "^5.0.0",
+    "dotenv": "^16.4.5",
+    "tweetnacl": "^1.0.3"
+  },
+  "//frost-wasm": "FROST threshold crypto (DKG + 2-round signing) over the wasm-bindgen wrapper in ./wasm (lit-frost + frost-dkg). Build it first: `cd wasm && ./build.sh` (see wasm/README.md for the two upstream patches it needs). The client requires ../wasm/pkg-node; the action imports the published ../wasm/pkg-web (pin the jsDelivr URL in action/mpcSigner.js after publishing)."
+}
