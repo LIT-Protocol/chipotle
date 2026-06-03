@@ -42,16 +42,20 @@ async fn main() -> Result<(), rocket::Error> {
     // Initialize the primary tracing subscriber (stdout + privacy filtering).
     // When built with --features otlp, also initializes OTLP providers and wires
     // tracing events into the OTel log pipeline via ContextAwareOtelLogLayer.
+    //
+    // `_log_guard` keeps the non-blocking fmt writer's background worker alive for the
+    // lifetime of the process; dropping it flushes any buffered logs on shutdown.
     #[cfg(not(feature = "otlp"))]
-    {
-        let subscriber =
+    let _log_guard = {
+        let (subscriber, guard) =
             lit_observability::init_subscriber(&obs.log_level).expect("Failed to setup tracing");
         tracing::subscriber::set_global_default(subscriber)
             .expect("setting default subscriber failed");
-    }
+        guard
+    };
 
     #[cfg(feature = "otlp")]
-    let _otlp_providers = {
+    let (_otlp_providers, _log_guard) = {
         use lit_observability::{
             logging::ContextAwareOtelLogLayer,
             opentelemetry::{KeyValue, global, trace::TracerProvider},
@@ -78,22 +82,24 @@ async fn main() -> Result<(), rocket::Error> {
                 let otel_trace_layer =
                     lit_observability::tracing_opentelemetry::layer().with_tracer(tracer);
                 let otel_log_layer = ContextAwareOtelLogLayer::new(&logger_provider);
-                let subscriber = lit_observability::init_subscriber(&obs.log_level)
-                    .expect("Failed to setup tracing")
-                    .with(otel_trace_layer)
-                    .with(otel_log_layer);
+                let (base_subscriber, guard) = lit_observability::init_subscriber(&obs.log_level)
+                    .expect("Failed to setup tracing");
+                let subscriber = base_subscriber.with(otel_trace_layer).with(otel_log_layer);
                 tracing::subscriber::set_global_default(subscriber)
                     .expect("setting default subscriber failed");
 
-                Some((tracing_provider, metrics_provider, logger_provider))
+                (
+                    Some((tracing_provider, metrics_provider, logger_provider)),
+                    guard,
+                )
             }
             Err(e) => {
                 eprintln!("OTLP init failed ({e}), falling back to stdout-only logging");
-                let subscriber = lit_observability::init_subscriber(&obs.log_level)
+                let (subscriber, guard) = lit_observability::init_subscriber(&obs.log_level)
                     .expect("Failed to setup tracing");
                 tracing::subscriber::set_global_default(subscriber)
                     .expect("setting default subscriber failed");
-                None
+                (None, guard)
             }
         }
     };

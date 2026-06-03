@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use ::tracing::Subscriber;
+use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::EnvFilter;
 use tracing_subscriber::{fmt, prelude::*};
 
@@ -28,11 +29,20 @@ pub use tracing_opentelemetry;
 
 /// Initializes the primary tracing subscriber with fmt (stdout) and privacy filtering.
 /// `log_level` is the minimum log level (e.g. "info", "debug"). Overridden by `RUST_LOG`.
+///
+/// The fmt layer writes through a [`tracing_appender::non_blocking`] writer so that log
+/// volume can never block the threads emitting events (e.g. request handlers) on the
+/// stdout lock. Formatting and the actual write happen on a dedicated background thread.
+///
+/// The returned [`WorkerGuard`] **must** be kept alive for as long as logging is needed:
+/// dropping it shuts down the background worker and flushes any buffered logs. Callers
+/// should bind it for the lifetime of the process (typically in `main`).
 pub fn init_subscriber(
     log_level: &str,
-) -> Result<
+) -> Result<(
     impl Subscriber + Send + Sync + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
-> {
+    WorkerGuard,
+)> {
     let level_filter =
         EnvFilter::try_from_default_env().or_else(|_e| EnvFilter::from_str(log_level)).map_err(
             |e| error::unexpected_err(e.to_string(), Some("Could not create filter".to_string())),
@@ -40,10 +50,17 @@ pub fn init_subscriber(
 
     let custom_formatter = logging::CustomEventFormatter::default();
 
-    Ok(tracing_subscriber::registry()
+    // Non-blocking writer: the background worker owns stdout and drains a bounded queue.
+    // In the default (lossy) mode, events are dropped rather than blocking the caller if
+    // the queue is full under extreme log volume — the right trade-off for the request path.
+    let (non_blocking, guard) = tracing_appender::non_blocking(std::io::stdout());
+
+    let subscriber = tracing_subscriber::registry()
         .with(level_filter)
-        .with(fmt::layer().event_format(custom_formatter))
-        .with(logging::privacy_filter::PrivacyModeLayer))
+        .with(fmt::layer().event_format(custom_formatter).with_writer(non_blocking))
+        .with(logging::privacy_filter::PrivacyModeLayer);
+
+    Ok((subscriber, guard))
 }
 
 /// Feature-gated OTLP provider initialization.
