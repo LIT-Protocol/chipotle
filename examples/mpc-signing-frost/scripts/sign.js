@@ -94,7 +94,15 @@ async function main() {
 
   let conn, blockhash, lastValidBlockHeight, submit = null;
   const to = args.to ? new PublicKey(args.to) : from; // dry default: self
-  const lamports = Math.round(parseFloat(args.sol || "0") * LAMPORTS_PER_SOL);
+  const solStr = args.sol === undefined || args.sol === true ? "0" : String(args.sol);
+  const solNum = Number(solStr);
+  if (!Number.isFinite(solNum) || solNum < 0) {
+    throw new Error(`--sol must be a non-negative number (got "${solStr}")`);
+  }
+  const lamports = Math.round(solNum * LAMPORTS_PER_SOL);
+  // The MPC account is also the fee payer, so it must keep a little SOL for the
+  // fee — a full-balance transfer can't succeed.
+  const FEE_BUFFER = 10000; // lamports; ~2x a typical signature fee
 
   if (dry) {
     blockhash = PublicKey.default.toBase58(); // dummy; not submitted
@@ -106,7 +114,9 @@ async function main() {
     const bal = await conn.getBalance(from);
     console.log(`From:    ${from.toBase58()}  (balance ${bal / LAMPORTS_PER_SOL} SOL)`);
     console.log(`Transfer: ${lamports / LAMPORTS_PER_SOL} SOL -> ${to.toBase58()}`);
-    if (bal < lamports) console.log("\n⚠️  Balance below the requested amount — fund it first (npm run fund).");
+    if (bal < lamports + FEE_BUFFER) {
+      console.log(`\n⚠️  Balance must exceed the transfer by the fee (~${FEE_BUFFER / LAMPORTS_PER_SOL} SOL) since this account also pays it — fund it first (npm run fund).`);
+    }
     console.log();
     submit = async (tx) => {
       const txid = await conn.sendRawTransaction(tx.serialize());

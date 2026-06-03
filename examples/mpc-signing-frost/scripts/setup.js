@@ -24,6 +24,7 @@
 
 const fs = require("fs");
 const path = require("path");
+const { keccak256 } = require("js-sha3");
 const env = require("./_env");
 
 // Deployed action has the wasm glue inlined (built by `npm run build:action`);
@@ -64,8 +65,11 @@ async function main() {
   // -------------------------------------------------------------------------
   // Step 3: Create the group with a wildcard action allowlist.
   // -------------------------------------------------------------------------
-  console.log("Step 3/7: Creating group (wildcard action allowlist)...");
-  const groupId = await addGroup(LIT_API_BASE, LIT_API_KEY);
+  console.log("Step 3/7: Creating group (locked to this action's CID)...");
+  // The node permits an action by keccak256(CID-string) (see the server's
+  // ipfs_cid_to_u256); cid_hashes_permitted holds that hash as 0x-hex.
+  const cidHash = "0x" + keccak256(actionCid);
+  const groupId = await addGroup(LIT_API_BASE, LIT_API_KEY, cidHash);
   env.upsert("GROUP_ID", String(groupId));
   console.log(`  GROUP_ID=${groupId}`);
 
@@ -149,14 +153,19 @@ async function getActionCid(base, apiKey, code) {
   });
 }
 
-async function addGroup(base, apiKey) {
+async function addGroup(base, apiKey, actionCid) {
+  // Lock the group to THIS action's CID (not the wildcard "0"). The action's
+  // keyshare is sealed under the PKP, and decryption is gated by group
+  // membership — so restricting to the exact CID means only this action can
+  // unseal the share. A wildcard would let any action the usage key can run
+  // decrypt and exfiltrate it.
   const body = await call(base, apiKey, "add_group", {
     method: "POST",
     body: JSON.stringify({
       group_name: "mpc-signing-frost",
       group_description: "2-of-3 threshold-FROST (Ed25519): Lit Action + user (hot + cold recovery)",
       pkp_ids_permitted: [],
-      cid_hashes_permitted: ["0"],
+      cid_hashes_permitted: [actionCid],
     }),
   });
   return body.group_id;

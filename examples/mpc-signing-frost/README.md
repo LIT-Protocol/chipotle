@@ -82,61 +82,68 @@ never locked out.**
 ```
    ┌────────────────────────────────────────────┐
    │ User's machine                              │
-   │   ├── hot share   (party 0, local)          │   ← never uploaded
-   │   ├── cold share  (party 2) → move OFFLINE  │   ← recovery; idle day-to-day
-   │   └── encrypted_action_keyshare             │   ← sealed to the group PKP;
-   │       + per-round sealed signing nonce      │     useless to anyone but the action
+   │   ├── hot share   (party 1, local)          │   ← never uploaded
+   │   ├── cold share  (party 3) → move OFFLINE  │   ← recovery; idle day-to-day
+   │   └── encrypted_action_keyshare             │   ← sealed to the group PKP +
+   │                                             │     bound params; only this action decrypts
    └─────────────┬───────────────────────────────┘
-                 │ each round: { sealed_action_state, the commitments it needs }
+                 │ sign: one call { message, the user's commitment }
                  ▼
    ┌────────────────────────────────────────────┐
-   │ Lit Action (party 1, this CID, stateless)   │
-   │  decrypt → restore nonce/state              │
-   │  signing_round1 / signing_round2(...)       │   ← runs FROST in WASM
-   │  reseal nonce → Lit.Actions.Encrypt         │   ← reseals to the group PKP
-   │  return { its commitment / sig share }      │
+   │ Lit Action (party 2, this CID, stateless)   │
+   │  decrypt keyshare (+ bound group key/thr.)  │
+   │  signing_round1 + signing_round2 — ATOMIC   │   ← fresh nonce, used once,
+   │  return { its commitment, sig share }       │     never sealed → never replayable
    └────────────────────────────────────────────┘
 
-   day-to-day quorum:  hot (party 0) + Lit (party 1)
-   recovery quorum:    hot (party 0) + cold (party 2)  — fully local, no Lit
+   day-to-day quorum:  hot (party 1) + Lit (party 2)
+   recovery quorum:    hot (party 1) + cold (party 3)  — fully local, no Lit
 ```
 
 - **The full key never exists**, by construction of FROST DKG. Each party only
-  ever holds its own additive/Shamir share; a compromised V8 isolate holding the
-  action's share cannot produce a signature without a second party contributing
-  its share.
+  ever holds its own Shamir share; a compromised V8 isolate holding the action's
+  share cannot produce a signature without a second party contributing its share.
 - **No one signs alone.** Every signature needs two of the three shares running
   the protocol together — *hot + Lit* day-to-day, *hot + cold* for recovery.
-- **PKP-bound seal.** The action is stateless and the node has no storage, so the
-  action's secret state (its signing share, and its per-signature FROST nonce) is
-  sealed with `Lit.Actions.Encrypt({ pkpId })` — a ciphertext only actions
-  permitted in the group can decrypt. The user stores the blob and relays it back.
-- **Nonce-reuse guard — the critical one for FROST.** A FROST signing nonce must
-  **never** be reused across two different messages: reuse leaks the signer's
-  secret share outright (it is two linear equations in the same secret). The
-  action commits the message into the sealed nonce in round 1 and **refuses in
-  round 2 to produce a signature share for any other message** — so a malicious
-  user relaying the same sealed nonce against a second message cannot extract the
-  share. (The ECDSA example has the exact same guard for the same reason.)
+- **Atomic signing — no reusable nonce. (The critical one for FROST.)** Reusing a
+  FROST nonce across two transcripts leaks the secret share outright (it is two
+  linear equations in the same secret). So the action does **both** signing rounds
+  in one stateless call: it generates its single-use nonce, signs over the full
+  `[user, action]` commitment set, and **discards the nonce** — it is never sealed
+  or relayed, so the user (the transport) has nothing to replay. A second call
+  generates a fresh nonce. There is no nonce to reuse.
+- **PKP + CID sealed share.** The action's long-lived signing share is sealed with
+  `Lit.Actions.Encrypt({ pkpId })`, and `setup.js` locks the permission group to
+  **this exact action CID** (`cid_hashes_permitted = [keccak256(cid)]`), so only
+  this action — not any other action your usage key can run — can decrypt it.
+- **Bound parameters.** The group verifying key, threshold, and the action's party
+  id are sealed *into* the keyshare; signing reads them from the seal and ignores
+  caller-supplied values, so a malicious relay can't drive the action with a
+  forged group key or threshold.
+- **Pinned crypto.** The action commits to the wasm's SHA-256 and refuses to run
+  any other bytes, so the CID transitively commits to the exact crypto even though
+  the 1.5 MB wasm is fetched at runtime.
 
 ## How it works
 
 Both parties run the same FROST library — the action in WASM inside the node,
-the user via the Node build locally. The user drives; the action is one
-stateless `/core/v1/lit_action` call per round.
+the user via the Node build locally. The user drives.
 
 - **DKG (`npm run keygen`)** — FROST distributed key generation (3 rounds:
-  `dkg_part1` → `dkg_part2` → `dkg_part3`) between the user's party(ies) and the
-  action. Produces the group Ed25519 public key and each party's signing share.
-  The user keeps the hot (and, in 2-of-3, the cold) share; the action's share is
-  returned sealed to its CID. No trusted dealer — the key is never whole.
-- **Signing (`npm run sign`)** — FROST signing is **2 rounds**:
-  1. **commit** — each signer runs `signing_round1` → a nonce (secret) +
-     commitment (public). The action seals its nonce (binding the message hash).
-  2. **sign share** — given the message and *all* commitments, each signer runs
-     `signing_round2` with its share → a signature share.
-  The user then `aggregate`s the two signature shares into a single 64-byte
-  Ed25519 signature and submits the Solana transaction.
+  `dkg_round1/2/3`) between the user's party(ies) and the action. The action runs
+  in two HTTP calls (round 1, then rounds 2+3 together). Produces the group
+  Ed25519 public key and each party's signing share. The user keeps the hot (and,
+  in 2-of-3, the cold) share; the action's share is returned sealed to the PKP +
+  CID, with the group key / threshold / party id bound in. No trusted dealer — the
+  key is never whole.
+- **Signing (`npm run sign`)** — one round-trip. The user commits locally
+  (`sign_round1`), then makes a single action call sending the message + its
+  commitment. The action generates its own nonce, runs `sign_round1` +
+  `sign_round2` over the full `[user, action]` commitment set **in that one
+  stateless call**, returns its commitment + signature share, and discards the
+  nonce. The user runs its `sign_round2` over the same transcript and
+  `aggregate`s the two shares into a 64-byte Ed25519 signature for Solana. The
+  action's nonce never leaves the isolate, so it can't be replayed/reused.
 
 ## Files
 
@@ -250,18 +257,26 @@ funds never freeze. (`--dry --recovery` verifies it without touching the chain.)
 
 ## Production considerations
 
-- **Inline + pin the WASM.** As in the ECDSA example, for maximum trust inline
-  the FROST wasm as base64 in the action so its **CID commits to the exact crypto
-  bytes**, rather than fetching from a CDN at runtime.
-- **Nonce hygiene.** FROST nonce reuse is catastrophic — it leaks the secret
-  share. The action's per-round nonce is single-use and bound to the committed
-  message; never relax that guard.
+These hardening items came out of an adversarial review; most are now **done** in
+this example, with the remaining gaps called out.
+
+- **Nonce hygiene (done).** FROST nonce reuse is catastrophic. The action signs
+  atomically and never persists its nonce, so there's no nonce to replay — see the
+  trust model. Don't reintroduce a sealed-nonce two-call signing flow.
+- **CID-locked seal (done).** `setup.js` locks the group to this action's CID
+  (`keccak256(cid)`), so only this action can decrypt the keyshare. Re-run `setup`
+  after any change to the deployed action (`mpcSigner.bundled.js`) — the CID, and
+  thus the lock, changes with the bytes.
+- **Pinned wasm (done).** The action verifies the fetched wasm's SHA-256 against a
+  pinned constant. `npm run build:action` re-pins it on every rebuild. **Still
+  fetched from a personal GitHub repo via jsDelivr** — move it to a Lit-owned npm
+  package (then the action imports it by bare specifier and the runtime fetch /
+  hash-pin go away), or inline if a future gateway allows the ~2 MB body.
+- **Bound parameters (done).** Group key / threshold / party id are sealed into the
+  keyshare and the action ignores caller-supplied values.
 - **Backups.** Hot + Lit is one signing quorum; hot + cold is the other. Keep the
-  cold share offline and separate from the hot store.
-- **Seal binding.** The action's share is sealed to the group **PKP**, so it
-  survives action edits as long as the PKP + group are unchanged. To bind the
-  seal to this exact action's bytes, restrict the group's `cid_hashes_permitted`
-  to its CID instead of the wildcard `["0"]`.
+  cold share offline and separate from the hot store. `keygen` writes both locally
+  by default and warns you to move the cold share off the machine — do it.
 
 ## References
 

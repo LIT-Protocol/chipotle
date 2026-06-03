@@ -90,7 +90,6 @@ struct Wire {
 /// One incoming DKG message (the `data` another participant relayed to us).
 #[derive(Deserialize)]
 struct InMsg {
-    #[allow(dead_code)]
     from: u16,
     data: Vec<u8>,
 }
@@ -99,8 +98,29 @@ struct InMsg {
 /// ../README.md "Prerequisite #1").
 #[derive(Serialize, Deserialize)]
 struct DkgState {
+    my_id: u16,
     all_ids: Vec<u16>,
     participant: Part,
+}
+
+/// Reject relayed message sets the protocol shouldn't accept before feeding them
+/// to frost-dkg: an unknown sender, our own id echoed back, or a duplicate sender
+/// (which could double-count toward the round threshold). frost-dkg also
+/// authenticates messages internally; this is wrapper-level defense in depth.
+fn check_senders(st: &DkgState, msgs: &[InMsg]) -> Result<(), JsValue> {
+    let mut seen = std::collections::BTreeSet::new();
+    for m in msgs {
+        if m.from == st.my_id {
+            return Err(err("DKG message claims to be from this party"));
+        }
+        if !st.all_ids.contains(&m.from) {
+            return Err(err(format!("DKG message from unknown party {}", m.from)));
+        }
+        if !seen.insert(m.from) {
+            return Err(err(format!("duplicate DKG message from party {}", m.from)));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Serialize)]
@@ -173,7 +193,7 @@ pub fn dkg_round1(my_id: u16, all_ids: Vec<u16>, threshold: u16) -> Result<JsVal
     let mut participant = Part::new_secret(id_scalar(my_id), &params).map_err(err)?;
     let generator = participant.run().map_err(err)?;
     let out = collect_out(&all_ids, &generator);
-    finish_round(all_ids, participant, out)
+    finish_round(my_id, all_ids, participant, out)
 }
 
 /// Receive the relayed round-1 messages, then run round 2.
@@ -181,12 +201,13 @@ pub fn dkg_round1(my_id: u16, all_ids: Vec<u16>, threshold: u16) -> Result<JsVal
 pub fn dkg_round2(state: Vec<u8>, incoming: JsValue) -> Result<JsValue, JsValue> {
     let mut st: DkgState = serde_json::from_slice(&state).map_err(err)?;
     let msgs: Vec<InMsg> = from_js(incoming)?;
+    check_senders(&st, &msgs)?;
     for m in &msgs {
         st.participant.receive(&m.data).map_err(err)?;
     }
     let generator = st.participant.run().map_err(err)?;
     let out = collect_out(&st.all_ids, &generator);
-    finish_round(st.all_ids, st.participant, out)
+    finish_round(st.my_id, st.all_ids, st.participant, out)
 }
 
 /// Receive the relayed round-2 messages, run round 3 (finalize) and return the
@@ -195,6 +216,7 @@ pub fn dkg_round2(state: Vec<u8>, incoming: JsValue) -> Result<JsValue, JsValue>
 pub fn dkg_round3(state: Vec<u8>, incoming: JsValue) -> Result<JsValue, JsValue> {
     let mut st: DkgState = serde_json::from_slice(&state).map_err(err)?;
     let msgs: Vec<InMsg> = from_js(incoming)?;
+    check_senders(&st, &msgs)?;
     for m in &msgs {
         st.participant.receive(&m.data).map_err(err)?;
     }
@@ -242,8 +264,8 @@ fn collect_out(all_ids: &[u16], generator: &RoundOutputGenerator<G>) -> Vec<Wire
         .collect()
 }
 
-fn finish_round(all_ids: Vec<u16>, participant: Part, out: Vec<Wire>) -> Result<JsValue, JsValue> {
-    let st = DkgState { all_ids, participant };
+fn finish_round(my_id: u16, all_ids: Vec<u16>, participant: Part, out: Vec<Wire>) -> Result<JsValue, JsValue> {
+    let st = DkgState { my_id, all_ids, participant };
     let state = serde_json::to_vec(&st).map_err(err)?;
     to_js(&DkgRoundOut { state, out })
 }

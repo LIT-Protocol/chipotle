@@ -31,14 +31,18 @@
 //   encState     sealed dkg state from round 1 (round 2 only)
 //   r1ToAction   [{from,data(b64)}] round-1 messages addressed to the action (r2)
 //   r2ToAction   [{from,data(b64)}] round-2 messages addressed to the action (r3)
-//   --- sign ---
-//   encActionKeyshare  sealed long-lived signing share
-//   message      <b64> the raw message bytes to sign. Committed in sign round 1
-//                (sealed into the nonce); round 2 refuses any other message
-//                (FROST nonce reuse leaks the secret share — see README).
-//   encNonce     sealed single-use signing nonce from round 1 (round 2 only)
-//   verifyingKey <b64> group VerifyingKey (round 2)
-//   commitments  [{id,data(b64)}] all signers' commitments (round 2)
+//   --- sign (single, atomic round) ---
+//   encActionKeyshare  sealed long-lived signing share (carries the group key,
+//                      threshold, and this party's id — the action trusts THOSE,
+//                      not caller-supplied values)
+//   message      <b64> the raw message bytes to sign
+//   peerCommitments  [{id,data(b64)}] the OTHER signer(s)' round-1 commitments
+//
+// Signing is one atomic call: the action generates its own single-use FROST
+// nonce, signs, and discards the nonce — it is never sealed or relayed, so it
+// can never be reused. (Reusing a FROST nonce across two transcripts is a
+// secret-share-extraction oracle; doing both rounds in one stateless call
+// removes the relay's ability to replay a nonce. See README "Trust model".)
 
 // ── WASM LOADER ────────────────────────────────────────────────────────────
 // This is the readable SOURCE. The DEPLOYED action is `mpcSigner.bundled.js`,
@@ -58,14 +62,27 @@ import init, {
 // Runtime fetch (a plain network call, not a bundler import — a full URL is OK).
 // Currently a personal repo via jsDelivr; move to a Lit-owned package.
 const WASM_URL =
-  "https://cdn.jsdelivr.net/gh/clawdbot-glitch003/lit-frost-wasm@v0.0.1/lit_frost_wasm_bg.wasm";
+  "https://cdn.jsdelivr.net/gh/clawdbot-glitch003/lit-frost-wasm@v0.0.2/lit_frost_wasm_bg.wasm";
+
+// The action CID commits to THIS file, not to the fetched wasm. So we pin the
+// wasm's SHA-256 here and refuse to run anything else: the CID transitively
+// commits to the exact crypto bytes, even though they're fetched at runtime.
+// (Update this when you rebuild the wasm; `npm run build:action` re-pins it.)
+const WASM_SHA256 =
+  "6b7eda8768478653f4cdfd85a6837f1de68ffc2b8ebb94d5ca335a98262951dc";
 
 let wasmReady = false;
 async function ensureWasm() {
   if (wasmReady) return;
   const res = await fetch(WASM_URL);
   if (!res.ok) throw new Error(`fetch wasm ${res.status}`);
-  await init(await res.arrayBuffer());
+  const bytes = new Uint8Array(await res.arrayBuffer());
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  if (hex !== WASM_SHA256) {
+    throw new Error(`wasm hash mismatch: got ${hex}, expected ${WASM_SHA256} — refusing to run untrusted crypto`);
+  }
+  await init(bytes);
   wasmReady = true;
 }
 
@@ -158,10 +175,20 @@ async function dkgRound({ round, sessionId, pkpId, myId, allIds, threshold, encS
     const r2 = dkg_round2(bytes, decodeMsgs(r1ToAction));
     const fin = dkg_round3(arr(r2.state), decodeMsgs(r2ToAction));
     out.out = encodeOut(r2.out);
-    out.encActionKeyshare = await seal(pkpId, fin.signing_share, "keyshare");
-    out.verifyingKey = u8ToB64(arr(fin.verifying_key));
+    const verifyingKey = u8ToB64(arr(fin.verifying_key));
+    const solanaPubkey = u8ToB64(arr(fin.solana_pubkey));
+    // Bind the protocol parameters into the sealed keyshare. Signing reads these
+    // from the seal and ignores caller-supplied values, so a malicious relay
+    // can't drive the action with a forged group key / threshold / party id.
+    out.encActionKeyshare = await seal(pkpId, fin.signing_share, "keyshare", undefined, {
+      myId,
+      threshold,
+      verifyingKey,
+      solanaPubkey,
+    });
+    out.verifyingKey = verifyingKey;
     out.verifyingShare = u8ToB64(arr(fin.verifying_share));
-    out.solanaPubkey = u8ToB64(arr(fin.solana_pubkey));
+    out.solanaPubkey = solanaPubkey;
     return out;
   }
 
@@ -169,48 +196,44 @@ async function dkgRound({ round, sessionId, pkpId, myId, allIds, threshold, encS
 }
 
 // ---------------------------------------------------------------------------
-// Signing — FROST, 2 rounds. Round 1 produces this party's nonce + commitment;
-// the nonce is sealed AND bound to the committed message. Round 2 produces this
-// party's signature share, but only for that same message — replaying the sealed
-// nonce against a different message is refused (nonce reuse would leak the share).
+// Signing — ONE atomic FROST round. The action generates its own single-use
+// nonce, commits, and signs in a single stateless call, then discards the nonce.
+// Because the nonce never leaves this isolate (it is not sealed or relayed), a
+// malicious relay cannot replay it against a second transcript — which is the
+// only way to get two signature shares under one nonce and extract the share.
+//
+// All protocol parameters (group key, threshold, this party's id) come from the
+// sealed keyshare, NOT from caller-supplied js_params, so the relay can't drive
+// the action with forged values either.
 // ---------------------------------------------------------------------------
-async function signRound({ round, sessionId, pkpId, myId, encActionKeyshare, encNonce, message, threshold, verifyingKey, commitments }) {
-  const out = { ok: true, op: "sign", round, sessionId };
-
-  if (round === 1) {
-    if (!message) throw new Error("sign round 1 requires the message (committed for the signing session)");
-    const { bytes: share } = await unseal(pkpId, encActionKeyshare, "keyshare");
-    const r = sign_round1(share);
-    out.commitment = u8ToB64(arr(r.commitment));
-    out.verifyingShare = u8ToB64(arr(r.verifying_share));
-    // bind the message into the sealed single-use nonce
-    out.encNonce = await seal(pkpId, r.nonce, "sign-nonce", 2, { sessionId, message });
-    return out;
+async function signRound({ pkpId, encActionKeyshare, message, peerCommitments }) {
+  if (!message) throw new Error("sign requires the message");
+  const { bytes: share, meta } = await unseal(pkpId, encActionKeyshare, "keyshare");
+  const myId = meta.myId;
+  const threshold = meta.threshold;
+  const verifyingKey = b64ToU8(meta.verifyingKey);
+  if (myId === undefined || threshold === undefined || meta.verifyingKey === undefined) {
+    throw new Error("sealed keyshare is missing bound parameters — re-run keygen");
   }
 
-  if (round === 2) {
-    const { bytes: nonce, meta } = await unseal(pkpId, encNonce, "sign-nonce", 2);
-    if (meta.sessionId !== sessionId) {
-      throw new Error("sealed-nonce sessionId mismatch — refusing cross-session splice");
-    }
-    if (meta.message !== message) {
-      throw new Error("sign round 2 message differs from the one committed in round 1 — refusing (nonce-reuse guard)");
-    }
-    const { bytes: share } = await unseal(pkpId, encActionKeyshare, "keyshare");
-    const commits = (commitments || []).map((c) => ({ id: c.id, data: b64ToU8(c.data) }));
-    const r = sign_round2(
-      b64ToU8(message),
-      myId,
-      share,
-      b64ToU8(verifyingKey),
-      threshold,
-      commits,
-      nonce
-    );
-    out.signatureShare = u8ToB64(arr(r.signature_share));
-    out.verifyingShare = u8ToB64(arr(r.verifying_share));
-    return out;
-  }
+  // Round 1: our own fresh nonce + commitment (in-memory only).
+  const r1 = sign_round1(share);
+  const myCommitment = arr(r1.commitment);
 
-  return { ok: false, error: `bad sign round ${round}` };
+  // Full commitment set = peers + self, ordered by id (matches the user side).
+  const commits = [
+    ...(peerCommitments || []).map((c) => ({ id: c.id, data: b64ToU8(c.data) })),
+    { id: myId, data: myCommitment },
+  ].sort((a, b) => a.id - b.id);
+
+  // Round 2: our signature share for THIS exact transcript, then drop the nonce.
+  const r2 = sign_round2(b64ToU8(message), myId, share, verifyingKey, threshold, commits, arr(r1.nonce));
+
+  return {
+    ok: true,
+    op: "sign",
+    commitment: u8ToB64(myCommitment),
+    signatureShare: u8ToB64(arr(r2.signature_share)),
+    verifyingShare: u8ToB64(arr(r2.verifying_share)),
+  };
 }

@@ -152,45 +152,46 @@ class MpcClient {
 
   // -------------------------------------------------------------------------
   // Normal signing: the user's hot share (party 1) + the Lit Action (party 2).
-  // FROST is 2 rounds; the user aggregates locally. Works for 2-of-2 and 2-of-3.
-  // `message` is the raw bytes to sign (the Solana transaction message). Returns
-  // the 64-byte Ed25519 signature (Buffer).
+  // The user commits first, then the action signs in ONE atomic call (it
+  // generates and discards its own nonce — never sealed, never replayable), then
+  // the user produces its own share and aggregates locally. `message` is the raw
+  // bytes to sign (the Solana transaction message). Returns the 64-byte sig.
   // -------------------------------------------------------------------------
   async sign({ hotShare, encActionKeyshare, verifyingKey, threshold = 2, message, onRound }) {
-    const sessionId = crypto.randomBytes(16).toString("hex");
     const hot = u8(Buffer.from(hotShare, "base64"));
     const vk = unb64(verifyingKey);
     const msg = u8(message);
-    const msgB64 = b64(msg);
 
-    // Round 1 (commit): user locally, action over HTTP. The action seals its
-    // single-use nonce bound to this message (nonce-reuse guard).
+    // User round 1 (commit) — locally; the nonce stays in memory.
     const uR1 = frost.sign_round1(hot);
+
+    // One atomic action call: it commits + signs over [user, action] and returns
+    // its commitment + share. The action derives id/threshold/key from its sealed
+    // keyshare, so we only send the message and our commitment.
     onRound && onRound(1);
-    const aR1 = await this.callAction({
-      op: "sign", round: 1, sessionId, myId: this.actionId ?? ACTION_ID,
-      encActionKeyshare, message: msgB64,
+    const aR = await this.callAction({
+      op: "sign",
+      encActionKeyshare,
+      message: b64(msg),
+      peerCommitments: [{ id: 1, data: b64(uR1.commitment) }],
     });
+
+    // Same full commitment set the action used (peers + action, sorted by id).
     const commitments = [
-      { id: 1, data: uR1.commitment },
-      { id: ACTION_ID, data: unb64(aR1.commitment) },
-    ];
+      { id: 1, data: u8(uR1.commitment) },
+      { id: ACTION_ID, data: unb64(aR.commitment) },
+    ].sort((a, b) => a.id - b.id);
     const verifyingShares = [
-      { id: 1, data: uR1.verifying_share },
-      { id: ACTION_ID, data: unb64(aR1.verifyingShare) },
+      { id: 1, data: u8(uR1.verifying_share) },
+      { id: ACTION_ID, data: unb64(aR.verifyingShare) },
     ];
 
-    // Round 2 (signature shares).
-    const uR2 = frost.sign_round2(msg, 1, hot, vk, threshold, commitments, u8(uR1.nonce));
+    // User round 2 over the agreed transcript, then aggregate.
     onRound && onRound(2);
-    const aR2 = await this.callAction({
-      op: "sign", round: 2, sessionId, myId: ACTION_ID,
-      encActionKeyshare, encNonce: aR1.encNonce, message: msgB64, threshold,
-      verifyingKey, commitments: commitments.map((c) => ({ id: c.id, data: b64(c.data) })),
-    });
+    const uR2 = frost.sign_round2(msg, 1, hot, vk, threshold, commitments, u8(uR1.nonce));
     const signatureShares = [
-      { id: 1, data: uR2.signature_share },
-      { id: ACTION_ID, data: unb64(aR2.signatureShare) },
+      { id: 1, data: u8(uR2.signature_share) },
+      { id: ACTION_ID, data: unb64(aR.signatureShare) },
     ];
 
     const sig = frost.aggregate(msg, vk, commitments, signatureShares, verifyingShares);
