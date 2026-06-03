@@ -15,6 +15,11 @@
 #               Prints the cargo commands needed to start them manually,
 #               with and without OTEL support.
 #
+# Billing (CPL-330): a local lit-api-server requires a TEST Stripe account. Export
+# STRIPE_SECRET_KEY (sk_test_…/rk_test_…) and STRIPE_PUBLISHABLE_KEY (pk_test_…)
+# before running, or export LIT_DISABLE_BILLING=true to run payment-free. These
+# env vars are inherited by the cargo run in step 5.
+#
 # Press Ctrl+C to tear down all background processes.
 
 set -euo pipefail
@@ -300,6 +305,12 @@ if [ "$NO_CODE" = true ]; then
     echo ""
     echo "Required env for any cargo run:"
     echo "  export DSTACK_SOCKET=\"$DSTACK_SOCKET\""
+    echo ""
+    echo "Billing (CPL-330): a local lit-api-server requires a TEST Stripe account."
+    echo "  export STRIPE_SECRET_KEY=\"sk_test_...\"      # or rk_test_..."
+    echo "  export STRIPE_PUBLISHABLE_KEY=\"pk_test_...\""
+    echo "  # ...or opt out and run payment-free:"
+    echo "  export LIT_DISABLE_BILLING=true"
     echo ""
     echo "--- lit-api-server ---"
     echo "  (a) Normal:"

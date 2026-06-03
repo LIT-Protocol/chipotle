@@ -106,7 +106,7 @@ async fn main() -> ExitCode {
         }
     };
 
-    let Some(stripe_state) = stripe::init() else {
+    let Some(stripe_state) = stripe::from_env() else {
         eprintln!(
             "error: STRIPE_SECRET_KEY and/or STRIPE_PUBLISHABLE_KEY are not set; nothing to report."
         );

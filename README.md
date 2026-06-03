@@ -241,6 +241,22 @@ Press **Ctrl+C** to stop all services.
 |---------------------|---------|-------------|
 | `SIMULATOR_DIR` | `~/GitHub/dstack/sdk/simulator` | Path to the dstack simulator directory |
 | `DSTACK_SOCKET` | Auto-detected | Override the simulator socket path |
+| `STRIPE_SECRET_KEY` | — | Stripe secret key. Local runs **require** a test key (`sk_test_…` / `rk_test_…`). |
+| `STRIPE_PUBLISHABLE_KEY` | — | Stripe publishable key. Local runs **require** a test key (`pk_test_…`). |
+| `LIT_DISABLE_BILLING` | unset | Set to `true` to opt out of the local test-Stripe requirement and run payment-free. |
+
+### Billing in local development
+
+By default a local (non-`production`) build of `lit-api-server` **requires a configured
+test Stripe account** so the billing path is actually exercised instead of silently running
+payment-free (CPL-330). On startup the server will refuse to run when:
+
+- the Stripe keys are missing, or
+- the keys are *live*-mode keys (`sk_live_…` / `pk_live_…`) — a guard so a dev machine can't
+  charge real cards.
+
+Set both `STRIPE_SECRET_KEY` (test) and `STRIPE_PUBLISHABLE_KEY` (test) before starting the
+server. To run payment-free anyway, set `LIT_DISABLE_BILLING=true`.
 
 ---
 
