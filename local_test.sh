@@ -374,14 +374,13 @@ if [ "$NO_CODE" = true ]; then
     echo ""
     echo "--- lit-actions ---"
     echo "  (a) Normal:"
-    echo "      cd $SCRIPT_DIR && \\"
-    echo "          cargo run --manifest-path=lit-actions/Cargo.toml --bin lit_actions"
+    echo "      cd $SCRIPT_DIR/lit-actions && \\"
+    echo "          cargo run --bin lit_actions"
     echo ""
     echo "  (b) With OTEL → local Jaeger:"
-    echo "      cd $SCRIPT_DIR && \\"
+    echo "      cd $SCRIPT_DIR/lit-actions && \\"
     echo "          LIT_TELEMETRY_ENDPOINT=\"$LIT_TELEMETRY_ENDPOINT_URL\" \\"
-    echo "          cargo run --manifest-path=lit-actions/Cargo.toml --bin lit_actions \\"
-    echo "                    --features otlp"
+    echo "          cargo run --bin lit_actions --features otlp"
     echo ""
     echo "--- lit-static ---"
     echo "      static-web-server -p 8080 -d \"$SCRIPT_DIR/lit-static\" -g info"
@@ -437,8 +436,8 @@ fi
 # --------------------------------------------------------------------------
 echo "==> Step 6: Starting lit-actions..."
 
-(cd "$SCRIPT_DIR" && \
-    cargo run --manifest-path=lit-actions/Cargo.toml --bin lit_actions) &
+(cd "$SCRIPT_DIR/lit-actions" && \
+    cargo run --bin lit_actions) &
 ACTIONS_PID=$!
 PIDS+=("$ACTIONS_PID")
 
