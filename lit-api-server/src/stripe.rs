@@ -88,8 +88,8 @@ fn billing_disabled() -> bool {
         .unwrap_or(false)
 }
 
-/// A Stripe key is "live mode" when it carries the `_live_` infix
-/// (`sk_live_…`, `rk_live_…`, `pk_live_…`).  Used to keep live keys off
+/// A Stripe key is "live mode" when it starts with a live-mode prefix
+/// (`sk_live_`, `rk_live_`, `pk_live_`).  Used to keep live keys off
 /// local (non-production) builds so a dev machine can't charge real cards.
 fn is_live_key(key: &str) -> bool {
     key.starts_with("sk_live_") || key.starts_with("rk_live_") || key.starts_with("pk_live_")
@@ -187,8 +187,9 @@ pub fn init() -> Result<Option<Arc<StripeState>>> {
     if is_live_key(&secret_key) || is_live_key(&publishable_key) {
         anyhow::bail!(
             "Refusing to start: a LIVE Stripe key was supplied on a non-production build. Local \
-             runs must use TEST keys (sk_test_…/pk_test_…) so a dev machine can't charge real \
-             cards.\n  Use a test key, or set {DISABLE_BILLING_ENV}=true to run payment-free."
+             runs must use TEST keys (sk_test_…/rk_test_…/pk_test_…) so a dev machine can't \
+             charge real cards.\n  Use a test key, or set {DISABLE_BILLING_ENV}=true to run \
+             payment-free."
         );
     }
 

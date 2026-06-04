@@ -107,8 +107,12 @@ async fn main() -> ExitCode {
     };
 
     let Some(stripe_state) = stripe::from_env() else {
+        // `from_env()` returns None when the keys are missing/empty or when the
+        // Stripe client fails to build (e.g. a malformed key). This CLI has no
+        // tracing subscriber, so cover both cases in the message rather than
+        // implying the vars are simply unset.
         eprintln!(
-            "error: STRIPE_SECRET_KEY and/or STRIPE_PUBLISHABLE_KEY are not set; nothing to report."
+            "error: STRIPE_SECRET_KEY / STRIPE_PUBLISHABLE_KEY are missing, empty, or invalid; nothing to report."
         );
         return ExitCode::from(1);
     };

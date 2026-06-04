@@ -252,8 +252,8 @@ test Stripe account** so the billing path is actually exercised instead of silen
 payment-free (CPL-330). On startup the server will refuse to run when:
 
 - the Stripe keys are missing, or
-- the keys are *live*-mode keys (`sk_live_…` / `pk_live_…`) — a guard so a dev machine can't
-  charge real cards.
+- the keys are *live*-mode keys (`sk_live_…` / `rk_live_…` / `pk_live_…`) — a guard so a dev
+  machine can't charge real cards.
 
 Set both `STRIPE_SECRET_KEY` (test) and `STRIPE_PUBLISHABLE_KEY` (test) before starting the
 server. To run payment-free anyway, set `LIT_DISABLE_BILLING=true`.
