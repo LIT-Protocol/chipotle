@@ -1,0 +1,95 @@
+---
+title: "WebAssembly (WASM)"
+description: "Lit Actions can load and run WebAssembly in the runtime — so real cryptography (threshold ECDSA, ZK), parsers, and anything compiled from Rust, C, C++, or Go runs inside the action."
+---
+
+## WASM runs inside a Lit Action
+
+The Lit Action runtime is Deno-based, so the standard `WebAssembly` API is
+available alongside the web platform globals an action already has (`fetch`,
+`CompressionStream`, `crypto`, `TextEncoder`, …). That means you can run a
+WebAssembly module directly inside the action — no native add-ons, no separate
+service. Anything that compiles to wasm (Rust, C/C++, Go, AssemblyScript) and
+anything published as a wasm-bindgen package on npm works.
+
+This is what makes heavyweight, audited cryptography practical inside an action:
+the [mpc-signing-ecdsa example](./examples#16-non-custodial-co-signer-threshold-ecdsa-split-between-lit-and-you)
+runs the [DKLs23](https://dkls.info/) threshold-ECDSA protocol (a Trail-of-Bits-audited
+Rust library compiled to wasm) entirely inside the action to co-sign with the user.
+
+## Loading a module
+
+There are two ways to get the wasm bytes into the runtime.
+
+### 1. Import the glue, fetch the wasm at runtime
+
+Most wasm-bindgen packages ship a small JS "glue" module plus a `.wasm` binary.
+[Import the glue from jsDelivr](./imports) (pinned + SHA-384 verified like any
+other import), then `fetch` the `.wasm` bytes and hand them to `initSync`:
+
+```javascript
+import { initSync, /* your exported types */ } from
+  "@silencelaboratories/dkls-wasm-ll-web@1.2.0/dkls-wasm-ll-web.js";
+
+const WASM_URL =
+  "https://cdn.jsdelivr.net/npm/@silencelaboratories/dkls-wasm-ll-web@1.2.0/dkls-wasm-ll-web_bg.wasm";
+
+let ready = false;
+async function ensureWasm() {
+  if (ready) return;
+  const res = await fetch(WASM_URL);                  // pull the .wasm bytes
+  if (!res.ok) throw new Error(`fetch wasm ${res.status}`);
+  initSync(new Uint8Array(await res.arrayBuffer()));  // instantiate the module
+  ready = true;
+}
+
+async function main(params) {
+  await ensureWasm();
+  // ...now call into the wasm-backed API...
+}
+```
+
+### 2. Inline the wasm as base64
+
+For maximum trust, base64-encode the `.wasm` and embed it in the action source,
+then decode and `initSync` it. This removes the runtime fetch and makes the
+action's **IPFS CID commit to the exact crypto bytes** — there is no external
+dependency to resolve at run time:
+
+```javascript
+const WASM_B64 = "AGFzbQEAAAA...";                    // the .wasm, base64-inlined
+initSync(Uint8Array.from(atob(WASM_B64), (c) => c.charCodeAt(0)));
+```
+
+<Note>
+  jsDelivr is immutable at a pinned version and integrity-checked, so option 1 is
+  safe for most uses. Option 2 is the tighter setup when you want the CID itself
+  to attest to the precise bytes that ran (e.g. so a verifier doesn't have to
+  trust the CDN at all). The trade-off is action size — a large module inlined as
+  base64 grows the source ~33%.
+</Note>
+
+## Things to keep in mind
+
+- **It's Deno, not Node.** You get web APIs (`fetch`, streams, `WebAssembly`,
+  `crypto`), not Node built-ins. Use the **web** build of a wasm-bindgen package
+  (e.g. `…-web`), not the `…-node` build.
+- **Size and response limits.** A big module plus its working state count against
+  action size and the response-payload cap — see [Limits](./limits). The
+  mpc-signing-ecdsa example relays a large sealed session each round, well within
+  the default response cap.
+- **Stateless across calls.** An action holds no memory between invocations, so a
+  wasm session that must span multiple calls has to be serialized out and passed
+  back in (mpc-signing-ecdsa seals its session with `Lit.Actions.Encrypt` and relays
+  it through the user each round).
+
+## See it run
+
+<Info>
+  The [mpc-signing-ecdsa example](https://github.com/LIT-Protocol/chipotle/tree/main/examples/mpc-signing-ecdsa)
+  runs DKLs23 threshold ECDSA in wasm inside the action: it instantiates the wasm,
+  serializes and rebuilds the module's session between every protocol round (the
+  stateless-relay pattern), and produces a signature plain `ecrecover` accepts. Its
+  `action/mpcSigner.js` is a working template for getting any wasm module running in
+  an action.
+</Info>

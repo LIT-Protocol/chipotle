@@ -31,7 +31,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use deno_runtime::tokio_util::create_and_run_current_thread;
+use deno_runtime::tokio_util::create_basic_runtime;
 use lit_actions_grpc::proto::{ExecuteJsRequest, ExecuteJsResponse};
 use lit_observability::channels::TracedReceiver;
 use lit_observability::logging::set_request_context;
@@ -322,10 +322,22 @@ impl WorkerPool {
 
 #[instrument(skip_all)]
 fn run_worker_thread(pool: Arc<WorkerPool>) {
+    // One current-thread Tokio runtime owns this worker for its whole life:
+    // both warm-time bootstrap and the per-request event loop run on it.
+    // deno_core's libuv/Node TTY compat layer registers process stdio via
+    // `AsyncFd::new` during `bootstrap_from_options`, which panics ("there is
+    // no reactor running") unless a Tokio reactor with the IO driver is the
+    // current thread's runtime. Entering this runtime around bootstrap — and
+    // running the request on the *same* runtime — keeps that reactor alive for
+    // the AsyncFd's lifetime, instead of bootstrapping on a bare thread and
+    // executing on a throwaway runtime (which would orphan the reactor).
+    let rt = create_basic_runtime();
+
     // Bootstrap is the panic surface: any V8 / Deno init issue lands here.
     // catch_unwind protects against Rust panics; aborts/segfaults/SIGTRAP
     // and FFI UB through V8 are NOT catchable here.
     let bootstrap_result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+        let _enter = rt.enter();
         runtime::build_worker_base(&pool.shared)
     }));
 
@@ -393,7 +405,7 @@ fn run_worker_thread(pool: Arc<WorkerPool>) {
     let shared = pool.shared.clone();
     let mut prepared = prepared;
 
-    create_and_run_current_thread(
+    rt.block_on(
         async move {
             // Per-request JS injection: namespace globals first (so user
             // code sees Lit.*), PatchDeno + everything else is owned by
@@ -424,6 +436,10 @@ fn run_worker_thread(pool: Arc<WorkerPool>) {
         }
         .instrument(span),
     );
+    // Force shutdown so any lingering blocking / unref'd Tokio tasks don't
+    // keep this thread alive after the one-shot request completes — matching
+    // the prior `create_and_run_current_thread` teardown semantics.
+    rt.shutdown_background();
     // MainWorker dropped here; thread exits.
 }
 
