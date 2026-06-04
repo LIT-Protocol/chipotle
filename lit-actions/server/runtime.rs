@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::{BTreeMap, HashMap};
 use std::mem::size_of;
 use std::path::{Path, PathBuf};
@@ -34,6 +35,24 @@ use sys_traits::impls::RealSys;
 use tokio::sync::{mpsc, oneshot};
 use tonic::Status;
 use tracing::{debug, error, info_span, instrument};
+
+include!(concat!(env!("OUT_DIR"), "/runtime_lazy_sources.rs"));
+
+fn lit_actions_ops_extension() -> deno_core::Extension {
+    let mut extension = lit_actions_ext::lit_actions::init();
+
+    // The startup snapshot is built with the full Lit Actions extension. At
+    // runtime, register only the Rust ops and middleware; re-providing the ESM
+    // sources here would re-run side-effectful patch modules (for example the
+    // fetch wrapper in 99_patches.js) on top of the snapshotted globals.
+    extension.js_files = Cow::Borrowed(&[]);
+    extension.esm_files = Cow::Borrowed(&[]);
+    extension.lazy_loaded_js_files = Cow::Borrowed(&[]);
+    extension.lazy_loaded_esm_files = Cow::Borrowed(&[]);
+    extension.synthetic_esm_modules = Cow::Borrowed(&[]);
+    extension.esm_entry_point = None;
+    extension
+}
 
 // Same default limits as in lit-node's action client
 const DEFAULT_TIMEOUT_MS: u64 = 1000 * 60 * 15; // 15 minutes
@@ -407,12 +426,13 @@ pub(crate) fn build_worker_base(shared: &PoolSharedState) -> Result<PreparedWork
         bootstrap: BootstrapOptions {
             cpu_count: 1,
             log_level: WorkerLogLevel::Info,
-            no_color: true,
             user_agent: "lit_protocol_node".to_string(),
             ..Default::default()
         },
-        extensions: vec![lit_actions_ext::lit_actions::init_ops()],
+        extensions: vec![lit_actions_ops_extension()],
         startup_snapshot: deno_isolate_init(),
+        residual_lazy_js_sources: RESIDUAL_LAZY_JS_SOURCES,
+        residual_lazy_esm_sources: RESIDUAL_LAZY_ESM_SOURCES,
         skip_op_registration: false,
         create_params: Some(
             v8::CreateParams::default().heap_limits(0, shared.memory_limit_mb * 1024 * 1024),
@@ -422,15 +442,15 @@ pub(crate) fn build_worker_base(shared: &PoolSharedState) -> Result<PreparedWork
         create_web_worker_cb: Arc::new(|_| {
             unreachable!("Worker is deleted from globalThis in LitNamespace.js")
         }),
-        format_js_error_fn: Some(Arc::new(format_js_error)),
-        maybe_inspector_server: None,
+        format_js_error_fn: Some(Arc::new(|error| format_js_error(error, None))),
         should_break_on_first_statement: false,
         should_wait_for_inspector_session: false,
-        strace_ops: None,
+        trace_ops: None,
         cache_storage_dir: None,
         origin_storage_dir: None,
         stdio: Default::default(),
         enable_stack_trace_arg_in_ops: false,
+        ..Default::default()
     };
 
     // Deny everything except for network access, e.g. via fetch(). The parser
@@ -445,6 +465,7 @@ pub(crate) fn build_worker_base(shared: &PoolSharedState) -> Result<PreparedWork
         WorkerServiceOptions::<DenoInNpmPackageChecker, ManagedNpmResolver<RealSys>, RealSys> {
             blob_store: Default::default(),
             broadcast_channel: Default::default(),
+            deno_rt_native_addon_loader: Default::default(),
             feature_checker: Default::default(),
             fs: Arc::new(RealFs),
             module_loader,
@@ -456,6 +477,7 @@ pub(crate) fn build_worker_base(shared: &PoolSharedState) -> Result<PreparedWork
             shared_array_buffer_store: Default::default(),
             compiled_wasm_module_store: Default::default(),
             v8_code_cache: Some(shared.v8_code_cache.clone()),
+            bundle_provider: Default::default(),
         };
 
     let main_module =
@@ -597,6 +619,8 @@ fn inject_params_globals(
 // See https://github.com/denoland/deno/blob/v1.43/cli/main.rs
 #[instrument(skip_all)]
 pub fn init_v8() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
     // Tigthen up V8 security while sacrificing performance
     // To get a list of supported flags: deno run --v8-flags=-help
     let unknown_flags = &deno_core::v8_set_flags(vec![
@@ -611,7 +635,7 @@ pub fn init_v8() {
         "unknown V8 flags specified"
     );
 
-    JsRuntime::init_platform(None, false);
+    JsRuntime::init_platform(None);
 }
 
 /// Legacy cold path: build a one-off `PoolSharedState` with the caller's
@@ -811,11 +835,10 @@ async fn execute_with_worker_inner(
     inject_params_globals(&mut worker, &js_params, &http_headers)?;
 
     let mut interval = tokio::time::interval(Duration::from_millis(MEMORY_SAMPLE_INTERVAL_MS));
-    let mut heap_stats = v8::HeapStatistics::default();
+
     // we try to take a sample prior to event starting execution to get a baseline to charge - if the action is fast enough, we'll never get a tick !
     update_resource_usage(
         &mut worker.js_runtime,
-        &mut heap_stats,
         tokio::time::Instant::now(),
         is_test_server,
     )
@@ -904,7 +927,7 @@ async fn execute_with_worker_inner(
             }
             tick_no = interval.tick() => {
                 // note that if we error out trying to update resource usage, we will not continue execution
-                update_resource_usage(&mut worker.js_runtime, &mut heap_stats, tick_no, is_test_server).await?;
+                update_resource_usage(&mut worker.js_runtime, tick_no, is_test_server).await?;
             }
         }
     }?;
@@ -915,7 +938,6 @@ async fn execute_with_worker_inner(
 #[instrument(skip_all, err)]
 async fn update_resource_usage(
     js_runtime: &mut JsRuntime,
-    heap_stats: &mut v8::HeapStatistics,
     tick_no: tokio::time::Instant,
     is_test_server: bool,
 ) -> Result<()> {
@@ -925,7 +947,7 @@ async fn update_resource_usage(
     }
 
     let op_state = js_runtime.op_state();
-    js_runtime.v8_isolate().get_heap_statistics(heap_stats);
+    let heap_stats = js_runtime.v8_isolate().get_heap_statistics();
     let mb_used_heap_size = heap_stats.used_heap_size() / 1024 / 1024;
     debug!(
         "MB used at {}: {}",
@@ -1134,6 +1156,12 @@ mod tests {
             memory_limit_mb: DEFAULT_MEMORY_LIMIT_MB,
             v8_code_cache: crate::v8_code_cache::new_v8_code_cache(),
         };
+
+        // `build_worker_base` bootstraps a `MainWorker`, whose Node TTY compat
+        // layer registers process stdio via `AsyncFd::new` and therefore needs
+        // a Tokio reactor on the current thread (see `run_worker_thread`).
+        let rt = deno_runtime::tokio_util::create_basic_runtime();
+        let _enter = rt.enter();
 
         let w1 = build_worker_base(&shared).expect("first worker built");
         let w2 = build_worker_base(&shared).expect("second worker built");
