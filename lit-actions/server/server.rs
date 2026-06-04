@@ -25,7 +25,7 @@ use lit_observability::{
 use temp_file::TempFile;
 use tokio_stream::{Stream, StreamExt as _};
 use tonic::{Request, Response, Status};
-use tracing::{Instrument, Span, debug, debug_span, error, info_span, instrument};
+use tracing::{Instrument, Span, debug, debug_span, error, instrument};
 
 /// Env var that overrides the default pool size. `0` disables the pool
 /// entirely (every request goes via the legacy cold path). Default: 10.
@@ -200,24 +200,9 @@ impl Action for Server {
         let send_exec_req_span = debug_span!("send_exec_req");
         tokio::spawn(
             async move {
-                // DIAGNOSTIC: split the inbound pump into two timed spans so
-                // Jaeger shows which await eats the per-hop stall:
-                //   grpc_socket_read   = time to read the node's reply off the
-                //                        UDS socket (main-runtime IO servicing)
-                //   grpc_forward_to_op = time to hand it to the waiting op
-                //                        (rendezvous / worker-thread wakeup)
-                loop {
-                    let req = match stream
-                        .try_next()
-                        .instrument(info_span!("grpc_socket_read"))
-                        .await
-                    {
-                        Ok(Some(req)) => req,
-                        _ => break,
-                    };
+                while let Ok(Some(req)) = stream.try_next().await {
                     let _ = inbound_tx
                         .send_async(req)
-                        .instrument(info_span!("grpc_forward_to_op"))
                         .inspect_err(|e| error!("failed to forward request: {e:#}"))
                         .await;
                 }
