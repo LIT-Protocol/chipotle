@@ -46,10 +46,145 @@ defense-in-depth.
 | Account-wide prepaid credits → 402 when empty | `core/v1/guards/billing.rs::BilledLitActionApiKey`; `stripe.rs` | ✅ but account-wide, crude |
 | Per-second execution charge | `actions/client/execution.rs::flush_unbilled_seconds`; `stripe.rs` `COST_LIT_ACTION_PER_SECOND_CENTS` | ✅ |
 
+## Architecture: where state lives & the zero-latency path
+
+The hot path today is already built on one principle, and everything here follows
+it: **authoritative data lives in a slow store (chain or Stripe); the request path
+only ever touches an in-process [moka](https://docs.rs/moka) cache with TTL +
+stale-while-revalidate (SWR) + request coalescing; staleness is tolerated within
+the TTL; money/usage settles asynchronously off the response path.** We are not
+inventing an architecture — we are adding cached fields that obey the existing one.
+
+What the code already establishes (verified):
+
+- **On-chain permission reads are already cached on the hot path.**
+  `accounts/blockchain_cache.rs` caches `canExecuteAction` / `canUseWalletInAction`
+  / wallet derivation (60-min TTL, per-account **generation-counter** invalidation
+  bumped on any write). The key's on-chain record is in memory when a request runs.
+- **Stripe reads are cached too.** `stripe.rs`: `wallet_cache` (key→wallet, 1h),
+  `customer_cache` (10m), `balance_cache` (10m TTL + **SWR** + background refresh +
+  coalescing). The credit check in `BilledLitActionApiKey::from_request` is a
+  memory read after warmup.
+- **Charging is off the response path.** `stripe::charge()` reads the cached
+  balance, does an **optimistic in-memory decrement**, records the event, and
+  `spawn`s the real Stripe balance transaction fire-and-forget (there's a
+  `billing.charge.settlement_failed` metric for when it doesn't land).
+  `flush_unbilled_seconds` awaits only the cache ops, not the network. So
+  per-request charging costs microseconds, not a round trip.
+
+### The zero-latency gate
+
+The on-chain key record is **already read and cached** on the hot path (it's what
+`canExecuteAction` returns). So we pack a single **`hasSpendingRules` bit** into
+that record. Reading it costs **zero** extra network and zero extra cache lookup —
+it rides along in data already in memory. Fetched in the **same multicall** as
+`canExecuteAction` (trivial Solidity change — return multiple values), even a cold
+cache miss adds no extra round trip.
+
+```
+guard (before execution):
+  (canExec, hasSpendingRules) = blockchain_cache.permissions(keyHash)  # 1 cached multicall
+  if !hasSpendingRules:  return Success         # ← the 99% with no caps: ZERO added latency
+  else:                  enforce rules (all in-memory; see below)
+```
+
+### Where each kind of state lives
+
+The three things we store have different shapes (config vs. counter, write-rarely
+vs. write-per-request), so they don't share one home:
+
+| Data | Shape | Home | Hot-path read |
+|---|---|---|---|
+| `hasSpendingRules` flag | 1 bit, toggled rarely | **On-chain** (opt 2), in the key record | Free — already in `BlockchainCache` |
+| Cap + window, rate/burst, concurrency, IP/origin allowlist | Config, edited occasionally | **lit-payments DB** (opt 3), edited via its backend+frontend | New moka cache (TTL+SWR), **only read when flag set** |
+| Per-key cumulative spend (rolling window) | High-write counter, durable | **lit-payments DB**, written on the existing **async** charge path | Optimistic in-memory decrement (mirrors `balance_cache`) |
+| Rate-limit token buckets, concurrency counts, per-IP counters | High-write, ephemeral, rolling | **In-process memory** (per-node) | Native — already in memory |
+
+**Why this split:**
+
+- **Flag on-chain, not the cap value.** The flag is a permission (belongs with the
+  others) and is the one thing that must be free to read for *everyone*. Toggled
+  only when a key gains/loses its first rule (1 tx, rare). Keeping the cap *value*
+  off-chain means tuning caps in the lit-payments UI needs no gas/tx, and the DB
+  read is gated behind the flag so non-cap accounts never touch it.
+- **Rule details + per-key usage in the DB, not Stripe metadata.** Stripe metadata
+  is per-*customer* (account), not per-key; writing it is an API call; it's the
+  wrong tool for rolling windows, rate config, or analytics. Keep Stripe for the
+  money relationship that already exists (opt 1 stays as-is).
+- **Counters in memory, per-node.** Rate buckets / concurrency counts can't go
+  on-chain (per-request writes) or in Stripe. Per-node is acceptable because the
+  **durable spend cap is the real backstop**; per-node rate limiting yields an
+  effective cluster rate of ≈ limit × N nodes, which is fine for griefing control
+  (AWS API Gateway throttling is approximate too). Start per-node; add a shared
+  store (Redis-like) only if cluster-exact limits are ever required.
+
+### Request flow for an opted-in key
+
+```
+1. blockchain_cache: (canExecuteAction, hasSpendingRules)   1 cached multicall
+2. flag set → rules_cache.get(keyHash)        memory; DB read only on cold miss (SWR)
+3. spend_cache.get(keyHash) vs rolling cap    memory; reject 402 if over
+4. rate bucket + concurrency counter          memory; reject 429/503 if over
+5. origin / IP allowlist check                memory; reject 403 if not allowed
+6. execute
+7. POST-response, in the existing spawned settlement task:
+     - Stripe balance txn (already there)
+     - increment per-key rolling spend in DB + optimistic in-mem decrement
+```
+
+Steps 1–5 are memory reads (low microseconds). Step 7 is entirely off the response
+path. An opted-in key pays one cold DB read per ~TTL window; a no-cap key pays
+nothing. The staleness tolerance is the same bargain CPL-246 already accepted for
+balances: a tiny possible overspend inside the TTL window in exchange for a fast
+hot path.
+
+### Resolved design decisions
+
+1. **Cap semantics → rolling window** (match AWS Budgets / Lambda), not a lifetime
+   balance. The per-key spend counter resets on the window boundary.
+2. **Rules-cache freshness → SWR** (short TTL + background refresh, no cross-service
+   invalidation plumbing), mirroring `balance_cache`. A cap edit takes effect
+   within the TTL window.
+3. **Counter durability → per-key spend reloads from the DB on cache miss**
+   (durable across deploys/restarts); rate/concurrency buckets may reset on restart
+   (acceptable — the spend cap is the durable backstop).
+4. **`hasSpendingRules` is fetched in the same contract multicall as
+   `canExecuteAction`** so a cold cache miss adds no extra round trip (a simple
+   Solidity change to return multiple values).
+5. **"Turn rules on" ordering:** write the DB rule first, *then* flip the on-chain
+   bit. The bit going true is what activates enforcement, so this ordering avoids a
+   window where the flag is set but rules aren't loaded.
+
 ## Work items, in priority order
 
 Priority = how much it bounds the worst case per dollar of effort. P0 items are
 the ones that turn "drains the account" into "burns a number you chose."
+
+---
+
+### P0.0 — `hasSpendingRules` flag + multicall  (foundation for everything below)
+
+**What.** A single `hasSpendingRules` bit on the on-chain key record, returned in
+the **same multicall** as `canExecuteAction`, surfaced through `BlockchainCache`,
+and a request guard that short-circuits to "no enforcement" when it's false.
+
+**Why first.** This is the zero-latency gate. Every per-key control below
+(spend cap, rate, concurrency, origin) reads it to decide whether to do *any* extra
+work. Land it first so the rest can assume "if we got here, rules exist." It also
+guarantees the headline property: **keys with no rules pay zero added latency.**
+
+**Build.**
+- Solidity: extend the `canExecuteAction` read to also return `hasSpendingRules`
+  (decision 4 — just more return values).
+- `accounts/blockchain_cache.rs`: cache the bit alongside the existing
+  `execute_action` / `execute_and_wallet` results (same generation-counter
+  invalidation, so flipping it bumps the generation and is picked up immediately).
+- A request guard (sibling to `BilledLitActionApiKey` / `cpu_overload`) that reads
+  the cached bit and returns `Success` immediately when false.
+
+**Acceptance.** A key with no rules executes with no extra reads beyond today's
+cached permission check; flipping the bit on-chain takes effect on the next request
+(generation bump), no redeploy.
 
 ---
 
@@ -63,29 +198,31 @@ flagged disabled), independent of the account's overall balance.
 "a leaked frontend key can spend the whole account" into "a leaked key can spend
 *its* budget, then stops." It's the analog of an AWS per-function/per-budget cap.
 
-**The shortcut.** The usage-key struct **already has a `balance` field** stored
-on-chain (`add_usage_api_key` in `core/v1/models/request.rs`; written in
-`accounts/mod.rs::setUsageApiKey`, currently hardcoded to `10_000_000` in
-`account_management.rs` and **never read** — a no-op today). Most of the schema
-exists; the work is enforcement, not new data modeling.
+See [Architecture: where state lives](#architecture-where-state-lives--the-zero-latency-path)
+for the storage split this builds on. The cap is a **rolling window** (decision 1):
+a per-key spend-to-date counter that resets on the window boundary, checked against
+a cap configured in the lit-payments DB, gated by the on-chain `hasSpendingRules`
+flag (P0.0) so non-cap keys pay zero latency.
 
 **Build.**
-- Read the per-key `balance` in `guards/billing.rs::BilledLitActionApiKey::from_request`
-  alongside (or instead of) the account customer balance.
-- Decrement it in the post-execution charge path
-  (`actions/client/execution.rs::flush_unbilled_seconds`).
-- On exhaustion: return 402 *for that key* and mark it disabled so subsequent
-  calls short-circuit before execution.
-- Expose `balance` / `daily_cap` as real fields in the create-key API + Dashboard;
-  let it be account-funded (sub-allocate from the account's credits) or topped up.
+- **On-chain:** the `hasSpendingRules` bit lands via P0.0 (fetched in the
+  `canExecuteAction` multicall). The existing no-op `balance` field on the key
+  (`add_usage_api_key` in `core/v1/models/request.rs`; hardcoded `10_000_000` in
+  `account_management.rs`, never read) can be repurposed as the flag or retired.
+- **DB (lit-payments):** store the cap + window per key; track the per-key rolling
+  spend-to-date. New endpoints on the lit-payments backend to read/set them.
+- **Hot path (`guards/billing.rs`):** when the flag is set, read the cached rules +
+  cached per-key spend (both in-memory; cold miss = one DB read, SWR) and reject
+  with **402** if the rolling spend would exceed the cap. Mark the key disabled for
+  the remainder of the window so subsequent calls short-circuit.
+- **Async (off response path):** in the existing spawned settlement task that
+  already writes Stripe (`stripe::charge`), also increment the per-key rolling
+  spend in the DB and apply the optimistic in-memory decrement (mirror
+  `balance_cache`). Per-key spend reloads from the DB on cache miss (decision 3).
 
-**Acceptance.** A key with a $X cap, hammered in a loop, stops at ~$X spent and is
-flagged disabled; the account's other keys and balance are untouched.
-
-**Open Qs.** Cap semantics — lifetime balance vs. rolling daily/monthly window
-(AWS Budgets is windowed; lifetime is simpler). On-chain write cost of decrement
-(may need an off-chain ledger with periodic on-chain settlement, like the
-existing Stripe optimistic-decrement pattern).
+**Acceptance.** A key with a $X/window cap, hammered in a loop, stops at ~$X spent
+within the window and is rejected until the window rolls; the account's other keys
+and overall balance are untouched; a key with no rules sees no added latency.
 
 ---
 
@@ -110,9 +247,11 @@ capacity. This is API Gateway's per-key/per-stage throttling.
 **Acceptance.** A key exceeding its configured rate gets 429 with a `Retry-After`;
 other keys unaffected; the global CPU guard still independently sheds load.
 
-**Open Qs.** Bucket store — in-process (per node, simplest, looser across a
-cluster) vs. shared (Redis-like, accurate but new dependency). Per-node is likely
-fine given the spend cap (P0.1) is the real backstop.
+**Decided.** Bucket store is **in-process, per-node** (decision in Architecture):
+effective cluster rate ≈ limit × N nodes, acceptable for griefing control since
+the spend cap (P0.1) is the durable backstop. Add a shared store (Redis-like) only
+if cluster-exact limits are ever required. Buckets gated behind `hasSpendingRules`
+(P0.0) so non-rule keys are untouched.
 
 ---
 
@@ -190,16 +329,16 @@ the Dashboard shows the bounded worst case for a public key at a glance.
 ## Suggested sequencing
 
 ```
-P0.1  per-key spend cap + auto-disable   ← do first; biggest blast-radius cut,
-                                            schema field already exists
-P0.2  per-key + per-IP rate/burst        ← parallel-able with P0.1
+P0.0  hasSpendingRules flag + multicall  ← foundation; the zero-latency gate
+P0.1  per-key spend cap (rolling) + auto-disable   ← biggest blast-radius cut
+P0.2  per-key + per-IP rate/burst        ← parallel-able with P0.1, both gated by P0.0
   └─ P1   per-key concurrency cap         ← small add once P0.2 lands
 P2.1  per-key origin allowlist           ← independent; defense-in-depth
-P2.2  public key type + Dashboard caps   ← depends on P0.1/P0.2/P1/P2.1 existing
+P2.2  public key type + Dashboard caps   ← depends on P0.0/P0.1/P0.2/P1/P2.1 existing
 P3    alarms / app-check / WAF / authz   ← post-parity hardening
 ```
 
-After **P0.1 + P0.2 + P1 + P2.2**, a usage key is safe to ship in a frontend with
+After **P0.0 + P0.1 + P0.2 + P1 + P2.2**, a usage key is safe to ship in a frontend with
 bounded, configurable blast radius — Lambda parity — and
 [private-apps-backend.md](./private-apps-backend.md) can make its relay optional.
 
