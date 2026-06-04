@@ -1,4 +1,4 @@
-import { atob } from 'ext:deno_web/05_base64.js';
+const { atob } = globalThis;
 
 const global = globalThis;
 
