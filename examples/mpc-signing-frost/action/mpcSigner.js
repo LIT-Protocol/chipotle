@@ -28,6 +28,8 @@
 //   --- dkg ---
 //   allIds       [1,2,3] (or [1,2]) — the full participant id set, same order
 //   threshold    signing threshold (2)
+//   signPeers    ids the action may co-sign with online (round 2; [1]=hot). Sealed
+//                into the keyshare; the cold share can't be used as cold+Lit online.
 //   encState     sealed dkg state from round 1 (round 2 only)
 //   r1ToAction   [{from,data(b64)}] round-1 messages addressed to the action (r2)
 //   r2ToAction   [{from,data(b64)}] round-2 messages addressed to the action (r3)
@@ -157,7 +159,7 @@ async function main(params) {
 // round 3 needs no extra round-trip; it returns the action's round-2 messages
 // plus its sealed long-lived signing share and the group key.
 // ---------------------------------------------------------------------------
-async function dkgRound({ round, sessionId, pkpId, myId, allIds, threshold, encState, r1ToAction, r2ToAction }) {
+async function dkgRound({ round, sessionId, pkpId, myId, allIds, threshold, signPeers, encState, r1ToAction, r2ToAction }) {
   const out = { ok: true, op: "dkg", round, sessionId };
 
   if (round === 1) {
@@ -179,12 +181,15 @@ async function dkgRound({ round, sessionId, pkpId, myId, allIds, threshold, encS
     const solanaPubkey = u8ToB64(arr(fin.solana_pubkey));
     // Bind the protocol parameters into the sealed keyshare. Signing reads these
     // from the seal and ignores caller-supplied values, so a malicious relay
-    // can't drive the action with a forged group key / threshold / party id.
+    // can't drive the action with a forged group key / threshold / party id, and
+    // can't make the action co-sign with anyone but the allowed online peers
+    // (signPeers = the hot share; the cold share is recovery-only, never online).
     out.encActionKeyshare = await seal(pkpId, fin.signing_share, "keyshare", undefined, {
       myId,
       threshold,
       verifyingKey,
       solanaPubkey,
+      signPeers: signPeers || [],
     });
     out.verifyingKey = verifyingKey;
     out.verifyingShare = u8ToB64(arr(fin.verifying_share));
@@ -212,8 +217,24 @@ async function signRound({ pkpId, encActionKeyshare, message, peerCommitments })
   const myId = meta.myId;
   const threshold = meta.threshold;
   const verifyingKey = b64ToU8(meta.verifyingKey);
-  if (myId === undefined || threshold === undefined || meta.verifyingKey === undefined) {
+  if (myId === undefined || threshold === undefined || meta.verifyingKey === undefined || !Array.isArray(meta.signPeers)) {
     throw new Error("sealed keyshare is missing bound parameters — re-run keygen");
+  }
+
+  // Enforce the signing policy bound at keygen: the action only co-signs with the
+  // allowed online peers (the hot share), exactly `threshold` signers total, no
+  // duplicate or self ids. This keeps the cold share recovery-only and rejects
+  // malformed/forged commitment sets before they reach the FROST library.
+  const peers = peerCommitments || [];
+  const seen = new Set();
+  for (const c of peers) {
+    if (c.id === myId) throw new Error("peer commitment claims the action's own id");
+    if (!meta.signPeers.includes(c.id)) throw new Error(`party ${c.id} is not an allowed online co-signer`);
+    if (seen.has(c.id)) throw new Error(`duplicate peer commitment for party ${c.id}`);
+    seen.add(c.id);
+  }
+  if (peers.length + 1 !== threshold) {
+    throw new Error(`expected ${threshold} signers (got ${peers.length + 1}) — wrong quorum`);
   }
 
   // Round 1: our own fresh nonce + commitment (in-memory only).
@@ -222,7 +243,7 @@ async function signRound({ pkpId, encActionKeyshare, message, peerCommitments })
 
   // Full commitment set = peers + self, ordered by id (matches the user side).
   const commits = [
-    ...(peerCommitments || []).map((c) => ({ id: c.id, data: b64ToU8(c.data) })),
+    ...peers.map((c) => ({ id: c.id, data: b64ToU8(c.data) })),
     { id: myId, data: myCommitment },
   ].sort((a, b) => a.id - b.id);
 

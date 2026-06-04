@@ -80,8 +80,13 @@ class MpcClient {
   // round-2 inputs, so it rides along in the second call — no extra round-trip).
   // Returns one signing share per user party, the action's sealed share, and the
   // group Ed25519 public key + Solana address.
+  //
+  // `signPeers` are the parties the action is allowed to co-sign with ONLINE
+  // (default [1] = the hot share). It is sealed into the action's keyshare, so
+  // the cold share (party 3) can NOT be used as cold+Lit online — cold is
+  // recovery-only (hot+cold, fully local). The action rejects any other quorum.
   // -------------------------------------------------------------------------
-  async keygen({ allIds = [1, 2, 3], threshold = 2, userParties = [1, 3], onRound } = {}) {
+  async keygen({ allIds = [1, 2, 3], threshold = 2, userParties = [1, 3], signPeers = [1], onRound } = {}) {
     if (userParties.includes(ACTION_ID)) throw new Error(`party ${ACTION_ID} is the Lit Action`);
     const sessionId = crypto.randomBytes(16).toString("hex");
     const ids = new Uint16Array(allIds);
@@ -116,6 +121,7 @@ class MpcClient {
       myId: ACTION_ID,
       allIds,
       threshold,
+      signPeers,
       encState: r1.encState,
       r1ToAction: inbox(out1, ACTION_ID).map((m) => ({ from: m.from, data: b64(m.data) })),
       r2ToAction: inbox(out2, ACTION_ID).map((m) => ({ from: m.from, data: b64(m.data) })),

@@ -116,10 +116,13 @@ never locked out.**
   `Lit.Actions.Encrypt({ pkpId })`, and `setup.js` locks the permission group to
   **this exact action CID** (`cid_hashes_permitted = [keccak256(cid)]`), so only
   this action — not any other action your usage key can run — can decrypt it.
-- **Bound parameters.** The group verifying key, threshold, and the action's party
-  id are sealed *into* the keyshare; signing reads them from the seal and ignores
-  caller-supplied values, so a malicious relay can't drive the action with a
-  forged group key or threshold.
+- **Bound parameters + signing policy.** The group verifying key, threshold, the
+  action's party id, and the **allowed online co-signers** (`signPeers = [hot]`)
+  are sealed *into* the keyshare. Signing reads them from the seal and ignores
+  caller-supplied values, and the action refuses any quorum other than
+  *hot + Lit* — so a forged group key/threshold can't drive it, and the cold
+  share can never be used as *cold + Lit* online (cold is recovery-only, hot+cold
+  fully local). It also rejects duplicate/unknown/self commitments.
 - **Pinned crypto.** The action commits to the wasm's SHA-256 and refuses to run
   any other bytes, so the CID transitively commits to the exact crypto even though
   the 1.5 MB wasm is fetched at runtime.
