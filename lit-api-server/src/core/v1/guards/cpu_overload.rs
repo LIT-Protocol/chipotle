@@ -20,6 +20,7 @@ use rocket::http::Status;
 use rocket::request::{FromRequest, Outcome, Request};
 use rocket_okapi::Result as RocketOkapiResult;
 use rocket_okapi::r#gen::OpenApiGenerator;
+use rocket_okapi::okapi::openapi3::{RefOr, Response, Responses};
 use rocket_okapi::request::{OpenApiFromRequest, RequestHeaderInput};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -175,6 +176,23 @@ impl<'r> OpenApiFromRequest<'r> for CpuAvailable {
     ) -> RocketOkapiResult<RequestHeaderInput> {
         // Internal guard - not a user-visible parameter.
         Ok(RequestHeaderInput::None)
+    }
+
+    /// Document the `429 Too Many Requests` this guard sheds on CPU overload so
+    /// it appears in the generated OpenAPI spec for every route that uses it.
+    fn get_responses(_generator: &mut OpenApiGenerator) -> RocketOkapiResult<Responses> {
+        let mut responses = Responses::default();
+        responses.responses.insert(
+            "429".to_string(),
+            RefOr::Object(Response {
+                description: "Too Many Requests \u{2014} the node is CPU-overloaded and shedding \
+                    load. Clients receiving this response should retry the request up to \
+                    five times with exponential backoff."
+                    .to_string(),
+                ..Default::default()
+            }),
+        );
+        Ok(responses)
     }
 }
 
