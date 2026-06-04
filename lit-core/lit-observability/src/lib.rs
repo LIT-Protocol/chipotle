@@ -32,7 +32,10 @@ pub use tracing_opentelemetry;
 ///
 /// The fmt layer writes through a [`tracing_appender::non_blocking`] writer so that log
 /// volume can never block the threads emitting events (e.g. request handlers) on the
-/// stdout lock. Formatting and the actual write happen on a dedicated background thread.
+/// stdout lock. Events are still *formatted* on the emitting thread, but the resulting
+/// bytes are handed to a bounded queue and the actual I/O happens on a dedicated
+/// background worker thread. The writer runs in lossy mode: under extreme volume, events
+/// are dropped rather than blocking the emitter when the queue is full.
 ///
 /// The returned [`WorkerGuard`] **must** be kept alive for as long as logging is needed:
 /// dropping it shuts down the background worker and flushes any buffered logs. Callers
@@ -51,9 +54,12 @@ pub fn init_subscriber(
     let custom_formatter = logging::CustomEventFormatter::default();
 
     // Non-blocking writer: the background worker owns stdout and drains a bounded queue.
-    // In the default (lossy) mode, events are dropped rather than blocking the caller if
-    // the queue is full under extreme log volume — the right trade-off for the request path.
-    let (non_blocking, guard) = tracing_appender::non_blocking(std::io::stdout());
+    // `lossy(true)` is set explicitly (it is also the crate default) so that under extreme
+    // log volume events are dropped rather than blocking the emitting thread when the queue
+    // is full — the right trade-off for the request path, and robust to a default change.
+    let (non_blocking, guard) = tracing_appender::non_blocking::NonBlockingBuilder::default()
+        .lossy(true)
+        .finish(std::io::stdout());
 
     let subscriber = tracing_subscriber::registry()
         .with(level_filter)
