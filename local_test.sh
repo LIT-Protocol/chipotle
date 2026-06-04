@@ -170,10 +170,11 @@ else
        "$SIMULATOR_DIR/sys-config.json" "$SIMULATOR_DIR/attestation.bin" \
        "$SIMULATOR_DIR/dstack.toml" "$SIM_TMP/"
 
-    # Rewrite the internal socket path to a user-writable location
-    # (the default /var/run/dstack.sock requires root on macOS)
+    # Rewrite the internal socket path to this run's isolated temp dir.
+    # Older dstack simulator configs used /var/run/dstack.sock; current configs
+    # use ./dstack.sock. Use perl for Linux/macOS-compatible in-place editing.
     DSTACK_SOCKET="$SIM_TMP/dstack.sock"
-    sed -i '' "s|unix:/var/run/dstack.sock|unix:$DSTACK_SOCKET|" "$SIM_TMP/dstack.toml"
+    perl -0pi -e "s|unix:/var/run/dstack\.sock|unix:$DSTACK_SOCKET|g; s|unix:\./dstack\.sock|unix:$DSTACK_SOCKET|g" "$SIM_TMP/dstack.toml"
 
     (cd "$SIM_TMP" && exec "$SIMULATOR_BIN") >> "$SIM_TMP/dstack-simulator.log" 2>&1 &
     SIM_PID=$!
@@ -226,6 +227,64 @@ name = "anvil"
 contract_address = "$CONTRACT_ADDRESS"
 EOF
 echo "    NodeConfig.toml written."
+
+# --------------------------------------------------------------------------
+# 3b. Provision local API payers before lit-api-server starts
+# --------------------------------------------------------------------------
+echo "==> Step 3b: Provisioning local API payers..."
+
+if ! command -v cast &>/dev/null; then
+    echo "ERROR: cast is not installed. Install Foundry and ensure ~/.foundry/bin is on PATH."
+    exit 1
+fi
+if ! command -v jq &>/dev/null; then
+    echo "ERROR: jq is not installed."
+    exit 1
+fi
+
+# Anvil's first default account is the diamond owner for deploy_anvil.
+ANVIL_OWNER_PRIVATE_KEY="${ANVIL_OWNER_PRIVATE_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}"
+ADMIN_API_PAYER_KEY=$(curl -sS --unix-socket "$DSTACK_SOCKET" -X POST http://dstack/GetKey \
+    -H 'Content-Type: application/json' \
+    -d '{"path":"v1/admin_api_payer","purpose":"lit_payer"}' | jq -r '.key')
+ADMIN_API_PAYER_SECRET=$(cast keccak "0x$ADMIN_API_PAYER_KEY")
+ADMIN_API_PAYER_ADDRESS=$(cast wallet address --private-key "$ADMIN_API_PAYER_SECRET")
+
+REQUESTED_API_PAYER_COUNT=$(cast call "$CONTRACT_ADDRESS" 'requestedApiPayerCount()(uint256)' \
+    --rpc-url http://127.0.0.1:8545 | cast to-dec)
+if [ -z "$REQUESTED_API_PAYER_COUNT" ] || [ "$REQUESTED_API_PAYER_COUNT" -lt 1 ]; then
+    REQUESTED_API_PAYER_COUNT=3
+fi
+
+API_PAYER_ADDRESSES=()
+for payer_number in $(seq 1 "$REQUESTED_API_PAYER_COUNT"); do
+    PAYER_KEY=$(curl -sS --unix-socket "$DSTACK_SOCKET" -X POST http://dstack/GetKey \
+        -H 'Content-Type: application/json' \
+        -d "{\"path\":\"v1/payer_${payer_number}\",\"purpose\":\"lit_payer\"}" | jq -r '.key')
+    PAYER_SECRET=$(cast keccak "0x$PAYER_KEY")
+    API_PAYER_ADDRESSES+=("$(cast wallet address --private-key "$PAYER_SECRET")")
+done
+
+API_PAYER_ARRAY="[$(IFS=,; echo "${API_PAYER_ADDRESSES[*]}")]"
+cast send "$CONTRACT_ADDRESS" 'setAdminApiPayerAccount(address)' "$ADMIN_API_PAYER_ADDRESS" \
+    --rpc-url http://127.0.0.1:8545 \
+    --private-key "$ANVIL_OWNER_PRIVATE_KEY" >/dev/null
+cast send "$CONTRACT_ADDRESS" 'setApiPayers(address[])' "$API_PAYER_ARRAY" \
+    --rpc-url http://127.0.0.1:8545 \
+    --private-key "$ANVIL_OWNER_PRIVATE_KEY" >/dev/null
+
+# Give local admin/api payer accounts enough gas for state-changing API calls.
+cast send "$ADMIN_API_PAYER_ADDRESS" --value 10ether \
+    --rpc-url http://127.0.0.1:8545 \
+    --private-key "$ANVIL_OWNER_PRIVATE_KEY" >/dev/null
+for payer_address in "${API_PAYER_ADDRESSES[@]}"; do
+    cast send "$payer_address" --value 10ether \
+        --rpc-url http://127.0.0.1:8545 \
+        --private-key "$ANVIL_OWNER_PRIVATE_KEY" >/dev/null
+done
+unset ADMIN_API_PAYER_KEY ADMIN_API_PAYER_SECRET PAYER_KEY PAYER_SECRET
+
+echo "    Provisioned ${#API_PAYER_ADDRESSES[@]} API payers and admin API payer."
 
 # --------------------------------------------------------------------------
 # 4. Start Jaeger (docker) — optional; telemetry only
@@ -315,14 +374,13 @@ if [ "$NO_CODE" = true ]; then
     echo ""
     echo "--- lit-actions ---"
     echo "  (a) Normal:"
-    echo "      cd $SCRIPT_DIR && \\"
-    echo "          cargo run --manifest-path=lit-actions/Cargo.toml --bin lit_actions"
+    echo "      cd $SCRIPT_DIR/lit-actions && \\"
+    echo "          cargo run --bin lit_actions"
     echo ""
     echo "  (b) With OTEL → local Jaeger:"
-    echo "      cd $SCRIPT_DIR && \\"
+    echo "      cd $SCRIPT_DIR/lit-actions && \\"
     echo "          LIT_TELEMETRY_ENDPOINT=\"$LIT_TELEMETRY_ENDPOINT_URL\" \\"
-    echo "          cargo run --manifest-path=lit-actions/Cargo.toml --bin lit_actions \\"
-    echo "                    --features otlp"
+    echo "          cargo run --bin lit_actions --features otlp"
     echo ""
     echo "--- lit-static ---"
     echo "      static-web-server -p 8080 -d \"$SCRIPT_DIR/lit-static\" -g info"
@@ -364,12 +422,13 @@ echo "==> Step 5: Starting lit-api-server..."
 API_PID=$!
 PIDS+=("$API_PID")
 
-# Wait for lit-api-server to respond (up to ~120s with 2s interval)
-if wait_for "lit-api-server" 60 "$API_PID" \
+# Wait for lit-api-server to respond (up to ~600s with 2s interval)
+if wait_for "lit-api-server" 300 "$API_PID" \
     'curl -sf http://localhost:8000/core/v1/health || curl -sf http://localhost:8000/'; then
     echo "    lit-api-server is ready (PID $API_PID)."
 else
-    echo "    WARNING: lit-api-server may still be compiling/starting. Continuing..."
+    echo "ERROR: lit-api-server failed to become ready."
+    exit 1
 fi
 
 # --------------------------------------------------------------------------
@@ -377,8 +436,8 @@ fi
 # --------------------------------------------------------------------------
 echo "==> Step 6: Starting lit-actions..."
 
-(cd "$SCRIPT_DIR" && \
-    cargo run --manifest-path=lit-actions/Cargo.toml --bin lit_actions) &
+(cd "$SCRIPT_DIR/lit-actions" && \
+    cargo run --bin lit_actions) &
 ACTIONS_PID=$!
 PIDS+=("$ACTIONS_PID")
 
@@ -404,7 +463,7 @@ if ! command -v static-web-server &>/dev/null; then
     exit 1
 fi
 
-static-web-server -p 8080 -d "$SCRIPT_DIR/lit-static" -g info &
+static-web-server -a 127.0.0.1 -p 8080 -d "$SCRIPT_DIR/lit-static" -g info &
 STATIC_PID=$!
 PIDS+=("$STATIC_PID")
 echo "    static-web-server serving lit-static on http://localhost:8080 (PID $STATIC_PID)."

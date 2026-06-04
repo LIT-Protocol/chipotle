@@ -79,6 +79,13 @@ impl TestClient {
     fn handle_op(&mut self, op: UnionResponse) -> ExecuteJsRequest {
         match op {
             UnionResponse::SetResponse(_) => SetResponseResponse {}.into(),
+            // Answer the deferred async op instantly, in-process, so the bench
+            // measures Deno's per-op event-loop / dispatch overhead rather than
+            // any network round-trip to a real lit-node.
+            UnionResponse::GetPrivateKey(_) => GetPrivateKeyResponse {
+                secret: "0xdeadbeef".to_string(),
+            }
+            .into(),
             _ => unimplemented!("op not implemented"),
         }
     }
@@ -87,7 +94,7 @@ impl TestClient {
 static SNAPSHOT: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/BASE_SNAPSHOT.bin"));
 
 const ASYNC_CODE: &str = indoc! {r#"
-    (async () => {
+    async function main() {
         const numbers = Array.from({ length: 100 }, (_, i) => i);
         const doubled = numbers.map(n => n * 2);
         const sum = doubled.reduce((acc, n) => acc + n, 0);
@@ -96,12 +103,23 @@ const ASYNC_CODE: &str = indoc! {r#"
             Promise.resolve(doubled.length)
         ]);
         return result[0] / result[1];
-    })()
+    }
 "#};
 
 const OPS_CODE: &str = indoc! {r#"
-    const response = LitActions.pubkeyToTokenId({ publicKey: "0x1234" })
-    LitActions.setResponse({response})
+    async function main() {
+        LitActions.setResponse({ response: "ok" })
+    }
+"#};
+
+// 100 sequential awaited deferred-async-op round-trips. Each resolves on an
+// event-loop turn, so this amplifies and isolates Deno's per-op dispatch cost.
+const DEFERRED_OPS_CODE: &str = indoc! {r#"
+    async function main() {
+        for (let i = 0; i < 100; i++) {
+            await LitActions.getPrivateKey({ pkpId: "0x1234" });
+        }
+    }
 "#};
 
 fn lit_actions(c: &mut Criterion) {
@@ -138,6 +156,15 @@ fn lit_actions(c: &mut Criterion) {
         })
     });
 
+    group.bench_function("Deferred ops x100", |b| {
+        b.to_async(&runtime).iter(|| async {
+            TestClient::new(server.socket_path())
+                .execute_js(black_box(DEFERRED_OPS_CODE))
+                .await
+                .unwrap();
+        })
+    });
+
     group.finish();
 }
 
@@ -157,6 +184,7 @@ fn vanilla_deno(c: &mut Criterion) {
             > {
                 blob_store: Default::default(),
                 broadcast_channel: Default::default(),
+                deno_rt_native_addon_loader: Default::default(),
                 feature_checker: Default::default(),
                 fs: Arc::new(RealFs),
                 module_loader: Rc::new(NoopModuleLoader),
@@ -168,6 +196,7 @@ fn vanilla_deno(c: &mut Criterion) {
                 shared_array_buffer_store: Default::default(),
                 compiled_wasm_module_store: Default::default(),
                 v8_code_cache: Default::default(),
+                bundle_provider: Default::default(),
             };
             let options = WorkerOptions {
                 bootstrap: BootstrapOptions {
