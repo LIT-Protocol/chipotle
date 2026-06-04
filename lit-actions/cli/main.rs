@@ -5,6 +5,7 @@ use clap::Parser;
 use lit_actions_server::cdn_module_loader::CdnModuleLoader;
 use lit_core::utils::unix::raise_fd_limit;
 use tracing::{debug, error, info};
+use tracing_appender::non_blocking::WorkerGuard;
 
 #[cfg(feature = "otlp")]
 use lit_observability::opentelemetry_sdk::{
@@ -97,16 +98,19 @@ async fn init_observability() -> ObservabilityProviders {
 
     let log_level = std::env::var("RUST_LOG").unwrap_or_else(|_| "trace".to_string());
 
+    // Returns the non-blocking fmt writer's `WorkerGuard`, which must be held for the
+    // lifetime of the process so buffered logs are flushed on shutdown.
     let init_stdout = || {
-        lit_observability::init_subscriber(&log_level)
-            .expect("Failed to init tracing subscriber (invalid RUST_LOG or filter config)")
-            .init()
+        let (subscriber, guard) = lit_observability::init_subscriber(&log_level)
+            .expect("Failed to init tracing subscriber (invalid RUST_LOG or filter config)");
+        subscriber.init();
+        guard
     };
 
     #[cfg(not(feature = "otlp"))]
     {
-        init_stdout();
-        ObservabilityProviders::default() // All None
+        let log_guard = init_stdout();
+        ObservabilityProviders::stdout_only(log_guard) // All providers None
     }
 
     #[cfg(feature = "otlp")]
@@ -140,8 +144,8 @@ async fn init_observability() -> ObservabilityProviders {
                 Ok(providers) => providers,
                 Err(e) => {
                     eprintln!("OTLP init failed ({e}), falling back to stdout-only logging");
-                    init_stdout();
-                    return ObservabilityProviders::default();
+                    let log_guard = init_stdout();
+                    return ObservabilityProviders::stdout_only(log_guard);
                 }
             };
 
@@ -192,17 +196,22 @@ async fn init_observability() -> ObservabilityProviders {
         let otel_trace_layer =
             lit_observability::tracing_opentelemetry::layer().with_tracer(tracer);
         let otel_log_layer = ContextAwareOtelLogLayer::new(&logger_provider);
-        lit_observability::init_subscriber(&log_level)
-            .expect("Failed to init tracing subscriber (invalid RUST_LOG or filter config)")
+        let (subscriber, log_guard) = lit_observability::init_subscriber(&log_level)
+            .expect("Failed to init tracing subscriber (invalid RUST_LOG or filter config)");
+        subscriber
             .with(otel_trace_layer)
             .with(otel_log_layer)
             .init();
 
-        ObservabilityProviders::new(tracing_provider, metrics_provider, logger_provider)
+        ObservabilityProviders::new(
+            tracing_provider,
+            metrics_provider,
+            logger_provider,
+            log_guard,
+        )
     }
 }
 
-#[derive(Default)]
 struct ObservabilityProviders {
     #[cfg(feature = "otlp")]
     tracing_provider: Option<TracerProvider>,
@@ -210,19 +219,38 @@ struct ObservabilityProviders {
     meter_provider: Option<SdkMeterProvider>,
     #[cfg(feature = "otlp")]
     logger_provider: Option<LoggerProvider>,
+    /// Keeps the non-blocking fmt writer's background worker alive; dropped (and thus
+    /// flushed) when the providers are torn down in `shutdown`.
+    _log_guard: WorkerGuard,
 }
 
 impl ObservabilityProviders {
+    /// Construct for the stdout-only path (no OTLP providers), holding only the
+    /// non-blocking fmt writer guard.
+    fn stdout_only(log_guard: WorkerGuard) -> Self {
+        Self {
+            #[cfg(feature = "otlp")]
+            tracing_provider: None,
+            #[cfg(feature = "otlp")]
+            meter_provider: None,
+            #[cfg(feature = "otlp")]
+            logger_provider: None,
+            _log_guard: log_guard,
+        }
+    }
+
     #[cfg(feature = "otlp")]
     fn new(
         tracing_provider: TracerProvider,
         meter_provider: SdkMeterProvider,
         logger_provider: LoggerProvider,
+        log_guard: WorkerGuard,
     ) -> Self {
         Self {
             tracing_provider: Some(tracing_provider),
             meter_provider: Some(meter_provider),
             logger_provider: Some(logger_provider),
+            _log_guard: log_guard,
         }
     }
 
