@@ -130,7 +130,11 @@ services:
       DNS_PROVIDER: "route53"
       TARGET_ENDPOINT: "http://lit-api-server:8000"
       CERTBOT_EMAIL: "admin@litprotocol.com"
-      SET_CAA: "true"
+      # SET_CAA must be false for ping-pong: with two instances (two in-TEE ACME
+      # accounts) sharing one custom domain, an accounturi-locked CAA written by
+      # one node would block the other node's ingress from (re)issuing its cert,
+      # so the cold node could fail to get a cert and never claim the domain.
+      SET_CAA: "false"
       AWS_ACCESS_KEY_ID: "${CERTBOT_AWS_ACCESS_KEY_ID}"
       AWS_SECRET_ACCESS_KEY: "${CERTBOT_AWS_SECRET_ACCESS_KEY}"
       # STS role assumption — required by dstack-ingress for Route 53 access.
