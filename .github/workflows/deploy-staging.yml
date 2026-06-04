@@ -519,3 +519,73 @@ jobs:
           fi
           echo "Domain now on '$LIVE_GW' (off old '$OLD_GW'); stopping old instance: $OLD"
           phala cvms stop "$OLD"
+
+  # Post-cutover auto-rollback. The cold box auto-claims the domain at boot (on
+  # /health), BEFORE the deeper checks (attestation/openapi/k6) run. If any of
+  # those fail, the new box is live-but-bad — flip the public domain back to the
+  # still-running old instance and stop the bad new box. Both instances share one
+  # app_id, so the _dstack-app-address TXT is identical; only the CNAME (→ node
+  # gateway) needs to move back. Runs ONLY on a verify failure after the new box
+  # came up (if it never came up, it never claimed, and the old box still serves).
+  rollback-on-failure:
+    needs: [determine-target, detect-changes, deploy, wait-for-api-available, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness]
+    if: >-
+      ${{ always()
+          && needs.determine-target.outputs.pingpong == 'true'
+          && needs.detect-changes.outputs.deploy_needed == 'true'
+          && needs.deploy.result == 'success'
+          && needs.wait-for-api-available.result == 'success'
+          && needs.determine-target.outputs.prev_live_cvm != ''
+          && (needs.verify-attestation.result == 'failure'
+              || needs.openapi-spec-check.result == 'failure'
+              || needs.k6-smoke.result == 'failure'
+              || needs.k6-correctness.result == 'failure') }}
+    runs-on: self-hosted
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Phala CLI + AWS CLI
+        run: |
+          npm install -g phala
+          command -v aws >/dev/null 2>&1 || python3 -m pip install --quiet --user awscli
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Roll the domain back to the previous instance, stop the bad one
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
+          CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
+          AWS_DEFAULT_REGION: ${{ vars.CERTBOT_AWS_REGION }}
+        run: |
+          set -euo pipefail
+          OLD="${{ needs.determine-target.outputs.prev_live_cvm }}"
+          NEW="${{ needs.determine-target.outputs.target_cvm }}"
+          DOMAIN="${{ needs.determine-target.outputs.domain }}"
+          OLD_GW=$(phala cvms get "$OLD" --json 2>/dev/null | jq -r '.gateway.cname // empty' | sed 's/\.$//')
+          [ -n "$OLD_GW" ] || { echo "::error::Rollback: cannot resolve old gateway for $OLD"; exit 1; }
+
+          # Assume the Route 53 role (same creds the CVMs use for DNS-01).
+          CREDS=$(aws sts assume-role --role-arn "$CERTBOT_AWS_ROLE_ARN" \
+            --role-session-name pingpong-rollback --query Credentials --output json)
+          export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r .AccessKeyId)
+          export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r .SecretAccessKey)
+          export AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r .SessionToken)
+
+          ZONE_DNS="${DOMAIN#*.}"   # test.chipotle.litprotocol.com → chipotle.litprotocol.com
+          ZONE=$(aws route53 list-hosted-zones-by-name --dns-name "$ZONE_DNS" \
+            --query 'HostedZones[0].Id' --output text | sed 's#/hostedzone/##')
+          [ -n "$ZONE" ] || { echo "::error::Rollback: could not find hosted zone for $ZONE_DNS"; exit 1; }
+
+          CB=$(mktemp)
+          printf '{"Comment":"pingpong rollback","Changes":[{"Action":"UPSERT","ResourceRecordSet":{"Name":"%s","Type":"CNAME","TTL":30,"ResourceRecords":[{"Value":"%s"}]}}]}\n' "$DOMAIN" "$OLD_GW" > "$CB"
+          echo "Rollback: pointing $DOMAIN CNAME back to old gateway $OLD_GW"
+          aws route53 change-resource-record-sets --hosted-zone-id "$ZONE" --change-batch "file://$CB"
+          rm -f "$CB"
+
+          # Stop the bad new box so its renewal daemon can't re-claim the CNAME.
+          unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+          echo "Rollback: stopping bad new instance $NEW"
+          phala cvms stop "$NEW" || true
+          echo "::error::Post-cutover verification failed — rolled $DOMAIN back to $OLD and stopped $NEW. Investigate the new build before redeploying."
+          exit 1
