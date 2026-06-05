@@ -5,6 +5,7 @@ use lit_billing_core::StripeClient;
 use lit_payments::auth::routes as auth_routes;
 use lit_payments::portal::routes as portal_routes;
 use lit_payments::rate;
+use lit_payments::spending::routes as spending_routes;
 use lit_payments::{auth, chain, config, db, mail};
 use rocket::fs::{FileServer, NamedFile};
 use rocket::http::Status;
@@ -55,6 +56,12 @@ async fn rocket() -> _ {
                 chain::get_payment_config,
                 chain::claim_payment,
                 rate::override_rate,
+                spending_routes::put_rules,
+                spending_routes::get_rules,
+                spending_routes::list_rules,
+                spending_routes::delete_rules,
+                spending_routes::internal_get_rules,
+                spending_routes::internal_charge,
             ],
         )
         .mount("/static", FileServer::from("static"))

@@ -9,3 +9,4 @@ pub mod db;
 pub mod mail;
 pub mod portal;
 pub mod rate;
+pub mod spending;
