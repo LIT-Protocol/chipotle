@@ -4,6 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Verify Lit Chipotle – TEE Attestation</title>
+    <script>
+      // Set theme before first paint to avoid a flash of the wrong theme.
+      (function () {
+        try {
+          var t = localStorage.getItem('verify-theme');
+          if (t !== 'light' && t !== 'dark') {
+            t = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+          }
+          document.documentElement.setAttribute('data-theme', t);
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'dark');
+        }
+      })();
+    </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -11,7 +25,9 @@
       rel="stylesheet"
     />
     <style>
-      :root {
+      :root,
+      :root[data-theme='dark'] {
+        color-scheme: dark;
         --bg: #0f0f12;
         --card: #18181c;
         --border: #2a2a30;
@@ -21,6 +37,18 @@
         --success: #34d399;
         --warning: #fbbf24;
         --critical: #f87171;
+      }
+      :root[data-theme='light'] {
+        color-scheme: light;
+        --bg: #f5f5f7;
+        --card: #ffffff;
+        --border: #e2e2e7;
+        --text: #1c1c20;
+        --muted: #6b6b73;
+        --accent: #7c3aed;
+        --success: #059669;
+        --warning: #b45309;
+        --critical: #dc2626;
       }
       * {
         box-sizing: border-box;
@@ -38,10 +66,35 @@
       a {
         color: var(--accent);
       }
+      .page-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 1rem;
+      }
       h1 {
         font-size: 1.6rem;
         font-weight: 700;
         margin-bottom: 0.35rem;
+      }
+      .theme-toggle {
+        flex-shrink: 0;
+        margin-top: 0.25rem;
+        padding: 0.5rem 0.85rem;
+        font-size: 0.82rem;
+        font-weight: 500;
+        background: var(--card);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.4rem;
+      }
+      .theme-toggle:hover {
+        border-color: var(--accent);
+        opacity: 1;
       }
       .subtitle {
         color: var(--muted);
@@ -342,7 +395,12 @@
     </style>
   </head>
   <body>
-    <h1>Verify Lit Chipotle</h1>
+    <div class="page-head">
+      <h1>Verify Lit Chipotle</h1>
+      <button id="theme-toggle" class="theme-toggle" type="button" aria-label="Toggle light or dark theme">
+        <span id="theme-icon">☀</span><span id="theme-label">Light</span>
+      </button>
+    </div>
     <p class="subtitle">
       Confirm that the Lit Chipotle API server is running unmodified code inside a genuine Intel TDX
       enclave operated by Phala Cloud — entirely in your browser, no terminal required. This runs the

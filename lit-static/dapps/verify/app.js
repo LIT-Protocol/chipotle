@@ -383,8 +383,48 @@ function applyDefaults() {
   el('app-id').value = DEFAULTS.appId;
 }
 
+// ── Theme ────────────────────────────────────────────────────────────────────
+
+const THEME_KEY = 'verify-theme';
+
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  // The button shows the theme it switches to.
+  const switchesToLight = theme === 'dark';
+  el('theme-icon').textContent = switchesToLight ? '☀' : '☾';
+  el('theme-label').textContent = switchesToLight ? 'Light' : 'Dark';
+}
+
+function initTheme() {
+  let theme = null;
+  try {
+    theme = localStorage.getItem(THEME_KEY);
+  } catch {
+    /* localStorage unavailable */
+  }
+  if (theme !== 'light' && theme !== 'dark') {
+    theme =
+      window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+        ? 'light'
+        : 'dark';
+  }
+  applyTheme(theme);
+}
+
+function toggleTheme() {
+  const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+  applyTheme(next);
+  try {
+    localStorage.setItem(THEME_KEY, next);
+  } catch {
+    /* localStorage unavailable */
+  }
+}
+
 // ── Boot ─────────────────────────────────────────────────────────────────────
 
+initTheme();
 applyDefaults();
+el('theme-toggle').addEventListener('click', toggleTheme);
 el('verify-btn').addEventListener('click', runVerify);
 el('reset-btn').addEventListener('click', applyDefaults);
