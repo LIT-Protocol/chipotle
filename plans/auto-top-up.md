@@ -83,7 +83,9 @@ CREATE TABLE auto_topup_config (
   payment_method_id        TEXT,
   consent_version          TEXT,
   consent_signed_at        TIMESTAMPTZ,
-  disabled_reason          TEXT,         -- NULL, 'manual', 'failures', 'card_invalid'
+  disabled_reason          TEXT,         -- NULL, 'manual', 'failures', 'card_invalid', 'requires_action'
+  pending_action_pi_id     TEXT,         -- set when an off-session PI returns requires_action; cleared on success
+  pending_action_at        TIMESTAMPTZ,  -- timestamp of the requires_action event; used for stale-action TTL
   updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   CONSTRAINT enabled_requires_config CHECK (
@@ -123,6 +125,7 @@ Validation constraints enforce: `enabled=true ⇒ all required fields non-null`,
 | `POST /billing/setup_intent` | Save card | Calls `lit_billing_core::customer::find_or_create_by_wallet`. Refuses if user has no Stripe customer AND has never made a manual top-up (we don't auto-create customers here; user must do their first manual top-up first to bootstrap the Stripe customer). Then creates Stripe SetupIntent via `lit_billing_core::StripeClient::post_with_idempotency("setup_intents", [usage=off_session, customer=cus_xxx])`. Returns `client_secret` to dashboard. |
 | `GET /billing/auto_topup_config` | Read config | Forwards to `lit-payments`'s `GET /internal/auto_topup_config?customer_id=...` with `X-Internal-Secret`. Returns config JSON to dashboard. |
 | `PUT /billing/auto_topup_config` | Save config | Body: `{enabled, threshold_cents, topup_amount_cents, monthly_cap_cents, payment_method_id, consent_version}`. Server-side validation: verify `payment_method_id` belongs to this customer (`GET /v1/customers/{cus_xxx}/payment_methods` and check membership), enforce `cap >= topup_amount`, etc. Forwards to `lit-payments`'s `PUT /internal/auto_topup_config`. |
+| `POST /billing/auto_topup_resume_pending` | Resume SCA-pending top-up | Reads the user's `pending_action_pi_id` from config (via `lit-payments` proxy). If set, retrieves the PaymentIntent's `client_secret` from Stripe and returns it to the dashboard so the user can complete the 3DS challenge with `stripe.handleNextAction`. Returns 404 if no pending action. |
 | `POST /internal/invalidate_balance_cache` | Drop cached balance | Called by `lit-payments` after every successful auto-credit. Body: `{customer_id}`. Calls `state.balance_cache.invalidate(&customer_id)` (same primitive as existing `confirm_payment_intent` flow at `lit-api-server/src/stripe.rs:612`). Auth: `X-Internal-Secret`. |
 
 ### Internal (on `lit-payments`, auth: `X-Internal-Secret`)
@@ -196,7 +199,10 @@ Called by `lit-api-server` after every deduction (chunk flush, final flush, mana
       metadata[wallet_address]: 0x...
       Idempotency-Key: {key}
     ```
-    On `authentication_required` error: set a flag on the config row (e.g. via `disabled_reason='requires_action'`) so the dashboard shows "action required" banner. User must re-authenticate on-session next visit.
+    On `authentication_required` error (SCA / 3DS required):
+       - `UPDATE auto_topup_config SET pending_action_pi_id=$1, pending_action_at=now(), disabled_reason='requires_action' WHERE customer_id=...`
+       - Send the **"action required" email** to the user with a deep link back to the dashboard's billing page.
+       - The PI itself stays in `requires_action` status at Stripe — it is NOT cancelled. The user re-authenticates on-session via the dashboard resume flow (§9) and the same PI completes.
     On `card_declined` / `expired_card` / etc.: webhook will fire `payment_intent.payment_failed` and trigger the counter-derivation in step 6 next time. No write here.
     On network/timeout: do nothing. Webhook may still arrive when Stripe finishes processing.
 
@@ -237,12 +243,14 @@ Endpoint: `POST /stripe/webhook` on `lit-payments`.
    - If no row returned (already credited) → return 200.
    - If row inserted → call `lit_billing_core::balance::write_transaction(stripe_client, customer_id, -pi.amount, description="Auto top-up via {pi.id}", idempotency_key="credit:{pi.id}")`.
    - On success, `UPDATE auto_topup_credits SET stripe_balance_transaction_id=$1 WHERE payment_intent_id=$2`.
+   - **Clear any pending SCA action for this PI**: `UPDATE auto_topup_config SET pending_action_pi_id=NULL, pending_action_at=NULL, disabled_reason=NULL WHERE customer_id=$1 AND pending_action_pi_id=$2`. (Only clears if this PI was the one waiting on SCA — covers the case where the user completed 3DS via the dashboard resume flow.)
    - Call `POST {LIT_API_SERVER_BASE_URL}/internal/invalidate_balance_cache` with `X-Internal-Secret` and `{customer_id}`. (Fire-and-forget; ignore errors — Stripe cache will refresh in ≤10 min regardless.)
    - Return 200.
 
    **`payment_intent.payment_failed`:**
    - If `pi.metadata.source != "auto_topup"` → return 200.
    - Send email + dashboard banner to user. (Email template: "Your auto top-up of $X failed: {reason}. Please update your card.")
+   - If `pending_action_pi_id == pi.id` (this was an SCA-pending PI that the user failed to authenticate or that expired), also clear `pending_action_pi_id`, `pending_action_at`, and reset `disabled_reason` from `requires_action`.
    - Do NOT write a counter. The disable decision is derived live in `/trigger_topup` by listing PIs and counting failures.
    - Return 200.
 
@@ -307,12 +315,36 @@ New modal opened from the billing page.
 2. On submit, dashboard calls `PUT /billing/auto_topup_config` with `{enabled, threshold_cents, topup_amount_cents, monthly_cap_cents, payment_method_id, consent_version: "v1"}`.
 3. Backend validates and persists.
 
+### SCA resume flow (when last off-session attempt returned `requires_action`)
+
+This is what the dashboard does when the user clicks the "Re-authenticate" button on the action-required banner (or arrives via the email deep link).
+
+1. On dashboard load, `GET /billing/auto_topup_config` returns `pending_action_pi_id` if non-null. Dashboard renders the action-required banner.
+2. User clicks "Confirm now" (banner) or arrives from the email link.
+3. Dashboard calls `POST /billing/auto_topup_resume_pending`. Backend reads `pending_action_pi_id` from config, retrieves the PaymentIntent from Stripe, returns `{ payment_intent_id, client_secret }`.
+4. Dashboard runs `stripe.handleNextAction({ clientSecret })`. Stripe.js opens the 3DS challenge modal.
+5. User completes the 3DS challenge.
+6. PI transitions to `succeeded` at Stripe. Stripe fires `payment_intent.succeeded` webhook → existing handler credits the wallet, clears `pending_action_pi_id` + `pending_action_at` + `disabled_reason` (§7).
+7. Dashboard polls `GET /billing/auto_topup_config` after `handleNextAction` resolves and reflects the cleared state.
+
+If the user abandons the challenge or fails 3DS, the PI eventually transitions to `requires_payment_method` (= failed) and Stripe fires `payment_intent.payment_failed`. The webhook handler clears the pending state and emails the user a "card needs updating" message. The same trigger handler's failure-derivation logic counts this against the consecutive-failure threshold.
+
 ### Status banners
 
 - **Enabled, healthy:** "Auto top-up: when your balance drops below $X, we'll charge $Y to card ending in ****1234, up to ~$Z/month."
-- **Enabled, requires_action (SCA pending):** "Action required: confirm your last auto top-up. [Re-authenticate]."
+- **Enabled, requires_action (SCA pending):** "Action required to complete your $X auto top-up. [Confirm now]" — clicking triggers the resume flow above.
 - **Disabled by user:** "Auto top-up is off. [Enable]"
 - **Auto-disabled after failures:** "Auto top-up was paused after 3 failed attempts. Please update your card. [Manage]"
+
+### Email notifications
+
+`lit-payments` sends transactional emails via the existing Resend integration. Three templates needed:
+
+| Trigger | Subject | Body content |
+|---|---|---|
+| Off-session PI returns `authentication_required` | "Action required: confirm your auto top-up" | Amount, card last4, deep link to dashboard's billing page (which auto-renders the resume banner) |
+| `payment_intent.payment_failed` webhook | "Your auto top-up couldn't be charged" | Amount, card last4, decline reason (human-friendly), link to dashboard to update card |
+| Auto-disable after 3 consecutive failures (set in `/trigger_topup` step 6) | "Auto top-up paused — update your card" | Brief summary of why, link to dashboard to update card and re-enable |
 
 ---
 
@@ -336,7 +368,7 @@ The mutex is optimization. Layers 2 and 3 are correctness primitives.
 | HTTP timeout on `paymentIntents.create` | Stripe still fires `payment_intent.succeeded` webhook when the charge settles; webhook handler credits the user |
 | Webhook delivered twice / replayed | `INSERT … ON CONFLICT DO NOTHING` skips the second one |
 | Card declined (insufficient funds, expired, etc.) | Webhook fires `payment_intent.payment_failed`; next `/trigger_topup` derives consecutive-failure count from listing PIs and disables after 3 |
-| SCA required (`requires_action`) | Caught on synchronous create response; flag set on config; dashboard shows "action required" banner; user re-auths on-session next visit |
+| SCA required (`requires_action`) | Caught on synchronous create response; `pending_action_pi_id` set on config; "action required" email sent + dashboard banner shown; user clicks "Confirm now" → dashboard calls `/billing/auto_topup_resume_pending` and runs `stripe.handleNextAction(client_secret)` to complete 3DS; on `payment_intent.succeeded` webhook the pending state is cleared and the wallet is credited (§9 SCA resume flow) |
 | User toggles auto-top-up off between trigger fire and handler execution | Handler reads `enabled=false` from Postgres and short-circuits |
 | Trigger fires when balance is actually above threshold (e.g., user just topped up manually) | Handler's step 4 (balance fetch) short-circuits |
 | `lit-payments` is briefly down when trigger fires | Trigger HTTP call fails; next deduction's trigger retries |
@@ -544,7 +576,7 @@ Tasks:
   - Cap check (sum + topup_amount > cap → return).
   - Compute deterministic Idempotency-Key: `auto_topup:{customer}:{floor(unix_ts/300)}`.
   - `paymentIntents.create` with `customer`, `payment_method`, `amount`, `currency=usd`, `off_session=true`, `confirm=true`, `metadata.source=auto_topup`, `metadata.wallet_address=...`, Idempotency-Key header.
-  - Handle synchronous `authentication_required` by setting `disabled_reason='requires_action'` on the config row.
+  - Handle synchronous `authentication_required` by setting `pending_action_pi_id`, `pending_action_at`, and `disabled_reason='requires_action'` on the config row, then sending the "action required" email via Resend.
 - Hook into `lit-api-server::charge()` (`stripe.rs:337`): after every deduction, `tokio::spawn` a fire-and-forget `POST /internal/trigger_topup` with `customer_id` + `wallet_address`. Never block the calling request.
 
 **Gate to Phase 5:** in Stripe test mode, a real card is charged via off-session PaymentIntent triggered from a Lit Action deduction. Burst of parallel triggers collapses to one charge (verify via Stripe Dashboard).
@@ -563,8 +595,9 @@ Tasks:
     - If no row returned → return 200 (already credited).
     - If inserted → `lit_billing_core::balance::write_transaction` with `Idempotency-Key: credit:{pi.id}`.
     - `UPDATE auto_topup_credits SET stripe_balance_transaction_id=$1`.
+    - Clear pending SCA state: `UPDATE auto_topup_config SET pending_action_pi_id=NULL, pending_action_at=NULL, disabled_reason=NULL WHERE customer_id=$1 AND pending_action_pi_id=$2`.
     - Fire-and-forget `POST /internal/invalidate_balance_cache` to `lit-api-server`.
-  - On `payment_intent.payment_failed` (filter `metadata.source=auto_topup`): send email + dashboard banner.
+  - On `payment_intent.payment_failed` (filter `metadata.source=auto_topup`): send email + dashboard banner. If the failed PI matches `pending_action_pi_id` for this customer, also clear the SCA pending state and reset `disabled_reason` from `requires_action`.
 - `POST /internal/invalidate_balance_cache` on `lit-api-server`:
   - Auth: `X-Internal-Secret`.
   - Calls existing `state.balance_cache.invalidate(&customer_id)` (precedent at `lit-api-server/src/stripe.rs:612`).
@@ -586,10 +619,14 @@ Tasks:
   - On return, read `setup_intent` query param, call `stripe.retrieveSetupIntent(client_secret)`, extract `payment_method`.
 - Save-config flow:
   - `PUT /billing/auto_topup_config` with full config + `consent_version` + signed timestamp.
+- SCA resume flow:
+  - On dashboard load, if `pending_action_pi_id` is non-null in the config, render the "action required" banner.
+  - "Confirm now" button calls `POST /billing/auto_topup_resume_pending`, receives `{ payment_intent_id, client_secret }`, calls `stripe.handleNextAction({ clientSecret })`.
+  - After `handleNextAction` resolves, re-fetch config and update the banner state.
 - Status banners per §9.
 - Dashboard reads config from `GET /billing/auto_topup_config` on page load.
 
-**Gate to Phase 7:** a real user can open the dashboard, save a card, enable auto-top-up, run a Lit Action, and see their balance auto-credited within a minute. No manual API calls required.
+**Gate to Phase 7:** a real user can open the dashboard, save a card, enable auto-top-up, run a Lit Action, and see their balance auto-credited within a minute. Using an SCA test card → action-required banner appears → "Confirm now" completes 3DS → balance is credited. No manual API calls required.
 
 ### Phase 7 — Failure handling + operational hardening (~2 days)
 
@@ -762,7 +799,7 @@ Full list: https://docs.stripe.com/testing
 - [ ] Setting up a small Lit Action that costs a few cents, manually pushing balance below threshold, and running the action → `paymentIntents.create` is called against Stripe test mode (visible in Stripe Dashboard Events feed).
 - [ ] Burst test: 10 parallel `curl POST /internal/trigger_topup` calls (with `X-Internal-Secret`) for the same customer → only one PaymentIntent appears in Stripe (idempotency-key dedupes the rest).
 - [ ] Test with `4000 0000 0000 0341` saved card → PI is created with status `requires_payment_method` (declined) → config row gets `disabled_reason` set after enough failures.
-- [ ] Test with `4000 0027 6000 3184` SCA card → PI returns `requires_action` → handler flags the config; webhook later confirms.
+- [ ] Test with `4000 0027 6000 3184` SCA card → PI returns `requires_action` → handler sets `pending_action_pi_id` + `pending_action_at` on the config row, sets `disabled_reason='requires_action'`, sends the "action required" email via Resend test mode.
 
 #### After Phase 5 — webhook and credit
 
@@ -778,7 +815,9 @@ Full list: https://docs.stripe.com/testing
 - [ ] User saves a `4242…` card → modal updates to show card on file.
 - [ ] User configures threshold/amount/cap, toggles enabled, saves → config persists, status banner shows the rule in plain English.
 - [ ] User runs a Lit Action that drops balance below threshold → within ~10 seconds, Stripe balance is credited and dashboard reflects new balance.
-- [ ] Use 3DS card, run a Lit Action → dashboard shows "action required" banner.
+- [ ] Use 3DS card, run a Lit Action → dashboard shows "action required" banner → user clicks "Confirm now" → 3DS modal opens → user completes challenge → PI transitions to `succeeded` → balance is credited → banner disappears on next config fetch → `pending_action_pi_id` is cleared in Postgres.
+- [ ] Use 3DS card, run a Lit Action → "action required" email arrives in Resend test inbox with deep link → clicking the link lands on dashboard with banner showing → resume flow proceeds as above.
+- [ ] SCA failure path: 3DS card, abandon the challenge (close the modal) → PI eventually transitions to `requires_payment_method` → `payment_failed` webhook fires → pending state cleared → user receives "card needs updating" email.
 
 #### After Phase 7 — failure handling
 
