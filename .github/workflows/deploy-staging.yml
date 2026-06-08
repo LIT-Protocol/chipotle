@@ -155,8 +155,14 @@ jobs:
 
           # Resolve a domain's CNAME target (no trailing dot) via dig, DoH fallback.
           resolve_cname() {
-            local d="$1" out=""
-            out=$(dig +short CNAME "$d" 2>/dev/null | head -1 | sed 's/\.$//')
+            # Prefer the zone's AUTHORITATIVE nameserver (no caching-resolver lag —
+            # critical when a previous run just cut over and a new run must read the
+            # current live node). Fall back to the default resolver, then DoH.
+            local d="$1" zone ns out=""
+            zone="${d#*.}"                                  # test.chipotle.litprotocol.com → chipotle.litprotocol.com
+            ns=$(dig +short NS "$zone" 2>/dev/null | head -1)
+            [ -n "$ns" ] && out=$(dig +short CNAME "$d" "@${ns}" 2>/dev/null | head -1 | sed 's/\.$//')
+            [ -z "$out" ] && out=$(dig +short CNAME "$d" 2>/dev/null | head -1 | sed 's/\.$//')
             if [ -z "$out" ]; then
               out=$(curl -s -H 'accept: application/dns-json' \
                 "https://1.1.1.1/dns-query?name=${d}&type=CNAME" 2>/dev/null \
@@ -498,8 +504,14 @@ jobs:
           OLD="${{ needs.determine-target.outputs.prev_live_cvm }}"
           DOMAIN="${{ needs.determine-target.outputs.domain }}"
           resolve_cname() {
-            local d="$1" out=""
-            out=$(dig +short CNAME "$d" 2>/dev/null | head -1 | sed 's/\.$//')
+            # Prefer the zone's AUTHORITATIVE nameserver (no caching-resolver lag —
+            # critical when a previous run just cut over and a new run must read the
+            # current live node). Fall back to the default resolver, then DoH.
+            local d="$1" zone ns out=""
+            zone="${d#*.}"                                  # test.chipotle.litprotocol.com → chipotle.litprotocol.com
+            ns=$(dig +short NS "$zone" 2>/dev/null | head -1)
+            [ -n "$ns" ] && out=$(dig +short CNAME "$d" "@${ns}" 2>/dev/null | head -1 | sed 's/\.$//')
+            [ -z "$out" ] && out=$(dig +short CNAME "$d" 2>/dev/null | head -1 | sed 's/\.$//')
             if [ -z "$out" ]; then
               out=$(curl -s -H 'accept: application/dns-json' \
                 "https://1.1.1.1/dns-query?name=${d}&type=CNAME" 2>/dev/null \
