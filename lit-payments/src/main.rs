@@ -48,12 +48,20 @@ async fn rocket() -> _ {
     let per_customer_mutex = PerCustomerMutex::new();
     lit_payments::auto_topup::reconciler::spawn(cfg.clone(), stripe.clone(), pool.clone());
 
-    // CORS: the dashboard runs on a different port locally (and on a
-    // different origin in production) so browser requests against
-    // lit-payments hit the preflight gate. Same `AllowedOrigins::all()`
-    // shape as lit-api-server uses (lit-api-server/src/main.rs:333).
+    // Codex P1 (Phase 8): exact-match CORS allowlist driven by
+    // `cors_allowed_origins`. The prior config used
+    // `AllowedOrigins::all()` paired with `allow_credentials: true`,
+    // which is CSRF-on-tap — any site could initiate credentialed
+    // requests against the billing API. Now we require the dashboard
+    // origin(s) to be declared explicitly (PUBLIC_BASE_URL + optional
+    // CORS_ALLOWED_ORIGINS); preflight rejects everything else.
+    tracing::info!(
+        origins = ?cfg.cors_allowed_origins,
+        "CORS allowlist"
+    );
+    let allowed = rocket_cors::AllowedOrigins::some_exact(&cfg.cors_allowed_origins);
     let cors = rocket_cors::CorsOptions {
-        allowed_origins: rocket_cors::AllowedOrigins::all(),
+        allowed_origins: allowed,
         allowed_methods: [
             rocket::http::Method::Get,
             rocket::http::Method::Post,

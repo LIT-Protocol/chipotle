@@ -65,18 +65,32 @@ pub struct Config {
     /// `balance_transactions` write). Default 900 (15 minutes); set lower
     /// (e.g. 60) for local testing.
     pub reconciler_interval_secs: i64,
+    /// Exact-match CORS allowlist. Browser requests from any other origin
+    /// will be rejected at the preflight gate. Default in production is
+    /// the `PUBLIC_BASE_URL` (the dashboard is served from the same
+    /// origin in production builds); local dev typically sets this to
+    /// the Vite dev-server origin via `CORS_ALLOWED_ORIGINS`.
+    ///
+    /// Codex P1 (Phase 8): the prior config used
+    /// `AllowedOrigins::all()` which lets any site initiate
+    /// credentialed requests against lit-payments. Combined with
+    /// `allow_credentials: true` that's CSRF-on-tap. Now exact-match
+    /// only; misconfigured deployments fail loudly.
+    pub cors_allowed_origins: Vec<String>,
 }
 
 impl Config {
     pub fn from_env() -> Result<Self> {
+        let public_base_url = required("PUBLIC_BASE_URL")?
+            .trim_end_matches('/')
+            .to_string();
+        let cors_allowed_origins = parse_cors_allowed_origins(&public_base_url);
         Ok(Self {
             database_url: required("DATABASE_URL")?,
             magic_link_signing_key: parse_signing_key()?,
             resend_api_key: required("RESEND_API_KEY")?,
             mail_from: required("MAIL_FROM")?,
-            public_base_url: required("PUBLIC_BASE_URL")?
-                .trim_end_matches('/')
-                .to_string(),
+            public_base_url,
             stripe_secret_key: required("STRIPE_SECRET_KEY")?,
             stripe_publishable_key: required("STRIPE_PUBLISHABLE_KEY")?,
             max_grant_cents: optional_i64("MAX_GRANT_CENTS", 2_000)?,
@@ -89,8 +103,28 @@ impl Config {
             lit_internal_shared_secret: required("LIT_INTERNAL_SHARED_SECRET")?,
             stripe_webhook_secret: required("STRIPE_WEBHOOK_SECRET")?,
             reconciler_interval_secs: optional_i64("RECONCILER_INTERVAL_SECS", 900)?,
+            cors_allowed_origins,
         })
     }
+}
+
+/// Build the CORS allowlist. Always includes `public_base_url`
+/// (same-origin = the production dashboard). The optional
+/// `CORS_ALLOWED_ORIGINS` env var (comma-separated) adds additional
+/// origins — the Vite dev server origin in local dev, or a separate
+/// dashboard host in staging. The defaults intentionally do NOT
+/// include `localhost:*` blindly; explicit allowlisting is the point.
+fn parse_cors_allowed_origins(public_base_url: &str) -> Vec<String> {
+    let mut out: Vec<String> = vec![public_base_url.trim_end_matches('/').to_string()];
+    if let Some(extra) = optional_trimmed("CORS_ALLOWED_ORIGINS") {
+        for origin in extra.split(',') {
+            let o = origin.trim().trim_end_matches('/').to_string();
+            if !o.is_empty() && !out.contains(&o) {
+                out.push(o);
+            }
+        }
+    }
+    out
 }
 
 fn parse_discount_basis_points() -> Result<i64> {

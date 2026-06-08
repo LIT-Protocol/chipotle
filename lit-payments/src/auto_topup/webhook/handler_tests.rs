@@ -79,6 +79,7 @@ fn test_config(stripe_secret_key: String, db_url: String) -> Config {
         lit_internal_shared_secret: "unused".into(),
         stripe_webhook_secret: WEBHOOK_SECRET.into(),
         reconciler_interval_secs: 900,
+        cors_allowed_origins: vec!["http://localhost".to_string()],
     }
 }
 

@@ -157,10 +157,17 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres
 MAGIC_LINK_SIGNING_KEY=$(openssl rand -base64 32)
 RESEND_API_KEY=re_...                    # https://resend.com → API keys
 MAIL_FROM=noreply@mail.litprotocol.com   # must be a verified Resend sender
-PUBLIC_BASE_URL=http://localhost:8000
+PUBLIC_BASE_URL=http://localhost:8001
 STRIPE_SECRET_KEY=rk_test_...            # Stripe restricted key; needs Customers: Read plus Billing > Customer Balance Transaction: Write
 ROCKET_SECRET_KEY=$(openssl rand -base64 32)  # required for private cookies in release
-ROCKET_PORT=8000
+# Port 8001 in dev to avoid colliding with lit-api-server on 8000.
+# The dashboard expects lit-payments at this port (see auth.js).
+ROCKET_PORT=8001
+# CORS allowlist (in addition to PUBLIC_BASE_URL). Comma-separated.
+# Add the dashboard origin here when the dashboard runs on a different
+# port — typical local dev is the same host:port as the api-server
+# (http://localhost:8000) since both static apps are served from there.
+# CORS_ALLOWED_ORIGINS=http://localhost:8000
 
 # Optional — cap defaults match the plan ($20 per grant, $100/op/day):
 # MAX_GRANT_CENTS=2000

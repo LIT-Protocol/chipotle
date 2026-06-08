@@ -55,6 +55,7 @@ fn test_config(stripe_secret_key: String) -> Config {
         lit_internal_shared_secret: "unused".into(),
         stripe_webhook_secret: "unused".into(),
         reconciler_interval_secs: 900,
+        cors_allowed_origins: vec!["http://localhost".to_string()],
     }
 }
 
@@ -75,9 +76,14 @@ impl AuthResolver for FixedWalletResolver {
         })
     }
     async fn resolve_api_key(&self, _api_key: &str) -> Result<ResolvedIdentity, AuthError> {
-        // The endpoint short-circuits to 501 before calling this for
-        // ApiKey-shaped BillingAuth, so this branch is unreachable in tests.
-        Err(AuthError::BadCredentials("unused".into()))
+        // Phase 2 P1 fix: the BillingAuth guard now resolves api keys
+        // before yielding ApiKey to the handler. The setup_intent
+        // handler's 501-for-api-key path is still what we're testing,
+        // so the mock returns Ok(_) to let the call reach the handler.
+        Ok(ResolvedIdentity {
+            wallet_address_hex: self.wallet.clone(),
+            api_key_hash_hex: format!("0x{}", "0".repeat(64)),
+        })
     }
 }
 
