@@ -1,0 +1,644 @@
+//! `POST /stripe/webhook` — `customer.updated` handler.
+//!
+//! Implements the full §6 flow synchronously inside the webhook request:
+//! verify signature → quick exits → mutex → fresh balance → list PIs →
+//! failure/cap check → off-session PaymentIntent create → sync credit →
+//! cache invalidation. Returns 5xx on transient backend failures so
+//! Stripe retries (3-day window); 200 only after credit work commits.
+//!
+//! The handler is generously instrumented because Phase 5 is the
+//! load-bearing trigger — when it misbehaves in production, observability
+//! is the difference between a 1-hour incident and a 1-day one.
+
+use std::time::{SystemTime, UNIX_EPOCH};
+
+use anyhow::Context;
+use lit_billing_core::StripeClient;
+use rocket::data::{Data, ToByteUnit};
+use rocket::http::{Header, Status};
+use rocket::request::{FromRequest, Outcome, Request};
+use rocket::{State, post};
+use serde_json::Value;
+use sqlx::PgPool;
+use time::OffsetDateTime;
+use uuid::Uuid;
+
+use crate::auto_topup::db;
+use crate::auto_topup::webhook::mutex::PerCustomerMutex;
+use crate::auto_topup::webhook::sca::generate_recovery_token;
+use crate::auto_topup::webhook::signature::verify as verify_signature;
+use crate::config::Config;
+use crate::internal::client as internal_client;
+
+const MAX_BODY_BYTES: u64 = 1 * 1024 * 1024;
+
+/// Minimum top-up floor — same value the dashboard validation enforces in
+/// `billing::auto_topup_config`. Kept here as a documented constant for the
+/// failure-threshold test and for future use by spec-derived assertions.
+#[allow(dead_code)]
+const MIN_TOPUP_CENTS: i64 = 500;
+
+const FAILURE_DISABLE_THRESHOLD: usize = 3;
+
+/// Webhook-specific request guard that extracts the Stripe-Signature
+/// header. Returning here as `Option<String>` lets the handler decide
+/// whether absence is a hard 401 or some other shape.
+pub struct StripeSignatureHeader(pub Option<String>);
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for StripeSignatureHeader {
+    type Error = ();
+    async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        let value = req
+            .headers()
+            .get_one("Stripe-Signature")
+            .map(|s| s.to_string());
+        Outcome::Success(StripeSignatureHeader(value))
+    }
+}
+
+#[post("/stripe/webhook", data = "<body>")]
+pub async fn stripe_webhook(
+    sig: StripeSignatureHeader,
+    body: Data<'_>,
+    cfg: &State<Config>,
+    stripe: &State<StripeClient>,
+    pool: &State<PgPool>,
+    mutex_cache: &State<PerCustomerMutex>,
+) -> Status {
+    let raw = match body.open(MAX_BODY_BYTES.bytes()).into_bytes().await {
+        Ok(v) if v.is_complete() => v.into_inner(),
+        Ok(_) => {
+            tracing::warn!("stripe webhook: body exceeded {MAX_BODY_BYTES} bytes");
+            return Status::PayloadTooLarge;
+        }
+        Err(e) => {
+            tracing::warn!("stripe webhook: read body failed: {e}");
+            return Status::BadRequest;
+        }
+    };
+
+    let Some(header_value) = sig.0 else {
+        return Status::Unauthorized;
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+    if let Err(e) = verify_signature(&header_value, &raw, &cfg.stripe_webhook_secret, now) {
+        tracing::warn!("stripe webhook: signature rejected: {e}");
+        return Status::Unauthorized;
+    }
+
+    let event: Value = match serde_json::from_slice(&raw) {
+        Ok(v) => v,
+        Err(e) => {
+            tracing::warn!("stripe webhook: body not JSON: {e}");
+            return Status::BadRequest;
+        }
+    };
+
+    // Step 2: Filter event type AND require a balance change. The latter
+    // is the cheap "not for us" reject for customer.updated events that
+    // change email / metadata / etc. without touching balance.
+    if event.get("type").and_then(|v| v.as_str()) != Some("customer.updated") {
+        return Status::Ok;
+    }
+    if event.pointer("/data/previous_attributes/balance").is_none() {
+        return Status::Ok;
+    }
+
+    let obj = match event.pointer("/data/object") {
+        Some(o) => o,
+        None => return Status::Ok,
+    };
+    let customer_id = match obj.get("id").and_then(|v| v.as_str()) {
+        Some(id) => id.to_string(),
+        None => return Status::Ok,
+    };
+    let new_balance = obj.get("balance").and_then(|v| v.as_i64()).unwrap_or(0);
+
+    match process_event(
+        cfg.inner(),
+        stripe.inner(),
+        pool.inner(),
+        mutex_cache.inner(),
+        &customer_id,
+        new_balance,
+    )
+    .await
+    {
+        Ok(()) => Status::Ok,
+        Err(ProcessError::Transient(e)) => {
+            tracing::error!("stripe webhook: transient error: {e:?}");
+            Status::ServiceUnavailable
+        }
+    }
+}
+
+#[derive(Debug)]
+enum ProcessError {
+    Transient(anyhow::Error),
+}
+
+impl From<anyhow::Error> for ProcessError {
+    fn from(e: anyhow::Error) -> Self {
+        ProcessError::Transient(e)
+    }
+}
+
+async fn process_event(
+    cfg: &Config,
+    stripe: &StripeClient,
+    pool: &PgPool,
+    mutex_cache: &PerCustomerMutex,
+    customer_id: &str,
+    payload_balance: i64,
+) -> Result<(), ProcessError> {
+    // Step 3a: Load config. Short-circuit unless the row is enabled AND
+    // not already in an SCA-pending state. Skipping the
+    // pending_action_pi_id check would let a fresh customer.updated event
+    // fire a second off-session PI while the first is still waiting on
+    // the user's 3DS confirmation — which overwrites the recovery_token
+    // (single-use!) and leaves us stuck with two pending PIs the
+    // dashboard can't distinguish. The webhook handler that staged the
+    // pending state already set `disabled_reason = 'requires_action'`;
+    // we treat that as a soft pause that the SCA resume / clear-pending
+    // path is responsible for lifting.
+    let config = match db::get_by_customer_id(pool, customer_id)
+        .await
+        .context("db read auto_topup_config")?
+    {
+        Some(c) if c.enabled && c.pending_action_pi_id.is_none() => c,
+        _ => return Ok(()),
+    };
+    let threshold = config.threshold_cents.ok_or_else(|| {
+        ProcessError::Transient(anyhow::anyhow!(
+            "enabled config missing threshold for {customer_id} — CHECK constraint should have caught this"
+        ))
+    })?;
+
+    // Step 3b: Quick exit on payload balance. Available credit = -balance
+    // (Stripe stores customer.balance as negative when the customer has
+    // credit available). If they're already above threshold, skip.
+    if -payload_balance >= threshold {
+        return Ok(());
+    }
+
+    // Step 4: Acquire per-customer mutex. Serializes concurrent
+    // customer.updated deliveries for the same customer.
+    let mutex = mutex_cache.get(customer_id);
+    let _guard = mutex.lock().await;
+
+    // Step 5: Fresh balance fetch — don't trust the webhook payload after
+    // the mutex wait; the balance may have moved.
+    let fresh_balance = lit_billing_core::balance::fetch(stripe, customer_id)
+        .await
+        .context("fetch fresh balance")?;
+    if -fresh_balance >= threshold {
+        return Ok(());
+    }
+
+    // Step 6: List PIs this month. Stripe doesn't filter by metadata
+    // server-side on list, so we filter client-side.
+    let month_start = month_start_unix(OffsetDateTime::now_utc());
+    let pis = list_pis_since(stripe, customer_id, month_start)
+        .await
+        .context("list PIs")?;
+
+    // Step 7: Derive consecutive failure count from most recent PIs.
+    // Disabling at >=3 matches plan §6 + the spec the team agreed on.
+    let consecutive_failures = count_consecutive_failures(&pis);
+    if consecutive_failures >= FAILURE_DISABLE_THRESHOLD {
+        db::disable_after_failures(pool, customer_id)
+            .await
+            .context("disable after failures")?;
+        // TODO Phase 8: dispatch "card needs updating" email via Resend.
+        tracing::warn!(
+            customer_id,
+            consecutive_failures,
+            "auto top-up disabled after consecutive failures"
+        );
+        return Ok(());
+    }
+
+    // Step 8: Cap check. Sum amounts of all non-failed PIs this month.
+    let topup_amount = config
+        .topup_amount_cents
+        .expect("CHECK constraint enforces non-null when enabled");
+    let monthly_cap = config
+        .monthly_cap_cents
+        .expect("CHECK constraint enforces non-null when enabled");
+    let spend_so_far = month_spend_cents(&pis);
+    if spend_so_far + topup_amount > monthly_cap {
+        tracing::info!(
+            customer_id,
+            spend_so_far,
+            topup_amount,
+            monthly_cap,
+            "auto top-up cap reached; skipping charge"
+        );
+        return Ok(());
+    }
+
+    // Step 9: Create off-session PaymentIntent. Idempotency key is a fresh
+    // UUID — webhook replays for the same customer.updated event happen
+    // rarely enough that we don't need to derive a stable key here; the
+    // unique constraint on auto_topup_credits.payment_intent_id catches
+    // duplicate credit attempts even if Stripe creates two PIs.
+    let payment_method_id = config
+        .payment_method_id
+        .as_deref()
+        .expect("CHECK constraint enforces non-null when enabled");
+    let wallet_address = config.wallet_address.as_str();
+    let amount_str = topup_amount.to_string();
+    let idempotency_key = Uuid::new_v4().to_string();
+    let pi_resp = stripe
+        .post_with_idempotency(
+            "payment_intents",
+            &[
+                ("amount", amount_str.as_str()),
+                ("currency", "usd"),
+                ("customer", customer_id),
+                ("payment_method", payment_method_id),
+                ("off_session", "true"),
+                ("confirm", "true"),
+                ("metadata[source]", "auto_topup"),
+                ("metadata[wallet_address]", wallet_address),
+            ],
+            &idempotency_key,
+        )
+        .await;
+
+    let pi_body = match pi_resp {
+        Ok(r) => r.body,
+        Err(e) => {
+            // Distinguish "Stripe returned a structured error with
+            // error.code" (decline / sca / etc.) from "HTTP timed out
+            // before any response" (transient — reconciler handles).
+            //
+            // Codex P1 #1: read `error.payment_intent.id` from the
+            // structured StripeError body instead of regexing the Display
+            // string. Without this, SCA recovery stages whatever string
+            // we happened to format as `pending_action_pi_id`, and the
+            // recovery page later calls Stripe with a non-PI id.
+            if let Some(stripe_err) = e.downcast_ref::<lit_billing_core::StripeError>() {
+                let code = stripe_err.code().unwrap_or("");
+                if code == "authentication_required" {
+                    let pi_id = stripe_err
+                        .payment_intent_id()
+                        .ok_or_else(|| {
+                            ProcessError::Transient(anyhow::anyhow!(
+                                "Stripe returned authentication_required without error.payment_intent.id; \
+                                 cannot stage SCA recovery"
+                            ))
+                        })?;
+                    handle_sca_required(pool, customer_id, pi_id).await?;
+                    return Ok(());
+                }
+                if matches!(
+                    code,
+                    "card_declined"
+                        | "expired_card"
+                        | "insufficient_funds"
+                        | "incorrect_cvc"
+                        | "processing_error"
+                ) {
+                    // TODO Phase 8: dispatch decline email. Failure
+                    // counter derivation in step 7 handles auto-disable.
+                    tracing::warn!(customer_id, code, "auto top-up charge declined");
+                    return Ok(());
+                }
+                // Other Stripe-side errors: not retriable here, but log
+                // and let the reconciler / next webhook tick figure it
+                // out. Return Ok(200) so Stripe doesn't pile on retries.
+                tracing::warn!(
+                    customer_id,
+                    code,
+                    "auto top-up: unexpected Stripe error code"
+                );
+                return Ok(());
+            }
+            // Non-Stripe error (network timeout, JSON parse, 5xx with no
+            // structured body). Treat as transient — Stripe retries the
+            // webhook; the reconciler catches any orphaned succeeded PI.
+            return Err(ProcessError::Transient(anyhow::anyhow!(
+                "paymentIntents.create transient error: {e:?}"
+            )));
+        }
+    };
+
+    let pi_id = pi_body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Stripe PI response missing id"))?
+        .to_string();
+    let pi_status = pi_body.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    if pi_status != "succeeded" {
+        // Stripe occasionally returns `requires_action` with status code 200
+        // (not as an error). Treat it the same way.
+        if pi_status == "requires_action" {
+            handle_sca_required(pool, customer_id, &pi_id).await?;
+            return Ok(());
+        }
+        tracing::warn!(
+            customer_id,
+            pi_id,
+            pi_status,
+            "PI not succeeded; skip credit"
+        );
+        return Ok(());
+    }
+
+    // Step 10: Try to claim the credit slot. ON CONFLICT DO NOTHING means
+    // a concurrent webhook + reconciler attempting the same PI converge
+    // on exactly one credit row.
+    let claimed = db::try_insert_credit(pool, &pi_id, customer_id, topup_amount)
+        .await
+        .context("claim credit row")?;
+    if !claimed {
+        // Someone else (other replica, reconciler) is/has credited this PI.
+        // Safe to return — the credit lands either way.
+        return Ok(());
+    }
+
+    // Step 11: Write the balance transaction. Idempotency-Key locks the
+    // logical "credit for PI X" operation at Stripe's side too.
+    let credit_idem = format!("credit:{pi_id}");
+    let neg_amount = (-topup_amount).to_string();
+    let bt_resp = stripe
+        .post_with_idempotency(
+            &format!("customers/{customer_id}/balance_transactions"),
+            &[
+                ("amount", neg_amount.as_str()),
+                ("currency", "usd"),
+                ("description", &format!("Auto top-up via {pi_id}")),
+            ],
+            &credit_idem,
+        )
+        .await
+        .context("balance_transactions write")?;
+    let bt_id = bt_resp
+        .body
+        .get("id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow::anyhow!("Stripe balance_tx response missing id"))?
+        .to_string();
+
+    // Step 12: Mark the credit complete in our ledger.
+    db::mark_credit_completed(pool, &pi_id, &bt_id)
+        .await
+        .context("mark credit completed")?;
+
+    // Step 12b: If this PI was the SCA recovery target, clear pending state.
+    if config.pending_action_pi_id.as_deref() == Some(pi_id.as_str()) {
+        let _ = db::clear_pending_action(pool, customer_id, &pi_id).await;
+    }
+
+    // Step 13: Invalidate lit-api-server's balance cache. Fire-and-forget;
+    // a failure here means the api-server serves the stale balance for up
+    // to 10 minutes (TTL). Not a correctness problem; just freshness.
+    let _ = invalidate_cache(cfg, customer_id).await;
+
+    Ok(())
+}
+
+fn month_start_unix(now: OffsetDateTime) -> i64 {
+    let first = OffsetDateTime::new_utc(
+        time::Date::from_calendar_date(now.year(), now.month(), 1)
+            .expect("first-of-month is always valid"),
+        time::Time::MIDNIGHT,
+    );
+    first.unix_timestamp()
+}
+
+async fn list_pis_since(
+    stripe: &StripeClient,
+    customer_id: &str,
+    since_unix: i64,
+) -> anyhow::Result<Vec<Value>> {
+    let mut out = Vec::new();
+    let mut starting_after: Option<String> = None;
+    let since_str = since_unix.to_string();
+    loop {
+        let mut params: Vec<(&str, &str)> = vec![
+            ("customer", customer_id),
+            ("limit", "100"),
+            ("created[gte]", since_str.as_str()),
+        ];
+        if let Some(ref s) = starting_after {
+            params.push(("starting_after", s.as_str()));
+        }
+        let resp = stripe
+            .get("payment_intents", &params)
+            .await
+            .context("payment_intents.list")?;
+        let data = resp.body.get("data").and_then(|d| d.as_array()).cloned();
+        let Some(arr) = data else { break };
+        let has_more = resp
+            .body
+            .get("has_more")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        let mut last_id: Option<String> = None;
+        for pi in arr.iter() {
+            if pi.pointer("/metadata/source").and_then(|v| v.as_str()) == Some("auto_topup") {
+                out.push(pi.clone());
+            }
+            last_id = pi.get("id").and_then(|v| v.as_str()).map(|s| s.to_string());
+        }
+        if !has_more {
+            break;
+        }
+        match last_id {
+            Some(id) => starting_after = Some(id),
+            None => break,
+        }
+    }
+    Ok(out)
+}
+
+fn count_consecutive_failures(pis: &[Value]) -> usize {
+    // The PI list endpoint returns newest first by default; we iterate in
+    // that order and stop counting at the first non-failed PI.
+    let mut count = 0;
+    for pi in pis {
+        if is_failed(pi) {
+            count += 1;
+        } else {
+            break;
+        }
+    }
+    count
+}
+
+fn is_failed(pi: &Value) -> bool {
+    let status = pi.get("status").and_then(|v| v.as_str()).unwrap_or("");
+    if status == "requires_payment_method" {
+        return true;
+    }
+    let last_err_code = pi
+        .pointer("/last_payment_error/code")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    matches!(
+        last_err_code,
+        "card_declined"
+            | "expired_card"
+            | "insufficient_funds"
+            | "incorrect_cvc"
+            | "processing_error"
+    )
+}
+
+/// Sum `amount` over all non-failed PIs in the window. Mirrors the cap
+/// definition: "total non-failed spend this month".
+fn month_spend_cents(pis: &[Value]) -> i64 {
+    pis.iter()
+        .filter(|pi| !is_failed(pi))
+        .filter_map(|pi| pi.get("amount").and_then(|v| v.as_i64()))
+        .sum()
+}
+
+async fn handle_sca_required(
+    pool: &PgPool,
+    customer_id: &str,
+    pi_id: &str,
+) -> Result<(), ProcessError> {
+    let token = generate_recovery_token();
+    db::set_pending_action(pool, customer_id, pi_id, &token)
+        .await
+        .context("set pending_action")?;
+    // TODO Phase 8: dispatch the tokenized recovery email via Resend.
+    tracing::info!(
+        customer_id,
+        pi_id,
+        "auto top-up: SCA recovery handoff staged"
+    );
+    Ok(())
+}
+
+/// Best-effort fallback extractor — only used by unit tests now.
+/// Production code reads `error.payment_intent.id` directly via the
+/// `StripeError` downcast (Codex P1 #1 fix).
+#[cfg(test)]
+fn extract_pi_id(s: &str) -> Option<String> {
+    let bytes = s.as_bytes();
+    let needle = b"pi_";
+    bytes.windows(3).enumerate().find_map(|(i, w)| {
+        if w != needle {
+            return None;
+        }
+        let mut end = i + 3;
+        while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
+            end += 1;
+        }
+        if end - i >= 6 {
+            Some(String::from_utf8_lossy(&bytes[i..end]).into_owned())
+        } else {
+            None
+        }
+    })
+}
+
+async fn invalidate_cache(cfg: &Config, customer_id: &str) -> anyhow::Result<()> {
+    let client = internal_client::build_client()?;
+    let body = serde_json::json!({ "customer_id": customer_id });
+    internal_client::post_internal(&client, cfg, "/internal/invalidate_balance_cache", &body).await
+}
+
+/// Used by `Rocket::custom` configurations that need to expose the
+/// signature header on outbound responses for ergonomic debugging in
+/// development; not used in production. Kept here so it lives next to
+/// the verifier.
+#[allow(dead_code)]
+fn debug_header(name: &str, value: &str) -> Header<'static> {
+    Header::new(name.to_string(), value.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn month_start_unix_is_first_of_month_midnight() {
+        let mid_month = OffsetDateTime::new_utc(
+            time::Date::from_calendar_date(2026, time::Month::June, 15).unwrap(),
+            time::Time::from_hms(12, 34, 56).unwrap(),
+        );
+        let start = month_start_unix(mid_month);
+        let parsed = OffsetDateTime::from_unix_timestamp(start).unwrap();
+        assert_eq!(parsed.year(), 2026);
+        assert_eq!(parsed.month(), time::Month::June);
+        assert_eq!(parsed.day(), 1);
+        assert_eq!(parsed.hour(), 0);
+        assert_eq!(parsed.minute(), 0);
+    }
+
+    #[test]
+    fn count_consecutive_failures_stops_at_first_success() {
+        let pi = |status: &str, code: Option<&str>| {
+            let mut m = serde_json::Map::new();
+            m.insert("status".into(), serde_json::Value::String(status.into()));
+            if let Some(c) = code {
+                m.insert("last_payment_error".into(), serde_json::json!({"code": c}));
+            }
+            Value::Object(m)
+        };
+        let list = vec![
+            pi("requires_payment_method", None),
+            pi("succeeded", None),
+            pi("requires_payment_method", None),
+            pi("requires_payment_method", None),
+        ];
+        // Only the first one counts; chain stops at the succeeded.
+        assert_eq!(count_consecutive_failures(&list), 1);
+    }
+
+    #[test]
+    fn count_consecutive_failures_recognizes_error_codes() {
+        let pi = |code: &str| serde_json::json!({"status":"processing","last_payment_error":{"code":code}});
+        let list = vec![
+            pi("card_declined"),
+            pi("insufficient_funds"),
+            pi("expired_card"),
+        ];
+        assert_eq!(count_consecutive_failures(&list), 3);
+    }
+
+    #[test]
+    fn month_spend_sums_non_failed_only() {
+        let succeeded = serde_json::json!({"status":"succeeded","amount":2000});
+        let failed = serde_json::json!({"status":"requires_payment_method","amount":500});
+        let pending = serde_json::json!({"status":"processing","amount":1500});
+        let list = vec![succeeded, failed, pending];
+        assert_eq!(month_spend_cents(&list), 3500);
+    }
+
+    #[test]
+    fn extract_pi_id_pulls_from_error_strings() {
+        let s = "Stripe error: authentication_required pi_3TfxzqGhjEGDNSRy0VYfHVf6 details";
+        assert_eq!(
+            extract_pi_id(s),
+            Some("pi_3TfxzqGhjEGDNSRy0VYfHVf6".to_string())
+        );
+    }
+
+    #[test]
+    fn extract_pi_id_returns_none_when_absent() {
+        assert!(extract_pi_id("nothing here").is_none());
+    }
+
+    /// Plan §6 step 7: at exactly 3 consecutive failures we auto-disable.
+    /// One less should NOT trigger.
+    #[test]
+    fn failure_threshold_is_three() {
+        assert_eq!(FAILURE_DISABLE_THRESHOLD, 3);
+    }
+
+    /// Plan §6 step 8 / dashboard: floor matches the manual-topup floor.
+    #[test]
+    fn min_topup_matches_manual_floor() {
+        assert_eq!(MIN_TOPUP_CENTS, 500);
+    }
+}

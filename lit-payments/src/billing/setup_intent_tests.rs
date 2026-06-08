@@ -118,6 +118,29 @@ fn wallet_header() -> String {
 ///   4. Waits for Stripe's search index to consistently return that id.
 ///
 /// Per-test calls are cheap on a clean account (one search hit, no delete).
+/// Attach a `pm_card_visa` PaymentMethod to the customer and return its id.
+/// Idempotent enough for tests — Stripe lets a single PaymentMethod attach
+/// to many customers (different ids per attach); on rerun we get a fresh
+/// pm_xxx but the previous one stays attached.
+pub(crate) async fn attach_test_card(stripe: &StripeClient, customer_id: &str) -> String {
+    let pm = stripe
+        .post(
+            "payment_methods",
+            &[("type", "card"), ("card[token]", "tok_visa")],
+        )
+        .await
+        .expect("create pm");
+    let pm_id = pm.body["id"].as_str().expect("pm id").to_string();
+    stripe
+        .post(
+            &format!("payment_methods/{pm_id}/attach"),
+            &[("customer", customer_id)],
+        )
+        .await
+        .expect("attach pm");
+    pm_id
+}
+
 pub(crate) async fn ensure_unique_customer(stripe: &StripeClient, wallet: &str) -> String {
     let query = format!("metadata['wallet_address']:'{wallet}'");
     let resp = stripe

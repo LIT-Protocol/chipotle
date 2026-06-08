@@ -6,6 +6,8 @@ use lit_billing_auth::{AuthResolver, BillingAuth};
 use lit_billing_core::StripeClient;
 use lit_payments::auth::routes as auth_routes;
 use lit_payments::auth_resolver::HttpAuthResolver;
+use lit_payments::auto_topup::webhook::handler as webhook_handler;
+use lit_payments::auto_topup::webhook::mutex::PerCustomerMutex;
 use lit_payments::billing as billing_routes;
 use lit_payments::portal::routes as portal_routes;
 use lit_payments::rate;
@@ -43,6 +45,7 @@ async fn rocket() -> _ {
         .expect("auth resolver"),
     );
     rate::spawn_rate_poller(pool.clone());
+    let per_customer_mutex = PerCustomerMutex::new();
     rocket::build()
         .manage(pool)
         .manage(cfg)
@@ -50,6 +53,7 @@ async fn rocket() -> _ {
         .manage(rate_limit)
         .manage(stripe)
         .manage(auth_resolver)
+        .manage(per_customer_mutex)
         .mount(
             "/",
             routes![
@@ -74,6 +78,7 @@ async fn rocket() -> _ {
                 billing_routes::setup_intent::setup_intent,
                 billing_routes::auto_topup_config::get_auto_topup_config,
                 billing_routes::auto_topup_config::put_auto_topup_config,
+                webhook_handler::stripe_webhook,
             ],
         )
         .mount("/static", FileServer::from("static"))

@@ -25,4 +25,4 @@ pub mod http;
 pub mod reporting;
 
 pub use client::StripeClient;
-pub use http::StripeResponse;
+pub use http::{StripeError, StripeResponse};

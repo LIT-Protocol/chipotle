@@ -16,7 +16,7 @@ hex = "0.4"
 hmac = "0.12"
 lit-billing-auth = { path = "../lit-billing-auth" }
 lit-billing-core = { path = "../lit-billing-core" }
-moka = { version = "0.12", features = ["future"] }
+moka = { version = "0.12", features = ["future", "sync"] }
 num-bigint = "0.4"
 num-traits = "0.2"
 rand = "0.8"
@@ -25,6 +25,8 @@ rocket = { version = "0.5.1", features = ["json", "secrets"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["arbitrary_precision"] }
 sha2 = "0.10"
+subtle = "2.6"
+thiserror = "1.0"
 sqlx = { version = "0.8", features = [
     "postgres",
     "runtime-tokio",

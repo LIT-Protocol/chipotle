@@ -168,6 +168,133 @@ pub async fn upsert(
     Ok(into_row(row))
 }
 
+/// Mark the config as auto-disabled after the consecutive-failure
+/// threshold is crossed. Idempotent — the WHERE clause means a second call
+/// is a no-op even if the row was already disabled.
+pub async fn disable_after_failures(pool: &PgPool, customer_id: &str) -> Result<()> {
+    let now = OffsetDateTime::now_utc();
+    sqlx::query(
+        "UPDATE auto_topup_config \
+            SET enabled = false, \
+                disabled_reason = 'failures', \
+                pending_action_pi_id = NULL, \
+                pending_action_at = NULL, \
+                recovery_token = NULL, \
+                recovery_token_expires_at = NULL, \
+                updated_at = $1 \
+            WHERE customer_id = $2",
+    )
+    .bind(now)
+    .bind(customer_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Record an off-session `authentication_required` handoff: store the
+/// pending PI id + a fresh recovery token (24h TTL). The auto top-up rule
+/// stays in the DB but is functionally paused — `disabled_reason` is
+/// `'requires_action'`, the dashboard shows the "action required" banner,
+/// and any new `customer.updated` will short-circuit on the
+/// disabled_reason check.
+pub async fn set_pending_action(
+    pool: &PgPool,
+    customer_id: &str,
+    pi_id: &str,
+    recovery_token: &str,
+) -> Result<()> {
+    let now = OffsetDateTime::now_utc();
+    let expires = now + time::Duration::hours(24);
+    sqlx::query(
+        "UPDATE auto_topup_config \
+            SET pending_action_pi_id = $1, \
+                pending_action_at = $2, \
+                recovery_token = $3, \
+                recovery_token_expires_at = $4, \
+                disabled_reason = 'requires_action', \
+                updated_at = $2 \
+            WHERE customer_id = $5",
+    )
+    .bind(pi_id)
+    .bind(now)
+    .bind(recovery_token)
+    .bind(expires)
+    .bind(customer_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Atomically clear the pending-action state after the SCA recovery flow
+/// credits a previously-pending PI. The `pending_action_pi_id` WHERE
+/// predicate makes the write a no-op if some other concurrent path
+/// already cleared it.
+pub async fn clear_pending_action(pool: &PgPool, customer_id: &str, pi_id: &str) -> Result<()> {
+    let now = OffsetDateTime::now_utc();
+    sqlx::query(
+        "UPDATE auto_topup_config \
+            SET pending_action_pi_id = NULL, \
+                pending_action_at = NULL, \
+                recovery_token = NULL, \
+                recovery_token_expires_at = NULL, \
+                disabled_reason = NULL, \
+                updated_at = $1 \
+            WHERE customer_id = $2 AND pending_action_pi_id = $3",
+    )
+    .bind(now)
+    .bind(customer_id)
+    .bind(pi_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// INSERT a row into `auto_topup_credits` (PK on `payment_intent_id`) to
+/// claim the credit slot. Returns `Ok(true)` if the row was inserted,
+/// `Ok(false)` if a row already existed (dedup hit — concurrent webhook
+/// + reconciler, or a webhook replay). Atomic — the unique constraint is
+/// the durable correctness primitive (see plan §11).
+pub async fn try_insert_credit(
+    pool: &PgPool,
+    payment_intent_id: &str,
+    customer_id: &str,
+    amount_cents: i64,
+) -> Result<bool> {
+    let inserted: Option<(String,)> = sqlx::query_as(
+        "INSERT INTO auto_topup_credits (payment_intent_id, customer_id, amount_cents) \
+         VALUES ($1, $2, $3) \
+         ON CONFLICT (payment_intent_id) DO NOTHING \
+         RETURNING payment_intent_id",
+    )
+    .bind(payment_intent_id)
+    .bind(customer_id)
+    .bind(amount_cents)
+    .fetch_optional(pool)
+    .await?;
+    Ok(inserted.is_some())
+}
+
+/// Mark a previously-inserted credit row as fully credited (the
+/// `balance_transactions` write succeeded). The reconciler distinguishes
+/// "credit row exists, balance_tx_id NULL" (partial — retry) from
+/// "credit row exists with balance_tx_id" (done — skip).
+pub async fn mark_credit_completed(
+    pool: &PgPool,
+    payment_intent_id: &str,
+    stripe_balance_transaction_id: &str,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE auto_topup_credits \
+            SET stripe_balance_transaction_id = $1 \
+            WHERE payment_intent_id = $2",
+    )
+    .bind(stripe_balance_transaction_id)
+    .bind(payment_intent_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
 /// Returns true if the error is a Postgres CHECK constraint violation
 /// (SQLSTATE 23514) on the `enabled_requires_config` constraint. Lets
 /// handlers map "you said enabled=true but didn't set all required fields"

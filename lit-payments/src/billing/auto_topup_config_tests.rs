@@ -119,29 +119,7 @@ fn wallet_header() -> String {
     base64_light::base64_encode(&serde_json::to_string(&json).unwrap())
 }
 
-/// Attach a `pm_card_visa` PaymentMethod to the customer and return its id.
-/// Idempotent enough for tests — Stripe lets a single PaymentMethod attach
-/// to many customers (different ids per attach); on rerun we get a fresh
-/// pm_xxx but the previous one stays attached. That doesn't affect the
-/// ownership-check tests since we always use the freshly-returned id.
-async fn attach_test_card(stripe: &StripeClient, customer_id: &str) -> String {
-    let pm = stripe
-        .post(
-            "payment_methods",
-            &[("type", "card"), ("card[token]", "tok_visa")],
-        )
-        .await
-        .expect("create pm");
-    let pm_id = pm.body["id"].as_str().expect("pm id").to_string();
-    stripe
-        .post(
-            &format!("payment_methods/{pm_id}/attach"),
-            &[("customer", customer_id)],
-        )
-        .await
-        .expect("attach pm");
-    pm_id
-}
+use super::setup_intent_tests::attach_test_card;
 
 /// Delete the `auto_topup_config` rows for this wallet so each test starts
 /// from a clean slate. We delete by wallet_address (not customer_id) because
