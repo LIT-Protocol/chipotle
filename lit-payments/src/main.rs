@@ -79,6 +79,8 @@ async fn rocket() -> _ {
                 billing_routes::setup_intent::setup_intent,
                 billing_routes::auto_topup_config::get_auto_topup_config,
                 billing_routes::auto_topup_config::put_auto_topup_config,
+                billing_routes::sca_resume::get_auto_topup_resume,
+                billing_routes::sca_resume::post_auto_topup_resume_complete,
                 webhook_handler::stripe_webhook,
             ],
         )
