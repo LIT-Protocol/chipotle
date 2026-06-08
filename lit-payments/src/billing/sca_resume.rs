@@ -235,7 +235,30 @@ pub async fn post_auto_topup_resume_complete(
                 "Could not record your credit; try again.",
             )
         })?;
-    if claimed {
+    // Codex P1 (Phase 7): when claimed=false, a prior path already wrote
+    // the credit row — but it may be a partial (balance_tx_id NULL) left
+    // over from a mid-flow crash on the original webhook delivery. Treat
+    // partials the same as a fresh claim: run the balance_transactions
+    // write under the same idempotency key. The Stripe Idempotency-Key
+    // guarantees we don't double-credit if the prior attempt actually
+    // landed at Stripe but failed on the DB write. Pre-fix this branch
+    // returned `credited: false` and left the partial unrepaired,
+    // forcing the user to wait for the reconciler tick.
+    let needs_balance_tx = if claimed {
+        true
+    } else {
+        match db::find_credit_row(pool, &pi_id).await {
+            Ok(Some(row)) => row.stripe_balance_transaction_id.is_none(),
+            Ok(None) => false,
+            Err(e) => {
+                tracing::warn!(
+                    "resume/complete: find_credit_row failed (treating as fully credited): {e}"
+                );
+                false
+            }
+        }
+    };
+    if needs_balance_tx {
         let credit_idem = format!("credit:{pi_id}");
         let neg = (-amount).to_string();
         let bt_resp = stripe
@@ -275,7 +298,7 @@ pub async fn post_auto_topup_resume_complete(
     let _ = invalidate_cache(cfg, &customer_id).await;
 
     Ok(Json(serde_json::json!({
-        "credited": claimed,
+        "credited": needs_balance_tx,
         "payment_intent_id": pi_id,
     })))
 }
