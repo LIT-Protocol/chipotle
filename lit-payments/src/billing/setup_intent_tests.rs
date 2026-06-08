@@ -118,7 +118,7 @@ fn wallet_header() -> String {
 ///   4. Waits for Stripe's search index to consistently return that id.
 ///
 /// Per-test calls are cheap on a clean account (one search hit, no delete).
-async fn ensure_unique_customer(stripe: &StripeClient, wallet: &str) -> String {
+pub(crate) async fn ensure_unique_customer(stripe: &StripeClient, wallet: &str) -> String {
     let query = format!("metadata['wallet_address']:'{wallet}'");
     let resp = stripe
         .get(
@@ -138,26 +138,16 @@ async fn ensure_unique_customer(stripe: &StripeClient, wallet: &str) -> String {
         })
         .unwrap_or_default();
 
-    let surviving = match ids.split_first() {
-        Some((first, rest)) => {
-            for dupe in rest {
-                tracing::warn!("deleting duplicate customer {dupe} for wallet {wallet}");
-                let _ = stripe.post(&format!("customers/{dupe}"), &[]).await;
-                // Stripe customer DELETE requires the customers/{id} DELETE
-                // HTTP verb, not POST. Use a raw reqwest call so we don't
-                // bloat the shared client surface.
-                let _ = reqwest::Client::new()
-                    .delete(format!("https://api.stripe.com/v1/customers/{dupe}"))
-                    .basic_auth(
-                        std::env::var("STRIPE_SECRET_KEY").unwrap_or_default(),
-                        Some(""),
-                    )
-                    .header("Stripe-Version", "2020-08-27")
-                    .send()
-                    .await;
-            }
-            first.clone()
-        }
+    // No dedup-by-deletion: deleting Stripe customers under tests has
+    // produced orphan rows in `auto_topup_config` (which holds
+    // `UNIQUE(wallet_address)`). Instead, take whichever id Stripe search
+    // returns first and accept extras as benign test-only fixtures. The
+    // handler's `find_by_wallet` will consistently return the same first id
+    // on subsequent calls because Stripe search ordering is stable within
+    // a short window. If a fully-fresh wallet has zero matches, create one
+    // and poll search until indexing settles.
+    let surviving = match ids.first() {
+        Some(first) => first.clone(),
         None => lit_billing_core::customer::find_or_create_by_wallet(stripe, wallet)
             .await
             .expect("create customer"),
@@ -176,6 +166,7 @@ async fn ensure_unique_customer(stripe: &StripeClient, wallet: &str) -> String {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn setup_intent_returns_client_secret_when_customer_exists() {
     let Some(key) = stripe_key() else {
         eprintln!("STRIPE_SECRET_KEY not set — skipping Stripe-backed test");
@@ -215,6 +206,7 @@ async fn setup_intent_returns_client_secret_when_customer_exists() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn setup_intent_returns_400_when_no_customer() {
     let Some(key) = stripe_key() else {
         eprintln!("STRIPE_SECRET_KEY not set — skipping Stripe-backed test");
@@ -239,6 +231,7 @@ async fn setup_intent_returns_400_when_no_customer() {
 }
 
 #[tokio::test]
+#[serial_test::serial]
 async fn setup_intent_returns_501_for_api_key_caller() {
     // Stripe key NOT required for this path — the handler short-circuits
     // before calling Stripe. Skip only if the build can't even construct

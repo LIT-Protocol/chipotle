@@ -72,6 +72,8 @@ async fn rocket() -> _ {
                 chain::claim_payment,
                 rate::override_rate,
                 billing_routes::setup_intent::setup_intent,
+                billing_routes::auto_topup_config::get_auto_topup_config,
+                billing_routes::auto_topup_config::put_auto_topup_config,
             ],
         )
         .mount("/static", FileServer::from("static"))

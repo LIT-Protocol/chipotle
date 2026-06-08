@@ -6,7 +6,10 @@
 //! lit-api-server's internal endpoints over the existing
 //! `X-Internal-Secret` channel (see `auth_resolver::HttpAuthResolver`).
 
+pub mod auto_topup_config;
 pub mod setup_intent;
 
 #[cfg(test)]
-mod setup_intent_tests;
+mod auto_topup_config_tests;
+#[cfg(test)]
+pub(crate) mod setup_intent_tests;

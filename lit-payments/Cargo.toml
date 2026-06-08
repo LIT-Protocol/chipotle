@@ -42,3 +42,8 @@ uuid = { version = "1", features = ["v4", "serde"] }
 # Used by Phase 3+ integration tests to base64-encode mock X-Wallet-Auth
 # payloads. Production code in this crate doesn't need it.
 base64_light = "0.1"
+# Serializes integration tests that touch shared external state (Stripe
+# customers keyed by wallet metadata, real Postgres rows). Tagging tests
+# with `#[serial]` prevents the "search-lag duplicate creation" race the
+# Phase 4 development run hit.
+serial_test = "3"

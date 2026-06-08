@@ -4,6 +4,7 @@
 
 pub mod auth;
 pub mod auth_resolver;
+pub mod auto_topup;
 pub mod billing;
 pub mod chain;
 pub mod config;
