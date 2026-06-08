@@ -63,9 +63,32 @@ impl AuthResolver for LocalAuthResolver {
         // for the API-key header (CPL-285 hardening), so callers here always
         // pass a raw key, but the function is shared with WalletSigned
         // downstream so we keep the broad acceptance.
-        let wallet_address_hex = crate::accounts::get_billing_wallet_address(api_key)
-            .await
-            .map_err(|e| AuthError::Transient(format!("on-chain resolve failed: {e}")))?;
+        //
+        // Codex P2 (Phase 2) fix: distinguish "key has no wallet on chain"
+        // (BadCredentials → 401) from "RPC / contract call failed"
+        // (Transient → 503). Pre-fix this method collapsed every error to
+        // Transient, so bad API keys produced 503s and made lit-payments
+        // retry-loop for permanent credential failures.
+        let wallet_address_hex = match crate::accounts::get_billing_wallet_address(api_key).await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                // `accounts::get_billing_wallet_address` bails with "account
+                // has no wallet address" when the on-chain mapping returns
+                // Address::ZERO for this key hash — i.e. the key isn't
+                // registered. Any other anyhow error is transport / RPC /
+                // contract decoding noise → transient.
+                let msg = format!("{e}");
+                if msg.contains("no wallet address") || msg.contains("Address::ZERO") {
+                    return Err(AuthError::BadCredentials(format!(
+                        "api key not found on chain: {msg}"
+                    )));
+                }
+                return Err(AuthError::Transient(format!(
+                    "on-chain resolve failed: {msg}"
+                )));
+            }
+        };
 
         // Derive the api_key_hash_hex from the wallet address — same value
         // ChainSecured callers carry around so downstream caching keys match.

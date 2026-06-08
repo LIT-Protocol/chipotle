@@ -57,6 +57,45 @@ impl<'r> FromRequest<'r> for BillingAuth {
     type Error = ();
 
     async fn from_request(request: &'r Request<'_>) -> Outcome<BillingAuth, Self::Error> {
+        // DEV-ONLY bypass: `LIT_DEV_WALLET_BYPASS=1` lets a caller present
+        // `X-Dev-Wallet: 0x...` instead of a signed EIP-712 payload. Used
+        // by the Phase 8 browser-QA harness when lit-api-server (which
+        // owns the on-chain resolver) is not running locally. The env var
+        // is read at request time, NOT cached, so a misconfigured prod
+        // deploy fails closed unless it actively sets the flag — and even
+        // then leaves a clear audit trail in `tracing::warn!`.
+        if std::env::var("LIT_DEV_WALLET_BYPASS")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+            && let Some(dev_wallet) = request.headers().get_one("X-Dev-Wallet")
+            && dev_wallet.starts_with("0x")
+            && dev_wallet.len() == 42
+        {
+            tracing::warn!(
+                "LIT_DEV_WALLET_BYPASS active — accepting X-Dev-Wallet={dev_wallet}. \
+                 DO NOT ENABLE IN PRODUCTION."
+            );
+            // Mirror the production `WalletSigned` shape so downstream
+            // handlers can't tell the difference.
+            let wallet_lower = dev_wallet.to_ascii_lowercase();
+            // The downstream cache key is the api_key_hash_hex, which is
+            // keccak256(walletAddress). Tests don't need a real hash; a
+            // deterministic value derived from the wallet keeps cache hits
+            // consistent across calls.
+            let api_key_hash_hex = format!(
+                "0x{}",
+                wallet_lower[2..]
+                    .repeat(2)
+                    .chars()
+                    .take(64)
+                    .collect::<String>()
+            );
+            return Outcome::Success(BillingAuth::WalletSigned {
+                wallet_address_hex: wallet_lower,
+                api_key_hash_hex,
+            });
+        }
+
         // Resolver is required — without it no auth can be done. A misconfigured
         // service should fail closed (500), never silently allow.
         let resolver = match request.rocket().state::<Arc<dyn AuthResolver>>() {
@@ -100,41 +139,63 @@ impl<'r> FromRequest<'r> for BillingAuth {
         // path only. Otherwise an attacker could send
         // `X-Api-Key: 0x{keccak256(walletAddress)}` and bypass the EIP-712 path
         // entirely (CPL-285 / CPL-286).
-        let auth_header = request.headers().get_one("Authorization");
-        if let Some(v) = auth_header {
-            let v = v.trim();
-            let mut parts = v.split_whitespace();
-            if let (Some(scheme), Some(key_part)) = (parts.next(), parts.next())
-                && scheme.eq_ignore_ascii_case("bearer")
-            {
-                let key = key_part.trim();
-                if !key.is_empty() {
-                    if is_precomputed_hash_shape(key) {
-                        tracing::warn!(
-                            "rejecting Authorization Bearer that looks like a precomputed account hash; \
-                             ChainSecured callers must use X-Wallet-Auth"
-                        );
-                        return Outcome::Error((Status::Unauthorized, ()));
-                    }
-                    return Outcome::Success(BillingAuth::ApiKey(key.to_string()));
-                }
+        //
+        // Codex P1 (Phase 2) fix: the guard must VERIFY the key, not just
+        // accept its presence. We delegate to `resolver.resolve_api_key`
+        // which (on lit-api-server) hits the on-chain
+        // `allApiKeyHashesToMaster` mapping and (on lit-payments) forwards
+        // via the internal HTTP hop. A non-existent / bogus key yields
+        // BadCredentials → 401; transient resolver failures yield
+        // Transient → 503 so retries are signalled correctly.
+        let api_key = extract_api_key(request);
+        if let Some(key) = api_key {
+            if is_precomputed_hash_shape(&key) {
+                tracing::warn!(
+                    "rejecting API-key header that looks like a precomputed account hash; \
+                     ChainSecured callers must use X-Wallet-Auth"
+                );
+                return Outcome::Error((Status::Unauthorized, ()));
             }
-        }
-        if let Some(key) = request.headers().get_one("X-Api-Key") {
-            let key = key.trim();
-            if !key.is_empty() {
-                if is_precomputed_hash_shape(key) {
-                    tracing::warn!(
-                        "rejecting X-Api-Key that looks like a precomputed account hash; \
-                         ChainSecured callers must use X-Wallet-Auth"
-                    );
-                    return Outcome::Error((Status::Unauthorized, ()));
+            match resolver.resolve_api_key(&key).await {
+                Ok(_identity) => {
+                    // Yield the raw key so downstream callers can keep
+                    // their existing keccak256/cache-key derivations
+                    // unchanged. The resolver call was the verification;
+                    // we don't carry its result forward to avoid changing
+                    // the public surface of `BillingAuth::ApiKey`.
+                    return Outcome::Success(BillingAuth::ApiKey(key));
                 }
-                return Outcome::Success(BillingAuth::ApiKey(key.to_string()));
+                Err(e) => return Outcome::Error((map_auth_error(e), ())),
             }
         }
         Outcome::Error((Status::Unauthorized, ()))
     }
+}
+
+/// Pull a non-empty API key out of either `Authorization: Bearer <k>` or
+/// `X-Api-Key: <k>`. Returns `None` if neither header is present or
+/// usable. Kept separate from the verification path so test code can
+/// exercise extraction without spinning up a resolver.
+fn extract_api_key<'r>(request: &'r Request<'_>) -> Option<String> {
+    if let Some(v) = request.headers().get_one("Authorization") {
+        let v = v.trim();
+        let mut parts = v.split_whitespace();
+        if let (Some(scheme), Some(key_part)) = (parts.next(), parts.next())
+            && scheme.eq_ignore_ascii_case("bearer")
+        {
+            let key = key_part.trim();
+            if !key.is_empty() {
+                return Some(key.to_string());
+            }
+        }
+    }
+    if let Some(key) = request.headers().get_one("X-Api-Key") {
+        let key = key.trim();
+        if !key.is_empty() {
+            return Some(key.to_string());
+        }
+    }
+    None
 }
 
 #[cfg(feature = "openapi")]
