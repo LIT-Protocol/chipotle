@@ -1,75 +1,71 @@
-# Auto Top-Up — Implementation Plan
+# Auto Top-Up — Final Implementation Plan
 
 **Status:** Locked. Ready to implement.
 **Scope:** Stripe-paying users only. LITKEY / crypto users are out of scope.
-**Architecture:** Webhook-driven, lit-payments-owned. lit-api-server is unchanged except for one tiny cache-invalidation endpoint.
+**Architecture:** Sync-credit, single-webhook-trigger. US cards only.
 
 ---
 
 ## 1. Goal
 
-After any Lit Action or management deduction reduces a user's Stripe customer balance below a configured threshold, automatically charge their saved card off-session for a configured top-up amount, subject to a configured monthly cap. UI matches Claude Console and OpenAI Platform's auto-recharge modals.
-
-Auto top-up is opt-in. Users configure it via the dashboard after saving a card.
+After any Lit Action or management deduction drops a user's Stripe customer balance below a configured threshold, automatically charge their saved card off-session for a configured top-up amount, subject to a configured monthly cap. UI matches Claude Console and OpenAI Platform's auto-recharge modals. Auto top-up is opt-in.
 
 ---
 
 ## 2. Product framing
 
-### Soft cap, explicit trade-off
+### Scope constraints (decided)
+- **US cards only.** No SCA / 3DS support — `requires_action` responses are treated as failures.
+- **Card payment method only.** No ACH, bank debits, wallets.
+- **Soft cap.** UI says "approximately $X/month." Cap can be exceeded by ~1 top-up amount in rare races; this is documented as the trade-off.
+- **Bias toward more top-ups, never fewer.** A missed top-up means a Lit Action fails mid-flight. An extra charge means an over-credited account that Sally can refund. The design favors over-charging.
 
-Monthly cap is **best-effort**, not a hard contract. UI copy must say "approximately $X/month." The only way the cap can be exceeded is a rare race against Stripe's PaymentIntent list endpoint, which isn't strongly read-after-write consistent. Probability <1% per opportunity; overshoot bounded by one top-up amount when it fires.
+### Charge and credit happen synchronously
 
-### Bias toward more top-ups, never fewer
-
-A missed top-up means Lit Action execution can fail mid-flight when balance hits zero. That's user-visible and disastrous. An extra top-up means the user has unexpected credits in their account — recoverable via refund through Sally's admin portal. The design intentionally favors over-charging over under-charging in any ambiguous case.
+When the trigger evaluates and decides to charge, `paymentIntents.create` with `off_session=true, confirm=true` returns the final status synchronously for US cards. On `succeeded`, the handler immediately calls `balance_transactions` to credit the user's wallet. **No `payment_intent.succeeded` webhook is used.** The only webhook is `customer.updated`, which is the trigger.
 
 ### What we are not building
-
 - Hard monthly cap with reservation ledger.
+- SCA / 3DS recovery flow.
+- `payment_intent.succeeded` / `payment_intent.payment_failed` webhooks.
 - Currency support beyond USD.
-- Refund-aware cap accounting (refunds do NOT restore monthly cap capacity).
-- Automated daily/rolling restrictions for public-tier API keys (future feature).
-- Reconciler cron — Stripe's 3-day webhook retry + manual recovery via admin portal cover the rare delivery-failure case.
+- Refund-aware cap accounting.
+- Daily / rolling restrictions on public-tier API keys.
+- Multi-card support per customer.
 
 ---
 
 ## 3. Architecture overview
 
-### Trigger source: Stripe `customer.updated` webhook
+### Trigger source: `customer.updated` webhook
 
-When `lit-api-server` deducts credits via `POST /v1/customers/{id}/balance_transactions`, Stripe fires a `customer.updated` event containing the new balance and the previous balance. `lit-payments` listens to this event, filters for balance changes, and decides whether to top up.
+`lit-api-server` deducts credits via `POST /v1/customers/{id}/balance_transactions` (existing behavior, unchanged). Stripe fires `customer.updated` containing the new and previous balance. `lit-payments` listens, filters for actual balance changes, and runs the trigger handler.
 
-**Empirically validated** in Stripe test mode (June 2026): 21 balance_transactions → 21 `customer.updated` events, 1:1, no coalescing under either slow (0.5s gap) or rapid parallel (10 in 2.8s) load. Each event contains the new `balance` and `previous_attributes.balance` for delta detection.
+**Empirically validated** (June 2026): 21 balance_transactions → 21 `customer.updated` events, 1:1 with no coalescing, balance correct in every payload.
 
 ### Components
 
-| Component | Path / Location | Role |
+| Component | Path | Role |
 |---|---|---|
-| **Dashboard** | `lit-static/dapps/dashboard/` | Vanilla HTML/JS. Adds config modal, save-card flow, status banners. Talks directly to `lit-payments`. |
-| **lit-api-server** | `lit-api-server/`, runs in TEE | Existing API server. **No trigger code, no auto-top-up logic.** Only adds: 1 internal `invalidate_balance_cache` endpoint. The existing wallet/API-key auth module (`billing_auth.rs`) is extracted to a shared crate so `lit-payments` can use it. |
-| **lit-payments** | `lit-payments/`, on Railway | Existing service. Adds: 3 dashboard-facing endpoints (now with wallet/API-key auth), 2 Stripe webhook handlers, 2 new Postgres tables. Becomes the home of all auto-top-up logic. |
-| **Postgres** | inside `lit-payments` DB | Existing DB. Adds 2 new tables: `auto_topup_config`, `auto_topup_credits`. |
-| **Stripe** | external | Customer, PaymentMethod, PaymentIntents, balance transactions, webhooks (`customer.updated`, `payment_intent.succeeded`, `payment_intent.payment_failed`). |
-| **Shared auth crate** | new, e.g. `lit-billing-auth/` | Extracted from `lit-api-server::core::v1::guards::billing_auth`. Accepts wallet signature (EIP-712) and API key. Used by both lit-api-server (existing endpoints) and lit-payments (new dashboard endpoints). |
-
-### Why the TEE no longer holds auto-top-up logic
-
-Architectural principle: keep the TEE (lit-api-server) narrowly focused on Lit Action execution and key-usage operations. Anything that can live outside the TEE should. Auto-top-up logic doesn't require a TEE, so it lives in `lit-payments`. The empirical test confirms Stripe's `customer.updated` webhook reliably delivers per-balance-change events, so we don't need an internal trigger from lit-api-server.
+| **Dashboard** | `lit-static/dapps/dashboard/` | Adds: auto-top-up modal, save-card flow, status banners. Talks directly to `lit-payments`. |
+| **lit-api-server** (TEE) | `lit-api-server/` | **No trigger code, no auto-top-up logic.** Adds one tiny endpoint: `POST /internal/invalidate_balance_cache`. Auth module `billing_auth.rs` extracted to a shared crate for reuse by `lit-payments`. |
+| **lit-payments** (Railway) | `lit-payments/` | All auto-top-up logic. Dashboard endpoints, the `customer.updated` webhook handler (which now does the full charge-and-credit synchronously), the reconciliation cron. |
+| **Postgres** (inside `lit-payments`) | | Two new tables: `auto_topup_config`, `auto_topup_credits`. |
+| **Shared auth crate** | new, e.g. `lit-billing-auth/` | Extracted from `lit-api-server::core::v1::guards::billing_auth`. Accepts wallet signature (EIP-712) or API key. Used by both services. |
+| **Stripe** | external | Customer, PaymentMethod, PaymentIntents, balance transactions, one webhook event (`customer.updated`). |
 
 ### Storage map
 
-| Data | Location | Reason |
+| Data | Where | Why |
 |---|---|---|
 | Config (5 fields: `enabled`, `threshold_cents`, `topup_amount_cents`, `monthly_cap_cents`, `payment_method_id`) | Postgres `auto_topup_config` | Fast reads, atomic writes, schema evolution, admin queryability |
-| Consent record (`consent_version`, `consent_signed_at`) | Postgres `auto_topup_config` (same row) | Off-session merchant-initiated charges require recorded user consent (PSD2 / SCA + Stripe policy) |
-| SCA-pending state (`pending_action_pi_id`, `pending_action_at`) | Postgres `auto_topup_config` (same row) | Drives dashboard banner + resume flow |
+| Consent (`consent_version`, `consent_signed_at`) | Postgres `auto_topup_config` (same row) | Off-session merchant-initiated charges require recorded consent |
 | Card data | Stripe (PaymentMethod attached to Customer) | Never on our servers; PCI scope stays with Stripe |
 | Wallet ↔ Stripe Customer mapping | Stripe customer metadata (`metadata.wallet_address`) | Existing pattern, unchanged |
-| Charge history (PaymentIntents) | Stripe (filter by `metadata.source=auto_topup`) | Source of truth |
+| Charge history | Stripe PaymentIntents (filtered by `metadata.source=auto_topup`) | Source of truth |
 | Monthly spend total | Computed on demand by listing PIs | No counter to race on |
 | Failure state | Derived by listing recent PIs and counting failures | No counter to race on |
-| Credit dedup (1 row per credited PI) | Postgres `auto_topup_credits` | Permanent dedup beyond Stripe's 24h idempotency cache, beyond 30-day webhook resend window |
+| Credit dedup (1 row per credited PI) | Postgres `auto_topup_credits` | Idempotency for the synchronous credit step; reconciliation can detect missing rows for timed-out attempts |
 
 ---
 
@@ -88,9 +84,7 @@ CREATE TABLE auto_topup_config (
   payment_method_id        TEXT,
   consent_version          TEXT,
   consent_signed_at        TIMESTAMPTZ,
-  disabled_reason          TEXT,         -- NULL, 'manual', 'failures', 'card_invalid', 'requires_action'
-  pending_action_pi_id     TEXT,         -- set when off-session PI returns requires_action; cleared on terminal status
-  pending_action_at        TIMESTAMPTZ,
+  disabled_reason          TEXT,         -- NULL, 'manual', 'failures', 'card_invalid'
   updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   CONSTRAINT enabled_requires_config CHECK (
@@ -115,9 +109,10 @@ CREATE TABLE auto_topup_credits (
 );
 
 CREATE INDEX ON auto_topup_credits (customer_id, credited_at);
+CREATE INDEX ON auto_topup_credits (stripe_balance_transaction_id) WHERE stripe_balance_transaction_id IS NULL;
 ```
 
-CHECK constraint enforces: `enabled=true ⇒ all required fields non-null`, `cap >= topup_amount`, min top-up $5.00 (matches existing one-shot floor), positive cents, USD-only (implicit).
+The partial index on `stripe_balance_transaction_id IS NULL` accelerates the reconciliation query (find rows where the credit was started but didn't finish).
 
 ---
 
@@ -125,69 +120,65 @@ CHECK constraint enforces: `enabled=true ⇒ all required fields non-null`, `cap
 
 ### Dashboard-facing (on `lit-payments`, behind the shared auth module)
 
-The dashboard talks directly to `lit-payments` for all auto-top-up endpoints. Auth uses the extracted shared module which accepts wallet signature (EIP-712 ChainSecured) or API key — identical to what the dashboard sends to `lit-api-server` today for existing billing endpoints.
-
 | Method + Path | Purpose | Behavior |
 |---|---|---|
-| `POST /billing/setup_intent` | Save card | Call `lit_billing_core::customer::find_by_wallet`. Refuse if user has no Stripe customer (require first manual top-up to bootstrap). Create Stripe SetupIntent (`usage=off_session, customer=cus_xxx`). Return `client_secret` + publishable key. |
-| `GET /billing/auto_topup_config` | Read config | Read row from `auto_topup_config` by customer_id. Return JSON (including `pending_action_pi_id` so dashboard knows whether to show the SCA banner). |
-| `PUT /billing/auto_topup_config` | Save config | Validate: verify `payment_method_id` belongs to this customer via `GET /v1/customers/{cus}/payment_methods` membership check; enforce `cap >= topup_amount`, positive cents, min top-up $5. UPSERT row. |
-| `POST /billing/auto_topup_resume_pending` | Resume SCA-pending top-up | Read `pending_action_pi_id` from config. If set, retrieve PI's `client_secret` from Stripe and return it to the dashboard for `stripe.handleNextAction`. Return 404 if no pending action. |
+| `POST /billing/setup_intent` | Save card | Calls `lit_billing_core::customer::find_by_wallet`. Refuses if no Stripe customer (user must do first manual top-up to bootstrap). Creates Stripe SetupIntent (`usage=off_session, customer=cus_xxx`). Returns `client_secret` + publishable key. |
+| `GET /billing/auto_topup_config` | Read config | Read row from `auto_topup_config`. Return JSON. |
+| `PUT /billing/auto_topup_config` | Save config | Validate: verify `payment_method_id` belongs to this customer; enforce `cap >= topup_amount`, positive cents, min top-up $5. UPSERT row. |
 
 ### Internal (on `lit-api-server`, auth: `X-Internal-Secret`)
 
-| Method + Path | Purpose | Behavior |
-|---|---|---|
-| `POST /internal/invalidate_balance_cache` | Drop cached balance | Called by `lit-payments` after every successful auto-credit. Body: `{customer_id}`. Calls existing `state.balance_cache.invalidate(&customer_id)` (precedent at `lit-api-server/src/stripe.rs:612`). |
+| Method + Path | Purpose |
+|---|---|
+| `POST /internal/invalidate_balance_cache` | Called by `lit-payments` after a successful sync credit. Body: `{customer_id}`. Calls existing `state.balance_cache.invalidate(...)`. |
 
-### Webhooks (on `lit-payments`, auth: Stripe-Signature HMAC)
+### Webhook (on `lit-payments`, auth: Stripe-Signature HMAC)
 
 | Method + Path | Purpose |
 |---|---|
-| `POST /stripe/webhook` | Single endpoint receiving all three event types: `customer.updated` (trigger), `payment_intent.succeeded` (credit), `payment_intent.payment_failed` (failure handling). Routed by `event.type`. |
+| `POST /stripe/webhook` | Single event type: `customer.updated`. Used as the auto-top-up trigger. Filtered by `previous_attributes.balance` presence. |
 
 ---
 
-## 6. `customer.updated` webhook — trigger flow
+## 6. Trigger + sync-credit flow (`customer.updated` handler)
 
-This is where auto-top-up decisions happen. Fires every time `customer.balance` changes (verified empirically).
+This is now the only place auto-top-up logic runs. The handler does the full evaluate-charge-credit pipeline synchronously.
 
 ### Step-by-step
 
-1. **Verify Stripe-Signature** (see §7 for HMAC details).
+1. **Verify Stripe-Signature** (raw body, HMAC-SHA256, 5-min tolerance, constant-time compare). Invalid → 401.
 
 2. **Parse event. Filter:**
    - `event.type != "customer.updated"` → ignore, return 200.
-   - `event.data.previous_attributes.balance` not present → ignore (balance didn't actually change; could be email/address/metadata update). Return 200.
+   - `previous_attributes.balance` not present → ignore (balance didn't actually change). Return 200.
 
-3. **Quick-exit on payload data:**
-   - Read `event.data.object.balance` (new balance).
-   - Read user's threshold from Postgres `auto_topup_config` by `customer_id`.
-   - If `!enabled`: return 200.
-   - If `available_credit (= -new_balance) >= threshold_cents`: return 200. (Not below threshold; nothing to do.)
-   - If `pending_action_pi_id` is set: return 200 (SCA flow in progress; don't fire another charge).
+3. **Quick exit on payload data:**
+   - Read `event.data.object.balance` (new balance) and `event.data.object.id` (customer_id).
+   - Read config from Postgres `auto_topup_config` by customer_id.
+   - If `!enabled` → return 200.
+   - If `available_credit (= -new_balance) >= threshold_cents` → return 200 (not below threshold).
 
 4. **Acquire per-customer mutex.**
-   `moka::sync::Cache<String, Arc<tokio::sync::Mutex<()>>>` with 5-minute TTL keyed by `customer_id`. Serializes parallel `customer.updated` events for the same customer within this process.
+   `moka::sync::Cache<String, Arc<tokio::sync::Mutex<()>>>` with 5-minute TTL keyed by `customer_id`. Serializes parallel events.
 
-5. **Re-fetch current balance from Stripe** via `lit_billing_core::balance::fetch(stripe_client, &customer_id)`. Don't trust the webhook payload — it could be stale by the time we acquired the mutex. If `available_credit >= threshold_cents`: release mutex, return 200.
+5. **Fresh balance fetch** from Stripe via `lit_billing_core::balance::fetch(stripe_client, &customer_id)`. Don't trust the webhook payload after the mutex wait. If `available_credit >= threshold_cents` → release mutex, return 200.
 
-6. **List PIs for this customer this month** via `GET /v1/payment_intents?customer={cus_xxx}&created[gte]={month_start_utc}&limit=100`. Paginate via `starting_after` until `has_more=false`. Client-side filter on `metadata.source == "auto_topup"`.
+6. **List PIs this month** for the customer: `GET /v1/payment_intents?customer={cus_xxx}&created[gte]={month_start_utc}&limit=100`. Paginate via `starting_after` until `has_more=false`. Client-side filter on `metadata.source == "auto_topup"`.
 
-7. **Derive failure state:** walk the list from most recent backwards, count consecutive failed PIs (`status=requires_payment_method` or with `last_payment_error.code` in `card_declined`, `expired_card`, `insufficient_funds`, `incorrect_cvc`, `processing_error`, etc.). If `consecutive_failures >= 3`:
+7. **Derive failure state.** Walk list from most recent backwards, count consecutive PIs in failed states (`status=requires_payment_method` or with `last_payment_error.code` in `card_declined`, `expired_card`, `insufficient_funds`, `incorrect_cvc`, `processing_error`). If `consecutive_failures >= 3`:
    - `UPDATE auto_topup_config SET enabled=false, disabled_reason='failures', updated_at=now() WHERE customer_id=...`
-   - Send the "card needs updating" email via Resend.
+   - Send "card needs updating" email via Resend.
    - Release mutex, return 200.
 
 8. **Recent-PI short-circuit:** if any non-failed PI exists in the last 10 minutes → release mutex, return 200 (already topped up recently).
 
-9. **Cap check:** sum amounts of all non-failed PIs this month. If `sum + topup_amount_cents > monthly_cap_cents`: release mutex, return 200 (cap reached).
+9. **Cap check.** Sum amounts of all non-failed PIs this month. If `sum + topup_amount_cents > monthly_cap_cents` → release mutex, return 200.
 
-10. **Create off-session PaymentIntent:**
+10. **Create off-session PaymentIntent (synchronous):**
     ```
     POST /v1/payment_intents
       customer: cus_xxx
-      payment_method: pm_xxx (from config)
+      payment_method: pm_xxx
       amount: topup_amount_cents
       currency: usd
       off_session: true
@@ -195,87 +186,58 @@ This is where auto-top-up decisions happen. Fires every time `customer.balance` 
       metadata[source]: auto_topup
       metadata[wallet_address]: 0x...
     ```
-    No deterministic Idempotency-Key bucket. The mutex serializes within-process; the rare list-staleness race is accepted per the soft-cap product trade-off.
+    Handle the synchronous response:
+    - **`status == "succeeded"`** → proceed to step 11.
+    - **`status == "requires_action"`** (rare for US cards; SCA-required): treat as failure. Send "card requires authentication" email. Don't credit. Release mutex, return 200.
+    - **Error response (declined, expired, insufficient_funds, etc.)** → send "card declined" email with reason. Don't credit. Release mutex, return 200. (Consecutive-failure derivation in step 7 will eventually auto-disable.)
+    - **HTTP timeout** → log the attempt with as much context as we have. Don't credit. Release mutex, return 200. **The reconciliation cron (§9) will detect the orphaned `succeeded` PI on its next run and credit it.**
 
-    **Handle the synchronous response:**
-    - `status=succeeded`: do nothing here. The `payment_intent.succeeded` webhook will handle crediting.
-    - `status=requires_action` (SCA): UPDATE `auto_topup_config SET pending_action_pi_id=$1, pending_action_at=now(), disabled_reason='requires_action'`. Send the "action required" email with deep link to dashboard. (The PI stays alive at Stripe waiting for the user to complete 3DS.)
-    - `status=processing` (rare for cards): do nothing here. Webhook will deliver the final outcome.
-    - Error response (`card_declined`, `expired_card`, etc.): do nothing here. The `payment_intent.payment_failed` webhook will fire and run the counter-derivation in step 7 next time.
-    - HTTP timeout: do nothing. Stripe will fire the `payment_intent.succeeded` webhook when the charge settles, if it was created. Self-healing.
+11. **Credit synchronously (the new sync-credit path):**
+    ```sql
+    INSERT INTO auto_topup_credits (payment_intent_id, customer_id, amount_cents)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (payment_intent_id) DO NOTHING
+      RETURNING payment_intent_id;
+    ```
+    - If no row returned (already credited — shouldn't happen here, but defensive) → release mutex, return 200.
+    - If row inserted, proceed.
 
-11. **Release mutex. Return 200.** Don't credit synchronously — credit happens in the `payment_intent.succeeded` webhook (§7).
+12. **Write the balance transaction (the credit):**
+    ```
+    lit_billing_core::balance::write_transaction(
+      stripe_client,
+      customer_id,
+      -pi.amount,
+      description: "Auto top-up via {pi.id}",
+      idempotency_key: "credit:{pi.id}"
+    )
+    ```
+    Idempotency-Key makes this safely retryable. If this call fails (network/timeout), the row in `auto_topup_credits` already exists with `stripe_balance_transaction_id IS NULL`, and the reconciler will retry.
+
+13. **Update the row:**
+    ```sql
+    UPDATE auto_topup_credits
+      SET stripe_balance_transaction_id = $1
+      WHERE payment_intent_id = $2;
+    ```
+
+14. **Invalidate `lit-api-server`'s balance cache:**
+    Fire-and-forget `POST {LIT_API_SERVER_BASE_URL}/internal/invalidate_balance_cache` with `X-Internal-Secret` and `{customer_id}`. Ignore errors (cache will refresh in ≤10 min regardless).
+
+15. **Release mutex. Return 200.**
 
 ---
 
-## 7. `payment_intent.succeeded` and `payment_intent.payment_failed` webhook — credit / failure flow
+## 7. Webhook signature verification
 
-This is the SAME endpoint as §6 (`POST /stripe/webhook`); the handler routes by `event.type`. The charge step in §6 is async (SCA, processing, timeouts), so the credit happens here regardless of how the charge completed.
+Applies to the one webhook endpoint (`POST /stripe/webhook`).
 
-### Webhook signature verification (applies to all events)
-
-1. **Read raw body** with Rocket `Data` handler (NOT the JSON extractor — HMAC must verify exact bytes). Size limit ~1 MB.
-2. **Verify `Stripe-Signature` header:**
-   - Parse `t={timestamp},v1={hex_signature}`.
-   - Reject if `|now - timestamp| > 300s` (5-minute tolerance).
-   - Compute `HMAC-SHA256(STRIPE_WEBHOOK_SECRET, "{timestamp}.{raw_body}")`.
-   - Constant-time compare against `v1` (`subtle::ConstantTimeEq`). Invalid → 401.
-3. **Parse JSON event** and route by `event.type`.
-
-### `payment_intent.succeeded`
-
-1. Filter: `pi.metadata.source != "auto_topup"` → return 200 (not ours; could be a manual top-up).
-
-2. (Optional defensive) GET `/v1/payment_intents/{pi.id}` to use the latest object shape (defends against Stripe API version drift in webhook payload).
-
-3. **Atomic dedup insert:**
-   ```sql
-   INSERT INTO auto_topup_credits (payment_intent_id, customer_id, amount_cents)
-     VALUES ($1, $2, $3)
-     ON CONFLICT (payment_intent_id) DO NOTHING
-     RETURNING payment_intent_id;
-   ```
-   - If no row returned (already credited from a prior delivery of this event) → return 200.
-   - If row inserted → continue.
-
-4. **Credit the user's wallet balance** via `lit_billing_core::balance::write_transaction(stripe_client, customer_id, -pi.amount, description="Auto top-up via {pi.id}", idempotency_key="credit:{pi.id}")`.
-
-5. **Update row** with the returned `stripe_balance_transaction_id`.
-
-6. **Clear SCA pending state** if applicable:
-   ```sql
-   UPDATE auto_topup_config
-     SET pending_action_pi_id=NULL, pending_action_at=NULL, disabled_reason=NULL
-     WHERE customer_id=$1 AND pending_action_pi_id=$2;
-   ```
-
-7. **Invalidate lit-api-server's balance cache:**
-   `POST {LIT_API_SERVER_BASE_URL}/internal/invalidate_balance_cache` with `X-Internal-Secret` and `{customer_id}`. Fire-and-forget; ignore errors (cache will refresh in ≤10 min regardless).
-
-8. **Return 200.**
-
-### `payment_intent.payment_failed`
-
-1. Filter: `pi.metadata.source != "auto_topup"` → return 200.
-
-2. Send "card declined" email + dashboard banner. Email includes: amount, card last4, decline reason (human-friendly), CTA to update card.
-
-3. If `pending_action_pi_id == pi.id` (this was an SCA-pending PI that the user abandoned or that expired):
-   ```sql
-   UPDATE auto_topup_config
-     SET pending_action_pi_id=NULL, pending_action_at=NULL, disabled_reason=NULL
-     WHERE customer_id=$1 AND pending_action_pi_id=$2;
-   ```
-
-4. **No counter writes.** The auto-disable decision happens in the `customer.updated` handler at step 7 (§6) by listing recent PIs and counting consecutive failures.
-
-5. **Return 200.**
-
-### What 5xx returns do
-
-If our handler errors (DB unavailable, Stripe API down), return 5xx. Stripe retries the webhook with exponential backoff for **up to 3 days**. Eventual delivery is the safety net for transient infrastructure failures.
-
-**Important:** return 2xx ONLY after the credit/state work is committed. If you ack before committing and then crash, Stripe will not retry and credit can be lost.
+1. **Read raw body** with Rocket `Data` handler (NOT JSON extractor — HMAC must verify exact bytes). Size limit ~1 MB.
+2. **Parse `Stripe-Signature` header:** `t={timestamp},v1={hex_signature}`.
+3. **Reject if `|now - timestamp| > 300s`** (5-minute tolerance).
+4. **Compute `HMAC-SHA256(STRIPE_WEBHOOK_SECRET, "{timestamp}.{raw_body}")`**, constant-time compare against `v1` (`subtle::ConstantTimeEq`). Invalid → 401.
+5. **Return 5xx on transient errors** (DB unavailable, Stripe API down) so Stripe retries (up to 3 days).
+6. **Return 200 ONLY after** all credit work is committed. Returning early and crashing means lost credit.
 
 ---
 
@@ -295,233 +257,251 @@ async fn invalidate_balance_cache(
 }
 ```
 
-Auth: `X-Internal-Secret` header (constant-time compare). Called by `lit-payments` after every successful auto-credit so the next Lit Action sees the new balance immediately rather than waiting for the 10-minute cache TTL.
+Auth via `X-Internal-Secret` (constant-time compare).
 
-### Auth extraction (separate refactor, can be done in parallel)
+### Auth extraction (parallel refactor)
 
-The existing `lit-api-server/src/core/v1/guards/billing_auth.rs` (wallet signature + API key validation) is extracted into a shared crate (e.g., `lit-billing-auth`) so `lit-payments` can use it. Extraction work includes:
-
-- Move the EIP-712 / ChainSecured signature verifier.
-- Move the API-key → master-wallet on-chain resolver (uses the `allApiKeyHashesToMaster` contract).
-- Move the wallet → Stripe customer mapping helper.
-- Move the local caches for these resolutions.
-- Refactor the Rocket request guard adapter to not depend on `lit-api-server`-specific state.
-
-`lit-payments` gains a dependency on this crate plus the on-chain RPC client config (`ALCHEMY_HTTPS_URL` or equivalent already used for LITKEY).
+Move `lit-api-server/src/core/v1/guards/billing_auth.rs` into a shared crate (`lit-billing-auth/`) so `lit-payments` can use the identical wallet-sig + API-key auth flow. Includes the on-chain `allApiKeyHashesToMaster` resolver and wallet → Stripe customer mapping. `lit-payments` gains a dependency on the new crate and the on-chain RPC config (`ALCHEMY_HTTPS_URL` already present for LITKEY).
 
 ---
 
-## 9. Dashboard changes
+## 9. Reconciliation cron
+
+**This is now load-bearing**, not optional. The sync-credit design intentionally accepts the timeout failure mode; the reconciler is what recovers from it.
+
+### Schedule
+
+Every 15 minutes (configurable). Runs in `lit-payments` as a `tokio` task spawned at startup.
+
+### Logic
+
+```sql
+-- 1. Get all enabled auto-top-up customers
+SELECT customer_id FROM auto_topup_config WHERE enabled = true;
+```
+
+For each customer:
+
+```
+-- 2. Fetch recent auto-top-up PIs from Stripe
+GET /v1/payment_intents
+  ?customer={cus_xxx}
+  &created[gte]={now - 7 days}
+  &limit=100
+filter to metadata.source == "auto_topup" AND status == "succeeded"
+```
+
+```sql
+-- 3. For each succeeded PI: check whether it was credited
+SELECT payment_intent_id, stripe_balance_transaction_id
+  FROM auto_topup_credits
+  WHERE payment_intent_id = $1;
+```
+
+Three cases:
+
+| Case | Action |
+|---|---|
+| Row exists, `stripe_balance_transaction_id` populated | Credited correctly — skip |
+| Row exists, `stripe_balance_transaction_id` NULL | Credit was started but never finished. Retry step 12 of §6 (with the same `credit:{pi.id}` idempotency key — Stripe dedupes if it actually succeeded). Then UPDATE row. |
+| No row at all | The trigger never finished crediting (HTTP timeout on PI create, or process crash). Run the full credit: INSERT row, call balance_transactions, UPDATE row. Alert Sally via log/metric so she can sanity-check. |
+
+### Why 7 days lookback
+
+Catches PIs from up to a week ago in case the reconciler itself was broken or paused. Cheap to scan because we filter by customer and use Stripe's `created[gte]`.
+
+### Why 15 minutes, not 24 hours
+
+Average user-visible recovery time: ~7.5 minutes after a timeout. Faster reduces support tickets. Cheap to run — listing PIs for active customers is bounded.
+
+---
+
+## 10. Dashboard changes
 
 ### Save-card flow
 
 1. User clicks "Add a card for auto top-up."
-2. Dashboard calls `POST /billing/setup_intent` on `lit-payments` with existing auth headers (wallet sig or API key — the shared auth module handles either).
+2. Dashboard calls `POST /billing/setup_intent` with existing auth headers (wallet sig or API key).
 3. Backend returns `{ client_secret, publishable_key }`.
-4. Dashboard initializes Stripe.js with the publishable key, mounts the Payment Element in **setup mode** (not payment mode).
-5. User enters card. Dashboard calls `stripe.confirmSetup({ elements, confirmParams: { return_url: dashboard_url } })`.
-6. On return, dashboard reads `setup_intent` query param, calls `stripe.retrieveSetupIntent(client_secret)`, extracts `payment_method`.
-7. Stores `pm_xxx` in local state pending submission with the rest of the config.
+4. Dashboard initializes Stripe.js with the publishable key, mounts Payment Element in **setup mode**.
+5. User enters card. Dashboard calls `stripe.confirmSetup({elements, confirmParams: {return_url}})`.
+6. On return, dashboard reads `setup_intent` query param, calls `stripe.retrieveSetupIntent(...)`, extracts `payment_method` id (`pm_xxx`).
 
 ### Save-config flow
 
-1. Modal collects: enable toggle, threshold (USD), top-up amount (USD), monthly cap (USD), card picker (preselected to the newly-saved `pm_xxx` or existing default), consent checkbox with explicit text ("I authorize Lit Protocol to charge my saved card up to approximately $X per month when my balance falls below $Y...").
-2. On submit, dashboard calls `PUT /billing/auto_topup_config` on `lit-payments` with `{enabled, threshold_cents, topup_amount_cents, monthly_cap_cents, payment_method_id, consent_version: "v1"}`.
-3. Backend validates and persists.
-
-### SCA resume flow
-
-When last off-session charge returned `requires_action`:
-
-1. On dashboard load, `GET /billing/auto_topup_config` returns `pending_action_pi_id` non-null. Dashboard renders the action-required banner.
-2. User clicks "Confirm now" (or arrives via the email deep link).
-3. Dashboard calls `POST /billing/auto_topup_resume_pending`. Backend returns `{ payment_intent_id, client_secret }`.
-4. Dashboard runs `stripe.handleNextAction({ clientSecret })`. Stripe.js opens the 3DS challenge modal.
-5. User completes the challenge.
-6. PI transitions to `succeeded` at Stripe. The `payment_intent.succeeded` webhook (§7) credits the wallet and clears the pending state.
-7. Dashboard re-fetches config and removes the banner.
-
-If the user abandons the challenge: PI eventually transitions to `requires_payment_method`. The `payment_intent.payment_failed` webhook clears the pending state and emails the user.
+1. Modal collects: enable toggle, threshold (USD), top-up amount (USD), monthly cap (USD), card picker, consent checkbox.
+2. Dashboard calls `PUT /billing/auto_topup_config` with full body + `consent_version`.
 
 ### Status banners
 
-- **Enabled, healthy:** "Auto top-up: when your balance drops below $X, we'll charge $Y to card ending in ****1234, up to ~$Z/month."
-- **Enabled, requires_action (SCA pending):** "Action required to complete your $X auto top-up. [Confirm now]" — clicking triggers the resume flow.
-- **Disabled by user:** "Auto top-up is off. [Enable]"
-- **Auto-disabled after failures:** "Auto top-up was paused after 3 failed attempts. Please update your card. [Manage]"
+| State | Message |
+|---|---|
+| Enabled, healthy | "Auto top-up: when your balance drops below $X, we'll charge $Y to card ending in ****1234, up to ~$Z/month." |
+| Disabled by user | "Auto top-up is off. [Enable]" |
+| Auto-disabled after failures | "Auto top-up was paused after 3 failed attempts. Please update your card. [Manage]" |
 
-### Email notifications
-
-`lit-payments` sends transactional emails via the existing Resend integration:
+### Email notifications (Resend)
 
 | Trigger | Subject | Body |
 |---|---|---|
-| Off-session PI returns `authentication_required` | "Action required: confirm your auto top-up" | Amount, card last4, deep link to dashboard billing page |
-| `payment_intent.payment_failed` webhook | "Your auto top-up couldn't be charged" | Amount, card last4, decline reason, link to update card |
-| Auto-disable after 3 consecutive failures | "Auto top-up paused — update your card" | Reason summary, link to update card and re-enable |
+| `paymentIntents.create` returns declined / expired / etc. | "Your auto top-up couldn't be charged" | Amount, card last4, decline reason, link to update card |
+| `paymentIntents.create` returns `requires_action` (rare for US cards) | "Your card requires authentication for auto top-up" | Brief explanation, link to update card |
+| Auto-disable after 3 consecutive failures | "Auto top-up paused — update your card" | Reason, link to update card and re-enable |
 
 ---
 
-## 10. Concurrency model — three layers of defense
+## 11. Concurrency model — three layers
 
-| Layer | What it prevents | Mechanism | Scope |
+| Layer | Prevents | Mechanism | Scope |
 |---|---|---|---|
-| 1. Per-customer Tokio mutex in `lit-payments` | Wasted Stripe API calls under burst of parallel `customer.updated` events | `moka::sync::Cache<String, Arc<Mutex<()>>>` TTL'd at 5 minutes | Per-process |
-| 2. Postgres unique constraint on `auto_topup_credits.payment_intent_id` | Double-credit on webhook replays (Stripe Dashboard resend up to 15 days, CLI resend up to 30 days, well beyond Stripe's 24h idempotency-key cache) | `INSERT … ON CONFLICT DO NOTHING` | Permanent |
-| 3. Stripe Idempotency-Key on balance-transactions credit write | Double-credit from concurrent credit attempts (e.g., webhook retries within Stripe's 24h dedup cache) | `Idempotency-Key: credit:{pi.id}` | Stripe-global, 24h |
+| 1. Per-customer Tokio mutex (`moka` TTL cache) | Parallel `customer.updated` events for the same customer doing duplicate evaluations | In-memory in `lit-payments` | Per-process |
+| 2. Postgres unique constraint on `auto_topup_credits.payment_intent_id` | Double-credit of the same PI (sync handler + reconciler both trying) | `INSERT … ON CONFLICT DO NOTHING` | Permanent |
+| 3. Stripe Idempotency-Key on `balance_transactions` write | Double-credit from retry under transient Stripe / network failure | `Idempotency-Key: credit:{pi.id}` | Stripe-global, 24h |
 
 The mutex is optimization. Layers 2 and 3 are correctness primitives.
 
 ---
 
-## 11. Edge cases — handled
+## 12. Edge cases — handled
 
 | Case | Handling |
 |---|---|
-| 5+ parallel `customer.updated` events for same customer | Mutex serializes within process; the early balance check (step 3 in §6) short-circuits second/third/etc. events whose balance is already above threshold after the first top-up |
-| HTTP timeout on `paymentIntents.create` | Stripe still fires `payment_intent.succeeded` webhook when the PI settles; credit handler runs. Self-healing. |
-| Webhook delivered twice / replayed (within 24h or up to 30 days via dashboard/CLI resend) | `INSERT auto_topup_credits ON CONFLICT DO NOTHING` skips the second one |
-| Webhook handler crashes mid-execution | Stripe retries (we returned 5xx or timed out) with exponential backoff for up to 3 days |
-| Card declined | `payment_intent.payment_failed` webhook fires → email user → next `customer.updated` event derives consecutive failures from listing PIs and disables after 3 |
-| SCA required (`requires_action`) | §6 step 10 sets `pending_action_pi_id`; "action required" email sent + dashboard banner; user clicks "Confirm now" → §9 resume flow → 3DS completes → `payment_intent.succeeded` webhook credits the wallet and clears pending state |
-| User toggles auto-top-up off between webhook fire and handler execution | Handler reads `enabled=false` from Postgres and short-circuits |
-| Trigger fires when balance is actually above threshold (e.g., user just topped up manually) | §6 step 5 (balance fetch from Stripe) short-circuits |
-| `customer.updated` for non-balance changes (email/address/metadata) | Filter on `previous_attributes.balance` presence — ignore if not present |
-| Stripe customer balance cached stale in `lit-api-server` after auto-top-up | `payment_intent.succeeded` handler calls `POST /internal/invalidate_balance_cache` after successful credit |
-| `customer.updated` event lost in transit | Self-healing — next deduction fires another `balance_transactions` write → another `customer.updated` → re-evaluation |
-| Stripe API version drift in event payload | Webhook handler optionally re-fetches the PI by id before crediting |
+| 5+ parallel `customer.updated` events for same customer | Mutex serializes; the early balance check (step 3) short-circuits later events whose balance is already above threshold after the first top-up |
+| `paymentIntents.create` HTTP timeout | Reconciler (§9) catches the orphaned succeeded PI and credits within ~15 min |
+| `balance_transactions` write fails after PI succeeded | Reconciler catches the `stripe_balance_transaction_id IS NULL` row and retries with the same idempotency key |
+| Webhook delivered twice / replayed | Step 3 short-circuit (`enabled` / balance check), and downstream `INSERT ... ON CONFLICT` dedup makes the credit safe |
+| Webhook handler crashes mid-execution | Stripe retries with backoff (up to 3 days) since we returned 5xx or timed out |
+| Card declined | Synchronous response handling in step 10 sends email; consecutive failure derivation in step 7 disables after 3 |
+| `requires_action` (SCA) | Treated as failure (we don't support SCA). User must update card or use a non-SCA card. |
+| User toggles off between webhook fire and handler execution | Step 3 reads `enabled=false` from Postgres and short-circuits |
+| Trigger fires when balance is already above threshold | Step 3 / step 5 short-circuit |
+| `customer.updated` for non-balance changes (email/address/metadata) | Filter on `previous_attributes.balance` — ignore if not present |
+| Stripe customer balance cached stale in `lit-api-server` after credit | Step 14 invalidates the cache |
+| `customer.updated` event lost | Self-healing — next deduction fires another `balance_transactions` write → another `customer.updated` |
 | Pagination on PI list at scale | Use `starting_after` until `has_more=false` |
 
 ---
 
-## 12. Edge cases — explicit trade-offs (accepted, not handled)
+## 13. Edge cases — accepted trade-offs
 
 | Case | What happens | Recovery |
 |---|---|---|
-| **List-endpoint staleness during cap check** | `paymentIntents.list` doesn't guarantee read-after-write consistency. If trigger A creates a PI and trigger B's list call runs within ms while the list is briefly stale, B can undercount and pass the cap check. Result: cap exceeded by up to 1 top-up. <1% per opportunity. | Soft cap; UI says "approximately $X/month." Manual refund via admin portal if user complains. |
-| **Webhook delivery delay** | Stripe delivers `customer.updated` 1–5s after deduction (sometimes longer under load). User running rapid Lit Actions near threshold could exhaust threshold buffer before top-up fires. | Set threshold high enough to absorb typical webhook latency × user's burn rate. |
-| **Webhook delivery failure beyond 3-day retry window** | User paid (if charge happened) but not credited on our side, OR top-up never fired. Extremely rare. | Manual recovery via Sally's admin portal. |
-| **Refunds / disputes** | Do NOT restore monthly cap capacity. Soft cap remains soft. | Documented. |
-| **Currency other than USD** | Not supported. | Out of scope. |
-| **Month boundary** | UTC. | Documented in UI copy. |
+| List-endpoint staleness during cap check | `paymentIntents.list` isn't strongly read-after-write consistent. <1% rare race; can result in 1 extra top-up. | Soft cap. Manual refund via admin portal. |
+| HTTP timeout on `paymentIntents.create` | Charge happened at Stripe, no credit applied immediately. | Reconciler (§9) credits within ~15 min. |
+| Reconciler doesn't run for hours (cron failure) | Some users see delayed credit. | Add a heartbeat / alert on the cron. |
+| Webhook delivery fails for the full 3-day Stripe retry window | Top-up never fires for that event. | Self-heals on next deduction → next `customer.updated`. |
+| EU cards / SCA-required cards | Auto-top-up doesn't work; user gets failure email. | User must use a non-SCA card. |
+| Refunds / disputes | Don't restore monthly cap. | Documented. |
+| Currency other than USD | Not supported. | Out of scope. |
 
 ---
 
-## 13. New environment variables
+## 14. New environment variables
 
 ### `lit-api-server`
-- `LIT_INTERNAL_SHARED_SECRET` — high-entropy random string for the cache-invalidation endpoint.
+- `LIT_INTERNAL_SHARED_SECRET` — high-entropy random; auth for cache-invalidation endpoint.
 
 ### `lit-payments`
-- `LIT_API_SERVER_BASE_URL` — e.g., `https://api.litprotocol.com`. For the cache-invalidation callback.
+- `LIT_API_SERVER_BASE_URL` — for the cache-invalidation callback.
 - `LIT_INTERNAL_SHARED_SECRET` — same value as on lit-api-server.
-- `STRIPE_WEBHOOK_SECRET` — from Stripe Dashboard after registering the webhook endpoint.
-- `ALCHEMY_HTTPS_URL` (or equivalent) — for the on-chain master-key resolver inherited from the extracted auth module (if not already present for LITKEY).
+- `STRIPE_WEBHOOK_SECRET` — from Stripe Dashboard after registering the `customer.updated` endpoint.
+- `RECONCILER_INTERVAL_SECS` (optional, default 900) — reconciler frequency.
+- `ALCHEMY_HTTPS_URL` — for the on-chain master-key resolver inherited from extracted auth module.
 
 ### Dashboard
 - `STRIPE_PUBLISHABLE_KEY` — if not already present.
 
 ---
 
-## 14. Service-auth requirements for `X-Internal-Secret`
+## 15. Service-auth requirements for `X-Internal-Secret`
 
-Used only for the cache-invalidation callback from `lit-payments` to `lit-api-server`. Webhooks use Stripe-Signature HMAC; dashboard endpoints use the shared wallet/API-key auth module.
+Used only for the cache-invalidation call from `lit-payments` to `lit-api-server`.
 
 - Generated with at least 256 bits of entropy (`openssl rand -base64 32`).
-- Stored in env vars only, never in code or commits.
-- TLS only (Railway and production deployments are HTTPS).
+- Stored in env vars only.
+- TLS only.
 - Constant-time comparison in the handler (`subtle::ConstantTimeEq`).
-- Never logged, never echoed in error responses.
+- Never logged or echoed in error responses.
 - Rotation: deploy both services with both old and new secrets accepted, swap, drop old.
 
 ---
 
-## 15. Sequence diagrams
+## 16. Sequence diagrams
 
 ### Setup (one-time)
 
 ```
-USER → DASHBOARD ─► lit-payments /billing/setup_intent ─► Stripe (create SetupIntent)
-                                                          │
-USER → DASHBOARD ◄─────────────── client_secret ──────────┘
-USER → DASHBOARD ─► Stripe.js (card entered) ─► Stripe (PaymentMethod attached, pm_xxx)
-USER → DASHBOARD ─► lit-payments /billing/auto_topup_config ─► Stripe (verify pm_xxx ownership)
+USER → DASHBOARD ─► lit-payments POST /billing/setup_intent ─► Stripe (SetupIntent)
                                                                 │
-                                                                ▼
-                                                            Postgres (UPSERT auto_topup_config)
+USER → DASHBOARD ◄────────── client_secret ─────────────────────┘
+USER → DASHBOARD ─► Stripe.js (card entered) ─► Stripe (PaymentMethod attached, pm_xxx)
+USER → DASHBOARD ─► lit-payments PUT /billing/auto_topup_config ─► Postgres (UPSERT)
 ```
 
 ### Runtime — every Lit Action deduction
 
 ```
-CLIENT ──► lit-api-server (run Lit Action, deduct credits via balance_transactions)
+CLIENT ─► lit-api-server (run Lit Action, deduct credits via balance_transactions)
                                                           │
                                                           ▼
-                                                      Stripe (POST /v1/customers/{id}/balance_transactions)
-                                                          │ customer.balance updates
+                                                      Stripe POST /v1/customers/{id}/balance_transactions
+                                                          │ customer.balance changes
+                                                          ▼
+                                                      Stripe fires customer.updated webhook
                                                           │
-                                                          ▼ Stripe fires customer.updated webhook
-                                                          │
-              ┌───────────────────────────────────────────┘
-              │
-              ▼
-        lit-payments POST /stripe/webhook (event.type = customer.updated)
-              │
-              ├─► verify HMAC
-              ├─► filter: previous_attributes.balance present? YES
-              ├─► quick exit: new balance >= threshold? then return 200
-              ├─► quick exit: pending_action_pi_id set? then return 200
-              ├─► acquire mutex[customer]
-              ├─► fresh balance::fetch from Stripe (don't trust payload)
-              ├─► list PIs this month from Stripe (paginated, filter metadata.source=auto_topup)
-              ├─► derive failure state → disable if 3+ consecutive
-              ├─► recent-PI short-circuit (< 10 min)
-              ├─► cap check (sum + amount > cap → skip)
-              ├─► POST /v1/payment_intents (off_session=true, confirm=true)
-              ├─► handle response (succeeded → wait for webhook; requires_action → set pending + email; declined → wait for failure webhook)
-              └─► release mutex, return 200
-
-CLIENT ◄── lit-api-server (Lit Action result returned earlier, never waited)
+                                                          ▼
+              lit-payments POST /stripe/webhook
+                  │
+                  ├─► verify Stripe-Signature HMAC
+                  ├─► filter: previous_attributes.balance present? YES, continue
+                  ├─► quick exit: balance >= threshold? then return 200
+                  ├─► acquire mutex[customer]
+                  ├─► fresh balance::fetch from Stripe (don't trust payload)
+                  ├─► list PIs this month, paginate, filter metadata.source=auto_topup
+                  ├─► derive failure state → disable if 3+ consecutive
+                  ├─► recent-PI short-circuit (< 10 min)
+                  ├─► cap check (sum + amount > cap → skip)
+                  │
+                  ├─► Stripe POST /v1/payment_intents (off_session, confirm)
+                  │   sync response:
+                  │     ├─ succeeded → continue
+                  │     ├─ requires_action → email + return 200
+                  │     ├─ declined/error → email + return 200
+                  │     └─ HTTP timeout → log + return 200 (reconciler handles)
+                  │
+                  ├─► Postgres INSERT auto_topup_credits ON CONFLICT DO NOTHING
+                  ├─► Stripe POST /v1/customers/{c}/balance_transactions
+                  │     Idempotency-Key: credit:{pi.id}
+                  ├─► Postgres UPDATE auto_topup_credits SET stripe_balance_transaction_id
+                  ├─► lit-api-server POST /internal/invalidate_balance_cache (fire-and-forget)
+                  └─► release mutex, return 200
 ```
 
-### Webhook — credit (seconds to days later)
+### Reconciliation (every 15 minutes)
 
 ```
-Stripe ──► lit-payments POST /stripe/webhook (event.type = payment_intent.succeeded)
-              │
-              ├─► verify HMAC
-              ├─► filter: metadata.source = auto_topup? YES
-              ├─► INSERT auto_topup_credits ON CONFLICT DO NOTHING
-              │     │
-              │     ▼
-              │     no row returned (already credited) → return 200
-              │     row returned (new credit) → continue
-              │
-              ├─► Stripe POST /v1/customers/{c}/balance_transactions, Idempotency-Key: credit:{pi.id}
-              ├─► UPDATE auto_topup_credits SET stripe_balance_transaction_id=...
-              ├─► UPDATE auto_topup_config (clear pending_action_pi_id if matching)
-              ├─► POST /internal/invalidate_balance_cache to lit-api-server (fire-and-forget)
-              └─► return 200
-```
-
-### Webhook — failure
-
-```
-Stripe ──► lit-payments POST /stripe/webhook (event.type = payment_intent.payment_failed)
-              │
-              ├─► verify HMAC
-              ├─► filter: metadata.source = auto_topup? YES
-              ├─► send email + dashboard banner
-              ├─► UPDATE auto_topup_config (clear pending if matching this PI)
-              └─► return 200
-                  (no counter writes — disable derived from listing PIs in next customer.updated)
+lit-payments cron tick
+       │
+       ▼
+Postgres SELECT customer_id FROM auto_topup_config WHERE enabled
+       │
+       ▼ for each customer:
+Stripe GET /v1/payment_intents?customer=...&created[gte]=now-7d
+       filter to metadata.source=auto_topup AND status=succeeded
+       │
+       ▼ for each succeeded PI:
+Postgres SELECT FROM auto_topup_credits WHERE payment_intent_id = pi.id
+       │
+       ├─ row + balance_transaction_id populated → skip
+       ├─ row but balance_transaction_id NULL → retry credit (idempotent), UPDATE row
+       └─ no row → run full credit (INSERT row, balance_transactions, UPDATE row), alert Sally
 ```
 
 ---
 
-## 16. Implementation phases
+## 17. Implementation phases
 
-Phases are strictly sequential at the gate level — each gates the next. Sub-tasks within a phase can be parallelized. Total estimated effort: **~2 weeks of focused work**.
+Phases are strictly sequential at the gate level. Total estimated effort: **~2 weeks of focused work**.
 
 ### Dependency chain
 
@@ -530,143 +510,106 @@ Phase 1: Foundation
   └─► Phase 2: Auth extraction
         └─► Phase 3: Saved card flow (SetupIntent)
               └─► Phase 4: Config CRUD
-                    └─► Phase 5: customer.updated trigger handler
-                          └─► Phase 6: payment_intent webhooks (credit + failure)
+                    └─► Phase 5: Webhook handler (trigger + sync charge + sync credit)
+                          └─► Phase 6: Reconciliation cron
                                 └─► Phase 7: Dashboard UI
                                       └─► Phase 8: Operational hardening
                                             └─► Phase 9: Production rollout
 ```
 
 ### Phase 1 — Foundation (~0.5 day)
+- Migration with both tables + CHECK constraints + partial index.
+- New env vars on both sides.
+- `X-Internal-Secret` Rocket guard in `lit-api-server`.
+- `POST /internal/invalidate_balance_cache` endpoint on `lit-api-server`.
 
-**Tasks:**
-- Migration `lit-payments/migrations/{timestamp}_auto_topup.sql` with both tables + CHECK constraints.
-- Add new env vars: `LIT_API_SERVER_BASE_URL`, `LIT_INTERNAL_SHARED_SECRET` (both sides), `STRIPE_WEBHOOK_SECRET`.
-- Add `X-Internal-Secret` Rocket request guard in `lit-api-server` for the new cache-invalidation endpoint.
-- Build `POST /internal/invalidate_balance_cache` on `lit-api-server` (calls existing `balance_cache.invalidate`).
-
-**Gate to Phase 2:** migration applies cleanly; a smoke test call to `invalidate_balance_cache` returns 200 with the right secret and 401 without.
+**Gate:** migration applies; cache-invalidation endpoint returns 200 with correct secret and 401 without.
 
 ### Phase 2 — Auth extraction (~2 days)
+- New `lit-billing-auth/` crate.
+- Move EIP-712 / ChainSecured verifier, API-key → master-wallet resolver, wallet → Stripe customer mapping, caches.
+- Service-agnostic Rocket request guard.
+- Update both services to depend on the new crate.
 
-**Tasks:**
-- Create a new crate (e.g., `lit-billing-auth/`).
-- Move from `lit-api-server/src/core/v1/guards/billing_auth.rs`: the EIP-712 / ChainSecured verifier, the API-key → master-wallet on-chain resolver, the wallet → Stripe customer mapping, the caches.
-- Refactor the Rocket request guard to be service-agnostic.
-- Update `lit-api-server` to depend on the new crate (existing endpoints unchanged externally).
-- Update `lit-payments` to depend on the new crate.
-- Add on-chain RPC client config to `lit-payments` (`ALCHEMY_HTTPS_URL`, etc.) if not already present.
-
-**Gate to Phase 3:** both services compile and run; existing `lit-api-server` billing endpoints still authenticate identically; a smoke test on a placeholder endpoint in `lit-payments` accepts both wallet-sig and API-key auth.
+**Gate:** existing `lit-api-server` billing endpoints still authenticate identically; a smoke test on a placeholder lit-payments endpoint accepts both wallet-sig and API-key.
 
 ### Phase 3 — Saved card flow (~2 days)
+- `POST /billing/setup_intent` on lit-payments behind the new shared auth.
+- Refuses with 400 if no Stripe customer (user must do manual top-up first).
+- Creates SetupIntent via `lit_billing_core::StripeClient`.
 
-**Tasks:**
-- `POST /billing/setup_intent` on `lit-payments`, behind the new shared auth.
-- Calls `lit_billing_core::customer::find_by_wallet`. Returns 400 if no Stripe customer (user must do first manual top-up first).
-- Creates Stripe SetupIntent via `lit_billing_core::StripeClient::post_with_idempotency`.
-
-**Gate to Phase 4:** can save a Stripe test-mode card (4242…) end-to-end with both wallet-auth and API-key-auth flows; `pm_xxx` is attached to the right customer.
+**Gate:** can save a `4242…` test card end-to-end; `pm_xxx` attached to the right customer.
 
 ### Phase 4 — Config CRUD (~1 day)
+- `GET /billing/auto_topup_config`
+- `PUT /billing/auto_topup_config` — validate `pm_xxx` ownership, enforce `cap >= topup_amount`, min top-up $5, UPSERT.
 
-**Tasks:**
-- `GET /billing/auto_topup_config` on `lit-payments` (read row by `customer_id`).
-- `PUT /billing/auto_topup_config` on `lit-payments`: verify `pm_xxx` ownership via Stripe, validate `cap >= topup_amount`, positive cents, min top-up $5, UPSERT row.
+**Gate:** config can be saved, read back, CHECK constraint rejects `enabled=true` with nulls.
 
-**Gate to Phase 5:** config can be saved, read back, CHECK constraints reject `enabled=true` with null fields.
+### Phase 5 — Webhook handler + sync credit (~3 days)
+**This is the core phase.** Full §6 implementation:
+- Raw `Data` handler, HMAC verification.
+- Mutex cache.
+- Balance fetch, PI list with pagination, failure derivation, recent-PI short-circuit, cap check.
+- `paymentIntents.create` with sync response handling (succeeded → credit, requires_action → email, error → email, timeout → log).
+- Sync credit: INSERT auto_topup_credits, balance_transactions write with idempotency key, UPDATE row.
+- Cache invalidation callback.
 
-### Phase 5 — `customer.updated` trigger handler (~3 days)
+**Gate:** real `4242…` card → balance drops below threshold → auto-charge fires → balance credited within seconds. Burst of parallel customer.updated for same customer collapses to one charge. Declined card (`4000 ... 0341`) → email sent, no credit.
 
-**Goal:** the core decision logic. The expensive phase.
+### Phase 6 — Reconciliation cron (~1 day)
+- Spawn `tokio` task at startup, runs every `RECONCILER_INTERVAL_SECS` (default 900).
+- Query enabled customers, list their recent auto-topup PIs, find missing credit rows or NULL balance_transaction_ids, fix them.
+- Log/alert on any row created or fixed by the reconciler.
 
-**Tasks:**
-- `POST /stripe/webhook` on `lit-payments` — raw `Data` handler, HMAC verification, route by `event.type`.
-- For `customer.updated`: full handler per §6:
-  - Filter on `previous_attributes.balance` presence.
-  - `moka` mutex cache per customer.
-  - Fresh balance fetch via `lit_billing_core::balance::fetch`.
-  - List PIs with pagination, client-side filter.
-  - Failure-derivation logic.
-  - Cap check.
-  - Off-session PaymentIntent create with handling for succeeded / requires_action / processing / errors / timeouts.
-
-**Gate to Phase 6:** in Stripe test mode, a real card is charged via off-session PI triggered from a `balance_transactions` write that drops balance below threshold. SCA card sets `pending_action_pi_id` and sends email. Burst of parallel `customer.updated` events for the same customer collapses to one charge via mutex + early balance check.
-
-### Phase 6 — `payment_intent.succeeded` and `payment_intent.payment_failed` handlers (~2 days)
-
-**Tasks:**
-- Branch on `event.type` in the same `/stripe/webhook` endpoint.
-- `payment_intent.succeeded` handler per §7: INSERT-ON-CONFLICT dedup → balance credit with idempotent key → UPDATE row → clear SCA pending → invalidate lit-api-server cache.
-- `payment_intent.payment_failed` handler per §7: email + banner + clear SCA pending if matching.
-
-**Gate to Phase 7:** test-mode PaymentIntent → webhook delivers → user credited → `lit-api-server` cache invalidated. Webhook resend on the same event → no double credit. Decline test card → email sent.
+**Gate:** kill `lit-payments` mid-charge between PI create and balance_transactions → restart → reconciler finds the orphan within 15 min and credits the user.
 
 ### Phase 7 — Dashboard UI (~3 days)
+- Auto-top-up modal.
+- Save-card flow with `stripe.confirmSetup`.
+- Save-config flow.
+- Status banners.
 
-**Tasks:**
-- Auto-top-up modal: toggle, threshold, top-up amount, monthly cap, card picker, consent.
-- Save-card flow with `stripe.confirmSetup` + return URL handling.
-- Save-config flow via `PUT /billing/auto_topup_config`.
-- SCA resume flow: banner → "Confirm now" button → `POST /billing/auto_topup_resume_pending` → `stripe.handleNextAction` → 3DS modal.
-- Status banners per §9.
-
-**Gate to Phase 8:** real user can save a card, enable auto-top-up, run a Lit Action, see balance auto-credited within ~10 seconds. SCA test card flow completes end-to-end.
+**Gate:** real user can save a card, enable auto-top-up, run a Lit Action, see balance auto-credited within ~10 seconds.
 
 ### Phase 8 — Operational hardening (~2 days)
-
-**Tasks:**
-- Email templates (three: action-required, payment-failed, auto-disabled).
-- Logging / metrics: trigger count per customer, charge success/failure rate, webhook delivery latency, mutex contention.
+- Email templates (three: declined, requires_action, auto-disabled).
+- Metrics: trigger count, charge success/failure rate, reconciler activity, mutex contention.
 - Service-auth secret rotation procedure documented.
-- Admin runbook: recovering a stuck PI via existing portal.
+- Admin runbook.
 
-**Gate to Phase 9:** failure-counter path tested end-to-end (3 declines → auto-disabled → user can re-enable after updating card).
+**Gate:** failure-counter path tested (3 declines → auto-disable → re-enable after updating card).
 
 ### Phase 9 — Production rollout (~1–2 days monitored)
-
-**Tasks:**
-- Register production Stripe webhook endpoint; copy live signing secret.
-- Deploy with all env vars wired.
-- Feature-flag the dashboard modal for gradual rollout (internal accounts first).
-- Monitor for 24–48 hours: webhook delivery success, charge approval rate, ticket volume.
-- Rollback plan: feature flag off, schema can stay (rows ignored).
+- Register production Stripe webhook endpoint (only `customer.updated`).
+- Deploy with env vars wired.
+- Feature-flag the dashboard modal.
+- Monitor for 24–48 hours.
 
 ### Parallelization notes
-
-- Phase 2 (auth extraction) can happen in parallel with Phase 1 once the migration is reviewed.
+- Phase 2 can run in parallel with Phase 1 once the migration is reviewed.
 - Phase 7 (dashboard styling) can start in parallel with Phase 5/6 once API shapes are frozen.
-- Phase 8 (email templates, runbook) can start as soon as Phase 6 lands.
-
-Cannot parallelize: Phase 5 before Phase 4 (need config to read), Phase 6 before Phase 5 (need triggers to create PIs to credit).
 
 ---
 
-## 17. Local development & testing
-
-Fully testable locally against Stripe test mode. No staging required.
+## 18. Local development & testing
 
 ### Prerequisites
+- Rust toolchain (per `lit-api-server/rust-toolchain.toml`).
+- Docker.
+- Stripe CLI (`brew install stripe/stripe-cli/stripe`).
+- Stripe test-mode account with restricted key (Customers R/W, PaymentIntents W, SetupIntents W, PaymentMethods R, Customer Balance Transactions W).
 
-- Rust toolchain (per `lit-api-server/rust-toolchain.toml`, currently 1.91).
-- Docker (for local Postgres).
-- [Stripe CLI](https://docs.stripe.com/stripe-cli) (`brew install stripe/stripe-cli/stripe`).
-- A Stripe test-mode account with a restricted key permissioned for: Customers (R/W), PaymentIntents (W), SetupIntents (W), PaymentMethods (R), Customer Balance Transactions (W).
-- `sqlx-cli` for manual migration ops: `cargo install sqlx-cli --no-default-features --features postgres`.
-
-### Step 1 — Start local Postgres
+### Step 1 — Postgres
 
 ```sh
 docker run --rm -d --name lit-payments-pg \
-  -e POSTGRES_PASSWORD=postgres \
-  -p 5432:5432 \
-  postgres:16
+  -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
 ```
 
-### Step 2 — Configure env vars
+### Step 2 — Env vars
 
-Create `lit-payments/.env`:
-
+`lit-payments/.env`:
 ```sh
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres
 MAGIC_LINK_SIGNING_KEY=$(openssl rand -base64 32)
@@ -675,53 +618,34 @@ RESEND_API_KEY=re_test_or_real
 MAIL_FROM=noreply@mail.litprotocol.com
 PUBLIC_BASE_URL=http://localhost:8000
 ROCKET_PORT=8000
-
-# Stripe
 STRIPE_SECRET_KEY=rk_test_...
-STRIPE_WEBHOOK_SECRET=whsec_...   # printed by `stripe listen` in Step 4
-
-# Auto top-up
+STRIPE_WEBHOOK_SECRET=whsec_...  # from `stripe listen`
 LIT_API_SERVER_BASE_URL=http://localhost:8002
 LIT_INTERNAL_SHARED_SECRET=$(openssl rand -base64 32)
-
-# Auth module (on-chain resolver for API-key auth)
+RECONCILER_INTERVAL_SECS=60  # faster for local testing
 ALCHEMY_HTTPS_URL=https://...
 ```
 
-Create `lit-api-server/.env` additions:
-
+`lit-api-server/.env` additions:
 ```sh
-LIT_INTERNAL_SHARED_SECRET=<same value as in lit-payments/.env>
+LIT_INTERNAL_SHARED_SECRET=<same value>
 ```
 
 ### Step 3 — Apply migrations
-
-```sh
-cd lit-payments && cargo run
-# sqlx migrations auto-run on startup
-```
-
-Or manually:
-
+Auto-runs on `cargo run`. Or manually:
 ```sh
 sqlx migrate run --database-url postgres://postgres:postgres@localhost:5432/postgres
-sqlx migrate info
-psql $DATABASE_URL -c '\d auto_topup_config'
-psql $DATABASE_URL -c '\d auto_topup_credits'
 ```
 
-### Step 4 — Forward Stripe webhooks to localhost
+### Step 4 — Forward webhooks
 
 ```sh
 stripe login
-stripe listen \
-  --events customer.updated,payment_intent.succeeded,payment_intent.payment_failed \
-  --forward-to http://localhost:8000/stripe/webhook
+stripe listen --events customer.updated --forward-to http://localhost:8000/stripe/webhook
 ```
+Copy the printed signing secret into `STRIPE_WEBHOOK_SECRET`, restart lit-payments.
 
-CLI prints a webhook signing secret. Copy it to `STRIPE_WEBHOOK_SECRET` and restart lit-payments.
-
-### Step 5 — Start all services
+### Step 5 — Start services
 
 ```sh
 # Terminal A: lit-payments
@@ -733,7 +657,7 @@ cd lit-api-server && cargo run
 # Terminal C: dashboard
 cd lit-static/dapps/dashboard && python3 -m http.server 8001
 
-# Terminal D: stripe listen (kept running)
+# Terminal D: stripe listen (keep running)
 ```
 
 ### Stripe test cards
@@ -742,149 +666,92 @@ cd lit-static/dapps/dashboard && python3 -m http.server 8001
 |---|---|
 | `4242 4242 4242 4242` | Success — off-session charges work |
 | `4000 0000 0000 0341` | Off-session decline (`card_declined`) |
-| `4000 0027 6000 3184` | 3DS required (`requires_action`) — exercises SCA flow |
+| `4000 0027 6000 3184` | 3DS required (`requires_action`) — treated as failure |
 | `4000 0000 0000 9995` | `insufficient_funds` decline |
 | `4000 0000 0000 0069` | `expired_card` decline |
 | `4000 0000 0000 0127` | `incorrect_cvc` decline |
 
-Full list: https://docs.stripe.com/testing
+### Per-phase acceptance tests
 
-### Acceptance tests per phase
+**After Phase 2** — both services accept the same wallet-sig + API-key auth.
 
-#### After Phase 2 — auth extraction
-- [ ] Existing lit-api-server billing endpoints still authenticate with both wallet-sig and API-key.
-- [ ] A placeholder lit-payments endpoint accepts the same auth headers and rejects invalid ones with 401.
+**After Phase 3** — saving `4242…` attaches `pm_xxx` to the right customer.
 
-#### After Phase 3 — saved card
-- [ ] `POST /billing/setup_intent` returns `client_secret` for an existing Stripe customer.
-- [ ] Returns 400 with clear "first do a manual top-up" message for a wallet with no Stripe customer.
-- [ ] Saving `4242…` via dashboard attaches `pm_xxx` to the right `cus_xxx` (verify: `stripe customers retrieve cus_xxx`).
+**After Phase 4** — config can be saved/read; CHECK constraint rejects invalid states.
 
-#### After Phase 4 — config CRUD
-- [ ] `PUT /billing/auto_topup_config` accepts valid config, returns 200, row appears in Postgres.
-- [ ] `PUT` with `enabled=true` and null `threshold_cents` is rejected by CHECK constraint.
-- [ ] `PUT` with `pm_xxx` not attached to this customer returns 400.
-- [ ] `GET /billing/auto_topup_config` returns what was written.
+**After Phase 5:**
+- [ ] Real card saved → `stripe post /v1/customers/{c}/balance_transactions -d "amount=-X" -d "currency=usd"` to drop balance → `customer.updated` fires → trigger handler creates PI, credits user. Verify row in `auto_topup_credits` with non-null `stripe_balance_transaction_id`.
+- [ ] Burst: 10 balance_transactions in parallel → only one PI created (mutex + balance-check short-circuit).
+- [ ] `4000 0000 0000 0341` saved → trigger fires → `paymentIntents.create` returns declined → email sent, no credit. Repeat 3x → config gets `disabled_reason='failures'`.
+- [ ] `4000 0027 6000 3184` saved → trigger fires → returns `requires_action` → email sent, no credit.
+- [ ] Webhook signature tampered → handler returns 401.
+- [ ] Immediately after a credit, lit-api-server balance fetch returns the new value (cache invalidated).
 
-#### After Phase 5 — customer.updated trigger
-- [ ] Manually create a `balance_transaction` via `stripe post /v1/customers/{c}/balance_transactions -d "amount=-X" -d "currency=usd"` so balance drops below threshold → `customer.updated` webhook fires → trigger handler creates a PaymentIntent visible in Stripe Dashboard.
-- [ ] Burst test: fire 10 balance_transactions in parallel via Stripe CLI → only one PaymentIntent results (mutex + balance-check short-circuit).
-- [ ] Use `4000 0000 0000 0341` saved card → PI is created with `status=requires_payment_method` (declined) → config row's `disabled_reason` set after 3 such failures via the derived-from-list logic.
-- [ ] Use `4000 0027 6000 3184` SCA card → `pending_action_pi_id` set, "action required" email sent.
+**After Phase 6:**
+- [ ] Manually create a `succeeded` PI in Stripe with `metadata.source=auto_topup` (no corresponding DB row) → reconciler picks it up within `RECONCILER_INTERVAL_SECS` and credits the customer.
+- [ ] Create a row in `auto_topup_credits` with `stripe_balance_transaction_id IS NULL` → reconciler completes the credit on next tick.
+- [ ] Kill lit-payments between `paymentIntents.create` and `balance_transactions` (insert a sleep in dev to simulate) → restart → reconciler recovers the orphan within 1 min.
 
-#### After Phase 6 — credit + failure webhooks
-- [ ] `stripe trigger payment_intent.succeeded` (or wait for a real PI) → row appears in `auto_topup_credits` → balance transaction created in Stripe → cache invalidation logged in `lit-api-server`.
-- [ ] `stripe events resend evt_xxx` to replay the same event → handler returns 200 immediately without a second credit (verify `auto_topup_credits` row count unchanged, no new balance transaction in Stripe).
-- [ ] `stripe trigger payment_intent.payment_failed` → email dispatched, banner appears.
-- [ ] Tamper with `Stripe-Signature` header → returns 401.
-- [ ] After a credit, immediate balance fetch via lit-api-server → returns updated value (cache invalidated).
+**After Phase 7** — full end-to-end flow with real user clicking through the dashboard.
 
-#### After Phase 7 — dashboard UI
-- [ ] User opens dashboard, sees "no card on file" state.
-- [ ] Saves a `4242…` card → modal updates to show card on file.
-- [ ] Configures threshold/amount/cap, toggles enabled, saves → status banner shows the rule.
-- [ ] Runs a Lit Action that drops balance below threshold → within ~10 seconds, balance is credited and dashboard reflects new balance.
-- [ ] Uses 3DS card → action-required banner appears → "Confirm now" → 3DS modal → completes → balance credited → banner clears.
-- [ ] 3DS abandoned → email arrives, banner eventually clears after failure webhook.
+### End-to-end smoke before Phase 9 rollout
 
-#### End-to-end smoke before Phase 9 rollout
 - [ ] Full happy path: save card → enable → run actions → auto-charge → credited.
-- [ ] Webhook replay safety: resend a `payment_intent.succeeded` event 24+ hours later → no double credit.
-- [ ] Cap reached: set cap=$5, top-up=$5, drive two top-ups in a row → second correctly skipped.
-- [ ] Cache invalidation under burst: 5 parallel deductions immediately after a top-up → all see updated balance (none rejected for insufficient credit).
-
-### Staging / preview
-
-No dedicated staging today. Two options if local isn't enough:
-1. Enable Railway preview environments for the lit-payments project (per-branch deploys).
-2. Deploy lit-payments to a personal Railway service for webhook testing against a publicly-reachable URL (vs. `stripe listen` which is local-only).
-
-For lit-api-server (TEE), staging is outside this repo's scope.
+- [ ] Cap reached: set cap=$5, top-up=$5, drive two top-ups in a row → second skipped.
+- [ ] Cache invalidation under burst: 5 deductions immediately after a top-up → all see updated balance.
+- [ ] Reconciler heartbeat: tail logs/metrics for 24h, ensure cron runs every interval.
 
 ### Quick-reference commands
 
 ```sh
-# Reset local Postgres
-docker stop lit-payments-pg && docker rm lit-payments-pg
-docker run --rm -d --name lit-payments-pg -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:16
-
 # Inspect tables
 psql $DATABASE_URL -c 'SELECT * FROM auto_topup_config;'
 psql $DATABASE_URL -c 'SELECT * FROM auto_topup_credits ORDER BY credited_at DESC LIMIT 10;'
 
-# Fire a balance_transaction (triggers customer.updated)
+# Manually drop balance to trigger customer.updated
 stripe post /v1/customers/cus_xxx/balance_transactions \
-  -d "amount=-100" -d "currency=usd" -d "description=manual test"
+  -d "amount=-100" -d "currency=usd" -d "description=test"
 
-# Trigger synthetic webhooks
-stripe trigger payment_intent.succeeded
-stripe trigger payment_intent.payment_failed
-
-# Replay specific event (idempotency test)
-stripe events resend evt_xxx
-
-# Tail Stripe CLI in JSON
-stripe listen --events customer.updated,payment_intent.succeeded,payment_intent.payment_failed \
-  --forward-to http://localhost:8000/stripe/webhook --format json
+# Check Stripe-side state
+stripe customers retrieve cus_xxx
+stripe payment_intents list --customer cus_xxx --limit 10
 ```
 
 ---
 
-## 18. What is explicitly NOT in this plan
+## 19. Verification
 
-- Hard monthly cap with reservation ledger.
-- Reconciler cron for orphaned Stripe PIs without a credit row. Manual recovery via admin portal handles the rare 3-day-webhook-failure case.
-- Currency support beyond USD.
-- Daily / rolling restrictions for public-tier API keys (future feature).
-- Refund-aware cap accounting.
-- Multi-card support per customer.
+Reviewed across four passes:
+1. Initial design (Codex consult).
+2. Simplified design (Codex consult, resumed).
+3. Empirical Stripe test mode validation of `customer.updated` firing 1:1 per balance_transaction (21 events for 21 transactions, no coalescing under slow or parallel load).
+4. Codex consult on whether sync-credit is safe under US-card + no-SCA constraints — confirmed defensible with idempotency keys + reconciliation.
 
----
-
-## 19. Open questions for product
-
-- Consent text wording: "approximately $X/month" or "up to $X/month" or both?
-- Email service confirmation (we plan to use existing Resend integration).
-- Failure-counter threshold for auto-disable: 3 (current plan).
-- 10-minute recent-PI short-circuit window.
-- Minimum top-up amount: $5 (matches existing one-shot floor).
+Alternative architectures considered and rejected:
+- Stripe Billing Meters + Credit Grants — requires migrating off `customer.balance`, touches admin portal / dashboard / lit-api-server / lit-payments. Out of scope per separate strategic decision.
+- Webhook-driven credit (`payment_intent.succeeded`) — adds duplicate-delivery handling complexity for marginal benefit over sync-credit + reconciler under the chosen constraints (US-only, no SCA).
 
 ---
 
-## 20. Verification
-
-This plan reflects four review passes:
-
-1. **Initial design review** (Codex consult, fresh session) — caught the load-bearing list-endpoint staleness issue and confirmed Postgres dedup table is necessary.
-2. **Simplified design review** (Codex consult, resumed session) — identified service-auth gaps, `pending_action` state machine, and SCA recovery flow.
-3. **Fresh-session sanity check on the locked design** — verified no missing pieces, flagged the `customer.updated` webhook as undocumented behavior worth empirically testing.
-4. **Empirical Stripe test (June 2026)** — fired 21 `balance_transactions` against a test customer (slow loop + parallel burst); received exactly 21 `customer.updated` events, no coalescing, balance correct in every payload, `previous_attributes.balance` present for delta detection. This validated the webhook-driven trigger.
-
-The alternative architecture (Stripe Billing Meters + Credit Grants for native auto-top-up) was explored and rejected: Stripe's own [Billing Credits implementation guide](https://docs.stripe.com/billing/subscriptions/usage-based/billing-credits/implementation-guide) explicitly states merchants must create the funding invoice themselves, listen for `invoice.paid`, and call the Credit Grants API. Same three steps, more complex billing platform. Migration off `customer.balance` would touch admin portal, dashboard, lit-api-server, lit-payments, and existing customer data — out of scope.
-
----
-
-## 21. Handoff checklist for the implementing agent
-
-If you're picking up this doc cold, do these in order:
+## 20. Handoff checklist for the implementing agent
 
 - [ ] Read §1–4 (goal, framing, architecture, schema).
-- [ ] Read §5–9 (endpoints, two webhook handler flows, lit-api-server change, dashboard flows).
-- [ ] Read §10 (three-layer concurrency model).
-- [ ] Read §11–12 (edge cases handled vs accepted trade-offs).
-- [ ] Read §13–14 (env vars + service-auth).
-- [ ] Read §17 (local development & testing) and stand up the local stack before writing any code.
-- [ ] Follow §16 phases in order. Each phase has a gate; do not skip ahead.
-- [ ] Use the per-phase acceptance tests at the end of §17 as your gate criteria.
-- [ ] Ask product before starting on §19 open questions.
+- [ ] Read §5–10 (endpoints, sync charge+credit flow, signature verification, `lit-api-server` changes, reconciler, dashboard).
+- [ ] Read §11 (three-layer concurrency).
+- [ ] Read §12–13 (edge cases handled vs accepted).
+- [ ] Read §14–15 (env vars, service-auth).
+- [ ] Read §18 and stand up the local stack before coding.
+- [ ] Follow §17 phases in order; honor gates.
+- [ ] Use per-phase acceptance tests in §18 as gate criteria.
 
-Key architectural facts you must internalize before coding:
-
-- **`customer.updated` is the trigger** (empirically validated 1:1 firing in §20). Filter on `previous_attributes.balance`.
-- **`payment_intent.succeeded` is the credit path** — never credit synchronously in the trigger handler.
+Key facts to internalize:
+- **`customer.updated` is the only webhook.** Filter on `previous_attributes.balance`.
+- **Charge AND credit are synchronous.** No `payment_intent.succeeded` webhook.
+- **Reconciler is load-bearing**, not optional — it's the only path that recovers from HTTP timeouts and partial-write failures.
+- **US cards only, no SCA.** `requires_action` is treated as failure.
 - **lit-api-server is unchanged** except for one tiny cache-invalidation endpoint.
-- **Dashboard talks to lit-payments directly** for auto-top-up endpoints (auth via the extracted shared module).
-- **Soft cap, bias toward more top-ups never fewer** — the design accepts rare double-charges; it does not accept missing top-ups.
-- **Webhook handlers must return 2xx only after all work is committed** — otherwise Stripe won't retry and credit is lost.
+- **Auth extracted** so dashboard talks to lit-payments directly with identical auth headers.
+- **Soft cap, bias toward more top-ups.** Rare double-charge acceptable; missed top-up is not.
+- **Webhook handler returns 2xx only after credit committed** to Postgres. Otherwise lost credit.
 
-This document is intended to be self-contained. If something is ambiguous, raise it — do not guess.
+This document is self-contained. Raise ambiguities — do not guess.
