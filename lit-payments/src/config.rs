@@ -39,6 +39,27 @@ pub struct Config {
     /// admin portal and rate poller run but LITKEY browser payments stay
     /// disabled.
     pub litkey_chain: Option<chain::ChainConfig>,
+    /// Base URL of `lit-api-server`, used for the auto-top-up cache
+    /// invalidation callback after a successful credit. e.g.,
+    /// `https://api.litprotocol.com`.
+    pub lit_api_server_base_url: String,
+    /// High-entropy shared secret for the internal `lit-payments` ⇄
+    /// `lit-api-server` hop. Compared in constant time against the
+    /// `X-Internal-Secret` header on internal endpoints. Same value must be
+    /// configured on both services. Generate with `openssl rand -base64 32`.
+    pub lit_internal_shared_secret: String,
+    /// Stripe webhook signing secret. Used to verify the `Stripe-Signature`
+    /// header on `POST /stripe/webhook` (the single `customer.updated`
+    /// event that triggers the auto-top-up flow). Copy from the Stripe
+    /// Dashboard after registering the webhook endpoint, or from
+    /// `stripe listen` output in local dev.
+    pub stripe_webhook_secret: String,
+    /// Interval (seconds) between reconciler runs (Phase 6). The reconciler
+    /// walks recent auto-top-up PIs and credits any that the sync handler
+    /// missed (HTTP timeout on `paymentIntents.create` or the
+    /// `balance_transactions` write). Default 900 (15 minutes); set lower
+    /// (e.g. 60) for local testing.
+    pub reconciler_interval_secs: i64,
 }
 
 impl Config {
@@ -56,6 +77,12 @@ impl Config {
             max_daily_per_operator_cents: optional_i64("MAX_DAILY_PER_OPERATOR_CENTS", 10_000)?,
             litkey_discount_basis_points: parse_discount_basis_points()?,
             litkey_chain: parse_litkey_chain_config()?,
+            lit_api_server_base_url: required("LIT_API_SERVER_BASE_URL")?
+                .trim_end_matches('/')
+                .to_string(),
+            lit_internal_shared_secret: required("LIT_INTERNAL_SHARED_SECRET")?,
+            stripe_webhook_secret: required("STRIPE_WEBHOOK_SECRET")?,
+            reconciler_interval_secs: optional_i64("RECONCILER_INTERVAL_SECS", 900)?,
         })
     }
 }

@@ -6,6 +6,7 @@ use lit_api_server::config;
 use lit_api_server::core;
 use lit_api_server::core::v1::guards::cpu_overload::CpuOverloadMonitor;
 use lit_api_server::dstack;
+use lit_api_server::internal;
 use lit_api_server::observability;
 use lit_api_server::restart::{RestartHandle, start_server_trigger_listener};
 use lit_api_server::stripe;
@@ -151,6 +152,7 @@ async fn main() -> Result<(), rocket::Error> {
 
     let cpu_monitor = CpuOverloadMonitor::start();
     let stripe_state = stripe::init();
+    let internal_config = internal::config::init();
 
     // Initialize global singletons once, outside the restart loop, so they
     // aren't re-initialized (and don't re-log) on every Rocket rebuild.
@@ -190,6 +192,7 @@ async fn main() -> Result<(), rocket::Error> {
             chain_config.clone(),
             cpu_monitor.clone(),
             stripe_state.clone(),
+            internal_config.clone(),
             ipfs_cache.clone(),
         );
 
@@ -310,6 +313,7 @@ fn build_rocket(
     chain_config: Arc<lit_api_server::accounts::chain_config::ChainConfig>,
     cpu_monitor: CpuOverloadMonitor,
     stripe_state: Option<Arc<stripe::StripeState>>,
+    internal_config: Option<Arc<internal::InternalConfig>>,
     ipfs_cache: Cache<String, Arc<String>>,
 ) -> rocket::Rocket<rocket::Build> {
     let allowed_methods = HashSet::from([
@@ -349,6 +353,7 @@ fn build_rocket(
             routes![openapi_json, openapi_json_redirect, swagger_ui_redirect],
         )
         .mount("/", core::v1::health::routes())
+        .mount("/", routes![internal::routes::invalidate_balance_cache])
         .mount("/core/v1/", core_routes)
         .mount("/core/v1/", core::v1::health::routes())
         .mount(
@@ -366,6 +371,7 @@ fn build_rocket(
         .manage(chain_config)
         .manage(cpu_monitor)
         .manage(stripe_state)
+        .manage(internal_config)
         .manage(core::v1::health::LitActionsSocketPath(
             std::path::PathBuf::from(core::v1::health::LIT_ACTIONS_SOCKET),
         ));

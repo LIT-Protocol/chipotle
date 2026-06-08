@@ -4786,6 +4786,7 @@ dependencies = [
  "sqlx",
  "strum 0.28.0",
  "strum_macros 0.28.0",
+ "subtle",
  "tdx-quote",
  "tokio",
  "toml_edit 0.22.27",
