@@ -37,3 +37,8 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+# Used by Phase 3+ integration tests to base64-encode mock X-Wallet-Auth
+# payloads. Production code in this crate doesn't need it.
+base64_light = "0.1"

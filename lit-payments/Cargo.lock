@@ -2097,6 +2097,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "base64",
+ "base64_light",
  "hex",
  "hmac",
  "lit-billing-auth",

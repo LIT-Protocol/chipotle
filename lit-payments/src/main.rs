@@ -6,6 +6,7 @@ use lit_billing_auth::{AuthResolver, BillingAuth};
 use lit_billing_core::StripeClient;
 use lit_payments::auth::routes as auth_routes;
 use lit_payments::auth_resolver::HttpAuthResolver;
+use lit_payments::billing as billing_routes;
 use lit_payments::portal::routes as portal_routes;
 use lit_payments::rate;
 use lit_payments::{auth, chain, config, db, mail};
@@ -70,6 +71,7 @@ async fn rocket() -> _ {
                 chain::get_payment_config,
                 chain::claim_payment,
                 rate::override_rate,
+                billing_routes::setup_intent::setup_intent,
             ],
         )
         .mount("/static", FileServer::from("static"))

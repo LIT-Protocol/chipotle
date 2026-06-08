@@ -28,6 +28,11 @@ pub struct Config {
     pub public_base_url: String,
     /// Stripe restricted secret key for the ops-facing service.
     pub stripe_secret_key: String,
+    /// Stripe publishable key — returned by `POST /billing/setup_intent` so
+    /// the dashboard can initialise Stripe.js without baking the key into
+    /// every front-end deploy. Pulled from the same Stripe account as
+    /// `stripe_secret_key`; no harm in shipping to the client.
+    pub stripe_publishable_key: String,
     /// Max cents a single grant can apply. Default $20.
     pub max_grant_cents: i64,
     /// Max cents one operator can grant in a rolling 24-hour window. Default $100.
@@ -73,6 +78,7 @@ impl Config {
                 .trim_end_matches('/')
                 .to_string(),
             stripe_secret_key: required("STRIPE_SECRET_KEY")?,
+            stripe_publishable_key: required("STRIPE_PUBLISHABLE_KEY")?,
             max_grant_cents: optional_i64("MAX_GRANT_CENTS", 2_000)?,
             max_daily_per_operator_cents: optional_i64("MAX_DAILY_PER_OPERATOR_CENTS", 10_000)?,
             litkey_discount_basis_points: parse_discount_basis_points()?,
