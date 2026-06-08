@@ -117,6 +117,16 @@ pub async fn stripe_webhook(
         None => return Status::Ok,
     };
     let new_balance = obj.get("balance").and_then(|v| v.as_i64()).unwrap_or(0);
+    // Codex P1 (Phase 5): use the Stripe webhook event.id as the
+    // idempotency-key seed for `paymentIntents.create`. Stripe redelivers
+    // the same event with the same id on 5xx replies, so a stable key
+    // means Stripe dedupes the retry on its side instead of letting us
+    // create a second PI per retry.
+    let event_id = event
+        .get("id")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
     match process_event(
         cfg.inner(),
@@ -125,6 +135,7 @@ pub async fn stripe_webhook(
         mutex_cache.inner(),
         &customer_id,
         new_balance,
+        &event_id,
     )
     .await
     {
@@ -154,20 +165,42 @@ async fn process_event(
     mutex_cache: &PerCustomerMutex,
     customer_id: &str,
     payload_balance: i64,
+    event_id: &str,
 ) -> Result<(), ProcessError> {
-    // Step 3a: Load config. Short-circuit unless the row is enabled AND
-    // not already in an SCA-pending state. Skipping the
-    // pending_action_pi_id check would let a fresh customer.updated event
-    // fire a second off-session PI while the first is still waiting on
-    // the user's 3DS confirmation — which overwrites the recovery_token
-    // (single-use!) and leaves us stuck with two pending PIs the
-    // dashboard can't distinguish. The webhook handler that staged the
-    // pending state already set `disabled_reason = 'requires_action'`;
-    // we treat that as a soft pause that the SCA resume / clear-pending
-    // path is responsible for lifting.
+    // Step 3a (pre-mutex): cheap payload-only quick exit. We re-read the
+    // config under the mutex below; this lookup is just to avoid taking
+    // the mutex when the row is plainly disabled or the payload balance
+    // already exceeds the threshold. Codex P1 (Phase 5): the
+    // load-bearing config read must happen INSIDE the mutex so that a
+    // concurrent SCA-staging path that sets pending_action_pi_id is
+    // observed by the next webhook tick. Without that ordering, two
+    // overlapping customer.updated deliveries can both see
+    // pending_action_pi_id=None and each fire an off-session PI.
+    let pre_check = db::get_by_customer_id(pool, customer_id)
+        .await
+        .context("db read auto_topup_config (pre-mutex)")?;
+    let pre_threshold = match &pre_check {
+        Some(c) if c.enabled && c.pending_action_pi_id.is_none() => c.threshold_cents,
+        _ => return Ok(()),
+    };
+    if let Some(t) = pre_threshold {
+        if -payload_balance >= t {
+            return Ok(());
+        }
+    }
+
+    // Step 4: Acquire per-customer mutex. Serializes concurrent
+    // customer.updated deliveries for the same customer.
+    let mutex = mutex_cache.get(customer_id);
+    let _guard = mutex.lock().await;
+
+    // Step 4b: Re-load config under the mutex. Required for correctness
+    // when another delivery (or the SCA-staging path) raced ahead of us
+    // and changed enabled / pending_action_pi_id between our pre-check
+    // and the lock acquisition.
     let config = match db::get_by_customer_id(pool, customer_id)
         .await
-        .context("db read auto_topup_config")?
+        .context("db read auto_topup_config (post-mutex)")?
     {
         Some(c) if c.enabled && c.pending_action_pi_id.is_none() => c,
         _ => return Ok(()),
@@ -177,18 +210,6 @@ async fn process_event(
             "enabled config missing threshold for {customer_id} — CHECK constraint should have caught this"
         ))
     })?;
-
-    // Step 3b: Quick exit on payload balance. Available credit = -balance
-    // (Stripe stores customer.balance as negative when the customer has
-    // credit available). If they're already above threshold, skip.
-    if -payload_balance >= threshold {
-        return Ok(());
-    }
-
-    // Step 4: Acquire per-customer mutex. Serializes concurrent
-    // customer.updated deliveries for the same customer.
-    let mutex = mutex_cache.get(customer_id);
-    let _guard = mutex.lock().await;
 
     // Step 5: Fresh balance fetch — don't trust the webhook payload after
     // the mutex wait; the balance may have moved.
@@ -241,18 +262,26 @@ async fn process_event(
         return Ok(());
     }
 
-    // Step 9: Create off-session PaymentIntent. Idempotency key is a fresh
-    // UUID — webhook replays for the same customer.updated event happen
-    // rarely enough that we don't need to derive a stable key here; the
-    // unique constraint on auto_topup_credits.payment_intent_id catches
-    // duplicate credit attempts even if Stripe creates two PIs.
+    // Step 9: Create off-session PaymentIntent. Codex P1 (Phase 5): the
+    // idempotency-key MUST derive from the Stripe event.id so that when
+    // Stripe redelivers the same customer.updated event (which it does
+    // on every 5xx we return), `paymentIntents.create` gets deduped on
+    // Stripe's side instead of creating a second PI per retry. The 24h
+    // idempotency-key TTL is the right scope — well past Stripe's 3-day
+    // retry window for an individual event would risk false hits, but
+    // within a redelivery burst it's exactly what we want. Falls back
+    // to a UUID if event_id is missing (only the unit-test paths).
     let payment_method_id = config
         .payment_method_id
         .as_deref()
         .expect("CHECK constraint enforces non-null when enabled");
     let wallet_address = config.wallet_address.as_str();
     let amount_str = topup_amount.to_string();
-    let idempotency_key = Uuid::new_v4().to_string();
+    let idempotency_key = if event_id.is_empty() {
+        Uuid::new_v4().to_string()
+    } else {
+        format!("auto_topup_pi:{event_id}")
+    };
     let pi_resp = stripe
         .post_with_idempotency(
             "payment_intents",
@@ -284,6 +313,19 @@ async fn process_event(
             // recovery page later calls Stripe with a non-PI id.
             if let Some(stripe_err) = e.downcast_ref::<lit_billing_core::StripeError>() {
                 let code = stripe_err.code().unwrap_or("");
+                // Codex P1 (Phase 5): structured Stripe 5xx (HTTP 5xx
+                // with a JSON `error` body, typically error.type=api_error)
+                // is a transient failure — Stripe's side is degraded, not
+                // a permanent decline. Pre-fix this collapsed to Ok(()),
+                // which acked the webhook and lost the retry. Returning
+                // Transient surfaces the 503 to Stripe; their 3-day
+                // redelivery loop is exactly the right retry primitive.
+                if stripe_err.status.is_server_error() {
+                    return Err(ProcessError::Transient(anyhow::anyhow!(
+                        "Stripe {} on paymentIntents.create: {stripe_err}",
+                        stripe_err.status
+                    )));
+                }
                 if code == "authentication_required" {
                     let pi_id = stripe_err
                         .payment_intent_id()
