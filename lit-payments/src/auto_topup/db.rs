@@ -96,20 +96,20 @@ pub async fn upsert(
     let now = OffsetDateTime::now_utc();
     let consent_signed_at = if body.enabled { Some(now) } else { None };
 
-    let (disabled_reason, pending_pi, pending_at, token, token_exp) = if body.enabled {
-        // Re-enabling: don't carry forward an old disabled_reason; pending
-        // state, if any, stays — a webhook handler may still need it.
-        (
-            None::<String>,
-            None::<String>,
-            None::<OffsetDateTime>,
-            None::<String>,
-            None::<OffsetDateTime>,
-        )
+    // Codex P1 (Phase 4) fix: pending SCA recovery state belongs to the
+    // server, not the client. A normal enabled save during
+    // `requires_action` must NOT wipe `pending_action_pi_id` /
+    // `recovery_token` / etc. The SQL `ON CONFLICT DO UPDATE` below uses
+    // a CASE expression on each pending field to preserve the existing
+    // value when the upsert keeps the row enabled, and only clears them
+    // when the user explicitly disables. We also keep `disabled_reason`
+    // intact while it is `requires_action` so the dashboard's SCA banner
+    // logic stays correct; other disabled_reasons ('manual', 'failures')
+    // are cleared on re-enable as the user expects.
+    let new_disabled_reason: Option<String> = if body.enabled {
+        None
     } else {
-        // Disabling: 'manual' is the user-initiated reason. Pending state
-        // is cleared (see doc comment).
-        (Some("manual".to_string()), None, None, None, None)
+        Some("manual".to_string())
     };
 
     let row: Row = sqlx::query_as(&format!(
@@ -119,7 +119,7 @@ pub async fn upsert(
             consent_version, consent_signed_at, disabled_reason, \
             pending_action_pi_id, pending_action_at, recovery_token, \
             recovery_token_expires_at, updated_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL, NULL, NULL, NULL, $11) \
          ON CONFLICT (customer_id) DO UPDATE SET \
             enabled = EXCLUDED.enabled, \
             threshold_cents = EXCLUDED.threshold_cents, \
@@ -128,11 +128,27 @@ pub async fn upsert(
             payment_method_id = EXCLUDED.payment_method_id, \
             consent_version = EXCLUDED.consent_version, \
             consent_signed_at = EXCLUDED.consent_signed_at, \
-            disabled_reason = EXCLUDED.disabled_reason, \
-            pending_action_pi_id = EXCLUDED.pending_action_pi_id, \
-            pending_action_at = EXCLUDED.pending_action_at, \
-            recovery_token = EXCLUDED.recovery_token, \
-            recovery_token_expires_at = EXCLUDED.recovery_token_expires_at, \
+            disabled_reason = CASE \
+                WHEN NOT EXCLUDED.enabled THEN EXCLUDED.disabled_reason \
+                WHEN auto_topup_config.disabled_reason = 'requires_action' THEN 'requires_action' \
+                ELSE NULL \
+            END, \
+            pending_action_pi_id = CASE \
+                WHEN EXCLUDED.enabled THEN auto_topup_config.pending_action_pi_id \
+                ELSE NULL \
+            END, \
+            pending_action_at = CASE \
+                WHEN EXCLUDED.enabled THEN auto_topup_config.pending_action_at \
+                ELSE NULL \
+            END, \
+            recovery_token = CASE \
+                WHEN EXCLUDED.enabled THEN auto_topup_config.recovery_token \
+                ELSE NULL \
+            END, \
+            recovery_token_expires_at = CASE \
+                WHEN EXCLUDED.enabled THEN auto_topup_config.recovery_token_expires_at \
+                ELSE NULL \
+            END, \
             updated_at = EXCLUDED.updated_at \
          RETURNING {SELECT_COLUMNS}"
     ))
@@ -145,11 +161,7 @@ pub async fn upsert(
     .bind(body.payment_method_id.as_deref())
     .bind(body.consent_version.as_deref())
     .bind(consent_signed_at)
-    .bind(disabled_reason)
-    .bind(pending_pi)
-    .bind(pending_at)
-    .bind(token)
-    .bind(token_exp)
+    .bind(new_disabled_reason)
     .bind(now)
     .fetch_one(pool)
     .await?;
