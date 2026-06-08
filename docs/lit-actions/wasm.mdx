@@ -15,7 +15,10 @@ anything published as a wasm-bindgen package on npm works.
 This is what makes heavyweight, audited cryptography practical inside an action:
 the [mpc-signing-ecdsa example](./examples#16-non-custodial-co-signer-threshold-ecdsa-split-between-lit-and-you)
 runs the [DKLs23](https://dkls.info/) threshold-ECDSA protocol (a Trail-of-Bits-audited
-Rust library compiled to wasm) entirely inside the action to co-sign with the user.
+Rust library compiled to wasm) entirely inside the action to co-sign with the user,
+and the [mpc-signing-frost example](./examples#17-non-custodial-co-signer-threshold-frost-for-solana-bitcoin-and-zcash)
+does the same with threshold **FROST** (the Kudelski-audited `lit-frost` + `frost-dkg`,
+compiled to wasm) for Schnorr/EdDSA chains like Solana.
 
 ## Loading a module
 
@@ -66,7 +69,25 @@ initSync(Uint8Array.from(atob(WASM_B64), (c) => c.charCodeAt(0)));
   safe for most uses. Option 2 is the tighter setup when you want the CID itself
   to attest to the precise bytes that ran (e.g. so a verifier doesn't have to
   trust the CDN at all). The trade-off is action size — a large module inlined as
-  base64 grows the source ~33%.
+  base64 grows the source ~33%, and an action that exceeds the request-body limit
+  can't be submitted at all.
+
+  **Middle ground (option 1 + a pinned hash).** When the module is too big to
+  inline but you still want the CID to commit to the crypto, fetch the wasm and
+  verify its SHA-256 against a constant in the action before `initSync`-ing it —
+  the CID commits to the hash, so the action refuses to run any other bytes:
+
+  ```javascript
+  const WASM_SHA256 = "6b7eda…51dc";                 // pinned; the CID commits to this
+  const bytes = new Uint8Array(await (await fetch(WASM_URL)).arrayBuffer());
+  const hex = [...new Uint8Array(await crypto.subtle.digest("SHA-256", bytes))]
+    .map((b) => b.toString(16).padStart(2, "0")).join("");
+  if (hex !== WASM_SHA256) throw new Error("wasm hash mismatch — refusing to run");
+  initSync({ module: bytes });
+  ```
+
+  The mpc-signing-frost example uses exactly this — its ~1.5 MB FROST module is too
+  large to inline, so it pins the hash instead.
 </Note>
 
 ## Things to keep in mind

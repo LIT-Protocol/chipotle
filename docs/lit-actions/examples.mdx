@@ -748,3 +748,54 @@ async function main({ round, sessionId, pkpId, encState, encKeyshare, inMsgs, me
 <Info>
   The full runnable example — the stateless `mpcSigner` action, a user-side client + local share store, `MpcVault.sol` (verifies the MPC signature with plain `ecrecover`), `setup` / `keygen` / `deploy` / `sign` scripts covering the interactive DKG and both signing quorums (hot + Lit, and the no-Lit hot + cold recovery path) — lives at [`examples/mpc-signing-ecdsa/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/mpc-signing-ecdsa) in the repo. Verified end-to-end on Base Sepolia; `npm run keygen -- --basic` does a simpler 2-of-2 (Lit + hot, no recovery).
 </Info>
+
+## 17. Non-Custodial Co-Signer: Threshold FROST for Solana, Bitcoin, and Zcash
+
+The same non-custodial **2-of-3** model as [§16](#16-non-custodial-co-signer-threshold-ecdsa-split-between-lit-and-you), for the **Schnorr / EdDSA** signature family instead of ECDSA. The key is split by a real **FROST** distributed key generation — Lit's Kudelski-audited [`lit-frost`](https://github.com/LIT-Protocol/lit-frost) + [`frost-dkg`](https://github.com/mikelodder7/frost-dkg), run in WASM — so **Lit cannot sign without you, the full key never exists anywhere, and you hold 2 of 3 shares** (hot + cold) for a no-Lit recovery path. This build signs **Ed25519**, so the threshold group key *is* a **Solana** address: there is no on-chain program to deploy — you just sign a `SystemProgram.transfer` and submit it.
+
+FROST signing is hardened against the protocol's sharpest footgun — nonce reuse. The action signs **atomically in one stateless call**: it generates its single-use nonce, signs over the full `[user, action]` commitment set, and discards the nonce. It is never sealed or relayed, so the user (the transport) has nothing to replay; a replay just gets a fresh nonce. The action also only co-signs with the **hot** share (the allowed peer set is sealed into the keyshare at keygen), pins the wasm's SHA-256, and is locked to its own CID.
+
+### Which chains and assets
+
+This build emits a standard **Ed25519** signature, so the threshold key is an ordinary account on any chain that verifies RFC-8032 Ed25519. Because `lit-frost` is the whole FROST *family*, switching the ciphersuite (a one-line `Scheme` change) and rebuilding the wasm reuses the exact same DKG + co-signing flow for the rest of the Schnorr/EdDSA world:
+
+| FROST ciphersuite | Chains / assets |
+| --- | --- |
+| **Ed25519** *(this build)* | **Solana** (verified end-to-end), and other standard-Ed25519 chains — NEAR, Stellar, Aptos, Sui, TON, Cardano, Hedera, Algorand |
+| **secp256k1 Taproot** (BIP-340) | **Bitcoin Taproot** (P2TR key-path spends) and other BIP-340 Schnorr signers |
+| **RedDSA** (Jubjub / Pallas) | **Zcash** shielded spend authorization — Sapling (Jubjub) and Orchard (Pallas) |
+| **Schnorrkel / sr25519** | **Polkadot**, **Kusama**, and other Substrate chains |
+| **Ristretto255 / P-256 / P-384 / Decaf377** | Schnorr over those curves (e.g. Penumbra uses Decaf377) |
+
+For the **ECDSA** world — every EVM chain, plus Bitcoin **legacy/SegWit**, Tron, and Cosmos secp256k1 accounts — use the [secp256k1-ECDSA sibling](#16-non-custodial-co-signer-threshold-ecdsa-split-between-lit-and-you). Between the two examples, **one share per signature-scheme family covers essentially every chain**, with no multisig contract anywhere.
+
+<Note>
+  Only the Ed25519 / Solana path is verified end-to-end. The other ciphersuites are supported by the audited `lit-frost` library, but each target chain still needs its own address derivation and transaction format — and Bitcoin Taproot needs the BIP-341 key tweak, Zcash shielded needs the RedDSA signature randomizer. The threshold-signature primitive is there; the chain glue is the remaining work (the same way Solana needed its transaction builder).
+</Note>
+
+```javascript
+// Abridged: the Lit-side party signs ATOMICALLY in one stateless call. It holds
+// ONE FROST share and cannot sign without the user's share.
+// js_params: { op:"sign", pkpId, encActionKeyshare, message, peerCommitments }
+async function signRound({ pkpId, encActionKeyshare, message, peerCommitments }) {
+  await ensureWasm(); // lit-frost FROST (Ed25519), run in WASM inside the node
+
+  // Unseal this party's share + the parameters bound at keygen: the group key,
+  // threshold, and the ONLY peers it may co-sign with (the hot share). The action
+  // trusts these, not caller-supplied values, and refuses any other quorum.
+  const { bytes: share, meta } = await unseal(pkpId, encActionKeyshare, "keyshare");
+  assertAllowedQuorum(peerCommitments, meta); // reject cold+Lit, dup/unknown/self
+
+  // BOTH FROST rounds in ONE call: a fresh nonce, sign over [user, action], then
+  // discard the nonce. It is never sealed or relayed, so it can never be reused
+  // (reusing a FROST nonce across two transcripts would leak the secret share).
+  const r1 = sign_round1(share);
+  const commits = [...peerCommitments, { id: meta.myId, data: r1.commitment }].sort(byId);
+  const r2 = sign_round2(message, meta.myId, share, meta.verifyingKey, meta.threshold, commits, r1.nonce);
+  return { commitment: r1.commitment, signatureShare: r2.signature_share, verifyingShare: r2.verifying_share };
+}
+```
+
+<Info>
+  The full runnable example — the stateless `mpcSigner` action, the user-side client + local share store, a `wasm/` wrapper that compiles `lit-frost` + `frost-dkg` to WebAssembly, and `setup` / `keygen` / `fund` / `sign` scripts covering the FROST DKG and both quorums (hot + Lit, and the no-Lit hot + cold recovery path) — lives at [`examples/mpc-signing-frost/`](https://github.com/LIT-Protocol/chipotle/tree/main/examples/mpc-signing-frost) in the repo. Verified end-to-end on Solana devnet (DKG + a hot + Lit transfer + a hot + cold recovery transfer); `npm run keygen -- --basic` does a simpler 2-of-2 (Lit + hot, no recovery).
+</Info>
