@@ -295,6 +295,43 @@ pub async fn mark_credit_completed(
     Ok(())
 }
 
+/// List all customer ids with `enabled = true`. Used by the reconciler
+/// to scope its PI scan to actually-active subscriptions.
+pub async fn list_enabled_customers(pool: &PgPool) -> Result<Vec<String>> {
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT customer_id FROM auto_topup_config WHERE enabled = true")
+            .fetch_all(pool)
+            .await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
+/// Per-PI credit row (subset). `None` means no row exists yet.
+#[derive(Debug, Clone)]
+pub struct CreditRow {
+    pub payment_intent_id: String,
+    pub customer_id: String,
+    pub amount_cents: i64,
+    pub stripe_balance_transaction_id: Option<String>,
+}
+
+/// Fetch the credit row for a PI. Used by the reconciler to triage
+/// orphans (no row, or row with null balance_tx_id).
+pub async fn find_credit_row(pool: &PgPool, payment_intent_id: &str) -> Result<Option<CreditRow>> {
+    let row: Option<(String, String, i64, Option<String>)> = sqlx::query_as(
+        "SELECT payment_intent_id, customer_id, amount_cents, stripe_balance_transaction_id \
+         FROM auto_topup_credits WHERE payment_intent_id = $1",
+    )
+    .bind(payment_intent_id)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| CreditRow {
+        payment_intent_id: r.0,
+        customer_id: r.1,
+        amount_cents: r.2,
+        stripe_balance_transaction_id: r.3,
+    }))
+}
+
 /// Returns true if the error is a Postgres CHECK constraint violation
 /// (SQLSTATE 23514) on the `enabled_requires_config` constraint. Lets
 /// handlers map "you said enabled=true but didn't set all required fields"

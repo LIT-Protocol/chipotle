@@ -8,5 +8,9 @@
 //! so the SQL surface stays in one place.
 
 pub mod db;
+pub mod reconciler;
+
+#[cfg(test)]
+mod reconciler_tests;
 pub mod types;
 pub mod webhook;

@@ -46,6 +46,7 @@ async fn rocket() -> _ {
     );
     rate::spawn_rate_poller(pool.clone());
     let per_customer_mutex = PerCustomerMutex::new();
+    lit_payments::auto_topup::reconciler::spawn(cfg.clone(), stripe.clone(), pool.clone());
     rocket::build()
         .manage(pool)
         .manage(cfg)
