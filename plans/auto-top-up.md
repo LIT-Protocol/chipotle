@@ -15,18 +15,21 @@ After any Lit Action or management deduction drops a user's Stripe customer bala
 ## 2. Product framing
 
 ### Scope constraints (decided)
-- **US cards only.** No SCA / 3DS support — `requires_action` responses are treated as failures.
+- **All card payment methods, including EU / SCA-required cards.**
 - **Card payment method only.** No ACH, bank debits, wallets.
-- **Soft cap.** UI says "approximately $X/month." Cap can be exceeded by ~1 top-up amount in rare races; this is documented as the trade-off.
+- **Soft cap.** UI says "approximately $X/month." Cap can be exceeded by ~1 top-up amount in rare races; documented trade-off.
 - **Bias toward more top-ups, never fewer.** A missed top-up means a Lit Action fails mid-flight. An extra charge means an over-credited account that Sally can refund. The design favors over-charging.
 
 ### Charge and credit happen synchronously
 
-When the trigger evaluates and decides to charge, `paymentIntents.create` with `off_session=true, confirm=true` returns the final status synchronously for US cards. On `succeeded`, the handler immediately calls `balance_transactions` to credit the user's wallet. **No `payment_intent.succeeded` webhook is used.** The only webhook is `customer.updated`, which is the trigger.
+When the trigger evaluates and decides to charge, `paymentIntents.create` with `off_session=true, confirm=true` returns the final status synchronously for US cards (and most EU cards exempted via MIT prior-auth). On `succeeded`, the handler immediately calls `balance_transactions` to credit the user's wallet. **No `payment_intent.succeeded` webhook is used.** The only webhook is `customer.updated`, which is the trigger.
+
+### SCA recovery (for cards that require authentication despite the MIT exemption)
+
+When Stripe returns `authentication_required` on an off-session charge, we save the pending PI id, send the user a tokenized email link, and bring them back on-session. The dashboard recovery page calls `stripe.confirmCardPayment(client_secret)`; Stripe.js renders the bank's 3DS challenge inside its iframe; on success, `confirmCardPayment` returns synchronously and we credit through the normal sync path. **No webhook needed for this either.**
 
 ### What we are not building
 - Hard monthly cap with reservation ledger.
-- SCA / 3DS recovery flow.
 - `payment_intent.succeeded` / `payment_intent.payment_failed` webhooks.
 - Currency support beyond USD.
 - Refund-aware cap accounting.
@@ -84,7 +87,11 @@ CREATE TABLE auto_topup_config (
   payment_method_id        TEXT,
   consent_version          TEXT,
   consent_signed_at        TIMESTAMPTZ,
-  disabled_reason          TEXT,         -- NULL, 'manual', 'failures', 'card_invalid'
+  disabled_reason          TEXT,         -- NULL, 'manual', 'failures', 'card_invalid', 'requires_action'
+  pending_action_pi_id     TEXT,         -- set when off-session PI returned authentication_required; cleared on terminal status
+  pending_action_at        TIMESTAMPTZ,
+  recovery_token           TEXT,         -- one-time token for tokenized email recovery link
+  recovery_token_expires_at TIMESTAMPTZ,
   updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
 
   CONSTRAINT enabled_requires_config CHECK (
@@ -110,6 +117,7 @@ CREATE TABLE auto_topup_credits (
 
 CREATE INDEX ON auto_topup_credits (customer_id, credited_at);
 CREATE INDEX ON auto_topup_credits (stripe_balance_transaction_id) WHERE stripe_balance_transaction_id IS NULL;
+CREATE INDEX ON auto_topup_config (recovery_token) WHERE recovery_token IS NOT NULL;
 ```
 
 The partial index on `stripe_balance_transaction_id IS NULL` accelerates the reconciliation query (find rows where the credit was started but didn't finish).
@@ -122,9 +130,11 @@ The partial index on `stripe_balance_transaction_id IS NULL` accelerates the rec
 
 | Method + Path | Purpose | Behavior |
 |---|---|---|
-| `POST /billing/setup_intent` | Save card | Calls `lit_billing_core::customer::find_by_wallet`. Refuses if no Stripe customer (user must do first manual top-up to bootstrap). Creates Stripe SetupIntent (`usage=off_session, customer=cus_xxx`). Returns `client_secret` + publishable key. |
-| `GET /billing/auto_topup_config` | Read config | Read row from `auto_topup_config`. Return JSON. |
+| `POST /billing/setup_intent` | Save card | Calls `lit_billing_core::customer::find_by_wallet`. Refuses if no Stripe customer (user must do first manual top-up to bootstrap). Creates Stripe SetupIntent (`usage=off_session, customer=cus_xxx`). Returns `client_secret` + publishable key. The dashboard's `stripe.confirmCardSetup` will trigger 3DS at save time for SCA cards — this creates the MIT prior-auth record that lets most future off-session charges skip 3DS. |
+| `GET /billing/auto_topup_config` | Read config | Read row from `auto_topup_config`. Return JSON including `pending_action_pi_id` so dashboard knows whether to show the SCA banner. |
 | `PUT /billing/auto_topup_config` | Save config | Validate: verify `payment_method_id` belongs to this customer; enforce `cap >= topup_amount`, positive cents, min top-up $5. UPSERT row. |
+| `GET /billing/auto_topup_resume?token=...` | SCA recovery landing | Resolves the one-time recovery token from email to a `customer_id`, returns the `client_secret` of the `pending_action_pi_id`. Dashboard uses this client_secret with `stripe.confirmCardPayment` to complete 3DS. Token expires after 24h. |
+| `POST /billing/auto_topup_resume/complete` | Apply credit after SCA succeeded | Called by dashboard after `stripe.confirmCardPayment` returns `succeeded`. Body: `{payment_intent_id}`. Looks up the PI in Stripe to verify status, then runs the sync-credit path: INSERT row, balance_transactions, UPDATE row, clear pending state, invalidate cache. |
 
 ### Internal (on `lit-api-server`, auth: `X-Internal-Secret`)
 
@@ -186,9 +196,9 @@ This is now the only place auto-top-up logic runs. The handler does the full eva
     ```
     Handle the synchronous response:
     - **`status == "succeeded"`** → proceed to step 10.
-    - **`status == "requires_action"`** (rare for US cards; SCA-required): treat as failure. Send "card requires authentication" email + dashboard banner. Don't credit. Release mutex, return 200.
-    - **Error response (declined, expired, insufficient_funds, etc.)** → send "card declined" email with reason + dashboard banner. Don't credit. Release mutex, return 200. (Consecutive-failure derivation in step 7 will eventually auto-disable.)
-    - **HTTP timeout** → log the attempt with as much context as we have. Don't credit. Release mutex, return 200. **The reconciliation cron (§9) will detect the orphaned `succeeded` PI on its next run and credit it.**
+    - **Error code `authentication_required`** (SCA needed): extract `pi_id` from `error.payment_intent.id`. Generate a one-time `recovery_token` (random 32 bytes, base64url). `UPDATE auto_topup_config SET pending_action_pi_id=$1, pending_action_at=now(), disabled_reason='requires_action', recovery_token=$2, recovery_token_expires_at=now()+'24h'`. Email the user with the recovery link `https://dashboard/recover_topup?token={recovery_token}`. Release mutex, return 200. The PI remains alive at Stripe waiting for on-session 3DS.
+    - **Other error (declined, expired, insufficient_funds, etc.)** → send "card declined" email with reason + dashboard banner. Don't credit. Release mutex, return 200. (Consecutive-failure derivation in step 7 will eventually auto-disable.)
+    - **HTTP timeout** → log the attempt. Don't credit. Release mutex, return 200. **The reconciliation cron (§9) will detect the orphaned `succeeded` PI on its next run and credit it.**
 
 10. **Credit synchronously (the new sync-credit path):**
     ```sql
@@ -223,6 +233,38 @@ This is now the only place auto-top-up logic runs. The handler does the full eva
     Fire-and-forget `POST {LIT_API_SERVER_BASE_URL}/internal/invalidate_balance_cache` with `X-Internal-Secret` and `{customer_id}`. Ignore errors (cache will refresh in ≤10 min regardless).
 
 14. **Release mutex. Return 200.**
+
+### Additional clear-pending step on succeeded credit
+
+If the PI we just credited was `pending_action_pi_id` for this customer (i.e. SCA recovery completed via the recovery page):
+```sql
+UPDATE auto_topup_config
+  SET pending_action_pi_id = NULL,
+      pending_action_at = NULL,
+      disabled_reason = NULL,
+      recovery_token = NULL,
+      recovery_token_expires_at = NULL
+  WHERE customer_id = $1 AND pending_action_pi_id = $2;
+```
+
+---
+
+## 6a. SCA recovery flow (user on-session)
+
+Triggered when the user clicks the recovery link in the "Your card requires authentication" email.
+
+1. Email link: `https://dashboard/recover_topup?token={recovery_token}`.
+2. Dashboard recovery page calls `GET /billing/auto_topup_resume?token={recovery_token}` on `lit-payments`.
+3. lit-payments verifies the token (matches `recovery_token` in `auto_topup_config`, not expired), retrieves the `pending_action_pi_id`, fetches the PI from Stripe to get its `client_secret`, returns `{ client_secret, payment_intent_id }`. Token is single-use — invalidate after this read.
+4. Dashboard JS runs `stripe.confirmCardPayment(client_secret)`. Stripe.js renders the bank's 3DS challenge inside its iframe.
+5. User authenticates with the bank.
+6. `confirmCardPayment` returns synchronously:
+   - `result.paymentIntent.status === 'succeeded'` → call a new lit-payments endpoint (or reuse the trigger flow at step 10) to apply the credit using the sync path. **No webhook needed.**
+   - `result.error` → show "authentication failed, try a different card." Email/banner persist; user can retry.
+
+7. On successful credit, the trigger handler's additional clear-pending step (above) clears `pending_action_pi_id` and re-enables auto-top-up.
+
+The 3DS UI is rendered by Stripe + the bank inside Stripe's iframe. We never build a PIN entry form (that would be a PCI violation). Our only frontend code is the `confirmCardPayment` call and the success/failure branches.
 
 ---
 
@@ -316,25 +358,52 @@ Average user-visible recovery time: ~7.5 minutes after a timeout. Faster reduces
 
 ## 10. Dashboard changes
 
-### Save-card flow
+### Save-card flow (creates MIT prior-auth)
 
 1. User clicks "Add a card for auto top-up."
 2. Dashboard calls `POST /billing/setup_intent` with existing auth headers (wallet sig or API key).
 3. Backend returns `{ client_secret, publishable_key }`.
-4. Dashboard initializes Stripe.js with the publishable key, mounts Payment Element in **setup mode**.
-5. User enters card. Dashboard calls `stripe.confirmSetup({elements, confirmParams: {return_url}})`.
-6. On return, dashboard reads `setup_intent` query param, calls `stripe.retrieveSetupIntent(...)`, extracts `payment_method` id (`pm_xxx`).
+4. Dashboard initializes Stripe.js, mounts Payment Element in **setup mode**.
+5. User enters card. Dashboard calls `stripe.confirmCardSetup(client_secret)`.
+   - **For SCA cards (EU/etc.): Stripe.js automatically renders the bank's 3DS challenge** inside its iframe. The user authenticates. This is the **MIT prior-auth event** — most future off-session charges on this card can skip 3DS as a result.
+   - For non-SCA cards: completes silently.
+6. On success, extract `payment_method` id (`pm_xxx`) from the resulting SetupIntent.
 
 ### Save-config flow
 
 1. Modal collects: enable toggle, threshold (USD), top-up amount (USD), monthly cap (USD), card picker, consent checkbox.
-2. Dashboard calls `PUT /billing/auto_topup_config` with full body + `consent_version`.
+2. Dashboard calls `PUT /billing/auto_topup_config`.
+
+### SCA recovery page (`/recover_topup?token=...`)
+
+A dedicated dashboard page reached via the email link.
+
+1. Read `token` from query string.
+2. Call `GET /billing/auto_topup_resume?token={token}`. Receive `{ client_secret, payment_intent_id }`.
+3. Initialize Stripe.js. Call `stripe.confirmCardPayment(client_secret)`. Bank's 3DS UI renders in Stripe's iframe.
+4. User authenticates.
+5. If `result.paymentIntent.status === 'succeeded'` → show "topped up!" and redirect to billing page.
+6. If `result.error` → show "authentication failed, try a different card" with link to update payment method.
+
+Frontend logic for the entire SCA recovery is roughly this:
+```js
+const stripe = Stripe(publishable_key);
+const { client_secret } = await fetch(`/billing/auto_topup_resume?token=${token}`).then(r => r.json());
+const result = await stripe.confirmCardPayment(client_secret);
+if (result.error) {
+  showError(result.error.message);
+} else {
+  // status === 'succeeded' — backend credit happens automatically via the trigger sync path
+  showSuccess();
+}
+```
 
 ### Status banners
 
 | State | Message |
 |---|---|
 | Enabled, healthy | "Auto top-up: when your balance drops below $X, we'll charge $Y to card ending in ****1234, up to ~$Z/month." |
+| `pending_action_pi_id` set (SCA pending) | "Action required to complete your $X auto top-up. Check your email or [Confirm now]." Clicking "Confirm now" takes user to the recovery page using the active token. |
 | Disabled by user | "Auto top-up is off. [Enable]" |
 | Auto-disabled after failures | "Auto top-up was paused after 3 failed attempts. Please update your card. [Manage]" |
 
@@ -343,7 +412,7 @@ Average user-visible recovery time: ~7.5 minutes after a timeout. Faster reduces
 | Trigger | Subject | Body |
 |---|---|---|
 | `paymentIntents.create` returns declined / expired / etc. | "Your auto top-up couldn't be charged" | Amount, card last4, decline reason, link to update card |
-| `paymentIntents.create` returns `requires_action` (rare for US cards) | "Your card requires authentication for auto top-up" | Brief explanation, link to update card |
+| `paymentIntents.create` returns `authentication_required` (SCA) | "Action required: verify your auto top-up" | Brief explanation, **tokenized recovery link** to `/recover_topup?token=...` |
 | Auto-disable after 3 consecutive failures | "Auto top-up paused — update your card" | Reason, link to update card and re-enable |
 
 ---
@@ -370,7 +439,7 @@ The mutex is optimization. Layers 2 and 3 are correctness primitives.
 | Webhook delivered twice / replayed | Step 3 short-circuit (`enabled` / balance check), and downstream `INSERT ... ON CONFLICT` dedup makes the credit safe |
 | Webhook handler crashes mid-execution | Stripe retries with backoff (up to 3 days) since we returned 5xx or timed out |
 | Card declined | Synchronous response handling in step 9 sends email + dashboard banner; consecutive failure derivation in step 7 disables after 3 |
-| `requires_action` (SCA) | Treated as failure (we don't support SCA in auto-top-up). User receives email + dashboard banner and must update card or use a non-SCA card. Existing one-time top-up flow does support SCA because the user is on-session. |
+| `authentication_required` (SCA) | Save `pending_action_pi_id` + recovery token, send tokenized email link, show dashboard banner. User clicks → recovery page calls `stripe.confirmCardPayment(client_secret)` → 3DS challenge → on success, credit applies via the normal sync path. No webhook needed. |
 | User toggles off between webhook fire and handler execution | Step 3 reads `enabled=false` from Postgres and short-circuits |
 | Trigger fires when balance is already above threshold | Step 3 / step 5 short-circuit |
 | User legitimately needs two top-ups in quick succession | Each `customer.updated` event re-evaluates from scratch; no artificial cooldown blocks them |
@@ -390,7 +459,7 @@ The mutex is optimization. Layers 2 and 3 are correctness primitives.
 | HTTP timeout on `paymentIntents.create` | Charge happened at Stripe, no credit applied immediately. | Reconciler (§9) credits within ~15 min. |
 | Reconciler doesn't run for hours (cron failure) | Some users see delayed credit. | Add a heartbeat / alert on the cron. |
 | Webhook delivery fails for the full 3-day Stripe retry window | Top-up never fires for that event. | Self-heals on next deduction → next `customer.updated`. |
-| EU cards / SCA-required cards | Auto-top-up doesn't work; user gets failure email. | User must use a non-SCA card. |
+| User abandons SCA recovery flow | Pending state lingers until user revisits or recovery token expires (24h). Auto-top-up is effectively paused for them. | User can re-trigger by clicking the email link again before expiry, or get a fresh attempt on the next deduction (which fires a fresh `customer.updated`). |
 | Refunds / disputes | Don't restore monthly cap. | Documented. |
 | Currency other than USD | Not supported. | Out of scope. |
 
@@ -428,13 +497,19 @@ Used only for the cache-invalidation call from `lit-payments` to `lit-api-server
 
 ## 16. Sequence diagrams
 
-### Setup (one-time)
+### Setup (one-time, including SCA prior-auth for EU cards)
 
 ```
-USER → DASHBOARD ─► lit-payments POST /billing/setup_intent ─► Stripe (SetupIntent)
+USER → DASHBOARD ─► lit-payments POST /billing/setup_intent ─► Stripe (SetupIntent usage=off_session)
                                                                 │
 USER → DASHBOARD ◄────────── client_secret ─────────────────────┘
-USER → DASHBOARD ─► Stripe.js (card entered) ─► Stripe (PaymentMethod attached, pm_xxx)
+USER → DASHBOARD ─► Stripe.js stripe.confirmCardSetup(client_secret)
+                       │
+                       ▼ (if EU/SCA card)
+                   Bank's 3DS challenge in Stripe.js iframe ──► USER authenticates
+                       │
+                       ▼
+                   PaymentMethod attached to Customer (pm_xxx) + MIT prior-auth record
 USER → DASHBOARD ─► lit-payments PUT /billing/auto_topup_config ─► Postgres (UPSERT)
 ```
 
@@ -464,7 +539,8 @@ CLIENT ─► lit-api-server (run Lit Action, deduct credits via balance_transac
                   ├─► Stripe POST /v1/payment_intents (off_session, confirm)
                   │   sync response:
                   │     ├─ succeeded → continue
-                  │     ├─ requires_action → email + return 200
+                  │     ├─ authentication_required → save pending_action_pi_id + recovery token,
+                  │     │     email tokenized link, return 200 (SCA recovery flow below)
                   │     ├─ declined/error → email + return 200
                   │     └─ HTTP timeout → log + return 200 (reconciler handles)
                   │
@@ -474,6 +550,42 @@ CLIENT ─► lit-api-server (run Lit Action, deduct credits via balance_transac
                   ├─► Postgres UPDATE auto_topup_credits SET stripe_balance_transaction_id
                   ├─► lit-api-server POST /internal/invalidate_balance_cache (fire-and-forget)
                   └─► release mutex, return 200
+```
+
+### SCA recovery (user-driven, after email)
+
+```
+User receives email → clicks recovery link → DASHBOARD /recover_topup?token=...
+       │
+       ▼
+DASHBOARD GET lit-payments /billing/auto_topup_resume?token=...
+       │
+       ▼ lit-payments: verify token, load pending_action_pi_id, fetch PI from Stripe
+       │ Returns { payment_intent_id, client_secret }
+       ▼
+DASHBOARD JS: stripe.confirmCardPayment(client_secret)
+       │
+       ▼ (Stripe.js renders bank's 3DS challenge in iframe)
+       │
+       ▼ USER authenticates
+       │
+       ▼ confirmCardPayment returns synchronously
+       │
+       ├─ result.paymentIntent.status === 'succeeded'
+       │     │
+       │     ▼ DASHBOARD POST lit-payments /billing/auto_topup_resume/complete
+       │     │     body: { payment_intent_id }
+       │     │
+       │     ▼ lit-payments runs sync-credit path (§6 step 10-13):
+       │     │     - INSERT auto_topup_credits ON CONFLICT
+       │     │     - Stripe balance_transactions (Idempotency-Key: credit:{pi.id})
+       │     │     - UPDATE row
+       │     │     - clear pending_action_pi_id, recovery_token, disabled_reason
+       │     │     - invalidate lit-api-server cache
+       │     │
+       │     ▼ DASHBOARD shows "topped up!"
+       │
+       └─ result.error → DASHBOARD shows "authentication failed, try another card"
 ```
 
 ### Reconciliation (every 15 minutes)
@@ -532,12 +644,13 @@ Phase 1: Foundation
 
 **Gate:** existing `lit-api-server` billing endpoints still authenticate identically; a smoke test on a placeholder lit-payments endpoint accepts both wallet-sig and API-key.
 
-### Phase 3 — Saved card flow (~2 days)
+### Phase 3 — Saved card flow with SCA prior-auth (~2 days)
 - `POST /billing/setup_intent` on lit-payments behind the new shared auth.
+- SetupIntent with `usage='off_session'`. Returns `client_secret` + publishable key.
 - Refuses with 400 if no Stripe customer (user must do manual top-up first).
-- Creates SetupIntent via `lit_billing_core::StripeClient`.
+- Dashboard uses `stripe.confirmCardSetup` which triggers 3DS in-browser for SCA cards, creating the MIT prior-auth record.
 
-**Gate:** can save a `4242…` test card end-to-end; `pm_xxx` attached to the right customer.
+**Gate:** can save a `4242…` test card end-to-end. Can save an SCA test card (`4000 0027 6000 3184`) — 3DS challenge fires in browser, user authenticates, `pm_xxx` saved with prior-auth record at Stripe.
 
 ### Phase 4 — Config CRUD (~1 day)
 - `GET /billing/auto_topup_config`
@@ -545,12 +658,16 @@ Phase 1: Foundation
 
 **Gate:** config can be saved, read back, CHECK constraint rejects `enabled=true` with nulls.
 
-### Phase 5 — Webhook handler + sync credit (~3 days)
+### Phase 5 — Webhook handler + sync credit + SCA detection (~3 days)
 **This is the core phase.** Full §6 implementation:
 - Raw `Data` handler, HMAC verification.
 - Mutex cache.
 - Balance fetch, PI list with pagination, failure derivation, cap check.
-- `paymentIntents.create` with sync response handling (succeeded → credit, requires_action → email, error → email, timeout → log).
+- `paymentIntents.create` with sync response handling:
+  - succeeded → credit
+  - **authentication_required → save `pending_action_pi_id` + recovery token, email tokenized link**
+  - declined/expired/etc. → email
+  - timeout → log (reconciler handles)
 - Sync credit: INSERT auto_topup_credits, balance_transactions write with idempotency key, UPDATE row.
 - Cache invalidation callback.
 
@@ -563,16 +680,21 @@ Phase 1: Foundation
 
 **Gate:** kill `lit-payments` mid-charge between PI create and balance_transactions → restart → reconciler finds the orphan within 15 min and credits the user.
 
-### Phase 7 — Dashboard UI (~3 days)
+### Phase 7 — Dashboard UI + SCA recovery page (~3 days)
 - Auto-top-up modal.
-- Save-card flow with `stripe.confirmSetup`.
+- Save-card flow with `stripe.confirmCardSetup` (handles 3DS prior-auth automatically for EU cards).
 - Save-config flow.
-- Status banners.
+- Status banners — including new "Action required" banner when `pending_action_pi_id` is set.
+- **New SCA recovery page** at `/recover_topup?token=...`:
+  - Calls `GET /billing/auto_topup_resume?token=...` to get `client_secret`.
+  - Runs `stripe.confirmCardPayment(client_secret)` to render bank's 3DS challenge.
+  - On success → calls `POST /billing/auto_topup_resume/complete` to trigger backend credit.
+  - On failure → shows error UI with link to update card.
 
-**Gate:** real user can save a card, enable auto-top-up, run a Lit Action, see balance auto-credited within ~10 seconds.
+**Gate:** real user can save a card (including an SCA test card) and enable auto-top-up. Lit Action triggers auto-charge. SCA card test: trigger `authentication_required`, user receives email, clicks link, completes 3DS on recovery page, balance credited.
 
 ### Phase 8 — Operational hardening (~2 days)
-- Email templates (three: declined, requires_action, auto-disabled).
+- Email templates: declined, **SCA action-required (with tokenized link)**, auto-disabled.
 - Metrics: trigger count, charge success/failure rate, reconciler activity, mutex contention.
 - Service-auth secret rotation procedure documented.
 - Admin runbook.
