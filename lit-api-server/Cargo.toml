@@ -20,6 +20,7 @@ apalis = { version = "0.6.0", features = ["tracing"] }
 apalis-sql = { version = "0.6.0", features = ["sqlite", "tokio-comp"] }
 
 anyhow = "1.0"
+async-trait = "0.1"
 base64_light = "0.1"
 dstack-sdk = "0.1.2"
 derive_builder = "0.12.0"
@@ -43,6 +44,7 @@ sha3 = "0.10"
 ipfs-hasher = "0.13.0"
 elliptic-curve = "0.13.8"
 k256 = { version = "0.13.4", features = ["ecdsa"] }
+lit-billing-auth = { path = "../lit-billing-auth", features = ["openapi"] }
 lit-billing-core = { path = "../lit-billing-core" }
 lit-core = { path = "../lit-core/lit-core" }
 lit-core-derive = { path = "../lit-core/lit-core-derive" }

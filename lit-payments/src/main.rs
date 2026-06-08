@@ -1,8 +1,11 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use anyhow::Result;
+use lit_billing_auth::{AuthResolver, BillingAuth};
 use lit_billing_core::StripeClient;
 use lit_payments::auth::routes as auth_routes;
+use lit_payments::auth_resolver::HttpAuthResolver;
 use lit_payments::portal::routes as portal_routes;
 use lit_payments::rate;
 use lit_payments::{auth, chain, config, db, mail};
@@ -28,6 +31,16 @@ async fn rocket() -> _ {
         mail::Mailer::new(cfg.resend_api_key.clone(), cfg.mail_from.clone()).expect("mailer");
     let rate_limit = auth::rate_limit::RateLimiter::new();
     let stripe = StripeClient::new(cfg.stripe_secret_key.clone()).expect("stripe client");
+    // HTTP-based auth resolver: forwards verification to lit-api-server's
+    // internal endpoints so the EIP-712 verifier and on-chain key resolver
+    // live in exactly one place.
+    let auth_resolver: Arc<dyn AuthResolver> = Arc::new(
+        HttpAuthResolver::new(
+            cfg.lit_api_server_base_url.clone(),
+            cfg.lit_internal_shared_secret.clone(),
+        )
+        .expect("auth resolver"),
+    );
     rate::spawn_rate_poller(pool.clone());
     rocket::build()
         .manage(pool)
@@ -35,6 +48,7 @@ async fn rocket() -> _ {
         .manage(mailer)
         .manage(rate_limit)
         .manage(stripe)
+        .manage(auth_resolver)
         .mount(
             "/",
             routes![
@@ -42,6 +56,7 @@ async fn rocket() -> _ {
                 login_page,
                 pay_with_litkey_page,
                 health,
+                authping,
                 auth_routes::request_link,
                 auth_routes::verify_link,
                 auth_routes::logout,
@@ -58,6 +73,16 @@ async fn rocket() -> _ {
             ],
         )
         .mount("/static", FileServer::from("static"))
+}
+
+/// `GET /_authping` — Phase 2 gate test endpoint. Returns the resolved
+/// identity if the caller presented a valid `X-Wallet-Auth` signature or
+/// `X-Api-Key`. Intentionally throwaway — proves the `BillingAuth` guard
+/// + `HttpAuthResolver` are wired end-to-end. Will be removed once real
+/// Phase 3/4 endpoints land.
+#[get("/_authping")]
+fn authping(auth: BillingAuth) -> String {
+    auth.identity_string().to_string()
 }
 
 /// Translate platform-provided env vars (Fly.io and most container hosts set

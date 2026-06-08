@@ -3,6 +3,7 @@
 //! See `plans/lit-payments-app.md` for the full design.
 
 pub mod auth;
+pub mod auth_resolver;
 pub mod chain;
 pub mod config;
 pub mod db;

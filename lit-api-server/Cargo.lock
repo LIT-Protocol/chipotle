@@ -4748,6 +4748,7 @@ dependencies = [
  "anyhow",
  "apalis",
  "apalis-sql",
+ "async-trait",
  "base64_light",
  "blake3",
  "dcap-qvl",
@@ -4763,6 +4764,7 @@ dependencies = [
  "k256",
  "lit-actions-grpc",
  "lit-api-core",
+ "lit-billing-auth",
  "lit-billing-core",
  "lit-core",
  "lit-core-derive",
@@ -4796,6 +4798,21 @@ dependencies = [
  "url",
  "uuid",
  "walkdir",
+]
+
+[[package]]
+name = "lit-billing-auth"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64_light",
+ "rocket",
+ "rocket_okapi",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "tracing",
 ]
 
 [[package]]

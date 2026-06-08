@@ -153,6 +153,11 @@ async fn main() -> Result<(), rocket::Error> {
     let cpu_monitor = CpuOverloadMonitor::start();
     let stripe_state = stripe::init();
     let internal_config = internal::config::init();
+    // `Arc<dyn AuthResolver>` is the auth backplane both this service and
+    // lit-payments use. lit-api-server owns the on-chain plumbing, so it
+    // installs the local in-process resolver here.
+    let auth_resolver: Arc<dyn lit_billing_auth::AuthResolver> =
+        Arc::new(lit_api_server::auth_resolver::LocalAuthResolver::new());
 
     // Initialize global singletons once, outside the restart loop, so they
     // aren't re-initialized (and don't re-log) on every Rocket rebuild.
@@ -193,6 +198,7 @@ async fn main() -> Result<(), rocket::Error> {
             cpu_monitor.clone(),
             stripe_state.clone(),
             internal_config.clone(),
+            auth_resolver.clone(),
             ipfs_cache.clone(),
         );
 
@@ -314,6 +320,7 @@ fn build_rocket(
     cpu_monitor: CpuOverloadMonitor,
     stripe_state: Option<Arc<stripe::StripeState>>,
     internal_config: Option<Arc<internal::InternalConfig>>,
+    auth_resolver: Arc<dyn lit_billing_auth::AuthResolver>,
     ipfs_cache: Cache<String, Arc<String>>,
 ) -> rocket::Rocket<rocket::Build> {
     let allowed_methods = HashSet::from([
@@ -353,7 +360,14 @@ fn build_rocket(
             routes![openapi_json, openapi_json_redirect, swagger_ui_redirect],
         )
         .mount("/", core::v1::health::routes())
-        .mount("/", routes![internal::routes::invalidate_balance_cache])
+        .mount(
+            "/",
+            routes![
+                internal::routes::invalidate_balance_cache,
+                internal::routes::verify_wallet_auth,
+                internal::routes::resolve_api_key,
+            ],
+        )
         .mount("/core/v1/", core_routes)
         .mount("/core/v1/", core::v1::health::routes())
         .mount(
@@ -372,6 +386,7 @@ fn build_rocket(
         .manage(cpu_monitor)
         .manage(stripe_state)
         .manage(internal_config)
+        .manage(auth_resolver)
         .manage(core::v1::health::LitActionsSocketPath(
             std::path::PathBuf::from(core::v1::health::LIT_ACTIONS_SOCKET),
         ));

@@ -56,7 +56,7 @@ pub(crate) const EIP712_DOMAIN_VERSION: &str = "1";
 pub(crate) const PRIMARY_TYPE_CREATE_WALLET: &str = "CreateWallet";
 pub(crate) const PRIMARY_TYPE_CONVERT_ACCOUNT: &str = "ConvertAccount";
 pub(crate) const PRIMARY_TYPE_ADD_USAGE_API_KEY: &str = "AddUsageApiKey";
-pub(crate) const PRIMARY_TYPE_BILLING_AUTH: &str = "BillingAuth";
+pub const PRIMARY_TYPE_BILLING_AUTH: &str = "BillingAuth";
 
 /// One field of an EIP-712 type declaration. Mirrors the wire shape
 /// (`{"name": "...", "type": "..."}`) so we can validate the client-supplied
@@ -207,7 +207,7 @@ pub(crate) fn build_canonical_typed_data_json(
 /// primary-type match, timestamp window) run before the expensive ECDSA
 /// recovery so junk traffic with stale, wrong-purpose, or wrong-chain
 /// payloads is dropped without doing crypto.
-pub(crate) fn verify_eip712_signature(
+pub fn verify_eip712_signature(
     typed_data_json: &serde_json::Value,
     signature_hex: &str,
     expected_primary_type: &str,
