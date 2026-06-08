@@ -170,11 +170,9 @@ This is now the only place auto-top-up logic runs. The handler does the full eva
    - Send "card needs updating" email via Resend.
    - Release mutex, return 200.
 
-8. **Recent-PI short-circuit:** if any non-failed PI exists in the last 10 minutes → release mutex, return 200 (already topped up recently).
+8. **Cap check.** Sum amounts of all non-failed PIs this month. If `sum + topup_amount_cents > monthly_cap_cents` → release mutex, return 200.
 
-9. **Cap check.** Sum amounts of all non-failed PIs this month. If `sum + topup_amount_cents > monthly_cap_cents` → release mutex, return 200.
-
-10. **Create off-session PaymentIntent (synchronous):**
+9. **Create off-session PaymentIntent (synchronous):**
     ```
     POST /v1/payment_intents
       customer: cus_xxx
@@ -187,12 +185,12 @@ This is now the only place auto-top-up logic runs. The handler does the full eva
       metadata[wallet_address]: 0x...
     ```
     Handle the synchronous response:
-    - **`status == "succeeded"`** → proceed to step 11.
-    - **`status == "requires_action"`** (rare for US cards; SCA-required): treat as failure. Send "card requires authentication" email. Don't credit. Release mutex, return 200.
-    - **Error response (declined, expired, insufficient_funds, etc.)** → send "card declined" email with reason. Don't credit. Release mutex, return 200. (Consecutive-failure derivation in step 7 will eventually auto-disable.)
+    - **`status == "succeeded"`** → proceed to step 10.
+    - **`status == "requires_action"`** (rare for US cards; SCA-required): treat as failure. Send "card requires authentication" email + dashboard banner. Don't credit. Release mutex, return 200.
+    - **Error response (declined, expired, insufficient_funds, etc.)** → send "card declined" email with reason + dashboard banner. Don't credit. Release mutex, return 200. (Consecutive-failure derivation in step 7 will eventually auto-disable.)
     - **HTTP timeout** → log the attempt with as much context as we have. Don't credit. Release mutex, return 200. **The reconciliation cron (§9) will detect the orphaned `succeeded` PI on its next run and credit it.**
 
-11. **Credit synchronously (the new sync-credit path):**
+10. **Credit synchronously (the new sync-credit path):**
     ```sql
     INSERT INTO auto_topup_credits (payment_intent_id, customer_id, amount_cents)
       VALUES ($1, $2, $3)
@@ -202,7 +200,7 @@ This is now the only place auto-top-up logic runs. The handler does the full eva
     - If no row returned (already credited — shouldn't happen here, but defensive) → release mutex, return 200.
     - If row inserted, proceed.
 
-12. **Write the balance transaction (the credit):**
+11. **Write the balance transaction (the credit):**
     ```
     lit_billing_core::balance::write_transaction(
       stripe_client,
@@ -214,17 +212,17 @@ This is now the only place auto-top-up logic runs. The handler does the full eva
     ```
     Idempotency-Key makes this safely retryable. If this call fails (network/timeout), the row in `auto_topup_credits` already exists with `stripe_balance_transaction_id IS NULL`, and the reconciler will retry.
 
-13. **Update the row:**
+12. **Update the row:**
     ```sql
     UPDATE auto_topup_credits
       SET stripe_balance_transaction_id = $1
       WHERE payment_intent_id = $2;
     ```
 
-14. **Invalidate `lit-api-server`'s balance cache:**
+13. **Invalidate `lit-api-server`'s balance cache:**
     Fire-and-forget `POST {LIT_API_SERVER_BASE_URL}/internal/invalidate_balance_cache` with `X-Internal-Secret` and `{customer_id}`. Ignore errors (cache will refresh in ≤10 min regardless).
 
-15. **Release mutex. Return 200.**
+14. **Release mutex. Return 200.**
 
 ---
 
@@ -371,12 +369,13 @@ The mutex is optimization. Layers 2 and 3 are correctness primitives.
 | `balance_transactions` write fails after PI succeeded | Reconciler catches the `stripe_balance_transaction_id IS NULL` row and retries with the same idempotency key |
 | Webhook delivered twice / replayed | Step 3 short-circuit (`enabled` / balance check), and downstream `INSERT ... ON CONFLICT` dedup makes the credit safe |
 | Webhook handler crashes mid-execution | Stripe retries with backoff (up to 3 days) since we returned 5xx or timed out |
-| Card declined | Synchronous response handling in step 10 sends email; consecutive failure derivation in step 7 disables after 3 |
-| `requires_action` (SCA) | Treated as failure (we don't support SCA). User must update card or use a non-SCA card. |
+| Card declined | Synchronous response handling in step 9 sends email + dashboard banner; consecutive failure derivation in step 7 disables after 3 |
+| `requires_action` (SCA) | Treated as failure (we don't support SCA in auto-top-up). User receives email + dashboard banner and must update card or use a non-SCA card. Existing one-time top-up flow does support SCA because the user is on-session. |
 | User toggles off between webhook fire and handler execution | Step 3 reads `enabled=false` from Postgres and short-circuits |
 | Trigger fires when balance is already above threshold | Step 3 / step 5 short-circuit |
+| User legitimately needs two top-ups in quick succession | Each `customer.updated` event re-evaluates from scratch; no artificial cooldown blocks them |
 | `customer.updated` for non-balance changes (email/address/metadata) | Filter on `previous_attributes.balance` — ignore if not present |
-| Stripe customer balance cached stale in `lit-api-server` after credit | Step 14 invalidates the cache |
+| Stripe customer balance cached stale in `lit-api-server` after credit | Step 13 invalidates the cache |
 | `customer.updated` event lost | Self-healing — next deduction fires another `balance_transactions` write → another `customer.updated` |
 | Pagination on PI list at scale | Use `starting_after` until `has_more=false` |
 
@@ -387,6 +386,7 @@ The mutex is optimization. Layers 2 and 3 are correctness primitives.
 | Case | What happens | Recovery |
 |---|---|---|
 | List-endpoint staleness during cap check | `paymentIntents.list` isn't strongly read-after-write consistent. <1% rare race; can result in 1 extra top-up. | Soft cap. Manual refund via admin portal. |
+| Rapid back-to-back triggers right after a successful top-up | If `customer.balance` reflection lags briefly behind the credit (rare, observed sub-second in test mode), a second trigger could fire and charge again. Aligns with "bias toward more top-ups" — extra credit, no lost money. | Manual refund via admin portal if user complains. |
 | HTTP timeout on `paymentIntents.create` | Charge happened at Stripe, no credit applied immediately. | Reconciler (§9) credits within ~15 min. |
 | Reconciler doesn't run for hours (cron failure) | Some users see delayed credit. | Add a heartbeat / alert on the cron. |
 | Webhook delivery fails for the full 3-day Stripe retry window | Top-up never fires for that event. | Self-heals on next deduction → next `customer.updated`. |
@@ -459,7 +459,6 @@ CLIENT ─► lit-api-server (run Lit Action, deduct credits via balance_transac
                   ├─► fresh balance::fetch from Stripe (don't trust payload)
                   ├─► list PIs this month, paginate, filter metadata.source=auto_topup
                   ├─► derive failure state → disable if 3+ consecutive
-                  ├─► recent-PI short-circuit (< 10 min)
                   ├─► cap check (sum + amount > cap → skip)
                   │
                   ├─► Stripe POST /v1/payment_intents (off_session, confirm)
@@ -550,7 +549,7 @@ Phase 1: Foundation
 **This is the core phase.** Full §6 implementation:
 - Raw `Data` handler, HMAC verification.
 - Mutex cache.
-- Balance fetch, PI list with pagination, failure derivation, recent-PI short-circuit, cap check.
+- Balance fetch, PI list with pagination, failure derivation, cap check.
 - `paymentIntents.create` with sync response handling (succeeded → credit, requires_action → email, error → email, timeout → log).
 - Sync credit: INSERT auto_topup_credits, balance_transactions write with idempotency key, UPDATE row.
 - Cache invalidation callback.
