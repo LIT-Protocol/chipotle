@@ -58,7 +58,12 @@ The `grpc::MetricsMiddleware` that previously auto-tracked gRPC request latency 
 ## Usage
 
 ```rust
-// Basic initialization
-let subscriber = lit_observability::init_subscriber("info").expect("Failed to init subscriber");
+// Basic initialization.
+//
+// The fmt layer writes through a `tracing_appender::non_blocking` writer, so the returned
+// `WorkerGuard` must be held for the lifetime of the process (bind it in `main`). Dropping
+// it shuts down the background log worker and flushes any buffered logs.
+let (subscriber, _log_guard) =
+    lit_observability::init_subscriber("info").expect("Failed to init subscriber");
 tracing::subscriber::set_global_default(subscriber).expect("Set subscriber failed");
 ```
