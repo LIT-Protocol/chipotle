@@ -47,7 +47,29 @@ async fn rocket() -> _ {
     rate::spawn_rate_poller(pool.clone());
     let per_customer_mutex = PerCustomerMutex::new();
     lit_payments::auto_topup::reconciler::spawn(cfg.clone(), stripe.clone(), pool.clone());
+
+    // CORS: the dashboard runs on a different port locally (and on a
+    // different origin in production) so browser requests against
+    // lit-payments hit the preflight gate. Same `AllowedOrigins::all()`
+    // shape as lit-api-server uses (lit-api-server/src/main.rs:333).
+    let cors = rocket_cors::CorsOptions {
+        allowed_origins: rocket_cors::AllowedOrigins::all(),
+        allowed_methods: [
+            rocket::http::Method::Get,
+            rocket::http::Method::Post,
+            rocket::http::Method::Put,
+            rocket::http::Method::Options,
+        ]
+        .iter()
+        .map(|m| rocket_cors::Method::from(*m))
+        .collect(),
+        allow_credentials: true,
+        ..Default::default()
+    }
+    .to_cors()
+    .expect("CORS failed to build");
     rocket::build()
+        .attach(cors)
         .manage(pool)
         .manage(cfg)
         .manage(mailer)
