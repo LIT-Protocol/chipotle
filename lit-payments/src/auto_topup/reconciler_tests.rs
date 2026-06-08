@@ -182,9 +182,16 @@ async fn reconciler_completes_partial_credit() {
         create_succeeded_auto_topup_pi(&stripe, &cust, &pm, TEST_WALLET_RECONCILER_PARTIAL, 500)
             .await;
     // Simulate the "partial credit" state: row inserted, bt_id null.
+    // Backdate `credited_at` past the reconciler's MIN_PARTIAL_AGE_SECS
+    // (60s) age gate — fresh partials are intentionally skipped because
+    // they're overwhelmingly likely to be the live webhook's in-flight
+    // balance_tx write. An integration test simulating a crashed webhook
+    // is exactly the "real orphan" case, so we backdate to 5 minutes
+    // ago so the reconciler picks it up.
     sqlx::query(
-        "INSERT INTO auto_topup_credits (payment_intent_id, customer_id, amount_cents) \
-         VALUES ($1, $2, $3)",
+        "INSERT INTO auto_topup_credits \
+            (payment_intent_id, customer_id, amount_cents, credited_at) \
+         VALUES ($1, $2, $3, now() - interval '5 minutes')",
     )
     .bind(&pi_id)
     .bind(&cust)

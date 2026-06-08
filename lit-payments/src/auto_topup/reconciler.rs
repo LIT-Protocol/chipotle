@@ -18,6 +18,7 @@
 //! drain) — that's fine because the next reconciler tick on the
 //! restarted process picks up any work that was interrupted.
 
+use std::collections::BTreeSet;
 use std::time::Duration;
 
 use ::time::OffsetDateTime;
@@ -32,6 +33,16 @@ use crate::config::Config;
 use crate::internal::client as internal_client;
 
 const LOOKBACK_DAYS: i64 = 7;
+
+/// Minimum age before the reconciler retries a partial credit row. The
+/// webhook handler typically writes the balance_transactions row within
+/// a few hundred ms of inserting the credit row; a fresh partial row is
+/// almost certainly the live webhook flow still in-flight, not a real
+/// orphan. Retrying immediately would race with the webhook on the
+/// balance_transactions write — safe (Stripe Idempotency-Key dedupes)
+/// but wasteful and noisy in logs. 60s is a generous floor that still
+/// lets a true crash mid-flow recover within one reconciler tick.
+const MIN_PARTIAL_AGE_SECS: i64 = 60;
 
 /// Spawn the reconciler. Returns immediately; the loop runs in the
 /// background until the process exits.
@@ -53,18 +64,30 @@ pub fn spawn(config: Config, stripe: StripeClient, pool: PgPool) {
     });
 }
 
-/// Single sweep across every enabled customer. Public for tests; the
-/// production scheduler in [`spawn`] is the only other caller.
+/// Single sweep across every enabled customer plus any customer with an
+/// outstanding partial credit row. Public for tests; the production
+/// scheduler in [`spawn`] is the only other caller.
+///
+/// Codex P1 (Phase 6): scope is the UNION of (enabled customers, customers
+/// with partial credit rows). Restricting to enabled customers stranded
+/// partial credits whenever a row got auto-disabled (failures threshold)
+/// between the PI succeeding and the balance_transactions write landing.
 pub async fn run_once(config: &Config, stripe: &StripeClient, pool: &PgPool) -> anyhow::Result<()> {
-    let customers = db::list_enabled_customers(pool)
+    let enabled = db::list_enabled_customers(pool)
         .await
         .context("list enabled customers")?;
-    if customers.is_empty() {
+    let partial = db::list_customers_with_partial_credits(pool)
+        .await
+        .context("list partial-credit customers")?;
+    let mut all: BTreeSet<String> = BTreeSet::new();
+    all.extend(enabled);
+    all.extend(partial);
+    if all.is_empty() {
         return Ok(());
     }
     let since_unix =
         (OffsetDateTime::now_utc() - ::time::Duration::days(LOOKBACK_DAYS)).unix_timestamp();
-    for customer_id in customers {
+    for customer_id in all {
         if let Err(e) = reconcile_customer(config, stripe, pool, &customer_id, since_unix).await {
             tracing::warn!(customer_id, "reconcile_customer failed: {e:?}");
         }
@@ -93,11 +116,30 @@ async fn reconcile_customer(
             Some(row) if row.stripe_balance_transaction_id.is_some() => {
                 // Credited. Skip.
             }
-            Some(_partial) => {
+            Some(partial) => {
                 // Row exists but balance_tx never landed. Retry just the
                 // balance_transactions write (with the same idempotency
                 // key — Stripe dedupes if the prior attempt actually
                 // succeeded).
+                //
+                // Codex P1 (Phase 6): age-gate this retry. A partial row
+                // less than MIN_PARTIAL_AGE_SECS old is overwhelmingly
+                // likely to be the live webhook handler's in-flight
+                // balance_transactions write, not a real orphan. The
+                // idempotency-key makes the race safe but wasteful;
+                // waiting one minute keeps logs and Stripe-call volume
+                // sane while still catching real crashes on the next
+                // tick.
+                let age = OffsetDateTime::now_utc() - partial.credited_at;
+                if age.whole_seconds() < MIN_PARTIAL_AGE_SECS {
+                    tracing::debug!(
+                        customer_id,
+                        pi_id,
+                        age_secs = age.whole_seconds(),
+                        "reconciler: skipping fresh partial credit (live webhook in flight)"
+                    );
+                    continue;
+                }
                 tracing::warn!(customer_id, pi_id, "reconciler: completing partial credit");
                 let bt_id = write_balance_transaction(stripe, customer_id, &pi_id, amount).await?;
                 db::mark_credit_completed(pool, &pi_id, &bt_id).await?;

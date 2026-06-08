@@ -305,6 +305,22 @@ pub async fn list_enabled_customers(pool: &PgPool) -> Result<Vec<String>> {
     Ok(rows.into_iter().map(|(id,)| id).collect())
 }
 
+/// Codex P1 (Phase 6): reconciler must also visit customers who have a
+/// partial credit row (PI created, balance_tx never landed) even if the
+/// row has since been disabled — failures-threshold auto-disable flips
+/// `enabled=false`, but the orphaned credit row still needs the
+/// balance_transactions retry. Pre-fix the reconciler scoped exclusively
+/// to enabled customers and these stayed pending forever.
+pub async fn list_customers_with_partial_credits(pool: &PgPool) -> Result<Vec<String>> {
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT DISTINCT customer_id FROM auto_topup_credits \
+            WHERE stripe_balance_transaction_id IS NULL",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
 /// Per-PI credit row (subset). `None` means no row exists yet.
 #[derive(Debug, Clone)]
 pub struct CreditRow {
@@ -312,13 +328,20 @@ pub struct CreditRow {
     pub customer_id: String,
     pub amount_cents: i64,
     pub stripe_balance_transaction_id: Option<String>,
+    /// Used by the reconciler to age-gate partial retries (Codex P1
+    /// Phase 6). The webhook handler typically commits the balance_tx
+    /// within a few hundred ms of inserting the credit row, so a fresh
+    /// partial row is overwhelmingly likely to be the live webhook
+    /// flow's in-flight write, not a real orphan.
+    pub credited_at: OffsetDateTime,
 }
 
 /// Fetch the credit row for a PI. Used by the reconciler to triage
 /// orphans (no row, or row with null balance_tx_id).
 pub async fn find_credit_row(pool: &PgPool, payment_intent_id: &str) -> Result<Option<CreditRow>> {
-    let row: Option<(String, String, i64, Option<String>)> = sqlx::query_as(
-        "SELECT payment_intent_id, customer_id, amount_cents, stripe_balance_transaction_id \
+    let row: Option<(String, String, i64, Option<String>, OffsetDateTime)> = sqlx::query_as(
+        "SELECT payment_intent_id, customer_id, amount_cents, \
+                stripe_balance_transaction_id, credited_at \
          FROM auto_topup_credits WHERE payment_intent_id = $1",
     )
     .bind(payment_intent_id)
@@ -329,7 +352,73 @@ pub async fn find_credit_row(pool: &PgPool, payment_intent_id: &str) -> Result<O
         customer_id: r.1,
         amount_cents: r.2,
         stripe_balance_transaction_id: r.3,
+        credited_at: r.4,
     }))
+}
+
+/// SCA recovery: resolve a `recovery_token` to the
+/// `(customer_id, pending_action_pi_id)` it grants access to, WITHOUT
+/// invalidating it. Used by the GET resume endpoint to fetch the PI's
+/// client_secret from Stripe; the caller invalidates only after the
+/// Stripe call succeeds via [`clear_recovery_token_for_pi`].
+///
+/// Splitting lookup from invalidation (codex P2 #3) preserves the
+/// single-use semantic for the happy path while letting a transient
+/// Stripe failure leave the token usable for retry. A successful Stripe
+/// call always burns the token; a 503 from Stripe never does.
+pub async fn lookup_recovery_token(pool: &PgPool, token: &str) -> Result<Option<(String, String)>> {
+    let row: Option<(String, String)> = sqlx::query_as(
+        "SELECT customer_id, pending_action_pi_id FROM auto_topup_config \
+            WHERE recovery_token = $1 \
+              AND recovery_token_expires_at > now() \
+              AND pending_action_pi_id IS NOT NULL",
+    )
+    .bind(token)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+/// Invalidate the recovery token for the given (customer, pi) pair. The
+/// WHERE clause matches on `pending_action_pi_id` so a race that landed
+/// on a different PI cannot accidentally clear the wrong row's token.
+pub async fn clear_recovery_token_for_pi(
+    pool: &PgPool,
+    customer_id: &str,
+    pi_id: &str,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE auto_topup_config \
+            SET recovery_token = NULL, recovery_token_expires_at = NULL \
+            WHERE customer_id = $1 AND pending_action_pi_id = $2",
+    )
+    .bind(customer_id)
+    .bind(pi_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Legacy atomic consume — kept for callers that already had the
+/// preserve-on-failure semantics handled at their level. Prefer the
+/// lookup + clear split above.
+#[allow(dead_code)]
+pub async fn consume_recovery_token(
+    pool: &PgPool,
+    token: &str,
+) -> Result<Option<(String, String)>> {
+    let row: Option<(String, String)> = sqlx::query_as(
+        "UPDATE auto_topup_config \
+            SET recovery_token = NULL, recovery_token_expires_at = NULL \
+            WHERE recovery_token = $1 \
+              AND recovery_token_expires_at > now() \
+              AND pending_action_pi_id IS NOT NULL \
+            RETURNING customer_id, pending_action_pi_id",
+    )
+    .bind(token)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
 }
 
 /// Returns true if the error is a Postgres CHECK constraint violation
