@@ -79,6 +79,7 @@ ignore = [
     { id = "RUSTSEC-2025-0141", reason = "bincode unmaintained — pre-existing" },
     { id = "RUSTSEC-2026-0105", reason = "core2 unmaintained, all versions yanked — pre-existing" },
     { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 unmaintained — author confirmed; transitive via clap_derive's derive macro chain in lit-payments. No drop-in replacement yet." },
+    { id = "RUSTSEC-2026-0174", reason = "http-types 2.12.0 Authorization::value non-ASCII (notice) — transitive in lit-actions; no upstream fix." },
 ]
 
 [sources]
