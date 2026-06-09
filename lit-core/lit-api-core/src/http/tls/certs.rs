@@ -12,7 +12,6 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use std::{fs, thread};
 
-use async_std::task;
 use openssl::asn1::Asn1Time;
 use openssl::pkey::PKey;
 use openssl::x509::X509;
@@ -749,7 +748,7 @@ async fn async_interruptable_sleep(sleep_ms: u64, quit_mu: Arc<AtomicBool>) {
     for _ in 0..(sleep_ms / INTERRUPTABLE_SLEEP_MS) {
         quit = quit_mu.load(Ordering::Acquire);
         if !quit {
-            task::sleep(Duration::from_millis(INTERRUPTABLE_SLEEP_MS)).await;
+            tokio::time::sleep(Duration::from_millis(INTERRUPTABLE_SLEEP_MS)).await;
         }
     }
 }

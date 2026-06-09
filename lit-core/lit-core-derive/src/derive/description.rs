@@ -1,12 +1,10 @@
-use proc_macro::TokenStream;
-
-use proc_macro_error::abort_call_site;
+use proc_macro2::{Span, TokenStream};
 use quote::quote;
 use syn::{self, Data, DeriveInput};
 
 use crate::utils::doc_comments::extract_doc_comment;
 
-pub(crate) fn derive_description(input: &DeriveInput) -> TokenStream {
+pub(crate) fn derive_description(input: &DeriveInput) -> syn::Result<TokenStream> {
     let name = input.ident.clone();
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
@@ -43,8 +41,10 @@ pub(crate) fn derive_description(input: &DeriveInput) -> TokenStream {
                 }
             };
 
-            TokenStream::from(modified)
+            Ok(modified)
         }
-        _ => abort_call_site!("`#[derive(Description)]` only supports enums"),
+        _ => {
+            Err(syn::Error::new(Span::call_site(), "`#[derive(Description)]` only supports enums"))
+        }
     }
 }
