@@ -43,25 +43,36 @@ yanked = "warn"
 #   current Rust workspace lockfile: RUSTSEC-2025-{0056,0057,0075,0080,0081,
 #   0098,0100}. Added RUSTSEC-2026-0173 (proc-macro-error2, via Alloy) and
 #   RUSTSEC-2026-0174 (http-types, via wiremock test dependency).
+# - 2026-06-08: "Tier 1" lockfile bumps (no Cargo.toml changes):
+#   * keccak 0.1.5 -> 0.1.6 in lit-actions/lit-core/lit-api-server cleared
+#     RUSTSEC-2026-0012 in every workspace -> entry removed.
+#   * rustls-webpki 0.103.9 -> 0.103.13 in lit-api-server fully cleared
+#     RUSTSEC-2026-0049 there and the 0.103-line half of 0098/0099/0104;
+#     the 0.101.7 copy (rocket 0.5.1 -> rustls 0.21) and deno's 0.102.8
+#     (lit-actions) still fire those, so they stay — reasons corrected below.
+#   * rand 0.8.5 -> 0.8.6 and 0.9.2 -> 0.9.4 in lit-api-server cleared
+#     RUSTSEC-2026-0097 there; lit-actions pins rand 0.8.5 and Alloy pulls
+#     rand into the generator/payments graphs, so the entry stays.
+#   Also removed three stale entries now advisory-not-detected in all six CI
+#   workspaces: RUSTSEC-2024-0388 (derivative), RUSTSEC-2025-0009 (aes),
+#   RUSTSEC-2025-0010 (ring <0.17).
 #
 # Suggested triage order: vulnerabilities > unsound > unmaintained.
 ignore = [
     # ── vulnerabilities ───────────────────────────────────────────────────────
     { id = "RUSTSEC-2023-0071", reason = "Marvin Attack timing sidechannel in rsa — still present via dcap-qvl dev dependency; pre-existing" },
-    { id = "RUSTSEC-2025-0009", reason = "AES panic on overflow check — transitive; pre-existing" },
     { id = "RUSTSEC-2026-0009", reason = "time DoS via stack exhaustion — still present in lit-actions (time 0.3.47 cascades serde 1.0.228 which breaks swc_config/swc_common from deno chain); cleared in lit-core and lit-api-server" },
-    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki CRL distribution-point matching — still present via non-ethers rustls users; pre-existing" },
-    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki URI name constraints — still present via non-ethers rustls 0.21 users; pre-existing" },
-    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki wildcard name constraints — still present via non-ethers rustls 0.21 users; pre-existing" },
-    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki CRL parsing panic — still present via non-ethers rustls 0.21 users; pre-existing" },
+    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki CRL distribution-point matching — now only via deno_runtime's rustls-webpki 0.102.8 in lit-actions; cleared elsewhere by bumping rustls-webpki 0.103.9->0.103.13" },
+    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki URI name constraints — via deno's 0.102.8 (lit-actions) and rocket 0.5.1's rustls 0.21 -> rustls-webpki 0.101.7 (lit-api-server); 0.103 line cleared via cargo update" },
+    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki wildcard name constraints — via deno's 0.102.8 (lit-actions) and rocket 0.5.1's rustls 0.21 -> rustls-webpki 0.101.7 (lit-api-server); 0.103 line cleared via cargo update" },
+    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki CRL parsing panic — via deno's 0.102.8 (lit-actions) and rocket 0.5.1's rustls 0.21 -> rustls-webpki 0.101.7 (lit-api-server); 0.103 line cleared via cargo update" },
     { id = "RUSTSEC-2026-0118", reason = "hickory NSEC3 unbounded loop — no upstream fix yet" },
     { id = "RUSTSEC-2026-0119", reason = "hickory DNS O(n^2) name compression — pinned by deno_runtime chain" },
 
     # ── unsound ───────────────────────────────────────────────────────────────
     { id = "RUSTSEC-2019-0036", reason = "failure type confusion — transitive; pre-existing" },
     { id = "RUSTSEC-2021-0145", reason = "atty unaligned read — transitive; pre-existing" },
-    { id = "RUSTSEC-2026-0012", reason = "keccak ARMv8 asm backend — only triggers with opt-in feature; pre-existing" },
-    { id = "RUSTSEC-2026-0097", reason = "rand custom logger unsound — pre-existing" },
+    { id = "RUSTSEC-2026-0097", reason = "rand custom logger unsound — still present via rand 0.8.5 pinned in lit-actions and Alloy's rand in generator/payments; cleared in lit-api-server after rand 0.8.5->0.8.6 / 0.9.2->0.9.4" },
     { id = "RUSTSEC-2026-0174", reason = "http-types ASCII invariant notice — transitive via wiremock test dependency; no safe upgrade available" },
 
     # ── unmaintained ──────────────────────────────────────────────────────────
@@ -69,9 +80,7 @@ ignore = [
     { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained — pre-existing" },
     { id = "RUSTSEC-2024-0375", reason = "atty unmaintained — pre-existing" },
     { id = "RUSTSEC-2024-0384", reason = "instant unmaintained — pre-existing" },
-    { id = "RUSTSEC-2024-0388", reason = "derivative unmaintained — transitive via ark-ff; surfaced after bytes/quinn/tar bumps refreshed the lockfile" },
     { id = "RUSTSEC-2024-0436", reason = "paste unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0010", reason = "ring <0.17 unmaintained — pre-existing" },
     { id = "RUSTSEC-2025-0052", reason = "async-std discontinued — pre-existing" },
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained — pre-existing" },
     { id = "RUSTSEC-2025-0141", reason = "bincode unmaintained — pre-existing" },
