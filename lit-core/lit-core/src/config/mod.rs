@@ -8,8 +8,6 @@ use std::str::FromStr;
 use config::{Config, Environment, File, Map, Value};
 #[cfg(feature = "ipfs")]
 use ipfs_api_backend_hyper::{IpfsApi, IpfsClient, TryFromUri};
-#[cfg(feature = "pinata")]
-use pinata_sdk::PinataApi;
 #[cfg(feature = "cli")]
 use termion::input::TermRead;
 
@@ -498,16 +496,6 @@ impl LitConfig {
 
             Ok(remotes)
         }
-    }
-
-    #[cfg(feature = "pinata")]
-    #[inline]
-    pub fn pinata_client(&self) -> Result<PinataApi> {
-        PinataApi::new(
-            self.get_checked_string("pinata.api_key")?,
-            self.get_checked_string("pinata.api_secret")?,
-        )
-        .map_err(|e| unexpected_err(e, None))
     }
 
     // Subnet
