@@ -71,6 +71,46 @@ export function getProvider() {
 }
 
 /**
+ * Probe whether the cached connection is still usable. The idempotent
+ * `connectWallet` shortcut must NOT hand back a signer that can no longer sign:
+ *   - WalletConnect sessions die (relay drop, wallet app closed) while the
+ *     provider object lingers in `_state`.
+ *   - Injected wallets (MetaMask, Rabby) auto-lock after an idle timeout.
+ * In both cases the stale signer fails at sign time (often by routing to a
+ * read-only RPC), so we re-prompt instead. We probe with `eth_accounts` against
+ * the active EIP-1193 provider — a real round-trip that needs no popup. NB:
+ * `signer.getAddress()` is useless here because ethers v6 caches the address
+ * and never touches the wallet.
+ *
+ * Best-effort, not perfect: WalletConnect often answers `eth_accounts` from its
+ * local session cache, so a wallet that died without a clean disconnect can
+ * still report "live" — the `connected === false` check and the timeout catch
+ * the common cases, and irreversible flows pass `force: true` to bypass the
+ * cache entirely.
+ */
+async function isConnectionLive() {
+  const eth = _state.eth;
+  if (!eth || !_state.signer) return false;
+  // A cleanly-dropped WalletConnect session flips this flag while leaving the
+  // provider object intact; trust it when it says the session is gone.
+  if (_state.source === 'walletconnect' && _wcProvider && _wcProvider.connected === false) {
+    return false;
+  }
+  try {
+    const accounts = await Promise.race([
+      eth.request({ method: 'eth_accounts' }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('probe-timeout')), 3000)),
+    ]);
+    if (!Array.isArray(accounts) || accounts.length === 0) return false; // locked
+    // The active account changed out from under us (and a listener missed it) —
+    // treat as stale rather than signing as the wrong address.
+    return accounts.some((a) => a.toLowerCase() === String(_state.address).toLowerCase());
+  } catch {
+    return false; // threw or timed out → connection is broken
+  }
+}
+
+/**
  * Connect a wallet, prompting the user with a picker on first call.
  *
  * @param {Object} [opts]
@@ -81,9 +121,13 @@ export function getProvider() {
  * @returns {Promise<{signer: import('ethers').Signer, address: string, chainId: number, source: string}>}
  */
 export async function connectWallet(opts = {}) {
-  if (!opts.force && _state.signer) {
+  if (!opts.force && _state.signer && (await isConnectionLive())) {
     return { signer: _state.signer, address: _state.address, chainId: _state.chainId, source: _state.source };
   }
+  // Either a first connect, or the cached connection is dead/locked. Tear down
+  // the stale state before re-prompting so we don't leak listeners or a
+  // half-open WalletConnect session, and so the picker starts from a clean slate.
+  if (_state.signer) disconnect();
   const choice = await showWalletPicker({ allowWalletConnect: !!opts.chainId });
   if (choice === 'cancel') {
     const err = new Error('Wallet connection cancelled.');
@@ -174,6 +218,18 @@ async function _connectWalletConnect({ chainId, rpcUrl }) {
       projectId: WALLETCONNECT_PROJECT_ID,
       chains: [chainId],
       rpcMap: rpcUrl ? { [chainId]: rpcUrl } : undefined,
+      // CRITICAL: declare the signing methods we depend on as *required*.
+      // @walletconnect/ethereum-provider's Eip155Provider routes any method
+      // NOT in the approved session namespace to the rpcMap HTTP node instead
+      // of the wallet. By default only `eth_sendTransaction` + `personal_sign`
+      // are required; `eth_signTypedData_v4` is merely *optional*, and wallets
+      // that don't echo optional methods back into the approved namespace leave
+      // it unrouted — so it gets sent to the public RPC, which has no keys and
+      // returns `-32601 Method not found`. Requiring the typed-data methods
+      // forces them into the namespace so they route to the wallet. ChainSecured
+      // flows can't work without EIP-712 v4 anyway, so failing the connection
+      // up front (vs. mid-sign) is the correct behavior for a wallet that lacks it.
+      methods: ['eth_sendTransaction', 'personal_sign', 'eth_signTypedData', 'eth_signTypedData_v4'],
       showQrModal: true,
     });
     // Re-emit the WC SDK's `display_uri` event as a DOM event so e2e tests can

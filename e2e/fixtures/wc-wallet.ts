@@ -22,11 +22,36 @@ if (!WC_PROJECT_ID) {
 
 const CHAIN_ID = `eip155:${foundry.id}`;
 
+// Everything this headless wallet can actually do. A real wallet only ever
+// approves a subset of what a dapp proposes.
+const SUPPORTED_METHODS = [
+  'eth_sendTransaction',
+  'eth_signTransaction',
+  'personal_sign',
+  'eth_sign',
+  'eth_signTypedData',
+  'eth_signTypedData_v4',
+];
+
 export interface TestWcWallet {
   walletkit: IWalletKit;
   address: Address;
   pair(uri: string): Promise<void>;
   disconnectAll(): Promise<void>;
+}
+
+export interface CreateTestWcWalletOpts {
+  accountIndex?: number;
+  /**
+   * Mimic a restrictive real-world wallet: approve ONLY the methods the dapp
+   * marks as *required*, dropping everything it proposed as optional. This is
+   * the configuration that surfaces WalletConnect's RPC-routing trap — any
+   * signing method left out of the approved namespace gets routed to the
+   * rpcMap HTTP node instead of the wallet. With `eth_signTypedData_v4` only
+   * optional, the dashboard's typed-data sign would hit the public RPC and get
+   * `-32601`; declaring it required (the fix) keeps it in the namespace.
+   */
+  approveOnlyRequired?: boolean;
 }
 
 /**
@@ -36,7 +61,12 @@ export interface TestWcWallet {
  *
  * Use one instance per test for isolation.
  */
-export async function createTestWcWallet(accountIndex = 1): Promise<TestWcWallet> {
+export async function createTestWcWallet(
+  opts: CreateTestWcWalletOpts | number = {},
+): Promise<TestWcWallet> {
+  // Back-compat: older callers passed a bare accountIndex.
+  const { accountIndex = 1, approveOnlyRequired = false } =
+    typeof opts === 'number' ? { accountIndex: opts } : opts;
   const { account, privateKey } = walletFor(accountIndex);
   const signer = privateKeyToAccount(privateKey);
 
@@ -58,24 +88,33 @@ export async function createTestWcWallet(accountIndex = 1): Promise<TestWcWallet
   });
 
   walletkit.on('session_proposal', async ({ id, params }) => {
-    const approvedNamespaces = buildApprovedNamespaces({
-      proposal: params,
-      supportedNamespaces: {
+    let approvedNamespaces;
+    if (approveOnlyRequired) {
+      // Hand-build the namespace from the dapp's *required* methods only, so
+      // optional proposals (which buildApprovedNamespaces would auto-include)
+      // are dropped — reproducing a wallet that doesn't echo optional methods.
+      const requiredMethods = params.requiredNamespaces?.eip155?.methods ?? [];
+      approvedNamespaces = {
         eip155: {
           chains: [CHAIN_ID],
-          methods: [
-            'eth_sendTransaction',
-            'eth_signTransaction',
-            'personal_sign',
-            'eth_sign',
-            'eth_signTypedData',
-            'eth_signTypedData_v4',
-          ],
+          methods: requiredMethods.filter((m: string) => SUPPORTED_METHODS.includes(m)),
           events: ['accountsChanged', 'chainChanged'],
           accounts: [`${CHAIN_ID}:${account.address}`],
         },
-      },
-    });
+      };
+    } else {
+      approvedNamespaces = buildApprovedNamespaces({
+        proposal: params,
+        supportedNamespaces: {
+          eip155: {
+            chains: [CHAIN_ID],
+            methods: SUPPORTED_METHODS,
+            events: ['accountsChanged', 'chainChanged'],
+            accounts: [`${CHAIN_ID}:${account.address}`],
+          },
+        },
+      });
+    }
 
     await walletkit.approveSession({ id, namespaces: approvedNamespaces });
   });

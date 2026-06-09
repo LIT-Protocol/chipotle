@@ -879,7 +879,11 @@ export async function convertToChainSecured() {
     }
     const { connectWallet, switchChain } = await import('../../wallet_connect.js');
     let chainId;
-    ({ signer, chainId } = await connectWallet({ chainId: expectedChainId, rpcUrl: getChainSecuredRpcUrl() }));
+    // `force: true` bypasses the cached-signer shortcut. Convert is irreversible
+    // and the connected wallet becomes the permanent on-chain admin, so we never
+    // silently reuse a prior (possibly stale, locked, or unintended) connection —
+    // the user must consciously pick the wallet that takes over ownership.
+    ({ signer, chainId } = await connectWallet({ chainId: expectedChainId, rpcUrl: getChainSecuredRpcUrl(), force: true }));
     if (chainId !== expectedChainId) {
       try {
         ({ signer } = await switchChain(expectedChainId));
@@ -897,8 +901,17 @@ export async function convertToChainSecured() {
   }
   closeActionProgress();
 
+  // Surface the exact wallet that will become admin — the user just picked it,
+  // but showing the resolved address in the irreversible-confirm step is the
+  // last guard against handing ownership to the wrong account.
+  let adminAddress = '';
+  try {
+    adminAddress = await signer.getAddress();
+  } catch {}
+  const adminLine = adminAddress ? `\n\nNew admin wallet: ${adminAddress}` : '';
+
   const ok = await confirmDelete(
-    "Convert this account to ChainSecured?\n\nYour connected wallet becomes the on-chain admin and your API key's write authority is removed permanently. This cannot be undone.\n\nYou will be asked to sign a message with your wallet to prove ownership, and will be signed in as the wallet after conversion.",
+    `Convert this account to ChainSecured?${adminLine}\n\nYour connected wallet becomes the on-chain admin and your API key's write authority is removed permanently. This cannot be undone.\n\nYou will be asked to sign a message with your wallet to prove ownership, and will be signed in as the wallet after conversion.`,
     { title: 'Confirm ownership change', confirmLabel: 'Convert' },
   );
   if (!ok) return;
