@@ -8,9 +8,11 @@
 // as the solver. The custody/policy story is exercised against the real settle()
 // machinery and real EIP-712 order signatures — just on an instance we control.
 //
-// Because we deploy our own settlement, ANY EVM chain works. We use Base Sepolia
-// (fast ~2s blocks, cheap, and matches the Across sibling); override COW_CHAIN_ID
-// + the RPC host whitelist in action/cowPolicy.js to run elsewhere.
+// Because we deploy our own settlement, the pattern is chain-portable, but these
+// scripts are wired to Base Sepolia (fast ~2s blocks, cheap, and matches the
+// Across sibling). To run elsewhere, add a Hardhat network, point the scripts at
+// that RPC env var, set COW_CHAIN_ID, and edit the RPC host whitelist in
+// action/cowPolicy.js.
 
 const fs = require("fs");
 const path = require("path");
@@ -50,6 +52,8 @@ const VAULT_ABI = [
   "function executeSettlement(bytes settleCalldata, address pullToken, uint256 pullAmount, uint256 authDeadline, bytes signature)",
   "function settlement() view returns (address)",
   "function policySigner() view returns (address)",
+  "function sellToken() view returns (address)",
+  "function buyToken() view returns (address)",
   "function killSwitch() view returns (bool)",
   "function maxFillAmount() view returns (uint256)",
   "function setKillSwitch(bool on)",
@@ -60,6 +64,7 @@ const VAULT_ABI = [
   "error AuthExpired()",
   "error KillSwitchEngaged()",
   "error OverCap()",
+  "error UnsupportedToken()",
 ];
 
 const MOCK_ERC20_ABI = [

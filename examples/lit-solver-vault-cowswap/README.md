@@ -5,10 +5,10 @@ batches lives in a Lit Action, not on the solver's box — so a compromised bot
 can't push a self-dealing settlement, and operational guardrails are enforced at
 signing time.**
 
-**Fast enough to solve with: ~361 ms median warm** for a full policy
-authorization round-trip (vault config reads + EIP-712 order verification +
-Lit Action signing), measured live on Base Sepolia + Lit Chipotle. This is the
-latency added before the solver submits `settle()`.
+**Fast enough to solve with: hundreds of milliseconds warm** for a full
+policy authorization round-trip (vault config reads, EIP-712 order verification,
+and Lit Action signing), measured live on Base Sepolia + Lit Chipotle. This is
+the latency added before the solver submits `settle()`.
 
 This is the CoW sibling of [`lit-solver-vault`](../lit-solver-vault) (which ships
 a generic mock demo and a live **Across** relayer). Same custody story, a very
@@ -22,9 +22,9 @@ different settlement system — and the difference is the whole point.
 > onboarding with the CoW team. So this example deploys *its own*
 > `GPv2Settlement` + `GPv2AllowListAuthentication` on Base Sepolia — the
 > real, audited CoW contracts, from the published `@cowprotocol/contracts`
-> artifacts. Because we deploy our own settlement, **any EVM chain works**; we
-> use Base Sepolia for its fast (~2s) blocks. It allowlists the vault as the
-> solver, and runs a genuine `settle()` end-to-end
+> artifacts. Because we deploy our own settlement, the pattern is portable to
+> other EVM chains; these scripts are wired to Base Sepolia for its fast (~2s)
+> blocks. It allowlists the vault as the solver, and runs a genuine `settle()` end-to-end
 > against real EIP-712 order signatures. Just on an instance we control.
 
 ## Why this is a Lit-shaped problem (and why it's sharper for CoW)
@@ -44,10 +44,11 @@ the Across variant removes, with a bigger blast radius. Here:
   can't call `settle()` at all (it isn't on the allowlist); it can only *ask* the
   vault, and the vault only settles batches a Lit Action signed.
 - The Lit Action **builds the entire settlement** from the trader's signed order
-  and signs only that. There's no caller-supplied field — recipient, amounts,
-  clearing prices and interactions are all derived from the order — so a
-  compromised bot can't produce a self-dealing batch. Exfiltration isn't
-  "rejected," it's impossible by construction (same property as `acrossPolicy`).
+  and signs only that. The token pair must match the pair pinned on the vault;
+  recipient, amounts, clearing prices and interactions are all derived from the
+  order — so a compromised bot can't produce a self-dealing batch. Exfiltration
+  isn't "rejected," it's impossible by construction (same property as
+  `acrossPolicy`).
 - The vault's inventory is exposed to the settlement only through a **bounded,
   per-batch approval** that's reset to zero after the call — so even the
   settlement contract can never pull more than the one batch needs.
@@ -68,15 +69,17 @@ automatically.**
        ├─────────────────►│                          │
        │                  │ read rpc host ✓           │
        │                  │ read vault.settlement(),  │
+       │                  │ sellToken, buyToken,      │
        │                  │ killSwitch, maxFillAmount ├─────────►│
        │                  │◄──────────────────────────┤
-       │                  │ read settlement.domainSeparator()    │
+       │                  │ compute EIP-712 domain locally       │
        │                  │ verify trader EIP-712 order sig       │
+       │                  │ verify order token pair == vault pair │
        │                  │ build the WHOLE settle() batch:       │
        │                  │   tokens, clearing prices, the trade, │
        │                  │   + 2 inventory interactions          │
        │ sig + calldata   │ sign(keccak(calldata), pullToken,     │
-       │◄─────────────────┤ pullAmount, authDeadline, vault, cid) │
+       │◄─────────────────┤ pullAmount, authDeadline, vault, chain)│
        │                                                          │
        │ executeSettlement(calldata, pullToken, pullAmount, deadline, sig) ──►│
        │                                       recover(sig) == policySigner ✓ │
@@ -122,14 +125,14 @@ a compromised owner can widen the gate. The security story is about removing the
 
 | Path | Purpose |
 | --- | --- |
-| `action/cowPolicy.js` | The policy Lit Action. Reads the vault's pinned settlement + config, verifies the trader's EIP-712 order, **builds the entire `settle()` calldata** from it, enforces cap / kill switch, and signs the batch. |
-| `contracts/CowSolverVault.sol` | Inventory custody + the allowlisted solver. `executeSettlement` verifies a policy signature over the settle calldata, grants a bounded one-batch approval, forwards `settle`; `exit` sweeps to the cold wallet; cold-wallet changes are timelocked. |
+| `action/cowPolicy.js` | The policy Lit Action. Reads the vault's pinned settlement, token pair, and config; verifies the trader's EIP-712 order; **builds the entire `settle()` calldata** from it; enforces token pair / cap / kill switch / order expiry; and signs the batch. |
+| `contracts/CowSolverVault.sol` | Inventory custody + the allowlisted solver. Pins the settlement and demo token pair; `executeSettlement` verifies a policy signature over the settle calldata, grants a bounded one-batch approval, forwards `settle`; `exit` sweeps to the cold wallet; cold-wallet changes are timelocked. |
 | `contracts/MockERC20.sol` | Faucet tokens (a 6-dp "USDC" the trader sells, an 18-dp "WETH" the vault holds). |
 | `scripts/deploy-cow.js` | Deploys our own `GPv2AllowListAuthentication` + `GPv2Settlement` (real CoW artifacts), the tokens, and the vault; allowlists the vault; funds inventory. |
 | `scripts/setup-cow.js` | One-shot: compute the action CID, derive `policySigner`, create + wire the group/usage key, register the action, run the deploy. |
 | `scripts/order.js` | Plays the trader: mints the sell token, approves the VaultRelayer, signs an EIP-712 order (the intent). |
 | `scripts/solve.js` | Happy path: authorize via Lit, submit `executeSettlement`. |
-| `scripts/attack.js` | Three attacks, all defeated: tampered receiver, forged policy sig, and a non-solver trying to settle directly. |
+| `scripts/attack.js` | Four attacks, all defeated: tampered receiver, unpinned token pair, forged policy sig, and a non-solver trying to settle directly. |
 | `scripts/_cow.js` / `_chipotle.js` / `_env.js` | Shared helpers (CoW ABIs + order signing, Lit REST calls, `.env` upsert). |
 
 ## Walkthrough
@@ -143,8 +146,10 @@ npm install
 
 Set `LIT_API_KEY`, `ALCHEMY_BASE_SEPOLIA_URL` (a `base-sepolia.g.alchemy.com`
 URL — the action whitelists that host), `DEPLOYER_PRIVATE_KEY` (Base-Sepolia gas;
-it becomes the vault owner), and `SOLVER_PRIVATE_KEY` (the bot's gas account; can
-be the same key for testing). See the comments in `.env.example`.
+it becomes the vault owner), and `SOLVER_PRIVATE_KEY` (the bot's gas account).
+Use a distinct solver key for the attack walkthrough; using the deployer key is
+convenient for a smoke test but collapses the owner/auth-manager/solver roles.
+See the comments in `.env.example`.
 
 ### 2. Run setup
 
@@ -157,7 +162,8 @@ group (wildcard allowlist, bounded by the scoped usage key), mint a scoped usage
 key, derive the action's wallet (the vault's `policySigner`), register the action
 + add it to the group, then deploy the whole CoW stack (`scripts/deploy-cow.js`):
 our `GPv2AllowListAuthentication`, our `GPv2Settlement`, the two test tokens, the
-`CowSolverVault` (allowlisted as the solver, funded with mWETH inventory).
+`CowSolverVault` (pinning that token pair, allowlisted as the solver, funded with
+mWETH inventory).
 
 Re-running does a fresh setup top-to-bottom and orphans the previous
 group/key/contracts — the simplest reset for a docs example.
@@ -178,26 +184,28 @@ npm run solve
 npm run attack
 #   1. compromised bot rewrites the order receiver to itself -> policy refuses
 #      (the rebuilt batch no longer recovers to the order owner)
-#   2. bot forges a policy signature and calls executeSettlement -> reverts
+#   2. bot swaps the order buy token away from the vault-pinned pair -> policy refuses
+#   3. bot forges a policy signature and calls executeSettlement -> reverts
 #      InvalidPolicySignature
-#   3. bot calls GPv2Settlement.settle directly -> "GPv2: not a solver"
+#   4. bot calls GPv2Settlement.settle directly -> "GPv2: not a solver"
 #      (only the vault is allowlisted)
 ```
 
-`npm run solve` prints the policy authorization latency in milliseconds. The
-current live measurement on Base Sepolia + Lit Chipotle was **~361 ms median warm**
-for authorization-only samples (`538, 484, 322, 360, 361, 352 ms`; mean
-`~403 ms`). The first end-to-end solve in this run authorized in `1585 ms`, then
-warm solves authorized in `553 ms` and `502 ms`, so expect the first call after
-an action edit or cache miss to be slower while the CID is pinned/distributed.
+`npm run solve` prints the policy authorization latency in milliseconds. After
+adding the token-pair and expiry checks, a live Base Sepolia + Lit Chipotle solve
+authorized in **567 ms** and then settled on-chain. The previous authorization-only
+warm sample set, before those checks, measured **~361 ms median warm** (`538, 484,
+322, 360, 361, 352 ms`; mean `~403 ms`). The extra checks add more reads but keep
+them in the same concurrent RPC round-trip. Expect the first call after an action
+edit or cache miss to be slower while the CID is pinned/distributed.
 
-The action does its work in a **single RPC round-trip**: the three vault reads
-fire concurrently (`Promise.all`), the EIP-712 domain is computed locally rather
-than read (verified byte-for-byte against the deployed settlement), and the
-policy-key derivation is kicked off in parallel with the reads. The action only
-reads + signs — it does **not** wait for the settlement to mine; `solve.js`
-submits that tx after the authorization returns, so block inclusion / finality is
-chain latency on top of the Lit authorization.
+The action does its work in a **single RPC round-trip**: the vault reads and
+latest-block read fire concurrently (`Promise.all`), the EIP-712 domain is
+computed locally rather than read (verified byte-for-byte against the deployed
+settlement), and the policy-key derivation is kicked off in parallel with the
+reads. The action only reads + signs — it does **not** wait for the settlement to
+mine; `solve.js` submits that tx after the authorization returns, so block
+inclusion / finality is chain latency on top of the Lit authorization.
 
 ## Liveness & exit
 
@@ -227,11 +235,11 @@ guards your inventory — Lit can never block you from your money."*
   route inventory out. That interaction allowlist is the load-bearing, genuinely
   hard part, and it has no analog in the Across variant (a fill is one bound
   transfer). It's the main thing to build before this is more than a custody demo.
-- **Economic policy is minimal.** With arbitrary test tokens the action can't
-  price the trade, so it only checks the per-batch cap and exact-limit fill. A
-  production solver needs a real fee floor, a quote/orderbook check, an
-  output-token allowlist, and a **cumulative** exposure budget — the per-batch cap
-  alone doesn't bound total drain across many settlements. (`order.feeAmount` is
+- **Economic policy is minimal.** The demo pins one mUSDC/mWETH token pair, but
+  with arbitrary test tokens the action still can't price the trade. A production
+  solver needs a real fee floor, a quote/orderbook check, broader token-pair
+  allowlists, and a **cumulative** exposure budget — the per-batch cap alone
+  doesn't bound total drain across many settlements. (`order.feeAmount` is
   required to be 0 here so the batch stays exact; real orders may carry a fee.)
 - **Move policy config off-chain.** `killSwitch` / `maxFillAmount` live on the
   vault so updates are one tx and the action reads them with a plain `eth_call`.
@@ -252,7 +260,8 @@ guards your inventory — Lit can never block you from your money."*
   the order signature, so the policy's checks are belt-and-suspenders, not the
   only line of defense.
 - **Latency from the live run.** On June 8, 2026, the policy authorization path
-  measured `~361 ms` median warm against Base Sepolia + Lit Chipotle. This is the
+  measured `567 ms` for the first live solve after adding token-pair and expiry
+  checks; the prior authorization-only warm median was `~361 ms`. This is the
   extra solver-side wait before submitting `executeSettlement`; the subsequent
   `settle()` transaction still waits for normal chain inclusion.
 - **erc20 balances only.** The action builds sell / fill-or-kill / erc20 orders,
