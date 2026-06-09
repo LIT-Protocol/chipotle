@@ -2,7 +2,7 @@
   "name": "lit-solver-vault-cowswap",
   "version": "0.0.1",
   "private": true,
-  "description": "Lit Action + vault example: policy-gated key custody for a CoW Protocol solver. The settlement-authorizing key lives in a Lit Action, not on the solver's box. Tier 1: runs against a self-deployed GPv2Settlement on Base Sepolia.",
+  "description": "Lit Action + vault example: policy-gated key custody for a CoW Protocol solver. The settlement-authorizing key lives in a Lit Action, not on the solver's box. Runs against a self-deployed GPv2Settlement on Base Sepolia.",
   "scripts": {
     "compile": "hardhat compile",
     "setup": "node scripts/setup-cow.js",

@@ -1,4 +1,4 @@
-// One-shot setup for the CoW Protocol (Tier 1) integration.
+// One-shot setup for the self-contained CoW Protocol integration.
 //
 // Prereqs in .env:
 //   LIT_API_KEY                Account-level (master) Lit API key

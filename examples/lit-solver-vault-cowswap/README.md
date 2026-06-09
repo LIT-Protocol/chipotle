@@ -19,14 +19,13 @@ different settlement system — and the difference is the whole point.
 > on testnet and fills a real deposit. CoW settlement is *permissioned*: only an
 > allowlisted (and, on mainnet, bonded + KYC'd) solver may call `settle()`. You
 > can't run a self-serve test solve against CoW's canonical contracts without
-> onboarding with the CoW team. So this example is **Tier 1**: it deploys *its
-> own* `GPv2Settlement` + `GPv2AllowListAuthentication` on Base Sepolia — the
+> onboarding with the CoW team. So this example deploys *its own*
+> `GPv2Settlement` + `GPv2AllowListAuthentication` on Base Sepolia — the
 > real, audited CoW contracts, from the published `@cowprotocol/contracts`
 > artifacts. Because we deploy our own settlement, **any EVM chain works**; we
 > use Base Sepolia for its fast (~2s) blocks. It allowlists the vault as the
 > solver, and runs a genuine `settle()` end-to-end
-> against real EIP-712 order signatures. Just on an instance we control. See
-> [Tiers](#why-tier-1-and-what-tiers-2-3-look-like).
+> against real EIP-712 order signatures. Just on an instance we control.
 
 ## Why this is a Lit-shaped problem (and why it's sharper for CoW)
 
@@ -214,26 +213,6 @@ guards your inventory — Lit can never block you from your money."*
   the kill switch and the per-batch cap and bounds the authorization TTL
   (`MAX_AUTH_TTL`), so a signature minted while policy was permissive can't
   execute after the owner tightens it.
-
-## Why "Tier 1", and what Tiers 2–3 look like
-
-CoW settlement is permissioned, so there are three fidelities of "test solve":
-
-- **Tier 1 (this example).** Deploy your *own* `GPv2Settlement` +
-  `GPv2AllowListAuthentication` and allowlist your vault. Real contracts, real
-  `settle()`, real EIP-712 order signatures — on an instance you control, on
-  **any EVM chain** (we use Base Sepolia for speed). **No CoW permission needed.**
-  This is the right place to prove the custody + policy story, which is exactly
-  what's Lit-shaped.
-- **Tier 2 — local shadow.** Run CoW's `autopilot` + `driver` + a solver engine
-  locally (the [`local_test`](https://docs.cow.fi/cow-protocol/tutorials/solvers/local_test)
-  tutorial) in *shadow* mode, mirroring real CoW auctions (no KYC/bond). Shadow
-  doesn't settle on-chain — your solver only *sees* real auctions — but it's the
-  way to prove the policy validates real auction data.
-- **Tier 3 — real CoW settlement.** Onboard with the CoW team (they generate +
-  allowlist your solver keys; KYC + bond for the barn/prod bonding pool). The only
-  path to a true `settle()` on CoW's canonical contracts. Weeks + a DAO
-  relationship, not a quick demo.
 
 ## Production hardening
 

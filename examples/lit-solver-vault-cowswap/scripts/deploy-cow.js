@@ -1,4 +1,4 @@
-// Deploys the Tier-1 CoW stack on Base Sepolia:
+// Deploys the self-contained CoW stack on Base Sepolia:
 //   1. GPv2AllowListAuthentication (our own instance) + initializeManager(deployer)
 //   2. GPv2Settlement(authenticator, balancerVault)  (creates its VaultRelayer)
 //   3. two MockERC20s: a sell token (the trader sells) + a buy token (vault inventory)

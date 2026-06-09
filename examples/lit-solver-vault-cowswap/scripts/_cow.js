@@ -1,13 +1,12 @@
-// Shared constants + helpers for the CoW Protocol (Tier 1) integration.
+// Shared constants + helpers for the self-contained CoW Protocol integration.
 //
-// "Tier 1" = a self-deployed GPv2Settlement. CoW's canonical settlement is
-// permissioned — only allowlisted (and on mainnet bonded) solvers may call
-// settle() — so you can't run a self-serve test solve against it the way Across
-// lets anyone fill. Instead we deploy our OWN GPv2Settlement +
-// GPv2AllowListAuthentication (the real, audited contracts, from the published
-// @cowprotocol/contracts artifacts) and allowlist our vault as the solver. The
-// custody/policy story is exercised against the real settle() machinery and
-// real EIP-712 order signatures — just on an instance we control.
+// CoW's canonical settlement is permissioned — only allowlisted (and on mainnet
+// bonded) solvers may call settle() — so you can't run a self-serve test solve
+// against it the way Across lets anyone fill. Instead we deploy our OWN
+// GPv2Settlement + GPv2AllowListAuthentication (the real, audited contracts,
+// from the published @cowprotocol/contracts artifacts) and allowlist our vault
+// as the solver. The custody/policy story is exercised against the real settle()
+// machinery and real EIP-712 order signatures — just on an instance we control.
 //
 // Because we deploy our own settlement, ANY EVM chain works. We use Base Sepolia
 // (fast ~2s blocks, cheap, and matches the Across sibling); override COW_CHAIN_ID
