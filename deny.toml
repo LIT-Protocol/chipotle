@@ -78,6 +78,7 @@ ignore = [
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained — pre-existing" },
     { id = "RUSTSEC-2025-0141", reason = "bincode unmaintained — pre-existing" },
     { id = "RUSTSEC-2026-0105", reason = "core2 unmaintained, all versions yanked — pre-existing" },
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 unmaintained — author confirmed; transitive via clap_derive's derive macro chain in lit-payments. No drop-in replacement yet." },
 ]
 
 [sources]
