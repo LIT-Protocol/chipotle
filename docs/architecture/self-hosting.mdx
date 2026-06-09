@@ -67,6 +67,29 @@ Self-hosting gives you more control, but it moves more responsibility onto your 
 | **Support surface** | Lit supports the hosted API and dashboard. | You own day-to-day operations; Lit can discuss support options for self-hosted environments. |
 | **Customization** | Standard public API and dashboard behavior. | You can fork, patch, and integrate the stack with your own systems. |
 
+## Governing upgrades yourself
+
+Self-hosting is not only an operational choice — it is a **governance** choice. When
+you self-host, you deploy your own `DstackApp` contract and point its owner at *your
+own* Safe (or wallet, timelock, or DAO). That means **you** decide which Lit Chipotle
+releases run, not Lit:
+
+- **You approve every release.** Lit publishing a new version does not change what
+  your enclave runs. A new compose hash only takes effect in your deployment when
+  your signers whitelist it on-chain.
+- **On your own timeline.** Pin a reviewed compose hash indefinitely, audit a new Lit
+  release at your own pace, and whitelist it only when you are satisfied. There is no
+  forced upgrade.
+- **With your own controls.** Add a timelock for a mandatory review window, set a
+  higher multisig threshold, or choose your own signers. The hosted service runs a
+  2-of-4 Safe with no timelock; your deployment can be as conservative as your
+  compliance posture requires.
+
+This is the deepest form of "don't trust, verify": you are not just verifying Lit's
+releases, you are the one authorizing them. See
+[Upgrade Governance](/architecture/verification/upgrade-governance) for how the
+hosted service does this and what signers verify before approving.
+
 ## When self-hosting makes sense
 
 Consider self-hosting when:
