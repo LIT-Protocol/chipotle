@@ -1,4 +1,4 @@
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::time::Duration;
 use std::{fs, path::PathBuf};
 
@@ -48,14 +48,20 @@ where
     F: std::future::Future<Output = ()>,
 {
     let socket_path = socket_path.into();
-    if socket_path.exists() {
-        // If the file is a symlink, e.g. from /var/run to somewhere else, remove the target file
-        if let Ok(target_path) = fs::read_link(&socket_path) {
-            fs::remove_file(target_path)
-        } else {
-            fs::remove_file(&socket_path)
-        }
-        .context("Failed to remove existing socket file")?;
+    // Use symlink_metadata (lstat) so we inspect the path itself, not what a
+    // symlink points to. Only unlink the path if it is an actual Unix socket;
+    // never follow a symlink to remove its target. This closes a CWE-59
+    // arbitrary-file-deletion vector when the socket lives in a world-writable
+    // sticky directory (e.g. /tmp). (F-001)
+    if let Ok(meta) = fs::symlink_metadata(&socket_path) {
+        anyhow::ensure!(
+            meta.file_type().is_socket(),
+            "Refusing to remove existing path at {:?}: not a Unix socket \
+             (file_type={:?}). Possible symlink/file planted by another user.",
+            socket_path,
+            meta.file_type(),
+        );
+        fs::remove_file(&socket_path).context("Failed to remove existing socket file")?;
     }
 
     let uds = UnixListener::bind(socket_path.clone())?;

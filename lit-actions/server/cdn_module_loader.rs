@@ -373,14 +373,33 @@ impl CdnModuleLoader {
             );
         }
 
-        // Inline hash takes priority, then lockfile manifest.
-        let expected_hash = inline_hash.clone().or_else(|| {
-            self.integrity
-                .read()
-                .expect("integrity lock poisoned")
-                .get(&url)
-                .cloned()
-        });
+        // Operator lockfile pin wins over any attacker-controlled inline
+        // `#sha384-...` fragment. When both are present they must match,
+        // otherwise the action is opting out of the operator pin.
+        let lock_hash = self
+            .integrity
+            .read()
+            .expect("integrity lock poisoned")
+            .get(&url)
+            .cloned();
+        let expected_hash = match (lock_hash.as_ref(), inline_hash.as_ref()) {
+            (Some(lock), Some(inline))
+                if !constant_time_eq(lock.as_bytes(), inline.as_bytes()) =>
+            {
+                error!(
+                    module_url = %url,
+                    lock_hash = %format!("sha384-{lock}"),
+                    inline_hash = %format!("sha384-{inline}"),
+                    "CDN module integrity: inline hash conflicts with lockfile pin"
+                );
+                return Err(JsErrorBox::generic(format!(
+                    "Inline integrity hash for {url} conflicts with lockfile pin: \
+                     expected sha384-{lock}, got inline sha384-{inline}"
+                )));
+            }
+            (Some(_), _) => lock_hash.clone(),
+            (None, _) => inline_hash.clone(),
+        };
 
         // Cache hit path: verify integrity against cached bytes and return.
         if let Ok(cache) = self.cache.read()
@@ -1136,6 +1155,57 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
         assert!(
             msg.contains("bundler") || msg.contains("Runtime import"),
             "unexpected rejection message: {msg}"
+        );
+    }
+
+    /// F-004: an attacker-controlled `#sha384-...` fragment in an import
+    /// specifier must not shadow the operator's lockfile pin for the same
+    /// URL. If the inline hash disagrees with the lockfile entry, the
+    /// fetch must be rejected even when cached bytes match the inline hash.
+    #[tokio::test]
+    async fn inline_hash_cannot_override_lockfile_pin() {
+        let url = "https://cdn.jsdelivr.net/npm/known@1.0.0/+esm".to_string();
+        let attacker_bytes = b"export default 'pwn';\n".to_vec();
+
+        // Lockfile pin for some other (operator-trusted) bytes.
+        let mut hasher = Sha384::new();
+        hasher.update(b"export default 'real';\n");
+        let lock_b64 =
+            base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
+
+        // Inline hash matches the attacker bytes the cache will serve.
+        let mut hasher = Sha384::new();
+        hasher.update(&attacker_bytes);
+        let inline_b64 =
+            base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
+
+        let mut manifest = HashMap::new();
+        manifest.insert(url.clone(), lock_b64.clone());
+
+        let cache: ModuleCache = Arc::new(RwLock::new(HashMap::new()));
+        cache
+            .write()
+            .unwrap()
+            .insert(url.clone(), attacker_bytes.clone());
+
+        let loader = CdnModuleLoader::with_options(
+            Arc::new(RwLock::new(manifest)),
+            true,
+            cache,
+            None,
+            None,
+            LoadedModules::default(),
+        );
+
+        let attacker_url = format!("{url}#sha384-{inline_b64}");
+        let err = loader
+            .fetch_module_bytes(&attacker_url)
+            .await
+            .expect_err("inline hash must not shadow lockfile pin");
+        let msg = format!("{err}");
+        assert!(
+            msg.contains("conflicts with lockfile pin"),
+            "unexpected error message: {msg}"
         );
     }
 
