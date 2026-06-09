@@ -7,7 +7,7 @@ use crate::core::v1::models::response::{
     AccountOpResponse, BillingBalanceResponse, CreatePaymentIntentResponse, StripeConfigResponse,
 };
 use crate::stripe::{self, StripeState};
-use lit_billing_auth::BillingAuth;
+use lit_billing_core::billing_auth::BillingAuth;
 use rocket::State;
 use rocket::serde::json::Json;
 use rocket::{get, post};

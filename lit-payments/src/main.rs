@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use lit_billing_auth::AuthResolver;
+use lit_billing_core::billing_auth::AuthResolver;
 use lit_billing_core::StripeClient;
 use lit_payments::auth::routes as auth_routes;
 use lit_payments::auth_resolver::HttpAuthResolver;

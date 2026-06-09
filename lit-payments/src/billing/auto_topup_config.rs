@@ -20,7 +20,7 @@
 
 use std::sync::Arc;
 
-use lit_billing_auth::{AuthResolver, BillingAuth};
+use lit_billing_core::billing_auth::{AuthResolver, BillingAuth};
 use lit_billing_core::{StripeClient, customer};
 use rocket::http::Status;
 use rocket::serde::json::Json;
@@ -80,13 +80,13 @@ async fn resolve_caller(
             Err(e) => {
                 tracing::warn!("auto_topup_config: API-key resolver failed: {e}");
                 let (status, code, message): (Status, &'static str, &str) = match e {
-                    lit_billing_auth::AuthError::BadCredentials(_)
-                    | lit_billing_auth::AuthError::Forbidden(_) => (
+                    lit_billing_core::billing_auth::AuthError::BadCredentials(_)
+                    | lit_billing_core::billing_auth::AuthError::Forbidden(_) => (
                         Status::Unauthorized,
                         "api_key_unresolved",
                         "API key could not be resolved to a wallet.",
                     ),
-                    lit_billing_auth::AuthError::Transient(_) => (
+                    lit_billing_core::billing_auth::AuthError::Transient(_) => (
                         Status::ServiceUnavailable,
                         "auth_resolver_unavailable",
                         "Could not contact the auth resolver; try again.",

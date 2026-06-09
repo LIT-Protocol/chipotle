@@ -62,6 +62,7 @@ dependencies = [
  "alloy-primitives",
  "alloy-sol-type-parser",
  "alloy-sol-types",
+ "derive_more",
  "itoa",
  "serde",
  "serde_json",
@@ -2063,27 +2064,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32a66949e030da00e8c7d4434b251670a91556f4144941d37452769c25d58a53"
 
 [[package]]
-name = "lit-billing-auth"
+name = "lit-billing-core"
 version = "0.1.0"
 dependencies = [
+ "alloy-dyn-abi",
+ "alloy-primitives",
  "anyhow",
  "async-trait",
  "base64_light",
+ "hex",
+ "reqwest",
  "rocket",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
- "tracing",
-]
-
-[[package]]
-name = "lit-billing-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "reqwest",
- "serde",
- "serde_json",
  "tracing",
 ]
 
@@ -2100,7 +2094,6 @@ dependencies = [
  "base64_light",
  "hex",
  "hmac",
- "lit-billing-auth",
  "lit-billing-core",
  "moka",
  "num-bigint",

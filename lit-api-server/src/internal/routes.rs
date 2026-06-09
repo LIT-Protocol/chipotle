@@ -9,7 +9,9 @@
 
 use std::sync::Arc;
 
-use lit_billing_auth::{AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload};
+use lit_billing_core::billing_auth::{
+    AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload,
+};
 use rocket::http::Status;
 use rocket::serde::Deserialize;
 use rocket::serde::json::Json;
@@ -123,7 +125,9 @@ mod tests {
     use std::sync::Arc;
 
     use async_trait::async_trait;
-    use lit_billing_auth::{AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload};
+    use lit_billing_core::billing_auth::{
+    AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload,
+};
     use rocket::http::{ContentType, Header, Status};
     use rocket::local::asynchronous::Client;
     use rocket::{Rocket, routes};

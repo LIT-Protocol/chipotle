@@ -44,8 +44,7 @@ sha3 = "0.10"
 ipfs-hasher = "0.13.0"
 elliptic-curve = "0.13.8"
 k256 = { version = "0.13.4", features = ["ecdsa"] }
-lit-billing-auth = { path = "../lit-billing-auth", features = ["openapi"] }
-lit-billing-core = { path = "../lit-billing-core" }
+lit-billing-core = { path = "../lit-billing-core", features = ["openapi"] }
 lit-core = { path = "../lit-core/lit-core" }
 lit-core-derive = { path = "../lit-core/lit-core-derive" }
 lit-observability = { path = "../lit-core/lit-observability", features = ["channels"] }

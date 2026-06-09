@@ -13,7 +13,7 @@
 //! same key after the first call is sub-millisecond on the api-server side.
 
 use async_trait::async_trait;
-use lit_billing_auth::{AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload};
+use lit_billing_core::billing_auth::{AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload};
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;

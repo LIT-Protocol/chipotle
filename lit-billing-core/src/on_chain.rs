@@ -33,7 +33,7 @@
 
 use std::time::Duration;
 
-use alloy_primitives::{Address, B256, U256, hex, keccak256};
+use alloy_primitives::{Address, B256, hex, keccak256};
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -272,6 +272,7 @@ pub fn get_billing_wallet_address_selector() -> [u8; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::U256;
 
     /// `0xab*32`-shaped strings must be treated as already-hashed inputs.
     #[test]

@@ -2,24 +2,24 @@
 //!
 //! Each service plugs in its own implementation:
 //!
-//! - **lit-api-server** uses a local resolver that calls the existing
-//!   in-process EIP-712 verifier and the on-chain `allApiKeyHashesToMaster`
-//!   resolver. Auth happens fully inside the TEE.
+//! - **lit-api-server** uses a local resolver that calls the shared
+//!   EIP-712 verifier ([`crate::eip712`]) and the shared on-chain
+//!   `allApiKeyHashesToMaster` resolver ([`crate::on_chain`]). Auth happens
+//!   fully in-process.
 //!
-//! - **lit-payments** uses an HTTP resolver that forwards the verification
-//!   to lit-api-server's internal endpoints. Keeps the on-chain plumbing in
-//!   exactly one place (the TEE) and saves lit-payments from having to
-//!   re-implement the same logic.
+//! - **lit-payments** uses the same in-process resolver — same shared
+//!   primitives, same calls. Glitch's PR #448 review folded the previous
+//!   HTTP hop into a direct call once the verifier moved here.
 //!
-//! The [`BillingAuth`] Rocket guard pulls an `Arc<dyn AuthResolver>` from
-//! Rocket state and dispatches verification to whichever impl the service
-//! installed.
+//! The [`crate::billing_auth::BillingAuth`] Rocket guard pulls an
+//! `Arc<dyn AuthResolver>` from Rocket state and dispatches verification to
+//! whichever impl the service installed.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 /// Failure modes from a resolver call. Each case maps to a Rocket
-/// `Status` by the [`crate::guard::BillingAuth`] `FromRequest` impl —
+/// `Status` by the [`super::BillingAuth`] `FromRequest` impl —
 /// `BadCredentials` / `Forbidden` → 401, `Transient` → 503.
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
@@ -72,6 +72,6 @@ pub trait AuthResolver: Send + Sync + 'static {
 
     /// Resolve a raw API key to its billing wallet address. The default
     /// implementation is intentionally absent — every consumer must wire one
-    /// up (the resolver may need on-chain access or an HTTP hop).
+    /// up (the resolver may need on-chain access).
     async fn resolve_api_key(&self, api_key: &str) -> Result<ResolvedIdentity, AuthError>;
 }

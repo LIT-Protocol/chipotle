@@ -18,6 +18,7 @@
 //! and on-chain wallet resolution.
 
 pub mod balance;
+pub mod billing_auth;
 pub mod client;
 pub mod customer;
 pub mod eip712;
