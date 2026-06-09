@@ -69,8 +69,7 @@ impl AuthResolver for LocalAuthResolver {
         // (Transient → 503). Pre-fix this method collapsed every error to
         // Transient, so bad API keys produced 503s and made lit-payments
         // retry-loop for permanent credential failures.
-        let wallet_address_hex = match crate::accounts::get_billing_wallet_address(api_key).await
-        {
+        let wallet_address_hex = match crate::accounts::get_billing_wallet_address(api_key).await {
             Ok(v) => v,
             Err(e) => {
                 // `accounts::get_billing_wallet_address` bails with "account
