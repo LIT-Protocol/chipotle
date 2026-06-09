@@ -5,7 +5,7 @@ use anyhow::Result;
 use lit_billing_core::billing_auth::AuthResolver;
 use lit_billing_core::StripeClient;
 use lit_payments::auth::routes as auth_routes;
-use lit_payments::auth_resolver::HttpAuthResolver;
+use lit_payments::auth_resolver::LocalAuthResolver;
 use lit_payments::auto_topup::webhook::handler as webhook_handler;
 use lit_payments::auto_topup::webhook::mutex::PerCustomerMutex;
 use lit_payments::billing as billing_routes;
@@ -34,16 +34,17 @@ async fn rocket() -> _ {
         mail::Mailer::new(cfg.resend_api_key.clone(), cfg.mail_from.clone()).expect("mailer");
     let rate_limit = auth::rate_limit::RateLimiter::new();
     let stripe = StripeClient::new(cfg.stripe_secret_key.clone()).expect("stripe client");
-    // HTTP-based auth resolver: forwards verification to lit-api-server's
-    // internal endpoints so the EIP-712 verifier and on-chain key resolver
-    // live in exactly one place.
-    let auth_resolver: Arc<dyn AuthResolver> = Arc::new(
-        HttpAuthResolver::new(
-            cfg.lit_api_server_base_url.clone(),
-            cfg.lit_internal_shared_secret.clone(),
-        )
-        .expect("auth resolver"),
-    );
+    // In-process auth resolver — wallet-sig verification + on-chain
+    // billing-wallet lookup, both running locally. Post-#448-glitch-followup
+    // these used to be HTTP hops to lit-api-server; the shared
+    // `lit-billing-core` crate now exposes both primitives so the same
+    // resolver shape runs on both services.
+    let on_chain_resolver =
+        config::build_on_chain_resolver(&cfg).expect("OnChainBillingResolver");
+    let auth_resolver: Arc<dyn AuthResolver> = Arc::new(LocalAuthResolver::new(
+        on_chain_resolver,
+        cfg.lit_accounts_chain_id,
+    ));
     rate::spawn_rate_poller(pool.clone());
     let per_customer_mutex = PerCustomerMutex::new();
     lit_payments::auto_topup::reconciler::spawn(cfg.clone(), stripe.clone(), pool.clone());

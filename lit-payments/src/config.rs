@@ -7,6 +7,7 @@ use std::str::FromStr;
 
 use alloy_primitives::Address;
 use anyhow::{Context, Result};
+use lit_billing_core::on_chain::OnChainBillingResolver;
 
 use crate::{chain, rate};
 
@@ -46,8 +47,29 @@ pub struct Config {
     pub litkey_chain: Option<chain::ChainConfig>,
     /// Base URL of `lit-api-server`, used for the auto-top-up cache
     /// invalidation callback after a successful credit. e.g.,
-    /// `https://api.litprotocol.com`.
+    /// `https://api.litprotocol.com`. This is the ONLY remaining
+    /// lit-api-server hop — wallet-sig verification + on-chain key
+    /// resolution moved into the shared `lit-billing-core` crate after
+    /// glitch's PR #448 architectural review.
     pub lit_api_server_base_url: String,
+    /// JSON-RPC endpoint for the chain that hosts AccountConfig (the
+    /// contract that maps API-key hashes → admin wallets, used by the
+    /// `BillingAuth` guard's API-key path). Same chain `lit-api-server`
+    /// configures via NodeConfig.toml's `[chain] name = …`. Required
+    /// because lit-payments now runs the on-chain lookup in-process via
+    /// `OnChainBillingResolver` (was an internal HTTP hop pre-#448
+    /// follow-up).
+    pub lit_accounts_rpc_url: String,
+    /// Chain ID of the AccountConfig chain. Used both by the on-chain
+    /// resolver above and by the EIP-712 verifier (the wallet-sig payload
+    /// commits to a chain ID; signatures minted against a different chain
+    /// will fail to recover). Read from `LIT_ACCOUNTS_CHAIN_ID`.
+    pub lit_accounts_chain_id: u64,
+    /// 0x-hex deployed address of the AccountConfig contract on the
+    /// chain above. Mirrors lit-api-server's `NodeConfig.toml`
+    /// `[chain] contract_address = …`. Read from
+    /// `LIT_ACCOUNTS_CONTRACT_ADDRESS`.
+    pub lit_accounts_contract_address: Address,
     /// High-entropy shared secret for the internal `lit-payments` ⇄
     /// `lit-api-server` hop. Compared in constant time against the
     /// `X-Internal-Secret` header on internal endpoints. Same value must be
@@ -101,6 +123,9 @@ impl Config {
                 .trim_end_matches('/')
                 .to_string(),
             lit_internal_shared_secret: required("LIT_INTERNAL_SHARED_SECRET")?,
+            lit_accounts_rpc_url: required("LIT_ACCOUNTS_RPC_URL")?,
+            lit_accounts_chain_id: parse_chain_id()?,
+            lit_accounts_contract_address: parse_accounts_contract_address()?,
             stripe_webhook_secret: required("STRIPE_WEBHOOK_SECRET")?,
             reconciler_interval_secs: optional_i64("RECONCILER_INTERVAL_SECS", 900)?,
             cors_allowed_origins,
@@ -148,6 +173,37 @@ fn optional_trimmed(name: &str) -> Option<String> {
         .ok()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+}
+
+/// Parse `LIT_ACCOUNTS_CHAIN_ID` as a `u64`. Required: signature
+/// recovery against the wrong chain silently fails (the digest differs),
+/// so an unset chain id would just produce 401s for every valid caller —
+/// a hard failure at startup is friendlier.
+fn parse_chain_id() -> Result<u64> {
+    let raw = required("LIT_ACCOUNTS_CHAIN_ID")?;
+    raw.trim()
+        .parse::<u64>()
+        .with_context(|| format!("LIT_ACCOUNTS_CHAIN_ID must be a positive integer; got {raw:?}"))
+}
+
+/// Parse `LIT_ACCOUNTS_CONTRACT_ADDRESS` as a 0x-prefixed Ethereum address.
+/// Same content lit-api-server gets from `NodeConfig.toml`.
+fn parse_accounts_contract_address() -> Result<Address> {
+    let raw = required("LIT_ACCOUNTS_CONTRACT_ADDRESS")?;
+    Address::from_str(raw.trim()).with_context(|| {
+        format!("LIT_ACCOUNTS_CONTRACT_ADDRESS must be a 0x-hex Ethereum address; got {raw:?}")
+    })
+}
+
+/// Build the on-chain resolver from the parsed config. Wraps the
+/// `OnChainBillingResolver` constructor so callers (e.g. `main.rs`) don't
+/// have to re-read env vars or clone strings around.
+pub fn build_on_chain_resolver(cfg: &Config) -> Result<OnChainBillingResolver> {
+    OnChainBillingResolver::new(
+        cfg.lit_accounts_rpc_url.clone(),
+        cfg.lit_accounts_contract_address,
+    )
+    .context("building OnChainBillingResolver from Config")
 }
 
 pub fn validate_chain_runtime_config(chain_id: i64) -> Result<()> {
