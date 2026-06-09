@@ -20,6 +20,7 @@
 pub mod balance;
 pub mod client;
 pub mod customer;
+pub mod eip712;
 pub mod format;
 pub mod http;
 pub mod reporting;
