@@ -383,9 +383,7 @@ impl CdnModuleLoader {
             .get(&url)
             .cloned();
         let expected_hash = match (lock_hash.as_ref(), inline_hash.as_ref()) {
-            (Some(lock), Some(inline))
-                if !constant_time_eq(lock.as_bytes(), inline.as_bytes()) =>
-            {
+            (Some(lock), Some(inline)) if !constant_time_eq(lock.as_bytes(), inline.as_bytes()) => {
                 error!(
                     module_url = %url,
                     lock_hash = %format!("sha384-{lock}"),
@@ -1170,14 +1168,12 @@ https://cdn.jsdelivr.net/npm/lodash-es@4.17.21/+esm sha384-xyz789
         // Lockfile pin for some other (operator-trusted) bytes.
         let mut hasher = Sha384::new();
         hasher.update(b"export default 'real';\n");
-        let lock_b64 =
-            base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
+        let lock_b64 = base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
 
         // Inline hash matches the attacker bytes the cache will serve.
         let mut hasher = Sha384::new();
         hasher.update(&attacker_bytes);
-        let inline_b64 =
-            base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
+        let inline_b64 = base64::engine::general_purpose::STANDARD.encode(hasher.finalize());
 
         let mut manifest = HashMap::new();
         manifest.insert(url.clone(), lock_b64.clone());
