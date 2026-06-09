@@ -39,6 +39,10 @@ yanked = "warn"
 #   RUSTSEC-2026-{0049,0098,0099,0104} remain via non-ethers rustls users
 #   (`rocket`/`reqwest`/Alloy chains). Net remains 31 active, but no remaining
 #   ignored advisory is justified by ethers.
+# - 2026-06-09: removed stale entries for crates no longer present in any
+#   current Rust workspace lockfile: RUSTSEC-2025-{0056,0057,0075,0080,0081,
+#   0098,0100}. Added RUSTSEC-2026-0173 (proc-macro-error2, via Alloy) and
+#   RUSTSEC-2026-0174 (http-types, via wiremock test dependency).
 #
 # Suggested triage order: vulnerabilities > unsound > unmaintained.
 ignore = [
@@ -58,6 +62,7 @@ ignore = [
     { id = "RUSTSEC-2021-0145", reason = "atty unaligned read — transitive; pre-existing" },
     { id = "RUSTSEC-2026-0012", reason = "keccak ARMv8 asm backend — only triggers with opt-in feature; pre-existing" },
     { id = "RUSTSEC-2026-0097", reason = "rand custom logger unsound — pre-existing" },
+    { id = "RUSTSEC-2026-0174", reason = "http-types ASCII invariant notice — transitive via wiremock test dependency; no safe upgrade available" },
 
     # ── unmaintained ──────────────────────────────────────────────────────────
     { id = "RUSTSEC-2020-0036", reason = "failure deprecated — transitive; pre-existing" },
@@ -68,16 +73,10 @@ ignore = [
     { id = "RUSTSEC-2024-0436", reason = "paste unmaintained — pre-existing" },
     { id = "RUSTSEC-2025-0010", reason = "ring <0.17 unmaintained — pre-existing" },
     { id = "RUSTSEC-2025-0052", reason = "async-std discontinued — pre-existing" },
-    { id = "RUSTSEC-2025-0056", reason = "adler unmaintained, use adler2 — pre-existing" },
-    { id = "RUSTSEC-2025-0057", reason = "fxhash unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0075", reason = "unic-char-range unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0080", reason = "unic-common unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0081", reason = "unic-char-property unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident unmaintained — pre-existing" },
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained — pre-existing" },
     { id = "RUSTSEC-2025-0141", reason = "bincode unmaintained — pre-existing" },
     { id = "RUSTSEC-2026-0105", reason = "core2 unmaintained, all versions yanked — pre-existing" },
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 unmaintained — transitive via alloy-sol-macro; no safe upgrade available" },
 ]
 
 [sources]
