@@ -7,7 +7,7 @@ signing time.**
 
 **Fast enough to solve with: ~361 ms median warm** for a full policy
 authorization round-trip (vault config reads + EIP-712 order verification +
-Lit Action signing), measured live on Base Sepolia + Lit testnet. This is the
+Lit Action signing), measured live on Base Sepolia + Lit Chipotle. This is the
 latency added before the solver submits `settle()`.
 
 This is the CoW sibling of [`lit-solver-vault`](../lit-solver-vault) (which ships
@@ -186,7 +186,7 @@ npm run attack
 ```
 
 `npm run solve` prints the policy authorization latency in milliseconds. The
-current live measurement on Base Sepolia + Lit testnet was **~361 ms median warm**
+current live measurement on Base Sepolia + Lit Chipotle was **~361 ms median warm**
 for authorization-only samples (`538, 484, 322, 360, 361, 352 ms`; mean
 `~403 ms`). The first end-to-end solve in this run authorized in `1585 ms`, then
 warm solves authorized in `553 ms` and `502 ms`, so expect the first call after
@@ -273,7 +273,7 @@ CoW settlement is permissioned, so there are three fidelities of "test solve":
   the order signature, so the policy's checks are belt-and-suspenders, not the
   only line of defense.
 - **Latency from the live run.** On June 8, 2026, the policy authorization path
-  measured `~361 ms` median warm against Base Sepolia + Lit testnet. This is the
+  measured `~361 ms` median warm against Base Sepolia + Lit Chipotle. This is the
   extra solver-side wait before submitting `executeSettlement`; the subsequent
   `settle()` transaction still waits for normal chain inclusion.
 - **erc20 balances only.** The action builds sell / fill-or-kill / erc20 orders,
