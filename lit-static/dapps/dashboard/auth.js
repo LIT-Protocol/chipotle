@@ -879,11 +879,13 @@ export async function convertToChainSecured() {
     }
     const { connectWallet, switchChain } = await import('../../wallet_connect.js');
     let chainId;
-    // `force: true` bypasses the cached-signer shortcut. Convert is irreversible
-    // and the connected wallet becomes the permanent on-chain admin, so we never
-    // silently reuse a prior (possibly stale, locked, or unintended) connection —
-    // the user must consciously pick the wallet that takes over ownership.
-    ({ signer, chainId } = await connectWallet({ chainId: expectedChainId, rpcUrl: getChainSecuredRpcUrl(), force: true }));
+    // No `force` here: a live cached connection is fine to reuse. The two guards
+    // that matter for this irreversible admin handoff are already in place — the
+    // liveness probe inside connectWallet re-prompts if the cached connection is
+    // dead/locked, and the confirm modal below shows the resolved admin address
+    // so the user can abort if it's not the wallet they intend. Forcing a fresh
+    // pick would also tear down a working wallet before a replacement is in hand.
+    ({ signer, chainId } = await connectWallet({ chainId: expectedChainId, rpcUrl: getChainSecuredRpcUrl() }));
     if (chainId !== expectedChainId) {
       try {
         ({ signer } = await switchChain(expectedChainId));
