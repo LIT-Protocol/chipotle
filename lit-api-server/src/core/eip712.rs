@@ -1256,12 +1256,14 @@ mod tests {
     fn rejects_oversized_signature() {
         let chain_id = ensure_test_chain_id();
         let wallet = PrivateKeySigner::random();
-        let (typed, _) =
-            sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
+        let (typed, _) = sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
         let huge_sig = format!("0x{}", "ab".repeat(MAX_SIGNATURE_BYTES + 1));
         let err = verify_eip712_signature(&typed, &huge_sig, PRIMARY_TYPE_CREATE_WALLET)
             .expect_err("must reject — signature exceeds cap");
-        assert!(format!("{err}").contains("too large"), "unexpected error: {err}");
+        assert!(
+            format!("{err}").contains("too large"),
+            "unexpected error: {err}"
+        );
     }
 
     /// The ERC-1271 magic value is `bytes4(keccak256("isValidSignature(bytes32,bytes)"))`.
