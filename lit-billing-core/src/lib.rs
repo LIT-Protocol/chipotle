@@ -18,10 +18,13 @@
 //! and on-chain wallet resolution.
 
 pub mod balance;
+pub mod billing_auth;
 pub mod client;
 pub mod customer;
+pub mod eip712;
 pub mod format;
 pub mod http;
+pub mod on_chain;
 pub mod reporting;
 
 pub use client::StripeClient;

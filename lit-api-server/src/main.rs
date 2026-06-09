@@ -156,7 +156,7 @@ async fn main() -> Result<(), rocket::Error> {
     // `Arc<dyn AuthResolver>` is the auth backplane both this service and
     // lit-payments use. lit-api-server owns the on-chain plumbing, so it
     // installs the local in-process resolver here.
-    let auth_resolver: Arc<dyn lit_billing_auth::AuthResolver> =
+    let auth_resolver: Arc<dyn lit_billing_core::billing_auth::AuthResolver> =
         Arc::new(lit_api_server::auth_resolver::LocalAuthResolver::new());
 
     // Initialize global singletons once, outside the restart loop, so they
@@ -320,7 +320,7 @@ fn build_rocket(
     cpu_monitor: CpuOverloadMonitor,
     stripe_state: Option<Arc<stripe::StripeState>>,
     internal_config: Option<Arc<internal::InternalConfig>>,
-    auth_resolver: Arc<dyn lit_billing_auth::AuthResolver>,
+    auth_resolver: Arc<dyn lit_billing_core::billing_auth::AuthResolver>,
     ipfs_cache: Cache<String, Arc<String>>,
 ) -> rocket::Rocket<rocket::Build> {
     let allowed_methods = HashSet::from([
@@ -360,14 +360,7 @@ fn build_rocket(
             routes![openapi_json, openapi_json_redirect, swagger_ui_redirect],
         )
         .mount("/", core::v1::health::routes())
-        .mount(
-            "/",
-            routes![
-                internal::routes::invalidate_balance_cache,
-                internal::routes::verify_wallet_auth,
-                internal::routes::resolve_api_key,
-            ],
-        )
+        .mount("/", routes![internal::routes::invalidate_balance_cache])
         .mount("/core/v1/", core_routes)
         .mount("/core/v1/", core::v1::health::routes())
         .mount(

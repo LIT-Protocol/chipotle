@@ -182,6 +182,23 @@ ROCKET_PORT=8001
 # ALCHEMY_HTTPS_URL=https://base-mainnet.g.alchemy.com/v2/...
 # LITKEY_GATEWAY_ADDRESS=0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b
 # LITKEY_CHAIN_ID=8453
+
+# AccountConfig chain — used by the BillingAuth Rocket guard to verify
+# wallet signatures (EIP-712 chain_id pinning) and to resolve API keys to
+# their on-chain billing wallet. Same chain lit-api-server reads from
+# NodeConfig.toml; lit-payments now runs the lookup in-process via
+# OnChainBillingResolver instead of an internal HTTP hop. The RPC URL
+# is normally https://yellowstone-rpc.litprotocol.com; the contract
+# address must match lit-api-server's NodeConfig.toml.
+LIT_ACCOUNTS_RPC_URL=https://yellowstone-rpc.litprotocol.com
+LIT_ACCOUNTS_CHAIN_ID=175188
+LIT_ACCOUNTS_CONTRACT_ADDRESS=0x...  # same value as lit-api-server NodeConfig.toml
+
+# Existing — still required, but now only used for the post-credit
+# cache-invalidation callback to lit-api-server (no longer carries
+# wallet-sig or API-key verification).
+# LIT_API_SERVER_BASE_URL=http://localhost:8000
+# LIT_INTERNAL_SHARED_SECRET=$(openssl rand -base64 32)
 ```
 
 ## LITKEY browser payment claim flow

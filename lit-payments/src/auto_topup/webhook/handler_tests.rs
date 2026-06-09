@@ -77,6 +77,9 @@ fn test_config(stripe_secret_key: String, db_url: String) -> Config {
         // fire-and-forget call swallows the error, so a bad URL is fine.
         lit_api_server_base_url: "http://127.0.0.1:1".into(),
         lit_internal_shared_secret: "unused".into(),
+        lit_accounts_rpc_url: "http://localhost:8545".to_string(),
+        lit_accounts_chain_id: 175188,
+        lit_accounts_contract_address: alloy_primitives::Address::ZERO,
         stripe_webhook_secret: WEBHOOK_SECRET.into(),
         reconciler_interval_secs: 900,
         cors_allowed_origins: vec!["http://localhost".to_string()],

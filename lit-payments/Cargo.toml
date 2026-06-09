@@ -14,7 +14,6 @@ alloy-primitives = "1.0"
 alloy-serde = "1.0"
 hex = "0.4"
 hmac = "0.12"
-lit-billing-auth = { path = "../lit-billing-auth" }
 lit-billing-core = { path = "../lit-billing-core" }
 moka = { version = "0.12", features = ["future", "sync"] }
 num-bigint = "0.4"

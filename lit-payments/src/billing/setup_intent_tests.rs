@@ -18,8 +18,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use lit_billing_auth::{AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload};
 use lit_billing_core::StripeClient;
+use lit_billing_core::billing_auth::{
+    AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload,
+};
 use rocket::http::{Header, Status};
 use rocket::local::asynchronous::Client;
 use rocket::{Rocket, routes};
@@ -53,6 +55,9 @@ fn test_config(stripe_secret_key: String) -> Config {
         litkey_chain: None,
         lit_api_server_base_url: "http://unused".into(),
         lit_internal_shared_secret: "unused".into(),
+        lit_accounts_rpc_url: "http://localhost:8545".to_string(),
+        lit_accounts_chain_id: 175188,
+        lit_accounts_contract_address: alloy_primitives::Address::ZERO,
         stripe_webhook_secret: "unused".into(),
         reconciler_interval_secs: 900,
         cors_allowed_origins: vec!["http://localhost".to_string()],

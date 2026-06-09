@@ -4764,7 +4764,6 @@ dependencies = [
  "k256",
  "lit-actions-grpc",
  "lit-api-core",
- "lit-billing-auth",
  "lit-billing-core",
  "lit-core",
  "lit-core-derive",
@@ -4801,28 +4800,21 @@ dependencies = [
 ]
 
 [[package]]
-name = "lit-billing-auth"
+name = "lit-billing-core"
 version = "0.1.0"
 dependencies = [
+ "alloy-dyn-abi",
+ "alloy-primitives",
  "anyhow",
  "async-trait",
  "base64_light",
+ "hex",
+ "reqwest 0.12.28",
  "rocket",
  "rocket_okapi",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
- "tracing",
-]
-
-[[package]]
-name = "lit-billing-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "reqwest 0.12.28",
- "serde",
- "serde_json",
  "tracing",
 ]
 

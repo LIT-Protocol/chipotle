@@ -2,17 +2,18 @@
 //!
 //! The guard pulls an `Arc<dyn AuthResolver>` from Rocket state and dispatches
 //! signature / key verification through it. Each service supplies its own
-//! resolver, so this guard runs unchanged on both lit-api-server (local
-//! in-process resolver) and lit-payments (HTTP resolver pointing at
-//! lit-api-server).
+//! resolver. Post-glitch-refactor both services use the same in-process
+//! resolver wired against the shared [`crate::eip712`] verifier and
+//! [`crate::on_chain`] billing-wallet lookup — there is no longer an HTTP
+//! resolver variant.
 
 use std::sync::Arc;
 
 use rocket::http::Status;
 use rocket::request::{FromRequest, Outcome, Request};
 
-use crate::is_precomputed_hash_shape;
-use crate::resolver::{AuthError, AuthResolver, WalletAuthPayload};
+use super::resolver::{AuthError, AuthResolver, WalletAuthPayload};
+use crate::on_chain::is_precomputed_hash_shape;
 
 /// Identity proven by an inbound billing request. Same shape as the original
 /// lit-api-server `BillingAuth` enum so handlers migrate by switching the
@@ -138,13 +139,11 @@ impl<'r> FromRequest<'r> for BillingAuth {
         // `X-Api-Key: 0x{keccak256(walletAddress)}` and bypass the EIP-712 path
         // entirely (CPL-285 / CPL-286).
         //
-        // Codex P1 (Phase 2) fix: the guard must VERIFY the key, not just
-        // accept its presence. We delegate to `resolver.resolve_api_key`
-        // which (on lit-api-server) hits the on-chain
-        // `allApiKeyHashesToMaster` mapping and (on lit-payments) forwards
-        // via the internal HTTP hop. A non-existent / bogus key yields
-        // BadCredentials → 401; transient resolver failures yield
-        // Transient → 503 so retries are signalled correctly.
+        // The guard VERIFIES the key (not just its presence) by delegating to
+        // `resolver.resolve_api_key` which (on every service) calls the on-chain
+        // `allApiKeyHashesToMaster` mapping. A non-existent / bogus key yields
+        // BadCredentials → 401; transient resolver failures yield Transient →
+        // 503 so retries are signalled correctly.
         let api_key = extract_api_key(request);
         if let Some(key) = api_key {
             if is_precomputed_hash_shape(&key) {
@@ -245,27 +244,13 @@ mod openapi_impl {
 
 #[cfg(test)]
 mod tests {
-    //! Phase 2 gate tests for the `BillingAuth` Rocket guard, exercised
-    //! against a mock `AuthResolver`. These cover the full decision tree:
-    //!
-    //!   • valid wallet signature → 200 + WalletSigned identity
-    //!   • tampered signature (resolver BadCredentials) → 401
-    //!   • resolver Transient → 503 (don't surface as auth failure)
-    //!   • malformed X-Wallet-Auth → fall through to API-key path
-    //!   • valid Authorization: Bearer → 200 + ApiKey identity
-    //!   • valid X-Api-Key → 200 + ApiKey identity
-    //!   • precomputed-hash shape in X-Api-Key → 401 (CPL-285 hardening)
-    //!   • precomputed-hash shape in Authorization → 401 (CPL-285 hardening)
-    //!   • empty X-Api-Key → 401
-    //!   • no auth headers → 401
-    //!   • missing AuthResolver from state → 500 (fail closed)
-    //!
-    //! Mocking the resolver isolates the guard from on-chain / EIP-712
-    //! details; those are covered by lit-api-server's own EIP-712 tests
-    //! and by the anvil-backed integration test in Phase 2.6.
+    //! Same coverage matrix as the old `lit-billing-auth` crate carried — the
+    //! guard's decision tree is unchanged; only the import path moved.
 
     use super::*;
-    use crate::resolver::{AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload};
+    use crate::billing_auth::resolver::{
+        AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload,
+    };
     use async_trait::async_trait;
     use rocket::http::{Header, Status};
     use rocket::local::asynchronous::Client;
@@ -275,8 +260,6 @@ mod tests {
     const TEST_WALLET: &str = "0x1111111111111111111111111111111111111111";
     const TEST_HASH: &str = "0xabcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
 
-    /// Mock resolver that returns whatever the test sets up. Each variant
-    /// corresponds to one branch we want to exercise on the guard.
     enum MockMode {
         Success,
         BadCredentials,
@@ -304,19 +287,17 @@ mod tests {
         }
 
         async fn resolve_api_key(&self, _api_key: &str) -> Result<ResolvedIdentity, AuthError> {
-            // API-key flow isn't routed through the resolver by the guard
-            // itself (the guard yields BillingAuth::ApiKey with the raw key
-            // and downstream code calls the resolver). Return success in
-            // case future code changes start calling it.
-            Ok(ResolvedIdentity {
-                wallet_address_hex: TEST_WALLET.to_string(),
-                api_key_hash_hex: TEST_HASH.to_string(),
-            })
+            match self.mode {
+                MockMode::Success => Ok(ResolvedIdentity {
+                    wallet_address_hex: TEST_WALLET.to_string(),
+                    api_key_hash_hex: TEST_HASH.to_string(),
+                }),
+                MockMode::BadCredentials => Err(AuthError::BadCredentials("mock".into())),
+                MockMode::Transient => Err(AuthError::Transient("mock".into())),
+            }
         }
     }
 
-    /// Test-only handler that yields the resolved identity string so we
-    /// can assert which branch the guard took.
     #[get("/probe")]
     fn probe(auth: BillingAuth) -> String {
         auth.identity_string().to_string()
@@ -328,9 +309,6 @@ mod tests {
         Client::tracked(rocket).await.expect("rocket client")
     }
 
-    /// `X-Wallet-Auth` carries a base64-encoded JSON payload. The mock
-    /// resolver doesn't care about the contents — just that the payload
-    /// decodes — so any non-empty base64-JSON works.
     fn wallet_header_value() -> String {
         let payload = serde_json::json!({
             "typed_data": { "primaryType": "BillingAuth" },
@@ -349,7 +327,6 @@ mod tests {
             .dispatch()
             .await;
         assert_eq!(resp.status(), Status::Ok);
-        // identity_string() on WalletSigned returns the api_key_hash_hex.
         assert_eq!(resp.into_string().await.unwrap_or_default(), TEST_HASH);
     }
 
@@ -377,10 +354,6 @@ mod tests {
 
     #[tokio::test]
     async fn malformed_wallet_header_falls_through_to_api_key() {
-        // base64-decoding "not-base64-!!" yields empty bytes; the guard
-        // logs a warning and falls through to the API-key path so a junk
-        // header from a misbehaving proxy / stale browser cache doesn't
-        // lock out an otherwise-valid API key caller.
         let client = build(MockMode::Success).await;
         let resp = client
             .get("/probe")
@@ -425,9 +398,6 @@ mod tests {
         );
     }
 
-    /// CPL-285: a precomputed account hash sent in `X-Api-Key` would have
-    /// bypassed the EIP-712 wallet-signed path entirely. The guard must
-    /// reject this shape outright in the API-key branch.
     #[tokio::test]
     async fn precomputed_hash_in_x_api_key_is_rejected() {
         let client = build(MockMode::Success).await;
@@ -470,8 +440,6 @@ mod tests {
 
     #[tokio::test]
     async fn missing_resolver_returns_500() {
-        // Build a Rocket without registering the resolver. The guard must
-        // fail closed rather than silently allow.
         let rocket = Rocket::build().mount("/", routes![probe]);
         let client = Client::tracked(rocket).await.expect("rocket client");
         let resp = client

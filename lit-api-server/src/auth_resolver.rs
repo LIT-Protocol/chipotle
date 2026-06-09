@@ -2,16 +2,20 @@
 //!
 //! `lit-api-server` already owns the on-chain `allApiKeyHashesToMaster`
 //! resolver and the in-process EIP-712 verifier. This adapter wires those
-//! into the shared `lit-billing-auth` trait so the same Rocket guard can
-//! authenticate handlers on this service without an HTTP hop.
+//! into the shared `lit-billing-core::billing_auth` trait so the same Rocket
+//! guard can authenticate handlers on this service without an HTTP hop.
 //!
-//! The matching HTTP-based resolver lives in `lit-payments` and calls into
-//! this service via `POST /internal/verify_wallet_auth` +
-//! `POST /internal/resolve_api_key`.
+//! Post-glitch-refactor: `lit-payments` constructs an identical in-process
+//! resolver using the shared crate's primitives — see
+//! `lit-payments/src/auth_resolver.rs`. There is no HTTP fallback any more;
+//! the `/internal/verify_wallet_auth` + `/internal/resolve_api_key`
+//! endpoints have been deleted.
 
 use alloy::primitives::keccak256;
 use async_trait::async_trait;
-use lit_billing_auth::{AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload};
+use lit_billing_core::billing_auth::{
+    AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload,
+};
 
 use crate::core::eip712::{PRIMARY_TYPE_BILLING_AUTH, verify_eip712_signature};
 
