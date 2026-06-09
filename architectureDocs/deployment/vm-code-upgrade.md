@@ -54,9 +54,14 @@ flowchart TB
 2. **Compute compose-hash** — dstack hashes the full `docker-compose.yml` (with pinned image
    digests) to produce the compose-hash that will appear in RTMR3 at boot.
 
-3. **Governance approval** — The DstackApp owner (wallet, multisig, or timelock) submits an
-   on-chain transaction to whitelist the new compose-hash. A timelock or multisig introduces a
-   mandatory delay, giving stakeholders time to review before the new code can receive keys.
+3. **Governance approval** — The DstackApp owner submits an on-chain transaction to whitelist
+   the new compose-hash. For the **production hosted deployment** this owner is a **2-of-4 Safe
+   multisig** (`0xF688…1098`) with **no timelock** — an approved change takes effect as soon as a
+   quorum executes it. Self-hosters can configure their own owner (wallet, higher-threshold
+   multisig, timelock, or DAO) to add a mandatory review delay. What signers verify before
+   approving (provenance via Sigstore, reproducible compose-hash, diff review) and the live
+   governance facts are documented in the published
+   [Upgrade Governance](../../docs/architecture/verification/upgrade-governance.mdx) page.
 
 4. **Deploy** — After the whitelist tx is confirmed, CI redeploys (`phala deploy` or DeRoT
    equivalent) with the new image digest substituted into docker-compose.
