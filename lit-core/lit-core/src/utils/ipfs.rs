@@ -1,18 +1,18 @@
 use std::env;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use async_std::fs;
-use async_std::fs::{File, OpenOptions};
-use async_std::future::timeout;
-use async_std::io::{ReadExt, WriteExt};
-use async_std::path::{Path, PathBuf};
-use async_std::stream::StreamExt;
 use bytes::{Bytes, BytesMut};
-use fs4::async_std::AsyncFileExt;
+use fs4::tokio::AsyncFileExt;
+use futures::StreamExt;
 use ipfs_api_backend_hyper::IpfsApi;
 use ipfs_hasher::IpfsHasher;
 use ipfs_unixfs::file::adder::FileAdder;
 use serde_json::Value;
+use tokio::fs;
+use tokio::fs::{File, OpenOptions};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::time::timeout;
 use tracing::{trace, warn};
 
 use crate::config::LitConfig;
@@ -50,7 +50,7 @@ pub async fn ipfs_cat_cached(
         cid
     ));
 
-    if cache_file.exists().await {
+    if fs::try_exists(&cache_file).await.unwrap_or(false) {
         trace!("ipfs_cat_cached: cache HIT for CID: {cid}");
 
         if want_content {
@@ -123,7 +123,7 @@ where
         let f = OpenOptions::new()
             .write(true)
             .create(true)
-            .append(false)
+            .truncate(true)
             .open(path)
             .await
             .map_err(|e| io_err(e, None))?;
@@ -133,14 +133,14 @@ where
         let _ = file.insert(f);
     }
 
-    match inner_ipfs_cat(cfg, cid.as_ref(), file.as_ref(), content).await {
+    match inner_ipfs_cat(cfg, cid.as_ref(), file.as_mut(), content).await {
         Ok(r) => Ok(r),
         Err(e) => {
             if let Some(file) = file {
                 file.unlock().map_err(|e| lock_err(e, None))?;
             }
             if let Some(path) = path
-                && path.exists().await
+                && fs::try_exists(path).await.unwrap_or(false)
             {
                 // Ignore remove error.
                 let _ = fs::remove_file(&path).await;
@@ -152,7 +152,7 @@ where
 }
 
 async fn inner_ipfs_cat<S>(
-    cfg: &LitConfig, cid: S, mut file: Option<&File>, mut content: Option<&mut BytesMut>,
+    cfg: &LitConfig, cid: S, mut file: Option<&mut File>, mut content: Option<&mut BytesMut>,
 ) -> Result<()>
 where
     S: AsRef<str> + Send + Sync,
@@ -180,7 +180,7 @@ where
                         ));
                     }
 
-                    if let Some(file) = file.as_mut() {
+                    if let Some(file) = file.as_deref_mut() {
                         timeout(timeout_dur, file.write_all(&chunk[..]))
                             .await
                             .map_err(|e| {
@@ -224,7 +224,7 @@ where
         }
     }
 
-    if let Some(file) = file.as_mut() {
+    if let Some(file) = file {
         file.flush().await.map_err(|e| io_err(e, None))?;
     }
 
@@ -296,40 +296,32 @@ pub async fn ipfs_cid_of_file<P>(path: P) -> Result<String>
 where
     P: AsRef<Path>,
 {
-    let file = File::open(path).await.map_err(|e| io_err(e, None))?;
+    let mut file = File::open(path).await.map_err(|e| io_err(e, None))?;
 
     file.lock_shared().map_err(|e| lock_err(e, None))?;
 
-    let res = inner_ipfs_cid_of_file(&file).await;
+    let res = inner_ipfs_cid_of_file(&mut file).await;
     let _ = file.unlock();
     res
 }
 
-async fn inner_ipfs_cid_of_file(mut file: &File) -> Result<String> {
+async fn inner_ipfs_cid_of_file(file: &mut File) -> Result<String> {
     let mut adder = FileAdder::default();
 
     let chunk_size = adder.size_hint();
-    let mut chunk = Vec::with_capacity(chunk_size);
+    let mut chunk = vec![0u8; chunk_size];
     loop {
-        let n = file
-            .by_ref()
-            .take(chunk_size as u64)
-            .read_to_end(&mut chunk)
-            .await
-            .map_err(|e| io_err(e, None))?;
+        // tokio's AsyncReadExt has no `by_ref().take(..).read_to_end(..)`; read up
+        // to `chunk_size` bytes per iteration instead. FileAdder buffers internally,
+        // so feeding it arbitrarily-sized slices yields the same CID.
+        let n = file.read(&mut chunk).await.map_err(|e| io_err(e, None))?;
         if n == 0 {
             break;
         }
 
-        let (_blocks, pushed) = adder.push(chunk.as_ref());
+        let (_blocks, pushed) = adder.push(&chunk[..n]);
         if pushed != n {
             return Err(unexpected_err("expected chunk to be drained!", None));
-        }
-
-        chunk.clear();
-
-        if n < chunk_size {
-            break;
         }
     }
 

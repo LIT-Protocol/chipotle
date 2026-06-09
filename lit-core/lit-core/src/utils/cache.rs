@@ -1,7 +1,8 @@
 #[cfg(feature = "ipfs")]
-use async_std::fs;
+use std::path::Path;
+
 #[cfg(feature = "ipfs")]
-use async_std::path::Path;
+use tokio::fs;
 
 #[cfg(feature = "ipfs")]
 use crate::env::ENV_CACHE_PATH_KEY;
@@ -12,7 +13,7 @@ use crate::error::unexpected::Unexpected;
 
 #[cfg(feature = "ipfs")]
 pub(crate) async fn cache_create_path(cache_path: &Path) -> Result<()> {
-    if !cache_path.exists().await {
+    if !fs::try_exists(cache_path).await.unwrap_or(false) {
         fs::create_dir_all(&cache_path).await.expect_or_err(
             format!(
                 "failed to create cache dir: {} \

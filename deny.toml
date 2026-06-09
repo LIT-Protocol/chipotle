@@ -56,6 +56,11 @@ yanked = "warn"
 #   Also removed three stale entries now advisory-not-detected in all six CI
 #   workspaces: RUSTSEC-2024-0388 (derivative), RUSTSEC-2025-0009 (aes),
 #   RUSTSEC-2025-0010 (ring <0.17).
+# - 2026-06-08: migrated lit-core (utils/cache.rs, utils/ipfs.rs) and
+#   lit-api-core (http/tls/certs.rs) off the discontinued async-std onto
+#   tokio (tokio::fs / tokio::io / tokio::time, fs4's "tokio" feature, and
+#   futures::StreamExt for the IPFS stream). async-std is gone from every
+#   workspace graph -> removed RUSTSEC-2025-0052.
 #
 # Suggested triage order: vulnerabilities > unsound > unmaintained.
 ignore = [
@@ -81,7 +86,6 @@ ignore = [
     { id = "RUSTSEC-2024-0375", reason = "atty unmaintained — pre-existing" },
     { id = "RUSTSEC-2024-0384", reason = "instant unmaintained — pre-existing" },
     { id = "RUSTSEC-2024-0436", reason = "paste unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0052", reason = "async-std discontinued — pre-existing" },
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained — pre-existing" },
     { id = "RUSTSEC-2025-0141", reason = "bincode unmaintained — pre-existing" },
     { id = "RUSTSEC-2026-0105", reason = "core2 unmaintained, all versions yanked — pre-existing" },
