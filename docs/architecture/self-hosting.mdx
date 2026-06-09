@@ -1,0 +1,114 @@
+---
+title: "Self-Hosting"
+description: "How to think about self-hosting Lit Chipotle, what is open source, and the operational tradeoffs compared with the hosted service."
+---
+
+Lit Chipotle is open source. The API server, Lit Actions runtime, dashboard/static assets, contracts, examples, and local development tooling are available in public repositories so teams can audit the stack, run it locally, and operate their own deployment when they need that level of control.
+
+Self-hosting is most useful when you need infrastructure ownership, private deployment controls, custom compliance boundaries, or a deployment model that your users can independently verify. The hosted Lit service is still the fastest path for most teams because Lit operates the TEE infrastructure, deployment pipeline, monitoring, billing integration, and upgrades.
+
+<Card
+  title="Interested in self-hosting?"
+  icon="envelope"
+  href="mailto:support@litprotocol.com?subject=Self-hosting%20Lit%20Chipotle"
+  horizontal
+>
+  Email the Lit team with your deployment goals, expected traffic, security requirements, and target environment.
+</Card>
+
+## Open source repositories
+
+The main stack lives in the Chipotle repository:
+
+<CardGroup cols={2}>
+  <Card title="Lit Chipotle" icon="github" href="https://github.com/LIT-Protocol/chipotle">
+    Core API server, Lit Actions runtime integration, dashboard/static assets, smart contracts, deployment files, examples, and docs.
+  </Card>
+  <Card title="Examples" icon="folder-open" href="https://github.com/LIT-Protocol/chipotle/tree/main/examples">
+    Runnable example apps for signing, encrypted policies, oracles, private stablecoins, cross-chain flows, and more.
+  </Card>
+  <Card title="Lit Actions" icon="bolt" href="https://github.com/LIT-Protocol/chipotle/tree/main/lit-actions">
+    The action execution runtime used by the API server to run JavaScript inside the TEE-backed environment.
+  </Card>
+  <Card title="API server" icon="server" href="https://github.com/LIT-Protocol/chipotle/tree/main/lit-api-server">
+    The Rocket-based HTTP service that exposes account management, Lit Action execution, attestation, billing, and configuration endpoints.
+  </Card>
+  <Card title="Static dashboard" icon="browser" href="https://github.com/LIT-Protocol/chipotle/tree/main/lit-static">
+    The browser UI for account, key, wallet, action, group, and billing management.
+  </Card>
+  <Card title="dstack" icon="shield-check" href="https://github.com/Dstack-TEE/dstack">
+    The open-source TEE stack used for local simulation and Phala Cloud deployments.
+  </Card>
+</CardGroup>
+
+## What you can self-host
+
+There are two common levels of ownership:
+
+| Model | What you operate | Best for |
+| --- | --- | --- |
+| **Local development** | Anvil, dstack simulator, contracts, `lit-api-server`, `lit-actions`, and static dashboard from your workstation. | Development, testing, demos, and auditing behavior before deploying. |
+| **Production self-hosting** | A TEE-backed deployment, Docker images, API server, Lit Actions runtime, chain configuration, RPC access, monitoring, release process, and verification evidence. | Teams that need infrastructure control, custom compliance review, private environments, or independently managed uptime. |
+
+For local development, start with the repository's `README.md` and `local_test.sh`. For production-oriented deployment details, see the deployment and verification references below.
+
+## Tradeoffs
+
+Self-hosting gives you more control, but it moves more responsibility onto your team.
+
+| Area | Hosted Lit service | Self-hosted deployment |
+| --- | --- | --- |
+| **Time to production** | Fastest path; create an account and call the API. | Requires infrastructure setup, release automation, configuration, and operations. |
+| **Infrastructure control** | Lit operates the public service. | You choose the TEE provider, deployment topology, domain model, and operational controls. |
+| **Upgrades** | Lit rolls out service upgrades. | You decide when to upgrade and are responsible for testing, rollout, and rollback. |
+| **Verification** | Use Lit-published verification material and public attestation paths. | You publish or provide your own attestation and provenance evidence for your users. |
+| **Monitoring** | Lit handles production monitoring and incident response for the hosted service. | You own logs, metrics, alerts, capacity planning, and incident response. |
+| **Billing** | Built-in Stripe credit flow. | You can keep, replace, or remove hosted-service billing assumptions depending on your deployment. |
+| **Support surface** | Lit supports the hosted API and dashboard. | You own day-to-day operations; Lit can discuss support options for self-hosted environments. |
+| **Customization** | Standard public API and dashboard behavior. | You can fork, patch, and integrate the stack with your own systems. |
+
+## When self-hosting makes sense
+
+Consider self-hosting when:
+
+- Your security model requires operating your own TEE deployment.
+- Your users or auditors need verification evidence produced by your organization.
+- You need custom networking, domains, data retention, monitoring, or compliance controls.
+- You want to fork the dashboard, API surface, billing flow, or deployment automation.
+- You need a private environment for internal workloads, regulated customers, or dedicated capacity.
+
+The hosted service is usually the better default when you want to ship quickly, avoid infrastructure work, and use Lit's standard operational path.
+
+## Operational checklist
+
+A production self-hosted deployment usually needs:
+
+- A TEE environment such as Phala Cloud / dstack.
+- A reproducible Docker build and release pipeline.
+- Chain configuration and deployed permission contracts.
+- RPC endpoints for the chains your actions and management flows depend on.
+- Persistent configuration for API, billing, and account metadata where applicable.
+- Monitoring for API health, action execution, chain RPC failures, billing failures, and TEE attestation endpoints.
+- A documented upgrade and rollback process.
+- A verification process your users can run or inspect.
+
+## References
+
+<CardGroup cols={2}>
+  <Card title="Deployment guide" icon="rocket" href="https://github.com/LIT-Protocol/chipotle/blob/main/architectureDocs/deployment/deployment.md">
+    Production deployment notes for the API server and Lit Actions runtime on Phala Cloud.
+  </Card>
+  <Card title="Verification" icon="badge-check" href="/architecture/verification/index">
+    How users can verify that a TEE deployment is running the expected code.
+  </Card>
+  <Card title="Full verification" icon="list-checks" href="/architecture/verification/full-verification">
+    Step-by-step attestation, image provenance, and code verification flow.
+  </Card>
+  <Card title="Local development" icon="terminal" href="https://github.com/LIT-Protocol/chipotle#local-development">
+    Run the full stack locally with the dstack simulator and Anvil.
+  </Card>
+</CardGroup>
+
+## Contact
+
+For self-hosting discussions, email [support@litprotocol.com](mailto:support@litprotocol.com?subject=Self-hosting%20Lit%20Chipotle). Include the environment you want to run, whether you need production support, expected request volume, security/compliance requirements, and any customization you expect to maintain.

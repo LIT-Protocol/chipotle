@@ -59,6 +59,7 @@
               "architecture/index",
               "architecture/groups",
               "architecture/authModel",
+              "architecture/self-hosting",
               "architecture/diagram",
               {
                 "group": "Security & Verification",
