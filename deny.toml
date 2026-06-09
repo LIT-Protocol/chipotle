@@ -72,6 +72,11 @@ yanked = "warn"
 #   tokio (tokio::fs / tokio::io / tokio::time, fs4's "tokio" feature, and
 #   futures::StreamExt for the IPFS stream). async-std is gone from every
 #   workspace graph -> removed RUSTSEC-2025-0052.
+# - 2026-06-09: dropped lit-core's `pinata` feature and the pinata-sdk 1.1.0
+#   dependency (its only API, Config::pinata_client(), was never called and
+#   the feature was enabled nowhere). pinata-sdk was the sole consumer of the
+#   abandoned `failure` crate -> removed RUSTSEC-2019-0036 and
+#   RUSTSEC-2020-0036.
 #
 # Suggested triage order: vulnerabilities > unsound > unmaintained.
 ignore = [
@@ -86,11 +91,9 @@ ignore = [
     { id = "RUSTSEC-2026-0119", reason = "hickory DNS O(n^2) name compression — pinned by deno_runtime chain" },
 
     # ── unsound ───────────────────────────────────────────────────────────────
-    { id = "RUSTSEC-2019-0036", reason = "failure type confusion — transitive; pre-existing" },
     { id = "RUSTSEC-2026-0097", reason = "rand custom logger unsound — still present via rand 0.8.5 pinned in lit-actions and Alloy's rand in generator/payments; cleared in lit-api-server after rand 0.8.5->0.8.6 / 0.9.2->0.9.4" },
 
     # ── unmaintained ──────────────────────────────────────────────────────────
-    { id = "RUSTSEC-2020-0036", reason = "failure deprecated — transitive; pre-existing" },
     { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained — lit-core-derive no longer uses it; now only via multihash-derive 0.8.1 in the LIT rust-ipfs-api fork's multihash 0.17 chain (lit-core), same blocker as RUSTSEC-2026-0105" },
     { id = "RUSTSEC-2024-0436", reason = "paste unmaintained — pre-existing" },
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained — pre-existing" },
