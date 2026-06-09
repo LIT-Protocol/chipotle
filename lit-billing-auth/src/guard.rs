@@ -57,13 +57,17 @@ impl<'r> FromRequest<'r> for BillingAuth {
     type Error = ();
 
     async fn from_request(request: &'r Request<'_>) -> Outcome<BillingAuth, Self::Error> {
-        // DEV-ONLY bypass: `LIT_DEV_WALLET_BYPASS=1` lets a caller present
-        // `X-Dev-Wallet: 0x...` instead of a signed EIP-712 payload. Used
-        // by the Phase 8 browser-QA harness when lit-api-server (which
-        // owns the on-chain resolver) is not running locally. The env var
-        // is read at request time, NOT cached, so a misconfigured prod
-        // deploy fails closed unless it actively sets the flag — and even
-        // then leaves a clear audit trail in `tracing::warn!`.
+        // DEV-ONLY bypass — compiled out of release binaries entirely.
+        //
+        // `LIT_DEV_WALLET_BYPASS=1` + `X-Dev-Wallet: 0x...` short-circuits
+        // EIP-712 verification for local browser QA when lit-api-server
+        // (which owns the on-chain resolver) isn't running. Glitch's PR
+        // review correctly flagged that a runtime env switch in a Stripe
+        // billing guard is a security-audit liability even if currently
+        // unset in prod. Gating behind `cfg(debug_assertions)` means the
+        // production binary literally cannot include this code path —
+        // `cargo build --release` strips it and the env var becomes inert.
+        #[cfg(debug_assertions)]
         if std::env::var("LIT_DEV_WALLET_BYPASS")
             .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
             .unwrap_or(false)
@@ -73,15 +77,9 @@ impl<'r> FromRequest<'r> for BillingAuth {
         {
             tracing::warn!(
                 "LIT_DEV_WALLET_BYPASS active — accepting X-Dev-Wallet={dev_wallet}. \
-                 DO NOT ENABLE IN PRODUCTION."
+                 DEBUG BUILD ONLY."
             );
-            // Mirror the production `WalletSigned` shape so downstream
-            // handlers can't tell the difference.
             let wallet_lower = dev_wallet.to_ascii_lowercase();
-            // The downstream cache key is the api_key_hash_hex, which is
-            // keccak256(walletAddress). Tests don't need a real hash; a
-            // deterministic value derived from the wallet keeps cache hits
-            // consistent across calls.
             let api_key_hash_hex = format!(
                 "0x{}",
                 wallet_lower[2..]
@@ -176,7 +174,7 @@ impl<'r> FromRequest<'r> for BillingAuth {
 /// `X-Api-Key: <k>`. Returns `None` if neither header is present or
 /// usable. Kept separate from the verification path so test code can
 /// exercise extraction without spinning up a resolver.
-fn extract_api_key<'r>(request: &'r Request<'_>) -> Option<String> {
+fn extract_api_key(request: &Request<'_>) -> Option<String> {
     if let Some(v) = request.headers().get_one("Authorization") {
         let v = v.trim();
         let mut parts = v.split_whitespace();

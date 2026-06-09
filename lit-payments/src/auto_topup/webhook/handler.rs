@@ -29,8 +29,9 @@ use crate::auto_topup::webhook::sca::generate_recovery_token;
 use crate::auto_topup::webhook::signature::verify as verify_signature;
 use crate::config::Config;
 use crate::internal::client as internal_client;
+use crate::mail::Mailer;
 
-const MAX_BODY_BYTES: u64 = 1 * 1024 * 1024;
+const MAX_BODY_BYTES: u64 = 1024 * 1024;
 
 /// Minimum top-up floor — same value the dashboard validation enforces in
 /// `billing::auto_topup_config`. Kept here as a documented constant for the
@@ -65,6 +66,7 @@ pub async fn stripe_webhook(
     stripe: &State<StripeClient>,
     pool: &State<PgPool>,
     mutex_cache: &State<PerCustomerMutex>,
+    mailer: &State<Mailer>,
 ) -> Status {
     let raw = match body.open(MAX_BODY_BYTES.bytes()).into_bytes().await {
         Ok(v) if v.is_complete() => v.into_inner(),
@@ -133,6 +135,7 @@ pub async fn stripe_webhook(
         stripe.inner(),
         pool.inner(),
         mutex_cache.inner(),
+        mailer.inner(),
         &customer_id,
         new_balance,
         &event_id,
@@ -158,11 +161,13 @@ impl From<anyhow::Error> for ProcessError {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn process_event(
     cfg: &Config,
     stripe: &StripeClient,
     pool: &PgPool,
     mutex_cache: &PerCustomerMutex,
+    mailer: &Mailer,
     customer_id: &str,
     payload_balance: i64,
     event_id: &str,
@@ -183,10 +188,10 @@ async fn process_event(
         Some(c) if c.enabled && c.pending_action_pi_id.is_none() => c.threshold_cents,
         _ => return Ok(()),
     };
-    if let Some(t) = pre_threshold {
-        if -payload_balance >= t {
-            return Ok(());
-        }
+    if let Some(t) = pre_threshold
+        && -payload_balance >= t
+    {
+        return Ok(());
     }
 
     // Step 4: Acquire per-customer mutex. Serializes concurrent
@@ -335,7 +340,7 @@ async fn process_event(
                                  cannot stage SCA recovery"
                             ))
                         })?;
-                    handle_sca_required(pool, customer_id, pi_id).await?;
+                    handle_sca_required(cfg, stripe, mailer, pool, customer_id, pi_id).await?;
                     return Ok(());
                 }
                 if matches!(
@@ -380,7 +385,7 @@ async fn process_event(
         // Stripe occasionally returns `requires_action` with status code 200
         // (not as an error). Treat it the same way.
         if pi_status == "requires_action" {
-            handle_sca_required(pool, customer_id, &pi_id).await?;
+            handle_sca_required(cfg, stripe, mailer, pool, customer_id, &pi_id).await?;
             return Ok(());
         }
         tracing::warn!(
@@ -543,6 +548,9 @@ fn month_spend_cents(pis: &[Value]) -> i64 {
 }
 
 async fn handle_sca_required(
+    cfg: &Config,
+    stripe: &StripeClient,
+    mailer: &Mailer,
     pool: &PgPool,
     customer_id: &str,
     pi_id: &str,
@@ -551,13 +559,82 @@ async fn handle_sca_required(
     db::set_pending_action(pool, customer_id, pi_id, &token)
         .await
         .context("set pending_action")?;
-    // TODO Phase 8: dispatch the tokenized recovery email via Resend.
+
+    // Glitch's PR review #2: actually send the recovery email. Without
+    // this the user has no way to discover the recovery URL — the token
+    // is staged in the DB but the link never reaches the cardholder, so
+    // the 3DS challenge sits forever and auto top-up is permanently
+    // paused. Fire-and-forget — a Resend outage shouldn't fail the
+    // webhook (Stripe would retry and stage a second pending PI), but
+    // we log loudly so the on-call sees email delivery degradation.
+    let recovery_url = format!(
+        "{}/recover_topup?token={}",
+        cfg.public_base_url.trim_end_matches('/'),
+        token
+    );
+    match fetch_customer_email(stripe, customer_id).await {
+        Ok(Some(email)) => {
+            let subject = "Action required: complete your auto top-up";
+            let text = format!(
+                "Your card requires extra verification (3D Secure) to complete the latest \
+                 auto top-up. Open the link below to finish the verification — it expires \
+                 in 24 hours and can only be used once.\n\n{recovery_url}\n\n\
+                 If you didn't expect this, you can safely ignore the email; auto top-up \
+                 stays paused until you click the link or update your card."
+            );
+            let html = format!(
+                "<p>Your card requires extra verification (3D Secure) to complete the latest \
+                 auto top-up.</p>\
+                 <p><a href=\"{recovery_url}\">Click here to complete the verification</a> \
+                 — the link expires in 24 hours and can only be used once.</p>\
+                 <p style=\"color:#666;font-size:0.9em\">If you didn't expect this, you can \
+                 safely ignore this email; auto top-up stays paused until you click the link \
+                 or update your card.</p>"
+            );
+            if let Err(e) = mailer.send(&email, subject, &html, &text).await {
+                tracing::error!(customer_id, pi_id, "SCA recovery email send failed: {e}");
+            } else {
+                tracing::info!(customer_id, pi_id, "SCA recovery email dispatched");
+            }
+        }
+        Ok(None) => {
+            tracing::warn!(
+                customer_id,
+                pi_id,
+                "Stripe customer has no email on file; SCA recovery link cannot be delivered"
+            );
+        }
+        Err(e) => {
+            tracing::error!(
+                customer_id,
+                pi_id,
+                "fetch customer email for SCA recovery failed: {e}"
+            );
+        }
+    }
+
     tracing::info!(
         customer_id,
         pi_id,
         "auto top-up: SCA recovery handoff staged"
     );
     Ok(())
+}
+
+async fn fetch_customer_email(
+    stripe: &StripeClient,
+    customer_id: &str,
+) -> anyhow::Result<Option<String>> {
+    let resp = stripe
+        .get(&format!("customers/{customer_id}"), &[])
+        .await
+        .context("fetch Stripe customer for email")?;
+    Ok(resp
+        .body
+        .get("email")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string()))
 }
 
 /// Best-effort fallback extractor — only used by unit tests now.

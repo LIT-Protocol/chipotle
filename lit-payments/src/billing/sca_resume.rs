@@ -29,6 +29,7 @@ use rocket::serde::json::Json;
 use rocket::{State, get, post};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use time::OffsetDateTime;
 
 use crate::auto_topup::db;
 use crate::config::Config;
@@ -244,11 +245,43 @@ pub async fn post_auto_topup_resume_complete(
     // landed at Stripe but failed on the DB write. Pre-fix this branch
     // returned `credited: false` and left the partial unrepaired,
     // forcing the user to wait for the reconciler tick.
+    //
+    // Glitch-review follow-up — Phase 7 idempotency-key expiry guard:
+    // Stripe drops a given Idempotency-Key after 24h. If `/complete` is
+    // called more than 24h after the original webhook (e.g. dashboard
+    // tab left open, user comes back next day), reusing the same
+    // `credit:{pi_id}` key would post a NEW balance_tx instead of
+    // hitting the dedup. Hard-cap the partial retry path to credits
+    // younger than 23h — within the Stripe window, dedup is reliable;
+    // beyond it, refuse and let the user re-initiate.
+    const MAX_PARTIAL_RETRY_AGE_HOURS: i64 = 23;
     let needs_balance_tx = if claimed {
         true
     } else {
         match db::find_credit_row(pool, &pi_id).await {
-            Ok(Some(row)) => row.stripe_balance_transaction_id.is_none(),
+            Ok(Some(row)) => {
+                if row.stripe_balance_transaction_id.is_some() {
+                    false
+                } else {
+                    let age = OffsetDateTime::now_utc() - row.credited_at;
+                    if age.whole_hours() >= MAX_PARTIAL_RETRY_AGE_HOURS {
+                        tracing::warn!(
+                            customer_id = %customer_id,
+                            pi_id = %pi_id,
+                            age_hours = age.whole_hours(),
+                            "resume/complete: partial credit too old; refusing retry to avoid \
+                             Stripe idempotency-key expiry double-credit"
+                        );
+                        return Err(err(
+                            Status::Conflict,
+                            "partial_credit_too_old",
+                            "This top-up needs manual repair (the recovery window expired). \
+                             Contact support.",
+                        ));
+                    }
+                    true
+                }
+            }
             Ok(None) => false,
             Err(e) => {
                 tracing::warn!(
@@ -259,6 +292,27 @@ pub async fn post_auto_topup_resume_complete(
         }
     };
     if needs_balance_tx {
+        // Belt-and-suspenders: re-verify the row is STILL a partial just
+        // before posting, in case another path (reconciler, parallel
+        // /complete) completed it between the check above and now. Skip
+        // the post if so. Cheap DB read; saves a potential double-credit
+        // window if Stripe idempotency-key TTL is shorter than expected
+        // or already-expired at the API level.
+        if !claimed
+            && let Ok(Some(row)) = db::find_credit_row(pool, &pi_id).await
+            && row.stripe_balance_transaction_id.is_some()
+        {
+            tracing::info!(
+                customer_id = %customer_id,
+                pi_id = %pi_id,
+                "resume/complete: partial credit completed by concurrent path; skipping"
+            );
+            let _ = db::clear_pending_action(pool, &customer_id, &pi_id).await;
+            return Ok(Json(serde_json::json!({
+                "credited": true,
+                "payment_intent_id": pi_id,
+            })));
+        }
         let credit_idem = format!("credit:{pi_id}");
         let neg = (-amount).to_string();
         let bt_resp = stripe

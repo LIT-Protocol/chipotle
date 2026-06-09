@@ -30,6 +30,14 @@ use crate::auto_topup::types::{AutoTopupConfigRow, AutoTopupConfigUpsert};
 /// one-shot manual top-up minimum so users don't get conflicting limits.
 const MIN_TOPUP_CENTS: i64 = 500;
 
+/// Glitch's PR review #5: hard ceiling on a single auto top-up charge
+/// — $200. Off-session charging (MIT prior-authorization) lets us pull
+/// arbitrary amounts without the user re-confirming, so an upper bound
+/// is a meaningful guardrail: if a config row got corrupted or an
+/// attacker compromised an account and rewrote the row, this caps the
+/// blast radius per charge. The monthly cap caps the radius per month.
+const MAX_TOPUP_CENTS: i64 = 20_000;
+
 #[derive(Debug, Serialize)]
 pub struct ErrorBody {
     pub error: &'static str,
@@ -159,13 +167,19 @@ pub async fn put_auto_topup_config(
         let threshold = body.threshold_cents.unwrap_or(0);
         let topup = body.topup_amount_cents.unwrap_or(0);
         let cap = body.monthly_cap_cents.unwrap_or(0);
-        if threshold <= 0 || topup < MIN_TOPUP_CENTS || cap < topup {
+        if threshold <= 0
+            || !(MIN_TOPUP_CENTS..=MAX_TOPUP_CENTS).contains(&topup)
+            || topup < threshold
+            || cap < topup
+        {
             return Err(err(
                 Status::BadRequest,
                 "invalid_config",
                 format!(
-                    "Auto top-up requires threshold > 0, top-up amount >= {MIN_TOPUP_CENTS} cents, \
-                     and monthly cap >= top-up amount."
+                    "Auto top-up requires threshold > 0, \
+                     {MIN_TOPUP_CENTS} <= top-up amount <= {MAX_TOPUP_CENTS} cents, \
+                     top-up amount >= threshold (so a single charge brings balance back \
+                     above threshold), and monthly cap >= top-up amount."
                 ),
             ));
         }

@@ -252,8 +252,8 @@ pub async fn clear_pending_action(pool: &PgPool, customer_id: &str, pi_id: &str)
 /// INSERT a row into `auto_topup_credits` (PK on `payment_intent_id`) to
 /// claim the credit slot. Returns `Ok(true)` if the row was inserted,
 /// `Ok(false)` if a row already existed (dedup hit — concurrent webhook
-/// + reconciler, or a webhook replay). Atomic — the unique constraint is
-/// the durable correctness primitive (see plan §11).
+/// and reconciler, or a webhook replay). Atomic — the unique constraint
+/// is the durable correctness primitive (see plan §11).
 pub async fn try_insert_credit(
     pool: &PgPool,
     payment_intent_id: &str,
@@ -319,6 +319,34 @@ pub async fn list_customers_with_partial_credits(pool: &PgPool) -> Result<Vec<St
     .fetch_all(pool)
     .await?;
     Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
+/// Glitch's PR review #3: return EVERY partial credit row, regardless
+/// of age, so the reconciler can repair partials older than Stripe's
+/// 7-day `payment_intents.list` window. The DB row already carries
+/// `(pi_id, customer_id, amount_cents, credited_at)` — Stripe only
+/// needs to be hit by id (`GET /v1/payment_intents/{pi_id}`), which has
+/// no time-window restriction.
+pub async fn list_partial_credit_rows(pool: &PgPool) -> Result<Vec<CreditRow>> {
+    let rows: Vec<(String, String, i64, Option<String>, OffsetDateTime)> = sqlx::query_as(
+        "SELECT payment_intent_id, customer_id, amount_cents, \
+                stripe_balance_transaction_id, credited_at \
+         FROM auto_topup_credits \
+         WHERE stripe_balance_transaction_id IS NULL \
+         ORDER BY credited_at ASC",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .into_iter()
+        .map(|r| CreditRow {
+            payment_intent_id: r.0,
+            customer_id: r.1,
+            amount_cents: r.2,
+            stripe_balance_transaction_id: r.3,
+            credited_at: r.4,
+        })
+        .collect())
 }
 
 /// Per-PI credit row (subset). `None` means no row exists yet.

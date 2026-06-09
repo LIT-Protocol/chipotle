@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use lit_billing_auth::{AuthResolver, BillingAuth};
+use lit_billing_auth::AuthResolver;
 use lit_billing_core::StripeClient;
 use lit_payments::auth::routes as auth_routes;
 use lit_payments::auth_resolver::HttpAuthResolver;
@@ -92,7 +92,6 @@ async fn rocket() -> _ {
                 login_page,
                 pay_with_litkey_page,
                 health,
-                authping,
                 auth_routes::request_link,
                 auth_routes::verify_link,
                 auth_routes::logout,
@@ -115,16 +114,6 @@ async fn rocket() -> _ {
             ],
         )
         .mount("/static", FileServer::from("static"))
-}
-
-/// `GET /_authping` — Phase 2 gate test endpoint. Returns the resolved
-/// identity if the caller presented a valid `X-Wallet-Auth` signature or
-/// `X-Api-Key`. Intentionally throwaway — proves the `BillingAuth` guard
-/// + `HttpAuthResolver` are wired end-to-end. Will be removed once real
-/// Phase 3/4 endpoints land.
-#[get("/_authping")]
-fn authping(auth: BillingAuth) -> String {
-    auth.identity_string().to_string()
 }
 
 /// Translate platform-provided env vars (Fly.io and most container hosts set

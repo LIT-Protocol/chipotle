@@ -7,11 +7,20 @@
 //!     `balance_transactions` — credit row exists, balance not credited.
 //!   - Process crash anywhere in the middle.
 //!
-//! The reconciler closes these gaps by sweeping each enabled customer's
-//! recent auto_topup PIs (last 7 days) every `RECONCILER_INTERVAL_SECS`
-//! and applying any missing credit work. The PI ledger
-//! (auto_topup_credits) + Stripe Idempotency-Key `credit:{pi.id}` make
-//! the sweep safe to run concurrently with the live webhook handler.
+//! The reconciler runs two passes every `RECONCILER_INTERVAL_SECS`:
+//!
+//! **Pass A — DB-driven (glitch's PR review #3)**: query
+//! `auto_topup_credits` for rows where `stripe_balance_transaction_id IS
+//! NULL` and replay the balance_transactions write for each. The DB row
+//! is the source of truth — we already have `(pi_id, customer_id,
+//! amount)`, so Stripe only needs to be hit by PI id, which has no time
+//! window. Pre-fix this lived behind a 7-day `payment_intents.list`
+//! scan; partials older than that were stranded forever.
+//!
+//! **Pass B — Stripe-list-driven**: for each enabled customer, scan
+//! `payment_intents.list` over the last 7 days for succeeded auto_topup
+//! PIs that have no `auto_topup_credits` row at all. Catches the rarer
+//! "succeeded at Stripe but service crashed before INSERT" path.
 //!
 //! Spawned from main.rs at startup; runs for the lifetime of the
 //! process. The process exits non-cleanly on shutdown (no graceful
@@ -64,24 +73,20 @@ pub fn spawn(config: Config, stripe: StripeClient, pool: PgPool) {
     });
 }
 
-/// Single sweep across every enabled customer plus any customer with an
-/// outstanding partial credit row. Public for tests; the production
-/// scheduler in [`spawn`] is the only other caller.
-///
-/// Codex P1 (Phase 6): scope is the UNION of (enabled customers, customers
-/// with partial credit rows). Restricting to enabled customers stranded
-/// partial credits whenever a row got auto-disabled (failures threshold)
-/// between the PI succeeding and the balance_transactions write landing.
+/// Two-pass sweep. Public for tests; the production scheduler in
+/// [`spawn`] is the only other caller.
 pub async fn run_once(config: &Config, stripe: &StripeClient, pool: &PgPool) -> anyhow::Result<()> {
+    // Pass A: DB-driven repair of partial credit rows.
+    if let Err(e) = repair_partial_credits(config, stripe, pool).await {
+        tracing::warn!("reconciler pass A (partial repair) failed: {e:?}");
+    }
+
+    // Pass B: Stripe-list-driven sweep for orphan PIs (no DB row at all).
     let enabled = db::list_enabled_customers(pool)
         .await
         .context("list enabled customers")?;
-    let partial = db::list_customers_with_partial_credits(pool)
-        .await
-        .context("list partial-credit customers")?;
     let mut all: BTreeSet<String> = BTreeSet::new();
     all.extend(enabled);
-    all.extend(partial);
     if all.is_empty() {
         return Ok(());
     }
@@ -91,6 +96,97 @@ pub async fn run_once(config: &Config, stripe: &StripeClient, pool: &PgPool) -> 
         if let Err(e) = reconcile_customer(config, stripe, pool, &customer_id, since_unix).await {
             tracing::warn!(customer_id, "reconcile_customer failed: {e:?}");
         }
+    }
+    Ok(())
+}
+
+/// Glitch's PR review #3: DB-driven partial-credit repair. Walks every
+/// `auto_topup_credits` row with `stripe_balance_transaction_id IS NULL`
+/// — these are PIs we know succeeded (we wouldn't have inserted the
+/// row otherwise) where the balance_transactions write didn't land.
+/// We fetch each PI by id directly (no time window), verify it's still
+/// `succeeded` at Stripe, then re-issue the balance_tx with the stable
+/// `credit:{pi_id}` idempotency key.
+async fn repair_partial_credits(
+    config: &Config,
+    stripe: &StripeClient,
+    pool: &PgPool,
+) -> anyhow::Result<()> {
+    let partials = db::list_partial_credit_rows(pool)
+        .await
+        .context("list partial credit rows")?;
+    if partials.is_empty() {
+        return Ok(());
+    }
+    let now = OffsetDateTime::now_utc();
+    for partial in partials {
+        // Age-gate: a row younger than MIN_PARTIAL_AGE_SECS is almost
+        // certainly the live webhook's in-flight balance_tx write.
+        // Repairing it would race; the idempotency-key makes the race
+        // safe but wasteful.
+        let age = now - partial.credited_at;
+        if age.whole_seconds() < MIN_PARTIAL_AGE_SECS {
+            continue;
+        }
+        let pi_id = partial.payment_intent_id;
+        let customer_id = partial.customer_id;
+        let amount = partial.amount_cents;
+        // Verify the PI is still succeeded at Stripe before posting a
+        // balance_tx for it. Defence against an attacker who somehow
+        // inserted a row, and against PI reversal edge cases.
+        let pi = match stripe.get(&format!("payment_intents/{pi_id}"), &[]).await {
+            Ok(r) => r.body,
+            Err(e) => {
+                tracing::warn!(
+                    customer_id,
+                    pi_id,
+                    "reconciler: stripe GET {pi_id} failed; will retry next tick: {e}"
+                );
+                continue;
+            }
+        };
+        if pi.get("status").and_then(|v| v.as_str()) != Some("succeeded") {
+            tracing::warn!(
+                customer_id,
+                pi_id,
+                status = pi.get("status").and_then(|v| v.as_str()).unwrap_or(""),
+                "reconciler: skipping partial whose PI is not succeeded"
+            );
+            continue;
+        }
+        if pi.pointer("/metadata/source").and_then(|v| v.as_str()) != Some("auto_topup") {
+            tracing::warn!(
+                customer_id,
+                pi_id,
+                "reconciler: skipping partial whose PI is not metadata.source=auto_topup"
+            );
+            continue;
+        }
+        tracing::warn!(
+            customer_id,
+            pi_id,
+            "reconciler: completing partial credit (DB-driven)"
+        );
+        let bt_id = match write_balance_transaction(stripe, &customer_id, &pi_id, amount).await {
+            Ok(id) => id,
+            Err(e) => {
+                tracing::warn!(
+                    customer_id,
+                    pi_id,
+                    "reconciler: balance_tx write failed: {e}"
+                );
+                continue;
+            }
+        };
+        if let Err(e) = db::mark_credit_completed(pool, &pi_id, &bt_id).await {
+            tracing::warn!(
+                customer_id,
+                pi_id,
+                "reconciler: mark_credit_completed failed: {e}"
+            );
+            continue;
+        }
+        let _ = invalidate_cache(config, &customer_id).await;
     }
     Ok(())
 }
@@ -112,54 +208,21 @@ async fn reconcile_customer(
         if amount <= 0 {
             continue;
         }
-        match db::find_credit_row(pool, &pi_id).await? {
-            Some(row) if row.stripe_balance_transaction_id.is_some() => {
-                // Credited. Skip.
-            }
-            Some(partial) => {
-                // Row exists but balance_tx never landed. Retry just the
-                // balance_transactions write (with the same idempotency
-                // key — Stripe dedupes if the prior attempt actually
-                // succeeded).
-                //
-                // Codex P1 (Phase 6): age-gate this retry. A partial row
-                // less than MIN_PARTIAL_AGE_SECS old is overwhelmingly
-                // likely to be the live webhook handler's in-flight
-                // balance_transactions write, not a real orphan. The
-                // idempotency-key makes the race safe but wasteful;
-                // waiting one minute keeps logs and Stripe-call volume
-                // sane while still catching real crashes on the next
-                // tick.
-                let age = OffsetDateTime::now_utc() - partial.credited_at;
-                if age.whole_seconds() < MIN_PARTIAL_AGE_SECS {
-                    tracing::debug!(
-                        customer_id,
-                        pi_id,
-                        age_secs = age.whole_seconds(),
-                        "reconciler: skipping fresh partial credit (live webhook in flight)"
-                    );
-                    continue;
-                }
-                tracing::warn!(customer_id, pi_id, "reconciler: completing partial credit");
-                let bt_id = write_balance_transaction(stripe, customer_id, &pi_id, amount).await?;
-                db::mark_credit_completed(pool, &pi_id, &bt_id).await?;
-                let _ = invalidate_cache(config, customer_id).await;
-            }
-            None => {
-                // No DB row at all — webhook handler never reached the
-                // INSERT (process crash, HTTP timeout on PI create, or
-                // mid-air interruption). Do the full credit dance.
-                tracing::warn!(customer_id, pi_id, "reconciler: applying orphaned credit");
-                let inserted = db::try_insert_credit(pool, &pi_id, customer_id, amount).await?;
-                if !inserted {
-                    // Lost the race with the webhook handler — fine.
-                    continue;
-                }
-                let bt_id = write_balance_transaction(stripe, customer_id, &pi_id, amount).await?;
-                db::mark_credit_completed(pool, &pi_id, &bt_id).await?;
-                let _ = invalidate_cache(config, customer_id).await;
-            }
+        // Pass A (repair_partial_credits) already handles every row with
+        // an existing `auto_topup_credits` entry, so Pass B only needs
+        // to act when there is no row at all — the "PI succeeded at
+        // Stripe but the service crashed before INSERT" path.
+        if db::find_credit_row(pool, &pi_id).await?.is_some() {
+            continue;
         }
+        tracing::warn!(customer_id, pi_id, "reconciler: applying orphaned credit");
+        let inserted = db::try_insert_credit(pool, &pi_id, customer_id, amount).await?;
+        if !inserted {
+            continue;
+        }
+        let bt_id = write_balance_transaction(stripe, customer_id, &pi_id, amount).await?;
+        db::mark_credit_completed(pool, &pi_id, &bt_id).await?;
+        let _ = invalidate_cache(config, customer_id).await;
     }
     Ok(())
 }
