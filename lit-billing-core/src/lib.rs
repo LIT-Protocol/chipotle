@@ -23,6 +23,7 @@ pub mod customer;
 pub mod eip712;
 pub mod format;
 pub mod http;
+pub mod on_chain;
 pub mod reporting;
 
 pub use client::StripeClient;
