@@ -132,10 +132,16 @@ impl OnChainBillingResolver {
         let key_hash = account_key_hash(key_or_hash)
             .map_err(|e| ResolveError::Transient(format!("hashing account key: {e}")))?;
 
-        // Selector = first 4 bytes of keccak256("getBillingWalletAddress(bytes32)").
-        // Cheap enough to recompute per-call; not worth a OnceLock for a 1-of-1
-        // call path. The argument is the 32-byte key hash, already-padded.
-        let selector = &keccak256(b"getBillingWalletAddress(bytes32)")[..4];
+        // Selector = first 4 bytes of keccak256("getBillingWalletAddress(uint256)").
+        // The on-chain contract's canonical ABI declares this argument as
+        // `uint256`, not `bytes32` — so the dispatcher selector is
+        // 0x7249a9b6 (see lit-api-server's generated alloy `sol!` binding in
+        // accounts/contracts/account_config_contract.rs). Wire encoding of
+        // the arg is identical for both Solidity types (both occupy 32 bytes
+        // big-endian), so the calldata after the selector is unchanged —
+        // but the selector itself MUST match the contract's declaration or
+        // the call reverts. Cheap enough to recompute per-call.
+        let selector = &keccak256(b"getBillingWalletAddress(uint256)")[..4];
         let mut calldata = Vec::with_capacity(36);
         calldata.extend_from_slice(selector);
         calldata.extend_from_slice(key_hash.as_slice());
