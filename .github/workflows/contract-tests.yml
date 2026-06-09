@@ -19,9 +19,6 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     name: forge-test
     runs-on: self-hosted
-    concurrency:
-      group: foundry-toolchain
-      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
