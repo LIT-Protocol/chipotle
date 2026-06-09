@@ -77,6 +77,21 @@ yanked = "warn"
 #   the feature was enabled nowhere). pinata-sdk was the sole consumer of the
 #   abandoned `failure` crate -> removed RUSTSEC-2019-0036 and
 #   RUSTSEC-2020-0036.
+# - 2026-06-09: lit-actions now consumes deno from crates.io (deno_core
+#   =0.401.0 / deno_runtime =0.256.0), not the LIT deno_core fork. The fork is
+#   referenced in NO lockfile in this repo, so removed the dead allow-git entry
+#   "https://github.com/Lit-Protocol/deno_core" from [sources] below.
+#   Investigated whether bumping deno to the latest published patch
+#   (deno_core 0.403.0 / deno_runtime 0.258.0) clears the deno-chain advisories
+#   (2026-0009 time, 2026-0097 rand, 2026-0118/0119 hickory, 2025-0141 bincode,
+#   2026-0049/0098/0099/0104 rustls-webpki). It does NOT: the latest deno still
+#   hard-pins every vulnerable version — rand =0.8.5 (deno_crypto/deno_kv),
+#   rustls-webpki ^0.102 via rustls =0.23.40 (deno_tls; ^0.102 excludes the
+#   fixed 0.103 line), hickory ^0.25.2 (no non-beta fix exists for 0.118),
+#   bincode 1.x (deno_kv; no fix outside the 2.x rewrite), and deno_ast =0.53.2
+#   still drags the swc/serde chain that breaks when time goes >=0.3.47. These
+#   eight advisory entries therefore cannot be removed by a deno bump and stay
+#   until deno upstream bumps its own deps.
 #
 # Suggested triage order: vulnerabilities > unsound > unmaintained.
 ignore = [
@@ -110,7 +125,6 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
     "https://github.com/LIT-Protocol/bulletproofs",
-    "https://github.com/Lit-Protocol/deno_core",
     "https://github.com/LIT-Protocol/env_logger",
     "https://github.com/LIT-Protocol/rust-ipfs-api",
     "https://github.com/LIT-Protocol/zerossl",
