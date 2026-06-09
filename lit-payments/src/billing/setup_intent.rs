@@ -14,8 +14,21 @@
 //! manual top-up flow is the canonical Customer-creation path and goes
 //! through KYC-relevant code; auto-creating customers on a SetupIntent
 //! request would let any auth'd wallet spawn empty Stripe customers.
+//!
+//! ### API-key callers
+//!
+//! Codex P1 (Phase 3) fix: the handler now supports API-key callers by
+//! re-resolving the key through the same `AuthResolver` the guard used.
+//! The resolver returns the same wallet address that an EIP-712-signed
+//! payload would, so downstream logic is identical (`customer::find_by_wallet`
+//! lookup, SetupIntent create, etc.). Plan §5 specifies "behind the
+//! shared auth module"; pre-fix the handler 501'd API-key callers,
+//! which is the auth module verifying then rejecting — exactly the
+//! shape §5 says shouldn't happen.
 
-use lit_billing_auth::BillingAuth;
+use std::sync::Arc;
+
+use lit_billing_auth::{AuthResolver, BillingAuth};
 use lit_billing_core::{StripeClient, customer};
 use rocket::http::Status;
 use rocket::serde::json::Json;
@@ -45,27 +58,44 @@ pub async fn setup_intent(
     auth: BillingAuth,
     cfg: &State<Config>,
     stripe: &State<StripeClient>,
+    resolver: &State<Arc<dyn AuthResolver>>,
 ) -> Result<Json<SetupIntentResponse>, (Status, Json<ErrorBody>)> {
-    // Resolve the auth'd identity to the wallet address Stripe customers are
-    // keyed by. For WalletSigned this is in-band; for ApiKey we'd need an
-    // on-chain hop. Phase 3 ships only the wallet-sig path — API-key
-    // callers get a clear-message rejection until the resolver hop is
-    // wired in Phase 4 (config CRUD) or later.
+    // Resolve the auth'd identity to the wallet address Stripe customers
+    // are keyed by. For WalletSigned this is in-band; for ApiKey we
+    // re-run `resolve_api_key` (the guard already verified it) to pull
+    // out the wallet — the resolver caches API-key → wallet for 1h on
+    // the api-server side, so this is effectively sub-ms on the hot
+    // path.
     let wallet_address = match &auth {
         BillingAuth::WalletSigned {
             wallet_address_hex, ..
         } => wallet_address_hex.clone(),
-        BillingAuth::ApiKey(_) => {
-            return Err((
-                Status::NotImplemented,
-                Json(ErrorBody {
-                    error: "api_key_setup_intent_unsupported",
-                    message:
-                        "API-key callers must use the dashboard wallet-sign flow to save a card."
-                            .to_string(),
-                }),
-            ));
-        }
+        BillingAuth::ApiKey(key) => match resolver.resolve_api_key(key).await {
+            Ok(identity) => identity.wallet_address_hex,
+            Err(e) => {
+                tracing::warn!("setup_intent: API-key resolver failed: {e}");
+                let (status, code, message): (Status, &'static str, &str) = match e {
+                    lit_billing_auth::AuthError::BadCredentials(_)
+                    | lit_billing_auth::AuthError::Forbidden(_) => (
+                        Status::Unauthorized,
+                        "api_key_unresolved",
+                        "API key could not be resolved to a wallet.",
+                    ),
+                    lit_billing_auth::AuthError::Transient(_) => (
+                        Status::ServiceUnavailable,
+                        "auth_resolver_unavailable",
+                        "Could not contact the auth resolver; try again.",
+                    ),
+                };
+                return Err((
+                    status,
+                    Json(ErrorBody {
+                        error: code,
+                        message: message.to_string(),
+                    }),
+                ));
+            }
+        },
     };
 
     let customer_id = match customer::find_by_wallet(stripe.inner(), &wallet_address).await {

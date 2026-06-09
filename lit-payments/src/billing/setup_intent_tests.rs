@@ -93,6 +93,9 @@ async fn build_client(key: String, resolver_wallet: &str) -> Client {
     let resolver: Arc<dyn AuthResolver> = Arc::new(FixedWalletResolver {
         wallet: resolver_wallet.to_string(),
     });
+    // The handler now takes `&State<Arc<dyn AuthResolver>>` so it can
+    // re-resolve API-key callers. Register the resolver under that
+    // concrete state key so the route can pull it out.
     let rocket = Rocket::build()
         .manage(cfg)
         .manage(stripe)
@@ -259,23 +262,33 @@ async fn setup_intent_returns_400_when_no_customer() {
     assert_eq!(body["error"], "no_stripe_customer");
 }
 
+/// Codex P1 (Phase 3): the handler used to 501 API-key callers. Per
+/// plan §5 the endpoint is "behind the shared auth module", which
+/// already verifies the key via `resolve_api_key`. The fix re-resolves
+/// the key inside the handler to derive the wallet and continues the
+/// normal flow. With a fresh wallet that has no Stripe customer, that
+/// flow lands at 400 `no_stripe_customer` — same as the wallet-sig
+/// path. Skip silently if Stripe creds aren't configured (this test
+/// also exercises the Stripe lookup).
 #[tokio::test]
 #[serial_test::serial]
-async fn setup_intent_returns_501_for_api_key_caller() {
-    // Stripe key NOT required for this path — the handler short-circuits
-    // before calling Stripe. Skip only if the build can't even construct
-    // a Rocket (it always can, since we pass a dummy key).
-    let client = build_client(
-        "rk_test_unused_for_this_test_xxx".to_string(),
-        TEST_WALLET_NO_CUSTOMER,
-    )
-    .await;
+async fn setup_intent_api_key_caller_proceeds_to_normal_flow() {
+    let Some(key) = stripe_key() else {
+        eprintln!("STRIPE_SECRET_KEY not set — skipping Stripe-backed test");
+        return;
+    };
+    // Use the "no-customer" wallet so the handler reaches the
+    // `find_by_wallet -> None` branch and returns 400 `no_stripe_customer`.
+    // That's the canonical success signal for "API-key path works": we
+    // got past the old 501 short-circuit and hit the same code the
+    // wallet-sig path hits.
+    let client = build_client(key, TEST_WALLET_NO_CUSTOMER).await;
     let resp = client
         .post("/billing/setup_intent")
         .header(Header::new("X-Api-Key", "some-raw-api-key"))
         .dispatch()
         .await;
-    assert_eq!(resp.status(), Status::NotImplemented);
+    assert_eq!(resp.status(), Status::BadRequest);
     let body: Value = resp.into_json().await.expect("json body");
-    assert_eq!(body["error"], "api_key_setup_intent_unsupported");
+    assert_eq!(body["error"], "no_stripe_customer");
 }

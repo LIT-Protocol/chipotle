@@ -1,9 +1,12 @@
 //! `GET` / `PUT /billing/auto_topup_config` — dashboard CRUD for the
 //! per-user auto top-up rule.
 //!
-//! Behind the [`BillingAuth`] guard. Wallet-sig path is fully supported;
-//! API-key callers get 501 until the resolver hop is wired (Phase 5 needs
-//! the on-chain mapping anyway).
+//! Behind the [`BillingAuth`] guard. Both wallet-sig and API-key callers
+//! are supported: the guard verifies the credential, and the handler
+//! re-resolves the API-key path through `AuthResolver` (cached) to pull
+//! out the wallet address. Plan §5 says these endpoints sit behind the
+//! shared auth module — which already does the verification — so a
+//! 501 for API-key callers would contradict the spec.
 //!
 //! The PUT path enforces:
 //!   - `cap >= topup_amount` (cap must cover at least one top-up)
@@ -15,7 +18,9 @@
 //! pending SCA-recovery state — closing codex's gap #15 about stale
 //! pending_action_pi_id triggering charges after a user opts out.
 
-use lit_billing_auth::BillingAuth;
+use std::sync::Arc;
+
+use lit_billing_auth::{AuthResolver, BillingAuth};
 use lit_billing_core::{StripeClient, customer};
 use rocket::http::Status;
 use rocket::serde::json::Json;
@@ -55,25 +60,41 @@ fn err(status: Status, code: &'static str, msg: impl Into<String>) -> (Status, J
 }
 
 /// Shared identity resolution: the dashboard endpoints all need the
-/// caller's wallet address + Stripe customer id. Wallet-sig auth gives us
-/// the wallet directly; API-key auth needs the on-chain resolver hop
-/// (Phase 5+). For now we 501 the API-key path so the dashboard's
-/// wallet-sig flow ships unblocked.
+/// caller's wallet address + Stripe customer id.
+///
+/// Wallet-sig auth gives us the wallet directly. API-key auth re-runs
+/// `resolve_api_key` (verified by the guard, cached on the resolver
+/// side) to pull the wallet out — closes codex's Phase 5 P1 about the
+/// 501 short-circuit contradicting plan §5.
 async fn resolve_caller(
     auth: &BillingAuth,
     stripe: &StripeClient,
+    resolver: &Arc<dyn AuthResolver>,
 ) -> Result<(String, String), (Status, Json<ErrorBody>)> {
     let wallet_address = match auth {
         BillingAuth::WalletSigned {
             wallet_address_hex, ..
         } => wallet_address_hex.clone(),
-        BillingAuth::ApiKey(_) => {
-            return Err(err(
-                Status::NotImplemented,
-                "api_key_config_unsupported",
-                "API-key callers must use the dashboard wallet-sign flow to manage auto top-up config.",
-            ));
-        }
+        BillingAuth::ApiKey(key) => match resolver.resolve_api_key(key).await {
+            Ok(identity) => identity.wallet_address_hex,
+            Err(e) => {
+                tracing::warn!("auto_topup_config: API-key resolver failed: {e}");
+                let (status, code, message): (Status, &'static str, &str) = match e {
+                    lit_billing_auth::AuthError::BadCredentials(_)
+                    | lit_billing_auth::AuthError::Forbidden(_) => (
+                        Status::Unauthorized,
+                        "api_key_unresolved",
+                        "API key could not be resolved to a wallet.",
+                    ),
+                    lit_billing_auth::AuthError::Transient(_) => (
+                        Status::ServiceUnavailable,
+                        "auth_resolver_unavailable",
+                        "Could not contact the auth resolver; try again.",
+                    ),
+                };
+                return Err(err(status, code, message));
+            }
+        },
     };
     let customer_id = customer::find_by_wallet(stripe, &wallet_address)
         .await
@@ -100,8 +121,9 @@ pub async fn get_auto_topup_config(
     auth: BillingAuth,
     stripe: &State<StripeClient>,
     pool: &State<PgPool>,
+    resolver: &State<Arc<dyn AuthResolver>>,
 ) -> Result<Json<Option<AutoTopupConfigRow>>, (Status, Json<ErrorBody>)> {
-    let (_wallet, customer_id) = resolve_caller(&auth, stripe.inner()).await?;
+    let (_wallet, customer_id) = resolve_caller(&auth, stripe.inner(), resolver.inner()).await?;
     let row = db::get_by_customer_id(pool.inner(), &customer_id)
         .await
         .map_err(|e| {
@@ -156,8 +178,10 @@ pub async fn put_auto_topup_config(
     body: Json<AutoTopupConfigUpsert>,
     stripe: &State<StripeClient>,
     pool: &State<PgPool>,
+    resolver: &State<Arc<dyn AuthResolver>>,
 ) -> Result<Json<AutoTopupConfigRow>, (Status, Json<ErrorBody>)> {
-    let (wallet_address, customer_id) = resolve_caller(&auth, stripe.inner()).await?;
+    let (wallet_address, customer_id) =
+        resolve_caller(&auth, stripe.inner(), resolver.inner()).await?;
     let body = body.into_inner();
 
     // Server-side invariants. The DB CHECK constraint also enforces these,

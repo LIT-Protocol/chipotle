@@ -106,6 +106,15 @@ pub async fn upsert(
     // intact while it is `requires_action` so the dashboard's SCA banner
     // logic stays correct; other disabled_reasons ('manual', 'failures')
     // are cleared on re-enable as the user expects.
+    //
+    // Codex P1 (Phase 4) follow-up: if the PUT changes
+    // `payment_method_id`, the old pending PI (which referenced the
+    // PRIOR card) is no longer relevant — the user is switching cards
+    // mid-SCA. Clear the pending state so the next webhook tick re-runs
+    // the off-session charge against the new card. Without this, the
+    // dashboard would keep the "action required" banner on the stale PI
+    // forever, and the webhook short-circuit on `pending_action_pi_id`
+    // would prevent any new charge from ever firing.
     let new_disabled_reason: Option<String> = if body.enabled {
         None
     } else {
@@ -130,24 +139,29 @@ pub async fn upsert(
             consent_signed_at = EXCLUDED.consent_signed_at, \
             disabled_reason = CASE \
                 WHEN NOT EXCLUDED.enabled THEN EXCLUDED.disabled_reason \
+                WHEN EXCLUDED.payment_method_id IS DISTINCT FROM auto_topup_config.payment_method_id THEN NULL \
                 WHEN auto_topup_config.disabled_reason = 'requires_action' THEN 'requires_action' \
                 ELSE NULL \
             END, \
             pending_action_pi_id = CASE \
-                WHEN EXCLUDED.enabled THEN auto_topup_config.pending_action_pi_id \
-                ELSE NULL \
+                WHEN NOT EXCLUDED.enabled THEN NULL \
+                WHEN EXCLUDED.payment_method_id IS DISTINCT FROM auto_topup_config.payment_method_id THEN NULL \
+                ELSE auto_topup_config.pending_action_pi_id \
             END, \
             pending_action_at = CASE \
-                WHEN EXCLUDED.enabled THEN auto_topup_config.pending_action_at \
-                ELSE NULL \
+                WHEN NOT EXCLUDED.enabled THEN NULL \
+                WHEN EXCLUDED.payment_method_id IS DISTINCT FROM auto_topup_config.payment_method_id THEN NULL \
+                ELSE auto_topup_config.pending_action_at \
             END, \
             recovery_token = CASE \
-                WHEN EXCLUDED.enabled THEN auto_topup_config.recovery_token \
-                ELSE NULL \
+                WHEN NOT EXCLUDED.enabled THEN NULL \
+                WHEN EXCLUDED.payment_method_id IS DISTINCT FROM auto_topup_config.payment_method_id THEN NULL \
+                ELSE auto_topup_config.recovery_token \
             END, \
             recovery_token_expires_at = CASE \
-                WHEN EXCLUDED.enabled THEN auto_topup_config.recovery_token_expires_at \
-                ELSE NULL \
+                WHEN NOT EXCLUDED.enabled THEN NULL \
+                WHEN EXCLUDED.payment_method_id IS DISTINCT FROM auto_topup_config.payment_method_id THEN NULL \
+                ELSE auto_topup_config.recovery_token_expires_at \
             END, \
             updated_at = EXCLUDED.updated_at \
          RETURNING {SELECT_COLUMNS}"
@@ -316,6 +330,28 @@ pub async fn list_customers_with_partial_credits(pool: &PgPool) -> Result<Vec<St
         "SELECT DISTINCT customer_id FROM auto_topup_credits \
             WHERE stripe_balance_transaction_id IS NULL",
     )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows.into_iter().map(|(id,)| id).collect())
+}
+
+/// Codex P1 (Phase 6) — extra: union into Pass B all customers who have
+/// had ANY auto_topup_credits row in the last `days` days. Catches the
+/// "user's card was charged off-session, service crashed pre-INSERT,
+/// then auto-disable flipped `enabled=false`" sequence: the credit
+/// never landed in `auto_topup_credits` (Pass A is blind), the
+/// customer is no longer in `list_enabled_customers` (Pass B was blind
+/// pre-fix), and the orphan succeeded PI at Stripe stays uncredited
+/// forever. 7 days matches `LOOKBACK_DAYS` in the reconciler so we
+/// never visit a customer who couldn't possibly have an orphan in the
+/// scan window.
+pub async fn list_recently_active_customers(pool: &PgPool, days: i64) -> Result<Vec<String>> {
+    let cutoff = OffsetDateTime::now_utc() - time::Duration::days(days);
+    let rows: Vec<(String,)> = sqlx::query_as(
+        "SELECT DISTINCT customer_id FROM auto_topup_credits \
+            WHERE credited_at >= $1",
+    )
+    .bind(cutoff)
     .fetch_all(pool)
     .await?;
     Ok(rows.into_iter().map(|(id,)| id).collect())

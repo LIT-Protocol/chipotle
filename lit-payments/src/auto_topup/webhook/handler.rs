@@ -538,11 +538,21 @@ fn is_failed(pi: &Value) -> bool {
     )
 }
 
-/// Sum `amount` over all non-failed PIs in the window. Mirrors the cap
-/// definition: "total non-failed spend this month".
+/// Sum `amount` over all non-failed, non-abandoned PIs in the window.
+///
+/// Codex P1 (Phase 5): `requires_action` is neither failed nor succeeded —
+/// it's an SCA challenge the user never completed. Pre-fix this code
+/// counted those PI amounts toward the monthly cap, so a single 3DS
+/// drop-off could exhaust the user's budget without any successful
+/// charge. The cap is "successful spend this month plus what's still
+/// in-flight"; we explicitly exclude `requires_action` (the user has
+/// abandoned the attempt or hasn't returned to complete it). The
+/// `pending_action_pi_id` state on the config row already paused new
+/// charges while a 3DS challenge is in flight, so we don't double-block.
 fn month_spend_cents(pis: &[Value]) -> i64 {
     pis.iter()
         .filter(|pi| !is_failed(pi))
+        .filter(|pi| pi.get("status").and_then(|v| v.as_str()) != Some("requires_action"))
         .filter_map(|pi| pi.get("amount").and_then(|v| v.as_i64()))
         .sum()
 }
@@ -567,50 +577,100 @@ async fn handle_sca_required(
     // paused. Fire-and-forget — a Resend outage shouldn't fail the
     // webhook (Stripe would retry and stage a second pending PI), but
     // we log loudly so the on-call sees email delivery degradation.
+    // Static dashboard ships `recover_topup.html` at the path root —
+    // we use the explicit `.html` suffix in the link so it works
+    // regardless of whether the host strips extensions. Pre-fix the
+    // URL was `/recover_topup` and depended on Cloudflare Pages'
+    // default extension-stripping; any host without that behaviour
+    // (custom CDN, future S3 mount, local Vite dev) 404'd the link.
     let recovery_url = format!(
-        "{}/recover_topup?token={}",
+        "{}/recover_topup.html?token={}",
         cfg.public_base_url.trim_end_matches('/'),
         token
     );
-    match fetch_customer_email(stripe, customer_id).await {
-        Ok(Some(email)) => {
-            let subject = "Action required: complete your auto top-up";
-            let text = format!(
-                "Your card requires extra verification (3D Secure) to complete the latest \
+    let email_result: Result<(), anyhow::Error> =
+        match fetch_customer_email(stripe, customer_id).await {
+            Ok(Some(email)) => {
+                let subject = "Action required: complete your auto top-up";
+                let text = format!(
+                    "Your card requires extra verification (3D Secure) to complete the latest \
                  auto top-up. Open the link below to finish the verification — it expires \
                  in 24 hours and can only be used once.\n\n{recovery_url}\n\n\
                  If you didn't expect this, you can safely ignore the email; auto top-up \
                  stays paused until you click the link or update your card."
-            );
-            let html = format!(
-                "<p>Your card requires extra verification (3D Secure) to complete the latest \
+                );
+                let html = format!(
+                    "<p>Your card requires extra verification (3D Secure) to complete the latest \
                  auto top-up.</p>\
                  <p><a href=\"{recovery_url}\">Click here to complete the verification</a> \
                  — the link expires in 24 hours and can only be used once.</p>\
                  <p style=\"color:#666;font-size:0.9em\">If you didn't expect this, you can \
                  safely ignore this email; auto top-up stays paused until you click the link \
                  or update your card.</p>"
-            );
-            if let Err(e) = mailer.send(&email, subject, &html, &text).await {
-                tracing::error!(customer_id, pi_id, "SCA recovery email send failed: {e}");
-            } else {
-                tracing::info!(customer_id, pi_id, "SCA recovery email dispatched");
+                );
+                match mailer.send(&email, subject, &html, &text).await {
+                    Ok(()) => {
+                        tracing::info!(customer_id, pi_id, "SCA recovery email dispatched");
+                        Ok(())
+                    }
+                    Err(e) => {
+                        tracing::error!(customer_id, pi_id, "SCA recovery email send failed: {e}");
+                        Err(anyhow::anyhow!("SCA recovery email send failed: {e}"))
+                    }
+                }
             }
-        }
-        Ok(None) => {
-            tracing::warn!(
-                customer_id,
-                pi_id,
-                "Stripe customer has no email on file; SCA recovery link cannot be delivered"
-            );
-        }
-        Err(e) => {
+            Ok(None) => {
+                // No email on file — nothing we can do. Don't roll back the
+                // pending state; the user has no recovery channel and the
+                // dashboard "action required" banner is the only signal left.
+                // Reconciler / next webhook will not re-fire (pending_action_pi_id
+                // is set), so the SCA stays paused indefinitely until the user
+                // updates their account email or contacts support.
+                tracing::warn!(
+                    customer_id,
+                    pi_id,
+                    "Stripe customer has no email on file; SCA recovery link cannot be delivered"
+                );
+                Ok(())
+            }
+            Err(e) => {
+                tracing::error!(
+                    customer_id,
+                    pi_id,
+                    "fetch customer email for SCA recovery failed: {e}"
+                );
+                Err(anyhow::anyhow!(
+                    "fetch customer email for SCA recovery failed: {e}"
+                ))
+            }
+        };
+
+    // Codex P1 (Phase 5): if the email (or email-lookup) failed, the
+    // pending state we just staged is useless — the user has no link to
+    // click and subsequent customer.updated webhooks short-circuit on
+    // `pending_action_pi_id`. Roll the pending state back so the next
+    // webhook tick re-attempts SCA staging from scratch (which will
+    // mint a fresh recovery token). Single-use semantics still hold;
+    // tokens are by-pi-id so a stale token in a delayed email is
+    // automatically invalidated once we restage. We DO NOT return
+    // Transient — Stripe shouldn't keep retrying the same delivery
+    // forever; the user's next manual top-up or balance change will
+    // produce a fresh customer.updated event.
+    if let Err(e) = email_result {
+        if let Err(clear_err) = db::clear_pending_action(pool, customer_id, pi_id).await {
             tracing::error!(
                 customer_id,
                 pi_id,
-                "fetch customer email for SCA recovery failed: {e}"
+                "SCA recovery rollback failed (pending state stuck): {clear_err}; orig: {e}"
+            );
+        } else {
+            tracing::warn!(
+                customer_id,
+                pi_id,
+                "SCA recovery email failed; pending state rolled back so next webhook retries"
             );
         }
+        return Ok(());
     }
 
     tracing::info!(
@@ -732,6 +792,18 @@ mod tests {
         let pending = serde_json::json!({"status":"processing","amount":1500});
         let list = vec![succeeded, failed, pending];
         assert_eq!(month_spend_cents(&list), 3500);
+    }
+
+    /// Codex P1 (Phase 5): `requires_action` PIs are abandoned SCA
+    /// challenges, not real spend. They must NOT count against the
+    /// monthly cap; otherwise a single 3DS drop-off can exhaust the
+    /// user's budget without a successful charge.
+    #[test]
+    fn month_spend_excludes_requires_action() {
+        let succeeded = serde_json::json!({"status":"succeeded","amount":2000});
+        let abandoned = serde_json::json!({"status":"requires_action","amount":5000});
+        let list = vec![succeeded, abandoned];
+        assert_eq!(month_spend_cents(&list), 2000);
     }
 
     #[test]

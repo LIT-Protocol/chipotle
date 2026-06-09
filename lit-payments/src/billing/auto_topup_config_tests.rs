@@ -89,7 +89,14 @@ impl AuthResolver for FixedWalletResolver {
         })
     }
     async fn resolve_api_key(&self, _api_key: &str) -> Result<ResolvedIdentity, AuthError> {
-        Err(AuthError::BadCredentials("unused".into()))
+        // Codex P1 (Phase 4): the handler now re-resolves API-key
+        // callers through this same resolver to pull the wallet out.
+        // Return Ok so the API-key test sees the normal flow (which
+        // lands at 400 `no_stripe_customer` for a fresh wallet).
+        Ok(ResolvedIdentity {
+            wallet_address_hex: self.wallet.clone(),
+            api_key_hash_hex: format!("0x{}", "0".repeat(64)),
+        })
     }
 }
 
@@ -425,16 +432,34 @@ async fn put_disable_clears_pending_action_state() {
     assert!(got["recovery_token_expires_at"].is_null());
 }
 
+/// Codex P1 (Phase 4): the handler used to 501 API-key callers. Per
+/// plan §5 these endpoints sit "behind the shared auth module" which
+/// already verifies the key — a 501 contradicts the spec. The fix
+/// re-resolves the API key through the same resolver the guard used,
+/// derives the wallet, and continues the normal flow. With a fresh
+/// (no-customer) wallet the flow lands at GET → 200 + null body just
+/// like the wallet-sig path.
 #[tokio::test]
 #[serial_test::serial]
-async fn api_key_caller_returns_501() {
+async fn api_key_caller_proceeds_to_normal_flow() {
     let Some(key) = stripe_key() else { return };
     let Some(url) = db_url() else { return };
+    let stripe = StripeClient::new(key.clone()).unwrap();
+    // Ensure the wallet has a Stripe customer so the GET path returns
+    // 200 (Some / None depending on row presence), not 400. We use the
+    // CRUD_BASIC wallet which `ensure_unique_customer` creates / finds.
+    let _ =
+        super::setup_intent_tests::ensure_unique_customer(&stripe, TEST_WALLET_CRUD_BASIC).await;
+    let pool = PgPool::connect(&url).await.unwrap();
+    reset_config_row_for_wallet(&pool, TEST_WALLET_CRUD_BASIC).await;
+
     let client = build_client(key, url, TEST_WALLET_CRUD_BASIC).await;
     let resp = client
         .get("/billing/auto_topup_config")
         .header(Header::new("X-Api-Key", "raw-api-key-abc"))
         .dispatch()
         .await;
-    assert_eq!(resp.status(), Status::NotImplemented);
+    assert_eq!(resp.status(), Status::Ok);
+    let body: Value = resp.into_json().await.unwrap();
+    assert!(body.is_null(), "expected null (no row yet), got {body}");
 }

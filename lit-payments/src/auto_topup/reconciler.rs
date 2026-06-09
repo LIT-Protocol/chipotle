@@ -53,6 +53,15 @@ const LOOKBACK_DAYS: i64 = 7;
 /// lets a true crash mid-flow recover within one reconciler tick.
 const MIN_PARTIAL_AGE_SECS: i64 = 60;
 
+/// Maximum age the reconciler will repair a partial credit row at. Stripe
+/// drops a given `Idempotency-Key` after ~24h, so reusing the same
+/// `credit:{pi_id}` key beyond that posts a NEW balance_tx instead of
+/// hitting the dedup — risking double credit. Mirrors the 23h cap on
+/// the `/billing/auto_topup_resume/complete` path (Phase 7) so both
+/// retry surfaces refuse the same window. Rows older than this need
+/// manual intervention; we log loudly so the on-call sees them.
+const MAX_PARTIAL_RETRY_AGE_HOURS: i64 = 23;
+
 /// Spawn the reconciler. Returns immediately; the loop runs in the
 /// background until the process exits.
 pub fn spawn(config: Config, stripe: StripeClient, pool: PgPool) {
@@ -82,11 +91,22 @@ pub async fn run_once(config: &Config, stripe: &StripeClient, pool: &PgPool) -> 
     }
 
     // Pass B: Stripe-list-driven sweep for orphan PIs (no DB row at all).
+    //
+    // Codex P1 (Phase 6): union the enabled set with customers who have
+    // had ANY auto_topup_credits row in the last 7 days. A user whose
+    // off-session PI charged but the service crashed pre-INSERT, then
+    // got auto-disabled before the next reconciler tick, would otherwise
+    // be invisible — no `enabled=true` row, no partial credit row.
+    // Recently-active membership catches them.
     let enabled = db::list_enabled_customers(pool)
         .await
         .context("list enabled customers")?;
+    let recently_active = db::list_recently_active_customers(pool, LOOKBACK_DAYS)
+        .await
+        .context("list recently active customers")?;
     let mut all: BTreeSet<String> = BTreeSet::new();
     all.extend(enabled);
+    all.extend(recently_active);
     if all.is_empty() {
         return Ok(());
     }
@@ -131,6 +151,22 @@ async fn repair_partial_credits(
         let pi_id = partial.payment_intent_id;
         let customer_id = partial.customer_id;
         let amount = partial.amount_cents;
+        // Codex P1 (Phase 6): cap the retry window at 23h. Stripe's
+        // Idempotency-Key TTL is ~24h, so reusing `credit:{pi_id}` past
+        // that window posts a fresh balance_tx instead of deduping —
+        // a recipe for double credit. Mirrors the cap in
+        // `sca_resume::post_auto_topup_resume_complete`. Older rows are
+        // surfaced via log; an operator credits manually.
+        if age.whole_hours() >= MAX_PARTIAL_RETRY_AGE_HOURS {
+            tracing::error!(
+                customer_id,
+                pi_id,
+                age_hours = age.whole_hours(),
+                "reconciler: partial credit older than Stripe idempotency window; manual \
+                 repair needed (skipping to avoid double-credit risk)"
+            );
+            continue;
+        }
         // Verify the PI is still succeeded at Stripe before posting a
         // balance_tx for it. Defence against an attacker who somehow
         // inserted a row, and against PI reversal edge cases.
@@ -159,6 +195,36 @@ async fn repair_partial_credits(
                 customer_id,
                 pi_id,
                 "reconciler: skipping partial whose PI is not metadata.source=auto_topup"
+            );
+            continue;
+        }
+        // Codex P1 (Phase 6): cross-verify the PI's Stripe-side
+        // `customer` and `amount` against the DB row before crediting.
+        // The DB row could be stale or tampered with; if Stripe says the
+        // PI was for customer X and amount Y, we must not credit
+        // customer A or amount B based on a mismatched local row. Skip
+        // (log loudly) and leave the row partial so an operator
+        // notices.
+        let pi_customer = pi.get("customer").and_then(|v| v.as_str()).unwrap_or("");
+        if pi_customer != customer_id {
+            tracing::error!(
+                customer_id,
+                pi_id,
+                pi_customer,
+                "reconciler: partial credit customer_id mismatch between Stripe PI and DB row; \
+                 manual repair needed"
+            );
+            continue;
+        }
+        let pi_amount = pi.get("amount").and_then(|v| v.as_i64()).unwrap_or(0);
+        if pi_amount != amount {
+            tracing::error!(
+                customer_id,
+                pi_id,
+                pi_amount,
+                db_amount = amount,
+                "reconciler: partial credit amount mismatch between Stripe PI and DB row; \
+                 manual repair needed"
             );
             continue;
         }
