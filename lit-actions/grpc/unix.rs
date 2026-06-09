@@ -1,4 +1,4 @@
-use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::time::Duration;
 use std::{fs, path::PathBuf};
 
@@ -48,19 +48,15 @@ where
     F: std::future::Future<Output = ()>,
 {
     let socket_path = socket_path.into();
-    // Use symlink_metadata (lstat) so we inspect the path itself, not what a
-    // symlink points to. Only unlink the path if it is an actual Unix socket;
-    // never follow a symlink to remove its target. This closes a CWE-59
-    // arbitrary-file-deletion vector when the socket lives in a world-writable
-    // sticky directory (e.g. /tmp). (F-001)
-    if let Ok(meta) = fs::symlink_metadata(&socket_path) {
-        anyhow::ensure!(
-            meta.file_type().is_socket(),
-            "Refusing to remove existing path at {:?}: not a Unix socket \
-             (file_type={:?}). Possible symlink/file planted by another user.",
-            socket_path,
-            meta.file_type(),
-        );
+    // Probe the path with symlink_metadata (lstat) so a dangling symlink is
+    // still detected, and only ever unlink the path *itself* — never a
+    // symlink's resolved target. The previous code did read_link() +
+    // remove_file(target), which let a symlink planted at the socket path in a
+    // world-writable directory (e.g. the default /tmp) trick the daemon into
+    // deleting an arbitrary file owned elsewhere (CWE-59). remove_file() unlinks
+    // a symlink itself rather than following it, so this still cleans up a stale
+    // socket or leftover file at our own path without the file-deletion vector.
+    if fs::symlink_metadata(&socket_path).is_ok() {
         fs::remove_file(&socket_path).context("Failed to remove existing socket file")?;
     }
 
