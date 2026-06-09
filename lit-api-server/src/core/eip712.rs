@@ -299,13 +299,28 @@ pub(crate) async fn verify_eip712_signature_allow_contract_wallet(
     if prepared.ecdsa_recovered == Some(prepared.claimed_address) {
         return Ok(prepared.claimed_address);
     }
-    verify_erc1271_signature(
+    // ECDSA didn't match — try the claimed address as an EIP-1271 contract
+    // wallet. `Err` here is a server/infra failure (propagate it); `Ok(false)`
+    // means the signature is definitively not valid for this address by either
+    // method, so we emit one unified error naming both paths.
+    if verify_erc1271_signature(
         prepared.claimed_address,
         prepared.digest,
         &prepared.signature,
     )
-    .await?;
-    Ok(prepared.claimed_address)
+    .await?
+    {
+        return Ok(prepared.claimed_address);
+    }
+    Err(ApiStatus::bad_request(
+        anyhow::anyhow!(
+            "Signature invalid: failed both EOA verification (EIP-712 ECDSA \
+             ecrecover) and smart-contract-wallet verification (EIP-1271 \
+             isValidSignature) for the claimed address"
+        ),
+        "Signature invalid: did not verify as an EOA (ECDSA) signature or as an \
+         EIP-1271 smart-contract-wallet signature",
+    ))
 }
 
 /// Run the synchronous validation pipeline and parse the signature. Shared by
@@ -427,11 +442,20 @@ fn prepare_verification(
 
 /// Verify a signature via EIP-1271 (`isValidSignature`) against an already-
 /// deployed smart-contract wallet at `address`, on the node's configured chain.
+///
+/// Returns `Ok(true)` only when the contract returns the ERC-1271 magic value.
+/// Returns `Ok(false)` for any *definitive* non-acceptance — the address is an
+/// EOA (no code), the contract doesn't implement EIP-1271, it reverted, or it
+/// returned a non-magic value. The caller turns `Ok(false)` into a single
+/// unified "signature invalid" error that names both verification paths, so an
+/// EOA user with a bad EIP-712 signature never sees a confusing 1271-only
+/// message. `Err` is reserved for genuine server/infra failures (no chain
+/// client, RPC timeout) — those are not the caller's signature being wrong.
 async fn verify_erc1271_signature(
     address: Address,
     digest: B256,
     signature: &[u8],
-) -> Result<(), ApiStatus> {
+) -> Result<bool, ApiStatus> {
     let provider = crate::accounts::signable_contract::get_read_only_client().map_err(|e| {
         ApiStatus::internal_server_error(e, "Chain client unavailable for EIP-1271 verification")
     })?;
@@ -443,47 +467,34 @@ async fn verify_erc1271_signature(
 
     // Bound the call in wall-clock time (slow/adversarial RPC or contract) on
     // top of the gas cap above.
-    let magic = match tokio::time::timeout(
+    match tokio::time::timeout(
         std::time::Duration::from_secs(ERC1271_CALL_TIMEOUT_SECS),
         call.call(),
     )
     .await
     {
         Err(_elapsed) => {
-            // Keep RPC/timing detail server-side; do not leak it to the client.
+            // RPC slowness/outage, not a wrong signature. Keep detail
+            // server-side and surface a 500 rather than misreporting the
+            // user's signature as invalid.
             tracing::warn!(
                 "EIP-1271 isValidSignature timed out after {}s for {address}",
                 ERC1271_CALL_TIMEOUT_SECS
             );
-            return Err(ApiStatus::bad_request(
+            Err(ApiStatus::internal_server_error(
                 anyhow::anyhow!("EIP-1271 verification timed out"),
-                "Signature does not match claimed address",
-            ));
+                "Signature verification temporarily unavailable (chain RPC timeout)",
+            ))
         }
-        Ok(Ok(magic)) => magic,
+        Ok(Ok(magic)) => Ok(magic == FixedBytes::<4>::from(ERC1271_MAGIC_VALUE)),
         Ok(Err(e)) => {
-            // An EOA (no contract code) or a contract that doesn't implement
-            // EIP-1271 returns no decodable `bytes4`, surfacing here. Log the
-            // RPC/contract detail server-side and return a generic message so
-            // revert strings and RPC internals don't leak to the client.
-            tracing::warn!("EIP-1271 isValidSignature call failed for {address}: {e}");
-            return Err(ApiStatus::bad_request(
-                anyhow::anyhow!("EIP-1271 verification failed"),
-                "Signature does not match claimed address",
-            ));
+            // An EOA (no contract code), a contract that doesn't implement
+            // EIP-1271, or a revert lands here. This is a definitive "not a
+            // valid contract-wallet signature" — log the RPC/contract detail
+            // server-side and report it as a non-acceptance (not a 500).
+            tracing::debug!("EIP-1271 isValidSignature call failed for {address}: {e}");
+            Ok(false)
         }
-    };
-
-    if magic == FixedBytes::<4>::from(ERC1271_MAGIC_VALUE) {
-        Ok(())
-    } else {
-        Err(ApiStatus::bad_request(
-            anyhow::anyhow!(
-                "EIP-1271 isValidSignature returned non-magic value {:#x}",
-                magic
-            ),
-            "Signature does not match claimed address",
-        ))
     }
 }
 
