@@ -360,14 +360,7 @@ fn build_rocket(
             routes![openapi_json, openapi_json_redirect, swagger_ui_redirect],
         )
         .mount("/", core::v1::health::routes())
-        .mount(
-            "/",
-            routes![
-                internal::routes::invalidate_balance_cache,
-                internal::routes::verify_wallet_auth,
-                internal::routes::resolve_api_key,
-            ],
-        )
+        .mount("/", routes![internal::routes::invalidate_balance_cache])
         .mount("/core/v1/", core_routes)
         .mount("/core/v1/", core::v1::health::routes())
         .mount(

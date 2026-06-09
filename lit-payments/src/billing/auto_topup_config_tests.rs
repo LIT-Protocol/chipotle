@@ -25,8 +25,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use lit_billing_core::billing_auth::{AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload};
 use lit_billing_core::StripeClient;
+use lit_billing_core::billing_auth::{
+    AuthError, AuthResolver, ResolvedIdentity, WalletAuthPayload,
+};
 use rocket::http::{Header, Status};
 use rocket::local::asynchronous::Client;
 use rocket::{Rocket, routes};

@@ -2,8 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use lit_billing_core::billing_auth::AuthResolver;
 use lit_billing_core::StripeClient;
+use lit_billing_core::billing_auth::AuthResolver;
 use lit_payments::auth::routes as auth_routes;
 use lit_payments::auth_resolver::LocalAuthResolver;
 use lit_payments::auto_topup::webhook::handler as webhook_handler;
@@ -39,8 +39,7 @@ async fn rocket() -> _ {
     // these used to be HTTP hops to lit-api-server; the shared
     // `lit-billing-core` crate now exposes both primitives so the same
     // resolver shape runs on both services.
-    let on_chain_resolver =
-        config::build_on_chain_resolver(&cfg).expect("OnChainBillingResolver");
+    let on_chain_resolver = config::build_on_chain_resolver(&cfg).expect("OnChainBillingResolver");
     let auth_resolver: Arc<dyn AuthResolver> = Arc::new(LocalAuthResolver::new(
         on_chain_resolver,
         cfg.lit_accounts_chain_id,

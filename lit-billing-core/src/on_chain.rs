@@ -156,9 +156,7 @@ impl OnChainBillingResolver {
         // Response shape: 0x-prefixed 64-char hex = 32 bytes, last 20 of which
         // are the address (left-padded). Empty `0x` is what a node returns
         // when the call reverts — treat as transient (could be a stale block).
-        let stripped = raw_result
-            .strip_prefix("0x")
-            .unwrap_or(raw_result.as_str());
+        let stripped = raw_result.strip_prefix("0x").unwrap_or(raw_result.as_str());
         if stripped.is_empty() {
             return Err(ResolveError::Transient(
                 "eth_call returned empty data (account hash unknown or contract reverted)"

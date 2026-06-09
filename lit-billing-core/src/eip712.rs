@@ -343,12 +343,13 @@ pub fn verify_eip712_signature(
             "eip712_signing_hash failed",
         )
     })?;
-    let sig: Signature = signature_hex
-        .trim()
-        .parse()
-        .map_err(|e: alloy_primitives::SignatureError| {
-            Eip712Error::bad(e.to_string(), "Invalid signature hex")
-        })?;
+    let sig: Signature =
+        signature_hex
+            .trim()
+            .parse()
+            .map_err(|e: alloy_primitives::SignatureError| {
+                Eip712Error::bad(e.to_string(), "Invalid signature hex")
+            })?;
     let recovered = sig
         .recover_address_from_prehash(&digest)
         .map_err(|e| Eip712Error::bad(e.to_string(), "Signature recovery failed"))?;
@@ -616,8 +617,12 @@ mod tests {
     #[test]
     fn happy_path_create_wallet() {
         let wallet = PrivateKeySigner::random();
-        let (typed, sig) =
-            sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), TEST_CHAIN_ID);
+        let (typed, sig) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_CREATE_WALLET,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         let recovered =
             verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
                 .unwrap();
@@ -650,8 +655,12 @@ mod tests {
     fn cross_flow_replay_rejected_at_primary_type_check() {
         let wallet = PrivateKeySigner::random();
         // User signs a CreateWallet typed payload.
-        let (typed, sig) =
-            sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), TEST_CHAIN_ID);
+        let (typed, sig) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_CREATE_WALLET,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         // Attacker forwards it to the AddUsageApiKey endpoint as-is.
         let err =
             verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_ADD_USAGE_API_KEY, TEST_CHAIN_ID)
@@ -670,8 +679,12 @@ mod tests {
     fn cross_flow_replay_rejected_at_recovery_when_primary_type_rewritten() {
         let wallet = PrivateKeySigner::random();
         // User signs CreateWallet.
-        let (mut typed, sig) =
-            sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), TEST_CHAIN_ID);
+        let (mut typed, sig) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_CREATE_WALLET,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         // Attacker rewrites primaryType + types map to look like AddUsageApiKey.
         typed["primaryType"] = serde_json::json!(PRIMARY_TYPE_ADD_USAGE_API_KEY);
         let payload_fields = serde_json::json!([
@@ -705,77 +718,91 @@ mod tests {
             now_secs(),
             TEST_CHAIN_ID.wrapping_add(1),
         );
-        let err =
-            verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
-                .expect_err("must reject — wrong chainId");
+        let err = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
+            .expect_err("must reject — wrong chainId");
         assert!(format!("{err}").contains("Chain ID"));
     }
 
     #[test]
     fn rejects_domain_name_mismatch() {
         let wallet = PrivateKeySigner::random();
-        let (mut typed, sig) =
-            sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), TEST_CHAIN_ID);
+        let (mut typed, sig) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_CREATE_WALLET,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         typed["domain"]["name"] = serde_json::json!("Not Lit ChainSecured");
-        let err =
-            verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
-                .expect_err("must reject — wrong domain name");
+        let err = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
+            .expect_err("must reject — wrong domain name");
         assert!(format!("{err}").contains("Domain name"));
     }
 
     #[test]
     fn rejects_domain_version_mismatch() {
         let wallet = PrivateKeySigner::random();
-        let (mut typed, sig) =
-            sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), TEST_CHAIN_ID);
+        let (mut typed, sig) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_CREATE_WALLET,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         typed["domain"]["version"] = serde_json::json!("99");
-        let err =
-            verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
-                .expect_err("must reject — wrong domain version");
+        let err = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
+            .expect_err("must reject — wrong domain version");
         assert!(format!("{err}").contains("Domain version"));
     }
 
     #[test]
     fn rejects_extra_domain_field_verifying_contract() {
         let wallet = PrivateKeySigner::random();
-        let (mut typed, sig) =
-            sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), TEST_CHAIN_ID);
+        let (mut typed, sig) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_CREATE_WALLET,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         typed["domain"]["verifyingContract"] =
             serde_json::json!("0x1111111111111111111111111111111111111111");
-        let err =
-            verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
-                .expect_err("must reject — verifyingContract is not allowed");
+        let err = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
+            .expect_err("must reject — verifyingContract is not allowed");
         assert!(format!("{err}").contains("Domain"));
     }
 
     #[test]
     fn rejects_schema_field_reorder() {
         let wallet = PrivateKeySigner::random();
-        let (mut typed, sig) =
-            sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), TEST_CHAIN_ID);
+        let (mut typed, sig) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_CREATE_WALLET,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         // Swap field order on the primary type — produces a different type hash.
         typed["types"][PRIMARY_TYPE_CREATE_WALLET] = serde_json::json!([
             { "name": "issuedAt", "type": "uint256" },
             { "name": "address", "type": "address" },
         ]);
-        let err =
-            verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
-                .expect_err("must reject — schema fields reordered");
+        let err = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
+            .expect_err("must reject — schema fields reordered");
         assert!(format!("{err}").contains("schema"));
     }
 
     #[test]
     fn rejects_extra_type_definitions() {
         let wallet = PrivateKeySigner::random();
-        let (mut typed, sig) =
-            sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), TEST_CHAIN_ID);
+        let (mut typed, sig) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_CREATE_WALLET,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         // Smuggle in an extra type the wallet UI might display alongside.
         typed["types"]["TotallyLegit"] = serde_json::json!([
             { "name": "spookyField", "type": "string" },
         ]);
-        let err =
-            verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
-                .expect_err("must reject — types must contain exactly EIP712Domain + primaryType");
+        let err = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
+            .expect_err("must reject — types must contain exactly EIP712Domain + primaryType");
         assert!(format!("{err}").contains("Unexpected type definitions"));
     }
 
@@ -785,9 +812,8 @@ mod tests {
         let stale = now_secs() - TIMESTAMP_SKEW_SECONDS - 1;
         let (typed, sig) =
             sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, stale, TEST_CHAIN_ID);
-        let err =
-            verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
-                .expect_err("must reject — issued_at outside skew window");
+        let err = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
+            .expect_err("must reject — issued_at outside skew window");
         assert!(format!("{err}").contains("timestamp"));
     }
 
@@ -797,9 +823,8 @@ mod tests {
         let future = now_secs() + TIMESTAMP_SKEW_SECONDS + 3600;
         let (typed, sig) =
             sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, future, TEST_CHAIN_ID);
-        let err =
-            verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
-                .expect_err("must reject — issued_at too far in future");
+        let err = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
+            .expect_err("must reject — issued_at too far in future");
         assert!(format!("{err}").contains("timestamp"));
     }
 
@@ -828,8 +853,9 @@ mod tests {
                 "issuedAt": i64::MIN.to_string(),
             }
         });
-        let err = verify_eip712_signature(&typed, "0x00", PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
-            .expect_err("must reject — issued_at is negative, not a valid uint256");
+        let err =
+            verify_eip712_signature(&typed, "0x00", PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
+                .expect_err("must reject — issued_at is negative, not a valid uint256");
         assert!(format!("{err}").contains("issuedAt"));
     }
 
@@ -859,8 +885,9 @@ mod tests {
                 "issuedAt": huge,
             }
         });
-        let err = verify_eip712_signature(&typed, "0x00", PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
-            .expect_err("must reject — issuedAt out of i64 range");
+        let err =
+            verify_eip712_signature(&typed, "0x00", PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
+                .expect_err("must reject — issuedAt out of i64 range");
         assert!(format!("{err}").contains("out of range"));
     }
 
@@ -889,8 +916,9 @@ mod tests {
                 "issuedAt": now_secs().to_string(),
             }
         });
-        let err = verify_eip712_signature(&typed, "0x00", PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
-            .expect_err("must reject — field def has an extra key");
+        let err =
+            verify_eip712_signature(&typed, "0x00", PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
+                .expect_err("must reject — field def has an extra key");
         assert!(
             format!("{err}").contains("label") || format!("{err}").contains("unknown field"),
             "unexpected error: {err}",
@@ -900,12 +928,15 @@ mod tests {
     #[test]
     fn rejects_extra_key_in_domain() {
         let wallet = PrivateKeySigner::random();
-        let (mut typed, sig) =
-            sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), TEST_CHAIN_ID);
+        let (mut typed, sig) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_CREATE_WALLET,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         typed["domain"]["displayName"] = serde_json::json!("Approve transfer");
-        let err =
-            verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
-                .expect_err("must reject — unknown domain key");
+        let err = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
+            .expect_err("must reject — unknown domain key");
         assert!(
             format!("{err}").contains("displayName") || format!("{err}").contains("unknown field"),
             "unexpected error: {err}",
@@ -915,8 +946,12 @@ mod tests {
     #[test]
     fn accepts_stringified_typed_data() {
         let wallet = PrivateKeySigner::random();
-        let (json, sig) =
-            sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), TEST_CHAIN_ID);
+        let (json, sig) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_CREATE_WALLET,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         let stringified = serde_json::Value::String(serde_json::to_string(&json).unwrap());
         let recovered = verify_eip712_signature(
             &stringified,
@@ -975,11 +1010,19 @@ mod tests {
     #[test]
     fn rejects_bad_signature_hex() {
         let wallet = PrivateKeySigner::random();
-        let (typed, _) =
-            sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), TEST_CHAIN_ID);
-        let err =
-            verify_eip712_signature(&typed, "0xnothex", PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
-                .expect_err("must reject — bad signature hex");
+        let (typed, _) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_CREATE_WALLET,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
+        let err = verify_eip712_signature(
+            &typed,
+            "0xnothex",
+            PRIMARY_TYPE_CREATE_WALLET,
+            TEST_CHAIN_ID,
+        )
+        .expect_err("must reject — bad signature hex");
         assert!(format!("{err}").contains("signature") || format!("{err}").contains("Signature"));
     }
 
@@ -1018,20 +1061,24 @@ mod tests {
             }
         });
         typed["domain"]["name"] = serde_json::Value::String("x".repeat(MAX_TYPED_DATA_LEN + 1));
-        let err = verify_eip712_signature(&typed, "0x00", PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
-            .expect_err("must reject — typed_data exceeds size cap");
+        let err =
+            verify_eip712_signature(&typed, "0x00", PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
+                .expect_err("must reject — typed_data exceeds size cap");
         assert!(format!("{err}").contains("too large"));
     }
 
     #[test]
     fn rejects_extra_message_fields() {
         let wallet = PrivateKeySigner::random();
-        let (mut typed, sig) =
-            sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), TEST_CHAIN_ID);
+        let (mut typed, sig) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_CREATE_WALLET,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         typed["message"]["decoy"] = serde_json::json!("Authorize $10 subscription");
-        let err =
-            verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
-                .expect_err("must reject — message must contain only address + issuedAt");
+        let err = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET, TEST_CHAIN_ID)
+            .expect_err("must reject — message must contain only address + issuedAt");
         assert!(format!("{err}").contains("unexpected fields"));
     }
 }
