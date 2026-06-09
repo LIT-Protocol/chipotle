@@ -38,6 +38,14 @@ export interface TestWcWallet {
   address: Address;
   pair(uri: string): Promise<void>;
   disconnectAll(): Promise<void>;
+  /**
+   * Every `session_request` method this wallet was actually asked to handle, in
+   * order. Lets a test prove a signing request reached the WALLET rather than
+   * being misrouted to the rpcMap HTTP node — critical because the local e2e
+   * fallback RPC is Anvil, which would happily sign eth_signTypedData_v4 with
+   * its unlocked deterministic accounts and mask a routing regression.
+   */
+  readonly handledMethods: string[];
 }
 
 export interface CreateTestWcWalletOpts {
@@ -119,9 +127,15 @@ export async function createTestWcWallet(
     await walletkit.approveSession({ id, namespaces: approvedNamespaces });
   });
 
+  const handledMethods: string[] = [];
+
   walletkit.on('session_request', async ({ topic, params, id }) => {
     const { request } = params;
     let result: unknown;
+    // Record the method BEFORE dispatch: a request that reaches this handler
+    // was routed to the wallet (not the rpcMap HTTP node), which is exactly
+    // what the routing regression test needs to assert.
+    handledMethods.push(request.method);
 
     try {
       switch (request.method) {
@@ -179,6 +193,7 @@ export async function createTestWcWallet(
   return {
     walletkit,
     address: account.address,
+    handledMethods,
     async pair(uri: string) {
       await walletkit.pair({ uri });
     },

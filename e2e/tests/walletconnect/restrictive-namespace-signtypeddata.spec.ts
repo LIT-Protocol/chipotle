@@ -59,6 +59,13 @@ test.describe('ChainSecured typed-data signing over a restrictive WC wallet', ()
     await expect(banner).toBeVisible({ timeout: 90_000 });
     await expect(banner).toContainText(/0x[0-9a-fA-F]{40}/);
 
+    // The banner alone is NOT sufficient proof: the e2e fallback RPC is Anvil,
+    // which signs eth_signTypedData_v4 with its unlocked deterministic accounts.
+    // A misrouted signature would still come back valid and the banner would
+    // still render — masking the routing bug. Assert the WALLET itself handled
+    // the v4 request, which only happens when it's in the approved namespace.
+    expect(restrictiveWallet.handledMethods).toContain('eth_signTypedData_v4');
+
     await dashboardPage.expectLoggedIn();
   });
 });

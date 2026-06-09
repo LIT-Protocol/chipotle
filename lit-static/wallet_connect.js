@@ -225,11 +225,14 @@ async function _connectWalletConnect({ chainId, rpcUrl }) {
       // are required; `eth_signTypedData_v4` is merely *optional*, and wallets
       // that don't echo optional methods back into the approved namespace leave
       // it unrouted — so it gets sent to the public RPC, which has no keys and
-      // returns `-32601 Method not found`. Requiring the typed-data methods
-      // forces them into the namespace so they route to the wallet. ChainSecured
+      // returns `-32601 Method not found`. Requiring the typed-data method
+      // forces it into the namespace so it routes to the wallet. ChainSecured
       // flows can't work without EIP-712 v4 anyway, so failing the connection
       // up front (vs. mid-sign) is the correct behavior for a wallet that lacks it.
-      methods: ['eth_sendTransaction', 'personal_sign', 'eth_signTypedData', 'eth_signTypedData_v4'],
+      // Only v4 is required — the app signs exclusively via ethers'
+      // `signer.signTypedData()` (→ eth_signTypedData_v4). Requiring the legacy
+      // unversioned `eth_signTypedData` would needlessly reject v4-only wallets.
+      methods: ['eth_sendTransaction', 'personal_sign', 'eth_signTypedData_v4'],
       showQrModal: true,
     });
     // Re-emit the WC SDK's `display_uri` event as a DOM event so e2e tests can
