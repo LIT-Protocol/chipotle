@@ -17,7 +17,6 @@ rocket-helper = ["tokio", "tokio-util", "async-compression", "bytes"]
 [dependencies]
 ahash = "0.8.12"
 arc-swap = { workspace = true, optional = true }
-async-std.workspace = true
 async-trait.workspace = true
 async-compression = { version = "0.4", features = ["gzip", "tokio"], optional = true }
 bytes = { workspace = true, optional = true }
@@ -34,7 +33,7 @@ once_cell.workspace = true
 openssl = { version = "0.10.71" }
 opentelemetry.workspace = true
 opentelemetry_sdk.workspace = true
-reqwest = { workspace = true, optional = true }
+reqwest = { workspace = true, optional = true, features = ["json"] }
 rocket = { version = "0.5", features = ["tls", "json"], optional = true }
 sd-notify = { version = "0.4" }
 scc.workspace = true

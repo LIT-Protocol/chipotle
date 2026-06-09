@@ -56,6 +56,49 @@ yanked = "warn"
 #   Also removed three stale entries now advisory-not-detected in all six CI
 #   workspaces: RUSTSEC-2024-0388 (derivative), RUSTSEC-2025-0009 (aes),
 #   RUSTSEC-2025-0010 (ring <0.17).
+# - 2026-06-08: "Tier 2" in-house fixes that removed four more entries:
+#   * lit-actions/ext dropped the `atty` dep for std::io::IsTerminal ->
+#     cleared RUSTSEC-2021-0145 and RUSTSEC-2024-0375 (atty was only used
+#     there).
+#   * lit-actions test dep wiremock 0.5 -> 0.6 dropped the old
+#     instant/http-types/rand 0.7.3 chain -> cleared RUSTSEC-2024-0384
+#     (instant) and RUSTSEC-2026-0174 (http-types).
+#   * lit-core-derive was reworked off the abandoned proc-macro-error onto
+#     plain syn::Error/compile_error!. RUSTSEC-2024-0370 still fires, but now
+#     only via multihash-derive 0.8.1 (LIT rust-ipfs-api fork's multihash
+#     0.17 chain in lit-core) — reason updated, entry kept.
+# - 2026-06-08: migrated lit-core (utils/cache.rs, utils/ipfs.rs) and
+#   lit-api-core (http/tls/certs.rs) off the discontinued async-std onto
+#   tokio (tokio::fs / tokio::io / tokio::time, fs4's "tokio" feature, and
+#   futures::StreamExt for the IPFS stream). async-std is gone from every
+#   workspace graph -> removed RUSTSEC-2025-0052.
+# - 2026-06-09: dropped lit-core's `pinata` feature and the pinata-sdk 1.1.0
+#   dependency (its only API, Config::pinata_client(), was never called and
+#   the feature was enabled nowhere). pinata-sdk was the sole consumer of the
+#   abandoned `failure` crate -> removed RUSTSEC-2019-0036 and
+#   RUSTSEC-2020-0036.
+# - 2026-06-09: lit-actions now consumes deno from crates.io (deno_core
+#   =0.401.0 / deno_runtime =0.256.0), not the LIT deno_core fork. The fork is
+#   referenced in NO lockfile in this repo, so removed the dead allow-git entry
+#   "https://github.com/Lit-Protocol/deno_core" from [sources] below.
+#   Investigated whether bumping deno to the latest published patch
+#   (deno_core 0.403.0 / deno_runtime 0.258.0) clears the deno-chain advisories
+#   (2026-0009 time, 2026-0097 rand, 2026-0118/0119 hickory, 2025-0141 bincode,
+#   2026-0049/0098/0099/0104 rustls-webpki). It does NOT: the latest deno still
+#   hard-pins every vulnerable version — rand =0.8.5 (deno_crypto/deno_kv),
+#   rustls-webpki ^0.102 via rustls =0.23.40 (deno_tls; ^0.102 excludes the
+#   fixed 0.103 line), hickory ^0.25.2 (no non-beta fix exists for 0.118),
+#   bincode 1.x (deno_kv; no fix outside the 2.x rewrite), and deno_ast =0.53.2
+#   still drags the swc/serde chain that breaks when time goes >=0.3.47. These
+#   eight advisory entries therefore cannot be removed by a deno bump and stay
+#   until deno upstream bumps its own deps.
+# - 2026-06-09: made `multiaddr` optional (default-off `with-multiaddr` feature)
+#   in the LIT rust-ipfs-api fork. lit-core builds its IPFS client via
+#   from_str(uri) and never uses the multiaddr constructors, so it no longer
+#   pulls multiaddr -> multihash 0.17 -> {core2, multihash-derive ->
+#   proc-macro-error}. Cleared RUSTSEC-2026-0105 (core2) and RUSTSEC-2024-0370
+#   (proc-macro-error) -> both removed. (Bumping multiaddr to 0.18 would not
+#   have sufficed: multihash 0.19 still requires the yanked core2 0.4.0.)
 #
 # Suggested triage order: vulnerabilities > unsound > unmaintained.
 ignore = [
@@ -70,21 +113,12 @@ ignore = [
     { id = "RUSTSEC-2026-0119", reason = "hickory DNS O(n^2) name compression — pinned by deno_runtime chain" },
 
     # ── unsound ───────────────────────────────────────────────────────────────
-    { id = "RUSTSEC-2019-0036", reason = "failure type confusion — transitive; pre-existing" },
-    { id = "RUSTSEC-2021-0145", reason = "atty unaligned read — transitive; pre-existing" },
     { id = "RUSTSEC-2026-0097", reason = "rand custom logger unsound — still present via rand 0.8.5 pinned in lit-actions and Alloy's rand in generator/payments; cleared in lit-api-server after rand 0.8.5->0.8.6 / 0.9.2->0.9.4" },
-    { id = "RUSTSEC-2026-0174", reason = "http-types ASCII invariant notice — transitive via wiremock test dependency; no safe upgrade available" },
 
     # ── unmaintained ──────────────────────────────────────────────────────────
-    { id = "RUSTSEC-2020-0036", reason = "failure deprecated — transitive; pre-existing" },
-    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained — pre-existing" },
-    { id = "RUSTSEC-2024-0375", reason = "atty unmaintained — pre-existing" },
-    { id = "RUSTSEC-2024-0384", reason = "instant unmaintained — pre-existing" },
     { id = "RUSTSEC-2024-0436", reason = "paste unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0052", reason = "async-std discontinued — pre-existing" },
     { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained — pre-existing" },
     { id = "RUSTSEC-2025-0141", reason = "bincode unmaintained — pre-existing" },
-    { id = "RUSTSEC-2026-0105", reason = "core2 unmaintained, all versions yanked — pre-existing" },
     { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 unmaintained — transitive via alloy-sol-macro; no safe upgrade available" },
 ]
 
@@ -96,7 +130,6 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
     "https://github.com/LIT-Protocol/bulletproofs",
-    "https://github.com/Lit-Protocol/deno_core",
     "https://github.com/LIT-Protocol/env_logger",
     "https://github.com/LIT-Protocol/rust-ipfs-api",
     "https://github.com/LIT-Protocol/zerossl",

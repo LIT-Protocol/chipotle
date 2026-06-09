@@ -1139,6 +1139,28 @@ async fn pool_concurrent_exhaustion() {
 /// runs an empty `nop` action, and returns. Used so concurrent tests
 /// don't share a single `TestClient` (which is sequential by design).
 async fn raw_execute_no_op(socket_path: &std::path::Path) -> Result<()> {
+    // Under heavy runner contention the server thread can be starved long
+    // enough that establishing a fresh connection trips the 1s
+    // `connect_timeout` (or the gRPC handshake races server startup),
+    // surfacing as a "transport error". With 20 simultaneous dials this is
+    // just a transient startup race, so retry the connect + handshake
+    // briefly instead of failing the test — mirrors the retry loop in
+    // `TestClient::execute_js`. Only the connection setup is retried; a
+    // real execution failure is reported immediately.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match raw_execute_no_op_once(socket_path).await {
+            Ok(()) => return Ok(()),
+            Err(_) if std::time::Instant::now() < deadline => {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// A single connect + handshake + execute attempt for [`raw_execute_no_op`].
+async fn raw_execute_no_op_once(socket_path: &std::path::Path) -> Result<()> {
     use lit_actions_server::proto::execute_js_response::Union as UnionResp;
 
     let (outbound_tx, outbound_rx) = flume::bounded::<ExecuteJsRequest>(0);
