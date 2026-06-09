@@ -1,13 +1,10 @@
-use proc_macro::TokenStream;
-use proc_macro_error::ResultExt;
-use proc_macro_error::{abort, abort_call_site};
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Span, TokenStream as TokenStream2};
 use quote::{ToTokens, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::{self, Attribute, Data, DeriveInput, Expr, Ident, LitStr, Token, parenthesized};
 
-pub(crate) fn derive_error_code(input: &DeriveInput) -> TokenStream {
+pub(crate) fn derive_error_code(input: &DeriveInput) -> syn::Result<TokenStream2> {
     let name = input.ident.clone();
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
 
@@ -28,7 +25,7 @@ pub(crate) fn derive_error_code(input: &DeriveInput) -> TokenStream {
                     #name::#variant_name => Cow::from(#variant_name_str),
                 });
 
-                for attr in CodeAttr::parse_all(&variant.attrs).iter() {
+                for attr in CodeAttr::parse_all(&variant.attrs)?.iter() {
                     if let Some(magic) = attr.magic.as_ref()
                         && let Some(val) = attr.value.as_ref()
                     {
@@ -83,9 +80,9 @@ pub(crate) fn derive_error_code(input: &DeriveInput) -> TokenStream {
                 }
             };
 
-            TokenStream::from(modified)
+            Ok(modified)
         }
-        _ => abort_call_site!("`#[derive(ErrorCode)]` only supports enums"),
+        _ => Err(syn::Error::new(Span::call_site(), "`#[derive(ErrorCode)]` only supports enums")),
     }
 }
 
@@ -98,24 +95,20 @@ pub struct CodeAttr {
 
 // Copied code, could be vastly simplified.
 impl CodeAttr {
-    pub fn parse_all(all_attrs: &[Attribute]) -> Vec<Self> {
-        all_attrs
-            .iter()
-            .filter_map(|attr| {
-                let valid = if attr.path.is_ident("code") { Some(true) } else { None };
-                valid.map(|v| (v, attr))
-            })
-            .flat_map(|(v, attr)| {
-                attr.parse_args_with(Punctuated::<CodeAttr, Token![,]>::parse_terminated)
-                    .unwrap_or_abort()
-                    .into_iter()
-                    .map(move |mut a| {
-                        a.valid = v;
-                        a
-                    })
-            })
-            .filter(|a| a.valid)
-            .collect()
+    pub fn parse_all(all_attrs: &[Attribute]) -> syn::Result<Vec<Self>> {
+        let mut parsed = Vec::new();
+        for attr in all_attrs.iter() {
+            if !attr.path.is_ident("code") {
+                continue;
+            }
+            let attrs =
+                attr.parse_args_with(Punctuated::<CodeAttr, Token![,]>::parse_terminated)?;
+            for mut a in attrs {
+                a.valid = true;
+                parsed.push(a);
+            }
+        }
+        Ok(parsed)
     }
 }
 
@@ -140,10 +133,11 @@ impl Parse for CodeAttr {
                 match input.parse::<Expr>() {
                     Ok(expr) => Some(AttrValue::Expr(expr)),
 
-                    Err(_) => abort! {
-                        assign_token,
-                        "expected `string literal` or `expression` after `=`"
-                    },
+                    Err(_) => {
+                        return Err(syn::Error::new_spanned(
+                            assign_token, "expected `string literal` or `expression` after `=`",
+                        ));
+                    }
                 }
             }
         } else if input.peek(syn::token::Paren) {
