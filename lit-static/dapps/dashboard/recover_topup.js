@@ -29,6 +29,7 @@ let _elements = null;
 let _paymentElement = null;
 let _paymentIntentId = null;
 let _clientSecret = null;
+let _paymentMethodId = null;
 
 (async function main() {
   const token = new URLSearchParams(location.search).get('token');
@@ -40,6 +41,7 @@ let _clientSecret = null;
     const intent = await fetchResume(token);
     _paymentIntentId = intent.payment_intent_id;
     _clientSecret = intent.client_secret;
+    _paymentMethodId = intent.payment_method_id || null;
     // eslint-disable-next-line no-undef
     _stripe = Stripe(intent.publishable_key);
     // SCA recovery is a 3DS challenge for an ALREADY-CREATED PI bound
@@ -65,12 +67,13 @@ confirmBtn.addEventListener('click', async () => {
     // For off-session charges on SCA-required cards, Stripe can't do
     // 3DS without the user present, so the PI is created and IMMEDIATELY
     // moved to `requires_payment_method` with last_payment_error =
-    // authentication_required (not `requires_action`). That means
-    // handleNextAction errors ("PI not in requires_action").
-    // confirmCardPayment re-confirms the PI's existing saved card
-    // on-session, which triggers Stripe.js's 3DS challenge UI and
-    // moves the PI through `requires_action` → `succeeded`.
-    const result = await _stripe.confirmCardPayment(_clientSecret);
+    // authentication_required (not `requires_action`). The
+    // payment_method is also detached. confirmCardPayment(secret, {pm})
+    // re-attaches the saved card on-session, which triggers Stripe.js's
+    // 3DS challenge UI and moves the PI through requires_action → succeeded.
+    const result = await _stripe.confirmCardPayment(_clientSecret, {
+      payment_method: _paymentMethodId,
+    });
     if (result.error) {
       setStatus(result.error.message || 'Authentication failed.', 'error');
       confirmBtn.disabled = false;

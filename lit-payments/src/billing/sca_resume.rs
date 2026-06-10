@@ -40,6 +40,12 @@ pub struct ResumeResponse {
     pub payment_intent_id: String,
     pub client_secret: String,
     pub publishable_key: String,
+    /// Saved PaymentMethod id (e.g. `pm_xxx`). Required by the dashboard's
+    /// `stripe.confirmCardPayment(client_secret, {payment_method})`
+    /// call when re-confirming an off-session PI whose `payment_method`
+    /// was detached by Stripe after `authentication_required` (which is
+    /// exactly the case the recovery flow exists to handle).
+    pub payment_method_id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -135,10 +141,20 @@ pub async fn get_auto_topup_resume(
         );
     }
 
+    // Fetch the customer's saved pm_id from our config — Stripe-side it
+    // got detached when the off-session SCA failed, so the frontend
+    // can't rely on `client_secret` alone for re-confirmation.
+    let payment_method_id = db::get_by_customer_id(pool.inner(), &customer_id)
+        .await
+        .ok()
+        .flatten()
+        .and_then(|row| row.payment_method_id);
+
     Ok(Json(ResumeResponse {
         payment_intent_id: pi_id,
         client_secret,
         publishable_key: cfg.stripe_publishable_key.clone(),
+        payment_method_id,
     }))
 }
 
