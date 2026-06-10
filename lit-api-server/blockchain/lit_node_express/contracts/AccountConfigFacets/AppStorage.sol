@@ -119,6 +119,13 @@ library AppStorage {
         EnumerableSet.StringSet nodeConfigurationKeys;
         mapping(string => string) nodeConfigurationValues;
         uint256 serverTriggerValue;
+        // Lambda-parity: per-usage-key flag gating off-hot-path spending-rule
+        // enforcement (rolling spend cap, rate/concurrency limits, origin
+        // allowlist) stored off-chain. False for every existing key, so the
+        // gateway does zero extra work unless it is explicitly set. Appended at
+        // the end of root storage so the existing layout is untouched.
+        // See plans/chipotle-lambda-parity.md.
+        mapping(uint256 => bool) usageKeyHasSpendingRules;
     }
 
     function getStorage()
