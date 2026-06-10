@@ -366,6 +366,7 @@ fn build_rocket(
         .manage(chain_config)
         .manage(cpu_monitor)
         .manage(stripe_state)
+        .manage(core::spending_rules::SpendingRulesState::from_env())
         .manage(core::v1::health::LitActionsSocketPath(
             std::path::PathBuf::from(core::v1::health::LIT_ACTIONS_SOCKET),
         ));

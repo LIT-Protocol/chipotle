@@ -676,6 +676,67 @@ pub async fn can_execute_action(api_key: &str, cid_hash: U256) -> Result<bool> {
     Ok(can_execute)
 }
 
+/// Scoped binding for the spending-rules view added in lambda-parity PR 3.
+/// Defined here (not via the giant generated binding) so it tracks the workspace
+/// alloy version directly; fold into the generated binding once it is
+/// regenerated on the canonical toolchain. See `plans/chipotle-lambda-parity.md`.
+mod spending_view {
+    alloy::sol! {
+        #[sol(rpc)]
+        contract SpendingView {
+            function canExecuteActionWithSpendingRules(
+                uint256 apiKeyHash,
+                uint256 cidHash
+            ) external view returns (bool canExecute, bool hasSpendingRules);
+        }
+    }
+}
+
+async fn fetch_execute_and_spending(
+    account_api_key_hash: U256,
+    cid_hash_eth: U256,
+) -> Result<(bool, bool)> {
+    let (client, address) = crate::accounts::signable_contract::read_only_client_and_address()?;
+    let contract = spending_view::SpendingView::new(address, client);
+    let result = contract
+        .canExecuteActionWithSpendingRules(account_api_key_hash, cid_hash_eth)
+        .call()
+        .await?;
+    Ok((result.canExecute, result.hasSpendingRules))
+}
+
+/// Combined hot-path check: `(can_execute, has_spending_rules)` in a single RPC.
+///
+/// `has_spending_rules` is the zero-latency gate for per-key Lambda-parity
+/// controls — false for every key that never set it, so the common path does no
+/// extra work. See `plans/chipotle-lambda-parity.md`.
+#[instrument(
+    name = "accounts::can_execute_action_with_spending_rules",
+    level = "debug",
+    skip_all,
+    err
+)]
+pub async fn can_execute_action_with_spending_rules(
+    api_key: &str,
+    cid_hash: U256,
+) -> Result<(bool, bool)> {
+    let account_api_key_hash = api_key_hash(api_key);
+    let cid_hash_eth = cid_hash;
+
+    if let Some(cache) = blockchain_cache::get() {
+        let key = cache.execute_and_spending_key(account_api_key_hash, cid_hash);
+        return cache
+            .execute_and_spending_cache()
+            .try_get_with(key, async move {
+                fetch_execute_and_spending(account_api_key_hash, cid_hash_eth).await
+            })
+            .await
+            .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+    }
+
+    fetch_execute_and_spending(account_api_key_hash, cid_hash_eth).await
+}
+
 #[instrument(
     name = "accounts::can_use_wallet_in_action",
     level = "debug",

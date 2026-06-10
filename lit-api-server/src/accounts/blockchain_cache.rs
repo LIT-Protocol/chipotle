@@ -35,6 +35,8 @@ pub struct BlockchainCache {
     use_wallet: Cache<String, bool>,
     /// `can_execute_action_and_use_wallet` results.
     execute_and_wallet: Cache<String, (bool, bool)>,
+    /// `can_execute_action_with_spending_rules` results: (canExecute, hasSpendingRules).
+    execute_and_spending: Cache<String, (bool, bool)>,
     /// `get_wallet_derivation` results.
     wallet_derivation: Cache<String, U256>,
     /// Per-account generation counter keyed by the string representation of
@@ -62,6 +64,11 @@ impl BlockchainCache {
             .time_to_idle(ttl)
             .time_to_live(ttl)
             .build();
+        let execute_and_spending = Cache::builder()
+            .max_capacity(MAX_CAPACITY)
+            .time_to_idle(ttl)
+            .time_to_live(ttl)
+            .build();
         let wallet_derivation = Cache::builder()
             .max_capacity(MAX_CAPACITY)
             .time_to_idle(ttl)
@@ -71,6 +78,7 @@ impl BlockchainCache {
             execute_action,
             use_wallet,
             execute_and_wallet,
+            execute_and_spending,
             wallet_derivation,
             generations: RwLock::new(HashMap::new()),
         }
@@ -112,6 +120,13 @@ impl BlockchainCache {
         format!("{h}:g{g}:ew:{cid_hash}:{wallet:#x}")
     }
 
+    /// Build a cache key for `can_execute_action_with_spending_rules`.
+    pub fn execute_and_spending_key(&self, api_key_hash: U256, cid_hash: U256) -> String {
+        let h = api_key_hash.to_string();
+        let g = self.generation(&h);
+        format!("{h}:g{g}:es:{cid_hash}")
+    }
+
     /// Build a cache key for `get_wallet_derivation`.
     pub fn wallet_derivation_key(&self, api_key_hash: U256, wallet: Address) -> String {
         let h = api_key_hash.to_string();
@@ -132,6 +147,11 @@ impl BlockchainCache {
     /// Reference to the `can_execute_action_and_use_wallet` cache.
     pub fn execute_and_wallet_cache(&self) -> &Cache<String, (bool, bool)> {
         &self.execute_and_wallet
+    }
+
+    /// Reference to the `can_execute_action_with_spending_rules` cache.
+    pub fn execute_and_spending_cache(&self) -> &Cache<String, (bool, bool)> {
+        &self.execute_and_spending
     }
 
     /// Reference to the `get_wallet_derivation` cache.
