@@ -184,25 +184,65 @@ async fn process_event(
     let pre_check = db::get_by_customer_id(pool, customer_id)
         .await
         .context("db read auto_topup_config (pre-mutex)")?;
-    // Stale pending recovery: if the recovery_token has expired (>24h
-    // since SCA was staged) we presume the user never completed the
-    // bank challenge. Clear pending state so this customer.updated can
-    // fire a fresh SCA cycle — otherwise auto-topup is permanently
-    // frozen with no escape hatch (bank 3DS timeout, lost email, etc).
-    // Codex P1 (Phase 7 follow-up): without this, the
-    // pending_action_pi_id guard becomes a forever-pause.
+    // Stale pending recovery — two ways to land here:
+    //
+    // 1. **Time-expired**: `recovery_token_expires_at` is in the past
+    //    (>24h since SCA was staged). User never opened the email or
+    //    abandoned mid-flow.
+    // 2. **PI moved to a non-requires_action state at Stripe**: bank
+    //    rejected the 3DS, user canceled, card expired, Stripe canceled
+    //    after their internal window, or an admin canceled via the
+    //    Stripe dashboard. Our DB still thinks the PI is pending, but
+    //    Stripe says otherwise — `handleNextAction` would error.
+    //
+    // Either case: clear our pending state so this `customer.updated`
+    // can fire a fresh SCA cycle. Without this escape hatch, the
+    // pending_action_pi_id guard becomes a permanent freeze with no
+    // operator-free recovery path. Costs one extra Stripe call per
+    // webhook for customers that actually have pending state set —
+    // bounded and only when we'd otherwise short-circuit anyway.
     if let Some(c) = &pre_check
         && c.enabled
-        && c.pending_action_pi_id.is_some()
-        && let Some(expires) = c.recovery_token_expires_at
-        && expires < OffsetDateTime::now_utc()
+        && let Some(pi_id) = c.pending_action_pi_id.as_deref()
     {
-        tracing::warn!(
-            customer_id,
-            pending_pi = ?c.pending_action_pi_id,
-            "pending SCA recovery expired (>24h); clearing pending state and trying fresh"
-        );
-        let _ = db::clear_pending_action_force(pool, customer_id).await;
+        let token_expired = c
+            .recovery_token_expires_at
+            .map(|exp| exp < OffsetDateTime::now_utc())
+            .unwrap_or(false);
+        let pi_not_pending = match stripe.get(&format!("payment_intents/{pi_id}"), &[]).await {
+            Ok(resp) => {
+                let status = resp
+                    .body
+                    .get("status")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                // requires_action = still legitimately pending; any
+                // other status means the PI has moved on at Stripe.
+                !status.is_empty() && status != "requires_action"
+            }
+            Err(e) => {
+                // If we can't reach Stripe, be conservative and don't
+                // clear; the next tick will retry. Don't escalate to
+                // a transient error — the webhook should still 200 so
+                // Stripe doesn't pile retries.
+                tracing::warn!(
+                    customer_id,
+                    pi_id,
+                    "could not fetch PI status to evaluate stale pending; leaving as-is: {e}"
+                );
+                false
+            }
+        };
+        if token_expired || pi_not_pending {
+            tracing::warn!(
+                customer_id,
+                pi_id,
+                token_expired,
+                pi_not_pending,
+                "pending SCA recovery stale; clearing pending state and trying fresh"
+            );
+            let _ = db::clear_pending_action_force(pool, customer_id).await;
+        }
     }
     // Re-read after possible clear above.
     let pre_check = db::get_by_customer_id(pool, customer_id)
