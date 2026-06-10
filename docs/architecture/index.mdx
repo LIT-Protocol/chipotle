@@ -18,17 +18,11 @@ All authorization state lives on-chain in a set of smart contracts: an Account c
 **Lit Actions (IPFS)**
 Lit Actions are immutable JavaScript programs stored on IPFS and referenced by content ID (CID). They are not owned by anyone — they are public, reusable, and content-addressed, similar to npm packages. The TEE fetches the action by CID at execution time and runs it inside a sandboxed JS environment that has access to the derived key material.
 
-## Self-Sovereign vs SaaS
+## API mode vs ChainSecured mode
 
-There are no modes. Whether you operate in a self-sovereign or SaaS posture is an emergent property of who owns the Account contract and what scopes your API keys carry.
+Who owns the account is a configuration choice, not a fork in the code. In **API mode**, a Lit-managed credential owns the account and relays your admin writes — the fastest way to start. In **ChainSecured mode**, a wallet you control (an EOA or Safe) owns the account on-chain and signs every change itself — fully self-custodied, with an on-chain audit trail. Both run the same contracts and the same Lit Actions; only account ownership and how writes are signed differ.
 
-| | SaaS | Self-Sovereign |
-|---|---|---|
-| **Account Owner** | TEE-derived wallet (Stytch auth) | 3-of-5 SAFE multisig on Base |
-| **API Key Scopes** | All scopes — full access via HTTP | Purpose-built keys with minimal scopes |
-| **Structural Changes** | Via TEE relay (Stytch-authenticated) | SAFE vote → direct on-chain tx |
-| **Key Recovery** | Stytch re-authentication | SAFE signers |
-| **Leaked Key Blast Radius** | High | Minimal — scoped to specific groups |
+See [API Mode vs ChainSecured Mode](/management/account_modes) for the side-by-side and the migration path.
 
 ## Further Reading
 

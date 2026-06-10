@@ -11,7 +11,7 @@ We call this **Chain Secured**.
 
 Authorization isn't a flag in someone's database. It's on-chain state that you own:
 
-- **Account** — an address on Base that owns everything. It can be an EOA, a TEE-derived wallet, or a SAFE multisig.
+- **Account** — an address on Base that owns everything: a wallet you control (an EOA or Safe) in [ChainSecured mode](/management/account_modes), or a Lit-managed credential in API mode.
 - **API keys & scopes** — each key is registered on-chain with explicit, per-group scopes (`execute`, `group:addPkp`, and so on).
 - **PKPs & Groups** — a Group is the authorization policy: it binds the keys (PKPs) to the immutable Lit Actions (IPFS CIDs) allowed to use them.
 
