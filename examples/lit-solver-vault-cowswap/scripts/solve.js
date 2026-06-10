@@ -22,7 +22,11 @@ async function main() {
   }
 
   const order = JSON.parse(process.env.COW_ORDER);
-  const authDeadline = Math.floor(Date.now() / 1000) + 600;
+  const now = Math.floor(Date.now() / 1000);
+  const authDeadline = Math.min(now + 600, Number(order.validTo));
+  if (authDeadline <= now) {
+    throw new Error("COW_ORDER is expired; run `npm run order` to sign a fresh order");
+  }
 
   console.log("Requesting CoW settlement authorization from Lit...");
   const t0 = Date.now();
