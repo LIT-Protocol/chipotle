@@ -5,6 +5,8 @@ description: "How Lit Chipotle's three composable layers — TEE enclave, on-cha
 
 Lit Chipotle is built on three composable layers that each handle a distinct concern. Understanding the separation makes it easier to reason about security, auditability, and where your own code fits in.
 
+The throughline: **your keys' authority lives on-chain, and an attested TEE enforces it by reading the chain.** We call this [Chain Secured](/architecture/chain-secured) — on-chain authority, signing at the speed of an API call.
+
 ## The Three Layers
 
 **TEE Enclave (Phala / dstack)**
@@ -30,6 +32,7 @@ There are no modes. Whether you operate in a self-sovereign or SaaS posture is a
 
 ## Further Reading
 
+- [Chain Secured](/architecture/chain-secured) — why your keys' authority lives on-chain, and how an attested TEE enforces it by reading
 - [Verify the TEE in 30 seconds](/architecture/verification/quick-verify) — one-click Phala Trust Center report for the live API
 - [Auth Model & Permission Matrix](/architecture/authModel) — detailed entity boundaries, execution flow, and the full permission matrix
 - [System Diagram](/architecture/diagram) — entity relationships, on-chain vs TEE boundaries, and management paths
