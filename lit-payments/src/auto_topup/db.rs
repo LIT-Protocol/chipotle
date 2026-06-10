@@ -47,6 +47,8 @@ fn into_row(r: Row) -> AutoTopupConfigRow {
         recovery_token: r.12,
         recovery_token_expires_at: r.13,
         updated_at: r.14,
+        card_brand: None,
+        card_last4: None,
     }
 }
 
@@ -258,6 +260,31 @@ pub async fn clear_pending_action(pool: &PgPool, customer_id: &str, pi_id: &str)
     .bind(now)
     .bind(customer_id)
     .bind(pi_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+/// Unconditional pending-state clear, used when the webhook handler
+/// detects a stale (>24h) SCA recovery handoff. The expired handoff
+/// would otherwise permanently pause auto top-up for this customer —
+/// they could neither complete the original 3DS (token expired) nor
+/// trigger a fresh attempt (handler refuses while pending is set).
+/// This is the escape hatch.
+pub async fn clear_pending_action_force(pool: &PgPool, customer_id: &str) -> Result<()> {
+    let now = OffsetDateTime::now_utc();
+    sqlx::query(
+        "UPDATE auto_topup_config \
+            SET pending_action_pi_id = NULL, \
+                pending_action_at = NULL, \
+                recovery_token = NULL, \
+                recovery_token_expires_at = NULL, \
+                disabled_reason = NULL, \
+                updated_at = $1 \
+            WHERE customer_id = $2",
+    )
+    .bind(now)
+    .bind(customer_id)
     .execute(pool)
     .await?;
     Ok(())

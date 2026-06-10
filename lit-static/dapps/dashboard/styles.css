@@ -2195,6 +2195,18 @@ textarea.input.textarea-sm {
   align-items: center;
   cursor: pointer;
 }
+/* Bigger, clearer checkbox inside the form-row toggle labels. */
+.form-row-toggle-label input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: #4338ca;
+  cursor: pointer;
+}
+/* Visually mute a whole form row when its toggle is off. */
+.form-row.is-disabled-row > :not(.form-row-toggle-label) {
+  opacity: 0.45;
+  pointer-events: none;
+}
 .amount-input {
   position: relative;
   display: inline-flex;

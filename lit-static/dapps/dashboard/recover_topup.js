@@ -42,11 +42,16 @@ let _clientSecret = null;
     _clientSecret = intent.client_secret;
     // eslint-disable-next-line no-undef
     _stripe = Stripe(intent.publishable_key);
-    _elements = _stripe.elements({ clientSecret: _clientSecret });
-    _paymentElement = _elements.create('payment');
-    _paymentElement.mount('#recover-payment-element');
+    // SCA recovery is a 3DS challenge for an ALREADY-CREATED PI bound
+    // to the user's saved card. We do NOT need a Payment Element (no
+    // card entry — the card is already on the PI). `handleNextAction`
+    // is the minimal Stripe.js call that triggers the bank's 3DS UI
+    // for a pending PI and returns the new status.
     confirmBtn.disabled = false;
-    setStatus('Enter the verification details requested by your bank, then click Confirm.', 'info');
+    setStatus(
+      'Click Confirm to complete the bank verification for your saved card.',
+      'info',
+    );
   } catch (e) {
     setStatus(formatError(e), 'error');
   }
@@ -56,11 +61,8 @@ confirmBtn.addEventListener('click', async () => {
   confirmBtn.disabled = true;
   setStatus('Contacting your bank…', 'info');
   try {
-    const result = await _stripe.confirmPayment({
-      elements: _elements,
-      // No redirect_url: we want confirmCardPayment-style behaviour where
-      // the result comes back to this page rather than navigating away.
-      redirect: 'if_required',
+    const result = await _stripe.handleNextAction({
+      clientSecret: _clientSecret,
     });
     if (result.error) {
       setStatus(result.error.message || 'Authentication failed.', 'error');

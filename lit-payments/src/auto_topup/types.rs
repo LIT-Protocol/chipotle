@@ -31,6 +31,15 @@ pub struct AutoTopupConfigRow {
     pub recovery_token_expires_at: Option<OffsetDateTime>,
     #[serde(with = "time::serde::rfc3339")]
     pub updated_at: OffsetDateTime,
+
+    /// Card brand (e.g. "visa", "mastercard") — populated by the GET
+    /// handler from Stripe after looking up `payment_method_id`. Never
+    /// stored in our DB; the source of truth is Stripe.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_brand: Option<String>,
+    /// Last 4 digits of the saved card. Same lifecycle as `card_brand`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub card_last4: Option<String>,
 }
 
 /// Caller-supplied fields for the `PUT /billing/auto_topup_config` upsert.

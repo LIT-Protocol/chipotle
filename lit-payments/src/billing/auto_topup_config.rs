@@ -124,7 +124,7 @@ pub async fn get_auto_topup_config(
     resolver: &State<Arc<dyn AuthResolver>>,
 ) -> Result<Json<Option<AutoTopupConfigRow>>, (Status, Json<ErrorBody>)> {
     let (_wallet, customer_id) = resolve_caller(&auth, stripe.inner(), resolver.inner()).await?;
-    let row = db::get_by_customer_id(pool.inner(), &customer_id)
+    let mut row = db::get_by_customer_id(pool.inner(), &customer_id)
         .await
         .map_err(|e| {
             tracing::error!("auto_topup_config GET: db read failed: {e}");
@@ -134,7 +134,118 @@ pub async fn get_auto_topup_config(
                 "Could not read your auto top-up config; try again.",
             )
         })?;
+
+    // Enrich the response with card brand + last4 so the dashboard can
+    // render "Visa •••• 4242" instead of the raw `pm_xxx` id. Stripe is
+    // the source of truth — we never persist card metadata locally
+    // (PCI scope stays with Stripe). One Stripe call per GET; cheap
+    // and bounded because this only runs when the page actively asks.
+    if let Some(ref mut r) = row
+        && let Some(ref pm_id) = r.payment_method_id
+    {
+        match stripe
+            .inner()
+            .get(&format!("payment_methods/{pm_id}"), &[])
+            .await
+        {
+            Ok(resp) => {
+                r.card_brand = resp
+                    .body
+                    .pointer("/card/brand")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                r.card_last4 = resp
+                    .body
+                    .pointer("/card/last4")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+            }
+            Err(e) => {
+                tracing::warn!(
+                    payment_method_id = %pm_id,
+                    "auto_topup_config GET: card brand/last4 lookup failed (non-fatal): {e}"
+                );
+            }
+        }
+    }
+
     Ok(Json(row))
+}
+
+#[derive(Debug, Serialize)]
+pub struct PaymentMethodSummary {
+    pub payment_method_id: String,
+    pub card_brand: String,
+    pub card_last4: String,
+}
+
+/// `GET /billing/payment_method?pm_id=pm_xxx` — return brand + last4 for
+/// a payment method, IF it belongs to the caller's Stripe customer.
+/// Used right after the dashboard's "Add a card" flow so the modal can
+/// render "Visa •••• 4242" before the user commits the auto-topup row
+/// to the DB (i.e. before `GET /billing/auto_topup_config` knows about
+/// the new card). Cross-tenant guard reuses `verify_payment_method_owned`.
+#[get("/billing/payment_method?<pm_id>")]
+pub async fn get_payment_method(
+    auth: BillingAuth,
+    pm_id: &str,
+    stripe: &State<StripeClient>,
+    resolver: &State<Arc<dyn AuthResolver>>,
+) -> Result<Json<PaymentMethodSummary>, (Status, Json<ErrorBody>)> {
+    let (_wallet, customer_id) = resolve_caller(&auth, stripe.inner(), resolver.inner()).await?;
+    if pm_id.trim().is_empty() {
+        return Err(err(
+            Status::BadRequest,
+            "missing_pm_id",
+            "pm_id query parameter is required.",
+        ));
+    }
+    let owned = verify_payment_method_owned(stripe.inner(), &customer_id, pm_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("payment_method GET: ownership check failed: {e}");
+            err(
+                Status::ServiceUnavailable,
+                "stripe_lookup_failed",
+                "Could not verify the payment method; try again.",
+            )
+        })?;
+    if !owned {
+        return Err(err(
+            Status::BadRequest,
+            "payment_method_not_owned",
+            "That payment method does not belong to your account.",
+        ));
+    }
+    let resp = stripe
+        .inner()
+        .get(&format!("payment_methods/{pm_id}"), &[])
+        .await
+        .map_err(|e| {
+            tracing::error!("payment_method GET: stripe lookup failed: {e}");
+            err(
+                Status::ServiceUnavailable,
+                "stripe_lookup_failed",
+                "Could not retrieve card details; try again.",
+            )
+        })?;
+    let card_brand = resp
+        .body
+        .pointer("/card/brand")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let card_last4 = resp
+        .body
+        .pointer("/card/last4")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    Ok(Json(PaymentMethodSummary {
+        payment_method_id: pm_id.to_string(),
+        card_brand,
+        card_last4,
+    }))
 }
 
 /// Verify `payment_method_id` is attached to the caller's Stripe customer.
@@ -190,11 +301,13 @@ pub async fn put_auto_topup_config(
     if body.enabled {
         let threshold = body.threshold_cents.unwrap_or(0);
         let topup = body.topup_amount_cents.unwrap_or(0);
-        let cap = body.monthly_cap_cents.unwrap_or(0);
+        let cap_opt = body.monthly_cap_cents;
+        // Cap is optional: None = unlimited (still bounded per-charge by
+        // MAX_TOPUP_CENTS = $200). When Some, must be >= top-up amount.
+        let cap_bad = matches!(cap_opt, Some(c) if c < topup);
         if threshold <= 0
             || !(MIN_TOPUP_CENTS..=MAX_TOPUP_CENTS).contains(&topup)
-            || topup < threshold
-            || cap < topup
+            || cap_bad
         {
             return Err(err(
                 Status::BadRequest,
@@ -202,8 +315,7 @@ pub async fn put_auto_topup_config(
                 format!(
                     "Auto top-up requires threshold > 0, \
                      {MIN_TOPUP_CENTS} <= top-up amount <= {MAX_TOPUP_CENTS} cents, \
-                     top-up amount >= threshold (so a single charge brings balance back \
-                     above threshold), and monthly cap >= top-up amount."
+                     and (if set) monthly cap >= top-up amount."
                 ),
             ));
         }

@@ -171,7 +171,7 @@ function renderStatusBanner() {
     host.appendChild(makeBanner({
       tone: 'success',
       title: 'Auto recharge is on',
-      body: `When your balance drops below $${t}, we'll charge $${amt} to ${cardSuffix}, up to ~$${cap}/month.`,
+      body: `When your balance drops below $${t}, we'll charge $${amt} to ${cardSuffix}, up to $${cap}/month.`,
       ctaLabel: 'Modify',
       ctaAction: () => openAutoRechargeModal(),
     }));
@@ -217,10 +217,27 @@ function dollarsFromCents(cents) {
 
 function formatCardSuffix(pmId) {
   if (!pmId) return 'your saved card';
-  // We don't keep card metadata in our DB; pm_xxx is opaque here. The
-  // backend has the card; this UI surfaces only what it has. (The full
-  // last4 + brand could be fetched from Stripe in a future iteration.)
+  // Backend `GET /billing/auto_topup_config` enriches the row with
+  // `card_brand` + `card_last4` from Stripe, so prefer "Visa •••• 4242"
+  // when available; fall back to a friendly placeholder otherwise.
+  const brand = _config?.card_brand;
+  const last4 = _config?.card_last4;
+  if (brand && last4) return `${prettyBrand(brand)} •••• ${last4}`;
   return 'your saved card';
+}
+
+function prettyBrand(brand) {
+  if (!brand) return '';
+  const map = {
+    visa: 'Visa',
+    mastercard: 'Mastercard',
+    amex: 'Amex',
+    discover: 'Discover',
+    diners: 'Diners',
+    jcb: 'JCB',
+    unionpay: 'UnionPay',
+  };
+  return map[brand.toLowerCase()] || (brand[0].toUpperCase() + brand.slice(1));
 }
 
 // ─── Auto-recharge modal ────────────────────────────────────────────────────
@@ -316,7 +333,18 @@ function populateModalFromConfig() {
 function renderCardPicker(pmId) {
   const label = document.getElementById('auto-recharge-card-label');
   if (!label) return;
-  label.textContent = pmId ? `Card on file: ${pmId}` : 'No card saved yet';
+  // Prefer "Visa •••• 4242" using the brand+last4 the GET endpoint
+  // returns from Stripe. After a fresh save via Stripe Elements we
+  // don't yet have those fields (they'll arrive on the next page
+  // load / config refresh), so fall back to a generic "Card saved".
+  if (pmId) {
+    const brand = _config?.card_brand;
+    const last4 = _config?.card_last4;
+    label.textContent =
+      brand && last4 ? `${prettyBrand(brand)} •••• ${last4}` : 'Card saved';
+  } else {
+    label.textContent = 'No card saved yet';
+  }
   label.dataset.pmId = pmId || '';
 }
 
@@ -338,6 +366,10 @@ function syncCapToggleUI() {
   const on = !!document.getElementById('auto-recharge-cap-toggle')?.checked;
   const input = document.getElementById('auto-recharge-cap-amount');
   if (input) input.disabled = !on;
+  // Visually gray-out the whole cap row when off — the disabled input
+  // alone isn't a strong enough cue (people miss it).
+  const row = document.getElementById('auto-recharge-cap-toggle')?.closest('.form-row');
+  if (row) row.classList.toggle('is-disabled-row', !on);
 }
 
 function updateComputedAmount() {
@@ -382,7 +414,7 @@ async function handleSave() {
       );
       return;
     }
-    if (!capOn || cap < (topupCents / 100)) {
+    if (capOn && cap < (topupCents / 100)) {
       setModalStatus(
         'Monthly limit must be at least the recharge amount.',
         'error',
@@ -403,7 +435,9 @@ async function handleSave() {
         enabled: true,
         threshold_cents: Math.round(drops * 100),
         topup_amount_cents: Math.round((restore - drops) * 100),
-        monthly_cap_cents: Math.round(cap * 100),
+        // null = no monthly cap. Backend treats null as "unlimited"
+        // (still bounded by per-charge MAX_TOPUP_CENTS).
+        monthly_cap_cents: capOn ? Math.round(cap * 100) : null,
         payment_method_id: pmId,
         consent_version: 'v1',
       }
@@ -511,6 +545,24 @@ async function handleAddCardSave() {
       return;
     }
     _stagedPaymentMethodId = pmId;
+    // Fetch brand + last4 so the picker can render "Visa •••• 4242"
+    // right away instead of the generic "Card saved" placeholder. The
+    // GET endpoint is cheap (one Stripe call) and any failure falls
+    // through to the generic label — non-fatal.
+    try {
+      const base = getLitPaymentsBaseUrl();
+      const lookupRes = await fetch(
+        `${base}/billing/payment_method?pm_id=${encodeURIComponent(pmId)}`,
+        { headers: await authHeaders() },
+      );
+      if (lookupRes.ok) {
+        const j = await lookupRes.json();
+        // Stash on _config so renderCardPicker picks it up.
+        _config = _config || {};
+        _config.card_brand = j.card_brand;
+        _config.card_last4 = j.card_last4;
+      }
+    } catch (_) { /* non-fatal */ }
     closeAddCardModal();
     renderCardPicker(pmId);
     setModalStatus('Card saved — ready to enable auto recharge.', 'success');

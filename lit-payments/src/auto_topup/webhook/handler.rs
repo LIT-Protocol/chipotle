@@ -184,6 +184,30 @@ async fn process_event(
     let pre_check = db::get_by_customer_id(pool, customer_id)
         .await
         .context("db read auto_topup_config (pre-mutex)")?;
+    // Stale pending recovery: if the recovery_token has expired (>24h
+    // since SCA was staged) we presume the user never completed the
+    // bank challenge. Clear pending state so this customer.updated can
+    // fire a fresh SCA cycle — otherwise auto-topup is permanently
+    // frozen with no escape hatch (bank 3DS timeout, lost email, etc).
+    // Codex P1 (Phase 7 follow-up): without this, the
+    // pending_action_pi_id guard becomes a forever-pause.
+    if let Some(c) = &pre_check
+        && c.enabled
+        && c.pending_action_pi_id.is_some()
+        && let Some(expires) = c.recovery_token_expires_at
+        && expires < OffsetDateTime::now_utc()
+    {
+        tracing::warn!(
+            customer_id,
+            pending_pi = ?c.pending_action_pi_id,
+            "pending SCA recovery expired (>24h); clearing pending state and trying fresh"
+        );
+        let _ = db::clear_pending_action_force(pool, customer_id).await;
+    }
+    // Re-read after possible clear above.
+    let pre_check = db::get_by_customer_id(pool, customer_id)
+        .await
+        .context("db read auto_topup_config (pre-mutex re-read)")?;
     let pre_threshold = match &pre_check {
         Some(c) if c.enabled && c.pending_action_pi_id.is_none() => c.threshold_cents,
         _ => return Ok(()),
@@ -252,16 +276,19 @@ async fn process_event(
     let topup_amount = config
         .topup_amount_cents
         .expect("CHECK constraint enforces non-null when enabled");
-    let monthly_cap = config
-        .monthly_cap_cents
-        .expect("CHECK constraint enforces non-null when enabled");
+    // monthly_cap_cents is optional — None = unlimited (only the
+    // per-charge MAX_TOPUP_CENTS cap applies). When set, enforce the
+    // soft cap as before.
+    let monthly_cap = config.monthly_cap_cents;
     let spend_so_far = month_spend_cents(&pis);
-    if spend_so_far + topup_amount > monthly_cap {
+    if let Some(cap) = monthly_cap
+        && spend_so_far + topup_amount > cap
+    {
         tracing::info!(
             customer_id,
             spend_so_far,
             topup_amount,
-            monthly_cap,
+            monthly_cap = cap,
             "auto top-up cap reached; skipping charge"
         );
         return Ok(());
