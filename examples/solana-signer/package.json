@@ -1,0 +1,16 @@
+{
+  "name": "solana-signer",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Lit Action example: a keyless Solana wallet bound to the action's CID. The action derives an ed25519 keypair from its own identity key, inspects the transaction it's asked to sign, and signs capped SystemProgram transfers on devnet.",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "address": "node scripts/address.js",
+    "airdrop": "node scripts/airdrop.js",
+    "transfer": "node scripts/transfer.js"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.95.3",
+    "dotenv": "^16.4.5"
+  }
+}

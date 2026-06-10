@@ -31,6 +31,7 @@
             "pages": [
               "lit-actions/index",
               "lit-actions/imports",
+              "lit-actions/wasm",
               "lit-actions/examples",
               "lit-actions/patterns",
               "lit-actions/secrets",
@@ -58,13 +59,16 @@
               "architecture/index",
               "architecture/groups",
               "architecture/authModel",
+              "architecture/self-hosting",
               "architecture/diagram",
               {
                 "group": "Security & Verification",
                 "pages": [
+                  "architecture/verification/attestation",
                   "architecture/verification/quick-verify",
                   "architecture/verification/index",
                   "architecture/verification/onchain-kms",
+                  "architecture/verification/upgrade-governance",
                   "architecture/verification/full-verification",
                   "architecture/verification/chain-of-trust"
                 ]

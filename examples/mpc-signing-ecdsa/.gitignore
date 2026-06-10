@@ -1,0 +1,8 @@
+node_modules/
+.env
+# The user's share(s) — never commit them.
+.mpc-store.json
+.mpc-cold-share.json
+# Hardhat
+artifacts/
+cache/

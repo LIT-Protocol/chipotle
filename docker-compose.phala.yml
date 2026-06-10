@@ -141,6 +141,17 @@ services:
       # The IAM user (AWS_ACCESS_KEY_ID) assumes this role to modify DNS records.
       AWS_ROLE_ARN: "${CERTBOT_AWS_ROLE_ARN}"
       AWS_REGION: "${CERTBOT_AWS_REGION}"
+      # Raise the nginx proxy timeouts from their 60s default. dstack-ingress
+      # runs nginx internally for TLS termination; with these unset, a request
+      # whose response takes >60s gets a 504 from the ingress even though the
+      # action runtime (DEFAULT_TIMEOUT_MS) allows up to 15 minutes. We match
+      # that 15-minute runtime budget so the ingress is never the limiting
+      # factor for a long-running Lit Action (e.g. WASM zk-proving). Note:
+      # dstack-gateway's upstream TCP proxy still closes connections idle for
+      # >10 minutes, so a response that needs longer than that with no bytes
+      # flowing requires streaming/async rather than just a longer timeout.
+      PROXY_READ_TIMEOUT: "900s"
+      PROXY_SEND_TIMEOUT: "900s"
     volumes:
       - /var/run/dstack.sock:/var/run/dstack.sock
       - cert-data:/etc/letsencrypt

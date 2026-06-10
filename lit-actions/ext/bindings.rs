@@ -28,11 +28,11 @@ pub struct LoadedModuleInfo {
 #[instrument(skip_all, ret)]
 #[op2(fast)]
 fn op_print(state: &mut OpState, #[string] msg: &str, is_err: bool) -> Result<(), JsErrorBox> {
-    use std::io::{Write, stderr, stdout};
+    use std::io::{IsTerminal, Write, stderr, stdout};
 
     lazy_static::lazy_static! {
-        static ref IS_ATTY_STDOUT: bool = atty::is(atty::Stream::Stdout);
-        static ref IS_ATTY_STDERR: bool = atty::is(atty::Stream::Stderr);
+        static ref IS_ATTY_STDOUT: bool = stdout().is_terminal();
+        static ref IS_ATTY_STDERR: bool = stderr().is_terminal();
     }
 
     let prepended = format!("[JSEnv] {msg}");
@@ -92,7 +92,7 @@ fn op_set_response(state: &mut OpState, #[string] response: String) -> Result<()
 }
 
 #[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
+#[op2(reentrant)]
 async fn op_increment_fetch_count(state: Rc<RefCell<OpState>>) -> Result<u32, JsErrorBox> {
     remote_op_async!(op_increment_fetch_count,
         state,
@@ -102,7 +102,7 @@ async fn op_increment_fetch_count(state: Rc<RefCell<OpState>>) -> Result<u32, Js
 }
 
 #[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
+#[op2(reentrant)]
 #[string]
 async fn op_aes_encrypt(
     state: Rc<RefCell<OpState>>,
@@ -120,7 +120,7 @@ async fn op_aes_encrypt(
 }
 
 #[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
+#[op2(reentrant)]
 #[string]
 async fn op_aes_decrypt(
     state: Rc<RefCell<OpState>>,
@@ -138,7 +138,7 @@ async fn op_aes_decrypt(
 }
 
 #[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
+#[op2(reentrant)]
 #[string]
 async fn op_get_private_key(
     state: Rc<RefCell<OpState>>,
@@ -154,7 +154,7 @@ async fn op_get_private_key(
 }
 
 #[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
+#[op2(reentrant)]
 #[string]
 async fn op_get_lit_action_private_key(state: Rc<RefCell<OpState>>) -> Result<String, JsErrorBox> {
     remote_op_async!(op_get_lit_action_private_key,
@@ -165,7 +165,7 @@ async fn op_get_lit_action_private_key(state: Rc<RefCell<OpState>>) -> Result<St
 }
 
 #[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
+#[op2(reentrant)]
 #[string]
 async fn op_get_lit_action_public_key(
     state: Rc<RefCell<OpState>>,
@@ -181,7 +181,7 @@ async fn op_get_lit_action_public_key(
 }
 
 #[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
+#[op2(reentrant)]
 #[string]
 async fn op_get_lit_action_wallet_address(
     state: Rc<RefCell<OpState>>,
@@ -197,7 +197,7 @@ async fn op_get_lit_action_wallet_address(
 }
 
 #[instrument(skip_all, ret)]
-#[op2(async, reentrant)]
+#[op2(reentrant)]
 async fn op_update_resource_usage(
     state: Rc<RefCell<OpState>>,
     tick: u32,

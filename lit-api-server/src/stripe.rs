@@ -34,6 +34,79 @@ pub const COST_LIT_ACTION_PER_SECOND_CENTS: i64 = 1; // $0.01 per second of exec
 /// Minimum top-up (500 cents = $5.00).
 pub const MIN_TOPUP_CENTS: i64 = 500;
 
+// ─── Observability ──────────────────────────────────────────────────────────
+//
+// Every charge is surfaced to the observability pipeline (CPL-329) so that spend
+// can be broken down by source and by payer. Charges are emitted both as metrics
+// (for dashboards/alerting) and as a per-payment structured `tracing` event (for
+// per-payment audit in the logs/traces pipeline).
+//
+// The billing wallet address is a first-class metric label (`wallet_address`) so
+// spend can be sliced per account directly in the metric backend. Note this makes
+// the time-series cardinality scale with the number of distinct billing wallets.
+
+/// Why a charge was incurred. Surfaced as the `reason` label on billing metrics
+/// and the `billing_reason` field on per-payment events.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BillingReason {
+    /// A management / state-change API call (flat per-call charge).
+    Management,
+    /// Lit Action execution time (per-second charge).
+    LitAction,
+}
+
+impl BillingReason {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BillingReason::Management => "management",
+            BillingReason::LitAction => "lit_action",
+        }
+    }
+}
+
+/// Charge outcomes, used as the `outcome` label on `billing.charge.count`.
+const OUTCOME_ACCEPTED: &str = "accepted";
+const OUTCOME_INSUFFICIENT_CREDITS: &str = "insufficient_credits";
+
+/// Emit observability for a charge decision (credit deducted, or rejected).
+///
+/// `cost_cents` is the amount the charge represented; for a rejected charge it is
+/// the amount we *attempted* to charge. Only accepted charges contribute to the
+/// `billing.charge.amount_cents` total.
+fn record_billing_event(
+    reason: BillingReason,
+    wallet_address: &str,
+    cost_cents: i64,
+    outcome: &'static str,
+) {
+    metrics::counter!(
+        "billing.charge.count",
+        "reason" => reason.as_str(),
+        "outcome" => outcome,
+        "wallet_address" => wallet_address.to_owned(),
+    )
+    .increment(1);
+
+    if outcome == OUTCOME_ACCEPTED {
+        metrics::counter!(
+            "billing.charge.amount_cents",
+            "reason" => reason.as_str(),
+            "wallet_address" => wallet_address.to_owned(),
+        )
+        .increment(cost_cents.max(0) as u64);
+    }
+
+    // Per-payment record for per-payment audit in the logs/traces pipeline.
+    // Logged at info so it reaches the pipeline without enabling debug logging.
+    tracing::info!(
+        billing_wallet_address = wallet_address,
+        billing_reason = reason.as_str(),
+        billing_amount_cents = cost_cents,
+        billing_outcome = outcome,
+        "billing charge event",
+    );
+}
+
 // ─── State ────────────────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug)]
@@ -261,7 +334,12 @@ fn should_update_balance_cache(cached: Option<i64>, fetched: i64) -> bool {
 /// network error cannot produce duplicate balance transactions.
 ///
 /// Returns `Err` only if the *cached* balance would go positive (insufficient credits).
-async fn charge(api_key: &str, cost_cents: i64, state: &StripeState) -> Result<()> {
+async fn charge(
+    api_key: &str,
+    cost_cents: i64,
+    reason: BillingReason,
+    state: &StripeState,
+) -> Result<()> {
     tracing::debug!(cost_cents, "stripe::charge: starting");
     let wallet = resolve_wallet_address(api_key, state).await?;
     let customer_id = get_customer_by_wallet(&wallet, state).await?;
@@ -286,12 +364,17 @@ async fn charge(api_key: &str, cost_cents: i64, state: &StripeState) -> Result<(
     };
 
     if balance + cost_cents > 0 {
+        record_billing_event(reason, &wallet, cost_cents, OUTCOME_INSUFFICIENT_CREDITS);
         anyhow::bail!(
             "Insufficient credits: balance {} cents, need {} cents",
             -balance,
             cost_cents
         );
     }
+
+    // Credits are sufficient; the charge is accepted at this point (the actual
+    // Stripe balance transaction settles asynchronously below).
+    record_billing_event(reason, &wallet, cost_cents, OUTCOME_ACCEPTED);
 
     // Optimistic local decrement: update the cached balance so subsequent calls
     // within the TTL window see the reduced value instead of the stale pre-charge
@@ -307,6 +390,7 @@ async fn charge(api_key: &str, cost_cents: i64, state: &StripeState) -> Result<(
     // exponential backoff to handle transient Stripe failures.
     let state = state.clone();
     let cid = customer_id.clone();
+    let wallet_for_metric = wallet.clone();
     let idempotency_key = uuid::Uuid::new_v4().to_string();
     tokio::spawn(async move {
         let cost_str = cost_cents.to_string();
@@ -343,6 +427,15 @@ async fn charge(api_key: &str, cost_cents: i64, state: &StripeState) -> Result<(
                             attempt + 1
                         );
                     } else {
+                        // The credit was already deducted locally but the Stripe
+                        // balance transaction never landed — surface this as its own
+                        // signal so settlement gaps are alertable.
+                        metrics::counter!(
+                            "billing.charge.settlement_failed",
+                            "reason" => reason.as_str(),
+                            "wallet_address" => wallet_for_metric.clone(),
+                        )
+                        .increment(1);
                         tracing::error!(
                             "stripe: background charge failed after {} attempts for customer {cid}: {e}",
                             attempt + 1
@@ -358,7 +451,13 @@ async fn charge(api_key: &str, cost_cents: i64, state: &StripeState) -> Result<(
 
 /// Charge $0.01 for a management API call.
 pub async fn charge_management(api_key: &str, state: &StripeState) -> Result<()> {
-    charge(api_key, COST_MANAGEMENT_CENTS, state).await
+    charge(
+        api_key,
+        COST_MANAGEMENT_CENTS,
+        BillingReason::Management,
+        state,
+    )
+    .await
 }
 
 /// Charge for `seconds` of Lit Action execution time.
@@ -377,7 +476,7 @@ pub async fn charge_lit_action_time(
     if cost == 0 {
         return Ok(());
     }
-    charge(api_key, cost, state).await
+    charge(api_key, cost, BillingReason::LitAction, state).await
 }
 
 /// Create a PaymentIntent for `amount_cents`.  Returns `(client_secret, payment_intent_id)`.
@@ -561,6 +660,14 @@ pub async fn list_balance_transactions_since(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn billing_reason_labels_are_stable() {
+        // These strings are emitted as metric labels (CPL-329); dashboards and
+        // alerts key off them, so the mapping must not drift.
+        assert_eq!(BillingReason::Management.as_str(), "management");
+        assert_eq!(BillingReason::LitAction.as_str(), "lit_action");
+    }
 
     #[test]
     fn cache_key_deterministic() {
