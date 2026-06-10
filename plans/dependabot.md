@@ -162,10 +162,44 @@ gh api --method PATCH /repos/LIT-Protocol/chipotle/dependabot/alerts/<N> \
   `deny.toml` ignore entry; revisit when deno/rocket/Alloy ship dep bumps (the
   `deny.toml` "upstream watch" already tracks this).
 
-## Follow-ups (out of scope for this Rust-only plan)
+## Step 4 — first-party npm alerts
 
-- **87 first-party npm alerts** remain: `lit-api-server/blockchain/lit_node_express`
-  (39), `e2e/pnpm-lock.yaml` (27), `lit-actions/package-lock.json` (12),
-  `lit-payments/contracts/package-lock.json` (9). Worth a separate pass —
-  `npm audit fix` / `pnpm update` per project — but these gate real shipped code
-  so they need actual testing, not just lockfile bumps.
+All 87 are **dev/build tooling**, not API-server runtime (verified by reading each
+`package.json`). Triaged the two the team flagged as most relevant:
+
+### 4a. `lit-actions/package-lock.json` (12 alerts) — ✅ 11 fixed
+
+Only 3 declared deps: `documentation`, `prettier`, `typescript` (doc-gen + format,
+ships in nothing). All 12 alerts are transitive deps of `documentation`.
+`npm audit fix --package-lock-only` (semver-bounded, no `package.json` change)
+clears 11 — lodash, minimatch ×3, picomatch ×2, brace-expansion, diff, postcss.
+Verified `npm install` succeeds.
+- **Remaining:** `#27` vue-template-compiler (XSS) — no fix exists; it's
+  `documentation`'s abandoned Vue 2 transitive (only "fix" is downgrading
+  `documentation` to an *older* 6.2.0). Dismiss `tolerable_risk` (dev docs tool).
+
+### 4b. `lit-api-server/blockchain/lit_node_express/package-lock.json` (39 alerts)
+
+Misleading dir name — this is the **hardhat contracts project** (package name
+`contracts`; deps = hardhat / ethers / `@safe-global` SDKs). Runs at contract
+test/deploy time in CI/dev, never in the API-server runtime.
+
+A semver-bounded `npm audit fix` clears only ~5 low/med (lodash, follow-redirects,
+picomatch). The serious ones do **not** move by lockfile bump:
+- **3 critical + 8 high** (elliptic critical, ethers, axios ×many, ws@7,
+  `@ethersproject/signing-key`, zksync-ethers) are the **ethers-v5 subtree under
+  `hardhat-deploy@1.0.4`** — only fixed by `hardhat-deploy@2.x` (MAJOR/breaking) +
+  likely `@safe-global` SDK bumps. Real migration work; must re-run `hardhat test`.
+- **No in-range fix:** undici, uuid, cookie, hardhat, `@sentry/node`,
+  `@nomicfoundation/hardhat-ethers`.
+
+**Decision (pending):** either (a) do the `hardhat-deploy@2` migration as scoped,
+tested work, or (b) dismiss as `tolerable_risk` — dev/CI contract tooling, the
+vulnerable paths (elliptic malleability, axios SSRF) aren't reachable by an
+attacker in a trusted local/CI deploy context. Not churning the lockfile for the
+~5 low/med wins, since it leaves every critical/high in place.
+
+### 4c. Untouched
+
+`e2e/pnpm-lock.yaml` (27) and `lit-payments/contracts/package-lock.json` (9) — same
+dev/test-tooling profile; revisit with the same lens if needed.
