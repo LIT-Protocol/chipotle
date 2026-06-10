@@ -93,6 +93,15 @@ pub async fn get_admin_api_signer() -> Result<SigningClient> {
     signer_provider(wallet)
 }
 
+/// The shared read-only provider for the node's configured chain. Used by
+/// callers that need a raw `eth_call` (e.g. EIP-1271 smart-contract-wallet
+/// signature verification) rather than the account-config contract instance.
+pub(crate) fn get_read_only_client() -> Result<SigningClient> {
+    GLOBAL_READ_ONLY_CLIENT.get().cloned().ok_or_else(|| {
+        anyhow::anyhow!("Read-only client not initialised — call init_chain_clients() at startup")
+    })
+}
+
 pub(crate) async fn get_read_only_account_config_contract() -> Result<AccountConfigInstance> {
     let client = GLOBAL_READ_ONLY_CLIENT
         .get()

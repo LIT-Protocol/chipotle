@@ -47,6 +47,11 @@ contract CowSolverVault {
     ///         honoring the modified action automatically.
     address public immutable policySigner;
 
+    /// @notice The exact token pair this demo vault will settle. The policy
+    ///         reads these and rejects orders for any other pair.
+    address public immutable sellToken;
+    address public immutable buyToken;
+
     /// @notice Local break-glass key. Restricts policy and sweeps to coldWallet.
     address public owner;
 
@@ -79,6 +84,7 @@ contract CowSolverVault {
     error AuthDeadlineTooFar();
     error KillSwitchEngaged();
     error OverCap();
+    error UnsupportedToken();
     error InvalidPolicySignature();
     error SettlementCallFailed();
     error NoPendingColdWalletChange();
@@ -103,16 +109,22 @@ contract CowSolverVault {
         address policySigner_,
         address owner_,
         address coldWallet_,
-        uint256 maxFillAmount_
+        uint256 maxFillAmount_,
+        address sellToken_,
+        address buyToken_
     ) {
         if (
             settlement_ == address(0) ||
             policySigner_ == address(0) ||
             owner_ == address(0) ||
-            coldWallet_ == address(0)
+            coldWallet_ == address(0) ||
+            sellToken_ == address(0) ||
+            buyToken_ == address(0)
         ) revert ZeroAddress();
         settlement = settlement_;
         policySigner = policySigner_;
+        sellToken = sellToken_;
+        buyToken = buyToken_;
         owner = owner_;
         coldWallet = coldWallet_;
         maxFillAmount = maxFillAmount_;
@@ -155,6 +167,7 @@ contract CowSolverVault {
         // kill switch or lowers the cap.
         if (killSwitch) revert KillSwitchEngaged();
         if (pullAmount > maxFillAmount) revert OverCap();
+        if (pullToken != buyToken) revert UnsupportedToken();
 
         bytes32 digest = keccak256(
             abi.encode(

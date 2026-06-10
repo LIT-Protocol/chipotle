@@ -6,11 +6,14 @@
 //     no longer recovers to the order owner and the action refuses. The only
 //     settlement it will sign pays the trader's real receiver.
 //
-// (2) The bot goes around the action and calls executeSettlement directly with
+// (2) The bot tries to swap the buy token to an unpinned token. The action reads
+//     the vault's pinned pair and refuses before signing.
+//
+// (3) The bot goes around the action and calls executeSettlement directly with
 //     a self-dealing batch and a forged policy signature. The vault recovers the
 //     signer, sees it isn't the policy signer, and reverts. Inventory never moves.
 //
-// (3) The bot tries to call GPv2Settlement.settle directly — but the bot isn't
+// (4) The bot tries to call GPv2Settlement.settle directly — but the bot isn't
 //     an allowlisted solver (only the vault is), so the settlement rejects it.
 //     This is the property that makes the vault-as-solver design necessary.
 //
@@ -46,7 +49,7 @@ async function main() {
   const authParams = (ord) => ({
     vaultAddress: process.env.COW_VAULT_ADDRESS,
     chainId: CHAIN_ID,
-    authDeadline: Math.floor(Date.now() / 1000) + 600,
+    authDeadline: Math.min(Math.floor(Date.now() / 1000) + 600, Number(ord.validTo)),
     order: policyOrderParam(ord, ord.owner, ord.signature),
     rpcUrl: process.env.ALCHEMY_BASE_SEPOLIA_URL,
   });
@@ -64,8 +67,18 @@ async function main() {
   console.log(`  The only settlement Lit will sign pays ${good.receiver} (the real receiver),`);
   console.log(`  not the attacker ${ethers.utils.getAddress(attacker)}. Exfiltration impossible.`);
 
-  // (2) Forge a policy signature for a self-dealing batch.
-  console.log("\nAttack 2: bot calls executeSettlement with a forged policy signature...");
+  // (2) Swap the buy token to something other than the vault-pinned inventory token.
+  console.log("\nAttack 2: compromised bot swaps the order buy token...");
+  const wrongPair = { ...order, buyToken: attacker };
+  const wrongPairAuth = await requestSolveAuthorization(authParams(wrongPair));
+  if (wrongPairAuth && wrongPairAuth.authorized) {
+    console.error("  ✗ UNEXPECTED: policy authorized an unpinned token pair. This is a bug.");
+    process.exit(1);
+  }
+  console.log("  ✓ Policy refused:", wrongPairAuth && wrongPairAuth.reason);
+
+  // (3) Forge a policy signature for a self-dealing batch.
+  console.log("\nAttack 3: bot calls executeSettlement with a forged policy signature...");
   const vault = new ethers.Contract(process.env.COW_VAULT_ADDRESS, VAULT_ABI, solver);
   const fakeCalldata = "0xdeadbeef"; // contents don't matter; the sig check fails first
   const pullToken = order.buyToken;
@@ -95,8 +108,8 @@ async function main() {
     console.log("  No valid policy signature -> no settle -> inventory safe.");
   }
 
-  // (3) Bot tries to settle directly on GPv2Settlement — it isn't a solver.
-  console.log("\nAttack 3: bot calls GPv2Settlement.settle directly (not allowlisted)...");
+  // (4) Bot tries to settle directly on GPv2Settlement — it isn't a solver.
+  console.log("\nAttack 4: bot calls GPv2Settlement.settle directly (not allowlisted)...");
   const settlement = new ethers.Contract(process.env.COW_SETTLEMENT_ADDRESS, SETTLEMENT_ABI, solver);
   try {
     await settlement.callStatic.settle([], [], [], [[], [], []]);

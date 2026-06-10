@@ -33,11 +33,10 @@
 //   2. settlement target == the vault's pinned settlement (trust anchor).
 //   3. killSwitch on the vault is off.
 //   4. the order signature recovers to the claimed owner (EIP-712, sell order).
-//   5. order.feeAmount == 0 and amounts are non-zero (keeps the batch exact).
-//   6. order.buyAmount (the inventory spent) <= the vault's maxFillAmount.
-//
-// (order.validTo is enforced on-chain by the settlement when settle runs, so
-// the action doesn't need a clock for it.)
+//   5. order token pair matches the vault's pinned sellToken / buyToken.
+//   6. order.feeAmount == 0 and amounts are non-zero (keeps the batch exact).
+//   7. authDeadline does not outlive order.validTo.
+//   8. order.buyAmount (the inventory spent) <= the vault's maxFillAmount.
 //
 // js_params:
 //   vaultAddress   CowSolverVault address (Base Sepolia)
@@ -63,6 +62,8 @@ const ORDER_TYPE_STRING =
 
 const vaultIface = new ethers.utils.Interface([
   "function settlement() view returns (address)",
+  "function sellToken() view returns (address)",
+  "function buyToken() view returns (address)",
   "function killSwitch() view returns (bool)",
   "function maxFillAmount() view returns (uint256)",
 ]);
@@ -131,15 +132,17 @@ async function main({ vaultAddress, chainId, authDeadline, order, rpcUrl }) {
   const keyPromise = Lit.Actions.getLitActionPrivateKey();
   keyPromise.catch(() => {});
 
-  // --- reads: the vault's pinned settlement + live policy config ----------
-  // The settlement is the trust anchor: we read it from the vault (its
-  // immutable), not from the caller, and build the batch for *that* contract.
-  // All three are independent, so one concurrent round-trip — and we compute the
-  // EIP-712 domain locally below rather than paying a second, dependent one.
-  const [settlement, killSwitch, maxFillAmount] = await Promise.all([
+  // --- reads: the vault's pinned settlement, token pair + live policy config -
+  // The settlement and token pair are trust anchors: we read them from the vault
+  // (its immutables), not from the caller, and build the batch for *that*
+  // contract and pair. These reads are independent, so one concurrent round-trip.
+  const [settlement, vaultSellToken, vaultBuyToken, killSwitch, maxFillAmount, latestBlock] = await Promise.all([
     readContract(rpcUrl, vaultAddress, vaultIface, "settlement", []),
+    readContract(rpcUrl, vaultAddress, vaultIface, "sellToken", []),
+    readContract(rpcUrl, vaultAddress, vaultIface, "buyToken", []),
     readContract(rpcUrl, vaultAddress, vaultIface, "killSwitch", []),
     readContract(rpcUrl, vaultAddress, vaultIface, "maxFillAmount", []),
+    rpc(rpcUrl, "eth_getBlockByNumber", ["latest", false]),
   ]);
 
   if (killSwitch) {
@@ -157,6 +160,13 @@ async function main({ vaultAddress, chainId, authDeadline, order, rpcUrl }) {
   const sellAmount = ethers.BigNumber.from(order.sellAmount);
   const buyAmount = ethers.BigNumber.from(order.buyAmount);
   const feeAmount = ethers.BigNumber.from(order.feeAmount || "0");
+  const orderValidTo = Number(order.validTo);
+  const authDeadlineNum = Number(authDeadline);
+  const blockTimestamp = Number.parseInt(latestBlock.timestamp, 16);
+  const orderSellToken = ethers.utils.getAddress(order.sellToken);
+  const orderBuyToken = ethers.utils.getAddress(order.buyToken);
+  const allowedSellToken = ethers.utils.getAddress(vaultSellToken);
+  const allowedBuyToken = ethers.utils.getAddress(vaultBuyToken);
 
   if (!feeAmount.isZero()) {
     // A non-zero fee is pulled from the trader on top of sellAmount; the batch
@@ -167,6 +177,27 @@ async function main({ vaultAddress, chainId, authDeadline, order, rpcUrl }) {
   }
   if (sellAmount.isZero() || buyAmount.isZero()) {
     return { authorized: false, reason: "order amounts must be non-zero" };
+  }
+  if (orderSellToken !== allowedSellToken || orderBuyToken !== allowedBuyToken) {
+    return {
+      authorized: false,
+      reason: `order token pair ${orderSellToken}/${orderBuyToken} does not match vault pair ${allowedSellToken}/${allowedBuyToken}`,
+    };
+  }
+  if (!Number.isSafeInteger(orderValidTo) || orderValidTo <= 0 || orderValidTo > 0xffffffff) {
+    return { authorized: false, reason: "order.validTo must be a positive uint32" };
+  }
+  if (!Number.isSafeInteger(blockTimestamp) || blockTimestamp <= 0) {
+    return { authorized: false, reason: "latest block timestamp unavailable" };
+  }
+  if (!Number.isSafeInteger(authDeadlineNum) || authDeadlineNum <= blockTimestamp) {
+    return { authorized: false, reason: "authDeadline must be in the future" };
+  }
+  if (orderValidTo <= blockTimestamp) {
+    return { authorized: false, reason: "order is expired" };
+  }
+  if (authDeadlineNum > orderValidTo) {
+    return { authorized: false, reason: "authDeadline must not exceed order.validTo" };
   }
   if (buyAmount.gt(ethers.BigNumber.from(maxFillAmount))) {
     return {
@@ -192,8 +223,8 @@ async function main({ vaultAddress, chainId, authDeadline, order, rpcUrl }) {
   // tokens[0] = sellToken (what the trader gives up, ends up in the vault),
   // tokens[1] = buyToken  (what the vault pays out, from inventory).
   const tokens = [
-    ethers.utils.getAddress(order.sellToken),
-    ethers.utils.getAddress(order.buyToken),
+    orderSellToken,
+    orderBuyToken,
   ];
 
   // Clearing prices fill the sell order exactly at its limit:
@@ -209,7 +240,7 @@ async function main({ vaultAddress, chainId, authDeadline, order, rpcUrl }) {
     receiver: ethers.utils.getAddress(order.receiver),
     sellAmount: sellAmount.toString(),
     buyAmount: buyAmount.toString(),
-    validTo: Number(order.validTo),
+    validTo: orderValidTo,
     appData: order.appData,
     feeAmount: "0",
     flags: 0, // sell order, fill-or-kill, erc20/erc20 balances, EIP-712 signing
@@ -265,7 +296,7 @@ async function main({ vaultAddress, chainId, authDeadline, order, rpcUrl }) {
         ethers.utils.keccak256(settleCalldata),
         pullToken,
         pullAmount,
-        authDeadline,
+        authDeadlineNum,
         vaultAddress,
         chainId,
       ]
@@ -282,7 +313,7 @@ async function main({ vaultAddress, chainId, authDeadline, order, rpcUrl }) {
     settleCalldata,
     pullToken,
     pullAmount,
-    authDeadline,
+    authDeadline: authDeadlineNum,
     vaultAddress,
     chainId,
     receiver: trade.receiver,

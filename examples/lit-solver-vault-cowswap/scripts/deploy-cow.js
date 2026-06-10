@@ -78,7 +78,15 @@ async function main() {
   // 4. The vault — the allowlisted solver. maxFillAmount is in buy-token units.
   const maxFill = hre.ethers.utils.parseEther(process.env.COW_MAX_FILL_WETH || "0.05");
   const Vault = await hre.ethers.getContractFactory("CowSolverVault");
-  const vault = await Vault.deploy(settlement.address, policySigner, owner, coldWallet, maxFill);
+  const vault = await Vault.deploy(
+    settlement.address,
+    policySigner,
+    owner,
+    coldWallet,
+    maxFill,
+    sellToken.address,
+    buyToken.address
+  );
   await vault.deployed();
   console.log("CowSolverVault:             ", vault.address);
 
