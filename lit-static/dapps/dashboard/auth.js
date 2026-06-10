@@ -131,6 +131,24 @@ export function logOut() {
   updateAuthUI();
 }
 
+/**
+ * Disconnect the connected browser wallet, then sign out. In ChainSecured mode
+ * the wallet IS the session, so tearing down the EIP-1193 / WalletConnect
+ * connection and clearing the session are the same user intent. The
+ * `onWalletChange` watcher also fires `logOut()` on disconnect, but we call it
+ * directly too so sign-out is synchronous (and correct if no live wallet
+ * connection is attached, e.g. after a page reload).
+ */
+async function disconnectWallet() {
+  try {
+    const { disconnect } = await import('../../wallet_connect.js');
+    disconnect();
+  } catch (e) {
+    console.warn('[auth] wallet disconnect failed:', e);
+  }
+  logOut();
+}
+
 /** Invalidate the cached SDK client; next getClient() rebuilds fresh. */
 export function resetClient() {
   _clientInstance = null;
@@ -533,7 +551,13 @@ function renderModeBadge() {
   if (isChainSecured) {
     const wallet = getChainSecuredWallet();
     const trunc = `${wallet.slice(0, 6)}\u2026${wallet.slice(-4)}`;
-    pillHtml = ` <button type="button" class="topbar-wallet-pill" id="topbar-wallet-pill" title="Copy wallet address" data-wallet="${escapeHtml(wallet)}">${escapeHtml(trunc)}</button>`;
+    pillHtml = ` <span class="topbar-wallet-wrap">
+        <button type="button" class="topbar-wallet-pill" id="topbar-wallet-pill" aria-haspopup="menu" aria-expanded="false" title="Wallet options" data-wallet="${escapeHtml(wallet)}">${escapeHtml(trunc)}<span class="topbar-wallet-chevron" aria-hidden="true">\u25be</span></button>
+        <div class="topbar-wallet-menu" id="topbar-wallet-menu" role="menu" aria-label="Wallet options" hidden>
+          <button type="button" class="topbar-wallet-menu-item" id="topbar-wallet-copy" role="menuitem">Copy address</button>
+          <button type="button" class="topbar-wallet-menu-item topbar-wallet-menu-danger" id="topbar-wallet-disconnect" role="menuitem">Disconnect wallet</button>
+        </div>
+      </span>`;
   }
   host.innerHTML = `<span class="topbar-mode-badge-wrap">
       <button type="button" class="topbar-mode-badge" id="topbar-mode-badge" aria-haspopup="dialog" aria-expanded="false">${escapeHtml(modeLabel)}</button>
@@ -563,11 +587,55 @@ function renderModeBadge() {
       }
     });
   }
+  wireWalletPillMenu();
+}
+
+/**
+ * Wire the ChainSecured wallet pill (topbar-left) as a popover menu:
+ * "Copy address" + "Disconnect wallet". Mirrors the mode-badge popover's
+ * open/close behavior (outside-click + Escape close). No-op when the pill is
+ * absent (API mode / unauthenticated).
+ */
+function wireWalletPillMenu() {
   const pill = document.getElementById('topbar-wallet-pill');
-  if (pill) {
-    pill.addEventListener('click', async () => {
+  const menu = document.getElementById('topbar-wallet-menu');
+  const copyBtn = document.getElementById('topbar-wallet-copy');
+  const disconnectBtn = document.getElementById('topbar-wallet-disconnect');
+  if (!pill || !menu) return;
+
+  const close = () => {
+    menu.hidden = true;
+    pill.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('click', onDocClick, true);
+    document.removeEventListener('keydown', onKeyDown, true);
+  };
+  const onDocClick = (ev) => {
+    if (!pill.contains(ev.target) && !menu.contains(ev.target)) close();
+  };
+  const onKeyDown = (ev) => { if (ev.key === 'Escape') close(); };
+
+  pill.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    const open = menu.hidden;
+    menu.hidden = !open;
+    pill.setAttribute('aria-expanded', String(open));
+    if (open) {
+      document.addEventListener('click', onDocClick, true);
+      document.addEventListener('keydown', onKeyDown, true);
+    }
+  });
+
+  if (copyBtn) {
+    copyBtn.addEventListener('click', async () => {
       const { copyToClipboard } = await import('./ui-utils.js');
-      await copyToClipboard(pill.dataset.wallet, pill);
+      await copyToClipboard(pill.dataset.wallet, copyBtn);
+      close();
+    });
+  }
+  if (disconnectBtn) {
+    disconnectBtn.addEventListener('click', () => {
+      close();
+      disconnectWallet();
     });
   }
 }
