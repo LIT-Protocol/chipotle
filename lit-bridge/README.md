@@ -108,6 +108,19 @@ TRIGGERS_BASE=... TRIGGERS_AGENT_TOKEN=... node registerTriggers.js
 
 (lit-triggers' `CHAIN_SPECS` now include `base-sepolia` / `arbitrum-sepolia`.)
 
+The trigger fires once per burn, so run **`scripts/retryPoller.js`** continuously
+(`--once` via cron, or a managed process): it scans recent `BurnInitiated` events,
+checks `usedBurnIds` on the destination, and re-relays anything un-minted (a burn
+that wasn't final or hit a flaky RPC when the trigger fired). Idempotent — the
+on-chain replay guard makes over-running safe.
+
+## Bringing a token to new chains
+
+Token issuers: see **[`docs/bringing-a-token-to-new-chains.md`](docs/bringing-a-token-to-new-chains.md)**
+— how to launch a cross-chain token (your own oracle/registry/relayer via
+`setup.js`), add chains, the quorum/finality/same-native caveats, and what's not
+built yet (wrapping an *existing* token needs the router contracts).
+
 ## Upgrades & governance
 
 The signing account is chain-secured and the registry + tokens are owned by the
