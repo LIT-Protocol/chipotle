@@ -1,0 +1,6 @@
+/target
+.env
+.env.*
+!.env.example
+scripts/node_modules
+action/bridgeAction.built.js
