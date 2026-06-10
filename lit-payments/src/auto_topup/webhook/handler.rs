@@ -184,23 +184,24 @@ async fn process_event(
     let pre_check = db::get_by_customer_id(pool, customer_id)
         .await
         .context("db read auto_topup_config (pre-mutex)")?;
-    // Stale pending recovery — two ways to land here:
+    // Stale pending recovery — only clear when the PI is definitively
+    // dead at Stripe OR the recovery token has expired. We deliberately
+    // do NOT clear on `requires_payment_method + last_payment_error =
+    // authentication_required`: that's the LIVE state the recovery
+    // email + `/recover_topup.html` flow is built to handle. Clearing
+    // it on every subsequent `customer.updated` would invalidate the
+    // in-flight email and re-send a duplicate one each time the user
+    // ran a Lit Action.
     //
-    // 1. **Time-expired**: `recovery_token_expires_at` is in the past
-    //    (>24h since SCA was staged). User never opened the email or
-    //    abandoned mid-flow.
-    // 2. **PI moved to a non-requires_action state at Stripe**: bank
-    //    rejected the 3DS, user canceled, card expired, Stripe canceled
-    //    after their internal window, or an admin canceled via the
-    //    Stripe dashboard. Our DB still thinks the PI is pending, but
-    //    Stripe says otherwise — `handleNextAction` would error.
+    // The two cases this catches:
+    //   1. Token expired (>24h since SCA was staged) — user never
+    //      completed 3DS.
+    //   2. PI is `canceled` / `succeeded` at Stripe — terminal state,
+    //      our DB just got behind.
     //
-    // Either case: clear our pending state so this `customer.updated`
-    // can fire a fresh SCA cycle. Without this escape hatch, the
-    // pending_action_pi_id guard becomes a permanent freeze with no
-    // operator-free recovery path. Costs one extra Stripe call per
-    // webhook for customers that actually have pending state set —
-    // bounded and only when we'd otherwise short-circuit anyway.
+    // Anything else (including the off-session `authentication_required`
+    // failure state) is treated as live and left alone. The 24h token
+    // expiry is the upper bound on how long pending state can persist.
     if let Some(c) = &pre_check
         && c.enabled
         && let Some(pi_id) = c.pending_action_pi_id.as_deref()
@@ -209,16 +210,19 @@ async fn process_event(
             .recovery_token_expires_at
             .map(|exp| exp < OffsetDateTime::now_utc())
             .unwrap_or(false);
-        let pi_not_pending = match stripe.get(&format!("payment_intents/{pi_id}"), &[]).await {
+        let pi_terminal = match stripe.get(&format!("payment_intents/{pi_id}"), &[]).await {
             Ok(resp) => {
                 let status = resp
                     .body
                     .get("status")
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                // requires_action = still legitimately pending; any
-                // other status means the PI has moved on at Stripe.
-                !status.is_empty() && status != "requires_action"
+                // Only "definitely done at Stripe" qualifies as terminal.
+                // `requires_action` is the happy-path pending state and
+                // `requires_payment_method` (when paired with
+                // last_payment_error.code = authentication_required) is
+                // the in-flight SCA recovery state we want to preserve.
+                matches!(status, "canceled" | "succeeded")
             }
             Err(e) => {
                 // If we can't reach Stripe, be conservative and don't
@@ -233,12 +237,12 @@ async fn process_event(
                 false
             }
         };
-        if token_expired || pi_not_pending {
+        if token_expired || pi_terminal {
             tracing::warn!(
                 customer_id,
                 pi_id,
                 token_expired,
-                pi_not_pending,
+                pi_terminal,
                 "pending SCA recovery stale; clearing pending state and trying fresh"
             );
             let _ = db::clear_pending_action_force(pool, customer_id).await;
