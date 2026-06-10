@@ -305,10 +305,7 @@ pub async fn put_auto_topup_config(
         // Cap is optional: None = unlimited (still bounded per-charge by
         // MAX_TOPUP_CENTS = $200). When Some, must be >= top-up amount.
         let cap_bad = matches!(cap_opt, Some(c) if c < topup);
-        if threshold <= 0
-            || !(MIN_TOPUP_CENTS..=MAX_TOPUP_CENTS).contains(&topup)
-            || cap_bad
-        {
+        if threshold <= 0 || !(MIN_TOPUP_CENTS..=MAX_TOPUP_CENTS).contains(&topup) || cap_bad {
             return Err(err(
                 Status::BadRequest,
                 "invalid_config",

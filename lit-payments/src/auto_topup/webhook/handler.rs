@@ -597,6 +597,12 @@ async fn handle_sca_required(
         .await
         .context("set pending_action")?;
 
+    // Fetch the PI to pull `amount` + `payment_method` for a richer
+    // email body — users should see exactly how much, on which card,
+    // before authorising the 3DS challenge.
+    let (charge_amount_dollars, card_brand, card_last4) =
+        fetch_pi_details(stripe, pi_id).await.unwrap_or_default();
+
     // Glitch's PR review #2: actually send the recovery email. Without
     // this the user has no way to discover the recovery URL — the token
     // is staged in the DB but the link never reaches the cardholder, so
@@ -615,62 +621,99 @@ async fn handle_sca_required(
         cfg.public_base_url.trim_end_matches('/'),
         token
     );
-    let email_result: Result<(), anyhow::Error> =
-        match fetch_customer_email(stripe, customer_id).await {
-            Ok(Some(email)) => {
-                let subject = "Action required: complete your auto top-up";
-                let text = format!(
-                    "Your card requires extra verification (3D Secure) to complete the latest \
-                 auto top-up. Open the link below to finish the verification — it expires \
-                 in 24 hours and can only be used once.\n\n{recovery_url}\n\n\
-                 If you didn't expect this, you can safely ignore the email; auto top-up \
-                 stays paused until you click the link or update your card."
-                );
-                let html = format!(
-                    "<p>Your card requires extra verification (3D Secure) to complete the latest \
-                 auto top-up.</p>\
-                 <p><a href=\"{recovery_url}\">Click here to complete the verification</a> \
-                 — the link expires in 24 hours and can only be used once.</p>\
-                 <p style=\"color:#666;font-size:0.9em\">If you didn't expect this, you can \
-                 safely ignore this email; auto top-up stays paused until you click the link \
-                 or update your card.</p>"
-                );
-                match mailer.send(&email, subject, &html, &text).await {
-                    Ok(()) => {
-                        tracing::info!(customer_id, pi_id, "SCA recovery email dispatched");
-                        Ok(())
-                    }
-                    Err(e) => {
-                        tracing::error!(customer_id, pi_id, "SCA recovery email send failed: {e}");
-                        Err(anyhow::anyhow!("SCA recovery email send failed: {e}"))
-                    }
+    let email_result: Result<(), anyhow::Error> = match fetch_customer_email(stripe, customer_id)
+        .await
+    {
+        Ok(Some(email)) => {
+            let amount_line = if !charge_amount_dollars.is_empty() {
+                format!("Amount: ${charge_amount_dollars}\n")
+            } else {
+                String::new()
+            };
+            let card_line = if !card_brand.is_empty() && !card_last4.is_empty() {
+                format!("Card: {card_brand} •••• {card_last4}\n")
+            } else {
+                String::new()
+            };
+            let subject = if !charge_amount_dollars.is_empty() {
+                format!(
+                    "Action required: confirm your ${charge_amount_dollars} Lit Protocol auto top-up"
+                )
+            } else {
+                "Action required: complete your Lit Protocol auto top-up".to_string()
+            };
+            let text = format!(
+                "Lit Protocol tried to auto top-up your account, but your card requires \
+                     extra verification (3D Secure) before the charge can complete.\n\n\
+                     {amount_line}{card_line}\
+                     Confirm the charge by opening the link below — it expires in 24 hours and \
+                     can only be used once.\n\n{recovery_url}\n\n\
+                     If you didn't expect this, you can safely ignore the email; auto top-up \
+                     stays paused until you click the link or update your card."
+            );
+            let amount_html = if !charge_amount_dollars.is_empty() {
+                format!(
+                    "<p style=\"margin:0;\"><strong>Amount:</strong> ${charge_amount_dollars}</p>"
+                )
+            } else {
+                String::new()
+            };
+            let card_html = if !card_brand.is_empty() && !card_last4.is_empty() {
+                format!(
+                    "<p style=\"margin:0;\"><strong>Card:</strong> {card_brand} •••• {card_last4}</p>"
+                )
+            } else {
+                String::new()
+            };
+            let html = format!(
+                "<p><strong>Lit Protocol</strong> tried to auto top-up your account, but \
+                     your card requires extra verification (3D Secure) before the charge can \
+                     complete.</p>\
+                     <div style=\"background:#f5f5f7;padding:12px 16px;border-radius:6px;margin:16px 0;\">\
+                     {amount_html}{card_html}\
+                     </div>\
+                     <p><a href=\"{recovery_url}\" style=\"display:inline-block;padding:10px 18px;background:#4338ca;color:white;text-decoration:none;border-radius:6px;\">Confirm the charge</a></p>\
+                     <p style=\"color:#666;font-size:0.9em\">This link expires in 24 hours and \
+                     can only be used once. If you didn't expect this, you can safely ignore \
+                     this email; auto top-up stays paused until you click the link or update \
+                     your card.</p>"
+            );
+            match mailer.send(&email, &subject, &html, &text).await {
+                Ok(()) => {
+                    tracing::info!(customer_id, pi_id, "SCA recovery email dispatched");
+                    Ok(())
+                }
+                Err(e) => {
+                    tracing::error!(customer_id, pi_id, "SCA recovery email send failed: {e}");
+                    Err(anyhow::anyhow!("SCA recovery email send failed: {e}"))
                 }
             }
-            Ok(None) => {
-                // No email on file — nothing we can do. Don't roll back the
-                // pending state; the user has no recovery channel and the
-                // dashboard "action required" banner is the only signal left.
-                // Reconciler / next webhook will not re-fire (pending_action_pi_id
-                // is set), so the SCA stays paused indefinitely until the user
-                // updates their account email or contacts support.
-                tracing::warn!(
-                    customer_id,
-                    pi_id,
-                    "Stripe customer has no email on file; SCA recovery link cannot be delivered"
-                );
-                Ok(())
-            }
-            Err(e) => {
-                tracing::error!(
-                    customer_id,
-                    pi_id,
-                    "fetch customer email for SCA recovery failed: {e}"
-                );
-                Err(anyhow::anyhow!(
-                    "fetch customer email for SCA recovery failed: {e}"
-                ))
-            }
-        };
+        }
+        Ok(None) => {
+            // No email on file — nothing we can do. Don't roll back the
+            // pending state; the user has no recovery channel and the
+            // dashboard "action required" banner is the only signal left.
+            // Reconciler / next webhook will not re-fire (pending_action_pi_id
+            // is set), so the SCA stays paused indefinitely until the user
+            // updates their account email or contacts support.
+            tracing::warn!(
+                customer_id,
+                pi_id,
+                "Stripe customer has no email on file; SCA recovery link cannot be delivered"
+            );
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!(
+                customer_id,
+                pi_id,
+                "fetch customer email for SCA recovery failed: {e}"
+            );
+            Err(anyhow::anyhow!(
+                "fetch customer email for SCA recovery failed: {e}"
+            ))
+        }
+    };
 
     // Codex P1 (Phase 5): if the email (or email-lookup) failed, the
     // pending state we just staged is useless — the user has no link to
@@ -722,6 +765,69 @@ async fn fetch_customer_email(
         .and_then(|v| v.as_str())
         .filter(|s| !s.is_empty())
         .map(|s| s.to_string()))
+}
+
+/// Pull `amount` + saved card's `brand` + `last4` for an SCA-pending PI
+/// so the recovery email can show the user exactly what they're being
+/// asked to authorise. Returns empty strings on any failure — the email
+/// caller falls back to a minimal subject line so a transient Stripe
+/// lookup never blocks the recovery flow.
+async fn fetch_pi_details(stripe: &StripeClient, pi_id: &str) -> Option<(String, String, String)> {
+    let resp = stripe
+        .get(
+            &format!("payment_intents/{pi_id}"),
+            &[("expand[]", "payment_method")],
+        )
+        .await
+        .ok()?;
+    let amount_cents = resp
+        .body
+        .get("amount")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let amount_dollars = if amount_cents > 0 {
+        format!("{:.2}", amount_cents as f64 / 100.0)
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string()
+    } else {
+        String::new()
+    };
+    let brand = resp
+        .body
+        .pointer("/payment_method/card/brand")
+        .and_then(|v| v.as_str())
+        .map(prettify_brand)
+        .unwrap_or_default();
+    let last4 = resp
+        .body
+        .pointer("/payment_method/card/last4")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    Some((amount_dollars, brand, last4))
+}
+
+/// Render a Stripe card brand identifier ("visa", "mastercard") in
+/// human-friendly title case. Unknown brands keep their original
+/// (lowercased) form. Mirrors the dashboard's `prettyBrand` helper.
+fn prettify_brand(brand: &str) -> String {
+    match brand.to_ascii_lowercase().as_str() {
+        "visa" => "Visa".to_string(),
+        "mastercard" => "Mastercard".to_string(),
+        "amex" => "Amex".to_string(),
+        "discover" => "Discover".to_string(),
+        "diners" => "Diners".to_string(),
+        "jcb" => "JCB".to_string(),
+        "unionpay" => "UnionPay".to_string(),
+        other => {
+            let mut chars = other.chars();
+            match chars.next() {
+                Some(c) => c.to_ascii_uppercase().to_string() + chars.as_str(),
+                None => String::new(),
+            }
+        }
+    }
 }
 
 /// Best-effort fallback extractor — only used by unit tests now.
