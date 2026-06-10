@@ -45,11 +45,16 @@ equivalent is to auto-dismiss alerts under `examples/`:
 
 ---
 
-## Step 2 — Fix the Rust alerts we *can* fix (lockfile bumps)
+## Step 2 — Fix the Rust alerts we *can* fix (lockfile bumps) ✅ DONE (2026-06-09)
 
 These are semver-compatible `Cargo.lock`-only bumps (no `Cargo.toml` changes) —
 the same "Tier 1" pattern documented in `deny.toml`'s history. Once the lockfiles
 no longer reference the vulnerable version, Dependabot auto-closes the alerts.
+
+**Outcome:** openssl ×3, rand (lit-core), and rsa (lit-actions) all bumped —
+**clears 26 alerts**. `tar` turned out to be deno-pinned (`deno_npm_cache` requires
+`=0.4.45`) → stays in step 3. `cargo deny ... advisories sources` passes in all
+three touched workspaces and the lockfiles resolve `--locked`.
 
 ### 2a. `openssl` → `0.10.80` — 24 alerts (highest priority) 🔴
 
@@ -83,30 +88,22 @@ lit-core (still `0.8.5`). lit-core is not deno-pinned, so it can move.
 Clears `#106` (GHSA-cq8v-f236-94qc / RUSTSEC-2026-0097).
 > The lit-actions copy of this same advisory (`#90`) is deno-pinned → see step 3.
 
-### 2c. `tar` → `0.4.46` in `lit-actions` — 1 alert (verify) 🟡
+### 2c. `tar` → `0.4.46` in `lit-actions` — BLOCKED ❌
 
-Locked at `0.4.45`; fix is `0.4.46`. `deny.toml` history shows earlier tar
-advisories were cleared by plain `cargo update`, so tar is likely not hard-pinned.
+Attempted `cargo update -p tar --precise 0.4.46`; failed with
+`failed to select a version for the requirement tar = "=0.4.45"`. The pin comes
+from `deno_npm_cache` (`cargo tree -i tar@0.4.45`), so `#368` (GHSA-3pv8) is
+deno-blocked and moves to step 3.
 
-```bash
-(cd lit-actions && cargo update -p tar --precise 0.4.46)
-```
-
-If the bump sticks → clears `#368` (GHSA-3pv8-6f4r-ffg2). If a transitive (deno)
-edge holds it back, move it to step 3 instead.
-
-### 2d. `rsa` → `0.9.10` in `lit-actions` — 1 alert (verify; likely blocked) 🟠
+### 2d. `rsa` → `0.9.10` in `lit-actions` — 1 alert ✅
 
 `#19` (CVE-2026-21895 / GHSA-9c48-w39g-hm26, panic on prime == 1) is a *different*
-advisory from the Marvin one already ignored as RUSTSEC-2023-0071. Locked at
-`0.9.9`; fix is `0.9.10`. `deno_crypto`/`deno_node_crypto` pin rsa — try the bump:
+advisory from the Marvin one already ignored as RUSTSEC-2023-0071. Bumped `0.9.9`
+→ `0.9.10` cleanly — deno did **not** hard-pin it. Clears `#19`.
 
 ```bash
 (cd lit-actions && cargo update -p rsa --precise 0.9.10)
 ```
-
-If it sticks → clears `#19`. If deno hard-pins `=0.9.9` → move to step 3 and add a
-matching ignore for CVE-2026-21895 to `deny.toml` (see step 3 note).
 
 ### After the bumps
 
@@ -132,12 +129,12 @@ upstream dep bumps land.
 
 | Alert(s) | Pkg | Advisory | `deny.toml` entry / blocker |
 | --- | --- | --- | --- |
-| `#78 #79 #82 #83 #80 #84 #109 #110 #111` | rustls-webpki | GHSA-965h/xgp8/82j2/pwjx | RUSTSEC-2026-0098/0099/0104/0049 — rocket 0.5.1 (rustls 0.21) + deno_tls (rustls 0.23.40) |
+| `#26 #78 #79 #80 #82 #83 #84 #109 #110 #111` | rustls-webpki | GHSA-pwjx/965h/xgp8/82j2 | RUSTSEC-2026-0049/0098/0099/0104 — rocket 0.5.1 (rustls 0.21) + deno_tls (rustls 0.23.40) |
 | `#128 #130` | hickory-proto | GHSA-3v94 | RUSTSEC-2026-0118 — no stable fix (0.26-beta only) + deno_net |
 | `#129 #131` | hickory-proto | GHSA-q2qq | RUSTSEC-2026-0119 — deno_net hickory 0.25 pin |
 | `#21` | time | GHSA-r6v5 / CVE-2026-25727 | RUSTSEC-2026-0009 — deno_ast/swc serde pin |
 | `#90` | rand | GHSA-cq8v | RUSTSEC-2026-0097 — deno's rand `=0.8.5` (lit-actions only) |
-| `#19` (if step 2d blocked) | rsa | GHSA-9c48 / CVE-2026-21895 | new — add to `deny.toml` ignore + dismiss |
+| `#368` | tar | GHSA-3pv8 | `deno_npm_cache` requires `=0.4.45` (deno-pinned) |
 
 > Verify the `lit-api-server` hickory source (`#130 #131`): `deny.toml` attributes
 > hickory to deno (lit-actions) only. If lit-api-server pulls hickory via a
@@ -160,10 +157,10 @@ gh api --method PATCH /repos/LIT-Protocol/chipotle/dependabot/alerts/<N> \
 ## End state
 
 - `examples/`: 0 alerts (auto-dismiss script + `socket.yml`).
-- Rust fixable: ~25–27 alerts closed by lockfile bumps (openssl is 24 of them).
-- Rust blocked: ~16 alerts dismissed `no_bandwidth`, each traceable to a `deny.toml`
-  ignore entry; revisit when deno/rocket/Alloy ship dep bumps (the `deny.toml`
-  "upstream watch" already tracks this).
+- Rust fixed: **26 alerts** closed by lockfile bumps (openssl ×24, rand ×1, rsa ×1).
+- Rust blocked: **17 alerts** to dismiss `no_bandwidth`, each traceable to a
+  `deny.toml` ignore entry; revisit when deno/rocket/Alloy ship dep bumps (the
+  `deny.toml` "upstream watch" already tracks this).
 
 ## Follow-ups (out of scope for this Rust-only plan)
 
