@@ -285,6 +285,11 @@ let _clientInstance = null;
 let _clientBaseUrl = null;
 let _clientMode = null;
 
+// AbortController for the currently-open wallet pill menu's document listeners.
+// Tracked at module scope so a topbar rebuild (renderModeBadge) can abort a
+// prior render's listeners before its nodes are replaced. See wireWalletPillMenu.
+let _walletMenuAbort = null;
+
 // Fires after every successful client method call (Proxy below). Used by
 // billing.js to refresh the credit balance display after any API activity
 // (NODE-4971). Registered via setOnApiCallSuccess() from initBilling().
@@ -595,41 +600,59 @@ function renderModeBadge() {
  * "Copy address" + "Disconnect wallet". Mirrors the mode-badge popover's
  * open/close behavior (outside-click + Escape close). No-op when the pill is
  * absent (API mode / unauthenticated).
+ *
+ * The outside-click / Escape handlers are bound to an AbortController so they
+ * are always torn down on close — including the toggle-closed path and the
+ * case where `renderModeBadge()` rebuilds the topbar (replacing these nodes)
+ * while the menu is still open. Without that, a stale capture listener would
+ * linger holding a detached-node closure until the next document click.
  */
 function wireWalletPillMenu() {
   const pill = document.getElementById('topbar-wallet-pill');
   const menu = document.getElementById('topbar-wallet-menu');
   const copyBtn = document.getElementById('topbar-wallet-copy');
   const disconnectBtn = document.getElementById('topbar-wallet-disconnect');
+  // Abort any listeners left over from a prior render's open menu before the
+  // old nodes (which this rebuild replaced) leak their closures.
+  if (_walletMenuAbort) { _walletMenuAbort.abort(); _walletMenuAbort = null; }
   if (!pill || !menu) return;
 
+  let ctrl = null;
   const close = () => {
     menu.hidden = true;
     pill.setAttribute('aria-expanded', 'false');
-    document.removeEventListener('click', onDocClick, true);
-    document.removeEventListener('keydown', onKeyDown, true);
+    if (ctrl) {
+      ctrl.abort();
+      if (_walletMenuAbort === ctrl) _walletMenuAbort = null;
+      ctrl = null;
+    }
   };
-  const onDocClick = (ev) => {
-    if (!pill.contains(ev.target) && !menu.contains(ev.target)) close();
+  const open = () => {
+    menu.hidden = false;
+    pill.setAttribute('aria-expanded', 'true');
+    ctrl = new AbortController();
+    _walletMenuAbort = ctrl;
+    const { signal } = ctrl;
+    document.addEventListener('click', (ev) => {
+      if (!pill.contains(ev.target) && !menu.contains(ev.target)) close();
+    }, { capture: true, signal });
+    document.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Escape') close();
+    }, { capture: true, signal });
   };
-  const onKeyDown = (ev) => { if (ev.key === 'Escape') close(); };
 
   pill.addEventListener('click', (ev) => {
     ev.stopPropagation();
-    const open = menu.hidden;
-    menu.hidden = !open;
-    pill.setAttribute('aria-expanded', String(open));
-    if (open) {
-      document.addEventListener('click', onDocClick, true);
-      document.addEventListener('keydown', onKeyDown, true);
-    }
+    if (menu.hidden) open(); else close();
   });
 
   if (copyBtn) {
     copyBtn.addEventListener('click', async () => {
       const { copyToClipboard } = await import('./ui-utils.js');
       await copyToClipboard(pill.dataset.wallet, copyBtn);
-      close();
+      // Keep the menu open briefly so the button's "Copied!" feedback is
+      // visible (copyToClipboard restores the label at 1500ms), then close.
+      setTimeout(close, 1200);
     });
   }
   if (disconnectBtn) {
