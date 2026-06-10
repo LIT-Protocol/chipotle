@@ -3,7 +3,7 @@ title: "Chain Secured"
 description: "A key's authority lives in smart contracts on Base, and an attested TEE enforces those rules by reading the chain — on-chain authority, signing at API speed."
 ---
 
-Lit's core guarantee is simple to state: **a key's authority is on-chain state.** What a key may sign, which code is allowed to use it, and who can change those rules all live in smart contracts on Base. Nothing off-chain — no server, no API key, no operator, not even Lit — can move a key outside what the chain permits.
+Lit's core guarantee is simple to state: **a key's authority is on-chain state.** What a key may sign, which code is allowed to use it, and who can change those rules all live in smart contracts on Base. Nothing off-chain — no server, no API key, no operator, not even Lit — can make a key sign outside the rules currently on the chain.
 
 We call this **Chain Secured**.
 
@@ -11,7 +11,7 @@ We call this **Chain Secured**.
 
 Authorization isn't a flag in someone's database. It's on-chain state that you own:
 
-- **Account** — an address on Base that owns everything: a wallet you control (an EOA or Safe) in [ChainSecured mode](/management/account_modes), or a Lit-managed credential in API mode.
+- **Account** — an address on Base that owns everything: a wallet you control (an EOA or Safe) in **ChainSecured mode**, or a Lit-managed credential in **API mode**. See [API mode vs ChainSecured mode](/management/account_modes).
 - **API keys & scopes** — each key is registered on-chain with explicit, per-group scopes (`execute`, `group:addPkp`, and so on).
 - **PKPs & Groups** — a Group is the authorization policy: it binds the keys (PKPs) to the immutable Lit Actions (IPFS CIDs) allowed to use them.
 
@@ -24,7 +24,7 @@ require(
 );
 ```
 
-Changing a rule is an on-chain transaction — public, auditable, and authorized by an owner you control. Put a SAFE in the owner slot and it takes a multisig vote. See the [Authentication Model](/architecture/authModel) for the full permission matrix.
+Changing a rule is an on-chain transaction — public, auditable, and authorized by an owner you control. Put a Safe in the owner slot and it takes a multisig vote. See the [Authentication Model](/architecture/authModel) for the full permission matrix.
 
 ## An attested TEE enforces it — by reading
 
@@ -50,7 +50,7 @@ So you get the chain's guarantees — public, owner-controlled, auditable author
 Because authority lives on-chain and the TEE only ever enforces it:
 
 - A leaked execute-only key can invoke the actions it is already permitted to, and nothing else. It cannot add itself to new groups, swap in new code, or move funds outside policy.
-- Changing *what the rules are* requires an owner transaction on Base. Put the owner behind a SAFE and an evil admin with an execute key "can invoke existing actions but cannot change the rules."
+- Changing *what the rules are* requires an owner transaction on Base. Put the owner behind a Safe, and an evil admin holding an execute key can invoke existing actions but cannot change the rules.
 - The rules are visible to anyone, at any time. Don't trust — verify.
 
 ## Further reading
