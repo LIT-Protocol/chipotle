@@ -61,9 +61,16 @@ confirmBtn.addEventListener('click', async () => {
   confirmBtn.disabled = true;
   setStatus('Contacting your bank…', 'info');
   try {
-    const result = await _stripe.handleNextAction({
-      clientSecret: _clientSecret,
-    });
+    // Why confirmCardPayment, not handleNextAction:
+    // For off-session charges on SCA-required cards, Stripe can't do
+    // 3DS without the user present, so the PI is created and IMMEDIATELY
+    // moved to `requires_payment_method` with last_payment_error =
+    // authentication_required (not `requires_action`). That means
+    // handleNextAction errors ("PI not in requires_action").
+    // confirmCardPayment re-confirms the PI's existing saved card
+    // on-session, which triggers Stripe.js's 3DS challenge UI and
+    // moves the PI through `requires_action` → `succeeded`.
+    const result = await _stripe.confirmCardPayment(_clientSecret);
     if (result.error) {
       setStatus(result.error.message || 'Authentication failed.', 'error');
       confirmBtn.disabled = false;
