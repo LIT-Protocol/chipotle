@@ -119,7 +119,9 @@ export class BinanceClient implements VenueClient {
 
   private async signed(method: 'GET' | 'POST' | 'DELETE', path: string, params: Params): Promise<unknown> {
     const creds = this.cfg.credentials;
-    if (!creds) throw new VenueError(this.venueId, 'auth', 'this call requires credentials');
+    if (!creds?.apiKey || !creds.secret) {
+      throw new VenueError(this.venueId, 'auth', 'this call requires credentials (apiKey + secret)');
+    }
     const all: Params = [...params, ['recvWindow', RECV_WINDOW], ['timestamp', String(this.now())]];
     const payload = encodeParams(all);
     const signature =
@@ -155,6 +157,8 @@ export class BinanceClient implements VenueClient {
   }
 
   async fetchMarket(symbol: string): Promise<Market> {
+    const cached = this.cfg.markets?.[symbol];
+    if (cached) return cached;
     const v = this.toVenueSymbol(symbol);
     const body = (await this.public_('/api/v3/exchangeInfo', [['symbol', v]])) as {
       symbols?: Array<{
@@ -191,6 +195,9 @@ export class BinanceClient implements VenueClient {
   }
 
   async createOrder(req: OrderRequest): Promise<Order> {
+    if (req.reduceOnly) {
+      throw new VenueError(this.venueId, 'invalid_request', 'reduceOnly is a perp concept; binance spot rejects it');
+    }
     const v = this.toVenueSymbol(req.symbol);
     const params: Params = [
       ['symbol', v],

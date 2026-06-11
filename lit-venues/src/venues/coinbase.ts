@@ -80,7 +80,9 @@ export class CoinbaseClient implements VenueClient {
     const headers: Record<string, string> = {};
     if (opts.auth) {
       const creds = this.cfg.credentials;
-      if (!creds) throw new VenueError(this.venueId, 'auth', 'this call requires credentials');
+      if (!creds?.apiKey || !creds.secret) {
+        throw new VenueError(this.venueId, 'auth', 'this call requires credentials (CDP key name + private key)');
+      }
       // uri claim is method + host + path, query string excluded, per CDP docs.
       headers.Authorization = `Bearer ${es256Jwt({
         keyName: creds.apiKey,
@@ -139,6 +141,8 @@ export class CoinbaseClient implements VenueClient {
   }
 
   async fetchMarket(symbol: string): Promise<Market> {
+    const cached = this.cfg.markets?.[symbol];
+    if (cached) return cached;
     const id = this.toVenueSymbol(symbol);
     const body = (await this.request('GET', `/api/v3/brokerage/market/products/${id}`)) as {
       base_currency_id?: string;
@@ -182,6 +186,9 @@ export class CoinbaseClient implements VenueClient {
   }
 
   async createOrder(req: OrderRequest): Promise<Order> {
+    if (req.reduceOnly) {
+      throw new VenueError(this.venueId, 'invalid_request', 'reduceOnly is a perp concept; coinbase spot rejects it');
+    }
     const productId = this.toVenueSymbol(req.symbol);
     let orderConfiguration: Record<string, unknown>;
     if (req.type === 'limit') {

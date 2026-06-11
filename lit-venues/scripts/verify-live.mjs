@@ -7,10 +7,15 @@
  *     LIT_VENUES_PROXY=http://user:pass@host:port (or it's read from
  *     /tmp/proxy_url.txt when present).
  *   - Coinbase Advanced Trade is reached directly (US-reachable).
+ *   - Hyperliquid is reached directly by default (no exchange-side IP
+ *     allowlist; geo posture is measured by this script — plan D8). Set
+ *     HYPERLIQUID_VIA_PROXY=true to route it through LIT_VENUES_PROXY too.
  *   - Public endpoints always run. Authenticated endpoints run only when keys
  *     are supplied:
  *       BINANCE_KEY / BINANCE_SECRET [/ BINANCE_KEY_TYPE=hmac|ed25519]
  *       COINBASE_KEY_NAME / COINBASE_PRIVATE_KEY
+ *       HYPERLIQUID_PRIVATE_KEY [/ HYPERLIQUID_ACCOUNT_ADDRESS for agent mode]
+ *         [/ HYPERLIQUID_SANDBOX=false to hit mainnet — default is testnet]
  *
  * undici provides the proxy-capable fetch (the library stays dependency-free);
  * in the TEE this same role is played by Lit.Actions.proxiedFetch.
@@ -126,6 +131,65 @@ console.log('\n== Coinbase Advanced Trade (direct) ==');
     });
   } else {
     console.log('  ! no COINBASE_KEY_NAME/PRIVATE_KEY — skipping authenticated (balances, orders)');
+  }
+}
+
+console.log('\n== Hyperliquid (PKP-native, direct) ==');
+{
+  const hlFetch = nodeFetch(process.env.HYPERLIQUID_VIA_PROXY === 'true' ? PROXY : '');
+  const hl = createVenue({ venueId: 'hyperliquid', fetchImpl: hlFetch });
+  await check('fetchTicker BTC (geo-posture measurement: direct egress)', async () => {
+    const t = await hl.fetchTicker('BTC');
+    if (!(t.last > 0)) throw new Error(`bad last: ${t.last}`);
+    return `last=${t.last}`;
+  });
+  await check('fetchMarket ETH (szDecimals → tick/lot rules)', async () => {
+    const m = await hl.fetchMarket('ETH');
+    if (!m.priceIncrement || !m.amountIncrement) throw new Error('missing increments');
+    return `pxMaxStep=${m.priceIncrement} lot=${m.amountIncrement} maxLev=${m.info?.maxLeverage}`;
+  });
+  await check('fetchFundingRate BTC (perp surface)', async () => {
+    const fr = await hl.fetchFundingRate('BTC');
+    if (fr.fundingRate === undefined) throw new Error('no funding');
+    return `funding=${fr.fundingRate} mark=${fr.markPrice}`;
+  });
+  await check('bad symbol maps to bad_symbol', async () => {
+    try {
+      await hl.fetchTicker('NOTACOIN');
+      throw new Error('expected an error');
+    } catch (e) {
+      if (e?.code !== 'bad_symbol') throw new Error(`got code ${e?.code}`);
+      return 'rejected as expected';
+    }
+  });
+  if (process.env.HYPERLIQUID_PRIVATE_KEY) {
+    const sandbox = process.env.HYPERLIQUID_SANDBOX !== 'false';
+    const authed = createVenue({
+      venueId: 'hyperliquid',
+      sandbox,
+      credentials: {
+        keyType: 'pkp-eip712',
+        privateKey: process.env.HYPERLIQUID_PRIVATE_KEY,
+        accountAddress: process.env.HYPERLIQUID_ACCOUNT_ADDRESS,
+      },
+      fetchImpl: hlFetch,
+    });
+    await check(`fetchBalances (${sandbox ? 'testnet' : 'MAINNET'})`, async () => {
+      const b = await authed.fetchBalances();
+      return `USDC free=${b[0]?.free} total=${b[0]?.total}`;
+    });
+    await check('order lifecycle: place deep GTC limit, list, cancel', async () => {
+      const m = await authed.fetchMarket('ETH');
+      const t = await authed.fetchTicker('ETH');
+      // bid 50% under mid so it rests without filling; integer px is always valid
+      const px = String(Math.max(1, Math.floor(t.last / 2)));
+      const order = await authed.createOrder({ symbol: 'ETH', side: 'buy', type: 'limit', amount: m.minAmount ?? '0.01', price: px });
+      const open = await authed.fetchOpenOrders('ETH');
+      await authed.cancelOrder(order.id, 'ETH');
+      return `oid=${order.id} rested (${open.length} open) then canceled`;
+    });
+  } else {
+    console.log('  ! no HYPERLIQUID_PRIVATE_KEY — skipping authenticated (balances, order lifecycle)');
   }
 }
 
