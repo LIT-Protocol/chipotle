@@ -18,6 +18,10 @@ flume = { workspace = true }
 lazy_static = "1"
 lit-actions-grpc = { workspace = true }
 lit-observability = { workspace = true, features = ["channels"] }
+# Matches lit-actions/server's reqwest exactly so feature-unification is a no-op
+# and we reuse the process-default aws_lc_rs provider installed in init_v8().
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots-no-provider"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }

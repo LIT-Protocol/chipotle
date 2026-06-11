@@ -131,6 +131,9 @@ export class LitApiClient {
     return this.request<AddUsageKeyResponse>('POST', '/add_usage_api_key', {
       headers: { 'x-api-key': apiKey },
       body: {
+        // `description` is required (not optional) by AddUsageApiKeyRequest —
+        // omitting it 422s on deployed environments.
+        description: '',
         can_create_groups: false,
         can_delete_groups: false,
         can_create_pkps: false,

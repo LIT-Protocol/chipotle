@@ -51,6 +51,14 @@ async function fetchApiPayers(): Promise<Address[]> {
 }
 
 export default async function globalSetup(): Promise<void> {
+  // Remote environments (staging/dev CVMs) already have api_payers registered
+  // and funded — this bootstrap is only for the local_test.sh Anvil stack.
+  if (!/localhost|127\.0\.0\.1/.test(API_BASE_URL)) {
+    // eslint-disable-next-line no-console
+    console.log(`[global-setup] remote API_BASE_URL (${API_BASE_URL}) — skipping local Anvil bootstrap`);
+    return;
+  }
+
   const proxy = accountConfigAddress();
 
   const publicClient = createPublicClient({ chain: foundry, transport: http(ANVIL_RPC_URL) });

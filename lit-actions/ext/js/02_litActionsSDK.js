@@ -103,6 +103,51 @@ function showImportDetails() {
   return JSON.parse(json);
 }
 
+/**
+ * Outbound HTTP that can egress through a per-request authenticated proxy, so a
+ * Lit Action can reach a venue (e.g. Binance) from a chosen non-US IP even
+ * though the enclave's own egress is geo-blocked. TLS to the destination is
+ * end-to-end through the proxy's CONNECT tunnel; the proxy never sees venue
+ * credentials or payloads. Counts against the same per-action fetch quota as
+ * the global `fetch`.
+ * @name Lit.Actions.proxiedFetch
+ * @function proxiedFetch
+ * @param {Object} params
+ * @param {string} params.url The absolute URL to request.
+ * @param {string} [params.method] HTTP method (default "GET").
+ * @param {Object|Array<[string,string]>} [params.headers] Request headers.
+ * @param {string} [params.body] Request body.
+ * @param {string} [params.proxy] Proxy URL `http(s)://[user:pass@]host:port`. Omit for a direct request.
+ * @returns {Promise<{status:number, ok:boolean, headers:Object, text:()=>Promise<string>, json:()=>Promise<any>}>}
+ */
+async function proxiedFetch({
+  url,
+  method = 'GET',
+  headers = {},
+  body = null,
+  proxy = null,
+} = {}) {
+  // Enforce the per-action fetch quota exactly like the wrapped global fetch.
+  await ops.op_increment_fetch_count();
+  const headerPairs = Array.isArray(headers) ? headers : Object.entries(headers);
+  const res = await ops.op_lit_proxied_fetch({
+    url,
+    method,
+    headers: headerPairs,
+    body,
+    proxy,
+  });
+  const headerMap = {};
+  for (const [k, v] of res.headers) headerMap[String(k).toLowerCase()] = v;
+  return {
+    status: res.status,
+    ok: res.status >= 200 && res.status < 300,
+    headers: headerMap,
+    text: async () => res.body,
+    json: async () => JSON.parse(res.body),
+  };
+}
+
 globalThis.LitActions = {
   Encrypt,
   Decrypt,
@@ -112,4 +157,5 @@ globalThis.LitActions = {
   getLitActionWalletAddress,
   setResponse,
   showImportDetails,
+  proxiedFetch,
 };
