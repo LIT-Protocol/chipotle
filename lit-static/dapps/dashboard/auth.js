@@ -893,6 +893,12 @@ export async function convertToChainSecured() {
     }
     const { connectWallet, switchChain } = await import('../../wallet_connect.js');
     let chainId;
+    // No `force` here: a live cached connection is fine to reuse. The two guards
+    // that matter for this irreversible admin handoff are already in place — the
+    // liveness probe inside connectWallet re-prompts if the cached connection is
+    // dead/locked, and the confirm modal below shows the resolved admin address
+    // so the user can abort if it's not the wallet they intend. Forcing a fresh
+    // pick would also tear down a working wallet before a replacement is in hand.
     ({ signer, chainId } = await connectWallet({ chainId: expectedChainId, rpcUrl: getChainSecuredRpcUrl() }));
     if (chainId !== expectedChainId) {
       try {
@@ -911,8 +917,17 @@ export async function convertToChainSecured() {
   }
   closeActionProgress();
 
+  // Surface the exact wallet that will become admin — the user just picked it,
+  // but showing the resolved address in the irreversible-confirm step is the
+  // last guard against handing ownership to the wrong account.
+  let adminAddress = '';
+  try {
+    adminAddress = await signer.getAddress();
+  } catch {}
+  const adminLine = adminAddress ? `\n\nNew admin wallet: ${adminAddress}` : '';
+
   const ok = await confirmDelete(
-    "Convert this account to ChainSecured?\n\nYour connected wallet becomes the on-chain admin and your API key's write authority is removed permanently. This cannot be undone.\n\nYou will be asked to sign a message with your wallet to prove ownership, and will be signed in as the wallet after conversion.",
+    `Convert this account to ChainSecured?${adminLine}\n\nYour connected wallet becomes the on-chain admin and your API key's write authority is removed permanently. This cannot be undone.\n\nYou will be asked to sign a message with your wallet to prove ownership, and will be signed in as the wallet after conversion.`,
     { title: 'Confirm ownership change', confirmLabel: 'Convert' },
   );
   if (!ok) return;

@@ -19,9 +19,6 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository
     name: forge-test
     runs-on: self-hosted
-    concurrency:
-      group: foundry-toolchain
-      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
         with:
@@ -41,8 +38,17 @@ jobs:
       - name: Check Foundry toolchain
         id: foundry-toolchain
         run: |
-          if command -v forge >/dev/null 2>&1 && forge --version | grep -Eq '(^|[^0-9])1\.5\.1([^0-9]|$)'; then
-            forge --version
+          # The global install on the shared runner lives in ~/.foundry/bin, which
+          # is only on PATH via the user's shell profile. GH Actions steps run in a
+          # non-login shell that doesn't source it, so probe the known location too.
+          forge_bin="$(command -v forge || true)"
+          if [ -z "$forge_bin" ] && [ -x "$HOME/.foundry/bin/forge" ]; then
+            forge_bin="$HOME/.foundry/bin/forge"
+          fi
+          if [ -n "$forge_bin" ] && "$forge_bin" --version | grep -Eq '(^|[^0-9])1\.5\.1([^0-9]|$)'; then
+            "$forge_bin" --version
+            # Put it on PATH for later steps so they don't trigger a reinstall.
+            echo "$(dirname "$forge_bin")" >> "$GITHUB_PATH"
             echo "installed=true" >> "$GITHUB_OUTPUT"
           else
             echo "installed=false" >> "$GITHUB_OUTPUT"
