@@ -2,6 +2,7 @@
 
 pub mod accounts;
 pub mod actions;
+pub mod approvals;
 pub mod config;
 pub mod core;
 pub mod dstack;

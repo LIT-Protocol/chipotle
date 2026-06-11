@@ -122,11 +122,14 @@ macro_rules! decl_op {
 
 decl_op!(AesDecrypt);
 decl_op!(AesEncrypt);
+decl_op!(CheckEmailApproval);
 decl_op!(GetPrivateKey);
 decl_op!(GetLitActionPrivateKey);
 decl_op!(GetLitActionPublicKey);
 decl_op!(GetLitActionWalletAddress);
 decl_op!(IncrementFetchCount);
 decl_op!(Print);
+decl_op!(RequestEmailApproval);
+decl_op!(SendEmail);
 decl_op!(SetResponse);
 decl_op!(UpdateResourceUsage);

@@ -370,6 +370,16 @@ fn build_rocket(
             std::path::PathBuf::from(core::v1::health::LIT_ACTIONS_SOCKET),
         ));
 
+    // Email approval primitive (plan D6/M3): user-facing approval pages at
+    // root + the service consumed by the lit_action op stream.
+    let approval_service = Arc::new(
+        lit_api_server::approvals::ApprovalService::from_env()
+            .expect("approval service init failed"),
+    );
+    r = r
+        .manage(approval_service)
+        .mount("/", lit_api_server::approvals::routes());
+
     // /attestation at root — per Phala Get Attestation
     r = r
         .mount("/", dstack::v1::endpoints::attestation_routes())

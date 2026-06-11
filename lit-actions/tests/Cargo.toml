@@ -24,11 +24,14 @@ deno_runtime = { workspace = true }
 flume = { workspace = true }
 gotham_store = "1"
 indoc = { workspace = true }
+# Signing fixture attestations for the email-approval op tests
+k256 = { version = "0.13", features = ["ecdsa"] }
 lit-actions-server = { workspace = true }
 lit-core = { workspace = true }
 pretty_assertions = "1"
 pretty_env_logger = "0.5"
 rstest = "0.19"
+serde_json = { workspace = true }
 sys_traits = { workspace = true }
 temp-file = "0.1"
 tokio = { workspace = true }

@@ -148,6 +148,67 @@ async function proxiedFetch({
   };
 }
 
+/**
+ * Send a plain-text notification email, server-mediated (fixed from-domain,
+ * per-account quotas, no arbitrary HTML) -- plan D6.
+ * @name Lit.Actions.sendEmail
+ * @function sendEmail
+ * @param {Object} params
+ * @param {string} params.to Recipient address.
+ * @param {string} params.subject Subject line (server prefixes it to prevent spoofing).
+ * @param {string} params.text Plain-text body.
+ * @returns {Promise<{accepted: boolean}>}
+ */
+async function sendEmail({ to, subject, text }) {
+  await ops.op_send_email(to, subject, text);
+  return { accepted: true };
+}
+
+/**
+ * Request a human approval over email: issues a single-use approval id and
+ * emails a signed approval link. Two-phase by design -- this phase exits, a
+ * later invocation calls checkEmailApproval (plan D6).
+ * @name Lit.Actions.requestEmailApproval
+ * @function requestEmailApproval
+ * @param {Object} params
+ * @param {string} params.to Approver's email address.
+ * @param {string} params.summary What is being approved (shown in the email and on the approval page).
+ * @param {string} [params.assurance] "L1" (link click) or "L2" (link + OTP step-up, default -- required for anything that moves funds).
+ * @param {number} [params.ttlSec] Approval validity window in seconds (default 3600).
+ * @returns {Promise<{approvalId: string, otp?: string, approvalUrl?: string}>} For L2 the OTP must reach the approver out-of-band (e.g. shown in the requesting app) -- email is the notification channel, not the authentication channel.
+ */
+async function requestEmailApproval({ to, summary, assurance = 'L2', ttlSec = 3600 }) {
+  const res = await ops.op_request_email_approval(to, summary, assurance, ttlSec);
+  return {
+    approvalId: res.approval_id,
+    otp: res.otp ?? undefined,
+    approvalUrl: res.approval_url ?? undefined,
+  };
+}
+
+/**
+ * Check an approval and verify its attestation IN-TEE against the pinned
+ * network attestation key. Returns approved=true only after the runtime has
+ * verified the signature, approvalId binding, status, and expiry -- a
+ * compromised approval service cannot forge an approval past this check.
+ * @name Lit.Actions.checkEmailApproval
+ * @function checkEmailApproval
+ * @param {Object} params
+ * @param {string} params.approvalId The id returned by requestEmailApproval.
+ * @returns {Promise<{approved: boolean, status: string, attestation?: string, approver?: string, assurance?: string, approvedAtMs?: number}>}
+ */
+async function checkEmailApproval({ approvalId }) {
+  const res = await ops.op_check_email_approval(approvalId);
+  return {
+    approved: res.approved,
+    status: res.status,
+    attestation: res.attestation ?? undefined,
+    approver: res.approver ?? undefined,
+    assurance: res.assurance ?? undefined,
+    approvedAtMs: res.approved_at_ms ?? undefined,
+  };
+}
+
 globalThis.LitActions = {
   Encrypt,
   Decrypt,
@@ -158,4 +219,7 @@ globalThis.LitActions = {
   setResponse,
   showImportDetails,
   proxiedFetch,
+  sendEmail,
+  requestEmailApproval,
+  checkEmailApproval,
 };

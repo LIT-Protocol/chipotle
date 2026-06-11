@@ -95,6 +95,13 @@ pub struct Client {
     #[serde(skip)]
     pub(crate) stripe_state: Option<Arc<StripeState>>,
 
+    /// Email approval service (plan D6/M3) backing the sendEmail /
+    /// requestEmailApproval / checkEmailApproval ops. `None` in contexts that
+    /// never execute those ops (e.g. config probing).
+    #[builder(default, setter(into, strip_option))]
+    #[serde(skip)]
+    pub(crate) approvals: Option<Arc<crate::approvals::ApprovalService>>,
+
     // State
     #[builder(setter(skip))]
     #[serde(skip)]

@@ -20,6 +20,9 @@ message ExecuteJsRequest {
     GetLitActionPrivateKeyResponse get_lit_action_private_key = 13;
     GetLitActionPublicKeyResponse get_lit_action_public_key = 14;
     GetLitActionWalletAddressResponse get_lit_action_wallet_address = 15;
+    SendEmailResponse send_email = 16;
+    RequestEmailApprovalResponse request_email_approval = 17;
+    CheckEmailApprovalResponse check_email_approval = 18;
   }
 
   message ExecutionRequest {
@@ -71,6 +74,19 @@ message ExecuteJsRequest {
   message GetLitActionWalletAddressResponse {
     string wallet_address = 1;
   }
+
+  message SendEmailResponse {}
+
+  message RequestEmailApprovalResponse {
+    string approval_id = 1;
+    string otp = 2;           // present only when the assurance level uses an OTP step-up (L2)
+    string approval_url = 3;  // present only when the server runs with expose-links (dev/e2e)
+  }
+
+  message CheckEmailApprovalResponse {
+    string status = 1;        // pending | approved | denied | expired
+    string attestation = 2;   // email-approval-v1 envelope; present only when approved
+  }
 }
 
 message ExecuteJsResponse {
@@ -86,7 +102,9 @@ message ExecuteJsResponse {
     GetLitActionPrivateKeyRequest get_lit_action_private_key = 13;
     GetLitActionPublicKeyRequest get_lit_action_public_key = 14;
     GetLitActionWalletAddressRequest get_lit_action_wallet_address = 15;
-
+    SendEmailRequest send_email = 16;
+    RequestEmailApprovalRequest request_email_approval = 17;
+    CheckEmailApprovalRequest check_email_approval = 18;
   }
 
   message ExecutionResult {
@@ -131,5 +149,22 @@ message ExecuteJsResponse {
 
   message GetLitActionWalletAddressRequest {
     string ipfs_id = 1;
+  }
+
+  message SendEmailRequest {
+    string to = 1;
+    string subject = 2;
+    string text = 3;
+  }
+
+  message RequestEmailApprovalRequest {
+    string to = 1;
+    string summary = 2;
+    string assurance = 3;  // L1 (link click) | L2 (link + OTP step-up)
+    uint32 ttl_sec = 4;
+  }
+
+  message CheckEmailApprovalRequest {
+    string approval_id = 1;
   }
 }

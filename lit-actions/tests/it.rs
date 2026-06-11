@@ -144,6 +144,18 @@ impl TestClient {
                 self.messages.put(req);
                 self.messages.take::<UpdateResourceUsageResponse>().into()
             }
+            UnionResponse::SendEmail(req) => {
+                self.messages.put(req);
+                self.messages.take::<SendEmailResponse>().into()
+            }
+            UnionResponse::RequestEmailApproval(req) => {
+                self.messages.put(req);
+                self.messages.take::<RequestEmailApprovalResponse>().into()
+            }
+            UnionResponse::CheckEmailApproval(req) => {
+                self.messages.put(req);
+                self.messages.take::<CheckEmailApprovalResponse>().into()
+            }
             UnionResponse::Result(_) => unreachable!(), // handled in main loop
         }
     }
@@ -1257,3 +1269,293 @@ async fn raw_execute_no_op_once(socket_path: &std::path::Path) -> Result<()> {
 /// — kept here as a documentation marker so future readers find it.
 #[allow(dead_code)]
 fn pool_isolation_doc() {}
+
+// ---------------------------------------------------------------------------
+// Email send + approval ops (plan D6/M3). checkEmailApproval verifies the
+// attestation INSIDE the runtime against LIT_APPROVAL_ATTESTATION_PUBKEY —
+// these tests forge the server side with a fixture key and prove the op
+// accepts only a correctly signed, unexpired, id-bound attestation.
+
+const TEST_ATTESTATION_PRIVKEY: [u8; 32] = [0x42; 32];
+
+fn hex_str(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn install_test_attestation_pubkey() {
+    let sk = k256::ecdsa::SigningKey::from_slice(&TEST_ATTESTATION_PRIVKEY).unwrap();
+    let pk = hex_str(sk.verifying_key().to_encoded_point(true).as_bytes());
+    // Safety: tests that touch this var all write the same fixture value.
+    unsafe { std::env::set_var("LIT_APPROVAL_ATTESTATION_PUBKEY", pk) };
+}
+
+fn signed_attestation(payload_json: &str) -> String {
+    use k256::ecdsa::signature::Signer;
+    let sk = k256::ecdsa::SigningKey::from_slice(&TEST_ATTESTATION_PRIVKEY).unwrap();
+    let sig: k256::ecdsa::Signature = sk.sign(payload_json.as_bytes());
+    serde_json::json!({
+        "v": "email-approval-v1",
+        "alg": "secp256k1-sha256",
+        "payload": payload_json,
+        "sig": hex_str(&sig.to_bytes()),
+    })
+    .to_string()
+}
+
+fn approval_payload(approval_id: &str, expires_at_ms: u64) -> String {
+    serde_json::json!({
+        "schema": "email-approval-v1",
+        "approval_id": approval_id,
+        "approver": "cfo@example.com",
+        "assurance": "L2",
+        "status": "approved",
+        "approved_at_ms": 1_700_000_000_000u64,
+        "expires_at_ms": expires_at_ms,
+    })
+    .to_string()
+}
+
+const FAR_FUTURE_MS: u64 = 4_102_444_800_000; // 2100-01-01
+
+#[rstest]
+#[tokio::test]
+async fn send_email(mut client: TestClient) {
+    let code = indoc! {r#"
+        async function main() {
+            const res = await Lit.Actions.sendEmail({
+                to: "ops@example.com",
+                subject: "weekly report",
+                text: "all venues green",
+            });
+            Lit.Actions.setResponse({ response: "accepted=" + res.accepted });
+        }
+    "#};
+
+    client
+        .respond_with(SendEmailResponse {})
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        client.received::<SendEmailRequest>(),
+        SendEmailRequest {
+            to: "ops@example.com".into(),
+            subject: "weekly report".into(),
+            text: "all venues green".into(),
+        }
+    );
+    assert_eq!(client.received::<SetResponseRequest>().response, "accepted=true");
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+#[rstest]
+#[tokio::test]
+async fn request_email_approval(mut client: TestClient) {
+    let code = indoc! {r#"
+        async function main() {
+            const r = await Lit.Actions.requestEmailApproval({
+                to: "cfo@example.com",
+                summary: "Sweep 2.5 BTC from Binance to cold storage",
+                assurance: "L2",
+                ttlSec: 600,
+            });
+            Lit.Actions.setResponse({
+                response: [r.approvalId, r.otp, r.approvalUrl ?? "none"].join("|"),
+            });
+        }
+    "#};
+
+    client
+        .respond_with(RequestEmailApprovalResponse {
+            approval_id: "apr_0123abcd".into(),
+            otp: "446655".into(),
+            approval_url: String::new(),
+        })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        client.received::<RequestEmailApprovalRequest>(),
+        RequestEmailApprovalRequest {
+            to: "cfo@example.com".into(),
+            summary: "Sweep 2.5 BTC from Binance to cold storage".into(),
+            assurance: "L2".into(),
+            ttl_sec: 600,
+        }
+    );
+    assert_eq!(
+        client.received::<SetResponseRequest>().response,
+        "apr_0123abcd|446655|none"
+    );
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+#[rstest]
+#[tokio::test]
+async fn check_email_approval_verifies_attestation_in_runtime(mut client: TestClient) {
+    install_test_attestation_pubkey();
+    let attestation = signed_attestation(&approval_payload("apr_ok", FAR_FUTURE_MS));
+
+    let code = indoc! {r#"
+        async function main() {
+            const r = await Lit.Actions.checkEmailApproval({ approvalId: "apr_ok" });
+            Lit.Actions.setResponse({
+                response: [r.approved, r.status, r.approver, r.assurance].join("|"),
+            });
+        }
+    "#};
+
+    client
+        .respond_with(CheckEmailApprovalResponse {
+            status: "approved".into(),
+            attestation,
+        })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        client.received::<CheckEmailApprovalRequest>(),
+        CheckEmailApprovalRequest { approval_id: "apr_ok".into() }
+    );
+    assert_eq!(
+        client.received::<SetResponseRequest>().response,
+        "true|approved|cfo@example.com|L2"
+    );
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+#[rstest]
+#[tokio::test]
+async fn check_email_approval_pending_short_circuits(mut client: TestClient) {
+    let code = indoc! {r#"
+        async function main() {
+            const r = await Lit.Actions.checkEmailApproval({ approvalId: "apr_wait" });
+            Lit.Actions.setResponse({ response: r.approved + "|" + r.status });
+        }
+    "#};
+
+    client
+        .respond_with(CheckEmailApprovalResponse {
+            status: "pending".into(),
+            attestation: String::new(),
+        })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    client.received::<CheckEmailApprovalRequest>();
+    assert_eq!(client.received::<SetResponseRequest>().response, "false|pending");
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+#[rstest]
+#[tokio::test]
+async fn check_email_approval_rejects_tampered_attestation(mut client: TestClient) {
+    install_test_attestation_pubkey();
+    // Sign a real payload, then swap in a different payload (escalated assurance)
+    // without re-signing — the runtime must refuse it.
+    let genuine = signed_attestation(&approval_payload("apr_ok", FAR_FUTURE_MS));
+    let mut envelope: serde_json::Value = serde_json::from_str(&genuine).unwrap();
+    envelope["payload"] = serde_json::Value::String(
+        approval_payload("apr_ok", FAR_FUTURE_MS).replace("\"L2\"", "\"L3\""),
+    );
+    let tampered = envelope.to_string();
+
+    let code = indoc! {r#"
+        async function main() {
+            try {
+                await Lit.Actions.checkEmailApproval({ approvalId: "apr_ok" });
+                Lit.Actions.setResponse({ response: "ACCEPTED (BUG)" });
+            } catch (e) {
+                Lit.Actions.setResponse({ response: "rejected: " + e.message });
+            }
+        }
+    "#};
+
+    client
+        .respond_with(CheckEmailApprovalResponse {
+            status: "approved".into(),
+            attestation: tampered,
+        })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    client.received::<CheckEmailApprovalRequest>();
+    let response = client.received::<SetResponseRequest>().response;
+    assert!(
+        response.contains("verification FAILED"),
+        "expected signature failure, got: {response}"
+    );
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+#[rstest]
+#[tokio::test]
+async fn check_email_approval_rejects_expired_and_misbound_attestations(mut client: TestClient) {
+    install_test_attestation_pubkey();
+    // Correctly signed but expired.
+    let expired = signed_attestation(&approval_payload("apr_old", 1));
+
+    let code = indoc! {r#"
+        async function main() {
+            try {
+                await Lit.Actions.checkEmailApproval({ approvalId: "apr_old" });
+                Lit.Actions.setResponse({ response: "ACCEPTED (BUG)" });
+            } catch (e) {
+                Lit.Actions.setResponse({ response: "rejected: " + e.message });
+            }
+        }
+    "#};
+
+    client
+        .respond_with(CheckEmailApprovalResponse {
+            status: "approved".into(),
+            attestation: expired,
+        })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+    client.received::<CheckEmailApprovalRequest>();
+    let response = client.received::<SetResponseRequest>().response;
+    assert!(response.contains("expired"), "expected expiry failure, got: {response}");
+    assert!(client.received::<ExecutionResult>().success);
+
+    // Correctly signed for a DIFFERENT approvalId — binding must be enforced.
+    let misbound = signed_attestation(&approval_payload("apr_other", FAR_FUTURE_MS));
+    let code = indoc! {r#"
+        async function main() {
+            try {
+                await Lit.Actions.checkEmailApproval({ approvalId: "apr_mine" });
+                Lit.Actions.setResponse({ response: "ACCEPTED (BUG)" });
+            } catch (e) {
+                Lit.Actions.setResponse({ response: "rejected: " + e.message });
+            }
+        }
+    "#};
+    client
+        .respond_with(CheckEmailApprovalResponse {
+            status: "approved".into(),
+            attestation: misbound,
+        })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+    client.received::<CheckEmailApprovalRequest>();
+    let response = client.received::<SetResponseRequest>().response;
+    assert!(
+        response.contains("different approvalId"),
+        "expected binding failure, got: {response}"
+    );
+    assert!(client.received::<ExecutionResult>().success);
+}

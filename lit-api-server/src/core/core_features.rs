@@ -32,6 +32,7 @@ pub async fn lit_action(
     http_client: &reqwest::Client,
     chain_config: Arc<ChainConfig>,
     stripe_state: Option<Arc<StripeState>>,
+    approvals: Option<Arc<crate::approvals::ApprovalService>>,
     lit_action_request: Json<LitActionRequest>,
 ) -> Result<LitActionResponse, ApiStatus> {
     let request_id = request_span.request_id.clone();
@@ -82,6 +83,9 @@ pub async fn lit_action(
 
     if let Some(stripe) = stripe_state {
         builder.stripe_state(stripe);
+    }
+    if let Some(approvals) = approvals {
+        builder.approvals(approvals);
     }
 
     let mut client = match builder.build().map_err(|e| e.to_string()) {

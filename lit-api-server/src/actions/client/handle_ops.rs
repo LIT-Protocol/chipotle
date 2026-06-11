@@ -29,6 +29,9 @@ impl Client {
             UnionResponse::GetLitActionPublicKey(_) => "GetLitActionPublicKey",
             UnionResponse::GetLitActionWalletAddress(_) => "GetLitActionWalletAddress",
             UnionResponse::UpdateResourceUsage(_) => "UpdateResourceUsage",
+            UnionResponse::SendEmail(_) => "SendEmail",
+            UnionResponse::RequestEmailApproval(_) => "RequestEmailApproval",
+            UnionResponse::CheckEmailApproval(_) => "CheckEmailApproval",
             UnionResponse::Result(_) => "Result",
         };
         tracing::debug!(op_type, ops_count = self.state.ops_count, "handle_op");
@@ -197,6 +200,43 @@ impl Client {
                     false
                 };
                 UpdateResourceUsageResponse { cancel_action }.into()
+            }
+            UnionResponse::SendEmail(SendEmailRequest { to, subject, text }) => {
+                let Some(svc) = self.approvals.as_ref() else {
+                    bail!("email service is not configured on this instance");
+                };
+                svc.send_email(&self.api_key, &to, &subject, &text).await?;
+                SendEmailResponse {}.into()
+            }
+            UnionResponse::RequestEmailApproval(RequestEmailApprovalRequest {
+                to,
+                summary,
+                assurance,
+                ttl_sec,
+            }) => {
+                let Some(svc) = self.approvals.as_ref() else {
+                    bail!("email approval service is not configured on this instance");
+                };
+                let requested = svc
+                    .request_approval(&self.api_key, &to, &summary, &assurance, ttl_sec)
+                    .await?;
+                RequestEmailApprovalResponse {
+                    approval_id: requested.approval_id,
+                    otp: requested.otp.unwrap_or_default(),
+                    approval_url: requested.approval_url.unwrap_or_default(),
+                }
+                .into()
+            }
+            UnionResponse::CheckEmailApproval(CheckEmailApprovalRequest { approval_id }) => {
+                let Some(svc) = self.approvals.as_ref() else {
+                    bail!("email approval service is not configured on this instance");
+                };
+                let (status, attestation) = svc.check(&self.api_key, &approval_id)?;
+                CheckEmailApprovalResponse {
+                    status,
+                    attestation: attestation.unwrap_or_default(),
+                }
+                .into()
             }
             UnionResponse::Result(_) => unreachable!(), // handled in main loop
         })
