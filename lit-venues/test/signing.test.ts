@@ -76,6 +76,12 @@ describe('es256Jwt (Coinbase CDP auth)', () => {
     expect(Buffer.from(parseEcP256PrivateKey(scalarHex)).toString('hex')).toBe(scalarHex);
   });
 
+  it('parses PEMs whose newlines arrive as literal \\n sequences (CDP JSON download format)', () => {
+    const literal = pem.replace(/\n/g, '\\n');
+    expect(literal).not.toContain('\n');
+    expect(Buffer.from(parseEcP256PrivateKey(literal)).toString('hex')).toBe(scalarHex);
+  });
+
   it('produces a verifiable JWT with the CDP claim shape', () => {
     const jwt = es256Jwt({
       keyName,

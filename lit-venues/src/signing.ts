@@ -61,6 +61,15 @@ export function b64urlEncode(bytes: Uint8Array): string {
 // ---------------------------------------------------------------------------
 // key parsing
 
+/**
+ * CDP key downloads (JSON) carry the PEM with LITERAL backslash-n sequences;
+ * pasting that into an env var is the most common way keys arrive. Normalize
+ * before any PEM detection/parsing.
+ */
+function normalizePemInput(s: string): string {
+  return s.replace(/\\n/g, '\n').trim();
+}
+
 function pemToDer(pem: string): Uint8Array {
   const body = pem.replace(/-----(BEGIN|END)[^-]*-----/g, '').replace(/\s+/g, '');
   return b64decode(body);
@@ -81,9 +90,9 @@ const PKCS8_ED25519_PREFIX = [
   0x30, 0x2e, 0x02, 0x01, 0x00, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x04, 0x22, 0x04, 0x20,
 ] as const;
 
-/** Accepts PKCS8 PEM, raw 64-char hex, or base64. Returns the 32-byte seed. */
+/** Accepts PKCS8 PEM (real or literal-\n newlines), raw 64-char hex, or base64. Returns the 32-byte seed. */
 export function parseEd25519PrivateKey(input: string): Uint8Array {
-  const s = input.trim();
+  const s = normalizePemInput(input);
   if (s.includes('-----BEGIN')) {
     const der = pemToDer(s);
     if (der.length === 48 && findSeq(der, PKCS8_ED25519_PREFIX) === 0) return der.subarray(16);
@@ -100,9 +109,9 @@ export function parseEd25519PrivateKey(input: string): Uint8Array {
 // SEC1 ECPrivateKey (and PKCS8-wrapped SEC1) both contain: INTEGER 1, OCTET STRING(32) key
 const EC_KEY_MARKER = [0x02, 0x01, 0x01, 0x04, 0x20] as const;
 
-/** Accepts SEC1 or PKCS8 EC P-256 PEM, raw 64-char hex, or base64. Returns the 32-byte scalar. */
+/** Accepts SEC1 or PKCS8 EC P-256 PEM (real or literal-\n newlines), raw 64-char hex, or base64. Returns the 32-byte scalar. */
 export function parseEcP256PrivateKey(input: string): Uint8Array {
-  const s = input.trim();
+  const s = normalizePemInput(input);
   if (s.includes('-----BEGIN')) {
     const der = pemToDer(s);
     const at = findSeq(der, EC_KEY_MARKER);

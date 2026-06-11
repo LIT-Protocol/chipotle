@@ -27,6 +27,24 @@ import { readFileSync, existsSync } from 'node:fs';
 import { fetch as uFetch, ProxyAgent } from 'undici';
 import { createVenue } from '../dist/lit-venues.mjs';
 
+// Optional ENV_FILE=path loads a dotenv-style file, tolerating multi-line
+// values (Coinbase CDP keys are PEMs): a line without KEY= continues the
+// previous value. Real env vars win over file values.
+if (process.env.ENV_FILE && existsSync(process.env.ENV_FILE)) {
+  let key = null;
+  let fromFile = false; // only continue values this loader set — never append to real env vars
+  for (const line of readFileSync(process.env.ENV_FILE, 'utf8').split('\n')) {
+    const m = line.match(/^([A-Z0-9_]+)=(.*)$/);
+    if (m) {
+      key = m[1];
+      fromFile = !(key in process.env);
+      if (fromFile) process.env[key] = m[2];
+    } else if (key && fromFile && line.trim() !== '') {
+      process.env[key] += `\n${line}`;
+    }
+  }
+}
+
 const PROXY =
   process.env.LIT_VENUES_PROXY ||
   (existsSync('/tmp/proxy_url.txt') ? readFileSync('/tmp/proxy_url.txt', 'utf8').trim() : '');
@@ -119,10 +137,12 @@ console.log('\n== Coinbase Advanced Trade (direct) ==');
       return `rejected (${e.code})`;
     }
   });
-  if (process.env.COINBASE_KEY_NAME && process.env.COINBASE_PRIVATE_KEY) {
+  const cbKeyName = process.env.COINBASE_KEY_NAME || process.env.COINBASE_API_KEY_NAME;
+  const cbPrivateKey = process.env.COINBASE_PRIVATE_KEY || process.env.COINBASE_API_KEY_SECRET;
+  if (cbKeyName && cbPrivateKey) {
     const authed = createVenue({
       venueId: 'coinbase',
-      credentials: { apiKey: process.env.COINBASE_KEY_NAME, secret: process.env.COINBASE_PRIVATE_KEY },
+      credentials: { apiKey: cbKeyName, secret: cbPrivateKey },
       fetchImpl: nodeFetch(''),
     });
     await check('fetchBalances (authenticated, ES256 JWT)', async () => {
@@ -162,32 +182,94 @@ console.log('\n== Hyperliquid (PKP-native, direct) ==');
       return 'rejected as expected';
     }
   });
-  if (process.env.HYPERLIQUID_PRIVATE_KEY) {
+  const hlPrivateKey =
+    process.env.HYPERLIQUID_PRIVATE_KEY || process.env.HYPERLIQUID_TESTNET_API_PRIVATE_KEY;
+  // Deliberately NOT defaulting accountAddress from *_API_ADDRESS: that var
+  // names the AGENT's own (always empty) address. The connector resolves the
+  // agent's master automatically via userRole; only override explicitly.
+  const hlAccountAddress = process.env.HYPERLIQUID_ACCOUNT_ADDRESS;
+  if (hlPrivateKey) {
     const sandbox = process.env.HYPERLIQUID_SANDBOX !== 'false';
     const authed = createVenue({
       venueId: 'hyperliquid',
       sandbox,
       credentials: {
         keyType: 'pkp-eip712',
-        privateKey: process.env.HYPERLIQUID_PRIVATE_KEY,
-        accountAddress: process.env.HYPERLIQUID_ACCOUNT_ADDRESS,
+        privateKey: hlPrivateKey,
+        accountAddress: hlAccountAddress,
       },
       fetchImpl: hlFetch,
     });
     await check(`fetchBalances (${sandbox ? 'testnet' : 'MAINNET'})`, async () => {
       const b = await authed.fetchBalances();
-      return `USDC free=${b[0]?.free} total=${b[0]?.total}`;
+      let hint = '';
+      if (Number(b[0]?.total) === 0) {
+        // Deposits land in SPOT; perp margin needs a spot→perp transfer that
+        // only the MASTER can sign (usdClassTransfer is user-signed — agents
+        // cannot move funds, by design). Surface the spot side so an "empty"
+        // perp account isn't mistaken for a missing deposit.
+        hint = ' — perp equity is 0; if funds were deposited they are likely in SPOT (master must transfer spot→perp; the agent key cannot)';
+      }
+      return `USDC free=${b[0]?.free} total=${b[0]?.total}${hint}`;
     });
     await check('order lifecycle: place deep GTC limit, list, cancel', async () => {
-      const m = await authed.fetchMarket('ETH');
       const t = await authed.fetchTicker('ETH');
-      // bid 50% under mid so it rests without filling; integer px is always valid
+      // bid 50% under mid so it rests without filling; integer px is always
+      // valid; size comfortably over the $10 min notional at that price
       const px = String(Math.max(1, Math.floor(t.last / 2)));
-      const order = await authed.createOrder({ symbol: 'ETH', side: 'buy', type: 'limit', amount: m.minAmount ?? '0.01', price: px });
+      const amount = (Math.ceil(((10 * 1.5) / Number(px)) * 10000) / 10000).toFixed(4);
+      let order;
+      try {
+        order = await authed.createOrder({ symbol: 'ETH', side: 'buy', type: 'limit', amount, price: px });
+      } catch (e) {
+        if (e?.code === 'insufficient_funds') {
+          return 'SKIPPED — perp account unfunded (error taxonomy verified: insufficient_funds); master must transfer spot→perp';
+        }
+        throw e;
+      }
       const open = await authed.fetchOpenOrders('ETH');
+      const listed = open.some((o) => o.id === order.id);
       await authed.cancelOrder(order.id, 'ETH');
+      const after = await authed.fetchOpenOrders('ETH');
+      if (!listed) throw new Error('order did not appear in openOrders');
+      if (after.some((o) => o.id === order.id)) throw new Error('order still open after cancel');
       return `oid=${order.id} rested (${open.length} open) then canceled`;
     });
+    if (process.env.HYPERLIQUID_FILL_TEST === 'true') {
+      if (!sandbox) {
+        console.log('  ! HYPERLIQUID_FILL_TEST refused on mainnet — testnet only');
+      } else {
+        await check('market fill round-trip: IOC buy 0.01 ETH, position, reduce-only close to flat', async () => {
+          let buy;
+          try {
+            buy = await authed.createOrder({ symbol: 'ETH', side: 'buy', type: 'market', amount: '0.01' });
+          } catch (e) {
+            if (e?.code === 'insufficient_funds') {
+              return 'SKIPPED — perp account unfunded; master must transfer spot→perp (agents cannot, by design)';
+            }
+            throw e;
+          }
+          if (buy.status !== 'filled' || !(Number(buy.filled) > 0)) {
+            throw new Error(`IOC buy did not fill: ${JSON.stringify(buy.info).slice(0, 200)}`);
+          }
+          const positions = await authed.fetchPositions();
+          const eth = positions.find((p) => p.symbol === 'ETH');
+          if (!eth) throw new Error('no ETH position after fill');
+          const close = await authed.createOrder({
+            symbol: 'ETH',
+            side: eth.side === 'long' ? 'sell' : 'buy',
+            type: 'market',
+            amount: eth.size.replace('-', ''),
+            reduceOnly: true,
+          });
+          if (close.status !== 'filled') throw new Error('reduce-only close did not fill');
+          const after = await authed.fetchPositions();
+          if (after.find((p) => p.symbol === 'ETH')) throw new Error('position not flat after close');
+          const fills = await authed.fetchMyTrades('ETH', { limit: 4 });
+          return `bought ${buy.filled} @ ${buy.price} (${eth.side} ${eth.size}, lev ${eth.leverage ?? '?'}), closed @ ${close.price}, flat; ${fills.length} fills visible`;
+        });
+      }
+    }
   } else {
     console.log('  ! no HYPERLIQUID_PRIVATE_KEY — skipping authenticated (balances, order lifecycle)');
   }

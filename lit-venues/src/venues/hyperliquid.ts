@@ -95,16 +95,39 @@ export class HyperliquidClient implements VenueClient {
     return c;
   }
 
-  /** Address whose state is read: explicit accountAddress (agent mode reads the master), else the signer's own address. */
-  private account(): string {
+  private accountCache?: string;
+
+  /**
+   * Address whose state is read. Resolution order:
+   *   1. explicit credentials.accountAddress,
+   *   2. if the signing key is a registered AGENT (API wallet), its master —
+   *      resolved once via the venue's userRole endpoint and cached. Agent
+   *      wallets are the default connection mode (plan D8) and their own
+   *      account is always empty; reading it instead of the master is the
+   *      footgun this lookup removes,
+   *   3. the signer's own address (master mode).
+   */
+  private async account(): Promise<string> {
+    if (this.accountCache) return this.accountCache;
     const creds = this.cfg.credentials;
-    if (creds?.accountAddress) return creds.accountAddress.toLowerCase();
-    if (creds?.privateKey) return privateKeyToAddress(creds.privateKey);
-    throw new VenueError(
-      this.venueId,
-      'auth',
-      'reads require credentials.accountAddress (agent mode) or credentials.privateKey',
-    );
+    if (creds?.accountAddress) {
+      this.accountCache = creds.accountAddress.toLowerCase();
+      return this.accountCache;
+    }
+    if (!creds?.privateKey) {
+      throw new VenueError(
+        this.venueId,
+        'auth',
+        'reads require credentials.accountAddress (agent mode) or credentials.privateKey',
+      );
+    }
+    const self = privateKeyToAddress(creds.privateKey);
+    const role = (await this.info({ type: 'userRole', user: self })) as {
+      role?: string;
+      data?: { user?: string };
+    };
+    this.accountCache = role?.role === 'agent' && role.data?.user ? role.data.user.toLowerCase() : self;
+    return this.accountCache;
   }
 
   private signer(): SignFn {
@@ -239,7 +262,7 @@ export class HyperliquidClient implements VenueClient {
   }
 
   async fetchBalances(): Promise<Balance[]> {
-    const state = (await this.info({ type: 'clearinghouseState', user: this.account() })) as {
+    const state = (await this.info({ type: 'clearinghouseState', user: await this.account() })) as {
       marginSummary?: { accountValue?: string };
       withdrawable?: string;
     };
@@ -360,7 +383,7 @@ export class HyperliquidClient implements VenueClient {
 
   async fetchOpenOrders(symbol: string): Promise<Order[]> {
     const coin = this.coin(symbol);
-    const orders = (await this.info({ type: 'openOrders', user: this.account() })) as Array<{
+    const orders = (await this.info({ type: 'openOrders', user: await this.account() })) as Array<{
       coin: string;
       oid: number;
       side: 'B' | 'A';
@@ -389,7 +412,7 @@ export class HyperliquidClient implements VenueClient {
 
   async fetchMyTrades(symbol: string, opts: { limit?: number } = {}): Promise<Fill[]> {
     const coin = this.coin(symbol);
-    const fills = (await this.info({ type: 'userFills', user: this.account() })) as Array<{
+    const fills = (await this.info({ type: 'userFills', user: await this.account() })) as Array<{
       coin: string;
       px: string;
       sz: string;
@@ -417,7 +440,7 @@ export class HyperliquidClient implements VenueClient {
   // ---- perp surface (plan D8) -------------------------------------------
 
   async fetchPositions(): Promise<Position[]> {
-    const state = (await this.info({ type: 'clearinghouseState', user: this.account() })) as {
+    const state = (await this.info({ type: 'clearinghouseState', user: await this.account() })) as {
       assetPositions?: Array<{
         position: {
           coin: string;
