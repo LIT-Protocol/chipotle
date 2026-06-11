@@ -28,11 +28,11 @@ pub struct LoadedModuleInfo {
 #[instrument(skip_all, ret)]
 #[op2(fast)]
 fn op_print(state: &mut OpState, #[string] msg: &str, is_err: bool) -> Result<(), JsErrorBox> {
-    use std::io::{Write, stderr, stdout};
+    use std::io::{IsTerminal, Write, stderr, stdout};
 
     lazy_static::lazy_static! {
-        static ref IS_ATTY_STDOUT: bool = atty::is(atty::Stream::Stdout);
-        static ref IS_ATTY_STDERR: bool = atty::is(atty::Stream::Stderr);
+        static ref IS_ATTY_STDOUT: bool = stdout().is_terminal();
+        static ref IS_ATTY_STDERR: bool = stderr().is_terminal();
     }
 
     let prepended = format!("[JSEnv] {msg}");

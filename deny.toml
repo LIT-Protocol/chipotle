@@ -39,45 +39,139 @@ yanked = "warn"
 #   RUSTSEC-2026-{0049,0098,0099,0104} remain via non-ethers rustls users
 #   (`rocket`/`reqwest`/Alloy chains). Net remains 31 active, but no remaining
 #   ignored advisory is justified by ethers.
+# - 2026-06-09: removed stale entries for crates no longer present in any
+#   current Rust workspace lockfile: RUSTSEC-2025-{0056,0057,0075,0080,0081,
+#   0098,0100}. Added RUSTSEC-2026-0173 (proc-macro-error2, via Alloy) and
+#   RUSTSEC-2026-0174 (http-types, via wiremock test dependency).
+# - 2026-06-08: "Tier 1" lockfile bumps (no Cargo.toml changes):
+#   * keccak 0.1.5 -> 0.1.6 in lit-actions/lit-core/lit-api-server cleared
+#     RUSTSEC-2026-0012 in every workspace -> entry removed.
+#   * rustls-webpki 0.103.9 -> 0.103.13 in lit-api-server fully cleared
+#     RUSTSEC-2026-0049 there and the 0.103-line half of 0098/0099/0104;
+#     the 0.101.7 copy (rocket 0.5.1 -> rustls 0.21) and deno's 0.102.8
+#     (lit-actions) still fire those, so they stay — reasons corrected below.
+#   * rand 0.8.5 -> 0.8.6 and 0.9.2 -> 0.9.4 in lit-api-server cleared
+#     RUSTSEC-2026-0097 there; lit-actions pins rand 0.8.5 and Alloy pulls
+#     rand into the generator/payments graphs, so the entry stays.
+#   Also removed three stale entries now advisory-not-detected in all six CI
+#   workspaces: RUSTSEC-2024-0388 (derivative), RUSTSEC-2025-0009 (aes),
+#   RUSTSEC-2025-0010 (ring <0.17).
+# - 2026-06-08: "Tier 2" in-house fixes that removed four more entries:
+#   * lit-actions/ext dropped the `atty` dep for std::io::IsTerminal ->
+#     cleared RUSTSEC-2021-0145 and RUSTSEC-2024-0375 (atty was only used
+#     there).
+#   * lit-actions test dep wiremock 0.5 -> 0.6 dropped the old
+#     instant/http-types/rand 0.7.3 chain -> cleared RUSTSEC-2024-0384
+#     (instant) and RUSTSEC-2026-0174 (http-types).
+#   * lit-core-derive was reworked off the abandoned proc-macro-error onto
+#     plain syn::Error/compile_error!. RUSTSEC-2024-0370 still fires, but now
+#     only via multihash-derive 0.8.1 (LIT rust-ipfs-api fork's multihash
+#     0.17 chain in lit-core) — reason updated, entry kept.
+# - 2026-06-08: migrated lit-core (utils/cache.rs, utils/ipfs.rs) and
+#   lit-api-core (http/tls/certs.rs) off the discontinued async-std onto
+#   tokio (tokio::fs / tokio::io / tokio::time, fs4's "tokio" feature, and
+#   futures::StreamExt for the IPFS stream). async-std is gone from every
+#   workspace graph -> removed RUSTSEC-2025-0052.
+# - 2026-06-09: dropped lit-core's `pinata` feature and the pinata-sdk 1.1.0
+#   dependency (its only API, Config::pinata_client(), was never called and
+#   the feature was enabled nowhere). pinata-sdk was the sole consumer of the
+#   abandoned `failure` crate -> removed RUSTSEC-2019-0036 and
+#   RUSTSEC-2020-0036.
+# - 2026-06-09: lit-actions now consumes deno from crates.io (deno_core
+#   =0.401.0 / deno_runtime =0.256.0), not the LIT deno_core fork. The fork is
+#   referenced in NO lockfile in this repo, so removed the dead allow-git entry
+#   "https://github.com/Lit-Protocol/deno_core" from [sources] below.
+#   Investigated whether bumping deno to the latest published patch
+#   (deno_core 0.403.0 / deno_runtime 0.258.0) clears the deno-chain advisories
+#   (2026-0009 time, 2026-0097 rand, 2026-0118/0119 hickory, 2025-0141 bincode,
+#   2026-0049/0098/0099/0104 rustls-webpki). It does NOT: the latest deno still
+#   hard-pins every vulnerable version — rand =0.8.5 (deno_crypto/deno_kv),
+#   rustls-webpki ^0.102 via rustls =0.23.40 (deno_tls; ^0.102 excludes the
+#   fixed 0.103 line), hickory ^0.25.2 (no non-beta fix exists for 0.118),
+#   bincode 1.x (deno_kv; no fix outside the 2.x rewrite), and deno_ast =0.53.2
+#   still drags the swc/serde chain that breaks when time goes >=0.3.47. These
+#   eight advisory entries therefore cannot be removed by a deno bump and stay
+#   until deno upstream bumps its own deps.
+# - 2026-06-09: made `multiaddr` optional (default-off `with-multiaddr` feature)
+#   in the LIT rust-ipfs-api fork. lit-core builds its IPFS client via
+#   from_str(uri) and never uses the multiaddr constructors, so it no longer
+#   pulls multiaddr -> multihash 0.17 -> {core2, multihash-derive ->
+#   proc-macro-error}. Cleared RUSTSEC-2026-0105 (core2) and RUSTSEC-2024-0370
+#   (proc-macro-error) -> both removed. (Bumping multiaddr to 0.18 would not
+#   have sufficed: multihash 0.19 still requires the yanked core2 0.4.0.)
+# - 2026-06-09: reqwest 0.11 -> 0.12 in lit-core (#471) moved lit-core's own
+#   HTTP client off rustls 0.21; and the LIT rust-ipfs-api fork made multiaddr
+#   optional (#472), clearing core2 + proc-macro-error. Then a full
+#   blocker audit of every remaining entry (reverse-dep traced across all 7 CI
+#   workspaces) + bumped the generator workspace's stale rand 0.8.5->0.8.6 /
+#   0.9.2->0.9.4 (alloy-signer-local; lockfile-only, matches what lit-api-server
+#   and lit-payments already resolved). That generator rand was the ONLY
+#   non-structural source left in the backlog. See the blocker summary below.
+#
+# - 2026-06-09: Dependabot-driven lockfile bumps (no Cargo.toml changes), clearing
+#   26 Dependabot alerts that postdated the RustSec snapshot above:
+#   * openssl 0.10.73/0.10.75 -> 0.10.80 (openssl-sys 0.9.116) in lit-core,
+#     lit-api-server, lit-actions -> cleared the 2026 rust-openssl CVE batch
+#     (CVE-2026-41676/41677/41678/41681/41898/42327/44662/45784). These were
+#     GitHub-advisory-only (not yet RUSTSEC), so cargo deny was already green;
+#     the bump pre-empts them if they land in RustSec.
+#   * rand 0.8.5 -> 0.8.6 in lit-core (the one workspace the 2026-06-08 rand bump
+#     missed) -> cleared RUSTSEC-2026-0097 there. lit-actions rand =0.8.5 stays
+#     deno-pinned (entry below unchanged).
+#   * rsa 0.9.9 -> 0.9.10 in lit-actions -> cleared CVE-2026-21895 (rsa panic on
+#     prime==1; distinct from the Marvin RUSTSEC-2023-0071 below). deno did NOT
+#     hard-pin rsa, so it moved.
+#   tar 0.4.45 -> 0.4.46 was attempted but BLOCKED: deno_npm_cache requires
+#   =0.4.45, so GHSA-3pv8 (tar PAX desync) stays Dependabot-dismissed until deno
+#   bumps. No RUSTSEC id assigned, so no ignore entry needed here.
+#
+# ── BLOCKER SUMMARY (2026-06-09 audit) ───────────────────────────────────────
+# Every remaining entry is held by a source we cannot move without either
+# forking an upstream dep or waiting for an upstream release. Grouped by blocker:
+#
+#   deno (frozen transitive pins, lit-actions)      9 entries:
+#       2026-0009 (time 0.3.44 <- swc/serde), 2026-0049/0098/0099/0104
+#       (rustls-webpki 0.102.8 <- rustls =0.23.40), 2026-0118/0119
+#       (hickory 0.25.2), 2026-0097 (rand =0.8.5), 2025-0141 (bincode 1.x),
+#       2023-0071 (rsa 0.9.9). Fix = a deno release that bumps these, or
+#       forking deno (explicitly rejected — see 2026-06-09 deno note above).
+#   rocket 0.5.1 (no released rustls-0.23 build)    co-blocks 4 entries:
+#       2026-0098/0099/0104 (webpki 0.101.7), 2025-0134 (rustls-pemfile).
+#       Only 0.6.0-dev (git) uses rustls 0.23; a framework swap clears NONE of
+#       these alone because deno also fires the webpki trio. Not worth it.
+#   Alloy                                            2 entries:
+#       2026-0173 (proc-macro-error2), part of 2024-0436 (paste).
+#   no upstream fix exists at all                    4 entries:
+#       2023-0071 (rsa Marvin, no const-time impl), 2026-0118 (hickory, only
+#       0.26-beta), 2024-0436 (paste, crate abandoned), 2025-0141 (bincode 1.x
+#       EOL). These stay even if every framework above moves.
+#   (groups overlap: e.g. rsa/hickory/bincode are both deno-pinned AND fixless.)
+#
+# CONCLUSION: without forking deno/rocket/Alloy, NO further entry can be
+# removed today. The remaining work is not code — it is upstream watch: re-run
+# `cargo deny` after deno and Alloy releases and drop entries as their dep
+# bumps land. The generator rand bump above was the last in-house lever.
 #
 # Suggested triage order: vulnerabilities > unsound > unmaintained.
 ignore = [
     # ── vulnerabilities ───────────────────────────────────────────────────────
-    { id = "RUSTSEC-2023-0071", reason = "Marvin Attack timing sidechannel in rsa — still present via dcap-qvl dev dependency; pre-existing" },
-    { id = "RUSTSEC-2025-0009", reason = "AES panic on overflow check — transitive; pre-existing" },
-    { id = "RUSTSEC-2026-0009", reason = "time DoS via stack exhaustion — still present in lit-actions (time 0.3.47 cascades serde 1.0.228 which breaks swc_config/swc_common from deno chain); cleared in lit-core and lit-api-server" },
-    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki CRL distribution-point matching — still present via non-ethers rustls users; pre-existing" },
-    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki URI name constraints — still present via non-ethers rustls 0.21 users; pre-existing" },
-    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki wildcard name constraints — still present via non-ethers rustls 0.21 users; pre-existing" },
-    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki CRL parsing panic — still present via non-ethers rustls 0.21 users; pre-existing" },
-    { id = "RUSTSEC-2026-0118", reason = "hickory NSEC3 unbounded loop — no upstream fix yet" },
-    { id = "RUSTSEC-2026-0119", reason = "hickory DNS O(n^2) name compression — pinned by deno_runtime chain" },
+    { id = "RUSTSEC-2023-0071", reason = "rsa Marvin timing sidechannel — NO upstream fix exists (constant-time RSA unimplemented). Present via deno_crypto/deno_node_crypto (rsa 0.9.9, lit-actions) and the dcap-qvl DEV dependency (rsa 0.9.10, lit-api-server). BLOCKER: no patched rsa release + deno transitive. Not removable." },
+    { id = "RUSTSEC-2026-0009", reason = "time parsing DoS (stack exhaustion) — fixed in >=0.3.47. Fires only in lit-actions: time 0.3.44 held <0.3.47 by the deno chain (deno_ast =0.53.2 -> swc; 0.3.47 pulls serde 1.0.228 which breaks swc_config/swc_common). Cleared everywhere else (0.3.47). BLOCKER: deno_ast/swc serde pin. WAITING ON: deno bumping deno_ast/swc. Not removable without forking deno." },
+    { id = "RUSTSEC-2026-0049", reason = "rustls-webpki CRL distribution-point matching — fixed in 0.103. Fires only via deno_tls/deno_fetch (rustls-webpki 0.102.8, locked by rustls =0.23.40) in lit-actions; cleared elsewhere (0.103.13). BLOCKER: deno_tls's rustls pin. WAITING ON: deno bumping rustls past 0.23.40. Not removable without forking deno." },
+    { id = "RUSTSEC-2026-0098", reason = "rustls-webpki URI name constraints — fixed in 0.103. TWO blockers: deno_tls's 0.102.8 (lit-actions) AND rocket 0.5.1's rustls 0.21 -> rustls-webpki 0.101.7 (lit-core/lit-api-server). WAITING ON: deno (rustls >0.23.40) AND a rocket release on rustls 0.23 (only in unreleased 0.6.0-dev). Not removable without forking deno and/or git-pinning rocket." },
+    { id = "RUSTSEC-2026-0099", reason = "rustls-webpki DNS wildcard name constraints — fixed in 0.103. TWO blockers: deno_tls's 0.102.8 (lit-actions) AND rocket 0.5.1's rustls 0.21 -> rustls-webpki 0.101.7 (lit-core/lit-api-server). WAITING ON: deno (rustls >0.23.40) AND a rocket release on rustls 0.23 (only in unreleased 0.6.0-dev). Not removable without forking deno and/or git-pinning rocket." },
+    { id = "RUSTSEC-2026-0104", reason = "rustls-webpki CRL parsing panic — fixed in 0.103. TWO blockers: deno_tls's 0.102.8 (lit-actions) AND rocket 0.5.1's rustls 0.21 -> rustls-webpki 0.101.7 (lit-core/lit-api-server). WAITING ON: deno (rustls >0.23.40) AND a rocket release on rustls 0.23 (only in unreleased 0.6.0-dev). Not removable without forking deno and/or git-pinning rocket." },
+    { id = "RUSTSEC-2026-0118", reason = "hickory NSEC3 unbounded loop — NO stable fix released (only 0.26.0-beta.1+). hickory-proto 0.25.2 via deno_net (lit-actions). BLOCKER: no stable hickory fix + deno transitive. WAITING ON: hickory 0.26 stable AND deno adopting it. Not removable." },
+    { id = "RUSTSEC-2026-0119", reason = "hickory DNS O(n^2) name compression — fixed in >=0.26.1. hickory-proto 0.25.2 via deno_net (lit-actions). BLOCKER: deno's hickory 0.25 pin. WAITING ON: deno adopting hickory 0.26. Not removable without forking deno." },
 
     # ── unsound ───────────────────────────────────────────────────────────────
-    { id = "RUSTSEC-2019-0036", reason = "failure type confusion — transitive; pre-existing" },
-    { id = "RUSTSEC-2021-0145", reason = "atty unaligned read — transitive; pre-existing" },
-    { id = "RUSTSEC-2026-0012", reason = "keccak ARMv8 asm backend — only triggers with opt-in feature; pre-existing" },
-    { id = "RUSTSEC-2026-0097", reason = "rand custom logger unsound — pre-existing" },
+    { id = "RUSTSEC-2026-0097", reason = "rand RngCore fill_bytes unsound — fixed in >=0.8.6 / >=0.9.3. Fires only in lit-actions: rand =0.8.5 hard-pinned by deno_crypto/deno_kv/deno_ast. Cleared in lit-api-server/payments (0.8.6/0.9.4) and the generator workspace (lockfile bumped 0.8.5->0.8.6, 0.9.2->0.9.4 via alloy-signer-local). BLOCKER: deno's rand =0.8.5 pin. WAITING ON: deno bumping rand. Not removable without forking deno." },
 
     # ── unmaintained ──────────────────────────────────────────────────────────
-    { id = "RUSTSEC-2020-0036", reason = "failure deprecated — transitive; pre-existing" },
-    { id = "RUSTSEC-2024-0370", reason = "proc-macro-error unmaintained — pre-existing" },
-    { id = "RUSTSEC-2024-0375", reason = "atty unmaintained — pre-existing" },
-    { id = "RUSTSEC-2024-0384", reason = "instant unmaintained — pre-existing" },
-    { id = "RUSTSEC-2024-0388", reason = "derivative unmaintained — transitive via ark-ff; surfaced after bytes/quinn/tar bumps refreshed the lockfile" },
-    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0010", reason = "ring <0.17 unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0052", reason = "async-std discontinued — pre-existing" },
-    { id = "RUSTSEC-2025-0056", reason = "adler unmaintained, use adler2 — pre-existing" },
-    { id = "RUSTSEC-2025-0057", reason = "fxhash unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0075", reason = "unic-char-range unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0080", reason = "unic-common unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0081", reason = "unic-char-property unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0098", reason = "unic-ucd-version unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0100", reason = "unic-ucd-ident unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained — pre-existing" },
-    { id = "RUSTSEC-2025-0141", reason = "bincode unmaintained — pre-existing" },
-    { id = "RUSTSEC-2026-0105", reason = "core2 unmaintained, all versions yanked — pre-existing" },
+    { id = "RUSTSEC-2024-0436", reason = "paste unmaintained — NO successor (crate abandoned; 1.0.15 is final). Ubiquitous transitive: deno chain (lit-actions) and the Alloy stack (alloy-primitives etc., lit-api-server/generator/payments/triggers). WAITING ON: deno + Alloy + wider ecosystem dropping paste. Not removable." },
+    { id = "RUSTSEC-2025-0134", reason = "rustls-pemfile unmaintained (folded into rustls-pki-types) — rustls-pemfile 1.0.4 via rocket_http 0.5.1 AND the zerossl fork's reqwest 0.11.27 (lit-core/lit-actions). BLOCKER: rocket has no released rustls-0.23 version. WAITING ON: a rocket release on rustls 0.23 (unreleased 0.6) + bumping zerossl's reqwest to 0.12. Not removable without git-pinning rocket." },
+    { id = "RUSTSEC-2025-0141", reason = "bincode 1.x unmaintained (2.x is a non-drop-in rewrite) — bincode 1.3.3 via deno_kv (lit-actions). BLOCKER: deno_kv's bincode 1.x pin. WAITING ON: deno_kv migrating to bincode 2.x. Not removable without forking deno." },
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 unmaintained — via alloy-sol-macro/alloy-sol-macro-expander (lit-api-server/generator/payments). BLOCKER: Alloy's proc-macro-error2 dep. WAITING ON: Alloy dropping proc-macro-error2. Not removable without forking Alloy." },
 ]
 
 [sources]
@@ -88,7 +182,6 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 allow-git = [
     "https://github.com/LIT-Protocol/bulletproofs",
-    "https://github.com/Lit-Protocol/deno_core",
     "https://github.com/LIT-Protocol/env_logger",
     "https://github.com/LIT-Protocol/rust-ipfs-api",
     "https://github.com/LIT-Protocol/zerossl",

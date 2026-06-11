@@ -7,6 +7,7 @@ license = "Apache-2.0"
 
 [dependencies]
 anyhow = "1.0"
+async-trait = "0.1"
 base64 = "0.22"
 alloy-dyn-abi = "1.0"
 alloy-primitives = "1.0"
@@ -14,15 +15,18 @@ alloy-serde = "1.0"
 hex = "0.4"
 hmac = "0.12"
 lit-billing-core = { path = "../lit-billing-core" }
-moka = { version = "0.12", features = ["future"] }
+moka = { version = "0.12", features = ["future", "sync"] }
 num-bigint = "0.4"
 num-traits = "0.2"
 rand = "0.8"
 reqwest = { version = "0.12", features = ["json"] }
 rocket = { version = "0.5.1", features = ["json", "secrets"] }
+rocket_cors = "0.6"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["arbitrary_precision"] }
 sha2 = "0.10"
+subtle = "2.6"
+thiserror = "1.0"
 sqlx = { version = "0.8", features = [
     "postgres",
     "runtime-tokio",
@@ -35,3 +39,13 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+# Used by Phase 3+ integration tests to base64-encode mock X-Wallet-Auth
+# payloads. Production code in this crate doesn't need it.
+base64_light = "0.1"
+# Serializes integration tests that touch shared external state (Stripe
+# customers keyed by wallet metadata, real Postgres rows). Tagging tests
+# with `#[serial]` prevents the "search-lag duplicate creation" race the
+# Phase 4 development run hit.
+serial_test = "3"

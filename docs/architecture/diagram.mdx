@@ -1,10 +1,10 @@
 ---
 title: "Entity Relationships"
-description: "Entity relationships, on-chain vs TEE boundaries, and how self-sovereign vs SaaS emerges from configuration — not modes."
+description: "Entity relationships, on-chain vs TEE boundaries, and how API mode vs ChainSecured mode emerges from configuration."
 ---
 
 <Note>
-  **Core Insight:** There are no "modes." Self-sovereign vs SaaS is an **emergent property** of how you configure the same system. The only things that vary are **who is the Account Owner** (TEE-derived wallet vs SAFE vs EOA) and **what scopes the API keys have**. The contracts don't know or care.
+  **Core Insight:** API mode and ChainSecured mode aren't a toggle in the code — they're an **emergent property** of how you configure the same system. The only things that vary are **who owns the account** (a Lit-managed credential vs a SAFE or EOA you control) and **what scopes the API keys have**. The contracts don't know or care.
 </Note>
 
 ---
@@ -17,7 +17,7 @@ The system spans four distinct trust boundaries. Understanding what lives where 
 
 | Entity | Description |
 |---|---|
-| **Account Owner** | Top-level identity. An address on Base that can do everything. Can be an EOA, TEE-derived wallet (Stytch auth), or SAFE/governance contract. **Ultimate authority.** |
+| **Account Owner** | Top-level identity. An address on Base that can do everything. A SAFE or EOA you control (ChainSecured mode), or a Lit-managed credential (API mode). **Ultimate authority.** |
 | **API Key (Private Key)** | User holds the private key locally. Sent to TEE over HTTPS per-request. TEE derives the address and checks scopes on-chain. |
 | **SAFE / Governance** | Optional. Multisig, timelocks, voting. Submits txs directly to chain for structural changes — TEE not involved. |
 
@@ -54,7 +54,7 @@ The system spans four distinct trust boundaries. Understanding what lives where 
 USER / EXTERNAL                ON-CHAIN (BASE)             TEE ENCLAVE
 ─────────────────────────────  ──────────────────────────  ──────────────────────────────
 Account Owner                  Account Contract             Root Key
- EOA / SAFE / TEE-derived   ──▶  owner address registered    master secret, never exported
+ EOA / SAFE / Lit-managed   ──▶  owner address registered    master secret, never exported
       │ owns                                                      │ derives
       │                        API Key Registry             Auth + Key Derivation
 API Key (private key)       ──▶  address → scopes mapping ◀──    verify scopes, derive keys
@@ -99,7 +99,7 @@ TEE checks scopes and submits the transaction on the user's behalf.
 User + API Key  →  TEE (verify scopes)  →  Permissions Contract
 ```
 
-### Path B: Direct to Chain *(self-sovereign)*
+### Path B: Direct to Chain *(ChainSecured mode)*
 
 Owner submits transactions directly — TEE is not involved.
 
@@ -144,17 +144,17 @@ SAFE / EOA  →  Permissions Contract
 
 The same system, two very different security postures — determined entirely by who the owner is and what scopes the keys carry.
 
-### SaaS Mode
+### API Mode
 
-*Fast iteration, broad scopes, Stytch recovery*
+*Fast iteration, broad scopes, managed recovery*
 
 | | |
 |---|---|
-| **Owner** | TEE-derived wallet from Stytch auth (email / passkey / OAuth) |
+| **Owner** | A Lit-managed credential |
 | **API Key** | `dev_key` with all scopes: `execute(*)`, `pkp:create`, `group:create`, `group:delete`, `group:manageActions(*)`, `group:addPkp(*)`, `group:removePkp(*)` |
-| **Effect** | Developer does everything via HTTP. Only API key management and ownership transfer require Stytch-authenticated dashboard. Recovery = Stytch re-auth. |
+| **Effect** | Developer does everything via HTTP. Only API key management and ownership transfer require the dashboard. Recovery = re-authenticating to the dashboard. |
 
-### Self-Sovereign Mode
+### ChainSecured Mode
 
 *Auditable governance, restricted scopes, SAFE multisig*
 

@@ -34,7 +34,7 @@ temp-file = "0.1"
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
-wiremock = "0.5"
+wiremock = "0.6"
 
 [build-dependencies]
 lit-actions-snapshot = { workspace = true }
