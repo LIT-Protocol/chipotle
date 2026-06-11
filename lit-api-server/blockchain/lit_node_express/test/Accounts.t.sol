@@ -117,6 +117,155 @@ contract AccountsTest is BaseTest {
         assertEq(views_.getAccountWalletAddress(usageHash), user);
     }
 
+    function test_setUsageApiKey_rejectsHijackOfAnotherAccount() public {
+        // Victim creates a ChainSecured account.
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 victimMaster = apiKeyHashOf(user);
+
+        // Attacker creates their own ChainSecured account, passing the access
+        // check on their own hash.
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("mallory", "evil");
+
+        // Attacker tries to point the victim's master hash at their own account
+        // by setting it as one of their usage keys. This must revert instead of
+        // overwriting allApiKeyHashesToMaster[victimMaster].
+        uint256[] memory empty = new uint256[](0);
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.AccountAlreadyExists.selector,
+                victimMaster
+            )
+        );
+        writes.setUsageApiKey(
+            apiKeyHashOf(stranger),
+            victimMaster,
+            block.timestamp + 7 days,
+            0,
+            "hijack",
+            "hijack",
+            false,
+            false,
+            false,
+            empty,
+            empty,
+            empty,
+            empty
+        );
+
+        // Victim's hash still resolves to the victim.
+        assertEq(views_.getAccountWalletAddress(victimMaster), user);
+    }
+
+    function test_setUsageApiKey_rejectsUsageKeyOwnedByAnotherAccount() public {
+        // Victim creates an account and registers a usage key.
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 victimMaster = apiKeyHashOf(user);
+
+        uint256 usageHash = uint256(keccak256("shared-usage-key"));
+        uint256[] memory empty = new uint256[](0);
+        vm.prank(user);
+        writes.setUsageApiKey(
+            victimMaster,
+            usageHash,
+            block.timestamp + 7 days,
+            0,
+            "usage-1",
+            "victim usage key",
+            false,
+            false,
+            false,
+            empty,
+            empty,
+            empty,
+            empty
+        );
+
+        // Attacker creates their own account and tries to claim the victim's
+        // usage-key hash as one of their own usage keys.
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("mallory", "evil");
+
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.AccountAlreadyExists.selector,
+                usageHash
+            )
+        );
+        writes.setUsageApiKey(
+            apiKeyHashOf(stranger),
+            usageHash,
+            block.timestamp + 7 days,
+            0,
+            "steal",
+            "steal",
+            false,
+            false,
+            false,
+            empty,
+            empty,
+            empty,
+            empty
+        );
+
+        // The usage key still resolves to the victim.
+        assertEq(views_.getAccountWalletAddress(usageHash), user);
+    }
+
+    function test_setUsageApiKey_allowsUpdatingOwnUsageKey() public {
+        // Re-calling setUsageApiKey for an existing usage key of the same
+        // account must still succeed (the guard only blocks cross-account
+        // collisions).
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 hash = apiKeyHashOf(user);
+
+        uint256 usageHash = uint256(keccak256("usage-key-1"));
+        uint256[] memory empty = new uint256[](0);
+        vm.prank(user);
+        writes.setUsageApiKey(
+            hash,
+            usageHash,
+            block.timestamp + 7 days,
+            0,
+            "usage-1",
+            "first",
+            false,
+            false,
+            false,
+            empty,
+            empty,
+            empty,
+            empty
+        );
+
+        // Update it again with new metadata — should not revert.
+        vm.prank(user);
+        writes.setUsageApiKey(
+            hash,
+            usageHash,
+            block.timestamp + 14 days,
+            0,
+            "usage-1-updated",
+            "second",
+            true,
+            false,
+            false,
+            empty,
+            empty,
+            empty,
+            empty
+        );
+
+        ViewsFacet.UsageApiKeyReturn[] memory keys = views_.listApiKeys(hash, 0, 10);
+        assertEq(keys.length, 1);
+        assertEq(keys[0].metadata.name, "usage-1-updated");
+    }
+
     function test_addAction_thenListActions_thenRemove() public {
         vm.prank(user);
         writes.newChainSecuredAccount("alice", "primary");

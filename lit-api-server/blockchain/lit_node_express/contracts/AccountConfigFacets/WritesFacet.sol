@@ -284,6 +284,23 @@ contract WritesFacet {
         uint256 masterAccountApiKeyHash = s.allApiKeyHashesToMaster[
             accountApiKeyHash
         ];
+        // Guard the account-resolution entry. Without this an attacker holding
+        // any account could call setUsageApiKey(theirHash, victimMasterHash, ...)
+        // and overwrite allApiKeyHashesToMaster[victimMasterHash], hijacking
+        // every later resolution of the victim's hash.
+        uint256 existingUsageMaster = s.allApiKeyHashesToMaster[usageApiKeyHash];
+        // Reject a usageApiKeyHash that is itself a master account hash
+        // (a master hash resolves to itself).
+        if (existingUsageMaster == usageApiKeyHash && usageApiKeyHash != 0) {
+            revert AppStorage.AccountAlreadyExists(usageApiKeyHash);
+        }
+        // Reject a usageApiKeyHash already registered to a different account.
+        if (
+            existingUsageMaster != 0 &&
+            existingUsageMaster != masterAccountApiKeyHash
+        ) {
+            revert AppStorage.AccountAlreadyExists(usageApiKeyHash);
+        }
         AppStorage.UsageApiKey storage apiKeyStorage = s
             .accounts[masterAccountApiKeyHash]
             .usageApiKeys[usageApiKeyHash];
