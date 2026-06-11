@@ -51,6 +51,19 @@ jobs:
           NETWORK=$(grep '^name' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
           ADDRESS=$(grep '^contract_address' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
 
+          # Validate before exporting: these values come from a file that a PR
+          # can mutate, and they are consumed by later shell steps. Reject
+          # anything that isn't a plain network name / EVM address so a crafted
+          # NodeConfig cannot inject shell or extra $GITHUB_OUTPUT keys.
+          if ! printf '%s' "$NETWORK" | grep -Eq '^[a-z0-9-]+$'; then
+            echo "::error::Invalid network '$NETWORK' in $CONFIG (expected [a-z0-9-]+)."
+            exit 1
+          fi
+          if ! printf '%s' "$ADDRESS" | grep -Eq '^0x[a-fA-F0-9]{40}$'; then
+            echo "::error::Invalid contract_address '$ADDRESS' in $CONFIG (expected 0x + 40 hex chars)."
+            exit 1
+          fi
+
           echo "network=$NETWORK" >> "$GITHUB_OUTPUT"
           echo "address=$ADDRESS" >> "$GITHUB_OUTPUT"
           echo "Resolved from $CONFIG: network=$NETWORK address=$ADDRESS"
@@ -80,11 +93,14 @@ jobs:
         working-directory: lit-api-server/blockchain/lit_node_express
         env:
           DEPLOYER_KEY: ${{ steps.config.outputs.network == 'base' && secrets.PHALA_DSTACKAPP_PRIVATE_KEY || (steps.config.outputs.network != 'base' && secrets.CONTRACT_DEPLOYER_SECRET_SEPOLIA) }}
+          NETWORK: ${{ steps.config.outputs.network }}
+          ADDRESS: ${{ steps.config.outputs.address }}
+          RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
         run: |
           ../rust_generator_and_deployer/target/debug/contract_deployer \
             --action=update \
-            --network=${{ steps.config.outputs.network }} \
+            --network="$NETWORK" \
             --abifolder=artifacts/contracts \
             --secret="$DEPLOYER_KEY" \
-            --address=${{ steps.config.outputs.address }} \
-            --rpc-url=${{ secrets.BASE_CHAIN_RPC }}
+            --address="$ADDRESS" \
+            --rpc-url="$RPC_URL"
