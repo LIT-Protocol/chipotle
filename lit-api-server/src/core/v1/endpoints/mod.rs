@@ -12,6 +12,8 @@ use rocket::Route;
 use rocket_okapi::okapi::openapi3::OpenApi;
 use rocket_okapi::openapi_get_routes_spec;
 
+pub use self::billing::webhook_routes;
+
 /// Returns Core v1 routes and the OpenAPI spec for them.
 pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
     openapi_get_routes_spec![

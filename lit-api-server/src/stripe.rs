@@ -113,6 +113,18 @@ fn record_billing_event(
 pub struct StripeState {
     pub publishable_key: String,
     client: StripeClient,
+    /// Stripe webhook signing secret (`whsec_…`), from `STRIPE_WEBHOOK_SECRET`.
+    /// `None` disables the `/billing/webhook` endpoint (it returns 503) so a
+    /// node without a configured secret can't be tricked into acting on
+    /// unverified events. See `handle_webhook`.
+    webhook_secret: Option<String>,
+    /// Stripe event ids (`evt_…`) we've already acted on, for fast in-process
+    /// idempotency against webhook redeliveries. Stripe retries failed
+    /// deliveries for up to ~3 days; the durable guarantee is the
+    /// `Idempotency-Key` on the debiting balance transaction (24h Stripe-side),
+    /// this cache just avoids redundant Stripe round-trips while the process is
+    /// up. TTL slightly exceeds Stripe's retry window.
+    processed_events: Cache<String, ()>,
     /// wallet_address → Stripe customer ID cache (10-min idle timeout).
     /// Avoids duplicate customer creation caused by Stripe Search API indexing lag.
     /// Uses `time_to_idle` so frequently accessed entries stay warm.
@@ -141,6 +153,17 @@ pub fn init() -> Option<Arc<StripeState>> {
     if secret_key.is_empty() || publishable_key.is_empty() {
         return None;
     }
+    // Optional: without it, /billing/webhook is disabled (refund/dispute
+    // clawbacks won't be applied automatically — see CPL-335).
+    let webhook_secret = std::env::var("STRIPE_WEBHOOK_SECRET")
+        .ok()
+        .filter(|s| !s.is_empty());
+    if webhook_secret.is_none() {
+        tracing::warn!(
+            "stripe: STRIPE_WEBHOOK_SECRET not set — refund/dispute webhooks are DISABLED; \
+             clawbacks will not debit credits automatically (CPL-335)"
+        );
+    }
     let client = StripeClient::new(secret_key)
         .map_err(|e| tracing::error!("stripe: failed to build HTTP client: {e}"))
         .ok()?;
@@ -160,10 +183,16 @@ pub fn init() -> Option<Arc<StripeState>> {
         .max_capacity(10_000)
         .time_to_live(Duration::from_secs(60)) // cooldown: max 1 refresh per customer per minute
         .build();
+    let processed_events = Cache::builder()
+        .max_capacity(100_000)
+        .time_to_live(Duration::from_secs(4 * 24 * 3600)) // 4 days > Stripe's ~3-day retry window
+        .build();
     tracing::info!("stripe: billing enabled");
     Some(Arc::new(StripeState {
         publishable_key,
         client,
+        webhook_secret,
+        processed_events,
         customer_cache,
         wallet_cache,
         balance_cache,
@@ -613,6 +642,172 @@ pub async fn confirm_payment_and_credit(
     state.balance_cache.invalidate(&customer_id).await;
 
     Ok(())
+}
+
+// ─── Webhooks (CPL-335) ─────────────────────────────────────────────────────
+//
+// Credits are granted optimistically on `confirm_payment`, but a chargeback or
+// refund pulls the money back out-of-band and never touched the credit ledger.
+// This signature-verified endpoint closes that gap: on `charge.dispute.created`
+// / `charge.refunded` it writes a *positive* customer balance transaction
+// (debiting credits) for the clawed-back amount. `payment_intent.payment_failed`
+// is acknowledged but needs no debit (no credit was ever granted).
+
+/// Outcome of handling an inbound webhook, mapped to an HTTP status by the
+/// endpoint. The distinction matters for Stripe's retry behaviour: a `Transient`
+/// error returns 5xx so Stripe redelivers; signature/config failures return 4xx.
+#[derive(Debug)]
+pub enum WebhookHandleError {
+    /// `STRIPE_WEBHOOK_SECRET` is not configured — endpoint disabled.
+    NotConfigured,
+    /// Signature verification failed (tampering, replay, or wrong secret).
+    InvalidSignature(lit_billing_core::webhook::SignatureError),
+    /// Body wasn't a parseable Stripe event.
+    BadPayload(anyhow::Error),
+    /// A Stripe API call (customer resolution / balance transaction) failed;
+    /// the event is unprocessed and Stripe should retry.
+    Transient(anyhow::Error),
+}
+
+impl std::fmt::Display for WebhookHandleError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WebhookHandleError::NotConfigured => write!(f, "webhook secret not configured"),
+            WebhookHandleError::InvalidSignature(e) => write!(f, "invalid signature: {e}"),
+            WebhookHandleError::BadPayload(e) => write!(f, "bad payload: {e}"),
+            WebhookHandleError::Transient(e) => write!(f, "transient error: {e}"),
+        }
+    }
+}
+
+/// Verify, deduplicate, and apply a Stripe webhook delivery.
+///
+/// Steps:
+/// 1. Reject if no signing secret is configured.
+/// 2. Verify the `Stripe-Signature` against the raw body (HMAC + ±5-min replay
+///    window).
+/// 3. Parse the event; short-circuit if we've already processed `event.id`.
+/// 4. For clawback events, resolve the Stripe customer and write a positive
+///    balance transaction (idempotency-keyed on the refund/dispute id), then
+///    invalidate the cached balance.
+/// 5. Record `event.id` as processed.
+pub async fn handle_webhook(
+    payload: &[u8],
+    sig_header: &str,
+    state: &StripeState,
+) -> Result<(), WebhookHandleError> {
+    use lit_billing_core::webhook;
+
+    let secret = state
+        .webhook_secret
+        .as_deref()
+        .ok_or(WebhookHandleError::NotConfigured)?;
+
+    let now_unix = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0);
+
+    webhook::verify_signature(
+        payload,
+        sig_header,
+        secret,
+        now_unix,
+        webhook::DEFAULT_TOLERANCE_SECS,
+    )
+    .map_err(WebhookHandleError::InvalidSignature)?;
+
+    let event = webhook::parse_event(payload).map_err(WebhookHandleError::BadPayload)?;
+
+    // Fast-path idempotency: a redelivery of an already-applied event is a
+    // no-op (and still a 200, so Stripe stops retrying).
+    if state.processed_events.get(&event.id).await.is_some() {
+        tracing::info!(event_id = %event.id, event_type = %event.event_type,
+            "stripe webhook: duplicate event, skipping");
+        return Ok(());
+    }
+
+    metrics::counter!("billing.webhook.received", "type" => event.event_type.clone()).increment(1);
+    tracing::info!(event_id = %event.id, event_type = %event.event_type,
+        "stripe webhook: received");
+
+    if let Some(clawback) = webhook::interpret_event(&event) {
+        let customer_id = resolve_clawback_customer(&clawback, state)
+            .await
+            .map_err(WebhookHandleError::Transient)?;
+
+        let idempotency_key = format!("clawback_{}", clawback.idempotency_anchor);
+        lit_billing_core::balance::write_transaction(
+            &state.client,
+            &customer_id,
+            clawback.amount_cents, // positive = debit credits
+            &clawback.description,
+            Some(&idempotency_key),
+        )
+        .await
+        .map_err(WebhookHandleError::Transient)?;
+
+        // The customer's available credit just dropped; drop the cached value
+        // so the next read reflects it (and so a cached optimistic decrement
+        // can't mask the clawback).
+        state.balance_cache.invalidate(&customer_id).await;
+
+        metrics::counter!(
+            "billing.webhook.clawback_cents",
+            "kind" => clawback.kind.as_str(),
+        )
+        .increment(clawback.amount_cents.max(0) as u64);
+        tracing::warn!(
+            event_id = %event.id,
+            kind = clawback.kind.as_str(),
+            customer_id = %customer_id,
+            amount_cents = clawback.amount_cents,
+            anchor = %clawback.idempotency_anchor,
+            "stripe webhook: debited credits for clawback",
+        );
+    }
+
+    state.processed_events.insert(event.id, ()).await;
+    Ok(())
+}
+
+/// Resolve the Stripe customer a clawback debits.
+///
+/// Charges carry `customer` directly; disputes don't, so we fetch the
+/// underlying charge (then the PaymentIntent as a last resort) to find it. Our
+/// PaymentIntents are always created with a customer, so one of these resolves.
+async fn resolve_clawback_customer(
+    clawback: &lit_billing_core::webhook::Clawback,
+    state: &StripeState,
+) -> Result<String> {
+    if let Some(customer) = &clawback.customer {
+        return Ok(customer.clone());
+    }
+
+    if let Some(charge_id) = &clawback.charge_id {
+        let resp = state
+            .client
+            .get(&format!("charges/{charge_id}"), &[])
+            .await?;
+        if let Some(customer) = resp.body.get("customer").and_then(|c| c.as_str()) {
+            return Ok(customer.to_string());
+        }
+    }
+
+    if let Some(pi_id) = &clawback.payment_intent_id {
+        let resp = state
+            .client
+            .get(&format!("payment_intents/{pi_id}"), &[])
+            .await?;
+        if let Some(customer) = resp.body.get("customer").and_then(|c| c.as_str()) {
+            return Ok(customer.to_string());
+        }
+    }
+
+    anyhow::bail!(
+        "stripe webhook: could not resolve customer for clawback (anchor {})",
+        clawback.idempotency_anchor
+    )
 }
 
 /// Set (or update) the email on an existing Stripe customer.

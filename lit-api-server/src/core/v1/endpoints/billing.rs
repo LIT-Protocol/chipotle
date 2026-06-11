@@ -7,10 +7,12 @@ use crate::core::v1::models::request::{ConfirmPaymentRequest, CreatePaymentInten
 use crate::core::v1::models::response::{
     AccountOpResponse, BillingBalanceResponse, CreatePaymentIntentResponse, StripeConfigResponse,
 };
-use crate::stripe::{self, StripeState};
-use rocket::State;
+use crate::stripe::{self, StripeState, WebhookHandleError};
+use rocket::data::ToByteUnit;
+use rocket::http::Status;
+use rocket::request::{FromRequest, Outcome, Request};
 use rocket::serde::json::Json;
-use rocket::{get, post};
+use rocket::{Data, Route, State, get, post, routes};
 use rocket_okapi::openapi;
 
 pub(super) fn billing_disabled_err() -> ApiStatus {
@@ -161,4 +163,126 @@ async fn billing_confirm_payment_impl(
         .await
         .map_err(|e| ApiStatus::internal_server_error(e, "Stripe error"))?;
     Ok(AccountOpResponse { success: true })
+}
+
+/// Maximum accepted webhook body. Stripe events are small (a few KB); a 256 KiB
+/// ceiling is generous while bounding memory from a hostile uncapped POST.
+const MAX_WEBHOOK_BODY: u64 = 256 * 1024;
+
+/// Extracts the `Stripe-Signature` header so the handler can verify the body.
+/// A delivery without it is rejected before we read the body.
+struct StripeSignature(String);
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for StripeSignature {
+    type Error = ();
+
+    async fn from_request(request: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        match request.headers().get_one("Stripe-Signature") {
+            Some(sig) => Outcome::Success(StripeSignature(sig.to_string())),
+            None => Outcome::Error((Status::BadRequest, ())),
+        }
+    }
+}
+
+/// POST /billing/webhook — Stripe-signed event ingress (CPL-335).
+///
+/// Verifies the `Stripe-Signature` over the *raw* body (so it must read bytes,
+/// not deserialized JSON), then applies refund/dispute clawbacks to the credit
+/// ledger. Mounted outside the OpenAPI surface (like `/health`) — it's a
+/// machine-to-machine endpoint, not part of the documented client API.
+///
+/// Returns 2xx on success or duplicate (Stripe stops retrying); 5xx on a
+/// transient failure (Stripe retries); 4xx on a bad signature / payload.
+#[post("/billing/webhook", data = "<body>")]
+async fn billing_webhook(
+    sig: StripeSignature,
+    stripe_state: &State<Option<Arc<StripeState>>>,
+    body: Data<'_>,
+) -> Status {
+    let Some(stripe) = stripe_state.inner() else {
+        // Billing disabled entirely on this node.
+        return Status::ServiceUnavailable;
+    };
+
+    let bytes = match body.open(MAX_WEBHOOK_BODY.bytes()).into_bytes().await {
+        Ok(b) if b.is_complete() => b.into_inner(),
+        Ok(_) => {
+            tracing::warn!("stripe webhook: body exceeded {MAX_WEBHOOK_BODY} bytes");
+            return Status::PayloadTooLarge;
+        }
+        Err(e) => {
+            tracing::warn!("stripe webhook: failed to read body: {e}");
+            return Status::BadRequest;
+        }
+    };
+
+    match stripe::handle_webhook(&bytes, &sig.0, stripe).await {
+        Ok(()) => Status::Ok,
+        Err(WebhookHandleError::NotConfigured) => {
+            tracing::warn!("stripe webhook: received but STRIPE_WEBHOOK_SECRET not configured");
+            Status::ServiceUnavailable
+        }
+        Err(e @ WebhookHandleError::InvalidSignature(_))
+        | Err(e @ WebhookHandleError::BadPayload(_)) => {
+            tracing::warn!("stripe webhook: rejected: {e}");
+            Status::BadRequest
+        }
+        Err(e @ WebhookHandleError::Transient(_)) => {
+            // 5xx so Stripe retries — the clawback hasn't been applied yet.
+            tracing::error!("stripe webhook: transient failure, asking Stripe to retry: {e}");
+            Status::InternalServerError
+        }
+    }
+}
+
+/// Webhook route, mounted separately from the OpenAPI-documented routes (see
+/// `main::build_rocket`). Kept out of `routes_with_spec` so it stays absent
+/// from `openapi.json` and the generated k6 client.
+pub fn webhook_routes() -> Vec<Route> {
+    routes![billing_webhook]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rocket::http::{ContentType, Header};
+    use rocket::local::asynchronous::Client;
+
+    fn build_rocket(stripe_state: Option<Arc<StripeState>>) -> rocket::Rocket<rocket::Build> {
+        rocket::build()
+            .manage(stripe_state)
+            .mount("/", webhook_routes())
+    }
+
+    #[tokio::test]
+    async fn webhook_without_signature_header_is_rejected() {
+        // The Stripe-Signature guard fails before we even read the body.
+        let client = Client::tracked(build_rocket(None))
+            .await
+            .expect("valid rocket");
+        let response = client
+            .post("/billing/webhook")
+            .header(ContentType::JSON)
+            .body(r#"{"id":"evt_1","type":"charge.refunded"}"#)
+            .dispatch()
+            .await;
+        assert_eq!(response.status(), Status::BadRequest);
+    }
+
+    #[tokio::test]
+    async fn webhook_returns_503_when_billing_disabled() {
+        // Signature header present, but no Stripe state configured on this node.
+        let client = Client::tracked(build_rocket(None))
+            .await
+            .expect("valid rocket");
+        let response = client
+            .post("/billing/webhook")
+            .header(ContentType::JSON)
+            .header(Header::new("Stripe-Signature", "t=1,v1=deadbeef"))
+            .body(r#"{"id":"evt_1","type":"charge.refunded"}"#)
+            .dispatch()
+            .await;
+        assert_eq!(response.status(), Status::ServiceUnavailable);
+    }
 }

@@ -23,6 +23,7 @@ pub mod customer;
 pub mod format;
 pub mod http;
 pub mod reporting;
+pub mod webhook;
 
 pub use client::StripeClient;
 pub use http::StripeResponse;
