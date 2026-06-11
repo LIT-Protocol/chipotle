@@ -106,3 +106,13 @@ Safe. Owner-only writes there (`setChain`, `setFeeConfig`, `setBridgePartner`,
 calldata and propose it the same way (`proposeRepin.js` is a template: swap the
 `to`/calldata). These are *contract* calls (not the Lit diamond), so no
 `apiKeyHash` subtlety — just the normal Safe propose → owner execute.
+
+**The handoff is two-step + per-chain.** `handoffToSafe.js` does
+`transferOwnership(Safe)` (sets `pendingOwner`); the Safe then calls
+`acceptOwnership()` — propose those with `proposeAccepts.js`. CRITICAL: **a Safe
+exists per chain.** If you `transferOwnership` a contract on chain X to a Safe
+address that was only deployed on chain Y, nothing can accept it on X (no code at
+that address). Before handing off a contract, deploy the same Safe address on its
+chain (Safe{Wallet} → Add network) and register the proposer as a delegate on
+that chain's Safe Transaction Service. `proposeAccepts.js` checks for the Safe per
+chain and skips (with a warning) any chain where it's missing.
