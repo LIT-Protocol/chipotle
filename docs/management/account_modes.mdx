@@ -38,9 +38,10 @@ actions, registering PKPs, minting usage keys, etc.
 | Lit Action execution     | Usage API key in `X-Api-Key`                          | Usage API key in `X-Api-Key` (minted from contract)  |
 | Billing                  | Stripe credits on the account                         | Stripe credits on the account (same flow)            |
 
-ChainSecured mode is referred to as *self-sovereign* in some internal
-material. They are the same thing — wallet ownership of the account on
-Base, with no required server round-trip for admin writes.
+In the SDK and contracts, ChainSecured mode is the `sovereign` mode
+(`mode: 'sovereign'`); earlier material called it *self-sovereign*. Same
+thing — wallet ownership of the account on Base, with no required server
+round-trip for admin writes.
 
 ## When to pick which
 

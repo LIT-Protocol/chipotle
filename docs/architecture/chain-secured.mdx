@@ -1,0 +1,61 @@
+---
+title: "Chain Secured"
+description: "A key's authority lives in smart contracts on Base, and an attested TEE enforces those rules by reading the chain — on-chain authority, signing at API speed."
+---
+
+Lit's core guarantee is simple to state: **a key's authority is on-chain state.** What a key may sign, which code is allowed to use it, and who can change those rules all live in smart contracts on Base. Nothing off-chain — no server, no API key, no operator, not even Lit — can make a key sign outside the rules currently on the chain.
+
+We call this **Chain Secured**.
+
+## The chain holds the authority
+
+Authorization isn't a flag in someone's database. It's on-chain state that you own:
+
+- **Account** — an address on Base that owns everything: a wallet you control (an EOA or Safe) in **ChainSecured mode**, or a Lit-managed credential in **API mode**. See [API mode vs ChainSecured mode](/management/account_modes).
+- **API keys & scopes** — each key is registered on-chain with explicit, per-group scopes (`execute`, `group:addPkp`, and so on).
+- **PKPs & Groups** — a Group is the authorization policy: it binds the keys (PKPs) to the immutable Lit Actions (IPFS CIDs) allowed to use them.
+
+The contract is the authority. Every privileged operation comes down to one check:
+
+```solidity
+require(
+  msg.sender == accountOwner ||
+  isAPIKeyWithScope(msg.sender, requiredScope, groupId)
+);
+```
+
+Changing a rule is an on-chain transaction — public, auditable, and authorized by an owner you control. Put a Safe in the owner slot and it takes a multisig vote. See the [Authentication Model](/architecture/authModel) for the full permission matrix.
+
+## An attested TEE enforces it — by reading
+
+On-chain rules are only as strong as what enforces them. In Lit, that's a sealed TEE that **reads** the contracts on every request:
+
+1. A request arrives: an API key, and "run action `QmABC` with `pkp_001`."
+2. The TEE reads on-chain — does this key have `execute` scope on a group where both `QmABC` and `pkp_001` are listed?
+3. If yes, it derives the key inside the enclave, runs the action, and signs. If no, it refuses.
+
+Key material never leaves the enclave, and the enclave can only run code that on-chain governance has whitelisted — so the read is trustworthy, not just convenient. You can verify the exact enclave yourself: see [Security & Verification](/architecture/verification/index) and [On-Chain KMS](/architecture/verification/onchain-kms).
+
+## Why it scales: write the rules, read to enforce
+
+The split between authority and enforcement is the point:
+
+- **Setting or changing a rule is a write** — one on-chain transaction, only when you configure or govern.
+- **Using a rule is a read** — the TEE reads current on-chain state and signs in the enclave. No per-operation transaction, no gas, no waiting on a block.
+
+So you get the chain's guarantees — public, owner-controlled, auditable authority — without paying the chain's throughput cost on every signature. Use smart-contract rails where they create trust, and reads where you need speed. The result is authority on-chain, signing at the speed of an API call.
+
+## What Chain Secured locks down
+
+Because authority lives on-chain and the TEE only ever enforces it:
+
+- A leaked execute-only key can invoke the actions it is already permitted to, and nothing else. It cannot add itself to new groups, swap in new code, or move funds outside policy.
+- Changing *what the rules are* requires an owner transaction on Base. Put the owner behind a Safe, and an evil admin holding an execute key can invoke existing actions but cannot change the rules.
+- The rules are visible to anyone, at any time. Don't trust — verify.
+
+## Further reading
+
+- [Authentication Model](/architecture/authModel) — entities, scopes, and the full permission matrix
+- [System Diagram](/architecture/diagram) — on-chain vs TEE boundaries and management paths
+- [On-Chain KMS](/architecture/verification/onchain-kms) — how Base contracts gate root-key release
+- [Security & Verification](/architecture/verification/index) — attestation and the full chain of trust
