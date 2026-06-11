@@ -1,0 +1,14 @@
+{
+  "name": "cex-sweep-with-email-approval",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Lit Action example: a CEX -> self-custody sweep gated by an L2 email approval (plan D6 two-phase pattern). Phase 1 applies the policy and requests the approval; phase 2 checks the attestation -- verified in-TEE by the runtime -- and performs the gated step.",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "request-sweep": "node scripts/request-sweep.js",
+    "complete-sweep": "node scripts/complete-sweep.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}

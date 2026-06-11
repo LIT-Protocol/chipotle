@@ -1,0 +1,13 @@
+{
+  "name": "venue-portfolio-read",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Lit Action example: attested multi-venue balance snapshot. Read-only venue API keys are sealed against a vault PKP and decrypted only inside the TEE by one pinned action (binance / coinbase / hyperliquid, each optional).",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "snapshot": "node scripts/snapshot.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}

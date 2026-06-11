@@ -1,0 +1,13 @@
+{
+  "name": "funding-rate-monitor",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Lit Action example: cross-venue funding/basis monitor. Reads Hyperliquid perp funding and Coinbase spot (public data, zero credentials), annualizes the funding rate, and sends a plain-text email alert via Lit.Actions.sendEmail when it crosses a threshold.",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "monitor": "node scripts/monitor.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "price-trigger-stop",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Lit Action example: a stop-loss within policy fences (floor price, max amount, derived-clientOrderId idempotency, reduceOnly on perps). A price poller — lit-triggers cron or a local loop — can only invoke the policy; the price is re-checked in-TEE.",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "arm": "node scripts/arm.js",
+    "disarm": "node scripts/arm.js --off",
+    "poll": "node scripts/poll.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}

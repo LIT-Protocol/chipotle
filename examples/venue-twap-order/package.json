@@ -1,0 +1,13 @@
+{
+  "name": "venue-twap-order",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Lit Action example: TWAP execution as chained cron ticks (plan D7) — one small policy-fenced child order per tick via lit-venues, with strategy state passed back to the caller between ticks.",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "tick": "node scripts/tick.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "name": "hl-agent-perp-policy",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Lit Action example: Hyperliquid perp orders placed by a CID-bound agent wallet whose key never exists outside the Lit TEE, fenced by policy (coin allowlist, max leverage, notional cap, reduce-only). The venue itself bars the agent from withdrawing; custody stays on the user's master wallet (plan D8).",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "approve-agent": "node scripts/approve-agent.js",
+    "trade": "node scripts/trade.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}
