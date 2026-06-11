@@ -1,0 +1,73 @@
+# Daily venue-drift canary (plan D5/M4): a Saturday-night exchange API change
+# should page us before it pages users.
+#
+# Runs the lit-venues LIVE conformance (real exchange APIs, real connector
+# code) straight from the runner — drift detection doesn't need the TEE; the
+# in-runtime path is covered by the venues-*.spec.ts k6 gates on deploys.
+#
+# Secrets (all optional — public conformance runs without any):
+#   LIT_VENUES_PROXY          non-US egress proxy (Binance geo-blocks US runners)
+#   BINANCE_TESTNET_KEY/SECRET, COINBASE_KEY_NAME/PRIVATE_KEY,
+#   HYPERLIQUID_TESTNET_KEY   unlock the authenticated tiers
+name: venue-drift-canary
+
+on:
+  schedule:
+    - cron: "23 6 * * *" # daily 06:23 UTC — off the top of the hour
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: lit-venues/package-lock.json
+      - name: Build lit-venues
+        working-directory: lit-venues
+        run: |
+          npm ci
+          npm run build
+      - name: Unit suite (signing vectors must stay pinned)
+        working-directory: lit-venues
+        run: npm test
+      - name: Live conformance against real venues
+        working-directory: lit-venues
+        env:
+          LIT_VENUES_PROXY: ${{ secrets.LIT_VENUES_PROXY }}
+          BINANCE_KEY: ${{ secrets.BINANCE_TESTNET_KEY }}
+          BINANCE_SECRET: ${{ secrets.BINANCE_TESTNET_SECRET }}
+          COINBASE_KEY_NAME: ${{ secrets.COINBASE_KEY_NAME }}
+          COINBASE_PRIVATE_KEY: ${{ secrets.COINBASE_PRIVATE_KEY }}
+          HYPERLIQUID_PRIVATE_KEY: ${{ secrets.HYPERLIQUID_TESTNET_KEY }}
+        run: node scripts/verify-live.mjs
+      - name: Open/refresh drift issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'venue-drift-canary: live conformance FAILED';
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'venue-drift',
+            });
+            const body = `The daily venue drift canary failed — an exchange API likely changed under us.\n\nRun: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}\n\nPlaybook: ship a lit-venues patch (connector library is a CDN module — plan D1), then re-run the canary.`;
+            if (open.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: open.data[0].number, body,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['venue-drift', 'P1'],
+              });
+            }
