@@ -163,6 +163,11 @@ async fn main() -> Result<(), rocket::Error> {
     // aren't re-initialized (and don't re-log) on every Rocket rebuild.
     accounts::blockchain_cache::init();
 
+    // Watch the AccountConfig contract for account/permission mutation events
+    // (WritesFacet) and invalidate the corresponding blockchain-cache entries,
+    // so on-chain changes made outside this process are reflected before TTL.
+    lit_api_server::account_events::start_account_event_listener();
+
     // IPFS cache lives outside the restart loop so warm entries survive restarts.
     let ipfs_cache: Cache<String, Arc<String>> = Cache::builder()
         .weigher(|_key, value: &Arc<String>| -> u32 { value.len().try_into().unwrap_or(u32::MAX) })
