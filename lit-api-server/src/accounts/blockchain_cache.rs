@@ -167,6 +167,19 @@ pub fn get() -> Option<&'static BlockchainCache> {
     BLOCKCHAIN_CACHE_INSTANCE.get()
 }
 
+/// Invalidate cached permission entries for the given `api_key_hash` (`U256`).
+///
+/// Unlike [`invalidate_for_key`], this takes the already-computed hash directly,
+/// matching the generation-map key format used by the `*_key` builders. It is
+/// the entry point used by the on-chain account-event listener
+/// ([`crate::account_events`]), which receives `apiKeyHash` values straight from
+/// emitted contract events.
+pub fn invalidate_for_hash(api_key_hash: U256) {
+    if let Some(cache) = get() {
+        cache.bump_generation(&api_key_hash.to_string());
+    }
+}
+
 /// Invalidate cached permission entries for the given API key.
 ///
 /// Prefer `invalidate_for_account` for group/action/PKP mutations, which also
