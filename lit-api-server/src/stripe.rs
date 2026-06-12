@@ -428,7 +428,12 @@ async fn resolve_wallet_classified(
     state: &StripeState,
 ) -> std::result::Result<String, BillingError> {
     resolve_wallet_address(api_key, state).await.map_err(|e| {
-        if e.downcast_ref::<crate::accounts::UnknownApiKey>().is_some() {
+        // `AccountDoesNotExist` arrives as a decoded contract-revert string
+        // (see accounts::get_billing_wallet_address) — same meaning as the
+        // typed zero-address case: this key maps to no account.
+        if e.downcast_ref::<crate::accounts::UnknownApiKey>().is_some()
+            || e.to_string().contains("AccountDoesNotExist")
+        {
             BillingError::InvalidApiKey
         } else {
             BillingError::Unavailable(e)
