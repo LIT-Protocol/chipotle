@@ -1,161 +1,95 @@
 # lit-api-server
 
-Rust API server for the Lit Express Node. Exposes core Lit node operations (account config, PKP mint/sign, encrypt/decrypt, Lit actions) plus **transfer** and **swap-intents** APIs. Serves static JavaScript SDKs and demo dApps.
+The Chipotle REST API: a Rust/Rocket server exposing account, key, group, and
+Lit Action execution endpoints under `/core/v1/`. Runs inside a TEE (Phala
+dstack) in production; against the dstack simulator locally.
 
-## Quick start
+> This README previously documented `/transfer/v1/` and `/swaps/v1/` APIs and
+> their demo dApps — those were removed from the server. The API surface today
+> is `/core/v1/` plus `/attestation`, `/health`, and `/dstack/v1/`.
 
-1. **Configure the node**  
-   Copy `NodeConfig.sample.toml` to `NodeConfig.toml` in the `lit-api-server` directory and set your chain (e.g. `anvil`), AccountConfig contract address, and deployer secret (private key):
+## Run it
 
-   ```toml
-   [chain]
-   name = "anvil"
-   contract_address = "0x..."
-   secret = "0x..."
-   ```
+From the repo root, `./local_test.sh` boots the full stack (Anvil chain,
+dstack simulator, contracts, this server, lit-actions, dashboard). To run just
+this server against an already-running simulator + chain:
 
-   The server reads this file at startup and will exit with an error if it is missing or invalid.
+```bash
+cargo run                        # dev (dstack socket via DSTACK_SOCKET)
+cargo run --features production  # prod behavior (hardcoded socket)
+```
 
-2. **Run the server** (from the `lit-api-server` directory or repo root):
-
-   ```bash
-   cargo run
-   ```
-
-   By default the API is at `http://localhost:8000` and static files (SDKs, dApps) are served from `/`.
-
-3. **Try the dashboard**  
-   Open `http://localhost:8000/dapps/dashboard/` to manage account config: groups, usage API keys, IPFS actions, wallets, and run Lit actions. Log in with an API key or create a new account.
-
-4. **Other dApps**  
-   `http://localhost:8000/dapps/swps/` (PKP wallet), `http://localhost:8000/dapps/solver/` (swap solver). Set the API URL in the footer if needed.
-
-5. **Blockchain tooling**  
-   For generating AccountConfig Rust bindings and deploying contracts, see [Blockchain](#blockchain) below.
-
----
+The server listens on `0.0.0.0:8000` (see `Rocket.toml`). The dashboard is
+served separately from `lit-static/` (`http://localhost:8080` under
+`local_test.sh`).
 
 ## Configuration
 
-**NodeConfig.toml** (required in the working directory when running the server):
+**NodeConfig.toml** (required in the working directory at startup; see
+`NodeConfig.sample.toml`, plus the `.next` / `.main` / `.prod` variants baked
+into images):
 
 | Field | Description |
 |-------|-------------|
-| `chain.name` | Chain for the AccountConfig contract (e.g. `anvil`) |
-| `chain.contract_address` | Deployed AccountConfig contract address |
-| `chain.secret` | Private key (hex) for the account config deployer/signer |
+| `chain.name` | Chain hosting the AccountConfig contract (e.g. `anvil`, `base`) |
+| `chain.contract_address` | Deployed AccountConfig diamond address |
 
-See `NodeConfig.sample.toml` for an example.
+Other files: `Rocket.toml` (listen address/port), `rpc-config.yaml` (RPC
+endpoints per chain), `log_levels.toml` (per-module log levels).
 
----
+Environment variables (all optional) are documented in the repo root
+[`.env.example`](../.env.example): `RUST_LOG`, `LIT_TELEMETRY_ENDPOINT`,
+`DSTACK_SOCKET`, `BASE_CHAIN_RPC`, `STRIPE_SECRET_KEY`,
+`STRIPE_PUBLISHABLE_KEY`, `STARTER_CREDITS_CENTS`, `CPU_OVERLOAD_MULTIPLIER`,
+`CPU_PSI_THRESHOLD`.
 
-## Project structure
+## Module map
 
-### `blockchain/`
+| Path | Purpose |
+|------|---------|
+| `src/main.rs` | Startup, restart loop (on-chain `ServerTriggered`), Rocket build, catcher/fairing registration |
+| `src/core/v1/endpoints/` | Route handlers (account mgmt, actions, billing, configuration) |
+| `src/core/v1/guards/` | API-key extraction, billing enforcement, CPU load shedding |
+| `src/core/v1/catchers.rs` | JSON error bodies (`{error, message, fix, docs_url}`) |
+| `src/core/` | Business logic behind the endpoints |
+| `src/accounts/` | AccountConfig contract reads/writes, signer pool, chain-config cache |
+| `src/actions/` | gRPC client to the lit-actions runtime + Deno op handlers |
+| `src/stripe.rs` | Credit ledger on Stripe customer balances (checks, charges, starter credits) |
+| `src/dstack/` | TEE attestation + key derivation via the dstack socket |
+| `blockchain/` | Contract tooling (see below) |
 
-Blockchain tooling and contracts used by the server.
+## Billing model
+
+With Stripe configured, management writes cost a flat $0.01 (checked in the
+guard, settled by a response fairing only after success) and Lit Actions bill
+$0.01/second during execution. Without Stripe env vars, billing is disabled and
+nothing is charged. Error semantics: invalid key → 401, insufficient credits →
+402 (body states amount needed and how to fund), billing infra down → 503. See
+the [Errors reference](https://developer.litprotocol.com/management/errors).
+
+## OpenAPI
+
+The spec is generated from the route definitions:
+
+```bash
+cargo run --bin openapi_spec > ../spec.json
+npx @grafana/openapi-to-k6 ../spec.json ../k6   # keep the k6 client in sync (CI-enforced)
+```
+
+Swagger UI: `/core/v1/swagger-ui`. Raw spec: `/core/v1/openapi.json`.
+
+## Blockchain tooling (`blockchain/`)
 
 | Path | Description |
 |------|-------------|
-| **`rust_generator_and_deployer/`** | Rust CLI tool for deploying/updating AccountConfig diamond artifacts with Alloy. |
-| **`lit_node_express/`** | Lit Node Express contracts and Makefile. `make generate` compiles Solidity and regenerates the checked-in Alloy AccountConfig binding via `forge bind` plus a small Node.js post-processing script. |
-| **`swaps/`** | Hardhat project with the **QuoteStorage** Solidity contract (swap requests, quotes). |
+| `lit_node_express/` | AccountConfig contracts. `make generate` compiles Solidity and regenerates the checked-in Alloy bindings via `forge bind`. |
+| `rust_generator_and_deployer/` | `contract_deployer` CLI: deploy/update the AccountConfig diamond (`--action=deploy\|update\|propose-update`, `--network=anvil\|yellowstone\|base-sepolia\|base`, `--abifolder=…`). |
 
----
+From the repo root: `just contracts-generate` and `just contracts-deploy`.
 
-### `blockchain/rust_generator_and_deployer`
-
-Rust tooling for deploying and updating contracts. AccountConfig Rust bindings are generated from `blockchain/lit_node_express` with `forge bind`; the old standalone Rust `contract_generator` binary has been removed.
-
-- **Contract deployer** — Reads a folder of contract artifact JSONs (Hardhat/Foundry-style: `abi` + `bytecode` or `evm.bytecode.object`), deploys or updates the AccountConfig diamond using Alloy and a configurable or default wallet. The old standalone `contract_generator` binary was removed after binding generation moved to `forge bind` in `blockchain/lit_node_express`.
-
-**Build (from `blockchain/rust_generator_and_deployer`):**
+## Tests
 
 ```bash
-cargo build --release
+cargo test       # unit tests
+just test        # k6 smoke against a running stack (from the repo root)
 ```
-
-**Contract deployer**
-
-```bash
-cargo run --release --bin contract_deployer -- \
-  --action=<deploy|update|propose-update> \
-  --network=<anvil|yellowstone|base-sepolia|base> \
-  --abifolder=<artifacts_folder> \
-  [--secret=<private_key>] \
-  [--address=<diamond_address>] \
-  [--output=<proposal_json_path>]
-```
-
-- **`--action`** — `deploy`, `update`, or `propose-update`.
-- **`--network`** — `anvil`, `yellowstone`, `base-sepolia`, or `base`.
-- **`--abifolder`** — Folder of contract **artifact** JSONs (`abi` + `bytecode` or `evm.bytecode.object`).
-- **`--secret`** — Optional. Deployer private key (hex). If omitted or blank, uses the default Anvil dev secret.
-- **`--address`** — Existing diamond address for `update` / `propose-update`.
-
-Example (deploy to local Anvil with default secret):
-
-```bash
-cd blockchain/rust_generator_and_deployer
-# Ensure Anvil is running on 127.0.0.1:8545, then:
-cargo run --release --bin contract_deployer -- \
-  --action=deploy \
-  --network=anvil \
-  --abifolder=../lit_node_express/artifacts/contracts
-```
-
-Example (deploy with a custom key):
-
-```bash
-cargo run --release --bin contract_deployer -- \
-  --action=deploy \
-  --network=base-sepolia \
-  --abifolder=../lit_node_express/artifacts/contracts \
-  --secret=0xYourPrivateKeyHex
-```
-
-**Deployer details**
-
-- Uses the given secret or the default Anvil account #0 key; suitable for local/testnet.
-- The deployer uses checked-in diamond foundation artifacts from `rust_generator_and_deployer/src/diamond/*.json` and app facet artifacts from `--abifolder`.
-- RPC URLs: Anvil `http://127.0.0.1:8545`, Yellowstone `https://yellowstone-rpc.litprotocol.com`, Base Sepolia `https://sepolia.base.org`.
-
----
-
-### `static/` — JavaScript SDKs
-
-Client SDKs that call the server’s HTTP API. Served by the Rocket file server.
-
-| File | Purpose | Server routes |
-|------|--------|----------------|
-| **`core_sdk.js`** | Core API: account (new, exists), create wallet, sign with PKP, Lit actions, AccountConfig (groups, usage keys, actions, PKPs). | `/core/v1/` |
-| **`transfer_sdk.js`** | Chain list, balance by API key/PKP/address, send. | `/transfer/v1/` |
-| **`swaps_sdk.js`** | Swap intents: token list, quote request, fill/accept quote, swap status, open requests/quotes. | `/swaps/v1/` |
-
-API docs: `static/docs/` (server markdown and client HTML).
-
----
-
-### `static/dapps/` — Demo apps
-
-| App | Path | Description |
-|-----|------|-------------|
-| **Dashboard** | `/dapps/dashboard/` | **Lit Express Node Dashboard** — Log in with API key or create account; manage Usage API keys, Groups, IPFS Actions, Wallets; run Lit actions and get Lit Action IPFS CID. |
-| **Swps** | `/dapps/swps/` | **LIT Swps** — PKP wallet: overview, transfer, swap request, history. Uses Core, Transfer, and Swaps SDKs. |
-| **Solver** | `/dapps/solver/` | **LIT Solver** — For solvers: list swap requests/quotes, commit to quote, attempt swap. |
-
-Default API base URL: `http://localhost:8000` (configurable in the footer where applicable).
-
----
-
-### `src/` — Core vs abstractions
-
-- **`src/core/`** — **Core API**: account (new_account, account_exists), create_wallet, sign_with_pkp, lit_action, get_lit_action_ipfs_id; AccountConfig operations (add/update/remove group, usage keys, actions, list groups/wallets/actions). Mounted at `/core/v1/`; client: `core_sdk.js`.
-- **`src/config.rs`** — Loads `NodeConfig.toml` (chain, contract_address, secret) at startup.
-- **`src/accounts/`** — AccountConfig contract integration (groups, usage keys, actions, PKPs).
-- **`src/actions/`** — Lit action execution (gRPC, JS runtime).
-- **`src/abstractions/`**
-  - **`transfer/`** — Chain metadata, balance, send. Mounted at `/transfer/v1/`; client: `transfer_sdk.js`.
-  - **`intents/swaps/`** — Swap intents (QuoteStorage, token list, quote lifecycle). Mounted at `/swaps/v1/`; client: `swaps_sdk.js`.
-
-Route mounting and static file server are in `src/main.rs`.
