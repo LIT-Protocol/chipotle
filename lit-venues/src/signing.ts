@@ -133,6 +133,16 @@ export function hmacSha256Hex(secret: string, payload: string): string {
   return bytesToHex(hmac(sha256, utf8ToBytes(secret), utf8ToBytes(payload)));
 }
 
+/**
+ * SHA-256 hex of a UTF-8 string. Handy for computing the `requestHash` that
+ * binds an email approval to an exact operation (plan D6): hash a canonical
+ * description of the operation, pass it to requestEmailApproval, and pass the
+ * identical hash to checkEmailApproval so the runtime binds them in-TEE.
+ */
+export function sha256Hex(payload: string): string {
+  return bytesToHex(sha256(utf8ToBytes(payload)));
+}
+
 export function ed25519SignBase64(privateKey: string, payload: string): string {
   const seed = parseEd25519PrivateKey(privateKey);
   return b64encode(ed25519.sign(utf8ToBytes(payload), seed));

@@ -30,7 +30,10 @@ pub(super) async fn lit_action(
     http_client: &State<reqwest::Client>,
     chain_config: &State<Arc<ChainConfig>>,
     stripe_state: &State<Option<Arc<StripeState>>>,
-    approvals: &State<Arc<crate::approvals::ApprovalService>>,
+    // Optional: when the approval service is disabled (no attestation key), this
+    // state is unmanaged. Using Option keeps the endpoint serving all other ops
+    // instead of 500-ing every action request.
+    approvals: Option<&State<Arc<crate::approvals::ApprovalService>>>,
     lit_action_request: Json<LitActionRequest>,
 ) -> OpenApiResponse<LitActionResponse, ErrMessage> {
     OpenApiResponse {
@@ -43,7 +46,7 @@ pub(super) async fn lit_action(
                 http_client.inner(),
                 chain_config.inner().clone(),
                 stripe_state.inner().clone(),
-                Some(approvals.inner().clone()),
+                approvals.map(|a| a.inner().clone()),
                 lit_action_request,
             )
             .await,

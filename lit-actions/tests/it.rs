@@ -1303,11 +1303,16 @@ fn signed_attestation(payload_json: &str) -> String {
 }
 
 fn approval_payload(approval_id: &str, expires_at_ms: u64) -> String {
+    approval_payload_bound(approval_id, expires_at_ms, "")
+}
+
+fn approval_payload_bound(approval_id: &str, expires_at_ms: u64, request_hash: &str) -> String {
     serde_json::json!({
         "schema": "email-approval-v1",
         "approval_id": approval_id,
         "approver": "cfo@example.com",
         "assurance": "L2",
+        "request_hash": request_hash,
         "status": "approved",
         "approved_at_ms": 1_700_000_000_000u64,
         "expires_at_ms": expires_at_ms,
@@ -1385,6 +1390,7 @@ async fn request_email_approval(mut client: TestClient) {
             summary: "Sweep 2.5 BTC from Binance to cold storage".into(),
             assurance: "L2".into(),
             ttl_sec: 600,
+            request_hash: String::new(),
         }
     );
     assert_eq!(
@@ -1421,11 +1427,108 @@ async fn check_email_approval_verifies_attestation_in_runtime(mut client: TestCl
 
     assert_eq!(
         client.received::<CheckEmailApprovalRequest>(),
-        CheckEmailApprovalRequest { approval_id: "apr_ok".into() }
+        CheckEmailApprovalRequest { approval_id: "apr_ok".into(), consume: true }
     );
     assert_eq!(
         client.received::<SetResponseRequest>().response,
         "true|approved|cfo@example.com|L2"
+    );
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+#[rstest]
+#[tokio::test]
+async fn check_email_approval_binds_matching_operation(mut client: TestClient) {
+    install_test_attestation_pubkey();
+    // Attestation bound to a specific operation hash; caller passes the same.
+    let attestation = signed_attestation(&approval_payload_bound("apr_b", FAR_FUTURE_MS, "0xdeadbeef"));
+
+    let code = indoc! {r#"
+        async function main() {
+            const r = await Lit.Actions.checkEmailApproval({ approvalId: "apr_b", requestHash: "0xdeadbeef" });
+            Lit.Actions.setResponse({ response: r.approved + "|" + r.status });
+        }
+    "#};
+
+    client
+        .respond_with(CheckEmailApprovalResponse { status: "approved".into(), attestation })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    client.received::<CheckEmailApprovalRequest>();
+    assert_eq!(client.received::<SetResponseRequest>().response, "true|approved");
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+#[rstest]
+#[tokio::test]
+async fn check_email_approval_rejects_operation_mismatch(mut client: TestClient) {
+    install_test_attestation_pubkey();
+    // Genuine, correctly-signed attestation for operation A — but the action is
+    // about to perform operation B. The in-TEE binding must refuse it. This is
+    // the core D6 guarantee: an approval for one op can't authorize another.
+    let attestation = signed_attestation(&approval_payload_bound("apr_b", FAR_FUTURE_MS, "0xAAAA"));
+
+    let code = indoc! {r#"
+        async function main() {
+            try {
+                await Lit.Actions.checkEmailApproval({ approvalId: "apr_b", requestHash: "0xBBBB" });
+                Lit.Actions.setResponse({ response: "ACCEPTED (BUG)" });
+            } catch (e) {
+                Lit.Actions.setResponse({ response: "rejected: " + e.message });
+            }
+        }
+    "#};
+
+    client
+        .respond_with(CheckEmailApprovalResponse { status: "approved".into(), attestation })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    client.received::<CheckEmailApprovalRequest>();
+    let response = client.received::<SetResponseRequest>().response;
+    assert!(
+        response.contains("does not match the expected operation"),
+        "expected operation-binding rejection, got: {response}"
+    );
+    assert!(client.received::<ExecutionResult>().success);
+}
+
+#[rstest]
+#[tokio::test]
+async fn check_email_approval_refuses_unbound_when_operation_expected(mut client: TestClient) {
+    install_test_attestation_pubkey();
+    // Unbound (notification-grade) attestation, but the action expects a bound
+    // approval — must refuse so an L1 confirm can't gate a fund movement.
+    let attestation = signed_attestation(&approval_payload_bound("apr_u", FAR_FUTURE_MS, ""));
+
+    let code = indoc! {r#"
+        async function main() {
+            try {
+                await Lit.Actions.checkEmailApproval({ approvalId: "apr_u", requestHash: "0xCCCC" });
+                Lit.Actions.setResponse({ response: "ACCEPTED (BUG)" });
+            } catch (e) {
+                Lit.Actions.setResponse({ response: "rejected: " + e.message });
+            }
+        }
+    "#};
+
+    client
+        .respond_with(CheckEmailApprovalResponse { status: "approved".into(), attestation })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    client.received::<CheckEmailApprovalRequest>();
+    let response = client.received::<SetResponseRequest>().response;
+    assert!(
+        response.contains("unbound"),
+        "expected unbound-refusal, got: {response}"
     );
     assert!(client.received::<ExecutionResult>().success);
 }

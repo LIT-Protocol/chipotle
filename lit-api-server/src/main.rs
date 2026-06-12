@@ -371,14 +371,23 @@ fn build_rocket(
         ));
 
     // Email approval primitive (plan D6/M3): user-facing approval pages at
-    // root + the service consumed by the lit_action op stream.
-    let approval_service = Arc::new(
-        lit_api_server::approvals::ApprovalService::from_env()
-            .expect("approval service init failed"),
-    );
-    r = r
-        .manage(approval_service)
-        .mount("/", lit_api_server::approvals::routes());
+    // root + the service consumed by the lit_action op stream. If it can't
+    // initialize (e.g. no attestation key configured and ephemeral not
+    // allowed), DEGRADE: log and leave it unmanaged so the email/approval ops
+    // return a clean "not configured" error while all other action traffic is
+    // unaffected — a misconfigured approval key must not take down the server.
+    match lit_api_server::approvals::ApprovalService::from_env() {
+        Ok(svc) => {
+            r = r
+                .manage(Arc::new(svc))
+                .mount("/", lit_api_server::approvals::routes());
+        }
+        Err(e) => {
+            tracing::warn!(
+                "email approval service disabled: {e}. sendEmail/requestEmailApproval/checkEmailApproval will return 'not configured'."
+            );
+        }
+    }
 
     // /attestation at root — per Phala Get Attestation
     r = r

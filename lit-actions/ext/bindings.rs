@@ -398,17 +398,17 @@ async fn op_lit_proxied_fetch(
     }
 
     let mut resp = rb.send().await.map_err(|e| {
-        let mut chain = format!("{e}");
-        let mut src = std::error::Error::source(&e);
-        while let Some(s) = src {
-            chain.push_str(&format!(" -> {s}"));
-            src = s.source();
-        }
+        // Deliberately categorized only — do NOT interpolate `{e}` or its
+        // source chain. reqwest embeds the request URL in its Display, and for
+        // signed venue calls (e.g. Binance) the HMAC signature + order params
+        // ride in the query string; leaking them into an action error/log
+        // returned to the caller would disclose request-signing material.
         JsErrorBox::generic(format!(
-            "op_lit_proxied_fetch: request failed (timeout={} connect={} request={}): {chain}",
+            "op_lit_proxied_fetch: request failed (timeout={} connect={} request={} body={})",
             e.is_timeout(),
             e.is_connect(),
-            e.is_request()
+            e.is_request(),
+            e.is_body(),
         ))
     })?;
 
@@ -483,17 +483,31 @@ struct ApprovalAttestationPayload {
     approval_id: String,
     approver: String,
     assurance: String,
+    /// Hash of the exact operation approved. Empty = unbound (notification
+    /// grade, L1). `#[serde(default)]` so older attestations still parse.
+    #[serde(default)]
+    request_hash: String,
     status: String,
     approved_at_ms: u64,
     expires_at_ms: u64,
 }
 
-/// Verify an email-approval-v1 attestation against the pinned network pubkey.
-/// Every failure is terminal: a checkEmailApproval that cannot prove approval
-/// reports it as an error, never as `approved: true`.
+/// Verify an email-approval-v1 attestation against the pinned network pubkey
+/// AND bind it to the operation the caller expects. Every failure is terminal:
+/// a checkEmailApproval that cannot prove approval of THIS operation reports it
+/// as an error, never as `approved: true`.
+///
+/// `expected_request_hash` is the hash of the operation the consuming action is
+/// about to perform. It never leaves the TEE, so a compromised approval service
+/// cannot tailor a forgery to it (and can't forge the signature regardless):
+///  - attestation bound (non-empty hash): caller MUST pass the matching hash.
+///  - attestation unbound (empty hash): caller MUST also pass empty — an
+///    action that expects a bound approval must refuse an unbound one
+///    (prevents a notification-grade L1 approval from gating a fund movement).
 fn verify_approval_attestation(
     approval_id: &str,
     attestation: &str,
+    expected_request_hash: &str,
 ) -> Result<ApprovalAttestationPayload, String> {
     use k256::ecdsa::signature::Verifier;
 
@@ -529,6 +543,15 @@ fn verify_approval_attestation(
     }
     if payload.status != "approved" {
         return Err(format!("attestation status is '{}', not 'approved'", payload.status));
+    }
+    // Operation binding — constant-time-ish exact match. The whole point of D6:
+    // an approval for one operation can't authorize another.
+    if payload.request_hash != expected_request_hash {
+        return Err(if payload.request_hash.is_empty() {
+            "attestation is unbound (no operation hash) but this action expects a bound approval — refusing".to_string()
+        } else {
+            "attestation does not match the expected operation (requestHash mismatch)".to_string()
+        });
     }
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -573,6 +596,7 @@ async fn op_request_email_approval(
     #[string] summary: String,
     #[string] assurance: String,
     ttl_sec: u32,
+    #[string] request_hash: String,
 ) -> Result<RequestEmailApprovalResult, JsErrorBox> {
     ensure_not_blank!(to, "to");
     ensure_not_blank!(summary, "summary");
@@ -580,7 +604,7 @@ async fn op_request_email_approval(
 
     remote_op_async!(op_request_email_approval,
         state,
-        RequestEmailApprovalRequest { to, summary, assurance, ttl_sec },
+        RequestEmailApprovalRequest { to, summary, assurance, ttl_sec, request_hash },
         UnionRequest::RequestEmailApproval(resp) => Ok(RequestEmailApprovalResult {
             approval_id: resp.approval_id,
             otp: Some(resp.otp).filter(|s| !s.is_empty()),
@@ -604,12 +628,14 @@ struct CheckEmailApprovalResult {
 async fn op_check_email_approval(
     state: Rc<RefCell<OpState>>,
     #[string] approval_id: String,
+    #[string] request_hash: String,
+    consume: bool,
 ) -> Result<CheckEmailApprovalResult, JsErrorBox> {
     ensure_not_blank!(approval_id, "approvalId");
 
     let (status, attestation) = remote_op_async!(op_check_email_approval,
         state,
-        CheckEmailApprovalRequest { approval_id: approval_id.clone() },
+        CheckEmailApprovalRequest { approval_id: approval_id.clone(), consume },
         UnionRequest::CheckEmailApproval(resp) => Ok((resp.status, resp.attestation))
     )?;
 
@@ -628,7 +654,9 @@ async fn op_check_email_approval(
             "op_check_email_approval: server reported approved but supplied no attestation (fail closed)",
         ));
     }
-    let payload = verify_approval_attestation(&approval_id, &attestation)
+    // Verifies signature, id/status/expiry, AND that the attestation is bound
+    // to the operation `request_hash` the caller passed — all in-TEE.
+    let payload = verify_approval_attestation(&approval_id, &attestation, &request_hash)
         .map_err(|e| JsErrorBox::generic(format!("op_check_email_approval: {e}")))?;
     Ok(CheckEmailApprovalResult {
         approved: true,

@@ -37,6 +37,7 @@ export {
 } from './decimal';
 export {
   hmacSha256Hex,
+  sha256Hex,
   ed25519SignBase64,
   es256Jwt,
   randomHex,

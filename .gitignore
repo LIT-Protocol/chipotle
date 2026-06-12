@@ -9,3 +9,7 @@ dstack-cache/
 CLAUDE.MD
 .gstack/
 .gstack-design-audit/
+
+# macOS
+.DS_Store
+**/.DS_Store

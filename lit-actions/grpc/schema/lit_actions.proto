@@ -162,9 +162,11 @@ message ExecuteJsResponse {
     string summary = 2;
     string assurance = 3;  // L1 (link click) | L2 (link + OTP step-up)
     uint32 ttl_sec = 4;
+    string request_hash = 5;  // hash of the exact operation being approved; bound into the attestation
   }
 
   message CheckEmailApprovalRequest {
     string approval_id = 1;
+    bool consume = 2;  // spend the approval (single-use) when true
   }
 }

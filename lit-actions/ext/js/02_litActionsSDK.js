@@ -175,10 +175,11 @@ async function sendEmail({ to, subject, text }) {
  * @param {string} params.summary What is being approved (shown in the email and on the approval page).
  * @param {string} [params.assurance] "L1" (link click) or "L2" (link + OTP step-up, default -- required for anything that moves funds).
  * @param {number} [params.ttlSec] Approval validity window in seconds (default 3600).
+ * @param {string} [params.requestHash] Hash of the EXACT operation being approved (amount, destination, venue, ...). Bound into the attestation and checked in-TEE by checkEmailApproval, so a valid approval cannot be replayed to authorize a different operation. REQUIRED for anything that moves funds; omit only for notification-grade L1 confirms.
  * @returns {Promise<{approvalId: string, otp?: string, approvalUrl?: string}>} For L2 the OTP must reach the approver out-of-band (e.g. shown in the requesting app) -- email is the notification channel, not the authentication channel.
  */
-async function requestEmailApproval({ to, summary, assurance = 'L2', ttlSec = 3600 }) {
-  const res = await ops.op_request_email_approval(to, summary, assurance, ttlSec);
+async function requestEmailApproval({ to, summary, assurance = 'L2', ttlSec = 3600, requestHash = '' }) {
+  const res = await ops.op_request_email_approval(to, summary, assurance, ttlSec, requestHash);
   return {
     approvalId: res.approval_id,
     otp: res.otp ?? undefined,
@@ -188,17 +189,23 @@ async function requestEmailApproval({ to, summary, assurance = 'L2', ttlSec = 36
 
 /**
  * Check an approval and verify its attestation IN-TEE against the pinned
- * network attestation key. Returns approved=true only after the runtime has
- * verified the signature, approvalId binding, status, and expiry -- a
- * compromised approval service cannot forge an approval past this check.
+ * network attestation key AND the operation it authorizes. Returns
+ * approved=true only after the runtime has verified the signature, approvalId
+ * binding, status, expiry, AND that the attestation's operation hash equals the
+ * `requestHash` you pass here -- so a compromised approval service cannot forge
+ * an approval, and a valid approval for one operation cannot be replayed to
+ * authorize another. By default the approval is consumed (single-use): the
+ * first approved check spends it, later checks report "consumed".
  * @name Lit.Actions.checkEmailApproval
  * @function checkEmailApproval
  * @param {Object} params
  * @param {string} params.approvalId The id returned by requestEmailApproval.
+ * @param {string} [params.requestHash] The operation hash this action is about to perform. MUST equal the hash passed to requestEmailApproval, or verification fails closed. Omit only when the approval was issued unbound (L1).
+ * @param {boolean} [params.consume] Spend the approval (default true). Pass false to peek at status without consuming.
  * @returns {Promise<{approved: boolean, status: string, attestation?: string, approver?: string, assurance?: string, approvedAtMs?: number}>}
  */
-async function checkEmailApproval({ approvalId }) {
-  const res = await ops.op_check_email_approval(approvalId);
+async function checkEmailApproval({ approvalId, requestHash = '', consume = true }) {
+  const res = await ops.op_check_email_approval(approvalId, requestHash, consume);
   return {
     approved: res.approved,
     status: res.status,

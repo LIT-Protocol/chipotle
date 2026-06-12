@@ -2,8 +2,30 @@
 //!
 //! Chipotle owns sending, nonce issuance, OTP step-up, and attestation
 //! signing; the lit-actions runtime owns VERIFICATION (in-TEE, against the
-//! pinned pubkey of this service's attestation key). A compromise of this
-//! service can therefore deny approvals but cannot forge one.
+//! pinned pubkey of this service's attestation key, and against the
+//! caller-supplied operation hash — see below).
+//!
+//! TRUST BOUNDARY — be precise about what in-TEE verification buys:
+//!  - A compromise of *Flows* (the approval UX layer) or of the network
+//!    transport CANNOT forge an approval: the runtime checks the secp256k1
+//!    signature against a pinned pubkey those parties don't hold.
+//!  - A compromise of *this service* CAN forge approvals, because this
+//!    process holds the signing key. The key is colocated with the public
+//!    link/OTP surface only for v1; moving signing into an isolated signer
+//!    (enclave/HSM) so an approval-service RCE cannot mint approvals is the
+//!    tracked follow-up. Do not read "in-TEE verification" as "the signer is
+//!    trustless" — it is not, yet.
+//!
+//! OPERATION BINDING — the attestation binds a caller-supplied `request_hash`
+//! (a hash of the exact operation: amount, destination, venue, etc.). The
+//! runtime compares it in-TEE to the hash the consuming action expects, so a
+//! valid "move 0.1 BTC to X" approval cannot be replayed to authorize a
+//! different movement. An approval with no request_hash is a bare
+//! notification-grade confirm (L1) and MUST NOT gate fund movement.
+//!
+//! SINGLE-USE — an approved record is consumed on first successful check
+//! (status → Consumed), so even the same operation cannot be replayed within
+//! the TTL.
 //!
 //! v1 stores pending approvals in memory: an approval must complete against
 //! the instance that issued it, and a deploy/cutover drops pending (not yet
@@ -69,8 +91,12 @@ fn looks_like_email(s: &str) -> bool {
 pub enum ApprovalStatus {
     Pending,
     Approved,
+    /// Approved AND already handed to the consumer once — terminal, anti-replay.
+    Consumed,
     Denied,
     Expired,
+    /// Too many wrong OTP attempts — terminal, anti-brute-force.
+    Locked,
 }
 
 impl ApprovalStatus {
@@ -78,11 +104,17 @@ impl ApprovalStatus {
         match self {
             ApprovalStatus::Pending => "pending",
             ApprovalStatus::Approved => "approved",
+            ApprovalStatus::Consumed => "consumed",
             ApprovalStatus::Denied => "denied",
             ApprovalStatus::Expired => "expired",
+            ApprovalStatus::Locked => "locked",
         }
     }
 }
+
+/// After this many wrong OTP entries the record locks, bounding online
+/// brute-force of the 6-digit (10^6) code to a handful of guesses.
+const MAX_OTP_ATTEMPTS: u32 = 5;
 
 #[derive(Debug, Clone)]
 struct ApprovalRecord {
@@ -92,7 +124,12 @@ struct ApprovalRecord {
     to: String,
     summary: String,
     assurance: String,
+    /// Hash of the exact operation being approved (caller-supplied in phase 1).
+    /// Signed into the attestation; the runtime binds against it in-TEE. Empty
+    /// for bare notification-grade approvals (L1, no fund movement).
+    request_hash: String,
     otp_hash: Option<String>,
+    otp_attempts: u32,
     status: ApprovalStatus,
     expires_at_ms: u64,
     attestation: Option<String>,
@@ -111,6 +148,11 @@ pub struct ApprovalConfig {
     /// requester being able to open the link collapses the email factor.
     pub expose_links: bool,
     pub max_ttl_sec: u32,
+    /// Allow an ephemeral (process-lifetime) attestation key when
+    /// LIT_APPROVAL_ATTESTATION_KEY is unset. Dev only — without it a missing
+    /// key is a hard error so prod never silently signs with a key no runtime
+    /// can pin across restarts.
+    pub allow_ephemeral_key: bool,
 }
 
 impl ApprovalConfig {
@@ -131,6 +173,8 @@ impl ApprovalConfig {
             max_ttl_sec: env("LIT_APPROVAL_MAX_TTL_SEC")
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(7 * 24 * 3600),
+            allow_ephemeral_key: env("LIT_APPROVAL_ALLOW_EPHEMERAL_KEY")
+                .is_some_and(|v| v == "true" || v == "1"),
         }
     }
 }
@@ -163,29 +207,17 @@ impl std::fmt::Debug for ApprovalService {
 
 impl ApprovalService {
     /// Construct from env. The attestation key comes from
-    /// LIT_APPROVAL_ATTESTATION_KEY (32-byte hex); without it an ephemeral key
-    /// is generated and a loud warning logged — approvals then verify only
-    /// against runtimes pinned to the printed ephemeral pubkey (dev only).
+    /// LIT_APPROVAL_ATTESTATION_KEY (32-byte hex). If unset, an ephemeral key
+    /// is generated ONLY when LIT_APPROVAL_ALLOW_EPHEMERAL_KEY=true (dev);
+    /// otherwise this is a hard error so production never silently signs with a
+    /// key no runtime can pin. Callers degrade gracefully (the approval ops
+    /// report "not configured") rather than aborting unrelated action traffic.
     pub fn from_env() -> Result<Self> {
         let cfg = ApprovalConfig::from_env();
-        let signing_key = match std::env::var("LIT_APPROVAL_ATTESTATION_KEY") {
-            Ok(hex) if !hex.trim().is_empty() => {
-                let bytes = hex_decode(&hex).context("LIT_APPROVAL_ATTESTATION_KEY")?;
-                k256::ecdsa::SigningKey::from_slice(&bytes)
-                    .context("LIT_APPROVAL_ATTESTATION_KEY must be a 32-byte secp256k1 scalar")?
-            }
-            _ => {
-                let mut bytes = [0u8; 32];
-                rand::thread_rng().fill_bytes(&mut bytes);
-                let key = k256::ecdsa::SigningKey::from_slice(&bytes).expect("32 random bytes");
-                tracing::warn!(
-                    pubkey = hex_encode(key.verifying_key().to_encoded_point(true).as_bytes()),
-                    "LIT_APPROVAL_ATTESTATION_KEY not set — generated an EPHEMERAL attestation key; \
-                     approvals will not survive restarts and runtimes must pin the pubkey above (dev only)"
-                );
-                key
-            }
-        };
+        let signing_key = Self::select_signing_key(
+            std::env::var("LIT_APPROVAL_ATTESTATION_KEY").ok(),
+            cfg.allow_ephemeral_key,
+        )?;
         // Link tokens only need to be unforgeable by outsiders; deriving from
         // the attestation key keeps configuration to a single secret.
         let mut link_key = [0u8; 32];
@@ -203,6 +235,40 @@ impl ApprovalService {
                 .build()
                 .context("building Resend HTTP client")?,
         })
+    }
+
+    /// Pure key-selection policy (testable without env mutation): a configured
+    /// 32-byte hex key wins; otherwise an ephemeral key only when explicitly
+    /// allowed (dev); otherwise a hard error so prod never silently signs with
+    /// an unpinnable key.
+    fn select_signing_key(
+        key_hex: Option<String>,
+        allow_ephemeral: bool,
+    ) -> Result<k256::ecdsa::SigningKey> {
+        match key_hex {
+            Some(hex) if !hex.trim().is_empty() => {
+                let bytes = hex_decode(&hex).context("LIT_APPROVAL_ATTESTATION_KEY")?;
+                k256::ecdsa::SigningKey::from_slice(&bytes)
+                    .context("LIT_APPROVAL_ATTESTATION_KEY must be a 32-byte secp256k1 scalar")
+            }
+            _ if allow_ephemeral => {
+                let mut bytes = [0u8; 32];
+                rand::thread_rng().fill_bytes(&mut bytes);
+                let key = k256::ecdsa::SigningKey::from_slice(&bytes).expect("32 random bytes");
+                tracing::warn!(
+                    pubkey = hex_encode(key.verifying_key().to_encoded_point(true).as_bytes()),
+                    "LIT_APPROVAL_ATTESTATION_KEY not set — generated an EPHEMERAL attestation key \
+                     (LIT_APPROVAL_ALLOW_EPHEMERAL_KEY=true); approvals will not survive restarts and \
+                     runtimes must pin the pubkey above (dev only)"
+                );
+                Ok(key)
+            }
+            _ => bail!(
+                "LIT_APPROVAL_ATTESTATION_KEY is not set. Set it to a 32-byte hex secp256k1 key, or \
+                 set LIT_APPROVAL_ALLOW_EPHEMERAL_KEY=true for local dev. Refusing to sign approvals \
+                 with an unpinnable ephemeral key in a non-dev context."
+            ),
+        }
     }
 
     /// Hex of the SEC1-compressed attestation pubkey — pin this on the
@@ -229,16 +295,22 @@ impl ApprovalService {
         )
     }
 
+    /// Per-key daily email quota. NOTE: keyed by the usage API key, so an
+    /// account that can mint/rotate usage keys can multiply its quota — this
+    /// is spam/abuse control, not a security boundary. Account-level keying
+    /// (resolving usage key → owning account) is the tracked follow-up.
     fn check_quota(&self, account_hash: &str) -> Result<()> {
         let day = now_ms() / 86_400_000;
         let mut quotas = self.quotas.lock().unwrap_or_else(|e| e.into_inner());
+        // Sweep stale days so the map can't grow unbounded across key churn.
+        quotas.retain(|_, (d, _)| *d == day);
         let entry = quotas.entry(account_hash.to_string()).or_insert((day, 0));
         if entry.0 != day {
             *entry = (day, 0);
         }
         if entry.1 >= self.cfg.email_daily_quota {
             bail!(
-                "email quota exceeded ({}/day per account) — contact support to raise it",
+                "email quota exceeded ({}/day per usage key) — contact support to raise it",
                 self.cfg.email_daily_quota
             );
         }
@@ -294,7 +366,9 @@ impl ApprovalService {
         self.deliver(to, &subject, text).await
     }
 
-    /// `Lit.Actions.requestEmailApproval` — issue id (+ OTP for L2), email the link.
+    /// `Lit.Actions.requestEmailApproval` — issue id (+ OTP for L2), email the
+    /// link. `request_hash` binds the exact operation; empty = bare
+    /// notification-grade confirm (must not gate fund movement).
     pub async fn request_approval(
         &self,
         api_key: &str,
@@ -302,12 +376,17 @@ impl ApprovalService {
         summary: &str,
         assurance: &str,
         ttl_sec: u32,
+        request_hash: &str,
     ) -> Result<RequestedApproval> {
         if !looks_like_email(to) {
             bail!("invalid approver address");
         }
         if summary.trim().is_empty() || summary.len() > 500 {
             bail!("summary must be 1..=500 chars");
+        }
+        let request_hash = request_hash.trim();
+        if !request_hash.is_empty() && (request_hash.len() > 200 || !request_hash.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'x')) {
+            bail!("request_hash must be a short hex/base64url operation digest");
         }
         match assurance {
             "L1" | "L2" => {}
@@ -347,7 +426,9 @@ impl ApprovalService {
                     to: to.to_string(),
                     summary: summary.to_string(),
                     assurance: assurance.to_string(),
+                    request_hash: request_hash.to_string(),
                     otp_hash: otp.as_deref().map(|o| sha256_hex(o.as_bytes())),
+                    otp_attempts: 0,
                     status: ApprovalStatus::Pending,
                     expires_at_ms,
                     attestation: None,
@@ -374,8 +455,17 @@ impl ApprovalService {
         })
     }
 
-    /// `Lit.Actions.checkEmailApproval` — status + attestation, scoped to the requesting account.
-    pub fn check(&self, api_key: &str, approval_id: &str) -> Result<(String, Option<String>)> {
+    /// `Lit.Actions.checkEmailApproval` — status + attestation, scoped to the
+    /// requesting account. `consume` (the default for the op) makes an approved
+    /// record single-use: it returns the attestation once, then transitions to
+    /// Consumed so the same approval cannot be replayed within its TTL. Pass
+    /// `consume = false` only to peek at status without spending it.
+    pub fn check(
+        &self,
+        api_key: &str,
+        approval_id: &str,
+        consume: bool,
+    ) -> Result<(String, Option<String>)> {
         let account = Self::account_hash(api_key);
         let mut store = self.store.lock().unwrap_or_else(|e| e.into_inner());
         let Some(record) = store.get_mut(approval_id) else {
@@ -388,7 +478,15 @@ impl ApprovalService {
         if record.status == ApprovalStatus::Pending && record.expires_at_ms <= now_ms() {
             record.status = ApprovalStatus::Expired;
         }
-        Ok((record.status.as_str().to_string(), record.attestation.clone()))
+        if record.status == ApprovalStatus::Approved {
+            let attestation = record.attestation.clone();
+            if consume {
+                // Spend it: report approved exactly once, then it's Consumed.
+                record.status = ApprovalStatus::Consumed;
+            }
+            return Ok(("approved".to_string(), attestation));
+        }
+        Ok((record.status.as_str().to_string(), None))
     }
 
     fn sign_attestation(&self, payload_json: &str) -> String {
@@ -448,7 +546,16 @@ impl ApprovalService {
         if let Some(expected_otp_hash) = &record.otp_hash {
             let supplied = otp.unwrap_or_default().trim();
             if supplied.is_empty() || &sha256_hex(supplied.as_bytes()) != expected_otp_hash {
-                bail!("incorrect or missing code — enter the 6-digit code from the requesting app");
+                record.otp_attempts += 1;
+                if record.otp_attempts >= MAX_OTP_ATTEMPTS {
+                    // Lock so the 6-digit code can't be ground down online.
+                    record.status = ApprovalStatus::Locked;
+                    bail!("too many incorrect codes — this approval is locked; request a fresh one");
+                }
+                bail!(
+                    "incorrect or missing code — enter the 6-digit code from the requesting app ({} attempt(s) left)",
+                    MAX_OTP_ATTEMPTS - record.otp_attempts
+                );
             }
         }
         let approved_at_ms = now_ms();
@@ -457,6 +564,9 @@ impl ApprovalService {
             "approval_id": approval_id,
             "approver": record.to,
             "assurance": record.assurance,
+            // Binds the exact operation; the runtime checks it in-TEE against
+            // the hash the consuming action expects. Empty = unbound (L1).
+            "request_hash": record.request_hash,
             "status": "approved",
             "approved_at_ms": approved_at_ms,
             "expires_at_ms": record.expires_at_ms,
@@ -599,6 +709,7 @@ mod tests {
                 email_daily_quota: 3,
                 expose_links: true,
                 max_ttl_sec: 3600,
+                allow_ephemeral_key: true,
             },
             signing_key,
             link_key,
@@ -608,40 +719,42 @@ mod tests {
         }
     }
 
+    fn token_of(url: &str) -> String {
+        url.split("t=").nth(1).unwrap().to_string()
+    }
+
     #[tokio::test]
-    async fn l2_flow_approve_with_otp_signs_verifiable_attestation() {
+    async fn l2_flow_approve_with_otp_signs_attestation_bound_to_operation() {
         let s = svc();
         let req = s
-            .request_approval("key1", "cfo@example.com", "Sweep 2.5 BTC", "L2", 600)
+            .request_approval("key1", "cfo@example.com", "Sweep 2.5 BTC", "L2", 600, "0xopHASH")
             .await
             .unwrap();
         let otp = req.otp.clone().unwrap();
-        let url = req.approval_url.unwrap();
-        let token = url.split("t=").nth(1).unwrap().to_string();
+        let token = token_of(&req.approval_url.unwrap());
 
-        // pending before decision
-        let (status, att) = s.check("key1", &req.approval_id).unwrap();
+        // pending before decision; peeking (consume=false) does not spend it
+        let (status, att) = s.check("key1", &req.approval_id, false).unwrap();
         assert_eq!(status, "pending");
         assert!(att.is_none());
 
-        // wrong OTP refused, record stays pending (retryable)
+        // wrong / missing OTP and bad token all refused
         assert!(s.decide(&req.approval_id, &token, Some("000000"), true).is_err());
-        // missing OTP refused
         assert!(s.decide(&req.approval_id, &token, None, true).is_err());
-        // bad token refused
         assert!(s.decide(&req.approval_id, "deadbeef", Some(&otp), true).is_err());
 
         // correct OTP approves
         assert_eq!(s.decide(&req.approval_id, &token, Some(&otp), true).unwrap(), "approved");
-        let (status, att) = s.check("key1", &req.approval_id).unwrap();
+
+        // consuming check returns the attestation exactly once
+        let (status, att) = s.check("key1", &req.approval_id, true).unwrap();
         assert_eq!(status, "approved");
         let att = att.unwrap();
 
-        // attestation verifies against the service pubkey and binds the id
+        // attestation verifies against the service pubkey and binds id + operation
         let env: serde_json::Value = serde_json::from_str(&att).unwrap();
         let payload = env["payload"].as_str().unwrap();
-        let sig_bytes = hex_decode(env["sig"].as_str().unwrap()).unwrap();
-        let sig = k256::ecdsa::Signature::from_slice(&sig_bytes).unwrap();
+        let sig = k256::ecdsa::Signature::from_slice(&hex_decode(env["sig"].as_str().unwrap()).unwrap()).unwrap();
         s.signing_key
             .verifying_key()
             .verify(payload.as_bytes(), &sig)
@@ -650,26 +763,68 @@ mod tests {
         assert_eq!(p["approval_id"], req.approval_id.as_str());
         assert_eq!(p["assurance"], "L2");
         assert_eq!(p["status"], "approved");
+        assert_eq!(p["request_hash"], "0xopHASH", "attestation must bind the operation hash");
+    }
 
-        // single-use: second decision refused
-        assert!(s.decide(&req.approval_id, &token, Some(&otp), true).is_err());
+    #[tokio::test]
+    async fn approved_record_is_single_use_consumed_on_first_check() {
+        let s = svc();
+        let req = s
+            .request_approval("key1", "cfo@example.com", "Sweep", "L1", 600, "0xop")
+            .await
+            .unwrap();
+        let token = token_of(&req.approval_url.unwrap());
+        assert_eq!(s.decide(&req.approval_id, &token, None, true).unwrap(), "approved");
+
+        // first consume → approved + attestation
+        let (status, att) = s.check("key1", &req.approval_id, true).unwrap();
+        assert_eq!(status, "approved");
+        assert!(att.is_some());
+
+        // replay → consumed, no attestation (anti-replay)
+        let (status, att) = s.check("key1", &req.approval_id, true).unwrap();
+        assert_eq!(status, "consumed");
+        assert!(att.is_none(), "a consumed approval must not hand out another attestation");
+    }
+
+    #[tokio::test]
+    async fn otp_locks_after_max_attempts() {
+        let s = svc();
+        let req = s
+            .request_approval("key1", "cfo@example.com", "Sweep", "L2", 600, "0xop")
+            .await
+            .unwrap();
+        let token = token_of(&req.approval_url.unwrap());
+        let real_otp = req.otp.unwrap();
+
+        // MAX_OTP_ATTEMPTS wrong guesses lock the record
+        for _ in 0..MAX_OTP_ATTEMPTS {
+            assert!(s.decide(&req.approval_id, &token, Some("999999"), true).is_err());
+        }
+        // even the CORRECT code is now refused — brute-force is bounded
+        assert!(
+            s.decide(&req.approval_id, &token, Some(&real_otp), true).is_err(),
+            "locked record must reject even the correct OTP"
+        );
+        let (status, _) = s.check("key1", &req.approval_id, false).unwrap();
+        assert_eq!(status, "locked");
     }
 
     #[tokio::test]
     async fn l1_flow_deny_and_account_scoping() {
         let s = svc();
         let req = s
-            .request_approval("key1", "ops@example.com", "Run weekly report", "L1", 600)
+            .request_approval("key1", "ops@example.com", "Run weekly report", "L1", 600, "")
             .await
             .unwrap();
         assert!(req.otp.is_none(), "L1 has no OTP step-up");
-        let token = req.approval_url.unwrap().split("t=").nth(1).unwrap().to_string();
+        let token = token_of(&req.approval_url.unwrap());
 
         // another account cannot see the approval
-        assert!(s.check("other-key", &req.approval_id).is_err());
+        assert!(s.check("other-key", &req.approval_id, false).is_err());
 
         assert_eq!(s.decide(&req.approval_id, &token, None, false).unwrap(), "denied");
-        let (status, att) = s.check("key1", &req.approval_id).unwrap();
+        let (status, att) = s.check("key1", &req.approval_id, true).unwrap();
         assert_eq!(status, "denied");
         assert!(att.is_none(), "denied approvals carry no attestation");
     }
@@ -682,15 +837,20 @@ mod tests {
             s.send_email("key1", "a@b.co", "s", "t").await.unwrap();
         }
         assert!(s.send_email("key1", "a@b.co", "s", "t").await.is_err());
-        // other account unaffected
+        // other key unaffected
         s.send_email("key2", "a@b.co", "s", "t").await.unwrap();
 
-        assert!(s.request_approval("k", "not-an-email", "x", "L1", 600).await.is_err());
-        assert!(s.request_approval("k", "a@b.co", "", "L1", 600).await.is_err());
-        assert!(s.request_approval("k", "a@b.co", "x", "L9", 600).await.is_err());
+        assert!(s.request_approval("k", "not-an-email", "x", "L1", 600, "").await.is_err());
+        assert!(s.request_approval("k", "a@b.co", "", "L1", 600, "").await.is_err());
+        assert!(s.request_approval("k", "a@b.co", "x", "L9", 600, "").await.is_err());
         assert!(
-            s.request_approval("k", "a@b.co", "x", "L3", 600).await.is_err(),
+            s.request_approval("k", "a@b.co", "x", "L3", 600, "").await.is_err(),
             "L3 is explicitly not available yet"
+        );
+        // malformed request_hash rejected
+        assert!(
+            s.request_approval("k", "a@b.co", "x", "L1", 600, "has spaces!").await.is_err(),
+            "request_hash must be a clean digest"
         );
     }
 
@@ -698,7 +858,7 @@ mod tests {
     async fn expired_approvals_report_expired() {
         let s = svc();
         let req = s
-            .request_approval("key1", "cfo@example.com", "x", "L1", 600)
+            .request_approval("key1", "cfo@example.com", "x", "L1", 600, "")
             .await
             .unwrap();
         // force expiry
@@ -706,9 +866,23 @@ mod tests {
             let mut store = s.store.lock().unwrap();
             store.get_mut(&req.approval_id).unwrap().expires_at_ms = 1;
         }
-        let (status, _) = s.check("key1", &req.approval_id).unwrap();
+        let (status, _) = s.check("key1", &req.approval_id, false).unwrap();
         assert_eq!(status, "expired");
-        let token = req.approval_url.unwrap().split("t=").nth(1).unwrap().to_string();
+        let token = token_of(&req.approval_url.unwrap());
         assert!(s.decide(&req.approval_id, &token, None, true).is_err());
+    }
+
+    #[test]
+    fn select_signing_key_refuses_ephemeral_unless_allowed() {
+        // No key + not allowed → hard error (prod footgun guard).
+        assert!(ApprovalService::select_signing_key(None, false).is_err());
+        assert!(ApprovalService::select_signing_key(Some("   ".into()), false).is_err());
+        // No key + dev opt-in → ephemeral key generated.
+        assert!(ApprovalService::select_signing_key(None, true).is_ok());
+        // Configured key always wins (32 bytes of 0x07 hex).
+        let hex = "07".repeat(32);
+        assert!(ApprovalService::select_signing_key(Some(hex), false).is_ok());
+        // Malformed key → error even when ephemeral is allowed (explicit beats fallback).
+        assert!(ApprovalService::select_signing_key(Some("nothex".into()), true).is_err());
     }
 }

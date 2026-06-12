@@ -71,6 +71,7 @@ export class HyperliquidClient implements VenueClient {
   private readonly base: string;
   private readonly doFetch: FetchLike;
   private metaCache?: HlMeta;
+  private lastNonce = 0;
 
   constructor(private readonly cfg: VenueConfig) {
     if (cfg.venueId !== 'hyperliquid') {
@@ -82,6 +83,19 @@ export class HyperliquidClient implements VenueClient {
 
   private now(): number {
     return this.cfg.nowMs ? this.cfg.nowMs() : Date.now();
+  }
+
+  /**
+   * Per-signer monotonic nonce. Hyperliquid keys actions by (signer, nonce)
+   * and rejects stale/duplicate nonces, so two actions signed in the same
+   * millisecond — or a clock that doesn't advance — would collide. Stepping
+   * past the last-used value guarantees strictly increasing nonces from one
+   * client instance (the one-agent-per-connection model, plan D8).
+   */
+  private nextNonce(): number {
+    const n = Math.max(this.now(), this.lastNonce + 1);
+    this.lastNonce = n;
+    return n;
   }
 
   private get isMainnet(): boolean {
@@ -202,7 +216,7 @@ export class HyperliquidClient implements VenueClient {
 
   /** Sign and submit an L1 (trading) action. One signature covers the whole batched action. */
   private async exchange(action: Record<string, unknown>): Promise<unknown> {
-    const nonce = this.now();
+    const nonce = this.nextNonce();
     const vaultAddress = this.cfg.credentials?.vaultAddress?.toLowerCase();
     const signature = await signL1Action(this.signer(), action, nonce, {
       isMainnet: this.isMainnet,
@@ -523,7 +537,7 @@ export class HyperliquidClient implements VenueClient {
     if (!req.agentName) {
       throw new VenueError(this.venueId, 'invalid_request', 'agentName is required (named agents are auditable and individually revocable)');
     }
-    const nonce = this.now();
+    const nonce = this.nextNonce();
     const hyperliquidChain = this.isMainnet ? 'Mainnet' : 'Testnet';
     const message = {
       hyperliquidChain,

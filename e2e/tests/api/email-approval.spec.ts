@@ -20,7 +20,7 @@ import { LitApiClient } from '../../fixtures/api-client';
 
 const APPROVER = 'approver-e2e@example.com';
 
-function actionRequestApproval(summary: string): string {
+function actionRequestApproval(summary: string, requestHash = ''): string {
   return `
 async function main() {
   const r = await Lit.Actions.requestEmailApproval({
@@ -28,17 +28,22 @@ async function main() {
     summary: ${JSON.stringify(summary)},
     assurance: 'L2',
     ttlSec: 300,
+    requestHash: ${JSON.stringify(requestHash)},
   });
   return { approvalId: r.approvalId, otp: r.otp ?? null, approvalUrl: r.approvalUrl ?? null };
 }
 `;
 }
 
-function actionCheckApproval(approvalId: string): string {
+function actionCheckApproval(approvalId: string, requestHash = '', consume = true): string {
   return `
 async function main() {
   try {
-    const r = await Lit.Actions.checkEmailApproval({ approvalId: ${JSON.stringify(approvalId)} });
+    const r = await Lit.Actions.checkEmailApproval({
+      approvalId: ${JSON.stringify(approvalId)},
+      requestHash: ${JSON.stringify(requestHash)},
+      consume: ${consume ? 'true' : 'false'},
+    });
     return { ok: true, approved: r.approved, status: r.status, approver: r.approver ?? null, hasAttestation: !!r.attestation };
   } catch (e) {
     return { ok: false, error: String((e && e.message) || e).slice(0, 300) };
@@ -46,6 +51,11 @@ async function main() {
 }
 `;
 }
+
+// A stand-in operation hash for the bound flow (any stable hex works — the
+// runtime only checks phase-1 and phase-2 agree).
+const OP_HASH = 'a'.repeat(64);
+const WRONG_OP_HASH = 'b'.repeat(64);
 
 async function postDecision(url: string, fields: Record<string, string>): Promise<string> {
   const [pageUrl, query] = url.split('?');
@@ -73,9 +83,10 @@ test.describe('email approval — M3 two-phase flow', () => {
       execute_in_groups: [0],
     });
 
-    // ---- phase 1: request the approval from inside an action
+    // ---- phase 1: request the approval from inside an action, BOUND to a
+    // specific operation hash (the runtime will require phase 2 to match it)
     const phase1 = await apiClient.litAction(usageApiKey, {
-      code: actionRequestApproval(`Sweep 0.1 BTC to cold storage (e2e ${stamp})`),
+      code: actionRequestApproval(`Sweep 0.1 BTC to cold storage (e2e ${stamp})`, OP_HASH),
     });
     expect(phase1.has_error, `phase 1 errored; logs: ${phase1.logs ?? '<none>'}`).toBe(false);
     const { approvalId, otp, approvalUrl } = phase1.response as {
@@ -87,8 +98,10 @@ test.describe('email approval — M3 two-phase flow', () => {
     expect(otp, 'L2 must issue an OTP to the requesting app').toMatch(/^\d{6}$/);
     test.skip(!approvalUrl, 'server runs without LIT_APPROVAL_EXPOSE_LINK — enable it on dev to run this gate');
 
-    // ---- pending before any decision
-    const pending = await apiClient.litAction(usageApiKey, { code: actionCheckApproval(approvalId) });
+    // ---- pending before any decision (peek without consuming)
+    const pending = await apiClient.litAction(usageApiKey, {
+      code: actionCheckApproval(approvalId, OP_HASH, false),
+    });
     expect(pending.has_error).toBe(false);
     expect(pending.response).toMatchObject({ ok: true, approved: false, status: 'pending' });
 
@@ -109,8 +122,11 @@ test.describe('email approval — M3 two-phase flow', () => {
     const replay = await postDecision(approvalUrl!, { otp: otp!, decision: 'approve' });
     expect(replay).toContain('already approved');
 
-    // ---- phase 2: the action checks the approval; the runtime verifies in-TEE
-    const phase2 = await apiClient.litAction(usageApiKey, { code: actionCheckApproval(approvalId) });
+    // ---- phase 2: the action checks the approval with the MATCHING operation
+    // hash; the runtime verifies signature + binding in-TEE and consumes it
+    const phase2 = await apiClient.litAction(usageApiKey, {
+      code: actionCheckApproval(approvalId, OP_HASH),
+    });
     expect(phase2.has_error).toBe(false);
     const verdict = phase2.response as {
       ok: boolean;
@@ -133,6 +149,29 @@ test.describe('email approval — M3 two-phase flow', () => {
       approver: APPROVER,
       hasAttestation: true,
     });
+
+    // ---- anti-replay: the approval was consumed by the check above, so a
+    // second check (even with the right hash) must NOT report approved
+    const replayCheck = await apiClient.litAction(usageApiKey, {
+      code: actionCheckApproval(approvalId, OP_HASH),
+    });
+    expect(replayCheck.response).toMatchObject({ ok: true, approved: false, status: 'consumed' });
+
+    // ---- operation binding: a fresh, genuinely-approved approval bound to
+    // OP_HASH must be REFUSED when checked against WRONG_OP_HASH (this is the
+    // replay-for-a-different-operation attack the binding closes)
+    const bindP1 = await apiClient.litAction(usageApiKey, {
+      code: actionRequestApproval(`Binding probe (e2e ${stamp})`, OP_HASH),
+    });
+    const bind = bindP1.response as { approvalId: string; otp: string; approvalUrl: string | null };
+    await postDecision(bind.approvalUrl!, { otp: bind.otp, decision: 'approve' });
+    const mismatch = await apiClient.litAction(usageApiKey, {
+      code: actionCheckApproval(bind.approvalId, WRONG_OP_HASH),
+    });
+    expect(mismatch.response).toMatchObject({ ok: false });
+    expect((mismatch.response as { error: string }).error).toContain(
+      'does not match the expected operation',
+    );
 
     // ---- deny path: a fresh approval, denied at the page, reports denied (no attestation)
     const denyPhase1 = await apiClient.litAction(usageApiKey, {

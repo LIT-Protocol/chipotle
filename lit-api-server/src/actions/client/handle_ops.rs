@@ -213,12 +213,13 @@ impl Client {
                 summary,
                 assurance,
                 ttl_sec,
+                request_hash,
             }) => {
                 let Some(svc) = self.approvals.as_ref() else {
                     bail!("email approval service is not configured on this instance");
                 };
                 let requested = svc
-                    .request_approval(&self.api_key, &to, &summary, &assurance, ttl_sec)
+                    .request_approval(&self.api_key, &to, &summary, &assurance, ttl_sec, &request_hash)
                     .await?;
                 RequestEmailApprovalResponse {
                     approval_id: requested.approval_id,
@@ -227,11 +228,14 @@ impl Client {
                 }
                 .into()
             }
-            UnionResponse::CheckEmailApproval(CheckEmailApprovalRequest { approval_id }) => {
+            // NOTE: request_hash binding is verified IN-TEE by the runtime op,
+            // not here — it never reaches the server, so a compromised server
+            // can't tailor a forgery to it. `consume` spends the approval.
+            UnionResponse::CheckEmailApproval(CheckEmailApprovalRequest { approval_id, consume }) => {
                 let Some(svc) = self.approvals.as_ref() else {
                     bail!("email approval service is not configured on this instance");
                 };
-                let (status, attestation) = svc.check(&self.api_key, &approval_id)?;
+                let (status, attestation) = svc.check(&self.api_key, &approval_id, consume)?;
                 CheckEmailApprovalResponse {
                     status,
                     attestation: attestation.unwrap_or_default(),

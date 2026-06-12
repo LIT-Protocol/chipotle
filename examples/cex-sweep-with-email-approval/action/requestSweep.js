@@ -35,6 +35,23 @@ const POLICY = {
   ttlSec: 900, // approval expires after 15 minutes
 };
 
+// Canonical hash of the EXACT operation being approved. Both phases compute it
+// identically; phase 1 binds it into the approval, phase 2 proves it matches.
+// This is what stops a valid "100 USDT to X" approval from being replayed to
+// authorize a different asset/amount/destination (codex P1). Field order is
+// fixed — it's hashed, so any drift changes the hash and fails the binding.
+function sweepRequestHash({ venueId, sandbox, asset, amount, destination }) {
+  const canonical = JSON.stringify({
+    v: "cex-sweep-v1",
+    venueId,
+    sandbox,
+    asset,
+    amount,
+    destination,
+  });
+  return LitVenues.sha256Hex(canonical);
+}
+
 async function main(params) {
   if (params && params.probe) {
     // Side-effect-free readiness probe: proves the bundle parsed and runs.
@@ -82,16 +99,27 @@ async function main(params) {
   // lit-venues exposes no withdrawal endpoints by design (plan non-goal):
   // the value-moving step is what phase 2 gates behind the verified approval.
   const summary = `Sweep ${amount} ${asset} from ${POLICY.venueId} (spot testnet) to ${destination}`;
+  const requestHash = sweepRequestHash({
+    venueId: POLICY.venueId,
+    sandbox: POLICY.sandbox,
+    asset,
+    amount,
+    destination,
+  });
   const approval = await Lit.Actions.requestEmailApproval({
     to: approverEmail,
     summary,
     assurance: POLICY.assurance,
     ttlSec: POLICY.ttlSec,
+    // Binds this approval to THIS exact sweep; phase 2 re-derives and the
+    // runtime verifies the match in-TEE.
+    requestHash,
   });
 
   return {
     requested: true,
     approvalId: approval.approvalId,
+    requestHash,
     // L2: the OTP must reach the approver OUT-OF-BAND via the requesting app
     // (the script prints it). It is never included in the approval email.
     otp: approval.otp ?? null,

@@ -3,12 +3,18 @@
 // Like phase 1, this runs with the lit-venues IIFE bundle concatenated above
 // it by scripts/_lit.js (global `LitVenues`); `Lit.Actions` is the runtime.
 //
-// checkEmailApproval is the heart of the example: the attestation produced by
-// the approval server is verified by the action runtime IN-TEE against the
-// pinned network attestation key before `approved: true` is ever reported.
-// That means a compromised approval server (or a compromised caller of this
-// action) cannot forge an approval — the worst either can do is fail to
-// deliver one. The action only has to branch on `approved`.
+// checkEmailApproval is the heart of the example. The attestation produced by
+// the approval server is verified by the action runtime IN-TEE before
+// `approved: true` is reported, against TWO things:
+//   1. the pinned network attestation key (signature) — so a compromised
+//      *Flows* layer or transport cannot forge an approval; and
+//   2. the `requestHash` of THIS exact sweep — so a valid approval for one
+//      operation cannot be replayed to authorize a different asset/amount/
+//      destination (this binding is what makes the gate meaningful).
+// The approval is also single-use: checkEmailApproval consumes it, so the same
+// approval can't drive two sweeps. (A compromise of the approval *service*
+// itself, which holds the signing key, is out of scope for in-TEE verification
+// — see the trust-boundary note in lit-api-server/src/approvals.rs.)
 //
 // On `approved: true`, the demo performs the swept-funds step it can honestly
 // perform: it re-verifies the venue balance still covers the intent and
@@ -31,18 +37,57 @@
 //   amount        the human-approved summary
 //   destination
 
+// Identical to phase 1's hash — same fields, same order. Re-derived here from
+// the params phase 2 is about to act on, so the approval is bound to exactly
+// what THIS invocation would do, not to whatever was merely displayed earlier.
+function sweepRequestHash({ venueId, sandbox, asset, amount, destination }) {
+  const canonical = JSON.stringify({
+    v: "cex-sweep-v1",
+    venueId,
+    sandbox,
+    asset,
+    amount,
+    destination,
+  });
+  return LitVenues.sha256Hex(canonical);
+}
+
 async function main(params) {
   const { approvalId, venueApiKey, venueSecret, proxyUrl, asset, amount, destination } =
     params || {};
   if (typeof approvalId !== "string" || !/^apr_[0-9a-f]{32}$/.test(approvalId)) {
     return { swept: false, status: "invalid", reason: "approvalId must look like apr_<32 hex>" };
   }
+  if (typeof amount !== "string" || !/^\d+(\.\d+)?$/.test(amount) || Number(amount) <= 0) {
+    return { swept: false, status: "invalid", reason: "amount must be a positive decimal string" };
+  }
+  for (const [name, value] of [["asset", asset], ["destination", destination]]) {
+    if (!value || typeof value !== "string") {
+      return { swept: false, status: "invalid", reason: `missing required param "${name}"` };
+    }
+  }
 
-  // ---- 1. Check the approval; the runtime verifies the attestation in-TEE --
-  const approval = await Lit.Actions.checkEmailApproval({ approvalId });
+  // ---- 1. Check the approval. The runtime verifies the attestation IN-TEE
+  // against the pinned key AND binds it to the requestHash of THIS exact sweep
+  // (recomputed from the params we're about to act on). A mismatch — a replay
+  // of an approval for a different operation — fails closed right here.
+  const requestHash = sweepRequestHash({
+    venueId: "binance",
+    sandbox: true,
+    asset,
+    amount,
+    destination,
+  });
+  let approval;
+  try {
+    approval = await Lit.Actions.checkEmailApproval({ approvalId, requestHash });
+  } catch (e) {
+    // Binding/verification failure (wrong operation, bad signature, expired).
+    return { swept: false, status: "rejected", reason: String((e && e.message) || e).slice(0, 200) };
+  }
   if (!approval.approved) {
     // pending → try again later (or let a lit-triggers webhook resume);
-    // denied / expired → the sweep is dead, a fresh phase 1 is required.
+    // denied / expired / consumed → the sweep is dead, a fresh phase 1 is required.
     return { swept: false, status: approval.status };
   }
 
