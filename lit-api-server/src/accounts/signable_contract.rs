@@ -116,6 +116,25 @@ pub(crate) async fn get_read_only_account_config_contract() -> Result<AccountCon
     Ok(contract)
 }
 
+/// Convert a mined transaction receipt into a success/failure result.
+///
+/// `get_receipt()` resolves successfully even when the transaction reverted
+/// on-chain — the receipt simply carries an EIP-658 status of 0. Treating that
+/// as success would report a failed write (e.g. a reverted `newAccount`) as
+/// having succeeded, leaving callers to act on state that was never persisted.
+/// We inspect the status explicitly and surface a revert as an error.
+fn receipt_to_result(receipt: alloy::rpc::types::TransactionReceipt) -> Result<bool> {
+    if receipt.status() {
+        Ok(true)
+    } else {
+        Err(anyhow::anyhow!(
+            "transaction reverted on-chain (tx hash: {:#x}, block: {:?})",
+            receipt.transaction_hash,
+            receipt.block_number
+        ))
+    }
+}
+
 pub async fn send_transaction<D>(
     function_call: CallBuilder<&SigningClient, D, Ethereum>,
     signer_pool: std::sync::Arc<SignerPool>,
@@ -139,7 +158,7 @@ where
     let first_err = match function_call.send().await {
         Ok(tx) => {
             let result = match tx.get_receipt().await {
-                Ok(_) => Ok(true),
+                Ok(receipt) => receipt_to_result(receipt),
                 Err(e) => Err(anyhow::Error::from(e)),
             };
             signer_pool.release(signer_address).await?;
@@ -205,7 +224,7 @@ where
     };
 
     let result = match tx.get_receipt().await {
-        Ok(_) => Ok(true),
+        Ok(receipt) => receipt_to_result(receipt),
         Err(e) => Err(e.into()),
     };
 

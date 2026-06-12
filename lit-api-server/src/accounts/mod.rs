@@ -768,7 +768,15 @@ pub async fn can_execute_action_and_use_wallet(
 pub async fn get_account_wallet_address(key_or_hash: &str) -> Result<String> {
     let contract = get_read_only_account_config_contract().await?;
     let key_hash = usage_api_key_to_hash(key_or_hash);
-    let wallet_address = contract.getAccountWalletAddress(key_hash).call().await?;
+    // Decode contract reverts (e.g. `AccountDoesNotExist`) into a human-readable
+    // string. Without this the raw alloy error is just the 4-byte selector, which
+    // callers like `billing::wallet_resolution_err` substring-match on to map to
+    // the right HTTP status (a missing account is a 400, not a 500).
+    let wallet_address = contract
+        .getAccountWalletAddress(key_hash)
+        .call()
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", decode_contract_revert(&e)))?;
     if wallet_address == Address::ZERO {
         anyhow::bail!("account has no wallet address");
     }
@@ -793,7 +801,15 @@ pub async fn get_account_wallet_address(key_or_hash: &str) -> Result<String> {
 pub async fn get_billing_wallet_address(key_or_hash: &str) -> Result<String> {
     let contract = get_read_only_account_config_contract().await?;
     let key_hash = usage_api_key_to_hash(key_or_hash);
-    let wallet_address = contract.getBillingWalletAddress(key_hash).call().await?;
+    // Decode contract reverts (e.g. `AccountDoesNotExist`) into a human-readable
+    // string so `billing::wallet_resolution_err` can map a missing account to a
+    // 400 instead of a confusing 500. A raw alloy revert is just the 4-byte
+    // selector, which the substring match never catches.
+    let wallet_address = contract
+        .getBillingWalletAddress(key_hash)
+        .call()
+        .await
+        .map_err(|e| anyhow::anyhow!("{}", decode_contract_revert(&e)))?;
     if wallet_address == Address::ZERO {
         anyhow::bail!("account has no wallet address");
     }

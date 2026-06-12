@@ -2,15 +2,51 @@
 name = "lit-billing-core"
 version = "0.1.0"
 edition = "2024"
-description = "Shared Stripe client + customer/balance primitives for Lit billing services"
+description = "Shared Stripe client + customer/balance/auth primitives for Lit billing services"
 license = "Apache-2.0"
+
+[features]
+default = []
+# Provides the `OpenApiFromRequest` impl for the `BillingAuth` guard, used by
+# services that mount the guard on okapi-documented routes (lit-api-server).
+# Services without okapi (lit-payments) leave this off and depend on the bare
+# Rocket guard only.
+openapi = ["dep:rocket_okapi"]
 
 [dependencies]
 anyhow = "1.0"
-hex = "0.4"
+async-trait = "0.1"
 hmac = "0.12"
 reqwest = { version = "0.12.10", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
+thiserror = "1.0"
 tracing = "0.1"
+
+# EIP-712 typed-data verification (was lit-api-server/src/core/eip712.rs).
+# `alloy-dyn-abi` parses arbitrary typed-data + computes the digest; the
+# primitives crate gives us `Address`, `Signature`, `U256`, `keccak256`.
+# These are the same versions lit-payments already pins, so adding them
+# here doesn't introduce a fresh alloy version into the lockfile.
+# `eip712` on alloy-dyn-abi gives us `TypedData::eip712_signing_hash`.
+# `k256` on alloy-primitives turns on `Signature::recover_address_from_prehash`
+# (ECDSA recovery). Without `k256` the signature type is just a transparent
+# wrapper and recovery is absent — see alloy-primitives docs.
+alloy-dyn-abi = { version = "1.0", features = ["eip712"] }
+alloy-primitives = { version = "1.0", features = ["k256"] }
+hex = "0.4"
+
+# Rocket guard + AuthResolver trait (was the lit-billing-auth crate).
+# Folded into this crate so both services consume a single shared module
+# rather than two parallel crates — the auth pieces only ever ride alongside
+# the Stripe pieces in practice.
+base64_light = "0.1"
+rocket = { version = "0.5.1", features = ["json"] }
+rocket_okapi = { version = "=0.9.0", optional = true }
+schemars = { version = "0.8", optional = true }
+
+[dev-dependencies]
+alloy-signer = "1.0"
+alloy-signer-local = "1.0"
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
