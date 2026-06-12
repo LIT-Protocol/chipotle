@@ -224,6 +224,15 @@ describe('HyperliquidClient', () => {
       { body: { marginSummary: { accountValue: '1250.5' }, withdrawable: '1000.0' } },
       {
         body: {
+          balances: [
+            { coin: 'USDC', token: 0, total: '250.25', hold: '0.0' },
+            { coin: 'PURR', token: 1, total: '5.0', hold: '1.0' },
+          ],
+          tokenToAvailableAfterMaintenance: [[0, '200.5']],
+        },
+      },
+      {
+        body: {
           assetPositions: [
             {
               position: {
@@ -249,21 +258,48 @@ describe('HyperliquidClient', () => {
     expect(open).toHaveLength(1);
     expect(open[0]).toMatchObject({ id: '1', side: 'buy', amount: '1.0', filled: '0.7', status: 'open' });
 
+    // USDC merges perp equity + spot (venue's available-after-maintenance wins
+    // for free); non-USDC spot coins ride along.
     const balances = await client.fetchBalances();
-    expect(balances).toEqual([{ asset: 'USDC', free: '1000.0', total: '1250.5' }]);
+    expect(body(calls[2]!)).toEqual({ type: 'spotClearinghouseState', user });
+    expect(balances).toEqual([
+      { asset: 'USDC', free: '1200.5', total: '1500.75' },
+      { asset: 'PURR', free: '4', total: '5.0' },
+    ]);
 
     const positions = await client.fetchPositions();
     expect(positions[0]).toMatchObject({ symbol: 'ETH', side: 'short', size: '-2.5', leverage: 5 });
+  });
+
+  it('reads unified accounts correctly: perp side zero, money on the spot/unified side', async () => {
+    const { f } = mockFetch([
+      { body: { role: 'agent', data: { user: '0x' + '50e2'.padEnd(40, '0') } } },
+      { body: { marginSummary: { accountValue: '0.0' }, withdrawable: '0.0' } },
+      {
+        body: {
+          balances: [{ coin: 'USDC', token: 0, total: '998.857882', hold: '0.0' }],
+          tokenToAvailableAfterMaintenance: [[0, '998.857882']],
+        },
+      },
+    ]);
+    const balances = await new HyperliquidClient({
+      venueId: 'hyperliquid',
+      credentials: { privateKey: KEY },
+      fetchImpl: f,
+    }).fetchBalances();
+    expect(balances).toEqual([{ asset: 'USDC', free: '998.857882', total: '998.857882' }]);
   });
 
   it('defaults reads to the signer address when the key is not a registered agent', async () => {
     const { f, calls } = mockFetch([
       { body: { role: 'user' } }, // userRole probe: plain master key
       { body: { marginSummary: { accountValue: '0' }, withdrawable: '0' } },
+      { body: { balances: [] } },
     ]);
     await new HyperliquidClient({ venueId: 'hyperliquid', credentials: { privateKey: KEY }, fetchImpl: f }).fetchBalances();
     expect(body(calls[0]!)).toEqual({ type: 'userRole', user: privateKeyToAddress(KEY) });
     expect(body(calls[1]!)).toEqual({ type: 'clearinghouseState', user: privateKeyToAddress(KEY) });
+    expect(body(calls[2]!)).toEqual({ type: 'spotClearinghouseState', user: privateKeyToAddress(KEY) });
   });
 
   it('auto-resolves the MASTER for agent keys via userRole, once (cached)', async () => {
@@ -271,27 +307,34 @@ describe('HyperliquidClient', () => {
     const { f, calls } = mockFetch([
       { body: { role: 'agent', data: { user: master } } },
       { body: { marginSummary: { accountValue: '1000' }, withdrawable: '900' } },
+      { body: { balances: [] } },
       { body: [] }, // openOrders on the SAME client must not re-probe userRole
     ]);
     const client = new HyperliquidClient({ venueId: 'hyperliquid', credentials: { privateKey: KEY }, fetchImpl: f });
     const balances = await client.fetchBalances();
     expect(balances[0]).toMatchObject({ free: '900', total: '1000' });
     expect(body(calls[1]!)).toEqual({ type: 'clearinghouseState', user: master });
+    expect(body(calls[2]!)).toEqual({ type: 'spotClearinghouseState', user: master });
     await client.fetchOpenOrders('ETH');
-    expect(calls).toHaveLength(3);
-    expect(body(calls[2]!)).toEqual({ type: 'openOrders', user: master });
+    expect(calls).toHaveLength(4);
+    expect(body(calls[3]!)).toEqual({ type: 'openOrders', user: master });
   });
 
   it('explicit accountAddress overrides agent auto-resolution (no userRole probe)', async () => {
-    const { f, calls } = mockFetch([{ body: { marginSummary: { accountValue: '1' }, withdrawable: '1' } }]);
+    const { f, calls } = mockFetch([
+      { body: { marginSummary: { accountValue: '1' }, withdrawable: '1' } },
+      { body: { balances: [] } },
+    ]);
     const user = '0x5e9ee1089755c3435139848e47e6635505d5a13a';
     await new HyperliquidClient({
       venueId: 'hyperliquid',
       credentials: { privateKey: KEY, accountAddress: user },
       fetchImpl: f,
     }).fetchBalances();
-    expect(calls).toHaveLength(1);
+    // two balance reads (perp + spot), but crucially no userRole probe
+    expect(calls).toHaveLength(2);
     expect(body(calls[0]!)).toEqual({ type: 'clearinghouseState', user });
+    expect(body(calls[1]!)).toEqual({ type: 'spotClearinghouseState', user });
   });
 
   it('fetches funding from metaAndAssetCtxs', async () => {

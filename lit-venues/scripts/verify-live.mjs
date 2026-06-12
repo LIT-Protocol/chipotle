@@ -200,16 +200,9 @@ console.log('\n== Hyperliquid (PKP-native, direct) ==');
       },
       fetchImpl: hlFetch,
     });
-    await check(`fetchBalances (${sandbox ? 'testnet' : 'MAINNET'})`, async () => {
+    await check(`fetchBalances (${sandbox ? 'testnet' : 'MAINNET'}, merged perp + spot/unified)`, async () => {
       const b = await authed.fetchBalances();
-      let hint = '';
-      if (Number(b[0]?.total) === 0) {
-        // Deposits land in SPOT; perp margin needs a spot→perp transfer that
-        // only the MASTER can sign (usdClassTransfer is user-signed — agents
-        // cannot move funds, by design). Surface the spot side so an "empty"
-        // perp account isn't mistaken for a missing deposit.
-        hint = ' — perp equity is 0; if funds were deposited they are likely in SPOT (master must transfer spot→perp; the agent key cannot)';
-      }
+      const hint = Number(b[0]?.total) === 0 ? ' — no USDC found on either the perp or spot/unified side' : '';
       return `USDC free=${b[0]?.free} total=${b[0]?.total}${hint}`;
     });
     await check('order lifecycle: place deep GTC limit, list, cancel', async () => {
@@ -223,7 +216,7 @@ console.log('\n== Hyperliquid (PKP-native, direct) ==');
         order = await authed.createOrder({ symbol: 'ETH', side: 'buy', type: 'limit', amount, price: px });
       } catch (e) {
         if (e?.code === 'insufficient_funds') {
-          return 'SKIPPED — perp account unfunded (error taxonomy verified: insufficient_funds); master must transfer spot→perp';
+          return 'SKIPPED — account unfunded (error taxonomy verified: insufficient_funds); deposit USDC (unified accounts margin perps from the spot side automatically)';
         }
         throw e;
       }
@@ -245,7 +238,7 @@ console.log('\n== Hyperliquid (PKP-native, direct) ==');
             buy = await authed.createOrder({ symbol: 'ETH', side: 'buy', type: 'market', amount: '0.01' });
           } catch (e) {
             if (e?.code === 'insufficient_funds') {
-              return 'SKIPPED — perp account unfunded; master must transfer spot→perp (agents cannot, by design)';
+              return 'SKIPPED — account unfunded; deposit USDC (on legacy split accounts only the master can transfer spot→perp — agents cannot, by design)';
             }
             throw e;
           }

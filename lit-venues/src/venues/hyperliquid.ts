@@ -1,7 +1,7 @@
 import { VenueError, type VenueErrorCode } from '../errors';
 import { httpRequest } from '../http';
 import { resolveFetch } from '../transports';
-import { applyBps, decimalsOf, floorToSigFigs, sigFigsOf, subDec, wireDecimal } from '../decimal';
+import { addDec, applyBps, decimalsOf, floorToSigFigs, sigFigsOf, subDec, wireDecimal } from '../decimal';
 import { privateKeyToAddress, rawKeySigner, type SignFn } from '../eip712';
 import {
   APPROVE_AGENT_FIELDS,
@@ -261,18 +261,38 @@ export class HyperliquidClient implements VenueClient {
     };
   }
 
+  /**
+   * Unified accounts (the venue's newer default) margin perps directly from
+   * the spot-side balance and disable manual spot↔perp transfers — a
+   * perp-only read shows ~0 while the account trades happily (found live,
+   * plan D8). So this merges both pools: one USDC row = perp equity + spot
+   * USDC, with `free` preferring the venue's own available-after-maintenance
+   * figure; other spot coins follow as extra rows. Costs 2 /info calls.
+   */
   async fetchBalances(): Promise<Balance[]> {
-    const state = (await this.info({ type: 'clearinghouseState', user: await this.account() })) as {
+    const user = await this.account();
+    const perp = (await this.info({ type: 'clearinghouseState', user })) as {
       marginSummary?: { accountValue?: string };
       withdrawable?: string;
     };
-    return [
-      {
-        asset: 'USDC',
-        free: state.withdrawable ?? '0',
-        total: state.marginSummary?.accountValue ?? '0',
-      },
-    ];
+    const spot = (await this.info({ type: 'spotClearinghouseState', user })) as {
+      balances?: Array<{ coin: string; token?: number; total: string; hold?: string }>;
+      tokenToAvailableAfterMaintenance?: Array<[number, string]>;
+    };
+    const availByToken = new Map(spot.tokenToAvailableAfterMaintenance ?? []);
+    let usdcFree = perp.withdrawable ?? '0';
+    let usdcTotal = perp.marginSummary?.accountValue ?? '0';
+    const rest: Balance[] = [];
+    for (const b of spot.balances ?? []) {
+      const free = availByToken.get(b.token ?? -1) ?? subDec(b.total, b.hold ?? '0');
+      if (b.coin === 'USDC') {
+        usdcFree = addDec(usdcFree, free);
+        usdcTotal = addDec(usdcTotal, b.total);
+      } else if (Number(b.total) !== 0) {
+        rest.push({ asset: b.coin, free, total: b.total });
+      }
+    }
+    return [{ asset: 'USDC', free: usdcFree, total: usdcTotal }, ...rest];
   }
 
   async createOrder(req: OrderRequest): Promise<Order> {
