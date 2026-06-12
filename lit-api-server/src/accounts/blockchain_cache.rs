@@ -6,18 +6,25 @@
 //! avoid redundant contract calls.
 //!
 //! TTL: permission results use per-entry expiration — positive (authorized)
-//! results live 60 minutes from insertion, while negative (denied) results
+//! results live 5 minutes from insertion, while negative (denied) results
 //! expire after 30 seconds. ChainSecured accounts mutate permissions by
 //! sending wallet-signed transactions directly to the chain, which this
-//! server never observes, so no invalidation hook can cover those writes; a
-//! short negative TTL bounds how long a stale denial is served (previously a
-//! newly group-permitted action returned 403 for up to an hour).
-//! Wallet derivation lookups keep the flat 60-minute TTL.
+//! server never observes, so no invalidation hook can cover those writes;
+//! the TTLs bound how long stale state is served in either direction: a
+//! stale denial (newly group-permitted action returning 403) lasts at most
+//! 30s, and a stale grant (revoked action/key still executing) lasts at most
+//! 5 minutes. Wallet derivation lookups use the positive TTL for the same
+//! reason — derivations can change on-chain without this server observing it.
+//! `try_get_with` coalesces concurrent misses per key, so the steady-state
+//! chain load is at most one read per (key, parameters) per TTL window.
 //!
 //! Invalidation uses a **per-account generation counter**: each API key hash
 //! has an associated generation number embedded in the cache key. Bumping the
 //! generation for an account causes all subsequent lookups to miss, while stale
-//! entries with old generations are evicted naturally by TTL.
+//! entries with old generations are evicted naturally by TTL. Note this is
+//! process-local: in a multi-replica deployment, a mutation handled by one
+//! replica does not invalidate the others — they converge within the TTL
+//! bounds above.
 
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
@@ -28,8 +35,12 @@ use moka::Expiry;
 use moka::future::Cache;
 
 /// TTL in seconds for positive (authorized) permission results and wallet
-/// derivations — 60 minutes.
-const CACHE_TTL_SECS: u64 = 3600;
+/// derivations — 5 minutes. This bounds how long a revoked permission (or a
+/// changed derivation) keeps being honored when the revocation happens
+/// out-of-band: ChainSecured wallet-signed transactions submitted directly
+/// on-chain, or a mutation handled by a different replica (invalidation is
+/// process-local).
+const CACHE_TTL_SECS: u64 = 300;
 
 /// TTL in seconds for negative (denied) permission results. Kept short so
 /// permissions granted out-of-band (ChainSecured wallet-signed transactions
