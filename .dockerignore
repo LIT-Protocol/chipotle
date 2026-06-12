@@ -7,6 +7,11 @@
 **/.env
 **/.env.*
 !**/.env.example
+# Tracked sample files must stay in the build context: excluding a tracked
+# file makes in-container `git describe --dirty` see a deletion, which stamps
+# release binaries with a spurious `-modified` version suffix.
+!**/.env.*.example
+!**/.env.local.example
 **/.DS_Store
 **/tmp/
 **/coverage/
