@@ -22,15 +22,16 @@ pub(super) fn billing_disabled_err() -> ApiStatus {
 
 /// Map wallet resolution errors to the correct HTTP status.
 ///
-/// "account has no wallet address" and contract reverts for missing accounts → 400.
+/// An API key that resolves to no account (typed [`UnknownApiKey`] or a
+/// contract revert for a missing account) → 401.
 /// Everything else (RPC failures, timeouts) → 500.
+///
+/// [`UnknownApiKey`]: crate::accounts::UnknownApiKey
 fn wallet_resolution_err(e: anyhow::Error) -> ApiStatus {
-    let msg = e.to_string();
-    if msg.contains("account has no wallet address") || msg.contains("AccountDoesNotExist") {
-        ApiStatus::bad_request(
-            anyhow::anyhow!("account not found for API key"),
-            "Invalid API key",
-        )
+    let unknown_key = e.downcast_ref::<crate::accounts::UnknownApiKey>().is_some()
+        || e.to_string().contains("AccountDoesNotExist");
+    if unknown_key {
+        ApiStatus::unauthorized("Invalid API key — it does not resolve to any account")
     } else {
         // Log the underlying error for internal diagnostics without exposing details to clients.
         eprintln!("wallet_resolution_err internal failure: {e:?}");

@@ -135,8 +135,9 @@ pub async fn new_account(
     )
     .await?;
 
-    // Best-effort: eagerly create the Stripe customer (with $0 balance) and set the email
-    // if provided.  Neither failure should prevent account creation.
+    // Best-effort: eagerly create the Stripe customer (with $0 balance), set the email
+    // if provided, and grant starter credits when STARTER_CREDITS_CENTS is configured.
+    // No failure here should prevent account creation.
     if let Some(stripe) = stripe_state {
         let wallet_hex = bytes_to_0x_hex(wallet_address.as_slice());
         match crate::stripe::get_customer_by_wallet(&wallet_hex, &stripe).await {
@@ -144,6 +145,9 @@ pub async fn new_account(
                 if !email.trim().is_empty() {
                     let _ = crate::stripe::set_customer_email(&customer_id, email.trim(), &stripe)
                         .await;
+                }
+                if let Err(e) = crate::stripe::grant_starter_credits(&customer_id, &stripe).await {
+                    tracing::warn!("stripe: failed to grant starter credits: {e}");
                 }
             }
             Err(e) => {

@@ -203,9 +203,31 @@ pub(super) async fn list_actions(
     }
 }
 
-#[openapi(tag = "Account Management")]
+/// Mint a new wallet (PKP) for the account.
+///
+/// Deprecated: minting is a metered write, so it should not live on a GET —
+/// link previewers, prefetchers, and retrying proxies replay GETs. Use
+/// `POST /create_wallet` instead. This form is kept for backwards
+/// compatibility.
+#[openapi(tag = "Account Management", deprecated)]
 #[get("/create_wallet")]
 pub(super) async fn create_wallet(
+    signer_pool: &State<Arc<SignerPool>>,
+    api_key: BilledManagementApiKey,
+) -> OpenApiResponse<CreateWalletResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(
+            account_management::create_wallet(signer_pool.inner().clone(), api_key.0.as_str())
+                .await,
+        )
+        .into(),
+    }
+}
+
+/// Mint a new wallet (PKP) for the account.
+#[openapi(tag = "Account Management")]
+#[post("/create_wallet")]
+pub(super) async fn create_wallet_post(
     signer_pool: &State<Arc<SignerPool>>,
     api_key: BilledManagementApiKey,
 ) -> OpenApiResponse<CreateWalletResponse, ErrMessage> {
