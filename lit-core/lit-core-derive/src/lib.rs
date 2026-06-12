@@ -2,7 +2,6 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream;
 
-use proc_macro_error::proc_macro_error;
 use syn::{DeriveInput, parse_macro_input};
 
 use crate::derive::description::derive_description;
@@ -12,17 +11,15 @@ pub(crate) mod derive;
 pub(crate) mod utils;
 
 #[proc_macro_derive(Description)]
-#[proc_macro_error]
 pub fn description(tokens: TokenStream) -> TokenStream {
     let input = parse_macro_input!(tokens as DeriveInput);
 
-    derive_description(&input)
+    derive_description(&input).unwrap_or_else(syn::Error::into_compile_error).into()
 }
 
 #[proc_macro_derive(ErrorCode, attributes(code))]
-#[proc_macro_error]
 pub fn error_code(tokens: TokenStream) -> TokenStream {
     let input = parse_macro_input!(tokens as DeriveInput);
 
-    derive_error_code(&input)
+    derive_error_code(&input).unwrap_or_else(syn::Error::into_compile_error).into()
 }

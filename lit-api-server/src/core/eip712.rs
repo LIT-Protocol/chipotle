@@ -21,10 +21,43 @@
 use std::collections::BTreeMap;
 
 use alloy::dyn_abi::TypedData;
-use alloy::primitives::{Address, Signature, U256};
+use alloy::primitives::{Address, B256, Bytes, FixedBytes, Signature, U256};
+use alloy::sol;
 
 use crate::config::GLOBAL_NODE_CONFIG;
 use crate::core::v1::helpers::api_status::ApiStatus;
+
+/// ERC-1271 `isValidSignature(bytes32,bytes)` magic return value
+/// (`bytes4(keccak256("isValidSignature(bytes32,bytes)"))`). A smart-contract
+/// wallet (Safe, etc.) returns exactly these four bytes when it considers the
+/// signature valid for the given hash.
+const ERC1271_MAGIC_VALUE: [u8; 4] = [0x16, 0x26, 0xba, 0x7e];
+
+sol! {
+    #[sol(rpc)]
+    interface IERC1271 {
+        function isValidSignature(bytes32 hash, bytes signature) external view returns (bytes4);
+    }
+}
+
+/// Hard cap on the decoded signature length. The EOA path needs exactly 65
+/// bytes; EIP-1271 contract signatures are larger (a Safe is ~65 bytes per
+/// owner plus overhead), but never anywhere near this. Rocket permits multi-MiB
+/// JSON bodies, and these mint endpoints are unauthenticated — without this cap
+/// an attacker could ship a multi-MiB hex blob to force decode/allocation and
+/// then ABI-encode it into giant `eth_call` calldata. 4 KiB covers ~60 Safe
+/// owners; legitimate payloads are far smaller.
+pub(crate) const MAX_SIGNATURE_BYTES: usize = 4096;
+
+/// Gas ceiling for the EIP-1271 `isValidSignature` `eth_call`. Signature
+/// verification (even a large Safe) costs well under this; the cap bounds the
+/// node/RPC CPU a malicious contract at an attacker-chosen address can burn per
+/// unauthenticated request.
+const ERC1271_CALL_GAS_LIMIT: u64 = 1_000_000;
+
+/// Wall-clock timeout for the EIP-1271 `eth_call`. Bounds how long a slow or
+/// adversarial RPC / contract can tie up a request handler.
+const ERC1271_CALL_TIMEOUT_SECS: u64 = 5;
 
 /// ±5-minute window on `issuedAt`; the only replay protection (no nonce
 /// store). Worst-case replay on the unauthenticated mint endpoints just
@@ -200,8 +233,33 @@ pub(crate) fn build_canonical_typed_data_json(
     })
 }
 
+/// Outcome of the cheap, synchronous portion of verification: everything
+/// validated and parsed up to (but not including) the address-equality check.
+/// `ecdsa_recovered` is `Some` when the signature is a well-formed 65-byte
+/// ECDSA signature that recovers to a concrete address (the EOA path), and
+/// `None` for contract-wallet signatures (wrong length, or recovery failed) —
+/// those are resolved on-chain via EIP-1271 instead.
+struct PreparedVerification {
+    /// The address claimed in `message.address`.
+    claimed_address: Address,
+    /// The EIP-712 signing hash the wallet signed.
+    digest: B256,
+    /// Raw signature bytes, as posted. Passed verbatim to EIP-1271
+    /// `isValidSignature` for the contract-wallet path.
+    signature: Vec<u8>,
+    /// Address recovered via ECDSA, if the signature is a standard 65-byte EOA
+    /// signature. `None` for smart-contract-wallet signatures.
+    ecdsa_recovered: Option<Address>,
+}
+
 /// Verify an EIP-712 typed-data + signature pair for a specific ChainSecured
-/// flow. Returns the recovered wallet address on success.
+/// flow against an **EOA only** (standard ECDSA `ecrecover`). Returns the
+/// recovered wallet address on success.
+///
+/// Smart-contract wallets (Safe, etc.) have no private key and produce
+/// EIP-1271 signatures that do not recover to the wallet address — use
+/// [`verify_eip712_signature_allow_contract_wallet`] for flows that must
+/// accept those.
 ///
 /// Cheap rejects (length cap, JSON parse, schema match, domain match,
 /// primary-type match, timestamp window) run before the expensive ECDSA
@@ -212,6 +270,66 @@ pub(crate) fn verify_eip712_signature(
     signature_hex: &str,
     expected_primary_type: &str,
 ) -> Result<Address, ApiStatus> {
+    let prepared = prepare_verification(typed_data_json, signature_hex, expected_primary_type)?;
+    if prepared.ecdsa_recovered == Some(prepared.claimed_address) {
+        return Ok(prepared.claimed_address);
+    }
+    Err(ApiStatus::bad_request(
+        anyhow::anyhow!("Signature does not match claimed address"),
+        "Signature does not match claimed address",
+    ))
+}
+
+/// Like [`verify_eip712_signature`], but additionally accepts EIP-1271
+/// smart-contract-wallet signatures (e.g. a Gnosis Safe). When standard ECDSA
+/// recovery does not match the claimed address, the claimed address is treated
+/// as a contract and `isValidSignature(digest, signature)` is called on-chain
+/// (against the node's configured chain — the same chain pinned in the EIP-712
+/// domain). Verification succeeds iff the contract returns the ERC-1271 magic
+/// value.
+///
+/// Counterfactual (not-yet-deployed) wallets are not supported — ERC-6492 is
+/// out of scope; the contract must already be deployed on-chain.
+pub(crate) async fn verify_eip712_signature_allow_contract_wallet(
+    typed_data_json: &serde_json::Value,
+    signature_hex: &str,
+    expected_primary_type: &str,
+) -> Result<Address, ApiStatus> {
+    let prepared = prepare_verification(typed_data_json, signature_hex, expected_primary_type)?;
+    if prepared.ecdsa_recovered == Some(prepared.claimed_address) {
+        return Ok(prepared.claimed_address);
+    }
+    // ECDSA didn't match — try the claimed address as an EIP-1271 contract
+    // wallet. `Err` here is a server/infra failure (propagate it); `Ok(false)`
+    // means the signature is definitively not valid for this address by either
+    // method, so we emit one unified error naming both paths.
+    if verify_erc1271_signature(
+        prepared.claimed_address,
+        prepared.digest,
+        &prepared.signature,
+    )
+    .await?
+    {
+        return Ok(prepared.claimed_address);
+    }
+    Err(ApiStatus::bad_request(
+        anyhow::anyhow!(
+            "Signature invalid: failed both EOA verification (EIP-712 ECDSA \
+             ecrecover) and smart-contract-wallet verification (EIP-1271 \
+             isValidSignature) for the claimed address"
+        ),
+        "Signature invalid: did not verify as an EOA (ECDSA) signature or as an \
+         EIP-1271 smart-contract-wallet signature",
+    ))
+}
+
+/// Run the synchronous validation pipeline and parse the signature. Shared by
+/// both the EOA-only and contract-wallet-aware entry points.
+fn prepare_verification(
+    typed_data_json: &serde_json::Value,
+    signature_hex: &str,
+    expected_primary_type: &str,
+) -> Result<PreparedVerification, ApiStatus> {
     // Length cap before parsing — bound the work an unauthenticated caller
     // can force the server to do before we hit anything expensive.
     let serialized = serde_json::to_string(typed_data_json)
@@ -279,24 +397,105 @@ pub(crate) fn verify_eip712_signature(
             "eip712_signing_hash failed",
         )
     })?;
-    let sig: Signature =
-        signature_hex
-            .trim()
-            .parse()
-            .map_err(|e: alloy::primitives::SignatureError| {
-                ApiStatus::bad_request(anyhow::anyhow!(e), "Invalid signature hex")
-            })?;
-    let recovered = sig
-        .recover_address_from_prehash(&digest)
-        .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "Signature recovery failed"))?;
-
-    if recovered != address {
+    // Decode the raw signature bytes. We keep these verbatim for the EIP-1271
+    // contract path (where the signature can be arbitrary-length, not a 65-byte
+    // ECDSA tuple) and additionally attempt standard ECDSA recovery for the EOA
+    // path.
+    let sig_str = signature_hex.trim();
+    // Cap the hex length before decoding so an oversized blob is rejected
+    // without allocating the decoded buffer (hex is 2 chars/byte, plus the
+    // optional "0x").
+    if sig_str.len() > MAX_SIGNATURE_BYTES * 2 + 2 {
         return Err(ApiStatus::bad_request(
-            anyhow::anyhow!("Signature does not match claimed address"),
-            "Signature does not match claimed address",
+            anyhow::anyhow!("signature exceeds {}-byte cap", MAX_SIGNATURE_BYTES),
+            "Signature too large",
         ));
     }
-    Ok(address)
+    let sig_bytes = hex::decode(sig_str.strip_prefix("0x").unwrap_or(sig_str))
+        .map_err(|e| ApiStatus::bad_request(anyhow::anyhow!(e), "Invalid signature hex"))?;
+    if sig_bytes.len() > MAX_SIGNATURE_BYTES {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("signature exceeds {}-byte cap", MAX_SIGNATURE_BYTES),
+            "Signature too large",
+        ));
+    }
+
+    // ECDSA recovery only applies to a standard 65-byte signature. Anything
+    // else is a contract-wallet (EIP-1271) signature, resolved on-chain by the
+    // caller. A 65-byte blob that fails to parse/recover also falls through to
+    // the contract path rather than erroring here.
+    let ecdsa_recovered = if sig_bytes.len() == 65 {
+        Signature::try_from(sig_bytes.as_slice())
+            .ok()
+            .and_then(|sig| sig.recover_address_from_prehash(&digest).ok())
+    } else {
+        None
+    };
+
+    Ok(PreparedVerification {
+        claimed_address: address,
+        digest,
+        signature: sig_bytes,
+        ecdsa_recovered,
+    })
+}
+
+/// Verify a signature via EIP-1271 (`isValidSignature`) against an already-
+/// deployed smart-contract wallet at `address`, on the node's configured chain.
+///
+/// Returns `Ok(true)` only when the contract returns the ERC-1271 magic value.
+/// Returns `Ok(false)` for any *definitive* non-acceptance — the address is an
+/// EOA (no code), the contract doesn't implement EIP-1271, it reverted, or it
+/// returned a non-magic value. The caller turns `Ok(false)` into a single
+/// unified "signature invalid" error that names both verification paths, so an
+/// EOA user with a bad EIP-712 signature never sees a confusing 1271-only
+/// message. `Err` is reserved for genuine server/infra failures (no chain
+/// client, RPC timeout) — those are not the caller's signature being wrong.
+async fn verify_erc1271_signature(
+    address: Address,
+    digest: B256,
+    signature: &[u8],
+) -> Result<bool, ApiStatus> {
+    let provider = crate::accounts::signable_contract::get_read_only_client().map_err(|e| {
+        ApiStatus::internal_server_error(e, "Chain client unavailable for EIP-1271 verification")
+    })?;
+
+    let contract = IERC1271::new(address, provider);
+    let call = contract
+        .isValidSignature(digest, Bytes::from(signature.to_vec()))
+        .gas(ERC1271_CALL_GAS_LIMIT);
+
+    // Bound the call in wall-clock time (slow/adversarial RPC or contract) on
+    // top of the gas cap above.
+    match tokio::time::timeout(
+        std::time::Duration::from_secs(ERC1271_CALL_TIMEOUT_SECS),
+        call.call(),
+    )
+    .await
+    {
+        Err(_elapsed) => {
+            // RPC slowness/outage, not a wrong signature. Keep detail
+            // server-side and surface a 500 rather than misreporting the
+            // user's signature as invalid.
+            tracing::warn!(
+                "EIP-1271 isValidSignature timed out after {}s for {address}",
+                ERC1271_CALL_TIMEOUT_SECS
+            );
+            Err(ApiStatus::internal_server_error(
+                anyhow::anyhow!("EIP-1271 verification timed out"),
+                "Signature verification temporarily unavailable (chain RPC timeout)",
+            ))
+        }
+        Ok(Ok(magic)) => Ok(magic == FixedBytes::<4>::from(ERC1271_MAGIC_VALUE)),
+        Ok(Err(e)) => {
+            // An EOA (no contract code), a contract that doesn't implement
+            // EIP-1271, or a revert lands here. This is a definitive "not a
+            // valid contract-wallet signature" — log the RPC/contract detail
+            // server-side and report it as a non-acceptance (not a 500).
+            tracing::debug!("EIP-1271 isValidSignature call failed for {address}: {e}");
+            Ok(false)
+        }
+    }
 }
 
 fn validate_domain(domain: &DomainView) -> Result<(), ApiStatus> {
@@ -1059,5 +1258,80 @@ mod tests {
         let err = verify_eip712_signature(&typed, &sig, PRIMARY_TYPE_CREATE_WALLET)
             .expect_err("must reject — message must contain only address + issuedAt");
         assert!(format!("{err}").contains("unexpected fields"));
+    }
+
+    /// An oversized signature is rejected before any decode/recovery work and
+    /// before reaching the (unauthenticated) EIP-1271 RPC path — bounds the
+    /// allocation + calldata an attacker can force on the mint endpoints.
+    #[test]
+    fn rejects_oversized_signature() {
+        let chain_id = ensure_test_chain_id();
+        let wallet = PrivateKeySigner::random();
+        let (typed, _) = sign_canonical(&wallet, PRIMARY_TYPE_CREATE_WALLET, now_secs(), chain_id);
+        let huge_sig = format!("0x{}", "ab".repeat(MAX_SIGNATURE_BYTES + 1));
+        let err = verify_eip712_signature(&typed, &huge_sig, PRIMARY_TYPE_CREATE_WALLET)
+            .expect_err("must reject — signature exceeds cap");
+        assert!(
+            format!("{err}").contains("too large"),
+            "unexpected error: {err}"
+        );
+    }
+
+    /// The ERC-1271 magic value is `bytes4(keccak256("isValidSignature(bytes32,bytes)"))`.
+    /// Pin the literal so a typo can't silently make every contract-wallet
+    /// signature "valid" (or "invalid").
+    #[test]
+    fn erc1271_magic_value_is_correct() {
+        use alloy::primitives::keccak256;
+        let selector = &keccak256("isValidSignature(bytes32,bytes)")[..4];
+        assert_eq!(selector, ERC1271_MAGIC_VALUE);
+    }
+
+    /// The contract-wallet-aware entry point must short-circuit on a valid EOA
+    /// (ECDSA) signature without ever touching the chain — the read-only client
+    /// is never initialised in unit tests, so reaching the EIP-1271 path here
+    /// would surface as an error instead of `Ok`.
+    #[tokio::test]
+    async fn allow_contract_wallet_accepts_eoa_without_rpc() {
+        let chain_id = ensure_test_chain_id();
+        let wallet = PrivateKeySigner::random();
+        let (typed, sig) =
+            sign_canonical(&wallet, PRIMARY_TYPE_CONVERT_ACCOUNT, now_secs(), chain_id);
+        let recovered = verify_eip712_signature_allow_contract_wallet(
+            &typed,
+            &sig,
+            PRIMARY_TYPE_CONVERT_ACCOUNT,
+        )
+        .await
+        .expect("valid EOA signature must verify via the ECDSA short-circuit");
+        assert_eq!(recovered, wallet.address());
+    }
+
+    /// A non-65-byte (contract-wallet-shaped) signature does not recover via
+    /// ECDSA, so the contract-aware entry point falls through to the on-chain
+    /// EIP-1271 path. With no read-only client initialised in tests, that
+    /// surfaces as an error rather than a panic — and crucially is *not*
+    /// silently accepted.
+    #[tokio::test]
+    async fn allow_contract_wallet_falls_through_to_1271_for_non_ecdsa_sig() {
+        let chain_id = ensure_test_chain_id();
+        let wallet = PrivateKeySigner::random();
+        // Build a valid canonical payload but replace the signature with a
+        // contract-wallet-shaped blob (not 65 bytes).
+        let (typed, _) =
+            sign_canonical(&wallet, PRIMARY_TYPE_CONVERT_ACCOUNT, now_secs(), chain_id);
+        let contract_sig = format!("0x{}", "ab".repeat(100)); // 100 bytes, not 65
+        let err = verify_eip712_signature_allow_contract_wallet(
+            &typed,
+            &contract_sig,
+            PRIMARY_TYPE_CONVERT_ACCOUNT,
+        )
+        .await
+        .expect_err("must not accept a contract-wallet sig with no chain client to verify against");
+        // Reached the 1271 path (client-unavailable), not a parse/validation error.
+        assert!(
+            format!("{err}").contains("Chain client unavailable"),
+            "unexpected error: {err}",
+        );
     }
 }

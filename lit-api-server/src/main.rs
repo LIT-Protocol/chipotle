@@ -6,6 +6,7 @@ use lit_api_server::config;
 use lit_api_server::core;
 use lit_api_server::core::v1::guards::cpu_overload::CpuOverloadMonitor;
 use lit_api_server::dstack;
+use lit_api_server::internal;
 use lit_api_server::observability;
 use lit_api_server::restart::{RestartHandle, start_server_trigger_listener};
 use lit_api_server::stripe;
@@ -42,16 +43,20 @@ async fn main() -> Result<(), rocket::Error> {
     // Initialize the primary tracing subscriber (stdout + privacy filtering).
     // When built with --features otlp, also initializes OTLP providers and wires
     // tracing events into the OTel log pipeline via ContextAwareOtelLogLayer.
+    //
+    // `_log_guard` keeps the non-blocking fmt writer's background worker alive for the
+    // lifetime of the process; dropping it flushes any buffered logs on shutdown.
     #[cfg(not(feature = "otlp"))]
-    {
-        let subscriber =
+    let _log_guard = {
+        let (subscriber, guard) =
             lit_observability::init_subscriber(&obs.log_level).expect("Failed to setup tracing");
         tracing::subscriber::set_global_default(subscriber)
             .expect("setting default subscriber failed");
-    }
+        guard
+    };
 
     #[cfg(feature = "otlp")]
-    let _otlp_providers = {
+    let (_otlp_providers, _log_guard) = {
         use lit_observability::{
             logging::ContextAwareOtelLogLayer,
             opentelemetry::{KeyValue, global, trace::TracerProvider},
@@ -78,22 +83,24 @@ async fn main() -> Result<(), rocket::Error> {
                 let otel_trace_layer =
                     lit_observability::tracing_opentelemetry::layer().with_tracer(tracer);
                 let otel_log_layer = ContextAwareOtelLogLayer::new(&logger_provider);
-                let subscriber = lit_observability::init_subscriber(&obs.log_level)
-                    .expect("Failed to setup tracing")
-                    .with(otel_trace_layer)
-                    .with(otel_log_layer);
+                let (base_subscriber, guard) = lit_observability::init_subscriber(&obs.log_level)
+                    .expect("Failed to setup tracing");
+                let subscriber = base_subscriber.with(otel_trace_layer).with(otel_log_layer);
                 tracing::subscriber::set_global_default(subscriber)
                     .expect("setting default subscriber failed");
 
-                Some((tracing_provider, metrics_provider, logger_provider))
+                (
+                    Some((tracing_provider, metrics_provider, logger_provider)),
+                    guard,
+                )
             }
             Err(e) => {
                 eprintln!("OTLP init failed ({e}), falling back to stdout-only logging");
-                let subscriber = lit_observability::init_subscriber(&obs.log_level)
+                let (subscriber, guard) = lit_observability::init_subscriber(&obs.log_level)
                     .expect("Failed to setup tracing");
                 tracing::subscriber::set_global_default(subscriber)
                     .expect("setting default subscriber failed");
-                None
+                (None, guard)
             }
         }
     };
@@ -151,6 +158,12 @@ async fn main() -> Result<(), rocket::Error> {
             std::process::exit(1);
         }
     };
+    let internal_config = internal::config::init();
+    // `Arc<dyn AuthResolver>` is the auth backplane both this service and
+    // lit-payments use. lit-api-server owns the on-chain plumbing, so it
+    // installs the local in-process resolver here.
+    let auth_resolver: Arc<dyn lit_billing_core::billing_auth::AuthResolver> =
+        Arc::new(lit_api_server::auth_resolver::LocalAuthResolver::new());
 
     // Initialize global singletons once, outside the restart loop, so they
     // aren't re-initialized (and don't re-log) on every Rocket rebuild.
@@ -190,6 +203,8 @@ async fn main() -> Result<(), rocket::Error> {
             chain_config.clone(),
             cpu_monitor.clone(),
             stripe_state.clone(),
+            internal_config.clone(),
+            auth_resolver.clone(),
             ipfs_cache.clone(),
         );
 
@@ -310,6 +325,8 @@ fn build_rocket(
     chain_config: Arc<lit_api_server::accounts::chain_config::ChainConfig>,
     cpu_monitor: CpuOverloadMonitor,
     stripe_state: Option<Arc<stripe::StripeState>>,
+    internal_config: Option<Arc<internal::InternalConfig>>,
+    auth_resolver: Arc<dyn lit_billing_core::billing_auth::AuthResolver>,
     ipfs_cache: Cache<String, Arc<String>>,
 ) -> rocket::Rocket<rocket::Build> {
     let allowed_methods = HashSet::from([
@@ -349,6 +366,7 @@ fn build_rocket(
             routes![openapi_json, openapi_json_redirect, swagger_ui_redirect],
         )
         .mount("/", core::v1::health::routes())
+        .mount("/", routes![internal::routes::invalidate_balance_cache])
         .mount("/core/v1/", core_routes)
         .mount("/core/v1/", core::v1::health::routes())
         .mount(
@@ -366,6 +384,8 @@ fn build_rocket(
         .manage(chain_config)
         .manage(cpu_monitor)
         .manage(stripe_state)
+        .manage(internal_config)
+        .manage(auth_resolver)
         .manage(core::v1::health::LitActionsSocketPath(
             std::path::PathBuf::from(core::v1::health::LIT_ACTIONS_SOCKET),
         ));

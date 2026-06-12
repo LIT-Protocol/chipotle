@@ -1,0 +1,134 @@
+---
+title: "What Is Attestation?"
+description: "A plain-English explanation of remote attestation: what a TEE proves, what an attestation quote is, and how a stranger turns 'I received a quote' into 'I can trust this server' — without trusting Lit or the cloud provider."
+---
+
+Every other page in this section tells you *how* to verify Lit Chipotle. This page
+explains *what you are actually verifying* and *why it is trustworthy* — in plain
+language, before any commands. If you have never worked with a Trusted Execution
+Environment (TEE) before, start here.
+
+## The problem attestation solves
+
+When you send data to an ordinary cloud server, you are trusting a lot of people you
+will never meet: the application operator (Lit), the cloud provider (Phala/Intel),
+the OS administrators, anyone with physical access to the machine. Any of them
+*could*, in principle, read your data, swap the code for a malicious version, or
+copy out a private key. You have no way to tell. "Trust us" is the only guarantee.
+
+**Remote attestation removes that trust.** It lets a remote machine produce
+hardware-signed, mathematical proof of *exactly what code it is running* — proof you
+can check yourself, that no operator (including Lit) can forge. Instead of "trust the
+operator," the guarantee becomes "trust the silicon and the math."
+
+This is the idea behind the broader [Proof of Cloud](https://proofofcloud.org/)
+movement: cloud services that prove what they run rather than asking you to take
+their word for it.
+
+## What a TEE is
+
+A **Trusted Execution Environment** is a hardware-isolated region of a CPU. Lit
+Chipotle runs inside **Intel TDX** (Trust Domain Extensions), a TEE built into recent
+Intel server chips. Inside the TEE:
+
+- Memory is **encrypted by the CPU**. Even someone with root on the host, physical
+  access to the RAM, or a hypervisor cannot read the plaintext.
+- The boot chain is **measured**. As firmware, kernel, and application load, the CPU
+  records a cryptographic hash of each stage into tamper-proof registers.
+- Secrets generated inside (like the TLS private key) **never leave**. There is no
+  API to extract them, by design.
+
+A TEE is not magic — it rests on the assumption that Intel's hardware root of trust
+is sound, and TEEs have known classes of side-channel research. But it replaces *many
+fully-trusted humans* with *one well-studied hardware assumption you can reason
+about*.
+
+## What an attestation quote is
+
+When the TEE boots, it produces an **attestation quote**: a small binary document,
+**signed by Intel's hardware root of trust**, that contains the measurements of
+everything that loaded. Think of it as a notarized receipt the silicon hands you,
+saying "here is exactly what I am running."
+
+The measurements live in registers called **MRTD** and **RTMR0–RTMR3**:
+
+| Register | What it records |
+|---|---|
+| **MRTD** | The virtual firmware |
+| **RTMR0–RTMR2** | Hardware config, kernel, boot parameters — i.e. the **operating system** |
+| **RTMR3** | The **application**: the hash of the docker-compose configuration (the *compose hash*), plus which KMS issued its keys |
+
+Two numbers carry most of the weight:
+
+- The **OS measurements** (MRTD/RTMR0–2) prove which operating system image booted.
+- The **compose hash** (in RTMR3) proves which application code booted — it is the
+  SHA-256 of the exact, image-digest-pinned docker-compose that defines Lit Chipotle.
+
+If even one byte of the OS or the application changes, these numbers change, and the
+quote no longer matches what is expected.
+
+## How a stranger turns a quote into trust
+
+Receiving a quote is not enough — anyone can hand you a document. The value comes
+from four independent checks, each of which you can run yourself:
+
+1. **Is the quote real?** Verify Intel's signature on the quote against Intel's
+   published root certificates. This proves the quote came from genuine TDX hardware
+   running with security patches up to date (not a simulator, not debug mode).
+
+2. **Is the OS one I trust?** Check the OS measurements against a known-good dstack OS
+   release — and confirm that release is whitelisted on-chain (see below).
+
+3. **Is the code one I trust?** Recompute the compose hash from the public source and
+   confirm it matches the quote — and that it is whitelisted on-chain.
+
+4. **Am I really talking to that TEE?** The TLS certificate for
+   `api.chipotle.litprotocol.com` was generated *inside* the TEE and bound into the
+   quote, so a successful HTTPS handshake proves your connection terminates in the
+   attested enclave — no proxy in the middle. (See
+   [Zero-Trust TLS](/architecture/verification/index#zero-trust-tls).)
+
+The crucial move is in steps 2 and 3: "a version I trust" is not decided by Lit. It
+is decided by a **whitelist held in smart contracts on Base**, governed by a Safe
+multisig. Lit cannot ship code to the production enclave without first getting that
+code's compose hash approved on-chain, in public, by multiple signers. That is what
+the [On-Chain KMS](/architecture/verification/onchain-kms) page covers, and the
+approval process itself is documented in
+[Upgrade Governance](/architecture/verification/upgrade-governance).
+
+## Why this is stronger than "trust the operator"
+
+Put the pieces together and the trust model inverts:
+
+- The **cloud provider** cannot read your data — memory is CPU-encrypted.
+- **Lit** cannot silently change the code — a new version cannot get keys until its
+  compose hash is whitelisted on Base by a multisig, visible to everyone.
+- **No single Lit employee** can change that whitelist — it takes a multisig quorum.
+- **You** do not have to trust any of the above — you re-derive every measurement and
+  read the on-chain whitelist yourself.
+
+That is the whole point of attestation: *don't trust, verify.*
+
+## What's next
+
+<CardGroup cols={2}>
+  <Card title="Verify in 30 Seconds" icon="shield-check" href="/architecture/verification/quick-verify">
+    The Phala Trust Center one-click report, plus three commands you can paste into a terminal.
+  </Card>
+  <Card title="On-Chain KMS" icon="key" href="/architecture/verification/onchain-kms">
+    How Base smart contracts — not Lit or Phala — gate key release to the enclave.
+  </Card>
+  <Card title="Upgrade Governance" icon="users" href="/architecture/verification/upgrade-governance">
+    How a new release is reviewed and approved by the Safe multisig before it can run.
+  </Card>
+  <Card title="Full Verification Guide" icon="list-checks" href="/architecture/verification/full-verification">
+    Replay the RTMR3 event log and check every layer yourself, end to end.
+  </Card>
+</CardGroup>
+
+## Further reading
+
+- [Proof of Cloud](https://proofofcloud.org/) — the verifiable-cloud movement
+- [Intel TDX overview](https://www.intel.com/content/www/us/en/developer/tools/trust-domain-extensions/overview.html)
+- [Phala: Attestation Overview](https://docs.phala.com/phala-cloud/attestation/overview)
+- [Phala: Complete Chain of Trust](https://docs.phala.com/phala-cloud/attestation/chain-of-trust)

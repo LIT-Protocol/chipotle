@@ -27,4 +27,5 @@ lit-core = { workspace = true }
 lit-observability = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
+tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
