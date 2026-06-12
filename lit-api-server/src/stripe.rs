@@ -193,18 +193,6 @@ pub async fn invalidate_wallet_cache(api_key: &str, state: &StripeState) {
     state.wallet_cache.invalidate(&cache_key(api_key)).await;
 }
 
-impl StripeState {
-    /// Drop the cached Stripe balance for a customer. Called by the internal
-    /// `/internal/invalidate_balance_cache` endpoint after `lit-payments`
-    /// applies a sync auto-top-up credit, so the next read goes back to
-    /// Stripe rather than serving the stale pre-credit balance from the
-    /// 10-minute TTL cache. Same primitive used internally by
-    /// `confirm_payment_intent` after a manual top-up.
-    pub async fn invalidate_balance_cache(&self, customer_id: &str) {
-        self.balance_cache.invalidate(customer_id).await;
-    }
-}
-
 /// Resolve any account identity to its billing wallet address.
 ///
 /// Accepts a raw API key (master or usage) or — for ChainSecured callers — a

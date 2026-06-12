@@ -1,112 +1,10 @@
 # lit-payments
 
 Ops-facing billing service. Magic-link auth + admin credit portal + LITKEY
-payment gateway + **auto top-up**. Deployed outside the TEE, on Railway.
+payment gateway. Deployed outside the TEE, on Railway.
 
-See `plans/lit-payments-app.md` for the original design and
-`plans/auto-top-up.md` for the auto top-up feature design.
-
-## Auto top-up — concise architecture
-
-Users opt in to "auto-recharge" via the dashboard. When their Stripe customer
-balance drops below a configured threshold, we charge their saved card off-session
-for a configured amount, subject to a configured monthly cap.
-
-### Components
-
-| Component | Role | New for auto top-up? |
-|---|---|---|
-| **Dashboard** (`lit-static/dapps/dashboard`) | Auto-top-up modal, save-card flow, status banners, SCA recovery page | new UI |
-| **lit-api-server** (TEE) | Existing Lit Action server. Deducts credits via `balance_transactions` (unchanged). | one new endpoint: `POST /internal/invalidate_balance_cache` |
-| **lit-payments** (Railway, this service) | Hosts all auto-top-up logic: dashboard endpoints, the `customer.updated` webhook handler (sync charge + sync credit), the reconciler cron | new endpoints + new tables |
-| **Postgres** (inside lit-payments) | Existing DB. Two new tables: `auto_topup_config`, `auto_topup_credits`. | new tables |
-| **Stripe** | Customer, PaymentMethod, PaymentIntent, `customer.balance` ledger | new webhook subscription: `customer.updated` |
-| **Shared auth crate** (`lit-billing-auth/`) | Wallet-sig + API-key validation extracted from `lit-api-server::billing_auth` | new crate |
-
-### Where data lives
-
-| Data | Location |
-|---|---|
-| Config (threshold, top-up amount, monthly cap, payment_method_id, consent, SCA pending state) | Postgres `auto_topup_config` (1 row per customer) |
-| Card data | Stripe (PaymentMethod attached to Customer); we only store the `pm_xxx` reference |
-| User credit ledger | Stripe `customer.balance` (negative = credit) — unchanged from before |
-| Wallet ↔ Stripe Customer mapping | Stripe customer metadata (`wallet_address`) — unchanged |
-| Charge history | Stripe PaymentIntents (filtered by `metadata.source=auto_topup`) |
-| Credit dedup | Postgres `auto_topup_credits` (1 row per credited PaymentIntent) |
-
-### Component interaction
-
-```
-USER ─► DASHBOARD ─► lit-payments        (save card, save config, SCA recovery)
-                       │
-                       ▼
-                   Postgres auto_topup_config
-
-CLIENT ─► lit-api-server (deduct credits — existing flow, unchanged)
-                       │
-                       ▼
-                   Stripe balance_transactions write → customer.balance drops
-                       │
-                       ▼
-                   Stripe fires customer.updated webhook
-                       │
-                       ▼
-                   lit-payments POST /stripe/webhook
-                       │  verify HMAC, mutex, fresh balance fetch,
-                       │  list PIs (failure derivation + cap check)
-                       │
-                       ▼
-                   Stripe paymentIntents.create (off_session, confirm) — synchronous
-                       │
-              ┌────────┴────────┐
-              ▼ succeeded       ▼ authentication_required, declined, timeout
-       INSERT auto_topup_credits   set pending state / email + banner / log
-              │
-              ▼
-       Stripe balance_transactions (credit, Idempotency-Key: credit:{pi.id})
-              │
-              ▼
-       UPDATE auto_topup_credits SET stripe_balance_transaction_id
-              │
-              ▼
-       Fire-and-forget POST lit-api-server /internal/invalidate_balance_cache
-              │
-              ▼
-       release mutex, return 200
-
-Every 15 min: reconciler cron
-   reads Postgres auto_topup_config + auto_topup_credits
-   lists recent succeeded auto-topup PIs from Stripe
-   for any PI missing a credit row or with NULL balance_transaction_id → completes the credit idempotently
-```
-
-### Left-to-right runtime flow
-
-```
-CLIENT  ─►  lit-api-server  ─►  Stripe                ─►  Stripe fires  ─►  lit-payments         ─►  Stripe                  ─►  Postgres                ─►  Stripe                  ─►  Postgres                ─►  lit-api-server
- run        deduct credits      balance_transactions     customer.updated   /stripe/webhook           paymentIntents.create       INSERT auto_topup_credits   balance_transactions         UPDATE row                 POST /internal/
- action     (existing)          write                    webhook            (verify HMAC, mutex,      (off_session, confirm)      ON CONFLICT DO NOTHING      Idempotency-Key:             SET stripe_balance_         invalidate_balance_cache
-                                                                            balance fetch, list PIs,                                                          credit:{pi.id}               transaction_id              (fire-and-forget)
-                                                                            cap check, failure
-                                                                            derivation)
-```
-
-### Three layers of dedup defense
-
-| Layer | Prevents | Mechanism |
-|---|---|---|
-| 1. Per-customer Tokio mutex (`moka` TTL cache) in lit-payments | Wasted parallel processing | In-process |
-| 2. Postgres unique constraint on `auto_topup_credits.payment_intent_id` | Double-credit (sync + reconciler races, webhook replays) | `INSERT … ON CONFLICT DO NOTHING` |
-| 3. Stripe Idempotency-Key on credit writes | Double-credit under transient retry within Stripe's 24h cache | `credit:{pi.id}` |
-
-### Key invariants
-
-- **Charge AND credit are synchronous** in the same `customer.updated` handler.
-- **One webhook only**: `customer.updated`. No `payment_intent.succeeded`, no `payment_intent.payment_failed`.
-- **Reconciler cron** (15-min default) is the recovery path for HTTP timeouts and partial writes.
-- **SCA recovery** is a separate user-driven flow: email link → on-session `stripe.confirmCardPayment` → 3DS challenge → success → credit via the same sync path.
-- **lit-api-server unchanged** except for the cache-invalidation endpoint.
-- **Dashboard talks only to lit-payments**, using the same wallet-sig + API-key auth via the extracted shared crate.
+See `plans/lit-payments-app.md` (in the repo root, on the planning branch)
+for the full design.
 
 ## Routes
 
@@ -157,17 +55,10 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/postgres
 MAGIC_LINK_SIGNING_KEY=$(openssl rand -base64 32)
 RESEND_API_KEY=re_...                    # https://resend.com → API keys
 MAIL_FROM=noreply@mail.litprotocol.com   # must be a verified Resend sender
-PUBLIC_BASE_URL=http://localhost:8001
+PUBLIC_BASE_URL=http://localhost:8000
 STRIPE_SECRET_KEY=rk_test_...            # Stripe restricted key; needs Customers: Read plus Billing > Customer Balance Transaction: Write
 ROCKET_SECRET_KEY=$(openssl rand -base64 32)  # required for private cookies in release
-# Port 8001 in dev to avoid colliding with lit-api-server on 8000.
-# The dashboard expects lit-payments at this port (see auth.js).
-ROCKET_PORT=8001
-# CORS allowlist (in addition to PUBLIC_BASE_URL). Comma-separated.
-# Add the dashboard origin here when the dashboard runs on a different
-# port — typical local dev is the same host:port as the api-server
-# (http://localhost:8000) since both static apps are served from there.
-# CORS_ALLOWED_ORIGINS=http://localhost:8000
+ROCKET_PORT=8000
 
 # Optional — cap defaults match the plan ($20 per grant, $100/op/day):
 # MAX_GRANT_CENTS=2000
@@ -182,23 +73,6 @@ ROCKET_PORT=8001
 # ALCHEMY_HTTPS_URL=https://base-mainnet.g.alchemy.com/v2/...
 # LITKEY_GATEWAY_ADDRESS=0xa2d54cd1D1dF1735718A857aC49CaF9ECaB0093b
 # LITKEY_CHAIN_ID=8453
-
-# AccountConfig chain — used by the BillingAuth Rocket guard to verify
-# wallet signatures (EIP-712 chain_id pinning) and to resolve API keys to
-# their on-chain billing wallet. Same chain lit-api-server reads from
-# NodeConfig.toml; lit-payments now runs the lookup in-process via
-# OnChainBillingResolver instead of an internal HTTP hop. The RPC URL
-# is normally https://yellowstone-rpc.litprotocol.com; the contract
-# address must match lit-api-server's NodeConfig.toml.
-LIT_ACCOUNTS_RPC_URL=https://yellowstone-rpc.litprotocol.com
-LIT_ACCOUNTS_CHAIN_ID=175188
-LIT_ACCOUNTS_CONTRACT_ADDRESS=0x...  # same value as lit-api-server NodeConfig.toml
-
-# Existing — still required, but now only used for the post-credit
-# cache-invalidation callback to lit-api-server (no longer carries
-# wallet-sig or API-key verification).
-# LIT_API_SERVER_BASE_URL=http://localhost:8000
-# LIT_INTERNAL_SHARED_SECRET=$(openssl rand -base64 32)
 ```
 
 ## LITKEY browser payment claim flow

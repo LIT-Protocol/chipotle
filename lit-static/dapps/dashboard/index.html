@@ -157,7 +157,6 @@
             <button type="button" class="btn btn-topbar btn-theme-toggle" id="theme-toggle" aria-label="Switch to dark mode"><span class="theme-icon" aria-hidden="true"></span></button>
             <span id="billing-balance-display" class="billing-balance" style="display:none;"></span>
             <button type="button" class="btn btn-primary btn-sm" id="btn-add-funds" style="display:none;">Add Funds</button>
-            <button type="button" class="btn btn-outline btn-sm" id="btn-auto-recharge" title="Auto recharge settings">Auto recharge</button>
             <span id="billing-not-required" class="billing-not-required" style="display:none;">Payment Not Required</span>
             <div class="account-dropdown" id="account-dropdown">
               <button type="button" class="btn btn-topbar account-dropdown-trigger" id="account-dropdown-trigger" aria-expanded="false" aria-haspopup="true" aria-label="Account menu">
@@ -279,7 +278,6 @@
               <strong>No funds available</strong>
               <p>Your account has no credit balance. Please <a href="#" id="no-funds-add-funds">add funds</a> for Lit Actions to work.</p>
             </div>
-            <div id="auto-recharge-banner" class="auto-recharge-banner-host"></div>
             <details class="help-details">
               <summary class="help-details-summary">
                 <span class="help-details-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg></span>
@@ -556,101 +554,6 @@
         <button type="button" class="btn btn-outline" id="billing-back-btn" style="display:none;">Back</button>
         <button type="button" class="btn btn-primary" id="billing-continue-btn">Continue</button>
         <button type="button" class="btn btn-primary" id="billing-pay-btn" style="display:none;">Pay</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Auto-recharge configuration modal (Phase 8) -->
-  <div id="auto-recharge-modal-overlay" class="modal-overlay" aria-hidden="true">
-    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="auto-recharge-modal-title">
-      <div class="modal-header">
-        <h3 id="auto-recharge-modal-title" class="modal-title">Auto recharge</h3>
-        <label class="auto-recharge-header-toggle">
-          <input type="checkbox" id="auto-recharge-enabled-toggle" />
-          <span class="slider" aria-hidden="true"></span>
-        </label>
-        <button type="button" class="modal-close" id="auto-recharge-modal-close-btn" aria-label="Close">&times;</button>
-      </div>
-      <div class="modal-body">
-        <p class="modal-subtitle">Automatically add credits when your balance runs low.</p>
-
-        <fieldset id="auto-recharge-fields" class="auto-recharge-fields">
-          <div class="form-row">
-            <label for="auto-recharge-drops-to">When balance drops to:</label>
-            <div class="amount-input"><span class="amount-prefix">$</span>
-              <input type="number" id="auto-recharge-drops-to" min="0" step="1" value="5" />
-            </div>
-          </div>
-          <div class="form-row">
-            <label for="auto-recharge-restore-to">Restore balance to:</label>
-            <div class="amount-input"><span class="amount-prefix">$</span>
-              <input type="number" id="auto-recharge-restore-to" min="0" step="1" value="10" />
-            </div>
-          </div>
-          <div class="form-row">
-            <label>Recharge amount:</label>
-            <span id="auto-recharge-amount-display" class="amount-readout">$5</span>
-          </div>
-
-          <div class="form-row form-row-divider">
-            <label for="auto-recharge-cap-toggle" class="form-row-toggle-label">
-              <span>Monthly recharge limit</span>
-              <input type="checkbox" id="auto-recharge-cap-toggle" />
-            </label>
-            <p class="form-hint">
-              Recharging stops once this limit is reached.
-            </p>
-            <div class="amount-input"><span class="amount-prefix">$</span>
-              <input type="number" id="auto-recharge-cap-amount" min="5" step="1" value="100" />
-            </div>
-          </div>
-
-          <div class="form-row form-row-divider">
-            <label>Payment method:</label>
-            <div class="card-picker-row">
-              <span id="auto-recharge-card-label" data-pm-id="">No card saved yet</span>
-              <button type="button" class="btn btn-outline btn-sm" id="auto-recharge-add-card-btn">Add a card</button>
-            </div>
-          </div>
-
-          <div id="auto-recharge-consent-row" class="form-row form-row-divider">
-            <label class="consent-row">
-              <input type="checkbox" id="auto-recharge-consent" />
-              <span>
-                I authorize Lit Protocol to charge my saved card up to the
-                monthly limit when my balance falls below the trigger.
-              </span>
-            </label>
-          </div>
-        </fieldset>
-
-        <div id="auto-recharge-modal-status" class="status" style="display:none;"></div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline" id="auto-recharge-cancel-btn">Cancel</button>
-        <button type="button" class="btn btn-primary" id="auto-recharge-save-btn">Save</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Save-card sub-flow modal (Phase 8) -->
-  <div id="add-card-modal-overlay" class="modal-overlay" aria-hidden="true">
-    <div class="modal-dialog" role="dialog" aria-modal="true" aria-labelledby="add-card-modal-title">
-      <div class="modal-header">
-        <h3 id="add-card-modal-title" class="modal-title">Save a card for auto recharge</h3>
-        <button type="button" class="modal-close" id="add-card-modal-close-btn" aria-label="Close">&times;</button>
-      </div>
-      <div class="modal-body">
-        <p class="modal-subtitle">
-          Your card stays at Stripe — we never see the card number. EU cards
-          may show a 3DS challenge during save.
-        </p>
-        <div id="add-card-payment-element"></div>
-        <div id="add-card-modal-status" class="status" style="display:none;"></div>
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-outline" id="add-card-cancel-btn">Cancel</button>
-        <button type="button" class="btn btn-primary" id="add-card-save-btn">Save card</button>
       </div>
     </div>
   </div>
