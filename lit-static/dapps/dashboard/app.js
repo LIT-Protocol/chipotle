@@ -6,7 +6,6 @@
 import { isAuthenticated, setTheme, getTheme, logOut, setOnAuthReady, updateStatCards, initLogin, setUsageKeyOverride, toggleOverrideEnabled, updateUsageKeyOverrideUI, setChainSecuredRpcUrl, toggleChainSecuredRpcPanel, updateChainSecuredRpcUrlUI, getMode, getApiKey, convertToChainSecured, changeChainSecuredOwnership } from './auth.js';
 import { initModalClose, initConfirmClose, showStatus, hideStatus, logError } from './ui-utils.js';
 import { initBilling, handleBillingReturn } from './billing.js';
-import { initAutoRecharge, openAutoRechargeModal } from './auto_recharge.js';
 import { initGroups, loadGroups } from './groups.js';
 import { initKeys, loadUsageKeys } from './keys.js';
 import { initActions, loadActions } from './actions.js';
@@ -314,11 +313,6 @@ function init() {
   initSidebar();
   initHeader();
   initBilling();
-  initAutoRecharge();
-  document.getElementById('btn-auto-recharge')?.addEventListener(
-    'click',
-    () => openAutoRechargeModal(),
-  );
   initUsageKeyOverride();
   initChainSecuredRpc();
   initAbout();

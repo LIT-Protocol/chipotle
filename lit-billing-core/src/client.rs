@@ -6,18 +6,6 @@ use anyhow::Result;
 
 use crate::http::{StripeResponse, parse_stripe_response, stripe_base};
 
-/// Stripe API version pinned for every request this client makes.
-///
-/// `2020-08-27` is the floor required for the Customer Search API
-/// (used by `customer::find_by_wallet`). Stripe accounts that haven't been
-/// upgraded inherit the version they were created on — pinning here means
-/// we get consistent behaviour regardless of the per-account default.
-///
-/// Bump deliberately: any change to Stripe response shapes between versions
-/// will surface as deserialisation errors in tests against the newer API
-/// before it ever reaches production.
-const STRIPE_API_VERSION: &str = "2020-08-27";
-
 /// Stripe API client: secret key + reqwest client.
 ///
 /// No caching, no in-process state beyond credentials. Build once and clone
@@ -54,7 +42,6 @@ impl StripeClient {
             .client
             .get(&url)
             .basic_auth(&self.secret_key, Some(""))
-            .header("Stripe-Version", STRIPE_API_VERSION)
             .query(query)
             .send()
             .await?;
@@ -70,7 +57,6 @@ impl StripeClient {
             .client
             .post(&url)
             .basic_auth(&self.secret_key, Some(""))
-            .header("Stripe-Version", STRIPE_API_VERSION)
             .form(params)
             .send()
             .await?;
@@ -94,7 +80,6 @@ impl StripeClient {
             .client
             .post(&url)
             .basic_auth(&self.secret_key, Some(""))
-            .header("Stripe-Version", STRIPE_API_VERSION)
             .header("Idempotency-Key", idempotency_key)
             .form(params)
             .send()
