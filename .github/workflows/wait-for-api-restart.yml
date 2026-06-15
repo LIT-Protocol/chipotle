@@ -26,6 +26,9 @@ on:
       api_root_url:
         description: "API base URL (e.g. https://example.com/core/v1)"
         value: ${{ jobs.wait.outputs.api_root_url }}
+      base_url:
+        description: "Site base URL without the /core/v1 suffix (e.g. https://example.com)"
+        value: ${{ jobs.wait.outputs.base_url }}
     inputs:
       expected_sha:
         description: "Expected git commit SHA for the new deployment (omit to skip version check)"
@@ -60,6 +63,7 @@ jobs:
     runs-on: ${{ fromJson(inputs.runner) }}
     outputs:
       api_root_url: ${{ steps.resolve-url.outputs.api_root_url }}
+      base_url: ${{ steps.resolve-url.outputs.base_url }}
     steps:
       - name: Checkout (for git describe)
         if: inputs.expected_sha != ''
@@ -106,6 +110,7 @@ jobs:
             exit 1
           fi
           echo "api_root_url=$BASE_URL" >> "$GITHUB_OUTPUT"
+          echo "base_url=${BASE_URL%/core/v1}" >> "$GITHUB_OUTPUT"
           echo "API base URL: $BASE_URL"
 
       - name: Wait for expected version
