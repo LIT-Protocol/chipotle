@@ -2,117 +2,83 @@
 //!
 //! Caches the results of on-chain permission checks (`canExecuteAction`,
 //! `canUseWalletInAction`) and wallet derivation lookups (`getWalletDerivation`)
-//! so that repeated calls for the same API key and relevant parameters
-//! avoid redundant contract calls.
+//! so that repeated calls for the same API key and relevant parameters avoid
+//! redundant contract calls.
 //!
-//! TTL: permission results use per-entry expiration — positive (authorized)
-//! results live 5 minutes from insertion, while negative (denied) results
-//! expire after 30 seconds. ChainSecured accounts mutate permissions by
-//! sending wallet-signed transactions directly to the chain, which this
-//! server never observes, so no invalidation hook can cover those writes;
-//! the TTLs bound how long stale state is served in either direction: a
-//! stale denial (newly group-permitted action returning 403) lasts at most
-//! 30s, and a stale grant (revoked action/key still executing) lasts at most
-//! 5 minutes. Wallet derivation lookups use the positive TTL for the same
-//! reason — derivations can change on-chain without this server observing it.
-//! `try_get_with` coalesces concurrent misses per key, so the steady-state
-//! chain load is at most one read per (key, parameters) per TTL window.
+//! # Design: a dumb verdict memoizer
 //!
-//! Invalidation uses a **per-account generation counter**: each API key hash
-//! has an associated generation number embedded in the cache key. Bumping the
-//! generation for an account causes all subsequent lookups to miss, while stale
-//! entries with old generations are evicted naturally by TTL. Note this is
-//! process-local: in a multi-replica deployment, a mutation handled by one
-//! replica does not invalidate the others — they converge within the TTL
-//! bounds above.
+//! The source of truth for permissions is the chain. This cache is *only* a
+//! performance optimization in front of it. It deliberately models nothing
+//! about accounts, master/usage keys, groups, or scopes — it memoizes opaque
+//! contract verdicts keyed by `(api_key_hash, params)`, exactly as the contract
+//! resolves them. A cache miss simply asks the chain; a denial is never special.
+//!
+//! ## Invalidation: one global generation counter
+//!
+//! Permission *mutations* are rare administrative operations; permission
+//! *checks* are the hot path. Given that ratio, we don't try to map a given
+//! on-chain mutation to the specific cache entries it affects (which would
+//! require the server to reconstruct the on-chain account graph — every master
+//! key, usage key, group and scope). Instead, **any** permission-relevant
+//! mutation bumps a single global generation counter embedded in every cache
+//! key, so all subsequent lookups miss and re-read from chain. Stale entries
+//! from older generations are never read again and age out by TTL.
+//!
+//! This is strictly *more* invalidation than necessary (a change to one account
+//! briefly invalidates verdicts for all accounts), which makes it always safe:
+//! it can over-invalidate, never serve stale. The cost is a small burst of
+//! chain re-reads right after a rare mutation, coalesced per key by
+//! `try_get_with` so the steady-state load is at most one read per
+//! (key, params) per generation.
+//!
+//! The bump is driven by an on-chain event listener ([`crate::account_events`])
+//! plus the write-path hooks in [`super`] (which call [`invalidate_all`]
+//! directly for instant invalidation of mutations this process performs). The
+//! listener also covers mutations this process never sees — ChainSecured
+//! wallet-signed transactions sent directly to the contract, or mutations
+//! performed by another replica.
+//!
+//! ## TTL: a backstop, not the freshness mechanism
+//!
+//! Invalidation is what keeps the cache fresh; the TTL is only insurance for the
+//! windows the listener can't cover (missed-block gaps, a replica between boot
+//! and its first poll). A single uniform TTL applies to every entry — there is
+//! no positive/negative asymmetry, because the cache stores verdicts, not
+//! policy, and the listener bounds staleness far tighter than the TTL anyway.
+//!
+//! ## Stateless / horizontally scalable by construction
+//!
+//! The generation counter is process-local. Each replica runs its own listener
+//! and bumps its own counter off the same chain logs, so replicas converge
+//! independently with no shared state. A freshly booted replica starts with an
+//! empty cache (everything misses → everything is fresh) and a listener anchored
+//! at the current block; it never needs history.
 
-use std::collections::HashMap;
-use std::sync::{OnceLock, RwLock};
-use std::time::{Duration, Instant};
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use alloy::primitives::{Address, U256};
-use moka::Expiry;
 use moka::future::Cache;
 
-/// TTL in seconds for positive (authorized) permission results and wallet
-/// derivations — 5 minutes. This bounds how long a revoked permission (or a
-/// changed derivation) keeps being honored when the revocation happens
-/// out-of-band: ChainSecured wallet-signed transactions submitted directly
-/// on-chain, or a mutation handled by a different replica (invalidation is
-/// process-local).
+/// Uniform TTL for every cached entry — a backstop for the windows the on-chain
+/// listener can't cover (missed-block gaps, a replica between boot and its first
+/// poll). Invalidation, not expiry, is the primary freshness mechanism, so this
+/// is generous; it is not load-bearing for correctness while the listener runs.
 const CACHE_TTL_SECS: u64 = 300;
-
-/// TTL in seconds for negative (denied) permission results. Kept short so
-/// permissions granted out-of-band (ChainSecured wallet-signed transactions
-/// submitted directly on-chain, or RPC state lag right after a grant) become
-/// visible quickly, while still absorbing bursts of repeated unauthorized
-/// requests between contract calls.
-const NEGATIVE_CACHE_TTL_SECS: u64 = 30;
-
-/// TTL for a permission result: full TTL when authorized, short when denied.
-fn permission_ttl(authorized: bool) -> Duration {
-    if authorized {
-        Duration::from_secs(CACHE_TTL_SECS)
-    } else {
-        Duration::from_secs(NEGATIVE_CACHE_TTL_SECS)
-    }
-}
-
-/// Per-entry expiry for `bool` permission caches (`can_execute_action`,
-/// `can_use_wallet_in_action`): denials expire after `NEGATIVE_CACHE_TTL_SECS`.
-struct PermissionExpiry;
-
-impl Expiry<String, bool> for PermissionExpiry {
-    fn expire_after_create(
-        &self,
-        _key: &String,
-        value: &bool,
-        _created_at: Instant,
-    ) -> Option<Duration> {
-        Some(permission_ttl(*value))
-    }
-
-    fn expire_after_update(
-        &self,
-        _key: &String,
-        value: &bool,
-        _updated_at: Instant,
-        _duration_until_expiry: Option<Duration>,
-    ) -> Option<Duration> {
-        Some(permission_ttl(*value))
-    }
-}
-
-/// Per-entry expiry for the `(can_execute, can_use_wallet)` pair cache: the
-/// request only proceeds when both are true, so any false in the pair is a
-/// denial and expires after `NEGATIVE_CACHE_TTL_SECS`.
-struct PairPermissionExpiry;
-
-impl Expiry<String, (bool, bool)> for PairPermissionExpiry {
-    fn expire_after_create(
-        &self,
-        _key: &String,
-        value: &(bool, bool),
-        _created_at: Instant,
-    ) -> Option<Duration> {
-        Some(permission_ttl(value.0 && value.1))
-    }
-
-    fn expire_after_update(
-        &self,
-        _key: &String,
-        value: &(bool, bool),
-        _updated_at: Instant,
-        _duration_until_expiry: Option<Duration>,
-    ) -> Option<Duration> {
-        Some(permission_ttl(value.0 && value.1))
-    }
-}
 
 /// Maximum entries per cache.
 const MAX_CAPACITY: u64 = 100_000;
 
-/// Caches blockchain permission check results with per-account invalidation.
+/// Build one of the per-verdict caches with the shared capacity and uniform TTL.
+fn build_cache<V: Clone + Send + Sync + 'static>() -> Cache<String, V> {
+    Cache::builder()
+        .max_capacity(MAX_CAPACITY)
+        .time_to_live(Duration::from_secs(CACHE_TTL_SECS))
+        .build()
+}
+
+/// Caches blockchain permission check results behind a global generation.
 pub struct BlockchainCache {
     /// `can_execute_action` results.
     execute_action: Cache<String, bool>,
@@ -122,67 +88,38 @@ pub struct BlockchainCache {
     execute_and_wallet: Cache<String, (bool, bool)>,
     /// `get_wallet_derivation` results.
     wallet_derivation: Cache<String, U256>,
-    /// Per-account generation counter keyed by the string representation of
-    /// the api_key_hash (`U256`). Uses a plain HashMap (no eviction) to
-    /// guarantee that a bumped generation is never lost. Each entry is ~100
-    /// bytes; even 100k accounts is only ~10MB.
-    generations: RwLock<HashMap<String, u64>>,
+    /// Global generation counter embedded in every cache key. Bumping it makes
+    /// all existing keys unreachable (a full logical flush); old entries age out
+    /// by TTL. A single atomic — no per-account bookkeeping.
+    generation: AtomicU64,
 }
 
 impl BlockchainCache {
     fn new() -> Self {
-        let ttl = Duration::from_secs(CACHE_TTL_SECS);
-        // Permission caches use per-entry expiry (short TTL for denials).
-        // The previous time_to_idle was redundant: with tti == ttl, the hard
-        // time_to_live cap always fired first.
-        let execute_action = Cache::builder()
-            .max_capacity(MAX_CAPACITY)
-            .expire_after(PermissionExpiry)
-            .build();
-        let use_wallet = Cache::builder()
-            .max_capacity(MAX_CAPACITY)
-            .expire_after(PermissionExpiry)
-            .build();
-        let execute_and_wallet = Cache::builder()
-            .max_capacity(MAX_CAPACITY)
-            .expire_after(PairPermissionExpiry)
-            .build();
-        let wallet_derivation = Cache::builder()
-            .max_capacity(MAX_CAPACITY)
-            .time_to_idle(ttl)
-            .time_to_live(ttl)
-            .build();
         Self {
-            execute_action,
-            use_wallet,
-            execute_and_wallet,
-            wallet_derivation,
-            generations: RwLock::new(HashMap::new()),
+            execute_action: build_cache(),
+            use_wallet: build_cache(),
+            execute_and_wallet: build_cache(),
+            wallet_derivation: build_cache(),
+            generation: AtomicU64::new(0),
         }
     }
 
-    /// Read the current generation for an api_key_hash. Returns 0 if unseen.
-    fn generation(&self, api_key_hash: &str) -> u64 {
-        self.generations
-            .read()
-            .expect("generation lock poisoned")
-            .get(api_key_hash)
-            .copied()
-            .unwrap_or(0)
+    /// Read the current global generation.
+    fn generation(&self) -> u64 {
+        self.generation.load(Ordering::Relaxed)
     }
 
     /// Build a cache key for `can_execute_action`.
     pub fn execute_action_key(&self, api_key_hash: U256, cid_hash: U256) -> String {
-        let h = api_key_hash.to_string();
-        let g = self.generation(&h);
-        format!("{h}:g{g}:{cid_hash}")
+        let g = self.generation();
+        format!("{api_key_hash}:g{g}:{cid_hash}")
     }
 
     /// Build a cache key for `can_use_wallet_in_action`.
     pub fn use_wallet_key(&self, api_key_hash: U256, cid_hash: U256, wallet: Address) -> String {
-        let h = api_key_hash.to_string();
-        let g = self.generation(&h);
-        format!("{h}:g{g}:{cid_hash}:{wallet:#x}")
+        let g = self.generation();
+        format!("{api_key_hash}:g{g}:{cid_hash}:{wallet:#x}")
     }
 
     /// Build a cache key for `can_execute_action_and_use_wallet`.
@@ -192,16 +129,14 @@ impl BlockchainCache {
         cid_hash: U256,
         wallet: Address,
     ) -> String {
-        let h = api_key_hash.to_string();
-        let g = self.generation(&h);
-        format!("{h}:g{g}:ew:{cid_hash}:{wallet:#x}")
+        let g = self.generation();
+        format!("{api_key_hash}:g{g}:ew:{cid_hash}:{wallet:#x}")
     }
 
     /// Build a cache key for `get_wallet_derivation`.
     pub fn wallet_derivation_key(&self, api_key_hash: U256, wallet: Address) -> String {
-        let h = api_key_hash.to_string();
-        let g = self.generation(&h);
-        format!("{h}:g{g}:wd:{wallet:#x}")
+        let g = self.generation();
+        format!("{api_key_hash}:g{g}:wd:{wallet:#x}")
     }
 
     /// Reference to the `can_execute_action` cache.
@@ -224,18 +159,13 @@ impl BlockchainCache {
         &self.wallet_derivation
     }
 
-    /// Bump the generation for a single api_key_hash, invalidating all cached
-    /// permission entries for that key.
-    fn bump_generation(&self, api_key_hash: &str) {
-        let mut gens = self.generations.write().expect("generation lock poisoned");
-        let entry = gens.entry(api_key_hash.to_string()).or_insert(0);
-        *entry = entry.wrapping_add(1);
-        let next = *entry;
-        tracing::debug!(
-            "blockchain_cache: bumped generation for {} to {}",
-            api_key_hash,
-            next
-        );
+    /// Bump the global generation, logically flushing all cached verdicts.
+    fn bump_generation(&self) {
+        let next = self
+            .generation
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_add(1);
+        tracing::debug!("blockchain_cache: bumped global generation to {next}");
     }
 }
 
@@ -245,7 +175,7 @@ static BLOCKCHAIN_CACHE_INSTANCE: OnceLock<BlockchainCache> = OnceLock::new();
 pub fn init() {
     BLOCKCHAIN_CACHE_INSTANCE.get_or_init(BlockchainCache::new);
     tracing::info!(
-        "blockchain_cache: initialized (TTL={CACHE_TTL_SECS}s, negative TTL={NEGATIVE_CACHE_TTL_SECS}s)"
+        "blockchain_cache: initialized (TTL={CACHE_TTL_SECS}s, global-generation invalidation)"
     );
 }
 
@@ -254,74 +184,15 @@ pub fn get() -> Option<&'static BlockchainCache> {
     BLOCKCHAIN_CACHE_INSTANCE.get()
 }
 
-/// Invalidate cached permission entries for the given API key.
+/// Invalidate the entire permission cache by bumping the global generation.
 ///
-/// Prefer `invalidate_for_account` for group/action/PKP mutations, which also
-/// invalidates usage keys under the same account.
-pub fn invalidate_for_key(api_key: &str) {
+/// Called by the write-path mutation helpers in [`super`] (for instant
+/// invalidation of mutations this process performs) and by the on-chain event
+/// listener ([`crate::account_events`]) when it observes any permission-relevant
+/// mutation. A no-op if the cache has not been initialized.
+pub fn invalidate_all() {
     if let Some(cache) = get() {
-        let hash = crate::utils::parse_with_hash::api_key_hash(api_key).to_string();
-        cache.bump_generation(&hash);
-    }
-}
-
-/// Invalidate cached permission entries for an entire account: the calling key
-/// and all usage keys returned by `list_api_keys`.
-///
-/// Fetches usage key hashes via a chain call to `list_api_keys`. Call after
-/// group/action/PKP mutations where any key under the account could be affected.
-///
-/// **Limitation:** If the caller authenticates with a usage key (not the master
-/// key), the master key's cached entries are NOT invalidated here because the
-/// contract does not expose a `resolveToMaster` view. In that case the master
-/// key's entries expire naturally via the 60-minute `time_to_live`. This is
-/// acceptable because usage-key-driven management mutations are uncommon in
-/// practice.
-pub async fn invalidate_for_account(api_key: &str) {
-    let Some(cache) = get() else { return };
-
-    // Always bump the calling key (master or usage).
-    let caller_hash = crate::utils::parse_with_hash::api_key_hash(api_key).to_string();
-    cache.bump_generation(&caller_hash);
-
-    // Fetch all usage keys under this account and bump each one.
-    // list_api_keys resolves both master and usage keys to the correct account.
-    match super::list_api_keys(api_key, U256::ZERO, U256::from(1000u64)).await {
-        Ok(usage_keys) => {
-            for uk in &usage_keys {
-                let hash = uk.apiKeyHash.to_string();
-                if hash != caller_hash {
-                    cache.bump_generation(&hash);
-                }
-            }
-            tracing::debug!(
-                "blockchain_cache: invalidated account ({} usage keys)",
-                usage_keys.len()
-            );
-        }
-        Err(e) => {
-            tracing::warn!(
-                "blockchain_cache: failed to list usage keys for invalidation: {e}. \
-                 Usage key cache entries may be stale until TTL."
-            );
-        }
-    }
-}
-
-/// Invalidate cached permission entries for both a master key and a usage key.
-///
-/// Call after usage-API-key mutations where both keys' cached entries may be stale.
-/// Uses `usage_api_key_to_hash` for the usage key to handle both raw keys and
-/// pre-computed hashes consistently with the on-chain mutation path.
-pub fn invalidate_for_keys(master_api_key: &str, usage_api_key: &str) {
-    if let Some(cache) = get() {
-        let master_hash = crate::utils::parse_with_hash::api_key_hash(master_api_key).to_string();
-        let usage_hash =
-            crate::utils::parse_with_hash::usage_api_key_to_hash(usage_api_key).to_string();
-        cache.bump_generation(&master_hash);
-        if usage_hash != master_hash {
-            cache.bump_generation(&usage_hash);
-        }
+        cache.bump_generation();
     }
 }
 
@@ -339,44 +210,45 @@ mod tests {
         Address::from(bytes)
     }
 
-    // ── Generation counter ──────────────────────────────────────────
+    // ── Global generation counter ───────────────────────────────────
 
     #[test]
     fn generation_starts_at_zero() {
         let cache = test_cache();
-        assert_eq!(cache.generation("anything"), 0);
+        assert_eq!(cache.generation(), 0);
     }
 
     #[test]
     fn bump_generation_increments() {
         let cache = test_cache();
-        cache.bump_generation("key1");
-        assert_eq!(cache.generation("key1"), 1);
-        cache.bump_generation("key1");
-        assert_eq!(cache.generation("key1"), 2);
+        cache.bump_generation();
+        assert_eq!(cache.generation(), 1);
+        cache.bump_generation();
+        assert_eq!(cache.generation(), 2);
     }
 
     #[test]
-    fn bump_generation_is_per_key() {
+    fn bump_generation_is_global() {
+        // A single bump shifts the generation seen by *every* account's key.
         let cache = test_cache();
-        cache.bump_generation("key_a");
-        cache.bump_generation("key_a");
-        cache.bump_generation("key_b");
-        assert_eq!(cache.generation("key_a"), 2);
-        assert_eq!(cache.generation("key_b"), 1);
-        assert_eq!(cache.generation("key_c"), 0);
+        let cid = U256::from(1u64);
+        let key_a_before = cache.execute_action_key(U256::from(100u64), cid);
+        let key_b_before = cache.execute_action_key(U256::from(200u64), cid);
+
+        cache.bump_generation();
+
+        let key_a_after = cache.execute_action_key(U256::from(100u64), cid);
+        let key_b_after = cache.execute_action_key(U256::from(200u64), cid);
+        assert_ne!(key_a_before, key_a_after);
+        assert_ne!(key_b_before, key_b_after);
     }
 
     #[test]
     fn wrapping_add_at_u64_max() {
         let cache = test_cache();
-        cache
-            .generations
-            .write()
-            .unwrap()
-            .insert("overflow".to_string(), u64::MAX);
-        cache.bump_generation("overflow");
-        assert_eq!(cache.generation("overflow"), 0);
+        cache.generation.store(u64::MAX, Ordering::Relaxed);
+        cache.bump_generation();
+        assert_eq!(cache.generation(), 0);
     }
 
     // ── Key generation ──────────────────────────────────────────────
@@ -384,19 +256,15 @@ mod tests {
     #[test]
     fn execute_action_key_format() {
         let cache = test_cache();
-        let hash = U256::from(42u64);
-        let cid = U256::from(99u64);
-        let key = cache.execute_action_key(hash, cid);
+        let key = cache.execute_action_key(U256::from(42u64), U256::from(99u64));
         assert_eq!(key, "42:g0:99");
     }
 
     #[test]
     fn use_wallet_key_format() {
         let cache = test_cache();
-        let hash = U256::from(42u64);
-        let cid = U256::from(99u64);
         let wallet = addr_from_low_u64(0xdead);
-        let key = cache.use_wallet_key(hash, cid, wallet);
+        let key = cache.use_wallet_key(U256::from(42u64), U256::from(99u64), wallet);
         assert!(key.starts_with("42:g0:99:"));
         assert!(key.contains("0x000000000000000000000000000000000000dead"));
     }
@@ -404,10 +272,7 @@ mod tests {
     #[test]
     fn execute_and_wallet_key_has_ew_discriminator() {
         let cache = test_cache();
-        let hash = U256::from(1u64);
-        let cid = U256::from(2u64);
-        let wallet = Address::ZERO;
-        let key = cache.execute_and_wallet_key(hash, cid, wallet);
+        let key = cache.execute_and_wallet_key(U256::from(1u64), U256::from(2u64), Address::ZERO);
         assert!(
             key.contains(":ew:"),
             "key should contain :ew: discriminator, got: {key}"
@@ -423,7 +288,7 @@ mod tests {
         let key_before = cache.execute_action_key(hash, cid);
         assert!(key_before.contains(":g0:"));
 
-        cache.bump_generation(&hash.to_string());
+        cache.bump_generation();
 
         let key_after = cache.execute_action_key(hash, cid);
         assert!(key_after.contains(":g1:"));
@@ -441,7 +306,6 @@ mod tests {
         let key = cache.execute_action_key(hash, cid);
         cache.execute_action.insert(key.clone(), true).await;
 
-        // Same key should hit
         let key2 = cache.execute_action_key(hash, cid);
         assert_eq!(key, key2);
         assert_eq!(cache.execute_action.get(&key2).await, Some(true));
@@ -453,50 +317,42 @@ mod tests {
         let hash = U256::from(10u64);
         let cid = U256::from(20u64);
 
-        // Populate cache
         let key = cache.execute_action_key(hash, cid);
         cache.execute_action.insert(key.clone(), true).await;
 
-        // Bump generation
-        cache.bump_generation(&hash.to_string());
+        cache.bump_generation();
 
-        // New key should be different — cache miss
+        // New key produces a miss; the old entry is unreachable (TTL-evicted later).
         let new_key = cache.execute_action_key(hash, cid);
         assert_ne!(key, new_key);
         assert_eq!(cache.execute_action.get(&new_key).await, None);
-
-        // Old key entry still exists (evicted by TTL later)
         assert_eq!(cache.execute_action.get(&key).await, Some(true));
     }
 
     #[tokio::test]
-    async fn invalidation_is_per_account() {
+    async fn invalidation_is_global_across_accounts() {
+        // One bump must invalidate every account, not just one.
         let cache = test_cache();
         let hash_a = U256::from(100u64);
         let hash_b = U256::from(200u64);
         let cid = U256::from(50u64);
 
-        // Populate both accounts
         let key_a = cache.execute_action_key(hash_a, cid);
         let key_b = cache.execute_action_key(hash_b, cid);
         cache.execute_action.insert(key_a.clone(), true).await;
         cache.execute_action.insert(key_b.clone(), false).await;
 
-        // Invalidate only account A
-        cache.bump_generation(&hash_a.to_string());
+        cache.bump_generation();
 
-        // Account A key changed (miss)
         let new_key_a = cache.execute_action_key(hash_a, cid);
-        assert_ne!(key_a, new_key_a);
-        assert_eq!(cache.execute_action.get(&new_key_a).await, None);
-
-        // Account B key unchanged (still hits)
         let new_key_b = cache.execute_action_key(hash_b, cid);
-        assert_eq!(key_b, new_key_b);
-        assert_eq!(cache.execute_action.get(&new_key_b).await, Some(false));
+        assert_ne!(key_a, new_key_a);
+        assert_ne!(key_b, new_key_b);
+        assert_eq!(cache.execute_action.get(&new_key_a).await, None);
+        assert_eq!(cache.execute_action.get(&new_key_b).await, None);
     }
 
-    // ── use_wallet and execute_and_wallet caches ────────────────────
+    // ── use_wallet, execute_and_wallet, wallet_derivation caches ────
 
     #[tokio::test]
     async fn use_wallet_cache_hit_and_invalidation() {
@@ -509,7 +365,7 @@ mod tests {
         cache.use_wallet.insert(key.clone(), true).await;
         assert_eq!(cache.use_wallet.get(&key).await, Some(true));
 
-        cache.bump_generation(&hash.to_string());
+        cache.bump_generation();
         let new_key = cache.use_wallet_key(hash, cid, wallet);
         assert_ne!(key, new_key);
         assert_eq!(cache.use_wallet.get(&new_key).await, None);
@@ -532,19 +388,16 @@ mod tests {
             Some((true, false))
         );
 
-        cache.bump_generation(&hash.to_string());
+        cache.bump_generation();
         let new_key = cache.execute_and_wallet_key(hash, cid, wallet);
         assert_eq!(cache.execute_and_wallet.get(&new_key).await, None);
     }
 
-    // ── wallet_derivation cache ──────────────────────────────────────
-
     #[test]
     fn wallet_derivation_key_has_wd_discriminator() {
         let cache = test_cache();
-        let hash = U256::from(1u64);
         let wallet = addr_from_low_u64(0xdead);
-        let key = cache.wallet_derivation_key(hash, wallet);
+        let key = cache.wallet_derivation_key(U256::from(1u64), wallet);
         assert!(
             key.contains(":wd:"),
             "key should contain :wd: discriminator, got: {key}"
@@ -567,7 +420,7 @@ mod tests {
             Some(U256::from(42u64))
         );
 
-        cache.bump_generation(&hash.to_string());
+        cache.bump_generation();
         let new_key = cache.wallet_derivation_key(hash, wallet);
         assert_ne!(key, new_key);
         assert_eq!(cache.wallet_derivation.get(&new_key).await, None);
@@ -578,11 +431,8 @@ mod tests {
     #[tokio::test]
     async fn try_get_with_populates_on_miss() {
         let cache = test_cache();
-        let hash = U256::from(1u64);
-        let cid = U256::from(2u64);
-        let key = cache.execute_action_key(hash, cid);
+        let key = cache.execute_action_key(U256::from(1u64), U256::from(2u64));
 
-        // Cache miss triggers the closure
         let result = cache
             .execute_action
             .try_get_with(key.clone(), async { Ok::<_, anyhow::Error>(true) })
@@ -590,7 +440,6 @@ mod tests {
             .unwrap();
         assert!(result);
 
-        // Second call should hit the cache (no closure needed)
         let result2: bool = cache
             .execute_action
             .try_get_with(key, async {
@@ -607,7 +456,6 @@ mod tests {
         let hash = U256::from(1u64);
         let cid = U256::from(2u64);
 
-        // Populate via try_get_with
         let key = cache.execute_action_key(hash, cid);
         cache
             .execute_action
@@ -615,17 +463,15 @@ mod tests {
             .await
             .unwrap();
 
-        // Bump generation
-        cache.bump_generation(&hash.to_string());
+        cache.bump_generation();
 
-        // New key produces a miss, closure runs
         let new_key = cache.execute_action_key(hash, cid);
         let mut closure_called = false;
         let result = cache
             .execute_action
             .try_get_with(new_key, async {
                 closure_called = true;
-                Ok::<_, anyhow::Error>(false) // different value proves it re-fetched
+                Ok::<_, anyhow::Error>(false)
             })
             .await
             .unwrap();
@@ -636,145 +482,12 @@ mod tests {
         assert!(!result, "should return the newly fetched value");
     }
 
-    // ── Per-entry expiry policy ──────────────────────────────────────
+    // ── invalidate_all (module-level) ────────────────────────────────
 
     #[test]
-    fn permission_ttl_is_full_for_authorized() {
-        assert_eq!(
-            permission_ttl(true),
-            Duration::from_secs(CACHE_TTL_SECS),
-            "authorized results should keep the full TTL"
-        );
-    }
-
-    #[test]
-    fn permission_ttl_is_short_for_denied() {
-        assert_eq!(
-            permission_ttl(false),
-            Duration::from_secs(NEGATIVE_CACHE_TTL_SECS),
-            "denied results should expire quickly so out-of-band on-chain \
-             grants (ChainSecured) are picked up without waiting out the TTL"
-        );
-    }
-
-    #[test]
-    fn permission_expiry_create_uses_value() {
-        let now = Instant::now();
-        let key = "k".to_string();
-        assert_eq!(
-            PermissionExpiry.expire_after_create(&key, &true, now),
-            Some(Duration::from_secs(CACHE_TTL_SECS))
-        );
-        assert_eq!(
-            PermissionExpiry.expire_after_create(&key, &false, now),
-            Some(Duration::from_secs(NEGATIVE_CACHE_TTL_SECS))
-        );
-    }
-
-    #[test]
-    fn permission_expiry_update_uses_new_value() {
-        let now = Instant::now();
-        let key = "k".to_string();
-        // A denial overwritten by a grant should adopt the full TTL, and vice versa.
-        assert_eq!(
-            PermissionExpiry.expire_after_update(
-                &key,
-                &true,
-                now,
-                Some(Duration::from_secs(NEGATIVE_CACHE_TTL_SECS))
-            ),
-            Some(Duration::from_secs(CACHE_TTL_SECS))
-        );
-        assert_eq!(
-            PermissionExpiry.expire_after_update(
-                &key,
-                &false,
-                now,
-                Some(Duration::from_secs(CACHE_TTL_SECS))
-            ),
-            Some(Duration::from_secs(NEGATIVE_CACHE_TTL_SECS))
-        );
-    }
-
-    #[test]
-    fn pair_permission_expiry_short_unless_both_true() {
-        let now = Instant::now();
-        let key = "k".to_string();
-        let full = Some(Duration::from_secs(CACHE_TTL_SECS));
-        let short = Some(Duration::from_secs(NEGATIVE_CACHE_TTL_SECS));
-        assert_eq!(
-            PairPermissionExpiry.expire_after_create(&key, &(true, true), now),
-            full
-        );
-        assert_eq!(
-            PairPermissionExpiry.expire_after_create(&key, &(true, false), now),
-            short
-        );
-        assert_eq!(
-            PairPermissionExpiry.expire_after_create(&key, &(false, true), now),
-            short
-        );
-        assert_eq!(
-            PairPermissionExpiry.expire_after_create(&key, &(false, false), now),
-            short
-        );
-        assert_eq!(
-            PairPermissionExpiry.expire_after_update(&key, &(true, true), now, short),
-            full
-        );
-    }
-
-    #[tokio::test]
-    async fn denied_entry_expires_after_negative_ttl() {
-        // Build a cache with a sub-second negative TTL surrogate to verify the
-        // expire_after wiring end-to-end without waiting 30 real seconds.
-        struct FastExpiry;
-        impl Expiry<String, bool> for FastExpiry {
-            fn expire_after_create(
-                &self,
-                _key: &String,
-                value: &bool,
-                _created_at: Instant,
-            ) -> Option<Duration> {
-                Some(if *value {
-                    Duration::from_secs(3600)
-                } else {
-                    Duration::from_millis(50)
-                })
-            }
-        }
-        let cache: Cache<String, bool> = Cache::builder().expire_after(FastExpiry).build();
-        cache.insert("denied".to_string(), false).await;
-        cache.insert("granted".to_string(), true).await;
-        assert_eq!(cache.get(&"denied".to_string()).await, Some(false));
-
-        tokio::time::sleep(Duration::from_millis(120)).await;
-        assert_eq!(
-            cache.get(&"denied".to_string()).await,
-            None,
-            "denied entry should expire after the negative TTL"
-        );
-        assert_eq!(
-            cache.get(&"granted".to_string()).await,
-            Some(true),
-            "granted entry should still be cached"
-        );
-    }
-
-    // ── invalidate_for_key / invalidate_for_keys (module-level) ─────
-
-    #[test]
-    fn invalidate_for_key_without_init_is_noop() {
-        // Global INSTANCE not initialized in test — should not panic
-        // (We can't test the initialized path without polluting the global,
-        // but we verify the None path is safe.)
-        // Note: if init() was called by another test in the same process,
-        // this would actually bump. That's fine — we just verify no panic.
-        invalidate_for_key("some_api_key");
-    }
-
-    #[test]
-    fn invalidate_for_keys_without_init_is_noop() {
-        invalidate_for_keys("master", "usage");
+    fn invalidate_all_without_init_is_noop() {
+        // Global INSTANCE may or may not be initialized depending on test order;
+        // either way this must not panic.
+        invalidate_all();
     }
 }

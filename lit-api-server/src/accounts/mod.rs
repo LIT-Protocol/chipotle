@@ -68,7 +68,7 @@ pub async fn convert_to_chain_secured_account(
     let function_call =
         contract.convertToChainSecuredAccount(api_key_hash, new_admin_wallet_address);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_for_account(api_key).await;
+    blockchain_cache::invalidate_all();
     Ok(result)
 }
 
@@ -136,7 +136,7 @@ pub async fn add_group(
         pkp_ids_eth,
     );
     send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_for_account(api_key).await;
+    blockchain_cache::invalidate_all();
     Ok(group_id)
 }
 
@@ -154,7 +154,7 @@ pub async fn add_action(
     let function_call =
         contract.addAction(account_api_key_hash, req.name, req.description, action_hash);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_for_account(api_key).await;
+    blockchain_cache::invalidate_all();
     Ok(result)
 }
 
@@ -169,7 +169,7 @@ pub async fn remove_action(
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.removeAction(account_api_key_hash, action_hash);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_for_account(api_key).await;
+    blockchain_cache::invalidate_all();
     Ok(result)
 }
 
@@ -187,7 +187,7 @@ pub async fn add_action_to_group(
         .map_err(|e| anyhow::anyhow!("Unable to parse action IPFS CID: {}", e))?;
     let function_call = contract.addActionToGroup(account_api_key_hash, group_id, action_hash);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_for_account(api_key).await;
+    blockchain_cache::invalidate_all();
     Ok(result)
 }
 
@@ -203,7 +203,7 @@ pub async fn add_pkp_to_group(
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.addPkpToGroup(account_api_key_hash, group_id, pkp_id);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_for_account(api_key).await;
+    blockchain_cache::invalidate_all();
     Ok(result)
 }
 
@@ -229,7 +229,7 @@ pub async fn update_group(
         pkp_ids.into_iter().collect(),
     );
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_for_account(api_key).await;
+    blockchain_cache::invalidate_all();
     Ok(result)
 }
 
@@ -245,7 +245,7 @@ pub async fn remove_action_from_group(
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.removeActionFromGroup(account_api_key_hash, group_id, action_hash);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_for_account(api_key).await;
+    blockchain_cache::invalidate_all();
     Ok(result)
 }
 
@@ -316,7 +316,7 @@ pub async fn remove_pkp_from_group(
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.removePkpFromGroup(account_api_key_hash, group_id, pkp_id);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_for_account(api_key).await;
+    blockchain_cache::invalidate_all();
     Ok(result)
 }
 
@@ -363,7 +363,7 @@ pub async fn add_usage_api_key(
         req.execute_in_groups.into_iter().map(U256::from).collect(),
     );
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_for_keys(api_key, usage_api_key);
+    blockchain_cache::invalidate_all();
     Ok(result)
 }
 
@@ -404,7 +404,7 @@ pub async fn update_usage_api_key(
     );
     let result =
         send_transaction(function_call, signer_pool, signer_address, client.clone()).await?;
-    blockchain_cache::invalidate_for_keys(api_key, usage_api_key);
+    blockchain_cache::invalidate_all();
     Ok(result)
 }
 
@@ -421,7 +421,7 @@ pub async fn remove_usage_api_key(
 
     let function_call = contract.removeUsageApiKey(account_api_key_hash, usage_api_key_hash);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_for_keys(api_key, usage_api_key);
+    blockchain_cache::invalidate_all();
     Ok(result)
 }
 
@@ -436,7 +436,7 @@ pub async fn remove_group(
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.removeGroup(account_api_key_hash, group_id);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_for_account(api_key).await;
+    blockchain_cache::invalidate_all();
     Ok(result)
 }
 
@@ -462,7 +462,7 @@ pub async fn register_wallet_derivation(
     );
 
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_for_account(api_key).await;
+    blockchain_cache::invalidate_all();
     Ok(result)
 }
 

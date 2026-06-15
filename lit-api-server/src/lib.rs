@@ -1,5 +1,6 @@
 #![recursion_limit = "256"]
 
+pub mod account_events;
 pub mod accounts;
 pub mod actions;
 pub mod config;
