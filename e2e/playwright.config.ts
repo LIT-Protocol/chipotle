@@ -33,7 +33,7 @@ export default defineConfig({
     // AI agents run with AGENT_SCREENSHOTS=1 so passing tests leave visual
     // evidence too (see AGENTS.md). Default stays failure-only to keep CI
     // artifacts lean.
-    screenshot: process.env.AGENT_SCREENSHOTS ? 'on' : 'only-on-failure',
+    screenshot: process.env.AGENT_SCREENSHOTS === '1' ? 'on' : 'only-on-failure',
     video: 'retain-on-failure',
   },
 
