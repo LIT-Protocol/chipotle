@@ -1,8 +1,8 @@
 # Deploy lit-api-server + lit-actions + otel-collector to Phala CVM
 #
-# Deployment targets:
-#   push to next → chipotle-next (direct automated deploy)
-#   push to main → chipotle-dev  (direct automated deploy)
+# Deployment target:
+#   push to main → chipotle-next (zero-downtime ping-pong cutover; test.chipotle.litprotocol.com)
+#   The `next` git branch is retired and chipotle-dev is deprecated — main is the deploy branch now.
 #
 # For production (v* tag) deploys, see deploy-prod-1-propose.yml and deploy-prod-2-execute.yml.
 #
@@ -37,6 +37,13 @@
 #                    ${DOCKER_IMAGE}-otel-collector
 #   DOCKERHUB_USERNAME - Docker Hub username
 #
+# Optional GitHub vars — enable zero-downtime ping-pong (else legacy single-CVM in-place deploy):
+#   NEXT_CVM_A / NEXT_CVM_B - the two long-lived chipotle-next instance names (same app_id, prod2 + prod4)
+#   Which one is LIVE is derived from DNS at deploy time (the public domain's CNAME →
+#   the live node's gateway); there is no stored live-pointer var to drift.
+#   Both instances' Phala devices MUST be allowlisted on the app's AppAuth contract
+#   (`phala cvms device-allowlist`) so the shared app_id derives keys on either node.
+#
 # Required Phala CVM encrypted env vars (per instance, set via Phala Cloud Dashboard):
 #   BASE_CHAIN_RPC             - RPC endpoint for the chain
 #   GCP_SERVICE_ACCOUNT_JSON   - GCP service account key (raw JSON or base64-encoded)
@@ -49,14 +56,17 @@
 
 name: "Deploy Staging"
 
-# Only one deploy job per-branch: abort any running job on same branch when a new commit is pushed.
+# Serialize deploys per-branch. cancel-in-progress is FALSE on purpose: a cutover
+# is multi-step (deploy → verify → claim → stop old) and cancelling it midway can
+# leave the old instance running / un-stopped. Let an in-flight deploy finish; a
+# newer push queues behind it.
 concurrency:
   group: deploy-phala-${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 on:
   push:
-    branches: [main, next]
+    branches: [main]
   workflow_dispatch:
     inputs:
       phala_cvm_name:
@@ -95,7 +105,16 @@ jobs:
   determine-target:
     runs-on: self-hosted
     outputs:
-      phala_app_name: ${{ steps.set.outputs.phala_app_name }}
+      # target_cvm = the CVM this run deploys to (the COLD one in ping-pong mode).
+      # phala_app_name is kept as an alias of target_cvm for backward compat.
+      phala_app_name: ${{ steps.set.outputs.target_cvm }}
+      target_cvm: ${{ steps.set.outputs.target_cvm }}
+      # prev_live_cvm = the instance that was live before this deploy; stopped
+      # after the new one is confirmed serving the public domain. Empty in
+      # legacy single-CVM mode (nothing to retire).
+      prev_live_cvm: ${{ steps.set.outputs.prev_live_cvm }}
+      # pingpong = "true" when the instance-pair vars are configured.
+      pingpong: ${{ steps.set.outputs.pingpong }}
       base_url: ${{ steps.set.outputs.base_url }}
       api_root_url: ${{ steps.set.outputs.api_root_url }}
       instance_type: ${{ steps.set.outputs.instance_type }}
@@ -103,41 +122,98 @@ jobs:
       node_config: ${{ steps.set.outputs.node_config }}
       domain: ${{ steps.set.outputs.domain }}
     steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Phala CLI
+        run: npm install -g phala
       - name: Set deployment target
         id: set
+        env:
+          INPUT_CVM: ${{ inputs.phala_cvm_name }}
+          # The two long-lived instance names (set as repo Actions vars to enable
+          # ping-pong; leave unset for legacy single-CVM in-place deploy). Which
+          # one is LIVE is derived from DNS at runtime, not stored — see below.
+          NEXT_CVM_A: ${{ vars.NEXT_CVM_A }}
+          NEXT_CVM_B: ${{ vars.NEXT_CVM_B }}
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
         run: |
+          # The `next` git branch is retired; `main` is the deploy branch and
+          # targets the chipotle-next staging app (test.chipotle.litprotocol.com),
+          # ping-ponged across its two instances. chipotle-dev is deprecated.
           if [ "${{ github.ref }}" = "refs/heads/main" ]; then
-            DEFAULT_APP_NAME="chipotle-dev"
-            echo "instance_type=tdx.large" >> "$GITHUB_OUTPUT"
-            echo "gcp_project_id=chipotle-dev" >> "$GITHUB_OUTPUT"
-            echo "node_config=NodeConfig.main.toml" >> "$GITHUB_OUTPUT"
-            DOMAIN="test.chipotle.litprotocol.com"
-          elif [ "${{ github.ref }}" = "refs/heads/next" ]; then
-            # Default targets the current prod replica provisioned via
-            # `phala instances add`. Shares the same app_id (0x969a8c14...)
-            # and derived keys as previous chipotle-next instances. To roll a
-            # new replica onto a different Phala node (zero-downtime upgrade),
-            # supply the `phala_cvm_name` input on a manual run instead of
-            # editing this default.
             DEFAULT_APP_NAME="chipotle-next-rep-sa6xj"
+            CVM_A="$NEXT_CVM_A"; CVM_B="$NEXT_CVM_B"
             echo "instance_type=tdx.small" >> "$GITHUB_OUTPUT"
             echo "gcp_project_id=chipotle-next" >> "$GITHUB_OUTPUT"
             echo "node_config=NodeConfig.next.toml" >> "$GITHUB_OUTPUT"
             DOMAIN="test.chipotle.litprotocol.com"
           else
-            echo "Unsupported branch for deployment"
+            echo "Unsupported ref '${{ github.ref }}' — deploy from main (or manual dispatch)."
             exit 1
           fi
 
-          # A manual workflow_dispatch run may override the target CVM via the
-          # phala_cvm_name input. This is empty on push events, so automated
-          # deploys keep using the branch default selected above.
-          PHALA_APP_NAME="${{ inputs.phala_cvm_name }}"
-          if [ -z "$PHALA_APP_NAME" ]; then
-            PHALA_APP_NAME="$DEFAULT_APP_NAME"
+          # Resolve a domain's CNAME target (no trailing dot) via dig, DoH fallback.
+          resolve_cname() {
+            # Prefer the zone's AUTHORITATIVE nameserver (no caching-resolver lag —
+            # critical when a previous run just cut over and a new run must read the
+            # current live node). Fall back to the default resolver, then DoH.
+            local d="$1" zone ns out=""
+            zone="${d#*.}"                                  # test.chipotle.litprotocol.com → chipotle.litprotocol.com
+            ns=$(dig +short NS "$zone" 2>/dev/null | head -1)
+            [ -n "$ns" ] && out=$(dig +short CNAME "$d" "@${ns}" 2>/dev/null | head -1 | sed 's/\.$//')
+            [ -z "$out" ] && out=$(dig +short CNAME "$d" 2>/dev/null | head -1 | sed 's/\.$//')
+            if [ -z "$out" ]; then
+              out=$(curl -s -H 'accept: application/dns-json' \
+                "https://1.1.1.1/dns-query?name=${d}&type=CNAME" 2>/dev/null \
+                | jq -r '.Answer[]? | select(.type==5) | .data' | head -1 | sed 's/\.$//')
+            fi
+            echo "$out"
+          }
+
+          # --- Ping-pong target selection (STATELESS) ---
+          # The LIVE instance is whichever the public domain currently points at.
+          # We read the domain's CNAME (→ the live node's gateway) and match it to
+          # each candidate CVM's gateway via `phala cvms get`. The OTHER instance
+          # is the cold deploy target. No stored "live" var → it can't drift, can't
+          # be corrupted by a cancelled run, and we can never deploy onto the box
+          # that is actually serving. Both instances share one app_id (one KMS
+          # identity); both nodes' devices must be on-chain allowlisted.
+          PINGPONG="false"; PREV=""; TARGET=""; LIVE_CVM=""
+          if [ -n "$CVM_A" ] && [ -n "$CVM_B" ]; then
+            PINGPONG="true"
+            LIVE_GW=$(resolve_cname "$DOMAIN")
+            GW_A=$(phala cvms get "$CVM_A" --json 2>/dev/null | jq -r '.gateway.cname // empty' | sed 's/\.$//')
+            GW_B=$(phala cvms get "$CVM_B" --json 2>/dev/null | jq -r '.gateway.cname // empty' | sed 's/\.$//')
+            if [ -n "$LIVE_GW" ] && [ "$LIVE_GW" = "$GW_A" ]; then LIVE_CVM="$CVM_A";
+            elif [ -n "$LIVE_GW" ] && [ "$LIVE_GW" = "$GW_B" ]; then LIVE_CVM="$CVM_B"; fi
+            PREV="$LIVE_CVM"
+            echo "Live gateway from DNS: '${LIVE_GW:-<none>}' → live CVM: '${LIVE_CVM:-<unknown>}' (A gw='$GW_A' B gw='$GW_B')"
+            if [ -n "$INPUT_CVM" ]; then
+              TARGET="$INPUT_CVM"
+            elif [ "$LIVE_CVM" = "$CVM_A" ]; then TARGET="$CVM_B";
+            elif [ "$LIVE_CVM" = "$CVM_B" ]; then TARGET="$CVM_A";
+            else
+              echo "::error::Could not determine the live instance from DNS (domain CNAME='${LIVE_GW:-empty}'; A gw='$GW_A'; B gw='$GW_B'). Pass phala_cvm_name to override."
+              exit 1
+            fi
+            # Never deploy onto the instance that is currently serving the domain.
+            if [ -n "$LIVE_CVM" ] && [ "$TARGET" = "$LIVE_CVM" ]; then
+              echo "::error::Refusing to deploy to the currently-live instance '$TARGET'. Target the cold one (or omit phala_cvm_name to auto-pick)."
+              exit 1
+            fi
+          else
+            TARGET="$DEFAULT_APP_NAME"
+            if [ -n "$INPUT_CVM" ]; then TARGET="$INPUT_CVM"; fi
           fi
-          echo "Deploying to Phala CVM: ${PHALA_APP_NAME}"
-          echo "phala_app_name=${PHALA_APP_NAME}" >> "$GITHUB_OUTPUT"
+          # Never retire the box we just deployed to.
+          if [ "$PREV" = "$TARGET" ]; then PREV=""; fi
+
+          echo "Ping-pong mode: $PINGPONG"
+          echo "Deploying to (cold) CVM: $TARGET ; retire after cutover: ${PREV:-<none>}"
+          echo "target_cvm=${TARGET}" >> "$GITHUB_OUTPUT"
+          echo "prev_live_cvm=${PREV}" >> "$GITHUB_OUTPUT"
+          echo "pingpong=${PINGPONG}" >> "$GITHUB_OUTPUT"
 
           echo "domain=${DOMAIN}" >> "$GITHUB_OUTPUT"
           echo "base_url=https://${DOMAIN}" >> "$GITHUB_OUTPUT"
@@ -341,18 +417,28 @@ jobs:
 
   wait-for-api-available:
     needs: [deploy, determine-target, detect-changes]
-    if: ${{ !cancelled() && needs.determine-target.result == 'success' && needs.detect-changes.result == 'success' && (needs.deploy.result == 'success' || needs.deploy.result == 'skipped') }}
+    # Only verify when a deploy actually happened. The cold instance is normally
+    # STOPPED between deploys, so on a no-op push (deploy_needed=false) there is
+    # nothing running at the cold URL to check — skip the whole verify chain.
+    if: ${{ needs.detect-changes.outputs.deploy_needed == 'true' && needs.deploy.result == 'success' }}
     uses: ./.github/workflows/wait-for-api-restart.yml
     with:
-      api_root_url: ${{ needs.determine-target.outputs.api_root_url }}
+      # Verify the freshly-deployed (cold) CVM on its OWN default Phala URL
+      # (*-8000.*.phala.network), not the shared public domain — which the old
+      # instance still owns until cutover. wait-for-api-restart resolves the
+      # direct URL from the CVM name via `phala cvms get`.
+      phala_app_name: ${{ needs.determine-target.outputs.target_cvm }}
       expected_sha: ${{ needs.detect-changes.outputs.deploy_needed == 'true' && github.sha || '' }}
       runner: '["self-hosted"]'
+    secrets:
+      PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
 
   verify-attestation:
     needs: [wait-for-api-available, determine-target]
     uses: ./.github/workflows/verify-attestation.yml
     with:
-      base_url: ${{ needs.determine-target.outputs.base_url }}
+      # Attest the cold box directly (its resolved default URL), pre-cutover.
+      base_url: ${{ needs.wait-for-api-available.outputs.base_url }}
       runner: '["self-hosted"]'
 
   openapi-spec-check:
@@ -373,3 +459,147 @@ jobs:
     uses: ./.github/workflows/k6-correctness.yml
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+
+  # ───────────────────────── Zero-downtime cutover (ping-pong) ─────────────────────────
+  # The cold CVM's dstack-ingress auto-claims the public domain on boot (as soon
+  # as lit-api-server's container starts — docker-compose service_started; there
+  # is no /health gate). After the cold box has
+  # passed all checks above on its direct URL, confirm the PUBLIC domain now
+  # serves the new version (DNS cutover propagated), THEN stop the old instance.
+  # No "live pointer" to record — the next deploy derives the live instance from
+  # DNS (see determine-target). Both jobs are no-ops outside ping-pong mode.
+
+  confirm-cutover:
+    needs: [determine-target, detect-changes, wait-for-api-available, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness]
+    if: ${{ needs.determine-target.outputs.pingpong == 'true' && needs.detect-changes.outputs.deploy_needed == 'true' }}
+    uses: ./.github/workflows/wait-for-api-restart.yml
+    with:
+      # PUBLIC domain this time — wait until the cold box's auto-claim has rolled
+      # over and the live domain reports the new SHA. The new SHA exists
+      # only on the freshly-deployed cold box, so this serving the new SHA implies
+      # the cold box owns the domain. (stop-old-cvm re-checks the CNAME to be sure,
+      # covering the same-commit-redeploy edge where both boxes share a SHA.)
+      api_root_url: ${{ needs.determine-target.outputs.api_root_url }}
+      expected_sha: ${{ github.sha }}
+      timeout: 300
+      runner: '["self-hosted"]'
+
+  stop-old-cvm:
+    needs: [determine-target, detect-changes, confirm-cutover]
+    if: ${{ needs.determine-target.outputs.pingpong == 'true' && needs.determine-target.outputs.prev_live_cvm != '' && needs.detect-changes.outputs.deploy_needed == 'true' }}
+    runs-on: self-hosted
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Phala CLI
+        run: npm install -g phala
+      - name: Stop the old instance — only if the domain has moved OFF it
+        # Guard against stranding the public domain: resolve the live domain's
+        # CNAME and refuse to stop OLD if the domain still points at OLD's gateway
+        # (cutover didn't actually move). Use `stop` (not delete) so the cert
+        # volume + identity persist as a warm rollback / next flip target.
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+        run: |
+          OLD="${{ needs.determine-target.outputs.prev_live_cvm }}"
+          DOMAIN="${{ needs.determine-target.outputs.domain }}"
+          resolve_cname() {
+            # Prefer the zone's AUTHORITATIVE nameserver (no caching-resolver lag —
+            # critical when a previous run just cut over and a new run must read the
+            # current live node). Fall back to the default resolver, then DoH.
+            local d="$1" zone ns out=""
+            zone="${d#*.}"                                  # test.chipotle.litprotocol.com → chipotle.litprotocol.com
+            ns=$(dig +short NS "$zone" 2>/dev/null | head -1)
+            [ -n "$ns" ] && out=$(dig +short CNAME "$d" "@${ns}" 2>/dev/null | head -1 | sed 's/\.$//')
+            [ -z "$out" ] && out=$(dig +short CNAME "$d" 2>/dev/null | head -1 | sed 's/\.$//')
+            if [ -z "$out" ]; then
+              out=$(curl -s -H 'accept: application/dns-json' \
+                "https://1.1.1.1/dns-query?name=${d}&type=CNAME" 2>/dev/null \
+                | jq -r '.Answer[]? | select(.type==5) | .data' | head -1 | sed 's/\.$//')
+            fi
+            echo "$out"
+          }
+          LIVE_GW=$(resolve_cname "$DOMAIN")
+          OLD_GW=$(phala cvms get "$OLD" --json 2>/dev/null | jq -r '.gateway.cname // empty' | sed 's/\.$//')
+          if [ -z "$LIVE_GW" ]; then
+            echo "::error::Could not resolve $DOMAIN; refusing to stop $OLD."
+            exit 1
+          fi
+          if [ "$LIVE_GW" = "$OLD_GW" ]; then
+            echo "::error::Public domain still points at OLD instance '$OLD' (gw=$OLD_GW). Cutover did not move the domain — NOT stopping it (would cause an outage)."
+            exit 1
+          fi
+          echo "Domain now on '$LIVE_GW' (off old '$OLD_GW'); stopping old instance: $OLD"
+          phala cvms stop "$OLD"
+
+  # Post-cutover auto-rollback. The cold box auto-claims the domain at boot (as
+  # soon as the container starts), BEFORE the deeper checks (attestation/openapi/k6)
+  # run. If any of
+  # those fail, the new box is live-but-bad — flip the public domain back to the
+  # still-running old instance and stop the bad new box. Both instances share one
+  # app_id, so the _dstack-app-address TXT is identical; only the CNAME (→ node
+  # gateway) needs to move back. Runs ONLY on a verify failure after the new box
+  # came up (if it never came up, it never claimed, and the old box still serves).
+  rollback-on-failure:
+    needs: [determine-target, detect-changes, deploy, wait-for-api-available, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness]
+    if: >-
+      ${{ always()
+          && needs.determine-target.outputs.pingpong == 'true'
+          && needs.detect-changes.outputs.deploy_needed == 'true'
+          && needs.deploy.result == 'success'
+          && needs.wait-for-api-available.result == 'success'
+          && needs.determine-target.outputs.prev_live_cvm != ''
+          && (needs.verify-attestation.result == 'failure'
+              || needs.openapi-spec-check.result == 'failure'
+              || needs.k6-smoke.result == 'failure'
+              || needs.k6-correctness.result == 'failure') }}
+    runs-on: self-hosted
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Phala CLI + AWS CLI
+        run: |
+          npm install -g phala
+          command -v aws >/dev/null 2>&1 || python3 -m pip install --quiet --user awscli
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Roll the domain back to the previous instance, stop the bad one
+        env:
+          PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
+          CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
+          AWS_DEFAULT_REGION: ${{ vars.CERTBOT_AWS_REGION }}
+        run: |
+          set -euo pipefail
+          OLD="${{ needs.determine-target.outputs.prev_live_cvm }}"
+          NEW="${{ needs.determine-target.outputs.target_cvm }}"
+          DOMAIN="${{ needs.determine-target.outputs.domain }}"
+          OLD_GW=$(phala cvms get "$OLD" --json 2>/dev/null | jq -r '.gateway.cname // empty' | sed 's/\.$//')
+          [ -n "$OLD_GW" ] || { echo "::error::Rollback: cannot resolve old gateway for $OLD"; exit 1; }
+
+          # Assume the Route 53 role (same creds the CVMs use for DNS-01).
+          CREDS=$(aws sts assume-role --role-arn "$CERTBOT_AWS_ROLE_ARN" \
+            --role-session-name pingpong-rollback --query Credentials --output json)
+          export AWS_ACCESS_KEY_ID=$(echo "$CREDS" | jq -r .AccessKeyId)
+          export AWS_SECRET_ACCESS_KEY=$(echo "$CREDS" | jq -r .SecretAccessKey)
+          export AWS_SESSION_TOKEN=$(echo "$CREDS" | jq -r .SessionToken)
+
+          ZONE_DNS="${DOMAIN#*.}"   # test.chipotle.litprotocol.com → chipotle.litprotocol.com
+          ZONE=$(aws route53 list-hosted-zones-by-name --dns-name "$ZONE_DNS" \
+            --query 'HostedZones[0].Id' --output text | sed 's#/hostedzone/##')
+          [ -n "$ZONE" ] || { echo "::error::Rollback: could not find hosted zone for $ZONE_DNS"; exit 1; }
+
+          CB=$(mktemp)
+          printf '{"Comment":"pingpong rollback","Changes":[{"Action":"UPSERT","ResourceRecordSet":{"Name":"%s","Type":"CNAME","TTL":30,"ResourceRecords":[{"Value":"%s"}]}}]}\n' "$DOMAIN" "$OLD_GW" > "$CB"
+          echo "Rollback: pointing $DOMAIN CNAME back to old gateway $OLD_GW"
+          aws route53 change-resource-record-sets --hosted-zone-id "$ZONE" --change-batch "file://$CB"
+          rm -f "$CB"
+
+          # Stop the bad new box so its renewal daemon can't re-claim the CNAME.
+          unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN
+          echo "Rollback: stopping bad new instance $NEW"
+          phala cvms stop "$NEW" || true
+          echo "::error::Post-cutover verification failed — rolled $DOMAIN back to $OLD and stopped $NEW. Investigate the new build before redeploying."
+          exit 1
