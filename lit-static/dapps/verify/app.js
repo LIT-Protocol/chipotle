@@ -58,7 +58,7 @@ function kv(label, value, cls) {
 }
 
 function link(href, text) {
-  return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener">${escapeHtml(text)}</a>`;
+  return `<a href="${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">${escapeHtml(text)}</a>`;
 }
 
 function collapsible(summary, body) {
@@ -76,6 +76,11 @@ function normHex(h) {
 }
 
 async function sha256hex(str) {
+  if (!(window.crypto && window.crypto.subtle)) {
+    throw new Error(
+      'Web Crypto (crypto.subtle) is unavailable. Open this page over https:// or http://localhost — not file://.'
+    );
+  }
   const data = new TextEncoder().encode(str);
   const buf = await crypto.subtle.digest('SHA-256', data);
   return Array.from(new Uint8Array(buf))
@@ -118,7 +123,11 @@ const WARN = 'warn';
 const FAIL = 'fail';
 
 async function fetchJson(url) {
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
+  // Always read fresh: a verification tool must never trust a stale cache.
+  const res = await fetch(url, {
+    cache: 'no-store',
+    headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
+  });
   const body = await res.text();
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} — ${truncate(body, 200) || res.statusText}`);
@@ -204,7 +213,14 @@ async function stepComposeIntegrity(tcb, composeHash) {
     return WARN;
   }
 
-  const computed = await sha256hex(tcb.app_compose);
+  let computed;
+  try {
+    computed = await sha256hex(tcb.app_compose);
+  } catch (e) {
+    setPill('step-compose', 'warn', 'unavailable');
+    setDetail('step-compose', `<p class="note bad">${escapeHtml(e.message)}</p>`);
+    return WARN;
+  }
   const reported = normHex(composeHash);
   const match = computed === reported;
 
@@ -322,14 +338,48 @@ function stepTrustCenter(info, expectedAppId) {
 
 let running = false;
 
-async function runVerify() {
-  if (running) return;
-  running = true;
-
+/**
+ * Read and validate the config inputs up-front. Returns { config } on success or
+ * { error } with a message. Fails fast so we never issue a relative fetch (e.g. an
+ * empty API URL becoming `/info`) or pass a non-canonical address to ethers.
+ */
+function readConfig() {
   const apiUrl = el('api-url').value.trim().replace(/\/+$/, '');
   const rpcUrl = el('rpc-url').value.trim();
-  const expectedAppId = el('app-id').value.trim();
+  const appIdRaw = el('app-id').value.trim();
 
+  if (!/^https?:\/\/.+/i.test(apiUrl)) {
+    return { error: 'API base URL must be an absolute http(s):// URL.' };
+  }
+  if (!/^https?:\/\/.+/i.test(rpcUrl)) {
+    return { error: 'Base RPC URL must be an absolute http(s):// URL.' };
+  }
+
+  // Accept a bare 20-byte hex (no 0x) too, then canonicalize via ethers.getAddress,
+  // which validates length and checksum. Step 3 compares it, step 4 calls it.
+  let addrInput = appIdRaw;
+  if (/^[0-9a-fA-F]{40}$/.test(addrInput)) addrInput = '0x' + addrInput;
+  let expectedAppId;
+  try {
+    expectedAppId = ethers.getAddress(addrInput);
+  } catch {
+    return { error: 'Expected app id must be a valid 20-byte address (0x + 40 hex chars).' };
+  }
+
+  return { config: { apiUrl, rpcUrl, expectedAppId } };
+}
+
+async function runVerify() {
+  if (running) return;
+
+  const { config, error } = readConfig();
+  if (error) {
+    setVerdict('fail', 'Invalid configuration', error);
+    return;
+  }
+  const { apiUrl, rpcUrl, expectedAppId } = config;
+
+  running = true;
   el('verify-btn').disabled = true;
   setVerdict('running', 'Verifying…', 'Reading attestation, recomputing the hash, and querying Base.');
 

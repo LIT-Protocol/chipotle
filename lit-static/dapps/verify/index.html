@@ -404,7 +404,7 @@
     <p class="subtitle">
       Confirm that the Lit Chipotle API server is running unmodified code inside a genuine Intel TDX
       enclave operated by Phala Cloud — entirely in your browser, no terminal required. This runs the
-      <a href="https://developer.litprotocol.com/architecture/verification/quick-verify" target="_blank" rel="noopener"
+      <a href="https://developer.litprotocol.com/architecture/verification/quick-verify" target="_blank" rel="noopener noreferrer"
         >quick-verify</a
       >
       checks: it reads the live attestation, recomputes the configuration hash, confirms the app
@@ -506,16 +506,20 @@
     </div>
 
     <footer>
-      <a href="https://developer.litprotocol.com/architecture/verification/quick-verify" target="_blank" rel="noopener"
+      <a href="https://developer.litprotocol.com/architecture/verification/quick-verify" target="_blank" rel="noopener noreferrer"
         >Verification docs</a
       >
-      <a href="https://docs.phala.com/phala-cloud/attestation/get-attestation" target="_blank" rel="noopener"
+      <a href="https://docs.phala.com/phala-cloud/attestation/get-attestation" target="_blank" rel="noopener noreferrer"
         >Phala attestation</a
       >
-      <a href="https://basescan.org/" target="_blank" rel="noopener">BaseScan</a>
+      <a href="https://basescan.org/" target="_blank" rel="noopener noreferrer">BaseScan</a>
     </footer>
 
-    <script src="https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.umd.min.js"></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/ethers@6.13.0/dist/ethers.umd.min.js"
+      integrity="sha384-JjzOKxQsr+Jhx75Ot1XldVFnWF2UCtB4Ig2JuEcuBt4VAdUG6alucV+sHrYjPn5C"
+      crossorigin="anonymous"
+    ></script>
     <script src="app.js"></script>
   </body>
 </html>
