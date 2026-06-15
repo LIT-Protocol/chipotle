@@ -21,8 +21,11 @@ test claims.
    matches what the test asserts, and flag anything that looks wrong even if the
    test passed.
 
-3. **For step-by-step evidence, add `--trace on`.** The trace zip in
-   `e2e/test-results/` contains a screenshot of every action; point the user at
+3. **For step-by-step evidence, add `--trace on`.** Example:
+
+   - `pnpm test -- --trace on` (or `pnpm test:api -- --trace on`, etc.)
+
+   The trace zip in `e2e/test-results/` contains a screenshot of every action; point the user at
    `pnpm exec playwright show-trace <zip>` to replay it.
 
 4. **Include the screenshot file paths in your final report** so the user can open
