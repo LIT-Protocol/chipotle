@@ -55,10 +55,13 @@ jobs:
           # can mutate, and they are consumed by later shell steps. Reject
           # anything that isn't a plain network name / EVM address so a crafted
           # NodeConfig cannot inject shell or extra $GITHUB_OUTPUT keys.
-          if ! printf '%s' "$NETWORK" | grep -Eq '^[a-z0-9-]+$'; then
-            echo "::error::Invalid network '$NETWORK' in $CONFIG (expected [a-z0-9-]+)."
-            exit 1
-          fi
+          case "$NETWORK" in
+            anvil|yellowstone|base-sepolia|base) ;;
+            *)
+              echo "::error::Invalid network '$NETWORK' in $CONFIG (expected anvil, yellowstone, base-sepolia, or base)."
+              exit 1
+              ;;
+          esac
           if ! printf '%s' "$ADDRESS" | grep -Eq '^0x[a-fA-F0-9]{40}$'; then
             echo "::error::Invalid contract_address '$ADDRESS' in $CONFIG (expected 0x + 40 hex chars)."
             exit 1
