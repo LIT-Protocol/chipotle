@@ -29,7 +29,7 @@ on:
         required: false
         type: string
       accounts_file:
-        description: "Optional accounts file override (e.g. ./k6/data/accounts.next.json)"
+        description: "Optional accounts file override, relative to the k6/ dir (e.g. ./data/accounts.next.json)"
         required: false
         type: string
 
@@ -37,7 +37,9 @@ jobs:
   k6-smoke:
     runs-on: self-hosted
     env:
-      K6_ACCOUNTS_FILE: ${{ inputs.accounts_file || (github.ref_name == 'next' && './data/accounts.next.json' || './data/accounts.dev.json') }}
+      # `main` is the deploy branch and targets chipotle-next (test.chipotle.litprotocol.com);
+      # the legacy `next` branch is retired. chipotle-dev is deprecated.
+      K6_ACCOUNTS_FILE: ${{ inputs.accounts_file || (github.ref_name == 'main' && './data/accounts.next.json' || './data/accounts.dev.json') }}
     steps:
       - uses: actions/checkout@v4
 
