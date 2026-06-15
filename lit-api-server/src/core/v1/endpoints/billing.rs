@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::core::v1::guards::billing_auth::BillingAuth;
 use crate::core::v1::helpers::api_status::{ApiResult, ApiStatus, ErrMessage};
 use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{ConfirmPaymentRequest, CreatePaymentIntentRequest};
@@ -7,7 +8,6 @@ use crate::core::v1::models::response::{
     AccountOpResponse, BillingBalanceResponse, CreatePaymentIntentResponse, StripeConfigResponse,
 };
 use crate::stripe::{self, StripeState, WebhookHandleError};
-use lit_billing_core::billing_auth::BillingAuth;
 use rocket::data::ToByteUnit;
 use rocket::http::Status;
 use rocket::request::{FromRequest, Outcome, Request};
