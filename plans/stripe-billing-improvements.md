@@ -125,33 +125,41 @@ Today `get_customer_by_wallet` queries Stripe by metadata each time (with a cach
 
 ## Sequencing
 
+The architectural move comes first. The cache work comes after — by then it's a much smaller problem (TEE internal gate only, not the public balance-read path), and the system is already in its target shape.
+
 Each phase is independently shippable and safe to halt between.
 
-1. **Phase 1 — Cache fix (small, urgent for auto top-up):**
-   - Treat insufficient cached balance as a miss; refetch from Stripe.
-   - Add the short-lived negative cache.
-   - This unblocks auto top-up from working correctly today, even before any code moves.
-
-2. **Phase 2 — Stand up the move targets in lit-payments:**
+1. **Phase 1 — Stand up the move targets in lit-payments:**
    - Port `create_payment_intent`, `confirm_payment_and_credit`, `set_customer_email`, `register_customer_email`.
-   - Port the **read-balance** path so lit-payments can serve `GET /billing/balance`.
+   - Port the read-balance path so lit-payments can serve `GET /billing/balance` (lit-payments reads Stripe directly; its own cache is fine and unconstrained by TEE).
    - Add endpoints in lit-payments mirroring `POST /billing/payment-intent`, `POST /billing/confirm-payment`, `GET /billing/stripe-config`, and `GET /billing/balance`.
    - Stand up the Stripe webhook receiver in lit-payments (single destination going forward).
-   - Ship behind a feature flag in the dashboard so it can flip between TEE-served and lit-payments-served endpoints.
+   - No client changes yet. Endpoints exist in both places.
 
-3. **Phase 3 — Flip clients:**
+2. **Phase 2 — Flip clients to lit-payments:**
    - Dashboard top-up + balance display → lit-payments.
-   - Any SDK or example that hits the TEE for payment intents or balance reads → lit-payments.
+   - Any SDK or example that hits the TEE for payment intents, balance reads, or stripe-config → lit-payments.
+   - Hard cutover per client (not concurrent traffic — avoids double-credit risk on confirm).
    - Monitor for regression for ~1 week.
 
-4. **Phase 4 — Delete from TEE:**
-   - Remove all five Stripe HTTP endpoints (`payment-intent`, `confirm-payment`, `stripe-config`, `balance`, and any reporting endpoints) and their handlers from `lit-api-server`.
-   - Delete the moved functions from `stripe.rs`. Keep `get_credit_balance` as an internal function used by the debit path.
+3. **Phase 3 — Delete from TEE:**
+   - Remove all Stripe HTTP endpoints (`payment-intent`, `confirm-payment`, `stripe-config`, `balance`) and their handlers from `lit-api-server`.
+   - Delete the moved functions from `stripe.rs`. Keep `get_credit_balance` as an **internal Rust function** used by the debit-gate check.
    - Re-attest / redeploy enclave with the smaller surface.
+
+4. **Phase 4 — Fix the TEE's internal debit-gate cache:**
+   - Now the only consumer of the TEE's balance cache is the gate check inside the debit path.
+   - Apply cache rule 2: treat insufficient cached balance as a miss; refetch from Stripe.
+   - Add the short-lived negative cache to bound Stripe rate-limit risk.
+   - This is the piece that lets auto top-up actually unlock billed work inside the TEE without waiting for TTL.
 
 5. **Phase 5 — Reporting:**
    - Move reporting helpers and the `stripe_report` binary to lit-payments.
    - Decommission TEE-side report runners.
+
+### Note on auto top-up correctness during the transition
+
+After Phase 2, the dashboard will already show fresh balance correctly because reads come from lit-payments. But billed API requests against the TEE can still 402 from a stale internal cache between top-up and TTL expiry. If auto top-up is in production users' hands before Phase 4 lands, **Phase 4 can be pulled forward and shipped as a small standalone PR against the current TEE code** — it's a self-contained ~20-line change. Sequencing it after the move is the clean version; sequencing it earlier is fine if timing demands it.
 
 ## Resolved decisions
 
