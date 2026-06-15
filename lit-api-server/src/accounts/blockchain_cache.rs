@@ -180,6 +180,44 @@ pub fn invalidate_for_hash(api_key_hash: U256) {
     }
 }
 
+/// Invalidate cached permission entries for an entire account identified by its
+/// on-chain `apiKeyHash`: the account (master) key and every usage key under it.
+///
+/// Hash-based analogue of [`invalidate_for_account`], used by the on-chain
+/// account-event listener ([`crate::account_events`]). Account-level mutation
+/// events (group/action/PKP) carry only the master `apiKeyHash`, but cached
+/// permission entries are keyed per *calling* key (master or usage), so
+/// usage-key-authenticated traffic would otherwise serve stale results until
+/// TTL. Resolves the usage keys via a chain call to `list_api_keys_by_hash`.
+///
+/// **Limitation:** Only the first 1000 usage keys are invalidated; any beyond
+/// that expire naturally via the 60-minute `time_to_live`. This mirrors
+/// [`invalidate_for_account`] and is acceptable in practice.
+pub async fn invalidate_for_account_hash(account_api_key_hash: U256) {
+    let Some(cache) = get() else { return };
+    cache.bump_generation(&account_api_key_hash.to_string());
+
+    match super::list_api_keys_by_hash(account_api_key_hash, U256::ZERO, U256::from(1000u64)).await
+    {
+        Ok(usage_keys) => {
+            for uk in &usage_keys {
+                cache.bump_generation(&uk.apiKeyHash.to_string());
+            }
+            tracing::debug!(
+                "blockchain_cache: invalidated account {} ({} usage keys)",
+                account_api_key_hash,
+                usage_keys.len()
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                "blockchain_cache: failed to list usage keys for account {account_api_key_hash}: {e}. \
+                 Usage-key cache entries may be stale until TTL."
+            );
+        }
+    }
+}
+
 /// Invalidate cached permission entries for the given API key.
 ///
 /// Prefer `invalidate_for_account` for group/action/PKP mutations, which also

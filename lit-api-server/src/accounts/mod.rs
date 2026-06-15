@@ -588,8 +588,18 @@ pub async fn list_api_keys(
     page_number: U256,
     page_size: U256,
 ) -> Result<Vec<UsageApiKeyReturn>> {
+    list_api_keys_by_hash(api_key_hash(api_key), page_number, page_size).await
+}
+
+/// List the usage API keys under an account, identified by its on-chain
+/// `apiKeyHash` directly (rather than a raw API key string). Used by the
+/// on-chain account-event listener, which only has access to hashes.
+pub async fn list_api_keys_by_hash(
+    account_api_key_hash: U256,
+    page_number: U256,
+    page_size: U256,
+) -> Result<Vec<UsageApiKeyReturn>> {
     let contract = get_read_only_account_config_contract().await?;
-    let account_api_key_hash = api_key_hash(api_key);
     let page = contract
         .listApiKeys(account_api_key_hash, page_number, page_size)
         .call()

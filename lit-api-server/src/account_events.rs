@@ -19,6 +19,7 @@ use alloy::primitives::{B256, U256};
 use alloy::providers::Provider;
 use alloy::rpc::types::Filter;
 use alloy::sol_types::SolEvent;
+use std::collections::HashSet;
 use std::time::Duration;
 
 /// Polling interval for checking new account-mutation events.
@@ -78,8 +79,13 @@ fn event_signatures() -> Vec<B256> {
 }
 
 /// Decode a single log against the known WritesFacet events and return every
-/// account `apiKeyHash` whose cached entries it affects. Logs whose signature
-/// doesn't match a known event (or which fail to decode) yield an empty vec.
+/// `apiKeyHash` carried in it. Logs whose signature doesn't match a known event
+/// (or which fail to decode) yield an empty vec.
+///
+/// **Invariant:** the first hash is always the account (master) `apiKeyHash`.
+/// Account-level events (group/action/PKP) carry only that; usage-key events
+/// additionally carry the usage key hash. Callers rely on `[0]` being the
+/// account hash to expand it to all usage keys under the account.
 fn account_hashes_from_log(log: &alloy::primitives::Log) -> Vec<U256> {
     let Some(topic0) = log.topics().first().copied() else {
         return Vec::new();
@@ -109,10 +115,43 @@ fn account_hashes_from_log(log: &alloy::primitives::Log) -> Vec<U256> {
     Vec::new()
 }
 
-/// Decode a single log and invalidate the cache for every affected account hash.
-fn invalidate_from_log(log: &alloy::rpc::types::Log) {
-    for hash in account_hashes_from_log(&log.inner) {
-        blockchain_cache::invalidate_for_hash(hash);
+/// Invalidate the cache for a batch of logs from one poll.
+///
+/// Two layers of invalidation, both required for correctness:
+/// 1. **Direct** — bump every hash carried in the events. This covers the
+///    usage key in a `UsageApiKeyRemoved` event, whose hash will no longer be
+///    returned by `listApiKeys` after removal.
+/// 2. **Account expansion** — for every affected account (the first hash of
+///    each event), also bump all usage keys under it. Account-level mutations
+///    (group/action/PKP) carry only the master hash, but cached permission
+///    entries are keyed per *calling* key, so usage-key traffic would stay
+///    stale until TTL otherwise.
+///
+/// Both sets are deduped so each account triggers at most one `listApiKeys`
+/// chain call per poll, regardless of how many of its events appear in the batch.
+async fn process_logs(logs: &[alloy::rpc::types::Log]) {
+    let mut direct: HashSet<U256> = HashSet::new();
+    let mut accounts: HashSet<U256> = HashSet::new();
+
+    for log in logs {
+        let hashes = account_hashes_from_log(&log.inner);
+        if let Some(&account) = hashes.first() {
+            accounts.insert(account);
+        }
+        direct.extend(hashes);
+    }
+
+    tracing::info!(
+        log_count = logs.len(),
+        account_count = accounts.len(),
+        "Account mutation events detected — invalidating cache"
+    );
+
+    for hash in &direct {
+        blockchain_cache::invalidate_for_hash(*hash);
+    }
+    for account in &accounts {
+        blockchain_cache::invalidate_for_account_hash(*account).await;
     }
 }
 
@@ -192,14 +231,7 @@ async fn run_event_listener() -> anyhow::Result<()> {
         match client.get_logs(&filter).await {
             Ok(logs) => {
                 if !logs.is_empty() {
-                    tracing::info!(
-                        log_count = logs.len(),
-                        block_range = format!("{from_block}..{latest_block}"),
-                        "Account mutation events detected — invalidating cache"
-                    );
-                    for log in &logs {
-                        invalidate_from_log(log);
-                    }
+                    process_logs(&logs).await;
                 }
                 // Only advance once logs are successfully processed; on error we
                 // retry the same range on the next tick.
@@ -427,9 +459,17 @@ mod tests {
                 signatures.contains(&topic0),
                 "every probe's signature must be in the filter set"
             );
+            let hashes = account_hashes_from_log(log);
             assert!(
-                account_hashes_from_log(log).contains(&account),
+                hashes.contains(&account),
                 "dispatch must decode every filtered signature"
+            );
+            // Invariant relied on by account expansion in process_logs: the
+            // first decoded hash is always the account (master) apiKeyHash.
+            assert_eq!(
+                hashes.first(),
+                Some(&account),
+                "first hash must be the account hash for every event"
             );
         }
     }
