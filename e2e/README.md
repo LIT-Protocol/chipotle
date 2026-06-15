@@ -85,6 +85,10 @@ make test-wc       # WalletConnect headless wallet
 make test-flows    # the parameterized onboarding flow under all three modes
 ```
 
+Set `AGENT_SCREENSHOTS=1` to capture a screenshot for every test (not just
+failures) into `test-results/`. AI agents are required to run with this on —
+see the root `AGENTS.md`.
+
 If you want to keep the cargo services running in your own terminal (e.g. to
 attach a debugger or watch logs), use:
 
