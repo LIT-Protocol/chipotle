@@ -278,7 +278,7 @@ pub fn invalidate_for_hash(api_key_hash: U256) {
 /// TTL. Resolves the usage keys via a chain call to `list_api_keys_by_hash`.
 ///
 /// **Limitation:** Only the first 1000 usage keys are invalidated; any beyond
-/// that expire naturally via the 60-minute `time_to_live`. This mirrors
+/// that expire naturally via the cache TTL. This mirrors
 /// [`invalidate_for_account`] and is acceptable in practice.
 pub async fn invalidate_for_account_hash(account_api_key_hash: U256) {
     let Some(cache) = get() else { return };

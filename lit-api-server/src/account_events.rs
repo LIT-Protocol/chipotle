@@ -4,8 +4,8 @@
 //! emitted by `WritesFacet` and invalidates the corresponding entries in the
 //! global blockchain permission cache ([`crate::accounts::blockchain_cache`]).
 //! This reflects on-chain changes made outside this process — e.g. directly
-//! against the contract, or by another API-server instance — without waiting for
-//! the 60-minute cache TTL.
+//! against the contract, or by another API-server instance — without waiting
+//! out the cache TTL.
 //!
 //! Mirrors the polling/retry structure of [`crate::restart`]. Unlike the restart
 //! listener (which watches a single event), it queries all WritesFacet event
