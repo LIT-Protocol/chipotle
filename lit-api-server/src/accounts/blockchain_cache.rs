@@ -43,10 +43,13 @@
 //!
 //! ## TTL: a backstop, not the freshness mechanism
 //!
-//! Invalidation keeps the cache fresh; the uniform TTL is only insurance for the
-//! windows invalidation can't cover (a missed-block gap, an ownership transfer
-//! that moves the wallet before the resolution entry expires, a replica between
-//! boot and its first poll).
+//! Invalidation keeps the cache fresh; the TTL is only insurance for the windows
+//! invalidation can't cover (a missed-block gap, an ownership transfer that moves
+//! the wallet before the resolution entry expires, a replica between boot and its
+//! first poll). Denials use a much shorter TTL than grants
+//! ([`NEGATIVE_CACHE_TTL_SECS`] vs [`CACHE_TTL_SECS`]) so that a permission
+//! granted while the listener is lagging or down still becomes visible quickly,
+//! rather than a stale denial being honored for the full grant TTL.
 //!
 //! ## Stateless / horizontally scalable by construction
 //!
@@ -58,15 +61,24 @@
 
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use alloy::primitives::{Address, U256};
+use moka::Expiry;
 use moka::future::Cache;
 
-/// Uniform TTL for every cached verdict — a backstop for the windows
-/// invalidation can't cover. Invalidation, not expiry, is the primary freshness
+/// TTL for positive (authorized) verdicts and for non-permission caches
+/// (wallet derivation, hash→wallet resolution). A backstop for the windows
+/// invalidation can't cover; invalidation, not expiry, is the primary freshness
 /// mechanism, so this is generous.
 const CACHE_TTL_SECS: u64 = 300;
+
+/// TTL for negative (denied) permission verdicts. Kept short so a permission
+/// granted out-of-band (a ChainSecured wallet-signed transaction, or RPC state
+/// lag right after a grant) becomes visible quickly even if the event listener
+/// is lagging or down — without it, a fresh denial would be honored for the full
+/// [`CACHE_TTL_SECS`]. Bounds the freshly-granted-but-still-denied window.
+const NEGATIVE_CACHE_TTL_SECS: u64 = 30;
 
 /// TTL for the `api_key_hash → account wallet` resolution cache. The mapping is
 /// stable except on ownership transfer, so this can be generous; it bounds how
@@ -76,7 +88,69 @@ const RESOLUTION_TTL_SECS: u64 = 300;
 /// Maximum entries per cache.
 const MAX_CAPACITY: u64 = 100_000;
 
-/// Build a verdict cache with the shared capacity and uniform TTL.
+/// TTL for a permission verdict: full when authorized, short when denied.
+fn permission_ttl(authorized: bool) -> Duration {
+    if authorized {
+        Duration::from_secs(CACHE_TTL_SECS)
+    } else {
+        Duration::from_secs(NEGATIVE_CACHE_TTL_SECS)
+    }
+}
+
+/// Per-entry expiry for the `bool` permission caches (`can_execute_action`,
+/// `can_use_wallet_in_action`): denials expire after [`NEGATIVE_CACHE_TTL_SECS`],
+/// grants after [`CACHE_TTL_SECS`].
+struct PermissionExpiry;
+
+impl Expiry<String, bool> for PermissionExpiry {
+    fn expire_after_create(
+        &self,
+        _key: &String,
+        value: &bool,
+        _created_at: Instant,
+    ) -> Option<Duration> {
+        Some(permission_ttl(*value))
+    }
+
+    fn expire_after_update(
+        &self,
+        _key: &String,
+        value: &bool,
+        _updated_at: Instant,
+        _duration_until_expiry: Option<Duration>,
+    ) -> Option<Duration> {
+        Some(permission_ttl(*value))
+    }
+}
+
+/// Per-entry expiry for the `(can_execute, can_use_wallet)` pair cache: the
+/// request only proceeds when both are true, so any `false` in the pair is a
+/// denial and expires after [`NEGATIVE_CACHE_TTL_SECS`].
+struct PairPermissionExpiry;
+
+impl Expiry<String, (bool, bool)> for PairPermissionExpiry {
+    fn expire_after_create(
+        &self,
+        _key: &String,
+        value: &(bool, bool),
+        _created_at: Instant,
+    ) -> Option<Duration> {
+        Some(permission_ttl(value.0 && value.1))
+    }
+
+    fn expire_after_update(
+        &self,
+        _key: &String,
+        value: &(bool, bool),
+        _updated_at: Instant,
+        _duration_until_expiry: Option<Duration>,
+    ) -> Option<Duration> {
+        Some(permission_ttl(value.0 && value.1))
+    }
+}
+
+/// Build a cache with the shared capacity and full positive TTL (used for the
+/// non-permission caches; permission caches use a per-entry [`Expiry`] instead).
 fn build_cache<V: Clone + Send + Sync + 'static>() -> Cache<String, V> {
     Cache::builder()
         .max_capacity(MAX_CAPACITY)
@@ -106,10 +180,21 @@ pub struct BlockchainCache {
 
 impl BlockchainCache {
     fn new() -> Self {
+        // Permission caches use per-entry expiry so denials expire fast; the
+        // non-permission caches use the plain positive TTL.
         Self {
-            execute_action: build_cache(),
-            use_wallet: build_cache(),
-            execute_and_wallet: build_cache(),
+            execute_action: Cache::builder()
+                .max_capacity(MAX_CAPACITY)
+                .expire_after(PermissionExpiry)
+                .build(),
+            use_wallet: Cache::builder()
+                .max_capacity(MAX_CAPACITY)
+                .expire_after(PermissionExpiry)
+                .build(),
+            execute_and_wallet: Cache::builder()
+                .max_capacity(MAX_CAPACITY)
+                .expire_after(PairPermissionExpiry)
+                .build(),
             wallet_derivation: build_cache(),
             resolution: Cache::builder()
                 .max_capacity(MAX_CAPACITY)
@@ -219,7 +304,7 @@ static BLOCKCHAIN_CACHE_INSTANCE: OnceLock<BlockchainCache> = OnceLock::new();
 pub fn init() {
     BLOCKCHAIN_CACHE_INSTANCE.get_or_init(BlockchainCache::new);
     tracing::info!(
-        "blockchain_cache: initialized (TTL={CACHE_TTL_SECS}s, per-account-generation invalidation)"
+        "blockchain_cache: initialized (TTL={CACHE_TTL_SECS}s, negative TTL={NEGATIVE_CACHE_TTL_SECS}s, per-account-generation invalidation)"
     );
 }
 
@@ -234,6 +319,76 @@ mod tests {
 
     fn test_cache() -> BlockchainCache {
         BlockchainCache::new()
+    }
+
+    // ── Per-entry expiry policy ──────────────────────────────────────
+
+    #[test]
+    fn permission_ttl_full_for_authorized_short_for_denied() {
+        assert_eq!(permission_ttl(true), Duration::from_secs(CACHE_TTL_SECS));
+        assert_eq!(
+            permission_ttl(false),
+            Duration::from_secs(NEGATIVE_CACHE_TTL_SECS)
+        );
+        assert!(NEGATIVE_CACHE_TTL_SECS < CACHE_TTL_SECS);
+    }
+
+    #[test]
+    fn permission_expiry_uses_value() {
+        let now = Instant::now();
+        let key = "k".to_string();
+        assert_eq!(
+            PermissionExpiry.expire_after_create(&key, &true, now),
+            Some(Duration::from_secs(CACHE_TTL_SECS))
+        );
+        assert_eq!(
+            PermissionExpiry.expire_after_create(&key, &false, now),
+            Some(Duration::from_secs(NEGATIVE_CACHE_TTL_SECS))
+        );
+    }
+
+    #[test]
+    fn pair_permission_expiry_short_unless_both_true() {
+        let now = Instant::now();
+        let key = "k".to_string();
+        let full = Some(Duration::from_secs(CACHE_TTL_SECS));
+        let short = Some(Duration::from_secs(NEGATIVE_CACHE_TTL_SECS));
+        assert_eq!(
+            PairPermissionExpiry.expire_after_create(&key, &(true, true), now),
+            full
+        );
+        assert_eq!(
+            PairPermissionExpiry.expire_after_create(&key, &(true, false), now),
+            short
+        );
+        assert_eq!(
+            PairPermissionExpiry.expire_after_create(&key, &(false, true), now),
+            short
+        );
+    }
+
+    #[tokio::test]
+    async fn denied_entry_expires_before_granted() {
+        // End-to-end wiring check with a sub-second surrogate so we don't wait
+        // 30 real seconds: a denial should evict while a grant survives.
+        struct FastExpiry;
+        impl Expiry<String, bool> for FastExpiry {
+            fn expire_after_create(&self, _k: &String, v: &bool, _c: Instant) -> Option<Duration> {
+                Some(if *v {
+                    Duration::from_secs(3600)
+                } else {
+                    Duration::from_millis(50)
+                })
+            }
+        }
+        let cache: Cache<String, bool> = Cache::builder().expire_after(FastExpiry).build();
+        cache.insert("denied".to_string(), false).await;
+        cache.insert("granted".to_string(), true).await;
+        assert_eq!(cache.get(&"denied".to_string()).await, Some(false));
+
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        assert_eq!(cache.get(&"denied".to_string()).await, None);
+        assert_eq!(cache.get(&"granted".to_string()).await, Some(true));
     }
 
     fn wallet_from_low_u64(n: u64) -> Address {
