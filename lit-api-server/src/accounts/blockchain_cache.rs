@@ -5,24 +5,109 @@
 //! so that repeated calls for the same API key and relevant parameters
 //! avoid redundant contract calls.
 //!
-//! TTL: 60 minutes idle (extending on every access) with a hard upper bound
-//! of 60 minutes from insertion (`time_to_live`), ensuring entries are never
-//! served beyond the TTL even under continuous traffic.
+//! TTL: permission results use per-entry expiration — positive (authorized)
+//! results live 5 minutes from insertion, while negative (denied) results
+//! expire after 30 seconds. ChainSecured accounts mutate permissions by
+//! sending wallet-signed transactions directly to the chain, which this
+//! server never observes, so no invalidation hook can cover those writes;
+//! the TTLs bound how long stale state is served in either direction: a
+//! stale denial (newly group-permitted action returning 403) lasts at most
+//! 30s, and a stale grant (revoked action/key still executing) lasts at most
+//! 5 minutes. Wallet derivation lookups use the positive TTL for the same
+//! reason — derivations can change on-chain without this server observing it.
+//! `try_get_with` coalesces concurrent misses per key, so the steady-state
+//! chain load is at most one read per (key, parameters) per TTL window.
 //!
 //! Invalidation uses a **per-account generation counter**: each API key hash
 //! has an associated generation number embedded in the cache key. Bumping the
 //! generation for an account causes all subsequent lookups to miss, while stale
-//! entries with old generations are evicted naturally by TTL.
+//! entries with old generations are evicted naturally by TTL. Note this is
+//! process-local: in a multi-replica deployment, a mutation handled by one
+//! replica does not invalidate the others — they converge within the TTL
+//! bounds above.
 
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use alloy::primitives::{Address, U256};
+use moka::Expiry;
 use moka::future::Cache;
 
-/// TTL in seconds — 60 minutes, extending on every access.
-const CACHE_TTL_SECS: u64 = 3600;
+/// TTL in seconds for positive (authorized) permission results and wallet
+/// derivations — 5 minutes. This bounds how long a revoked permission (or a
+/// changed derivation) keeps being honored when the revocation happens
+/// out-of-band: ChainSecured wallet-signed transactions submitted directly
+/// on-chain, or a mutation handled by a different replica (invalidation is
+/// process-local).
+const CACHE_TTL_SECS: u64 = 300;
+
+/// TTL in seconds for negative (denied) permission results. Kept short so
+/// permissions granted out-of-band (ChainSecured wallet-signed transactions
+/// submitted directly on-chain, or RPC state lag right after a grant) become
+/// visible quickly, while still absorbing bursts of repeated unauthorized
+/// requests between contract calls.
+const NEGATIVE_CACHE_TTL_SECS: u64 = 30;
+
+/// TTL for a permission result: full TTL when authorized, short when denied.
+fn permission_ttl(authorized: bool) -> Duration {
+    if authorized {
+        Duration::from_secs(CACHE_TTL_SECS)
+    } else {
+        Duration::from_secs(NEGATIVE_CACHE_TTL_SECS)
+    }
+}
+
+/// Per-entry expiry for `bool` permission caches (`can_execute_action`,
+/// `can_use_wallet_in_action`): denials expire after `NEGATIVE_CACHE_TTL_SECS`.
+struct PermissionExpiry;
+
+impl Expiry<String, bool> for PermissionExpiry {
+    fn expire_after_create(
+        &self,
+        _key: &String,
+        value: &bool,
+        _created_at: Instant,
+    ) -> Option<Duration> {
+        Some(permission_ttl(*value))
+    }
+
+    fn expire_after_update(
+        &self,
+        _key: &String,
+        value: &bool,
+        _updated_at: Instant,
+        _duration_until_expiry: Option<Duration>,
+    ) -> Option<Duration> {
+        Some(permission_ttl(*value))
+    }
+}
+
+/// Per-entry expiry for the `(can_execute, can_use_wallet)` pair cache: the
+/// request only proceeds when both are true, so any false in the pair is a
+/// denial and expires after `NEGATIVE_CACHE_TTL_SECS`.
+struct PairPermissionExpiry;
+
+impl Expiry<String, (bool, bool)> for PairPermissionExpiry {
+    fn expire_after_create(
+        &self,
+        _key: &String,
+        value: &(bool, bool),
+        _created_at: Instant,
+    ) -> Option<Duration> {
+        Some(permission_ttl(value.0 && value.1))
+    }
+
+    fn expire_after_update(
+        &self,
+        _key: &String,
+        value: &(bool, bool),
+        _updated_at: Instant,
+        _duration_until_expiry: Option<Duration>,
+    ) -> Option<Duration> {
+        Some(permission_ttl(value.0 && value.1))
+    }
+}
 
 /// Maximum entries per cache.
 const MAX_CAPACITY: u64 = 100_000;
@@ -47,20 +132,20 @@ pub struct BlockchainCache {
 impl BlockchainCache {
     fn new() -> Self {
         let ttl = Duration::from_secs(CACHE_TTL_SECS);
+        // Permission caches use per-entry expiry (short TTL for denials).
+        // The previous time_to_idle was redundant: with tti == ttl, the hard
+        // time_to_live cap always fired first.
         let execute_action = Cache::builder()
             .max_capacity(MAX_CAPACITY)
-            .time_to_idle(ttl)
-            .time_to_live(ttl)
+            .expire_after(PermissionExpiry)
             .build();
         let use_wallet = Cache::builder()
             .max_capacity(MAX_CAPACITY)
-            .time_to_idle(ttl)
-            .time_to_live(ttl)
+            .expire_after(PermissionExpiry)
             .build();
         let execute_and_wallet = Cache::builder()
             .max_capacity(MAX_CAPACITY)
-            .time_to_idle(ttl)
-            .time_to_live(ttl)
+            .expire_after(PairPermissionExpiry)
             .build();
         let wallet_derivation = Cache::builder()
             .max_capacity(MAX_CAPACITY)
@@ -159,7 +244,9 @@ static BLOCKCHAIN_CACHE_INSTANCE: OnceLock<BlockchainCache> = OnceLock::new();
 /// Initialize the global blockchain cache. Call once during startup.
 pub fn init() {
     BLOCKCHAIN_CACHE_INSTANCE.get_or_init(BlockchainCache::new);
-    tracing::info!("blockchain_cache: initialized (TTL={CACHE_TTL_SECS}s)");
+    tracing::info!(
+        "blockchain_cache: initialized (TTL={CACHE_TTL_SECS}s, negative TTL={NEGATIVE_CACHE_TTL_SECS}s)"
+    );
 }
 
 /// Get the global cache instance. Returns `None` if not initialized.
@@ -598,6 +685,131 @@ mod tests {
             "closure should run on cache miss after bump"
         );
         assert!(!result, "should return the newly fetched value");
+    }
+
+    // ── Per-entry expiry policy ──────────────────────────────────────
+
+    #[test]
+    fn permission_ttl_is_full_for_authorized() {
+        assert_eq!(
+            permission_ttl(true),
+            Duration::from_secs(CACHE_TTL_SECS),
+            "authorized results should keep the full TTL"
+        );
+    }
+
+    #[test]
+    fn permission_ttl_is_short_for_denied() {
+        assert_eq!(
+            permission_ttl(false),
+            Duration::from_secs(NEGATIVE_CACHE_TTL_SECS),
+            "denied results should expire quickly so out-of-band on-chain \
+             grants (ChainSecured) are picked up without waiting out the TTL"
+        );
+    }
+
+    #[test]
+    fn permission_expiry_create_uses_value() {
+        let now = Instant::now();
+        let key = "k".to_string();
+        assert_eq!(
+            PermissionExpiry.expire_after_create(&key, &true, now),
+            Some(Duration::from_secs(CACHE_TTL_SECS))
+        );
+        assert_eq!(
+            PermissionExpiry.expire_after_create(&key, &false, now),
+            Some(Duration::from_secs(NEGATIVE_CACHE_TTL_SECS))
+        );
+    }
+
+    #[test]
+    fn permission_expiry_update_uses_new_value() {
+        let now = Instant::now();
+        let key = "k".to_string();
+        // A denial overwritten by a grant should adopt the full TTL, and vice versa.
+        assert_eq!(
+            PermissionExpiry.expire_after_update(
+                &key,
+                &true,
+                now,
+                Some(Duration::from_secs(NEGATIVE_CACHE_TTL_SECS))
+            ),
+            Some(Duration::from_secs(CACHE_TTL_SECS))
+        );
+        assert_eq!(
+            PermissionExpiry.expire_after_update(
+                &key,
+                &false,
+                now,
+                Some(Duration::from_secs(CACHE_TTL_SECS))
+            ),
+            Some(Duration::from_secs(NEGATIVE_CACHE_TTL_SECS))
+        );
+    }
+
+    #[test]
+    fn pair_permission_expiry_short_unless_both_true() {
+        let now = Instant::now();
+        let key = "k".to_string();
+        let full = Some(Duration::from_secs(CACHE_TTL_SECS));
+        let short = Some(Duration::from_secs(NEGATIVE_CACHE_TTL_SECS));
+        assert_eq!(
+            PairPermissionExpiry.expire_after_create(&key, &(true, true), now),
+            full
+        );
+        assert_eq!(
+            PairPermissionExpiry.expire_after_create(&key, &(true, false), now),
+            short
+        );
+        assert_eq!(
+            PairPermissionExpiry.expire_after_create(&key, &(false, true), now),
+            short
+        );
+        assert_eq!(
+            PairPermissionExpiry.expire_after_create(&key, &(false, false), now),
+            short
+        );
+        assert_eq!(
+            PairPermissionExpiry.expire_after_update(&key, &(true, true), now, short),
+            full
+        );
+    }
+
+    #[tokio::test]
+    async fn denied_entry_expires_after_negative_ttl() {
+        // Build a cache with a sub-second negative TTL surrogate to verify the
+        // expire_after wiring end-to-end without waiting 30 real seconds.
+        struct FastExpiry;
+        impl Expiry<String, bool> for FastExpiry {
+            fn expire_after_create(
+                &self,
+                _key: &String,
+                value: &bool,
+                _created_at: Instant,
+            ) -> Option<Duration> {
+                Some(if *value {
+                    Duration::from_secs(3600)
+                } else {
+                    Duration::from_millis(50)
+                })
+            }
+        }
+        let cache: Cache<String, bool> = Cache::builder().expire_after(FastExpiry).build();
+        cache.insert("denied".to_string(), false).await;
+        cache.insert("granted".to_string(), true).await;
+        assert_eq!(cache.get(&"denied".to_string()).await, Some(false));
+
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        assert_eq!(
+            cache.get(&"denied".to_string()).await,
+            None,
+            "denied entry should expire after the negative TTL"
+        );
+        assert_eq!(
+            cache.get(&"granted".to_string()).await,
+            Some(true),
+            "granted entry should still be cached"
+        );
     }
 
     // ── invalidate_for_key / invalidate_for_keys (module-level) ─────

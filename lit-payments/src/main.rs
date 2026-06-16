@@ -1,14 +1,8 @@
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use anyhow::Result;
 use lit_billing_core::StripeClient;
-use lit_billing_core::billing_auth::AuthResolver;
 use lit_payments::auth::routes as auth_routes;
-use lit_payments::auth_resolver::LocalAuthResolver;
-use lit_payments::auto_topup::webhook::handler as webhook_handler;
-use lit_payments::auto_topup::webhook::mutex::PerCustomerMutex;
-use lit_payments::billing as billing_routes;
 use lit_payments::portal::routes as portal_routes;
 use lit_payments::rate;
 use lit_payments::{auth, chain, config, db, mail};
@@ -34,57 +28,13 @@ async fn rocket() -> _ {
         mail::Mailer::new(cfg.resend_api_key.clone(), cfg.mail_from.clone()).expect("mailer");
     let rate_limit = auth::rate_limit::RateLimiter::new();
     let stripe = StripeClient::new(cfg.stripe_secret_key.clone()).expect("stripe client");
-    // In-process auth resolver — wallet-sig verification + on-chain
-    // billing-wallet lookup, both running locally. Post-#448-glitch-followup
-    // these used to be HTTP hops to lit-api-server; the shared
-    // `lit-billing-core` crate now exposes both primitives so the same
-    // resolver shape runs on both services.
-    let on_chain_resolver = config::build_on_chain_resolver(&cfg).expect("OnChainBillingResolver");
-    let auth_resolver: Arc<dyn AuthResolver> = Arc::new(LocalAuthResolver::new(
-        on_chain_resolver,
-        cfg.lit_accounts_chain_id,
-    ));
     rate::spawn_rate_poller(pool.clone());
-    let per_customer_mutex = PerCustomerMutex::new();
-    lit_payments::auto_topup::reconciler::spawn(cfg.clone(), stripe.clone(), pool.clone());
-
-    // Codex P1 (Phase 8): exact-match CORS allowlist driven by
-    // `cors_allowed_origins`. The prior config used
-    // `AllowedOrigins::all()` paired with `allow_credentials: true`,
-    // which is CSRF-on-tap — any site could initiate credentialed
-    // requests against the billing API. Now we require the dashboard
-    // origin(s) to be declared explicitly (PUBLIC_BASE_URL + optional
-    // CORS_ALLOWED_ORIGINS); preflight rejects everything else.
-    tracing::info!(
-        origins = ?cfg.cors_allowed_origins,
-        "CORS allowlist"
-    );
-    let allowed = rocket_cors::AllowedOrigins::some_exact(&cfg.cors_allowed_origins);
-    let cors = rocket_cors::CorsOptions {
-        allowed_origins: allowed,
-        allowed_methods: [
-            rocket::http::Method::Get,
-            rocket::http::Method::Post,
-            rocket::http::Method::Put,
-            rocket::http::Method::Options,
-        ]
-        .iter()
-        .map(|m| rocket_cors::Method::from(*m))
-        .collect(),
-        allow_credentials: true,
-        ..Default::default()
-    }
-    .to_cors()
-    .expect("CORS failed to build");
     rocket::build()
-        .attach(cors)
         .manage(pool)
         .manage(cfg)
         .manage(mailer)
         .manage(rate_limit)
         .manage(stripe)
-        .manage(auth_resolver)
-        .manage(per_customer_mutex)
         .mount(
             "/",
             routes![
@@ -105,13 +55,6 @@ async fn rocket() -> _ {
                 chain::get_payment_config,
                 chain::claim_payment,
                 rate::override_rate,
-                billing_routes::setup_intent::setup_intent,
-                billing_routes::auto_topup_config::get_auto_topup_config,
-                billing_routes::auto_topup_config::put_auto_topup_config,
-                billing_routes::auto_topup_config::get_payment_method,
-                billing_routes::sca_resume::get_auto_topup_resume,
-                billing_routes::sca_resume::post_auto_topup_resume_complete,
-                webhook_handler::stripe_webhook,
             ],
         )
         .mount("/static", FileServer::from("static"))

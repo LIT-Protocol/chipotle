@@ -461,8 +461,9 @@ jobs:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
 
   # ───────────────────────── Zero-downtime cutover (ping-pong) ─────────────────────────
-  # The cold CVM's dstack-ingress auto-claims the public domain on boot (gated
-  # on its /health via docker-compose service_healthy). After the cold box has
+  # The cold CVM's dstack-ingress auto-claims the public domain on boot (as soon
+  # as lit-api-server's container starts — docker-compose service_started; there
+  # is no /health gate). After the cold box has
   # passed all checks above on its direct URL, confirm the PUBLIC domain now
   # serves the new version (DNS cutover propagated), THEN stop the old instance.
   # No "live pointer" to record — the next deploy derives the live instance from
@@ -474,7 +475,7 @@ jobs:
     uses: ./.github/workflows/wait-for-api-restart.yml
     with:
       # PUBLIC domain this time — wait until the cold box's auto-claim has rolled
-      # over and the live domain reports the new SHA + /health. The new SHA exists
+      # over and the live domain reports the new SHA. The new SHA exists
       # only on the freshly-deployed cold box, so this serving the new SHA implies
       # the cold box owns the domain. (stop-old-cvm re-checks the CNAME to be sure,
       # covering the same-commit-redeploy edge where both boxes share a SHA.)
@@ -532,8 +533,9 @@ jobs:
           echo "Domain now on '$LIVE_GW' (off old '$OLD_GW'); stopping old instance: $OLD"
           phala cvms stop "$OLD"
 
-  # Post-cutover auto-rollback. The cold box auto-claims the domain at boot (on
-  # /health), BEFORE the deeper checks (attestation/openapi/k6) run. If any of
+  # Post-cutover auto-rollback. The cold box auto-claims the domain at boot (as
+  # soon as the container starts), BEFORE the deeper checks (attestation/openapi/k6)
+  # run. If any of
   # those fail, the new box is live-but-bad — flip the public domain back to the
   # still-running old instance and stop the bad new box. Both instances share one
   # app_id, so the _dstack-app-address TXT is identical; only the CNAME (→ node
