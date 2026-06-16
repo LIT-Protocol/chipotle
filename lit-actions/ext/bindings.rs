@@ -287,16 +287,27 @@ fn default_proxied_fetch_method() -> String {
 /// Split `scheme://user:pass@host:port` into (`scheme://host:port`, Some((user, pass))).
 /// Userinfo is taken up to the last `@` before the host; the user/pass split is
 /// on the first `:`. Returns no credentials when there is no userinfo.
+///
+/// User and pass are percent-decoded: per RFC 3986 the userinfo component is
+/// percent-encoded, and proxy providers (Webshare, Bright Data, ...) hand out
+/// generated passwords that contain reserved chars (`@ : / +`) which therefore
+/// arrive `%`-encoded. We must decode to the original bytes before handing them
+/// to `.basic_auth()`, or authentication fails against the proxy. The decode is
+/// `_lossy` so a malformed `%XX` degrades to U+FFFD rather than dropping the
+/// credential entirely.
 fn split_proxy_credentials(proxy_url: &str) -> (String, Option<(String, String)>) {
+    use percent_encoding::percent_decode_str;
+
     let Some((scheme, rest)) = proxy_url.split_once("://") else {
         return (proxy_url.to_string(), None);
     };
     let Some((userinfo, hostport)) = rest.rsplit_once('@') else {
         return (proxy_url.to_string(), None);
     };
+    let decode = |s: &str| percent_decode_str(s).decode_utf8_lossy().into_owned();
     let (user, pass) = match userinfo.split_once(':') {
-        Some((u, p)) => (u.to_string(), p.to_string()),
-        None => (userinfo.to_string(), String::new()),
+        Some((u, p)) => (decode(u), decode(p)),
+        None => (decode(userinfo), String::new()),
     };
     (format!("{scheme}://{hostport}"), Some((user, pass)))
 }
@@ -501,3 +512,74 @@ extension!(
         _ => op,
     },
 );
+
+#[cfg(test)]
+mod proxied_fetch_tests {
+    use super::*;
+
+    #[test]
+    fn no_scheme_returns_input_unchanged() {
+        // Not a URL with a scheme — pass through, no credentials.
+        let (url, creds) = split_proxy_credentials("not-a-url");
+        assert_eq!(url, "not-a-url");
+        assert_eq!(creds, None);
+    }
+
+    #[test]
+    fn no_userinfo_returns_input_unchanged() {
+        // A direct proxy with no `user:pass@` must keep credentials None so the
+        // builder never calls `.basic_auth()` with empty strings.
+        let (url, creds) = split_proxy_credentials("http://proxy.example:8080");
+        assert_eq!(url, "http://proxy.example:8080");
+        assert_eq!(creds, None);
+    }
+
+    #[test]
+    fn user_and_pass_are_split_and_stripped_from_url() {
+        let (url, creds) = split_proxy_credentials("http://alice:s3cret@proxy.example:8080");
+        assert_eq!(url, "http://proxy.example:8080");
+        assert_eq!(creds, Some(("alice".to_string(), "s3cret".to_string())));
+    }
+
+    #[test]
+    fn user_without_colon_gets_empty_password() {
+        let (url, creds) = split_proxy_credentials("https://tokenonly@proxy.example:443");
+        assert_eq!(url, "https://proxy.example:443");
+        assert_eq!(creds, Some(("tokenonly".to_string(), String::new())));
+    }
+
+    #[test]
+    fn percent_encoded_reserved_chars_are_decoded() {
+        // Generated proxy passwords routinely contain reserved chars delivered
+        // %-encoded: `:` (%3A), `/` (%2F), `+` (%2B), `@` (%40). The decoded
+        // bytes are what must reach `.basic_auth()`.
+        let (url, creds) =
+            split_proxy_credentials("http://user%40corp:p%40ss%2Fw%2Brd%3A1@proxy.example:8080");
+        assert_eq!(url, "http://proxy.example:8080");
+        assert_eq!(
+            creds,
+            Some(("user@corp".to_string(), "p@ss/w+rd:1".to_string()))
+        );
+    }
+
+    #[test]
+    fn password_containing_at_sign_splits_on_last_at() {
+        // userinfo is taken up to the LAST `@`, so a literal `@` mid-password
+        // (when not percent-encoded) still leaves the real host intact.
+        let (url, creds) = split_proxy_credentials("http://u:p@ss@proxy.example:8080");
+        assert_eq!(url, "http://proxy.example:8080");
+        assert_eq!(creds, Some(("u".to_string(), "p@ss".to_string())));
+    }
+
+    #[test]
+    fn default_method_is_get() {
+        assert_eq!(default_proxied_fetch_method(), "GET");
+    }
+
+    #[test]
+    fn byte_cap_is_ten_mib() {
+        // Guards the memory bound the op relies on; a silent bump here would let
+        // a single response grow the native buffer past the documented limit.
+        assert_eq!(PROXIED_FETCH_MAX_BYTES, 10 * 1024 * 1024);
+    }
+}
