@@ -108,6 +108,23 @@ yanked = "warn"
 #   and lit-payments already resolved). That generator rand was the ONLY
 #   non-structural source left in the backlog. See the blocker summary below.
 #
+# - 2026-06-09: Dependabot-driven lockfile bumps (no Cargo.toml changes), clearing
+#   26 Dependabot alerts that postdated the RustSec snapshot above:
+#   * openssl 0.10.73/0.10.75 -> 0.10.80 (openssl-sys 0.9.116) in lit-core,
+#     lit-api-server, lit-actions -> cleared the 2026 rust-openssl CVE batch
+#     (CVE-2026-41676/41677/41678/41681/41898/42327/44662/45784). These were
+#     GitHub-advisory-only (not yet RUSTSEC), so cargo deny was already green;
+#     the bump pre-empts them if they land in RustSec.
+#   * rand 0.8.5 -> 0.8.6 in lit-core (the one workspace the 2026-06-08 rand bump
+#     missed) -> cleared RUSTSEC-2026-0097 there. lit-actions rand =0.8.5 stays
+#     deno-pinned (entry below unchanged).
+#   * rsa 0.9.9 -> 0.9.10 in lit-actions -> cleared CVE-2026-21895 (rsa panic on
+#     prime==1; distinct from the Marvin RUSTSEC-2023-0071 below). deno did NOT
+#     hard-pin rsa, so it moved.
+#   tar 0.4.45 -> 0.4.46 was attempted but BLOCKED: deno_npm_cache requires
+#   =0.4.45, so GHSA-3pv8 (tar PAX desync) stays Dependabot-dismissed until deno
+#   bumps. No RUSTSEC id assigned, so no ignore entry needed here.
+#
 # ── BLOCKER SUMMARY (2026-06-09 audit) ───────────────────────────────────────
 # Every remaining entry is held by a source we cannot move without either
 # forking an upstream dep or waiting for an upstream release. Grouped by blocker:

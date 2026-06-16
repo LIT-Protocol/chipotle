@@ -684,17 +684,16 @@ pub(crate) async fn execute_js(
         v8_code_cache,
     });
 
-    let mut prepared = build_worker_base(&shared)
+    let prepared = build_worker_base(&shared)
         .context("Error building main worker")
         .map_err(|e| anyhow!("{e:#}"))?; // Ensure to keep context when downcasting JS errors later
-
-    inject_lit_namespace(&mut prepared.worker, &auth_context, &http_headers)?;
 
     execute_with_worker(
         prepared,
         shared,
         code,
         js_params,
+        auth_context,
         http_headers,
         timeout_ms,
         outbound_tx,
@@ -719,6 +718,7 @@ pub(crate) async fn execute_with_worker(
     shared: Arc<PoolSharedState>,
     code: String,
     js_params: Option<serde_json::Value>,
+    auth_context: Option<serde_json::Value>,
     http_headers: BTreeMap<String, String>,
     timeout_ms: Option<u64>,
     outbound_tx: flume::Sender<tonic::Result<ExecuteJsResponse>>,
@@ -731,6 +731,7 @@ pub(crate) async fn execute_with_worker(
         shared,
         code,
         js_params,
+        auth_context,
         http_headers,
         timeout_ms,
         outbound_tx,
@@ -756,6 +757,7 @@ async fn execute_with_worker_inner(
     shared: Arc<PoolSharedState>,
     code: String,
     js_params: Option<serde_json::Value>,
+    auth_context: Option<serde_json::Value>,
     http_headers: BTreeMap<String, String>,
     timeout_ms: Option<u64>,
     outbound_tx: flume::Sender<tonic::Result<ExecuteJsResponse>>,
@@ -770,10 +772,6 @@ async fn execute_with_worker_inner(
 
     let timeout_ms = timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS);
     let memory_limit_mb = shared.memory_limit_mb;
-
-    // PatchDeno.js must run AFTER LitNamespace.js (which the caller already
-    // injected) to preserve the original bootstrap order.
-    execute_patch_deno(&mut worker)?;
 
     // Check the action code cache early so we can skip prepare_action_code
     // on cache hit (the real performance win). We always use CdnModuleLoader
@@ -817,6 +815,18 @@ async fn execute_with_worker_inner(
             let _ = memory_limit_tx.send(current_limit);
             current_limit * 2
         });
+
+    // Materialize the per-request Lit namespace globals AFTER the controller
+    // thread and near-heap-limit callback above. auth_context and http_headers
+    // are caller-supplied and may be multi-MB; serializing them into V8 must be
+    // subject to the same timeout/OOM guards as user code so an oversized blob
+    // surfaces as a resource-exhausted error instead of a hard V8
+    // FatalProcessOutOfMemory abort (F-008).
+    inject_lit_namespace(&mut worker, &auth_context, &http_headers)?;
+
+    // PatchDeno.js must run AFTER LitNamespace.js to preserve the original
+    // bootstrap order.
+    execute_patch_deno(&mut worker)?;
 
     // Inject the caller's js_params as a single global (`__litJsParams`), via
     // execute_script — which deliberately bypasses the eval-context code cache.

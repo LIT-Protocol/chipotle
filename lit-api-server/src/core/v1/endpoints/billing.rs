@@ -162,3 +162,37 @@ async fn billing_confirm_payment_impl(
         .map_err(|e| ApiStatus::internal_server_error(e, "Stripe error"))?;
     Ok(AccountOpResponse { success: true })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rocket::http::Status;
+
+    /// A missing account must map to 400, not 500. The wallet-lookup helpers
+    /// run the contract revert through `decode_contract_revert`, so the error
+    /// string contains the `AccountDoesNotExist` error name — this asserts the
+    /// substring match still routes it to a client error.
+    #[test]
+    fn account_does_not_exist_maps_to_400() {
+        let err = anyhow::anyhow!("Contract error: AccountDoesNotExist (0xd4a84737...)");
+        assert_eq!(wallet_resolution_err(err).status, Status::BadRequest);
+    }
+
+    #[test]
+    fn missing_wallet_address_maps_to_400() {
+        let err = anyhow::anyhow!("account has no wallet address");
+        assert_eq!(wallet_resolution_err(err).status, Status::BadRequest);
+    }
+
+    /// RPC/transport failures (anything that isn't a known missing-account
+    /// revert) stay 500 so transient infra problems aren't reported to clients
+    /// as a bad API key.
+    #[test]
+    fn other_errors_map_to_500() {
+        let err = anyhow::anyhow!("error sending request: connection refused");
+        assert_eq!(
+            wallet_resolution_err(err).status,
+            Status::InternalServerError
+        );
+    }
+}

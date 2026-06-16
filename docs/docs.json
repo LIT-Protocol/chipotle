@@ -57,6 +57,7 @@
             "group": "Architecture",
             "pages": [
               "architecture/index",
+              "architecture/chain-secured",
               "architecture/groups",
               "architecture/authModel",
               "architecture/self-hosting",

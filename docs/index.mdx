@@ -54,6 +54,9 @@ Patterns you can build on one programmable runtime.
 How the runtime works and how trust is established.
 
 <CardGroup cols={2}>
+  <Card title="Chain Secured" icon="link" href="/architecture/chain-secured">
+    Your keys' authority lives on-chain; an attested TEE enforces it by reading the chain.
+  </Card>
   <Card title="Architecture" icon="layer-group" href="/architecture/index">
     The three layers: chain-secured TEE, on-chain permissions, and IPFS-hosted actions.
   </Card>
@@ -74,7 +77,7 @@ Account ownership, billing, and key management.
 
 <CardGroup cols={3}>
   <Card title="Account Modes" icon="users-gear" href="/management/account_modes">
-    SaaS vs. self-sovereign — picking an ownership model and migrating between them.
+    API mode vs. ChainSecured mode — picking an ownership model and migrating between them.
   </Card>
   <Card title="API Keys" icon="key" href="/management/api_keys">
     Account keys vs. usage keys, and how to scope them.
