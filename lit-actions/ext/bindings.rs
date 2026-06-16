@@ -385,7 +385,12 @@ async fn op_lit_proxied_fetch(
 ) -> Result<ProxiedFetchResponse, JsErrorBox> {
     ensure_not_blank!(req.url, "url");
 
-    let client = proxied_fetch_client(req.proxy.as_deref().map(str::trim).filter(|p| !p.is_empty()))?;
+    let client = proxied_fetch_client(
+        req.proxy
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty()),
+    )?;
 
     let method = reqwest::Method::from_bytes(req.method.trim().to_ascii_uppercase().as_bytes())
         .map_err(|e| JsErrorBox::generic(format!("op_lit_proxied_fetch: invalid method: {e}")))?;
@@ -416,15 +421,22 @@ async fn op_lit_proxied_fetch(
     let headers = resp
         .headers()
         .iter()
-        .map(|(k, v)| (k.as_str().to_string(), v.to_str().unwrap_or_default().to_string()))
+        .map(|(k, v)| {
+            (
+                k.as_str().to_string(),
+                v.to_str().unwrap_or_default().to_string(),
+            )
+        })
         .collect();
 
     // Streamed read with a hard cap so a hostile or runaway response can't blow
     // the action's 64MB memory budget.
     let mut buf: Vec<u8> = Vec::new();
-    while let Some(chunk) = resp.chunk().await.map_err(|e| {
-        JsErrorBox::generic(format!("op_lit_proxied_fetch: body read failed: {e}"))
-    })? {
+    while let Some(chunk) = resp
+        .chunk()
+        .await
+        .map_err(|e| JsErrorBox::generic(format!("op_lit_proxied_fetch: body read failed: {e}")))?
+    {
         if buf.len() + chunk.len() > PROXIED_FETCH_MAX_BYTES {
             return Err(JsErrorBox::generic(format!(
                 "op_lit_proxied_fetch: response exceeded {PROXIED_FETCH_MAX_BYTES} bytes"
