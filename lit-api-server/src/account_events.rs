@@ -28,6 +28,14 @@ const EVENT_POLL_INTERVAL: Duration = Duration::from_secs(10);
 /// Maximum number of consecutive startup failures before giving up.
 const MAX_LISTENER_RETRIES: u32 = 5;
 
+/// Interval at which a permanently-dead listener re-emits its health warning.
+const DEAD_WARN_INTERVAL: Duration = Duration::from_secs(300);
+
+/// Metric gauge tracking listener liveness: `1` while running, `0` once it has
+/// given up. Ops can alert on this reaching `0` (or absent) — otherwise a dead
+/// listener is invisible after its single startup-failure error scrolls away.
+const LISTENER_UP_GAUGE: &str = "account_event_listener.up";
+
 /// Expand `$mac!(EventType, |e| vec![..account hashes..])` once per `WritesFacet`
 /// account/permission mutation event. Used to build both the log filter's topic
 /// set and the decode dispatch from a single source of truth, so the two can
@@ -169,7 +177,9 @@ pub fn start_account_event_listener() {
                             attempts = attempt,
                             "Account event listener failed permanently after {MAX_LISTENER_RETRIES} attempts: {e}"
                         );
-                        break;
+                        // Does not return — keeps the dead state visible to ops
+                        // via the liveness gauge and a periodic warning.
+                        report_listener_dead().await;
                     }
                     let backoff = Duration::from_secs(2u64.pow(attempt.min(5)));
                     tracing::warn!(
@@ -182,6 +192,24 @@ pub fn start_account_event_listener() {
             }
         }
     });
+}
+
+/// Permanently signal that the listener has stopped. Sets the liveness gauge to
+/// `0` and re-emits a warning every [`DEAD_WARN_INTERVAL`] so the dead state
+/// stays visible in logs rather than scrolling away after one error. Never
+/// returns — once here, on-chain invalidation is off until the process restarts.
+async fn report_listener_dead() -> ! {
+    metrics::gauge!(LISTENER_UP_GAUGE).set(0.0);
+    let mut interval = tokio::time::interval(DEAD_WARN_INTERVAL);
+    interval.tick().await; // consume the immediate first tick
+    loop {
+        interval.tick().await;
+        metrics::gauge!(LISTENER_UP_GAUGE).set(0.0);
+        tracing::warn!(
+            "Account event listener is not running — on-chain account mutations no longer \
+             invalidate the permission cache; entries clear only via TTL. Restart to recover."
+        );
+    }
 }
 
 async fn run_event_listener() -> anyhow::Result<()> {
@@ -201,6 +229,7 @@ async fn run_event_listener() -> anyhow::Result<()> {
         event_count = signatures.len(),
         "Account event listener started"
     );
+    metrics::gauge!(LISTENER_UP_GAUGE).set(1.0);
 
     let mut last_checked_block = start_block.saturating_sub(1);
     let mut interval = tokio::time::interval(EVENT_POLL_INTERVAL);
