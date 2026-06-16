@@ -68,7 +68,7 @@ pub async fn convert_to_chain_secured_account(
     let function_call =
         contract.convertToChainSecuredAccount(api_key_hash, new_admin_wallet_address);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_all();
+    invalidate_for_account(api_key).await;
     Ok(result)
 }
 
@@ -136,7 +136,7 @@ pub async fn add_group(
         pkp_ids_eth,
     );
     send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_all();
+    invalidate_for_account(api_key).await;
     Ok(group_id)
 }
 
@@ -154,7 +154,7 @@ pub async fn add_action(
     let function_call =
         contract.addAction(account_api_key_hash, req.name, req.description, action_hash);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_all();
+    invalidate_for_account(api_key).await;
     Ok(result)
 }
 
@@ -169,7 +169,7 @@ pub async fn remove_action(
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.removeAction(account_api_key_hash, action_hash);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_all();
+    invalidate_for_account(api_key).await;
     Ok(result)
 }
 
@@ -187,7 +187,7 @@ pub async fn add_action_to_group(
         .map_err(|e| anyhow::anyhow!("Unable to parse action IPFS CID: {}", e))?;
     let function_call = contract.addActionToGroup(account_api_key_hash, group_id, action_hash);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_all();
+    invalidate_for_account(api_key).await;
     Ok(result)
 }
 
@@ -203,7 +203,7 @@ pub async fn add_pkp_to_group(
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.addPkpToGroup(account_api_key_hash, group_id, pkp_id);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_all();
+    invalidate_for_account(api_key).await;
     Ok(result)
 }
 
@@ -229,7 +229,7 @@ pub async fn update_group(
         pkp_ids.into_iter().collect(),
     );
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_all();
+    invalidate_for_account(api_key).await;
     Ok(result)
 }
 
@@ -245,7 +245,7 @@ pub async fn remove_action_from_group(
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.removeActionFromGroup(account_api_key_hash, group_id, action_hash);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_all();
+    invalidate_for_account(api_key).await;
     Ok(result)
 }
 
@@ -316,7 +316,7 @@ pub async fn remove_pkp_from_group(
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.removePkpFromGroup(account_api_key_hash, group_id, pkp_id);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_all();
+    invalidate_for_account(api_key).await;
     Ok(result)
 }
 
@@ -363,7 +363,7 @@ pub async fn add_usage_api_key(
         req.execute_in_groups.into_iter().map(U256::from).collect(),
     );
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_all();
+    invalidate_for_account(api_key).await;
     Ok(result)
 }
 
@@ -404,7 +404,7 @@ pub async fn update_usage_api_key(
     );
     let result =
         send_transaction(function_call, signer_pool, signer_address, client.clone()).await?;
-    blockchain_cache::invalidate_all();
+    invalidate_for_account(api_key).await;
     Ok(result)
 }
 
@@ -421,7 +421,7 @@ pub async fn remove_usage_api_key(
 
     let function_call = contract.removeUsageApiKey(account_api_key_hash, usage_api_key_hash);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_all();
+    invalidate_for_account(api_key).await;
     Ok(result)
 }
 
@@ -436,7 +436,7 @@ pub async fn remove_group(
     let account_api_key_hash = api_key_hash(api_key);
     let function_call = contract.removeGroup(account_api_key_hash, group_id);
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_all();
+    invalidate_for_account(api_key).await;
     Ok(result)
 }
 
@@ -462,7 +462,7 @@ pub async fn register_wallet_derivation(
     );
 
     let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
-    blockchain_cache::invalidate_all();
+    invalidate_for_account(api_key).await;
     Ok(result)
 }
 
@@ -479,8 +479,12 @@ pub async fn get_wallet_derivation(api_key: &str, wallet_address: Address) -> Re
     let account_api_key_hash = account_api_key_hash_alloy;
     let wallet_eth = wallet_address;
 
-    if let Some(cache) = blockchain_cache::get() {
-        let key = cache.wallet_derivation_key(account_api_key_hash_alloy, wallet_address);
+    if let Some(cache) = blockchain_cache::get()
+        && let Ok(wallet) = resolve_account_wallet_hash(account_api_key_hash_alloy).await
+    {
+        let account_gen = cache.account_generation(wallet);
+        let key =
+            cache.wallet_derivation_key(account_api_key_hash_alloy, account_gen, wallet_address);
         return cache
             .wallet_derivation_cache()
             .try_get_with(key, async {
@@ -652,8 +656,11 @@ pub async fn can_execute_action(api_key: &str, cid_hash: U256) -> Result<bool> {
     let account_api_key_hash = account_api_key_hash_alloy;
     let cid_hash_eth = cid_hash;
 
-    if let Some(cache) = blockchain_cache::get() {
-        let key = cache.execute_action_key(account_api_key_hash_alloy, cid_hash);
+    if let Some(cache) = blockchain_cache::get()
+        && let Ok(wallet) = resolve_account_wallet_hash(account_api_key_hash_alloy).await
+    {
+        let account_gen = cache.account_generation(wallet);
+        let key = cache.execute_action_key(account_api_key_hash_alloy, account_gen, cid_hash);
         return cache
             .execute_action_cache()
             .try_get_with(key, async {
@@ -692,8 +699,16 @@ pub async fn can_use_wallet_in_action(
     let cid_hash_eth = cid_hash;
     let wallet_eth = wallet_address;
 
-    if let Some(cache) = blockchain_cache::get() {
-        let key = cache.use_wallet_key(account_api_key_hash_alloy, cid_hash, wallet_address);
+    if let Some(cache) = blockchain_cache::get()
+        && let Ok(wallet) = resolve_account_wallet_hash(account_api_key_hash_alloy).await
+    {
+        let account_gen = cache.account_generation(wallet);
+        let key = cache.use_wallet_key(
+            account_api_key_hash_alloy,
+            account_gen,
+            cid_hash,
+            wallet_address,
+        );
         return cache
             .use_wallet_cache()
             .try_get_with(key, async {
@@ -726,9 +741,16 @@ pub async fn can_execute_action_and_use_wallet(
     let cid_hash_eth = cid_hash;
     let wallet_eth = wallet_address;
 
-    if let Some(cache) = blockchain_cache::get() {
-        let key =
-            cache.execute_and_wallet_key(account_api_key_hash_alloy, cid_hash, wallet_address);
+    if let Some(cache) = blockchain_cache::get()
+        && let Ok(wallet) = resolve_account_wallet_hash(account_api_key_hash_alloy).await
+    {
+        let account_gen = cache.account_generation(wallet);
+        let key = cache.execute_and_wallet_key(
+            account_api_key_hash_alloy,
+            account_gen,
+            cid_hash,
+            wallet_address,
+        );
         return cache
             .execute_and_wallet_cache()
             .try_get_with(key, async {
@@ -749,6 +771,64 @@ pub async fn can_execute_action_and_use_wallet(
         .call()
         .await?;
     Ok((result.canExecute, result.canUseWallet))
+}
+
+/// Resolve an `api_key_hash` to its account wallet address, memoized in the
+/// blockchain cache's [`resolution_cache`](blockchain_cache::BlockchainCache::resolution_cache).
+///
+/// The wallet is the account identity used to key per-account cache generations
+/// (see [`blockchain_cache`]): master and usage keys under one account all
+/// resolve here to the same wallet. Memoized because it sits on the permission
+/// hot path — at most one `getAccountWalletAddress` call per key per resolution
+/// TTL. Falls back to a direct call when the cache is not initialized.
+pub async fn resolve_account_wallet_hash(api_key_hash: U256) -> Result<Address> {
+    async fn fetch(api_key_hash: U256) -> Result<Address> {
+        let contract = get_read_only_account_config_contract().await?;
+        let wallet = contract
+            .getAccountWalletAddress(api_key_hash)
+            .call()
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", decode_contract_revert(&e)))?;
+        if wallet == Address::ZERO {
+            anyhow::bail!("account has no wallet address");
+        }
+        Ok(wallet)
+    }
+
+    if let Some(cache) = blockchain_cache::get() {
+        return cache
+            .resolution_cache()
+            .try_get_with(api_key_hash.to_string(), fetch(api_key_hash))
+            .await
+            .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+    }
+    fetch(api_key_hash).await
+}
+
+/// Invalidate every cached verdict for the account that owns `api_key_hash` by
+/// bumping its wallet's generation. Resolves the hash to its account wallet
+/// first; on resolution failure the account's entries are left to expire by TTL.
+///
+/// Used by the on-chain event listener ([`crate::account_events`]) with the
+/// `apiKeyHash` carried in a mutation event.
+pub async fn invalidate_account_by_hash(api_key_hash: U256) {
+    let Some(cache) = blockchain_cache::get() else {
+        return;
+    };
+    match resolve_account_wallet_hash(api_key_hash).await {
+        Ok(wallet) => cache.bump_account_generation(wallet),
+        Err(e) => tracing::warn!(
+            "blockchain_cache: could not resolve account for {api_key_hash} to invalidate: {e}. \
+             Cached entries will expire via TTL."
+        ),
+    }
+}
+
+/// Invalidate every cached verdict for the account behind `api_key` (master or
+/// usage key). Write-path convenience wrapper over [`invalidate_account_by_hash`]
+/// for mutations this process performs.
+pub async fn invalidate_for_account(api_key: &str) {
+    invalidate_account_by_hash(api_key_hash(api_key)).await;
 }
 
 /// Resolve any account identity to the admin wallet address of its parent account.
