@@ -1,0 +1,23 @@
+{
+  "name": "@lit-protocol/lit-approvals",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Email-approval primitive as a Lit Action library: untrusted shared store (Neon over HTTP), in-TEE attestation signing with the action's CID-bound key, in-TEE verification. No Node built-ins.",
+  "type": "module",
+  "main": "./dist/lit-approvals.mjs",
+  "scripts": {
+    "build": "node scripts/bundle.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.9.0",
+    "@noble/hashes": "^1.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.6.3",
+    "vitest": "^3.0.0"
+  }
+}
