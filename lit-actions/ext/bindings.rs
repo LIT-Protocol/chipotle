@@ -334,7 +334,14 @@ fn proxied_fetch_client(proxy: Option<&str>) -> Result<reqwest::Client, JsErrorB
     }
 
     let mut builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(PROXIED_FETCH_TIMEOUT_SECS));
+        .timeout(std::time::Duration::from_secs(PROXIED_FETCH_TIMEOUT_SECS))
+        // No automatic redirect following (parity with the CDN module loader). A
+        // venue/proxy/attacker-controlled endpoint could otherwise 30x-redirect a
+        // signed request to a different host, an internal address, or an http://
+        // downgrade — replaying the caller's method, body, and API-key/HMAC headers
+        // to a destination the action never authorized. The action sees the 3xx
+        // status and decides for itself.
+        .redirect(reqwest::redirect::Policy::none());
     if !key.is_empty() {
         // Pull any `user:pass@` out of the URL and apply it explicitly:
         // reqwest::Proxy does not reliably forward URL userinfo as the
@@ -366,9 +373,13 @@ fn proxied_fetch_client(proxy: Option<&str>) -> Result<reqwest::Client, JsErrorB
 /// authenticated proxy. This lets an action reach a venue (e.g. Binance) from a
 /// chosen non-US IP even though the enclave's own egress is geo-blocked
 /// (HTTP 451). Egress happens in-process via `reqwest` — the same place Deno's
-/// `fetch` egresses from — and the proxy is reached over an HTTP CONNECT tunnel,
-/// so TLS to the venue is end-to-end and the proxy never sees venue credentials
-/// or payloads. The per-action fetch quota is enforced by the JS wrapper calling
+/// `fetch` egresses from. For an `https://` destination the proxy is reached
+/// over an HTTP CONNECT tunnel, so TLS to the venue is end-to-end and the proxy
+/// sees only the host:port, never the request URL, headers, or body. NOTE: this
+/// end-to-end guarantee holds ONLY for `https://` targets. A plain `http://`
+/// destination is sent as an ordinary forward-proxy request, so the proxy sees
+/// the full URL/headers/body in cleartext — callers handling secrets must use
+/// `https://`. The per-action fetch quota is enforced by the JS wrapper calling
 /// `op_increment_fetch_count` before this op; the byte cap bounds memory the way
 /// `deno_fetch` does. Unlike the other ops here it does no gRPC round-trip to
 /// lit-node — the request is purely local.
@@ -432,11 +443,18 @@ async fn op_lit_proxied_fetch(
     // Streamed read with a hard cap so a hostile or runaway response can't blow
     // the action's 64MB memory budget.
     let mut buf: Vec<u8> = Vec::new();
-    while let Some(chunk) = resp
-        .chunk()
-        .await
-        .map_err(|e| JsErrorBox::generic(format!("op_lit_proxied_fetch: body read failed: {e}")))?
-    {
+    while let Some(chunk) = resp.chunk().await.map_err(|e| {
+        // Categorized only — same reasoning as the send() error above. A read
+        // error after headers (timeout/reset/decode) still carries the request
+        // URL in reqwest's Display, which for signed venue calls embeds the HMAC
+        // signature + order params in the query string. Never interpolate `{e}`.
+        JsErrorBox::generic(format!(
+            "op_lit_proxied_fetch: body read failed (timeout={} body={} decode={})",
+            e.is_timeout(),
+            e.is_body(),
+            e.is_decode(),
+        ))
+    })? {
         if buf.len() + chunk.len() > PROXIED_FETCH_MAX_BYTES {
             return Err(JsErrorBox::generic(format!(
                 "op_lit_proxied_fetch: response exceeded {PROXIED_FETCH_MAX_BYTES} bytes"

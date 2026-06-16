@@ -106,10 +106,13 @@ function showImportDetails() {
 /**
  * Outbound HTTP that can egress through a per-request authenticated proxy, so a
  * Lit Action can reach a venue (e.g. Binance) from a chosen non-US IP even
- * though the enclave's own egress is geo-blocked. TLS to the destination is
- * end-to-end through the proxy's CONNECT tunnel; the proxy never sees venue
- * credentials or payloads. Counts against the same per-action fetch quota as
- * the global `fetch`.
+ * though the enclave's own egress is geo-blocked. For an `https://` URL, TLS to
+ * the destination is end-to-end through the proxy's CONNECT tunnel and the proxy
+ * sees only host:port, never your credentials or payloads. A plain `http://` URL
+ * goes through the proxy in cleartext, so always use `https://` for anything
+ * sensitive. Redirects are NOT followed — a 3xx is returned to you as-is so a
+ * redirect can't replay your headers/body to another host. Counts against the
+ * same per-action fetch quota as the global `fetch`.
  * @name Lit.Actions.proxiedFetch
  * @function proxiedFetch
  * @param {Object} params
