@@ -149,6 +149,42 @@ impl Expiry<String, (bool, bool)> for PairPermissionExpiry {
     }
 }
 
+/// Per-entry expiry for the `api_key_hash → wallet` resolution cache. A real
+/// wallet lives for [`RESOLUTION_TTL_SECS`]; the [`Address::ZERO`] sentinel for
+/// a nonexistent account expires after the short [`NEGATIVE_CACHE_TTL_SECS`], so
+/// an account created right after a failed lookup becomes visible quickly while
+/// a flood of invalid keys is still absorbed.
+struct ResolutionExpiry;
+
+impl Expiry<String, Address> for ResolutionExpiry {
+    fn expire_after_create(
+        &self,
+        _key: &String,
+        value: &Address,
+        _created_at: Instant,
+    ) -> Option<Duration> {
+        Some(if *value == Address::ZERO {
+            Duration::from_secs(NEGATIVE_CACHE_TTL_SECS)
+        } else {
+            Duration::from_secs(RESOLUTION_TTL_SECS)
+        })
+    }
+
+    fn expire_after_update(
+        &self,
+        _key: &String,
+        value: &Address,
+        _updated_at: Instant,
+        _duration_until_expiry: Option<Duration>,
+    ) -> Option<Duration> {
+        Some(if *value == Address::ZERO {
+            Duration::from_secs(NEGATIVE_CACHE_TTL_SECS)
+        } else {
+            Duration::from_secs(RESOLUTION_TTL_SECS)
+        })
+    }
+}
+
 /// Build a cache with the shared capacity and full positive TTL (used for the
 /// non-permission caches; permission caches use a per-entry [`Expiry`] instead).
 fn build_cache<V: Clone + Send + Sync + 'static>() -> Cache<String, V> {
@@ -198,7 +234,7 @@ impl BlockchainCache {
             wallet_derivation: build_cache(),
             resolution: Cache::builder()
                 .max_capacity(MAX_CAPACITY)
-                .time_to_live(Duration::from_secs(RESOLUTION_TTL_SECS))
+                .expire_after(ResolutionExpiry)
                 .build(),
             account_generations: RwLock::new(HashMap::new()),
         }
@@ -296,6 +332,12 @@ impl BlockchainCache {
     pub fn resolution_cache(&self) -> &Cache<String, Address> {
         &self.resolution
     }
+
+    /// Drop all memoized hash→wallet resolutions. Called on ownership transfer,
+    /// which moves an account's wallet and so invalidates stale resolutions.
+    pub fn clear_resolutions(&self) {
+        self.resolution.invalidate_all();
+    }
 }
 
 static BLOCKCHAIN_CACHE_INSTANCE: OnceLock<BlockchainCache> = OnceLock::new();
@@ -389,6 +431,40 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(120)).await;
         assert_eq!(cache.get(&"denied".to_string()).await, None);
         assert_eq!(cache.get(&"granted".to_string()).await, Some(true));
+    }
+
+    #[test]
+    fn resolution_expiry_negative_for_zero_address() {
+        let now = Instant::now();
+        let key = "h".to_string();
+        assert_eq!(
+            ResolutionExpiry.expire_after_create(&key, &Address::ZERO, now),
+            Some(Duration::from_secs(NEGATIVE_CACHE_TTL_SECS)),
+            "a nonexistent-account sentinel should use the short negative TTL"
+        );
+        let real = {
+            let mut b = [0u8; 20];
+            b[19] = 1;
+            Address::from(b)
+        };
+        assert_eq!(
+            ResolutionExpiry.expire_after_create(&key, &real, now),
+            Some(Duration::from_secs(RESOLUTION_TTL_SECS)),
+            "a real wallet should use the full resolution TTL"
+        );
+    }
+
+    #[tokio::test]
+    async fn clear_resolutions_drops_entries() {
+        let cache = test_cache();
+        cache
+            .resolution
+            .insert("h".to_string(), wallet_from_low_u64(0xabc))
+            .await;
+        assert!(cache.resolution.get(&"h".to_string()).await.is_some());
+        cache.clear_resolutions();
+        cache.resolution.run_pending_tasks().await;
+        assert!(cache.resolution.get(&"h".to_string()).await.is_none());
     }
 
     fn wallet_from_low_u64(n: u64) -> Address {

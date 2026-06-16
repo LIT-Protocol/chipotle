@@ -479,24 +479,33 @@ pub async fn get_wallet_derivation(api_key: &str, wallet_address: Address) -> Re
     let account_api_key_hash = account_api_key_hash_alloy;
     let wallet_eth = wallet_address;
 
-    if let Some(cache) = blockchain_cache::get()
-        && let Ok(wallet) = resolve_account_wallet_hash(account_api_key_hash_alloy).await
-    {
-        let account_gen = cache.account_generation(wallet);
-        let key =
-            cache.wallet_derivation_key(account_api_key_hash_alloy, account_gen, wallet_address);
-        return cache
-            .wallet_derivation_cache()
-            .try_get_with(key, async {
-                let contract = get_read_only_account_config_contract().await?;
-                let derivation = contract
-                    .getWalletDerivation(account_api_key_hash, wallet_eth)
-                    .call()
-                    .await?;
-                Ok(derivation)
-            })
-            .await
-            .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+    if let Some(cache) = blockchain_cache::get() {
+        match resolve_account_wallet_hash(account_api_key_hash_alloy).await {
+            Ok(wallet) if wallet != Address::ZERO => {
+                let account_gen = cache.account_generation(wallet);
+                let key = cache.wallet_derivation_key(
+                    account_api_key_hash_alloy,
+                    account_gen,
+                    wallet_address,
+                );
+                return cache
+                    .wallet_derivation_cache()
+                    .try_get_with(key, async {
+                        let contract = get_read_only_account_config_contract().await?;
+                        let derivation = contract
+                            .getWalletDerivation(account_api_key_hash, wallet_eth)
+                            .call()
+                            .await?;
+                        Ok(derivation)
+                    })
+                    .await
+                    .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+            }
+            // Account does not exist — no verdict call needed (cached negative).
+            Ok(_) => return Err(anyhow::anyhow!("AccountDoesNotExist")),
+            // Transient resolution failure — fall through to a direct, uncached call.
+            Err(_) => {}
+        }
     }
 
     let contract = get_read_only_account_config_contract().await?;
@@ -656,23 +665,28 @@ pub async fn can_execute_action(api_key: &str, cid_hash: U256) -> Result<bool> {
     let account_api_key_hash = account_api_key_hash_alloy;
     let cid_hash_eth = cid_hash;
 
-    if let Some(cache) = blockchain_cache::get()
-        && let Ok(wallet) = resolve_account_wallet_hash(account_api_key_hash_alloy).await
-    {
-        let account_gen = cache.account_generation(wallet);
-        let key = cache.execute_action_key(account_api_key_hash_alloy, account_gen, cid_hash);
-        return cache
-            .execute_action_cache()
-            .try_get_with(key, async {
-                let contract = get_read_only_account_config_contract().await?;
-                let can_execute = contract
-                    .canExecuteAction(account_api_key_hash, cid_hash_eth)
-                    .call()
-                    .await?;
-                Ok(can_execute)
-            })
-            .await
-            .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+    if let Some(cache) = blockchain_cache::get() {
+        match resolve_account_wallet_hash(account_api_key_hash_alloy).await {
+            Ok(wallet) if wallet != Address::ZERO => {
+                let account_gen = cache.account_generation(wallet);
+                let key =
+                    cache.execute_action_key(account_api_key_hash_alloy, account_gen, cid_hash);
+                return cache
+                    .execute_action_cache()
+                    .try_get_with(key, async {
+                        let contract = get_read_only_account_config_contract().await?;
+                        let can_execute = contract
+                            .canExecuteAction(account_api_key_hash, cid_hash_eth)
+                            .call()
+                            .await?;
+                        Ok(can_execute)
+                    })
+                    .await
+                    .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+            }
+            Ok(_) => return Err(anyhow::anyhow!("AccountDoesNotExist")),
+            Err(_) => {}
+        }
     }
 
     let contract = get_read_only_account_config_contract().await?;
@@ -699,28 +713,32 @@ pub async fn can_use_wallet_in_action(
     let cid_hash_eth = cid_hash;
     let wallet_eth = wallet_address;
 
-    if let Some(cache) = blockchain_cache::get()
-        && let Ok(wallet) = resolve_account_wallet_hash(account_api_key_hash_alloy).await
-    {
-        let account_gen = cache.account_generation(wallet);
-        let key = cache.use_wallet_key(
-            account_api_key_hash_alloy,
-            account_gen,
-            cid_hash,
-            wallet_address,
-        );
-        return cache
-            .use_wallet_cache()
-            .try_get_with(key, async {
-                let contract = get_read_only_account_config_contract().await?;
-                let can_use = contract
-                    .canUseWalletInAction(account_api_key_hash, cid_hash_eth, wallet_eth)
-                    .call()
-                    .await?;
-                Ok(can_use)
-            })
-            .await
-            .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+    if let Some(cache) = blockchain_cache::get() {
+        match resolve_account_wallet_hash(account_api_key_hash_alloy).await {
+            Ok(wallet) if wallet != Address::ZERO => {
+                let account_gen = cache.account_generation(wallet);
+                let key = cache.use_wallet_key(
+                    account_api_key_hash_alloy,
+                    account_gen,
+                    cid_hash,
+                    wallet_address,
+                );
+                return cache
+                    .use_wallet_cache()
+                    .try_get_with(key, async {
+                        let contract = get_read_only_account_config_contract().await?;
+                        let can_use = contract
+                            .canUseWalletInAction(account_api_key_hash, cid_hash_eth, wallet_eth)
+                            .call()
+                            .await?;
+                        Ok(can_use)
+                    })
+                    .await
+                    .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+            }
+            Ok(_) => return Err(anyhow::anyhow!("AccountDoesNotExist")),
+            Err(_) => {}
+        }
     }
 
     let contract = get_read_only_account_config_contract().await?;
@@ -741,28 +759,36 @@ pub async fn can_execute_action_and_use_wallet(
     let cid_hash_eth = cid_hash;
     let wallet_eth = wallet_address;
 
-    if let Some(cache) = blockchain_cache::get()
-        && let Ok(wallet) = resolve_account_wallet_hash(account_api_key_hash_alloy).await
-    {
-        let account_gen = cache.account_generation(wallet);
-        let key = cache.execute_and_wallet_key(
-            account_api_key_hash_alloy,
-            account_gen,
-            cid_hash,
-            wallet_address,
-        );
-        return cache
-            .execute_and_wallet_cache()
-            .try_get_with(key, async {
-                let contract = get_read_only_account_config_contract().await?;
-                let result = contract
-                    .canExecuteActionAndUseWallet(account_api_key_hash, cid_hash_eth, wallet_eth)
-                    .call()
-                    .await?;
-                Ok((result.canExecute, result.canUseWallet))
-            })
-            .await
-            .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+    if let Some(cache) = blockchain_cache::get() {
+        match resolve_account_wallet_hash(account_api_key_hash_alloy).await {
+            Ok(wallet) if wallet != Address::ZERO => {
+                let account_gen = cache.account_generation(wallet);
+                let key = cache.execute_and_wallet_key(
+                    account_api_key_hash_alloy,
+                    account_gen,
+                    cid_hash,
+                    wallet_address,
+                );
+                return cache
+                    .execute_and_wallet_cache()
+                    .try_get_with(key, async {
+                        let contract = get_read_only_account_config_contract().await?;
+                        let result = contract
+                            .canExecuteActionAndUseWallet(
+                                account_api_key_hash,
+                                cid_hash_eth,
+                                wallet_eth,
+                            )
+                            .call()
+                            .await?;
+                        Ok((result.canExecute, result.canUseWallet))
+                    })
+                    .await
+                    .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{:#}", e));
+            }
+            Ok(_) => return Err(anyhow::anyhow!("AccountDoesNotExist")),
+            Err(_) => {}
+        }
     }
 
     let contract = get_read_only_account_config_contract().await?;
@@ -781,18 +807,29 @@ pub async fn can_execute_action_and_use_wallet(
 /// resolve here to the same wallet. Memoized because it sits on the permission
 /// hot path — at most one `getAccountWalletAddress` call per key per resolution
 /// TTL. Falls back to a direct call when the cache is not initialized.
+///
+/// Returns [`Address::ZERO`] for an account that provably does not exist (a zero
+/// wallet or an `AccountDoesNotExist` revert). That sentinel is cached with the
+/// short negative TTL so a stream of invalid keys can't force a chain call per
+/// request. Only transient failures (RPC/transport errors) return `Err`, so a
+/// real account is never negative-cached on a blip.
 pub async fn resolve_account_wallet_hash(api_key_hash: U256) -> Result<Address> {
     async fn fetch(api_key_hash: U256) -> Result<Address> {
         let contract = get_read_only_account_config_contract().await?;
-        let wallet = contract
-            .getAccountWalletAddress(api_key_hash)
-            .call()
-            .await
-            .map_err(|e| anyhow::anyhow!("{}", decode_contract_revert(&e)))?;
-        if wallet == Address::ZERO {
-            anyhow::bail!("account has no wallet address");
+        match contract.getAccountWalletAddress(api_key_hash).call().await {
+            // A zero wallet means the account has no wallet — treat as absent.
+            Ok(wallet) => Ok(wallet),
+            Err(e) => {
+                let decoded = decode_contract_revert(&e);
+                // A definitive "no such account" revert is a cacheable negative;
+                // anything else is transient and must not be negative-cached.
+                if decoded.contains("AccountDoesNotExist") {
+                    Ok(Address::ZERO)
+                } else {
+                    Err(anyhow::anyhow!("{decoded}"))
+                }
+            }
         }
-        Ok(wallet)
     }
 
     if let Some(cache) = blockchain_cache::get() {
@@ -807,7 +844,8 @@ pub async fn resolve_account_wallet_hash(api_key_hash: U256) -> Result<Address> 
 
 /// Invalidate every cached verdict for the account that owns `api_key_hash` by
 /// bumping its wallet's generation. Resolves the hash to its account wallet
-/// first; on resolution failure the account's entries are left to expire by TTL.
+/// first; a nonexistent account ([`Address::ZERO`]) is a no-op, and a transient
+/// resolution failure leaves the account's entries to expire by TTL.
 ///
 /// Used by the on-chain event listener ([`crate::account_events`]) with the
 /// `apiKeyHash` carried in a mutation event.
@@ -816,11 +854,23 @@ pub async fn invalidate_account_by_hash(api_key_hash: U256) {
         return;
     };
     match resolve_account_wallet_hash(api_key_hash).await {
-        Ok(wallet) => cache.bump_account_generation(wallet),
+        Ok(wallet) if wallet != Address::ZERO => cache.bump_account_generation(wallet),
+        Ok(_) => {} // account does not exist — nothing cached to invalidate
         Err(e) => tracing::warn!(
             "blockchain_cache: could not resolve account for {api_key_hash} to invalidate: {e}. \
              Cached entries will expire via TTL."
         ),
+    }
+}
+
+/// Drop all memoized `api_key_hash → wallet` resolutions. Called by the event
+/// listener when it observes an ownership transfer (which moves an account's
+/// admin wallet): clearing forces every key to re-resolve to its current wallet
+/// on the next request, so a usage key can't keep composing its old wallet's
+/// generation. Transfers are rare, so the re-resolution cost is negligible.
+pub fn clear_wallet_resolutions() {
+    if let Some(cache) = blockchain_cache::get() {
+        cache.clear_resolutions();
     }
 }
 

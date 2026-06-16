@@ -19,8 +19,8 @@
 //! Mirrors the polling/retry structure of [`crate::restart`].
 
 use crate::accounts::contracts::account_config_contract::AccountConfig as ac;
-use crate::accounts::invalidate_account_by_hash;
 use crate::accounts::signable_contract::get_read_only_account_config_contract;
+use crate::accounts::{clear_wallet_resolutions, invalidate_account_by_hash};
 use alloy::primitives::{B256, U256};
 use alloy::providers::Provider;
 use alloy::rpc::types::Filter;
@@ -115,9 +115,24 @@ async fn process_logs(logs: &[alloy::rpc::types::Log]) {
         .filter_map(|log| account_hash_from_log(&log.inner))
         .collect();
 
+    // An ownership transfer moves an account's admin wallet, which is the
+    // identity we key generations by. Memoized hash→wallet resolutions for that
+    // account (including its usage keys) are now stale, and we can't enumerate
+    // them, so drop the whole resolution cache. Transfers are rare, so the
+    // re-resolution cost is negligible. Done before the bumps below so each
+    // affected account re-resolves to its current wallet.
+    let ownership_transferred = logs.iter().any(|log| {
+        log.inner.topics().first()
+            == Some(&ac::ChainSecuredAccountOwnershipTransferred::SIGNATURE_HASH)
+    });
+    if ownership_transferred {
+        clear_wallet_resolutions();
+    }
+
     tracing::info!(
         log_count = logs.len(),
         account_count = accounts.len(),
+        ownership_transferred,
         "Account mutation events detected — invalidating affected accounts"
     );
 
