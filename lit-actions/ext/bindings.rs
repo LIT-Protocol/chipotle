@@ -275,7 +275,9 @@ struct ProxiedFetchRequest {
     headers: Vec<(String, String)>,
     #[serde(default)]
     body: Option<String>,
-    /// `http(s)://[user:pass@]host:port`. Empty/None → a direct (unproxied) request.
+    /// `http(s)://[user:pass@]host:port`. Omit/`null` = deliberate direct
+    /// (unproxied) request. A supplied-but-empty/whitespace value is rejected
+    /// (fail closed) rather than degrading to direct egress.
     #[serde(default)]
     proxy: Option<String>,
 }
@@ -328,16 +330,38 @@ lazy_static::lazy_static! {
     /// One `reqwest::Client` per proxy URL ("" = direct). `Client` is an Arc
     /// around a connection pool, so reuse keeps TCP+TLS sessions warm across
     /// calls instead of paying a fresh handshake per request (plan M2
-    /// follow-up). Keys contain proxy credentials — they are secret material
-    /// and must never be logged.
-    static ref PROXIED_FETCH_CLIENTS: std::sync::Mutex<std::collections::HashMap<String, reqwest::Client>> =
-        std::sync::Mutex::new(std::collections::HashMap::new());
+    /// follow-up). `RwLock` (not `Mutex`): the pool saturates at <=16 entries
+    /// almost immediately and is read-only thereafter, so concurrent lookups
+    /// proceed in parallel. Keys contain proxy credentials — they are secret
+    /// material and must never be logged.
+    static ref PROXIED_FETCH_CLIENTS: std::sync::RwLock<std::collections::HashMap<String, reqwest::Client>> =
+        std::sync::RwLock::new(std::collections::HashMap::new());
+}
+
+/// Resolve the request's `proxy` field into the value handed to the client pool.
+///
+/// Fail closed on a supplied-but-empty proxy. `None` (field absent / `null`) is a
+/// deliberate direct request. `Some(non-empty)` is proxied (trimmed). But a proxy
+/// that is present yet blank/whitespace is a misconfiguration (empty env var, bad
+/// string interpolation in an action), NOT a request for direct egress — silently
+/// degrading it to a direct request would send the signed request + API keys +
+/// HMAC out the enclave's own (geo-blocked) IP, precisely what this op exists to
+/// prevent. So that case is an error, not a fallback.
+fn resolve_proxy(proxy: Option<&str>) -> Result<Option<&str>, JsErrorBox> {
+    match proxy {
+        Some(p) if p.trim().is_empty() => Err(JsErrorBox::generic(
+            "op_lit_proxied_fetch: proxy was supplied but is empty/whitespace; \
+             omit the field (or pass null) for a deliberate direct request",
+        )),
+        Some(p) => Ok(Some(p.trim())),
+        None => Ok(None),
+    }
 }
 
 fn proxied_fetch_client(proxy: Option<&str>) -> Result<reqwest::Client, JsErrorBox> {
     let key = proxy.unwrap_or_default();
     if let Some(client) = PROXIED_FETCH_CLIENTS
-        .lock()
+        .read()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .get(key)
     {
@@ -372,7 +396,7 @@ fn proxied_fetch_client(proxy: Option<&str>) -> Result<reqwest::Client, JsErrorB
     })?;
 
     let mut pool = PROXIED_FETCH_CLIENTS
-        .lock()
+        .write()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
     if pool.len() < PROXIED_FETCH_CLIENT_POOL_MAX {
         pool.insert(key.to_string(), client.clone());
@@ -407,12 +431,7 @@ async fn op_lit_proxied_fetch(
 ) -> Result<ProxiedFetchResponse, JsErrorBox> {
     ensure_not_blank!(req.url, "url");
 
-    let client = proxied_fetch_client(
-        req.proxy
-            .as_deref()
-            .map(str::trim)
-            .filter(|p| !p.is_empty()),
-    )?;
+    let client = proxied_fetch_client(resolve_proxy(req.proxy.as_deref())?)?;
 
     let method = reqwest::Method::from_bytes(req.method.trim().to_ascii_uppercase().as_bytes())
         .map_err(|e| JsErrorBox::generic(format!("op_lit_proxied_fetch: invalid method: {e}")))?;
@@ -477,6 +496,12 @@ async fn op_lit_proxied_fetch(
     Ok(ProxiedFetchResponse {
         status,
         headers,
+        // TEXT-ONLY contract: the body crosses into JS as a string, so a
+        // non-UTF-8 (binary/gzipped/protobuf) response is replaced lossily with
+        // U+FFFD rather than round-tripping. Every current consumer is a venue
+        // REST API returning JSON/UTF-8 text, for which this is exact. Binary
+        // responses are out of scope for v1; supporting them (base64 envelope or
+        // a responseType flag) is a follow-up. Documented on the JS wrapper.
         body: String::from_utf8_lossy(&buf).into_owned(),
     })
 }
@@ -574,6 +599,29 @@ mod proxied_fetch_tests {
     #[test]
     fn default_method_is_get() {
         assert_eq!(default_proxied_fetch_method(), "GET");
+    }
+
+    #[test]
+    fn resolve_proxy_none_is_direct() {
+        // Field absent / null = deliberate direct request.
+        assert_eq!(resolve_proxy(None).unwrap(), None);
+    }
+
+    #[test]
+    fn resolve_proxy_present_is_trimmed() {
+        assert_eq!(
+            resolve_proxy(Some("  http://proxy.example:8080  ")).unwrap(),
+            Some("http://proxy.example:8080")
+        );
+    }
+
+    #[test]
+    fn resolve_proxy_supplied_but_empty_fails_closed() {
+        // The security-critical case: a present-but-blank proxy must NOT degrade
+        // to direct egress — it's an error.
+        assert!(resolve_proxy(Some("")).is_err());
+        assert!(resolve_proxy(Some("   ")).is_err());
+        assert!(resolve_proxy(Some("\t\n")).is_err());
     }
 
     #[test]

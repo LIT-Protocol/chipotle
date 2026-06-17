@@ -112,7 +112,9 @@ function showImportDetails() {
  * goes through the proxy in cleartext, so always use `https://` for anything
  * sensitive. Redirects are NOT followed - a 3xx is returned to you as-is so a
  * redirect can't replay your headers/body to another host. Counts against the
- * same per-action fetch quota as the global `fetch`.
+ * same per-action fetch quota as the global `fetch`. The response body is
+ * decoded as UTF-8 text (use it for JSON/text APIs); a binary response would be
+ * corrupted, so this is text-only.
  * @name Lit.Actions.proxiedFetch
  * @function proxiedFetch
  * @param {Object} params
@@ -120,7 +122,7 @@ function showImportDetails() {
  * @param {string} [params.method] HTTP method (default "GET").
  * @param {Object|Array<[string,string]>} [params.headers] Request headers.
  * @param {string} [params.body] Request body.
- * @param {string} [params.proxy] Proxy URL `http(s)://[user:pass@]host:port`. Omit for a direct request.
+ * @param {string} [params.proxy] Proxy URL `http(s)://[user:pass@]host:port`. Omit (or pass null) for a deliberate direct request; a supplied-but-empty value is rejected so a misconfigured proxy can't silently egress direct.
  * @returns {Promise<{status:number, ok:boolean, headers:Object, text:()=>Promise<string>, json:()=>Promise<any>}>}
  */
 async function proxiedFetch({
