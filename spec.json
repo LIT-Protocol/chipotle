@@ -110,6 +110,54 @@
         }
       }
     },
+    "/convert_to_chain_secured_account": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "convert_to_chain_secured_account",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConvertToChainSecuredAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountOpResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/account_exists": {
       "get": {
         "tags": [
@@ -153,6 +201,7 @@
         "tags": [
           "Account Management"
         ],
+        "description": "Mint a new wallet (PKP) for the account.\n\nDeprecated: minting is a metered write, so it should not live on a GET — link previewers, prefetchers, and retrying proxies replay GETs. Use `POST /create_wallet` instead. This form is kept for backwards compatibility.",
         "operationId": "create_wallet",
         "parameters": [
           {
@@ -174,6 +223,81 @@
                   "oneOf": [
                     {
                       "$ref": "#/components/schemas/CreateWalletResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "deprecated": true
+      },
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "description": "Mint a new wallet (PKP) for the account.",
+        "operationId": "create_wallet_post",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CreateWalletResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/create_wallet_with_signature": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "create_wallet_with_signature",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWalletWithSignatureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CreateWalletWithSignatureResponse"
                     },
                     {
                       "$ref": "#/components/schemas/ErrMessage"
@@ -646,6 +770,43 @@
                   "oneOf": [
                     {
                       "$ref": "#/components/schemas/AddUsageApiKeyResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/add_usage_api_key_with_signature": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "operationId": "add_usage_api_key_with_signature",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddUsageApiKeyWithSignatureRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AddUsageApiKeyWithSignatureResponse"
                     },
                     {
                       "$ref": "#/components/schemas/ErrMessage"
@@ -1385,8 +1546,7 @@
           {
             "name": "X-Api-Key",
             "in": "header",
-            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
-            "required": true,
+            "description": "API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{typed_data, signature})>` where `typed_data` is EIP-712 with `primaryType: \"BillingAuth\"`. The signature proves wallet possession; the typed data must include the connected wallet address and an issuedAt timestamp within ±5 minutes.",
             "schema": {
               "type": "string"
             }
@@ -1424,8 +1584,7 @@
           {
             "name": "X-Api-Key",
             "in": "header",
-            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
-            "required": true,
+            "description": "API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{typed_data, signature})>` where `typed_data` is EIP-712 with `primaryType: \"BillingAuth\"`. The signature proves wallet possession; the typed data must include the connected wallet address and an issuedAt timestamp within ±5 minutes.",
             "schema": {
               "type": "string"
             }
@@ -1473,8 +1632,7 @@
           {
             "name": "X-Api-Key",
             "in": "header",
-            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
-            "required": true,
+            "description": "API-mode auth: account or usage API key (alternatively `Authorization: Bearer <key>`). OR — for ChainSecured callers — omit X-Api-Key entirely and send `X-Wallet-Auth: <base64(JSON{typed_data, signature})>` where `typed_data` is EIP-712 with `primaryType: \"BillingAuth\"`. The signature proves wallet possession; the typed data must include the connected wallet address and an issuedAt timestamp within ±5 minutes.",
             "schema": {
               "type": "string"
             }
@@ -1662,6 +1820,40 @@
           }
         }
       },
+      "AccountOpResponse": {
+        "description": "Response for account config operations (add_pkp_to_group, remove_pkp_from_group, add_usage_api_key, remove_usage_api_key).",
+        "type": "object",
+        "required": [
+          "success"
+        ],
+        "properties": {
+          "success": {
+            "type": "boolean"
+          }
+        }
+      },
+      "ConvertToChainSecuredAccountRequest": {
+        "description": "Body for `convert_to_chain_secured_account`. The caller is authenticated by their existing API key (header). The supplied wallet becomes the on-chain admin and the account flips from managed to ChainSecured. The conversion is irreversible.",
+        "type": "object",
+        "required": [
+          "new_admin_wallet_address",
+          "signature",
+          "typed_data"
+        ],
+        "properties": {
+          "new_admin_wallet_address": {
+            "description": "Hex-encoded EVM address (with or without 0x prefix). Must be the wallet the user controls; verified by an EIP-712 typed-data signature.",
+            "type": "string"
+          },
+          "typed_data": {
+            "description": "EIP-712 typed-data object the wallet signed. Must use `primaryType: \"ConvertAccount\"` and the canonical schema (see `core::eip712`)."
+          },
+          "signature": {
+            "description": "65-byte 0x-prefixed signature (r||s||v) over the EIP-712 digest of `typed_data`.",
+            "type": "string"
+          }
+        }
+      },
       "CreateWalletResponse": {
         "type": "object",
         "required": [
@@ -1669,6 +1861,40 @@
         ],
         "properties": {
           "wallet_address": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateWalletWithSignatureResponse": {
+        "description": "Returned by `/create_wallet_with_signature`. The client must follow up with an on-chain `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` call signed by the same wallet — until that lands, the PKP exists in MPC but is not registered to any account.",
+        "type": "object",
+        "required": [
+          "derivation_path",
+          "wallet_address"
+        ],
+        "properties": {
+          "wallet_address": {
+            "type": "string"
+          },
+          "derivation_path": {
+            "description": "0x-prefixed lowercase hex (uint256). Pass through verbatim to `registerWalletDerivation`'s `derivationPath` arg.",
+            "type": "string"
+          }
+        }
+      },
+      "CreateWalletWithSignatureRequest": {
+        "description": "ChainSecured wallet creation. The client signs EIP-712 typed data with their wallet; the server verifies the signature, mints a PKP via DStack MPC, and returns the new wallet address + derivation path so the client can register it on-chain via `registerWalletDerivation`.\n\nThe server does not maintain a nonce store. Replay protection is a ±5-minute window on the `issuedAt` field plus the per-flow primaryType binding — worst-case replay still just mints an extra unregistered PKP (compute cost only; registration requires a separate wallet signature on-chain).",
+        "type": "object",
+        "required": [
+          "signature",
+          "typed_data"
+        ],
+        "properties": {
+          "typed_data": {
+            "description": "EIP-712 typed-data object the wallet signed. Must use `primaryType: \"CreateWallet\"` and the canonical schema (see `core::eip712`)."
+          },
+          "signature": {
+            "description": "65-byte 0x-prefixed signature (r||s||v) over the EIP-712 digest of `typed_data`.",
             "type": "string"
           }
         }
@@ -1691,14 +1917,20 @@
         }
       },
       "LitActionRequest": {
-        "description": "API key via header.",
+        "description": "API key via header.\n\nProvide either `code` (inline JS) or `ipfs_id` (IPFS CID of a previously-cached action). When `code` is provided it is cached by its IPFS hash so subsequent calls can use `ipfs_id`.",
         "type": "object",
-        "required": [
-          "code"
-        ],
         "properties": {
           "code": {
-            "type": "string"
+            "description": "Inline JS source. Optional when `ipfs_id` is supplied.",
+            "default": null,
+            "type": "string",
+            "nullable": true
+          },
+          "ipfs_id": {
+            "description": "IPFS CID of a previously-submitted action. Looked up in the in-memory cache.",
+            "default": null,
+            "type": "string",
+            "nullable": true
           },
           "js_params": {
             "nullable": true
@@ -1752,18 +1984,6 @@
             "items": {
               "type": "string"
             }
-          }
-        }
-      },
-      "AccountOpResponse": {
-        "description": "Response for account config operations (add_pkp_to_group, remove_pkp_from_group, add_usage_api_key, remove_usage_api_key).",
-        "type": "object",
-        "required": [
-          "success"
-        ],
-        "properties": {
-          "success": {
-            "type": "boolean"
           }
         }
       },
@@ -1945,6 +2165,46 @@
               "format": "uint64",
               "minimum": 0.0
             }
+          }
+        }
+      },
+      "AddUsageApiKeyWithSignatureResponse": {
+        "description": "Returned by `/add_usage_api_key_with_signature`. The client must follow up with on-chain `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` and `setUsageApiKey(adminHash, keccak256(usage_api_key), …)` — both signed by the admin wallet — to attach the usage key to the ChainSecured account.",
+        "type": "object",
+        "required": [
+          "derivation_path",
+          "usage_api_key",
+          "wallet_address"
+        ],
+        "properties": {
+          "usage_api_key": {
+            "description": "Base64-encoded 32-byte secret. Send as `X-Api-Key` / `Authorization: Bearer …` for usage requests; pass `keccak256(this)` to `setUsageApiKey`.",
+            "type": "string"
+          },
+          "wallet_address": {
+            "description": "0x-prefixed lowercase hex EVM address of the minted PKP wallet.",
+            "type": "string"
+          },
+          "derivation_path": {
+            "description": "0x-prefixed lowercase hex (uint256). Pass through verbatim to `registerWalletDerivation`'s `derivationPath` arg.",
+            "type": "string"
+          }
+        }
+      },
+      "AddUsageApiKeyWithSignatureRequest": {
+        "description": "ChainSecured usage-key minting. Mirrors `CreateWalletWithSignatureRequest`: the user proves wallet ownership with an EIP-712 typed-data signature, the server mints a usage-key wallet via DStack MPC and returns the secret (as the usage API key) plus address + derivation path. The client follows up with on-chain `registerWalletDerivation` and `setUsageApiKey` signed by their admin wallet — only the admin wallet of a ChainSecured account can call `setUsageApiKey` (see AppStorage.accountExistsAndIsMutable).",
+        "type": "object",
+        "required": [
+          "signature",
+          "typed_data"
+        ],
+        "properties": {
+          "typed_data": {
+            "description": "EIP-712 typed-data object the wallet signed. Must use `primaryType: \"AddUsageApiKey\"` and the canonical schema (see `core::eip712`)."
+          },
+          "signature": {
+            "description": "65-byte 0x-prefixed signature (r||s||v) over the EIP-712 digest of `typed_data`.",
+            "type": "string"
           }
         }
       },
