@@ -279,20 +279,6 @@ export function getBaseUrl() {
   return '__LIT_API_BASE_URL__';
 }
 
-/**
- * Base URL for `lit-payments` — the auto top-up backend (Phase 1–7).
- *
- * In dev we keep lit-payments on port 8001 so it doesn't collide with the
- * existing lit-api-server expectation of port 8000. Production builds get
- * the placeholder substituted by the deploy script. Used only by the
- * auto-recharge UI; the legacy billing endpoints continue to hit the
- * api-server via `getBaseUrl()` + the cached `client` singleton.
- */
-export function getLitPaymentsBaseUrl() {
-  if (isLocalhostOrigin()) return 'http://localhost:8001';
-  return '__LIT_PAYMENTS_BASE_URL__';
-}
-
 // ----- API client (cached singleton) -----
 
 let _clientInstance = null;
