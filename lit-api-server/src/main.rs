@@ -344,6 +344,11 @@ fn build_rocket(
         .attach(observability::ObservabilityFairing::new())
         .attach(cors)
         .attach(metrics_fairings)
+        // Settles the $0.01 management charge after (and only after) a
+        // successful response — see guards/billing.rs.
+        .attach(lit_api_server::core::v1::guards::billing::ManagementBillingFairing)
+        // JSON error bodies instead of Rocket's default HTML pages.
+        .register("/", lit_api_server::core::v1::catchers::catchers())
         .mount(
             "/",
             routes![openapi_json, openapi_json_redirect, swagger_ui_redirect],

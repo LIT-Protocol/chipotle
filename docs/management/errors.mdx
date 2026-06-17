@@ -1,0 +1,69 @@
+---
+title: "Errors"
+description: "Every error status the API returns, what causes it, and how to fix it."
+---
+
+Every error response from the API is JSON. There are two shapes:
+
+**Catcher errors** (auth, billing, routing, body parsing) return a structured object:
+
+```json
+{
+  "error": "payment_required",
+  "message": "Insufficient credits: this call needs $0.01 but your balance is $0.00.",
+  "fix": "Add funds (minimum $5.00, card or crypto) in the dashboard at https://dashboard.chipotle.litprotocol.com/dapps/dashboard/ or via POST /core/v1/billing/create_payment_intent. Check your balance with GET /core/v1/billing/balance.",
+  "docs_url": "https://developer.litprotocol.com/management/pricing"
+}
+```
+
+**Endpoint-specific failures** (a contract revert, an execution error) return a JSON string with the error message and the matching HTTP status:
+
+```json
+"Permission denied"
+```
+
+Robust clients should branch on the HTTP status code first and treat the body as
+diagnostic detail.
+
+## Status codes
+
+| Status | `error` | What it means | What to do |
+|--------|---------|---------------|------------|
+| `400 Bad Request` | `bad_request` | The body is malformed JSON or a parameter has the wrong shape. | Compare your request against the [OpenAPI spec](https://api.chipotle.litprotocol.com/core/v1/swagger-ui). |
+| `401 Unauthorized` | `unauthorized` | No API key was sent, **or the key does not resolve to any account** (typo'd, revoked, or never created). | Send the key via `X-Api-Key` or `Authorization: Bearer`. Verify it with `GET /core/v1/account_exists`. |
+| `402 Payment Required` | `payment_required` | Your account exists but its credit balance cannot cover this operation. The `message` includes the required amount and your balance. | [Add funds](/management/pricing) — card or [crypto](/management/crypto) — or `POST /core/v1/billing/create_payment_intent`. Check balance with `GET /core/v1/billing/balance`. |
+| `403 Forbidden` | `forbidden` | The key is valid and funded but not permitted to do this — usually a usage key acting outside its granted groups. | Inspect scopes with `GET /core/v1/list_api_keys`, or use the account master key. See [API Keys](/management/api_keys). |
+| `404 Not Found` | `not_found` | No such endpoint or resource. | Browse `/core/v1/swagger-ui`. |
+| `422 Unprocessable Entity` | `unprocessable_entity` | The body parsed as JSON but doesn't match the endpoint's schema. | Compare field names and types against the OpenAPI spec. |
+| `429 Too Many Requests` | `too_many_requests` | The node is shedding load (CPU pressure). | Retry with backoff. |
+| `500 Internal Server Error` | `internal_error` | Something failed on our side. | Retry; report it if persistent. |
+| `503 Service Unavailable` | `service_unavailable` | A dependency (billing, chain RPC, or the actions runtime) is temporarily down. Nothing was charged. | Retry in a few seconds. |
+
+## Billing guarantees on errors
+
+- **Failed requests are not charged.** The flat $0.01 management charge settles
+  only after the operation succeeds. A request rejected for a bad body (400/422),
+  missing permission (403), or a server error (5xx) costs nothing.
+- **An invalid key is a 401, not a 402.** You will only ever see
+  `402 Payment Required` for an account that actually exists and is short on
+  credits.
+- **Billing outages are a 503, not a 402.** If Stripe or the chain RPC is
+  unreachable, the API tells you to retry — it does not tell you to pay.
+
+## Common sequences
+
+**"I created an account but every call says 402."**
+New accounts start with no credits unless the node grants starter credits.
+Running Lit Actions and write/metered management calls (creating wallets,
+groups, usage keys) consume credits; read-only calls (`list_*`, `account_exists`,
+`billing/balance`) are free. [Add funds](/management/pricing) to proceed.
+
+**"My key worked yesterday and now I get 401."**
+The key was removed (`remove_usage_api_key`) or you're sending a truncated
+value. Keys are shown once at creation; verify with `GET /core/v1/account_exists`
+and mint a new usage key from your account key if needed.
+
+**"The error body isn't JSON."**
+It is, as of API version `v1.2`. If you see an HTML error page you are talking
+to something other than the API (a proxy, a wrong URL) — check the host and
+path.

@@ -142,13 +142,13 @@ Use [Grafana k6](https://grafana.com/docs/k6/latest/) to run integration tests a
 **Prerequisites:** Install k6 ([install guide](https://grafana.com/docs/k6/latest/set-up/install-k6/)).
 
 ```bash
-just k6-test
+just test
 ```
 
-Or with a custom base URL:
+Or with a custom base URL and specific suites (see `k6/` for the full list):
 
 ```bash
-BASE_URL=https://your-instance.phala.network just k6-test
+BASE_URL=https://your-instance.phala.network/core/v1 just test smoke integration
 ```
 
 The k6 tests create a new account via `new_account` in each run; this requires the AccountConfig contract to be deployed and configured on the chain (e.g. Base Sepolia).
