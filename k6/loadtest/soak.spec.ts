@@ -120,39 +120,62 @@ const allScenarios = {
   },
 };
 
-const SCENARIO = __ENV.SCENARIO;
-const scenarios =
-  SCENARIO === "soak"
+// Fail loud on a typo'd SCENARIO rather than silently running every scenario
+// (which would re-enable the heavier ramp_* load on a gate that wanted soak).
+const SCENARIO = __ENV.SCENARIO || "";
+if (SCENARIO !== "" && SCENARIO !== "soak" && SCENARIO !== "ramp") {
+  throw new Error(
+    `Invalid SCENARIO="${SCENARIO}"; expected "soak", "ramp", or empty (run all).`,
+  );
+}
+const runSoak = SCENARIO === "" || SCENARIO === "soak";
+const runRamp = SCENARIO === "" || SCENARIO === "ramp";
+
+const scenarios = {
+  ...(runSoak
     ? {
         soak_encrypt_decrypt: allScenarios.soak_encrypt_decrypt,
         soak_ecdsa_sign: allScenarios.soak_ecdsa_sign,
       }
-    : SCENARIO === "ramp"
-      ? {
-          ramp_encrypt_decrypt: allScenarios.ramp_encrypt_decrypt,
-          ramp_ecdsa_sign: allScenarios.ramp_ecdsa_sign,
-        }
-      : allScenarios;
+    : {}),
+  ...(runRamp
+    ? {
+        ramp_encrypt_decrypt: allScenarios.ramp_encrypt_decrypt,
+        ramp_ecdsa_sign: allScenarios.ramp_ecdsa_sign,
+      }
+    : {}),
+};
+
+// Build thresholds only for the scenarios that actually run. Defining a
+// threshold over a submetric that receives zero samples (e.g. ramp_* when
+// SCENARIO=soak) is at best misleading and, on some k6 versions, fails the run
+// outright — which would break the gate every time. Keep them in lockstep with
+// `scenarios` above.
+const thresholds: Record<string, string[]> = {
+  http_req_duration: ["p(99)<15000"],
+  checks: ["rate>=0.95"],
+};
+if (runSoak) {
+  // soak_* carry the interim per-endpoint p95 regression ceilings (the gate
+  // runs SCENARIO=soak); keep the loose p99 "didn't fall over" bound too.
+  thresholds["http_req_duration{scenario:soak_encrypt_decrypt}"] = [
+    `p(95)<${SOAK_P95_ENCRYPT_MS}`,
+    "p(99)<15000",
+  ];
+  thresholds["http_req_duration{scenario:soak_ecdsa_sign}"] = [
+    `p(95)<${SOAK_P95_ECDSA_MS}`,
+    "p(99)<15000",
+  ];
+}
+if (runRamp) {
+  thresholds["http_req_duration{scenario:ramp_encrypt_decrypt}"] = ["p(99)<15000"];
+  thresholds["http_req_duration{scenario:ramp_ecdsa_sign}"] = ["p(99)<15000"];
+}
 
 export const options = {
   scenarios,
-  setupTimeout: "3m", // 8 accounts × 2 API calls each; ~6s/call → ~96s min; 3m allows for slow responses
-  thresholds: {
-    http_req_duration: ["p(99)<15000"],
-    checks: ["rate>=0.95"],
-    // soak_* carry the interim per-endpoint p95 regression ceilings (the gate
-    // runs SCENARIO=soak); keep the loose p99 "didn't fall over" bound too.
-    "http_req_duration{scenario:soak_encrypt_decrypt}": [
-      `p(95)<${SOAK_P95_ENCRYPT_MS}`,
-      "p(99)<15000",
-    ],
-    "http_req_duration{scenario:soak_ecdsa_sign}": [
-      `p(95)<${SOAK_P95_ECDSA_MS}`,
-      "p(99)<15000",
-    ],
-    "http_req_duration{scenario:ramp_encrypt_decrypt}": ["p(99)<15000"],
-    "http_req_duration{scenario:ramp_ecdsa_sign}": ["p(99)<15000"],
-  },
+  setupTimeout: "3m", // accounts × 2 API calls each; ~6s/call; 3m allows for slow responses
+  thresholds,
 };
 
 export interface SoakAccountData {
@@ -163,16 +186,23 @@ export interface SoakAccountData {
 export type SoakSetupData = SoakAccountData[];
 
 export function setup(): SoakSetupData {
-  const maxVus = Math.max(SOAK_VUS, RAMP_MAX_VUS);
-  if (PRECREATED_ACCOUNTS.length < maxVus) {
+  // Only provision/fund accounts for the scenarios that actually run. k6 gives
+  // each concurrent VU a globally-unique __VU, so the pool must cover the SUM of
+  // the running scenarios' peak VUs (soak peaks at SOAK_VUS total across its two
+  // scenarios; ramp peaks at RAMP_MAX_VUS). With SCENARIO=soak,SOAK_VUS=2 this is
+  // 2 — not 8 — so a soak-only gate doesn't demand or fund ramp accounts it never
+  // uses (which would waste Stripe top-ups and fail if the pool is < 8).
+  const requiredAccounts =
+    (runSoak ? SOAK_VUS : 0) + (runRamp ? RAMP_MAX_VUS : 0);
+  if (PRECREATED_ACCOUNTS.length < requiredAccounts) {
     throw new Error(
-      `Not enough pre-created accounts for soak test: need ${maxVus}, found ${PRECREATED_ACCOUNTS.length}. Run accounts.seed.spec.ts with a higher ACCOUNTS_COUNT.`,
+      `Not enough pre-created accounts for soak test: need ${requiredAccounts}, found ${PRECREATED_ACCOUNTS.length}. Run accounts.seed.spec.ts with a higher ACCOUNTS_COUNT.`,
     );
   }
 
   const accounts: SoakAccountData[] = [];
   const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
-  for (let i = 0; i < maxVus; i++) {
+  for (let i = 0; i < requiredAccounts; i++) {
     const account = PRECREATED_ACCOUNTS[i];
     ensureAccountCredits(client, { "X-Api-Key": account.apiKey });
     accounts.push({ usageApiKey: account.usageApiKey, pkpId: account.walletAddress });
