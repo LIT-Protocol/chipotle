@@ -1,0 +1,6 @@
+/target
+/pkg-web
+/pkg-node
+# local-only: vendored, serde-patched frost-dkg used to validate the build.
+# The patch itself is captured in frost-dkg-serde.patch (committed).
+/.vendor
