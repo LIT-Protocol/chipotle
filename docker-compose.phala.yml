@@ -68,6 +68,10 @@ services:
       # Use sandbox keys for dev/next, live keys for prod.
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY}
+      # Shared bearer secret between lit-payments and lit-api-server for the
+      # internal cache-invalidation endpoint (/internal/invalidate_balance_cache).
+      # Must match the value set on lit-payments (Railway env var of the same name).
+      LIT_INTERNAL_SHARED_SECRET: ${LIT_INTERNAL_SHARED_SECRET}
     volumes:
       - lit-socket:/tmp
       - /var/run/dstack.sock:/var/run/dstack.sock
