@@ -24,9 +24,22 @@ export function buildMultiSelect(id, items, getValue, getLabel, placeholder, dis
   );
 }
 
+// Canonical decimal form of a group id. list_groups returns ids as 0x-padded
+// 32-byte hex in API mode but as decimal in sovereign mode, while usage-key
+// permission arrays (can_execute_in_groups, \u2026) are always plain integers. Use
+// decimal everywhere so the multi-select checkbox value matches both the saved
+// permission ids (for pre-fill) and getSelectedGroupIds()'s Number() read.
+export function normalizeGroupId(id) {
+  try {
+    return BigInt(id).toString();
+  } catch {
+    return String(id);
+  }
+}
+
 export function buildGroupMultiSelect(id, disabled) {
   const items = [{ id: '0', name: 'All Groups' }, ...getGroupsStore()];
-  return buildMultiSelect(id, items, (g) => g.id, (g) => g.name || String(g.id), 'Select groups\u2026', disabled);
+  return buildMultiSelect(id, items, (g) => normalizeGroupId(g.id), (g) => g.name || String(g.id), 'Select groups\u2026', disabled);
 }
 
 export function buildWalletMultiSelect(id, disabled) {
@@ -187,6 +200,47 @@ async function confirmAndRemoveGroup(item) {
   }
 }
 
+// Re-check the boxes in a multi-select that match `values`. `wrap` is the
+// captured .ms-wrap node (not an id) so a stale async caller can verify the
+// modal wasn't closed/rebuilt out from under it via wrap.isConnected.
+function preSelectMultiSelect(wrap, values) {
+  if (!wrap || !wrap.isConnected || !values || !values.length) return;
+  const valSet = new Set(values.map(String));
+  wrap.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+    if (valSet.has(cb.value)) cb.checked = true;
+  });
+  updateMultiSelectSummary(wrap.id);
+}
+
+// listGroups returns only {id, name, description}, so the group's currently
+// permitted PKPs and actions have to be fetched per-group to pre-fill the
+// edit modal's multi-selects.
+async function preselectGroupPermissions(item) {
+  const apiKey = getEffectiveApiKey();
+  const groupId = String(Number(item.id));
+  const pkpWrap = document.getElementById('modal-group-pkp-ids');
+  const cidWrap = document.getElementById('modal-group-cid-hashes');
+  let client;
+  try {
+    client = await getClient();
+  } catch (e) {
+    logError('preselectGroupPermissions:getClient', e);
+    return;
+  }
+  try {
+    const wallets = await client.listWalletsInGroup({ apiKey, groupId, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
+    preSelectMultiSelect(pkpWrap, wallets.map((w) => w.wallet_address));
+  } catch (e) {
+    logError('preselectGroupPkps', e);
+  }
+  try {
+    const actions = await client.listActions({ apiKey, groupId, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
+    preSelectMultiSelect(cidWrap, actions.map((a) => a.id));
+  } catch (e) {
+    logError('preselectGroupCids', e);
+  }
+}
+
 function openGroupModal(item = null) {
   const isEdit = item != null;
   const nameId = isEdit ? 'modal-edit-group-name' : 'modal-group-name';
@@ -219,6 +273,9 @@ function openGroupModal(item = null) {
 
   attachGroupMultiSelectLogic('modal-group-pkp-ids');
   attachGroupMultiSelectLogic('modal-group-cid-hashes');
+  // When editing, load the group's saved PKP/action permissions back into the
+  // multi-selects (fire-and-forget; guarded against the modal being closed).
+  if (isEdit) void preselectGroupPermissions(item);
   if (allOptsBtn) allOptsBtn.addEventListener('click', () => {
     selectAllInMultiSelect('modal-group-pkp-ids');
     selectAllInMultiSelect('modal-group-cid-hashes');
