@@ -215,9 +215,15 @@ function preSelectMultiSelect(wrap, values) {
 // listGroups returns only {id, name, description}, so the group's currently
 // permitted PKPs and actions have to be fetched per-group to pre-fill the
 // edit modal's multi-selects.
+// The server maps the U256::ZERO "any/all" sentinel to the string id "n/a"
+// (metadata_to_item), but the modal's "All" option uses checkbox value "0".
+const WILDCARD_ITEM_ID = 'n/a';
+
 async function preselectGroupPermissions(item) {
   const apiKey = getEffectiveApiKey();
-  const groupId = String(Number(item.id));
+  // normalizeGroupId, not Number(): API-mode ids are 0x-padded hex and large
+  // u256 values would lose precision (or become NaN) through JS Number.
+  const groupId = normalizeGroupId(item.id);
   const pkpWrap = document.getElementById('modal-group-pkp-ids');
   const cidWrap = document.getElementById('modal-group-cid-hashes');
   let client;
@@ -235,7 +241,9 @@ async function preselectGroupPermissions(item) {
   }
   try {
     const actions = await client.listActions({ apiKey, groupId, pageNumber: '0', pageSize: LIST_PAGE_SIZE });
-    preSelectMultiSelect(cidWrap, actions.map((a) => a.id));
+    // A group that permits "All" actions comes back as the "n/a" wildcard id;
+    // map it to "0" so the modal's All checkbox preselects.
+    preSelectMultiSelect(cidWrap, actions.map((a) => (a.id === WILDCARD_ITEM_ID ? '0' : a.id)));
   } catch (e) {
     logError('preselectGroupCids', e);
   }

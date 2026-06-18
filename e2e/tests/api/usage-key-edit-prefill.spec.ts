@@ -88,8 +88,16 @@ test.describe('usage API key edit modal pre-fills every option', () => {
       ['#modal-usage-add-pkp-groups', perms.add_pkp_to_groups],
       ['#modal-usage-remove-pkp-groups', perms.remove_pkp_from_groups],
     ];
+    // Assert the EXACT checked group-id values, not just the count — the bug
+    // was mismatched IDs, so a same-cardinality wrong set must fail here.
     for (const [sel, expected] of groups) {
-      await expect(page.locator(`${sel} input:checked`)).toHaveCount(expected.length);
+      await expect
+        .poll(() =>
+          page.locator(`${sel} input:checked`).evaluateAll((els) =>
+            (els as HTMLInputElement[]).map((e) => e.value).sort(),
+          ),
+        )
+        .toEqual(expected.map(String).sort());
     }
 
     // screenshot: collapsed (summaries + capability boxes visible)

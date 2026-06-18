@@ -74,11 +74,14 @@ test.describe('group edit modal pre-fills saved permissions', () => {
     );
     for (const a of actions) actionHash[a.name] = a.id;
 
-    // 4) groups with distinct permitted subsets
+    // 4) groups with distinct permitted subsets. cids/pkps are the exact
+    //    checkbox VALUES we expect checked: real PKP addresses + action hashes,
+    //    plus the "All" sentinels ('0x000…0' for PKPs, '0' for actions).
     const groups = [
       { name: 'Two PKPs + one action', pkps: [wallets.W1, wallets.W2], cids: [actionHash.A1] },
       { name: 'One PKP + two actions', pkps: [wallets.W3], cids: [actionHash.A2, actionHash.A3] },
       { name: 'All PKPs + one action', pkps: [ZERO_ADDR], cids: [actionHash.A1] },
+      { name: 'One PKP + all actions', pkps: [wallets.W1], cids: ['0'] },
     ];
     for (const g of groups) {
       await post('/add_group', key, {
@@ -107,12 +110,17 @@ test.describe('group edit modal pre-fills saved permissions', () => {
       const overlay = page.locator('#modal-overlay');
       await expect(page.locator('#modal-title')).toHaveText('Edit group');
 
-      // preselect is async (fetches listWalletsInGroup + listActions) — wait for
-      // the boxes to actually be checked before asserting / screenshotting.
+      // preselect is async (fetches listWalletsInGroup + listActions) — poll
+      // until the EXACT expected checkbox values are checked (not just the
+      // count: wrong-but-same-cardinality selections must fail this).
       const pkpWrap = page.locator('#modal-group-pkp-ids');
       const cidWrap = page.locator('#modal-group-cid-hashes');
-      await expect(pkpWrap.locator('input:checked')).toHaveCount(g.pkps.length);
-      await expect(cidWrap.locator('input:checked')).toHaveCount(g.cids.length);
+      const checked = (sel: string) =>
+        page.locator(`${sel} input:checked`).evaluateAll((els) =>
+          (els as HTMLInputElement[]).map((e) => e.value).sort(),
+        );
+      await expect.poll(() => checked('#modal-group-pkp-ids')).toEqual([...g.pkps].sort());
+      await expect.poll(() => checked('#modal-group-cid-hashes')).toEqual([...g.cids].sort());
 
       const slug = g.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
       await overlay.screenshot({ path: path.join(SHOT_DIR, `${slug}--summary.png`) });
