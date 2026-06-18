@@ -49,6 +49,11 @@ on:
         required: false
         type: string
         default: ''
+      scenario:
+        description: "Soak-only: restrict to a scenario group ('soak' or 'ramp'). Empty = all. The gate uses 'soak' to drop the ramp_* scenarios."
+        required: false
+        type: string
+        default: ''
     secrets:
       accounts_json:
         description: "Raw JSON content for pre-funded accounts file (written to a temp file at runtime)"
@@ -96,6 +101,15 @@ on:
         required: false
         type: string
         default: ''
+      scenario:
+        description: "Soak-only: restrict to a scenario group ('soak' or 'ramp'). Empty = all scenarios."
+        required: false
+        type: choice
+        default: ''
+        options:
+          - ''
+          - soak
+          - ramp
       accounts_file:
         description: "Optional accounts file override, relative to the k6/ dir (e.g. ./data/accounts.next.json)"
         required: false
@@ -156,6 +170,7 @@ jobs:
           SOAK_DURATION: ${{ inputs.duration }}
           BPT_STEP_DURATION: ${{ inputs.duration }}
           BPT_STEPS: ${{ inputs.steps }}
+          SCENARIO: ${{ inputs.scenario }}
         # pipefail keeps k6's exit code (the threshold gate) while teeing the
         # full summary — incl. p50/p95/p99 + check rates — to an artifact.
         run: |

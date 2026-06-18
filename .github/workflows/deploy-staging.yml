@@ -463,21 +463,30 @@ jobs:
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
 
-  # Performance regression gate. Runs a load test against the freshly-deployed
+  # Latency regression gate. Runs a low-VU soak against the freshly-deployed
   # (cold) instance on its OWN direct URL (not the public domain). Note the cold
   # box auto-claims the public domain at boot — before this gate runs — so a bad
   # build may already be serving public traffic by now; this gate does NOT
   # prevent that. What it does: a load-test failure blocks confirm-cutover and
   # triggers rollback-on-failure below, which flips the public domain back to the
   # still-running old instance. So it's detect-and-roll-back, not prevent-go-live.
-  # `spike` is the fast variant (~2–3 min); heavier soak/breakpoint runs are
-  # available via k6-loadtest.yml dispatch.
+  #
+  # Why soak (low VU) and not spike: spike (25 VUs of real crypto) saturates the
+  # small staging box and trips lit-api-server's CPU load-shedding guard (429s),
+  # which measures the failure cliff, not latency — and the fast 429s actually
+  # mask "got slower" regressions. A low-VU soak stays under the shed threshold
+  # so per-endpoint p95 reflects the code path. SCENARIO=soak drops the spec's
+  # ramp_* scenarios. The p95 ceilings live in soak.spec.ts (interim absolute
+  # bounds; Phase 2 swaps them for run-over-run deltas vs a baseline).
   k6-loadtest:
     needs: [wait-for-api-available, k6-correctness]
     uses: ./.github/workflows/k6-loadtest.yml
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
-      test: spike
+      test: soak
+      vus: '2'
+      duration: 3m
+      scenario: soak
 
   # ───────────────────────── Zero-downtime cutover (ping-pong) ─────────────────────────
   # The cold CVM's dstack-ingress auto-claims the public domain on boot (as soon

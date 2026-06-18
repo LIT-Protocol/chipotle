@@ -1,6 +1,6 @@
 # Gate releases on k6 load tests (perf regression gate)
 
-**Status:** Phase 1 shipped (PR #506, branch `glitch003/ci-perf-tests-k6`). Phases 2–3 not started.
+**Status:** Phase 1 shipped (PR #506). Gate vehicle switched spike → low-VU soak after a live test (see §3.1). Phase 2 not started.
 **Scope:** Turn the existing k6 load tests (`k6/loadtest/{spike,soak,breakpoint}.spec.ts`) from manual-only tools into an automated perf-regression gate on the staging deploy, then into real run-over-run regression detection. Dedicated idle servers are earmarked as the stable load-generation / baseline hardware.
 
 ---
@@ -32,6 +32,25 @@ Stop perf regressions from shipping. Today the load tests only run by hand (`jus
 
 **Known limitation (by design for P1):** the gate is detect-and-roll-back. The cold box auto-claims the public domain at container boot, so a bad build can briefly serve public traffic before the gate fails and `rollback-on-failure` flips DNS back.
 
+### 3.1 Gate vehicle: spike → low-VU soak (chosen after a live test)
+
+The first dispatch ran `test: spike` (25 VUs of real crypto) against next and got a flood of HTTP 429s. Root cause: that load saturates the small `tdx.small` box and trips lit-api-server's CPU load-shedding guard (`cpu_overload.rs`, sheds at load>2×cpu or CPU PSI>50%). Spike measures the *failure cliff*, not latency — and worse, the shed 429s return instantly, which would *lower* measured latency and **mask** "got slower" regressions. So spike is the wrong vehicle for "we made this endpoint a lot slower."
+
+Switched the gate to a **low-VU soak** (`test: soak`, `vus: 2`, `duration: 3m`, `scenario: soak`). A 2-VU soak with soak's 2–4s think time runs at ~2 req/s — well under the shed threshold — so per-endpoint p95 reflects the code path, not contention. `SCENARIO=soak` (new `k6-loadtest.yml` input) drops the spec's `ramp_*` scenarios (one of which spins a hot no-op VU on the runner).
+
+**Verified clean on next (run 27782975924):** 0 shedding 429s, `http_req_failed 0.00%`, `checks 100%`. First baseline numbers (low-load p95):
+
+| Endpoint | avg | p95 | max |
+|---|---|---|---|
+| `soak_encrypt_decrypt` | 99 ms | **106 ms** | 207 ms |
+| `soak_ecdsa_sign` | 249 ms | **274 ms** | 322 ms |
+
+`soak_*` and `ramp_*` agreed within a few ms → reproducible signal.
+
+**Interim absolute ceilings (in `soak.spec.ts`, env-overridable):** `SOAK_P95_ENCRYPT_MS=350`, `SOAK_P95_ECDSA_MS=700` (~3× baseline). Catches gross regressions without false-failing on jitter; Phase 2 replaces with deltas.
+
+**Open knob:** the soak scenario's hardcoded 2m ramp-up/down makes the gate ~7 min. If that's too slow per deploy, trim the ramps (→ ~4 min) or run on a dedicated box (Phase 3).
+
 ---
 
 ## 4. Phase 2 — real regression detection (TODO)
@@ -43,8 +62,8 @@ The headline goal: gate on a **delta vs the last green release**, not just absol
 - Comparison step in CI: fail if e.g. `p95 > 1.2× baseline` for the last green release.
 
 **Folded-in from the Codex adversarial review of PR #506:**
-- **#4 — tighten the deploy gate thresholds.** Spike's `checks>=0.8` / `p99<30s` lets a degraded build (up to 20% failed assertions) pass and go live. Phase 2's delta gate is the real fix; also revisit the absolute floor for the cutover gate specifically.
-- **#2 — reduce time-to-rollback.** `k6-loadtest` in `rollback-on-failure`'s `needs` means rollback can't start until the ~3-min spike finishes, even if an earlier independent gate (e.g. `verify-attestation`) already failed. Decouple fast-fail rollback from the slow load-test gate so a bad-but-live box is pulled back ASAP. (Pre-existing pattern — `k6-smoke`/`k6-correctness` already do this — but worth fixing while we're here.)
+- **#4 — gate thresholds.** Partially addressed: the gate is now low-VU soak with interim per-endpoint p95 ceilings (§3.1), not the loose spike `checks>=0.8`/`p99<30s`. The real fix is still the delta gate above — replace the absolute `SOAK_P95_*_MS` ceilings with run-over-run deltas vs the last green release.
+- **#2 — reduce time-to-rollback.** `k6-loadtest` in `rollback-on-failure`'s `needs` means rollback can't start until the ~7-min soak finishes, even if an earlier independent gate (e.g. `verify-attestation`) already failed. Decouple fast-fail rollback from the slow load-test gate so a bad-but-live box is pulled back ASAP. (Pre-existing pattern — `k6-smoke`/`k6-correctness` already do this — but worth fixing while we're here.)
 
 ---
 

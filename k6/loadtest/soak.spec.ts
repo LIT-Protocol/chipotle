@@ -48,6 +48,16 @@ import { ensureAccountCredits } from "../stripe.ts";
 const SOAK_DURATION = __ENV.SOAK_DURATION || "30m";
 const SOAK_VUS = parseInt(__ENV.SOAK_VUS || "3", 10);
 
+// Interim per-endpoint p95 latency ceilings (ms) for the deploy gate.
+// Coarse absolute ceilings at ~3x the observed low-load baseline on staging
+// (encrypt/decrypt ~106ms p95, ecdsa-sign ~274ms p95) — enough to catch gross
+// "we made this endpoint a lot slower" regressions without false-failing on
+// normal jitter. Phase 2 replaces these with run-over-run deltas vs a stored
+// baseline. Overridable via env so manual/endurance soaks at higher VU (where
+// latency legitimately rises) don't trip them.
+const SOAK_P95_ENCRYPT_MS = __ENV.SOAK_P95_ENCRYPT_MS || "350";
+const SOAK_P95_ECDSA_MS = __ENV.SOAK_P95_ECDSA_MS || "700";
+
 // Stages: 2min ramp-up, (duration - 4min) steady, 2min ramp-down
 const RAMP_UP = "2m";
 const RAMP_DOWN = "2m";
@@ -130,8 +140,16 @@ export const options = {
   thresholds: {
     http_req_duration: ["p(99)<15000"],
     checks: ["rate>=0.95"],
-    "http_req_duration{scenario:soak_encrypt_decrypt}": ["p(99)<15000"],
-    "http_req_duration{scenario:soak_ecdsa_sign}": ["p(99)<15000"],
+    // soak_* carry the interim per-endpoint p95 regression ceilings (the gate
+    // runs SCENARIO=soak); keep the loose p99 "didn't fall over" bound too.
+    "http_req_duration{scenario:soak_encrypt_decrypt}": [
+      `p(95)<${SOAK_P95_ENCRYPT_MS}`,
+      "p(99)<15000",
+    ],
+    "http_req_duration{scenario:soak_ecdsa_sign}": [
+      `p(95)<${SOAK_P95_ECDSA_MS}`,
+      "p(99)<15000",
+    ],
     "http_req_duration{scenario:ramp_encrypt_decrypt}": ["p(99)<15000"],
     "http_req_duration{scenario:ramp_ecdsa_sign}": ["p(99)<15000"],
   },
