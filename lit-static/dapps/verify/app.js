@@ -117,20 +117,85 @@ function setVerdict(status, text, sub) {
 
 // ── Verification steps ───────────────────────────────────────────────────────
 
-// Outcomes per step that feed the overall verdict.
+// Outcomes per step that feed the overall verdict. A verifier has no middle
+// ground: a check either proves what it claims (PASS) or it does not (FAIL).
 const PASS = 'pass';
-const WARN = 'warn';
 const FAIL = 'fail';
+
+/**
+ * A verification tool must run over an authenticated channel, otherwise a network
+ * attacker can rewrite /info, /attestation, or RPC responses and forge the result.
+ * Require https:// everywhere; allow http:// only for loopback (local dev).
+ */
+function isAllowedUrl(raw) {
+  let u;
+  try {
+    u = new URL(raw);
+  } catch {
+    return false;
+  }
+  if (u.protocol === 'https:') return true;
+  if (u.protocol === 'http:') {
+    return ['localhost', '127.0.0.1', '[::1]', '::1'].includes(u.hostname);
+  }
+  return false;
+}
+
+// A hostile endpoint must not be able to hang the UI forever or exhaust memory.
+const FETCH_TIMEOUT_MS = 15000;
+const MAX_RESPONSE_BYTES = 4 * 1024 * 1024; // 4 MiB cap on any single response.
+
+/** Read a response body with a hard byte cap so a lying/absent Content-Length can't OOM the tab. */
+async function readCapped(res, controller) {
+  const declared = Number(res.headers.get('content-length') || 0);
+  if (declared > MAX_RESPONSE_BYTES) {
+    controller.abort();
+    throw new Error(`Response too large (${declared} bytes; cap ${MAX_RESPONSE_BYTES}).`);
+  }
+  if (!res.body || !res.body.getReader) {
+    const text = await res.text();
+    if (text.length > MAX_RESPONSE_BYTES) throw new Error(`Response exceeded ${MAX_RESPONSE_BYTES}-byte cap.`);
+    return text;
+  }
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = '';
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > MAX_RESPONSE_BYTES) {
+      controller.abort();
+      throw new Error(`Response exceeded ${MAX_RESPONSE_BYTES}-byte cap.`);
+    }
+    text += decoder.decode(value, { stream: true });
+  }
+  return text + decoder.decode();
+}
 
 async function fetchJson(url) {
   // Always read fresh: a verification tool must never trust a stale cache.
-  const res = await fetch(url, {
-    cache: 'no-store',
-    headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
-  });
-  const body = await res.text();
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status} — ${truncate(body, 200) || res.statusText}`);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  let body;
+  try {
+    const res = await fetch(url, {
+      cache: 'no-store',
+      signal: controller.signal,
+      headers: { Accept: 'application/json', 'Cache-Control': 'no-cache' },
+    });
+    body = await readCapped(res, controller);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} — ${truncate(body, 200) || res.statusText}`);
+    }
+  } catch (e) {
+    if (e.name === 'AbortError') {
+      throw new Error(`Request to ${url} timed out or was aborted after ${FETCH_TIMEOUT_MS / 1000}s.`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
   }
   try {
     return JSON.parse(body);
@@ -159,13 +224,15 @@ async function stepInfo(apiUrl) {
   const tcb = parseTcbInfo(info.tcb_info);
   const composeHash = info.compose_hash || tcb.compose_hash || '';
 
-  // Attestation quote is supporting evidence; failure here is not fatal.
+  // The attestation quote is the artifact that ties this server to real TDX
+  // hardware. A genuine TEE always serves one; its absence is disqualifying,
+  // even though full DCAP validation of it happens at the Trust Center (step 5).
   let quote = null;
   let quoteNote = '';
   try {
     quote = await fetchJson(`${apiUrl}/attestation`);
   } catch (e) {
-    quoteNote = `<p class="note">Quote endpoint unavailable: ${escapeHtml(e.message)}</p>`;
+    quoteNote = `<p class="note bad">Quote endpoint unavailable: ${escapeHtml(e.message)}</p>`;
   }
 
   let detail =
@@ -189,15 +256,21 @@ async function stepInfo(apiUrl) {
     detail += collapsible('Show app_compose', tcb.app_compose);
   }
 
-  if (composeHash) {
-    setPill('step-info', 'pass', 'reachable');
+  let outcome = PASS;
+  if (!composeHash) {
+    setPill('step-info', 'fail', 'no compose_hash');
+    detail += `<p class="note bad">Server did not report a compose_hash, so its configuration cannot be verified.</p>`;
+    outcome = FAIL;
+  } else if (!(quote && quote.quote)) {
+    setPill('step-info', 'fail', 'no attestation quote');
+    detail += `<p class="note bad">Server did not return a TDX attestation quote. A genuine TEE always serves one; without it this endpoint cannot be attested.</p>`;
+    outcome = FAIL;
   } else {
-    setPill('step-info', 'warn', 'no compose_hash');
-    detail += `<p class="note bad">Server did not report a compose_hash.</p>`;
+    setPill('step-info', 'pass', 'reachable');
   }
   setDetail('step-info', detail);
 
-  return { info, tcb, quote, composeHash, outcome: composeHash ? PASS : WARN };
+  return { info, tcb, quote, composeHash, outcome };
 }
 
 /** Step 2 — recompute SHA-256(app_compose) and compare to the reported hash. */
@@ -205,21 +278,24 @@ async function stepComposeIntegrity(tcb, composeHash) {
   setPill('step-compose', 'running', 'hashing');
 
   if (!tcb.app_compose) {
-    setPill('step-compose', 'warn', 'no app_compose');
+    setPill('step-compose', 'fail', 'no app_compose');
     setDetail(
       'step-compose',
-      `<p class="note">The server did not return <code>app_compose</code>, so the hash could not be recomputed in-browser. The on-chain whitelist check below remains the authoritative binding.</p>`
+      `<p class="note bad">The server did not return <code>app_compose</code>, so its configuration hash cannot be independently recomputed. The on-chain check only proves the server-reported hash is whitelisted, not that the server runs it — integrity is unverifiable.</p>`
     );
-    return WARN;
+    return FAIL;
   }
 
   let computed;
   try {
     computed = await sha256hex(tcb.app_compose);
   } catch (e) {
-    setPill('step-compose', 'warn', 'unavailable');
-    setDetail('step-compose', `<p class="note bad">${escapeHtml(e.message)}</p>`);
-    return WARN;
+    setPill('step-compose', 'fail', 'unavailable');
+    setDetail(
+      'step-compose',
+      `<p class="note bad">Cannot recompute the hash in this browser, so integrity cannot be verified: ${escapeHtml(e.message)}</p>`
+    );
+    return FAIL;
   }
   const reported = normHex(composeHash);
   const match = computed === reported;
@@ -229,15 +305,15 @@ async function stepComposeIntegrity(tcb, composeHash) {
     kv('SHA-256(app_compose)', computed, match ? 'good' : 'bad') +
     (match
       ? `<p class="note">The configuration the server reports hashes to exactly the value it claims.</p>`
-      : `<p class="note bad">Recomputed hash does not match the reported compose_hash. This can happen if the dstack manifest serializes app_compose differently than the hashed bytes; the authoritative check is the on-chain whitelist (step 4), which binds the quoted compose_hash.</p>`);
+      : `<p class="note bad">Recomputed hash does NOT match the reported compose_hash. The server is misreporting its configuration — do not trust this endpoint.</p>`);
   setDetail('step-compose', detail);
 
   if (match) {
     setPill('step-compose', 'pass', 'matches');
     return PASS;
   }
-  setPill('step-compose', 'warn', 'mismatch');
-  return WARN;
+  setPill('step-compose', 'fail', 'mismatch');
+  return FAIL;
 }
 
 /** Step 3 — app_id matches the expected DstackApp address. */
@@ -348,11 +424,11 @@ function readConfig() {
   const rpcUrl = el('rpc-url').value.trim();
   const appIdRaw = el('app-id').value.trim();
 
-  if (!/^https?:\/\/.+/i.test(apiUrl)) {
-    return { error: 'API base URL must be an absolute http(s):// URL.' };
+  if (!isAllowedUrl(apiUrl)) {
+    return { error: 'API base URL must be an https:// URL (http:// is allowed only for localhost).' };
   }
-  if (!/^https?:\/\/.+/i.test(rpcUrl)) {
-    return { error: 'Base RPC URL must be an absolute http(s):// URL.' };
+  if (!isAllowedUrl(rpcUrl)) {
+    return { error: 'Base RPC URL must be an https:// URL (http:// is allowed only for localhost).' };
   }
 
   // Accept a bare 20-byte hex (no 0x) too, then canonicalize via ethers.getAddress,
@@ -371,6 +447,17 @@ function readConfig() {
 
 async function runVerify() {
   if (running) return;
+
+  // Fail closed if the ethers dependency never loaded (CDN blocked, offline, or
+  // SRI integrity mismatch). Without it steps 3 and 4 cannot run.
+  if (typeof ethers === 'undefined') {
+    setVerdict(
+      'fail',
+      'Verifier failed to load',
+      'The ethers.js library could not be loaded (CDN blocked, offline, or integrity mismatch). Reload the page or check your network and extensions.'
+    );
+    return;
+  }
 
   const { config, error } = readConfig();
   if (error) {
@@ -405,17 +492,11 @@ async function runVerify() {
         'Verification failed',
         'One or more checks did not pass. Do not trust this endpoint until resolved.'
       );
-    } else if (outcomes.includes(WARN)) {
-      setVerdict(
-        'warn',
-        'Verified with warnings',
-        'Core checks passed. Review the warnings below, then confirm the hardware quote via the Phala Trust Center.'
-      );
     } else {
       setVerdict(
         'pass',
-        'Verified',
-        'Reachable, configuration hash matches, identity confirmed, and whitelisted on Base. Confirm the hardware quote via the Phala Trust Center (step 5).'
+        'Configuration checks passed',
+        'The server is reachable, serves an attestation quote, its app_compose hashes to the reported compose_hash, its identity matches, and that hash is whitelisted on Base. This does NOT by itself prove the hardware: complete the Intel TDX quote validation at the Phala Trust Center (step 5) to confirm a genuine enclave.'
       );
     }
   } catch (e) {

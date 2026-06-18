@@ -3,21 +3,18 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      Lock down script sources: any script execution on this page can forge the
+      verdict. connect-src stays broad (https: + loopback) because the API and RPC
+      endpoints are user-supplied. style-src keeps 'unsafe-inline' for the inline
+      <style> block below; moving that to a file would let us drop it.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src https: http://localhost:* http://127.0.0.1:*; base-uri 'none'; form-action 'none'"
+    />
     <title>Verify Lit Chipotle – TEE Attestation</title>
-    <script>
-      // Set theme before first paint to avoid a flash of the wrong theme.
-      (function () {
-        try {
-          var t = localStorage.getItem('verify-theme');
-          if (t !== 'light' && t !== 'dark') {
-            t = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-          }
-          document.documentElement.setAttribute('data-theme', t);
-        } catch (e) {
-          document.documentElement.setAttribute('data-theme', 'dark');
-        }
-      })();
-    </script>
+    <script src="theme-init.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -402,13 +399,15 @@
       </button>
     </div>
     <p class="subtitle">
-      Confirm that the Lit Chipotle API server is running unmodified code inside a genuine Intel TDX
-      enclave operated by Phala Cloud — entirely in your browser, no terminal required. This runs the
+      Run the in-browser
       <a href="https://developer.litprotocol.com/architecture/verification/quick-verify" target="_blank" rel="noopener noreferrer"
         >quick-verify</a
       >
-      checks: it reads the live attestation, recomputes the configuration hash, confirms the app
-      identity, and queries the on-chain whitelist on Base.
+      checks against a Lit Chipotle API server: read its live attestation, recompute and match its
+      configuration hash, confirm its identity, and check the on-chain whitelist on Base. These prove
+      the server reports a whitelisted configuration. Proving it actually runs inside a genuine Intel
+      TDX enclave requires validating the hardware quote, which a browser cannot do — complete that at
+      the Phala Trust Center (step 5).
     </p>
 
     <div class="config">
