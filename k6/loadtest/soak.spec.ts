@@ -220,6 +220,7 @@ export function setup(): SoakSetupData {
       });
       created.push({ usageApiKey: acc.usageApiKey, pkpId: acc.walletAddress });
     }
+    logBillingWallets(created);
     return created;
   }
 
@@ -245,7 +246,22 @@ export function setup(): SoakSetupData {
     ensureAccountCredits(client, { "X-Api-Key": account.apiKey });
     accounts.push({ usageApiKey: account.usageApiKey, pkpId: account.walletAddress });
   }
+  logBillingWallets(accounts);
   return accounts;
+}
+
+/**
+ * Log the billing wallet address(es) the run will use. These are public 0x
+ * addresses (never the API keys) — they match the Stripe customer's
+ * `metadata.wallet_address`, so you can find the customer and grant credits
+ * when a prod run runs out of money. Printed at setup so it's at the top of
+ * the run log.
+ */
+function logBillingWallets(accounts: SoakAccountData[]): void {
+  const wallets = accounts.map((a) => a.pkpId).join(", ");
+  console.log(
+    `soak: billing wallet address(es) in use (fund the Stripe customer whose metadata.wallet_address matches one of these): ${wallets}`,
+  );
 }
 
 export function encryptDecrypt(setupData: SoakSetupData) {
