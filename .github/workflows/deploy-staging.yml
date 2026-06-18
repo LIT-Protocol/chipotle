@@ -582,7 +582,17 @@ jobs:
       - name: Install Phala CLI + AWS CLI
         run: |
           npm install -g phala
-          command -v aws >/dev/null 2>&1 || python3 -m pip install --quiet --user awscli
+          # AWS CLI v2 via the official installer (no Python dependency). The old
+          # `pip install --user awscli` fails on the runner's externally-managed
+          # Python (PEP 668: "externally-managed-environment"). Guarded so a
+          # pre-installed aws is reused; --update keeps it idempotent across reruns
+          # on a persistent self-hosted $HOME.
+          if ! command -v aws >/dev/null 2>&1; then
+            curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+            unzip -q -o /tmp/awscliv2.zip -d /tmp
+            /tmp/aws/install --update --install-dir "$HOME/.local/aws-cli" --bin-dir "$HOME/.local/bin"
+            rm -rf /tmp/awscliv2.zip /tmp/aws
+          fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Roll the domain back to the previous instance, stop the bad one
         env:
