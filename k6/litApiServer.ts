@@ -465,6 +465,15 @@ export type CreateWalletHeaders = {
 
 export type CreateWalletDefault = CreateWalletResponse | ErrMessage;
 
+export type CreateWalletPostHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type CreateWalletPostDefault = CreateWalletResponse | ErrMessage;
+
 export type CreateWalletWithSignatureDefault =
   | CreateWalletWithSignatureResponse
   | ErrMessage;
@@ -932,6 +941,12 @@ export class LitApiServerClient {
     };
   }
 
+  /**
+ * Mint a new wallet (PKP) for the account.
+
+Deprecated: minting is a metered write, so it should not live on a GET — link previewers, prefetchers, and retrying proxies replay GETs. Use `POST /create_wallet` instead. This form is kept for backwards compatibility.
+ * @deprecated
+ */
   createWallet(
     headers: CreateWalletHeaders,
     requestParameters?: Params,
@@ -969,6 +984,49 @@ export class LitApiServerClient {
       response,
       data,
       operationId: "create_wallet",
+    };
+  }
+
+  /**
+   * Mint a new wallet (PKP) for the account.
+   */
+  createWalletPost(
+    headers: CreateWalletPostHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: CreateWalletPostDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/create_wallet`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request("POST", k6url.toString(), undefined, {
+      ...mergedRequestParameters,
+      headers: {
+        ...mergedRequestParameters?.headers,
+        // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+        ...Object.fromEntries(
+          Object.entries(headers || {}).map(([key, value]) => [
+            key,
+            String(value),
+          ]),
+        ),
+      },
+    });
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "create_wallet_post",
     };
   }
 

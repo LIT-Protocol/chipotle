@@ -12,14 +12,13 @@ RUN apt-get update && apt-get install -y \
 
 COPY . .
 
-RUN cd lit-api-server && cargo build --release --features production --bin lit-api-server
+RUN cd lit-api-server && cargo build --locked --release --features production --bin lit-api-server
 
 FROM debian:bookworm-slim AS runtime
 
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
-    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app

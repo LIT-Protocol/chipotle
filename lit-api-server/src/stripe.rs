@@ -34,6 +34,51 @@ pub const COST_LIT_ACTION_PER_SECOND_CENTS: i64 = 1; // $0.01 per second of exec
 /// Minimum top-up (500 cents = $5.00).
 pub const MIN_TOPUP_CENTS: i64 = 500;
 
+// ─── Errors ──────────────────────────────────────────────────────────────────
+
+/// Why a billing check or charge failed.
+///
+/// Guards map each variant to a distinct HTTP status so callers can tell an
+/// auth problem (401) from a funding problem (402) from a billing-infra
+/// problem (503). Previously all three surfaced as `402 Payment Required`,
+/// which told developers with a typo'd key to add funds.
+#[derive(Debug)]
+pub enum BillingError {
+    /// The API key does not resolve to any on-chain account → 401.
+    InvalidApiKey,
+    /// The account exists but cannot cover the operation → 402.
+    InsufficientCredits {
+        /// Credits available, in cents (≥ 0; Stripe-balance sign already flipped).
+        available_cents: i64,
+        /// Cents this operation needs.
+        required_cents: i64,
+    },
+    /// Chain RPC or Stripe failed — not the caller's fault → 503.
+    Unavailable(anyhow::Error),
+}
+
+impl std::fmt::Display for BillingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BillingError::InvalidApiKey => {
+                write!(f, "API key does not resolve to any account")
+            }
+            BillingError::InsufficientCredits {
+                available_cents,
+                required_cents,
+            } => write!(
+                f,
+                "insufficient credits: have {}, need {}",
+                cents_to_display(*available_cents),
+                cents_to_display(*required_cents)
+            ),
+            BillingError::Unavailable(e) => write!(f, "billing unavailable: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for BillingError {}
+
 // ─── Observability ──────────────────────────────────────────────────────────
 //
 // Every charge is surfaced to the observability pipeline (CPL-329) so that spend
@@ -131,6 +176,9 @@ pub struct StripeState {
     /// for 60 seconds, so each customer triggers at most one Stripe GET per minute
     /// regardless of request rate.
     balance_refresh_in_flight: Cache<String, ()>,
+    /// Credits (in cents) granted to every new account, from `STARTER_CREDITS_CENTS`.
+    /// 0 (the default) disables the grant entirely.
+    starter_credits_cents: i64,
 }
 
 /// Initialise Stripe from environment variables.  Returns `None` if the env vars are absent
@@ -160,7 +208,14 @@ pub fn init() -> Option<Arc<StripeState>> {
         .max_capacity(10_000)
         .time_to_live(Duration::from_secs(60)) // cooldown: max 1 refresh per customer per minute
         .build();
+    let starter_credits_cents = read_starter_credits_env();
     tracing::info!("stripe: billing enabled");
+    if starter_credits_cents > 0 {
+        tracing::info!(
+            starter_credits_cents,
+            "stripe: starter credits enabled for new accounts"
+        );
+    }
     Some(Arc::new(StripeState {
         publishable_key,
         client,
@@ -168,7 +223,30 @@ pub fn init() -> Option<Arc<StripeState>> {
         wallet_cache,
         balance_cache,
         balance_refresh_in_flight,
+        starter_credits_cents,
     }))
+}
+
+/// Parse `STARTER_CREDITS_CENTS`. Unset, empty, unparseable, or negative → 0 (off).
+fn read_starter_credits_env() -> i64 {
+    let Ok(raw) = std::env::var("STARTER_CREDITS_CENTS") else {
+        return 0;
+    };
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return 0;
+    }
+    match raw.parse::<i64>() {
+        Ok(v) if v >= 0 => v,
+        Ok(v) => {
+            tracing::warn!("STARTER_CREDITS_CENTS is negative ({v}); starter credits disabled");
+            0
+        }
+        Err(e) => {
+            tracing::warn!("STARTER_CREDITS_CENTS unparseable ({e}); starter credits disabled");
+            0
+        }
+    }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -230,7 +308,16 @@ pub async fn resolve_wallet_address(api_key: &str, state: &StripeState) -> Resul
             crate::accounts::get_billing_wallet_address(api_key).await
         })
         .await
-        .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e}"));
+        // Moka wraps errors in `Arc`, which can't be unwrapped into the owned
+        // error. Re-wrapping as a string would erase the typed `UnknownApiKey`
+        // that guards rely on to answer 401 instead of 402 — so reconstruct it.
+        .map_err(|e: Arc<anyhow::Error>| {
+            if e.downcast_ref::<crate::accounts::UnknownApiKey>().is_some() {
+                anyhow::Error::new(crate::accounts::UnknownApiKey)
+            } else {
+                anyhow::anyhow!("{e}")
+            }
+        });
     tracing::debug!(
         success = result.is_ok(),
         "stripe::resolve_wallet_address: done"
@@ -335,6 +422,60 @@ fn should_update_balance_cache(cached: Option<i64>, fetched: i64) -> bool {
     }
 }
 
+/// Resolve the billing wallet, classifying failures for status mapping.
+async fn resolve_wallet_classified(
+    api_key: &str,
+    state: &StripeState,
+) -> std::result::Result<String, BillingError> {
+    resolve_wallet_address(api_key, state).await.map_err(|e| {
+        // `AccountDoesNotExist` arrives as a decoded contract-revert string
+        // (see accounts::get_billing_wallet_address) — same meaning as the
+        // typed zero-address case: this key maps to no account.
+        if e.downcast_ref::<crate::accounts::UnknownApiKey>().is_some()
+            || e.to_string().contains("AccountDoesNotExist")
+        {
+            BillingError::InvalidApiKey
+        } else {
+            BillingError::Unavailable(e)
+        }
+    })
+}
+
+/// Verify the account can cover `required_cents` WITHOUT charging.
+///
+/// Used by request guards so nothing is deducted before the request body has
+/// been validated and the handler has succeeded — the actual charge happens
+/// post-response (management ops) or during execution (lit actions). An
+/// insufficient balance is recorded as a rejected-charge billing event so the
+/// existing metrics keep seeing guard rejections.
+pub async fn check_credit(
+    api_key: &str,
+    required_cents: i64,
+    reason: BillingReason,
+    state: &StripeState,
+) -> std::result::Result<(), BillingError> {
+    let wallet = resolve_wallet_classified(api_key, state).await?;
+    let customer_id = get_customer_by_wallet(&wallet, state)
+        .await
+        .map_err(BillingError::Unavailable)?;
+    let balance = get_credit_balance(&customer_id, state)
+        .await
+        .map_err(BillingError::Unavailable)?;
+    if balance + required_cents > 0 {
+        record_billing_event(
+            reason,
+            &wallet,
+            required_cents,
+            OUTCOME_INSUFFICIENT_CREDITS,
+        );
+        return Err(BillingError::InsufficientCredits {
+            available_cents: (-balance).max(0),
+            required_cents,
+        });
+    }
+    Ok(())
+}
+
 /// Charge `cost_cents` against the customer's credit balance.
 ///
 /// Reads the cached balance directly (without triggering a background refresh) to
@@ -351,10 +492,12 @@ async fn charge(
     cost_cents: i64,
     reason: BillingReason,
     state: &StripeState,
-) -> Result<()> {
+) -> std::result::Result<(), BillingError> {
     tracing::debug!(cost_cents, "stripe::charge: starting");
-    let wallet = resolve_wallet_address(api_key, state).await?;
-    let customer_id = get_customer_by_wallet(&wallet, state).await?;
+    let wallet = resolve_wallet_classified(api_key, state).await?;
+    let customer_id = get_customer_by_wallet(&wallet, state)
+        .await
+        .map_err(BillingError::Unavailable)?;
 
     // Read the cache directly.  If missing, fall back to an inline Stripe fetch
     // using try_get_with to coalesce concurrent cache-miss requests for the same
@@ -371,17 +514,18 @@ async fn charge(
                     lit_billing_core::balance::fetch(&state2.client, &cid).await
                 })
                 .await
-                .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e}"))?
+                .map_err(|e: Arc<anyhow::Error>| {
+                    BillingError::Unavailable(anyhow::anyhow!("{e}"))
+                })?
         }
     };
 
     if balance + cost_cents > 0 {
         record_billing_event(reason, &wallet, cost_cents, OUTCOME_INSUFFICIENT_CREDITS);
-        anyhow::bail!(
-            "Insufficient credits: balance {} cents, need {} cents",
-            -balance,
-            cost_cents
-        );
+        return Err(BillingError::InsufficientCredits {
+            available_cents: (-balance).max(0),
+            required_cents: cost_cents,
+        });
     }
 
     // Credits are sufficient; the charge is accepted at this point (the actual
@@ -462,7 +606,10 @@ async fn charge(
 }
 
 /// Charge $0.01 for a management API call.
-pub async fn charge_management(api_key: &str, state: &StripeState) -> Result<()> {
+pub async fn charge_management(
+    api_key: &str,
+    state: &StripeState,
+) -> std::result::Result<(), BillingError> {
     charge(
         api_key,
         COST_MANAGEMENT_CENTS,
@@ -488,7 +635,39 @@ pub async fn charge_lit_action_time(
     if cost == 0 {
         return Ok(());
     }
-    charge(api_key, cost, BillingReason::LitAction, state).await
+    charge(api_key, cost, BillingReason::LitAction, state)
+        .await
+        .map_err(anyhow::Error::new)
+}
+
+/// Grant the configured starter credits to a newly created customer.
+///
+/// No-op when `STARTER_CREDITS_CENTS` is unset or 0 (the default). The Stripe
+/// POST carries a per-customer idempotency key, so a retried `new_account`
+/// cannot double-grant within Stripe's idempotency window; beyond that,
+/// customers are only ever created once per account wallet, and this is only
+/// called from account creation.
+pub async fn grant_starter_credits(customer_id: &str, state: &StripeState) -> Result<()> {
+    let cents = state.starter_credits_cents;
+    if cents <= 0 {
+        return Ok(());
+    }
+    let amount = (-cents).to_string(); // negative = credit to customer
+    state
+        .client
+        .post_with_idempotency(
+            &format!("customers/{customer_id}/balance_transactions"),
+            &[
+                ("amount", amount.as_str()),
+                ("currency", "usd"),
+                ("description", "Starter credits"),
+            ],
+            &format!("starter-credits-{customer_id}"),
+        )
+        .await?;
+    state.balance_cache.invalidate(customer_id).await;
+    tracing::info!(customer_id, cents, "stripe: granted starter credits");
+    Ok(())
 }
 
 /// Create a PaymentIntent for `amount_cents`.  Returns `(client_secret, payment_intent_id)`.

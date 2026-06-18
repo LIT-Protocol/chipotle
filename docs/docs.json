@@ -23,7 +23,8 @@
               "management/pricing",
               "management/crypto",
               "management/litkey",
-              "management/api_keys"
+              "management/api_keys",
+              "management/errors"
             ]
           },
           {

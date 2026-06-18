@@ -6,7 +6,10 @@
 # Local env / temp files
 **/.env
 **/.env.*
-!**/.env.example
+# Re-include all committed *.example env templates. They are tracked in git;
+# dropping any of them (e.g. .env.local.example) removes a tracked file from the
+# build context, which makes `git describe --dirty` stamp the binary "-modified".
+!**/.env*.example
 **/.DS_Store
 **/tmp/
 **/coverage/
