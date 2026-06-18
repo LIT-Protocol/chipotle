@@ -59,6 +59,18 @@ on:
         description: "API base URL (optional; uses k6 spec fallback when empty)"
         required: false
         type: string
+      env:
+        # Without this, a manual run leaves K6_ENV empty, which stripe.ts treats
+        # as non-prod and enables test-card top-ups — even against a prod URL.
+        # Defaulting to 'staging' keeps top-ups on for staging; pick 'prod' to
+        # disable funding when pointing at a live deployment.
+        description: "Target environment: 'staging' enables Stripe top-ups, 'prod' disables them"
+        required: false
+        type: choice
+        default: 'staging'
+        options:
+          - staging
+          - prod
       test:
         description: "Which load test to run"
         required: false

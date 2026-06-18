@@ -278,6 +278,9 @@ jobs:
             Dockerfile.otel-collector
             docker-compose.phala.yml
             .github/workflows/deploy-staging.yml
+            .github/workflows/k6-loadtest.yml
+            k6/loadtest/
+            k6/setup.ts
           )
           CHANGED=$(git diff --name-only "$DEPLOYED_SHA" HEAD -- "${DEPLOY_PATHS[@]}")
           if [ -n "$CHANGED" ]; then
@@ -461,10 +464,14 @@ jobs:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
 
   # Performance regression gate. Runs a load test against the freshly-deployed
-  # (cold) instance on its direct URL — before it owns the public domain — so a
-  # build that falls over under load fails here and triggers rollback-on-failure
-  # below, never taking public traffic. `spike` is the fast variant (~2–3 min);
-  # heavier soak/breakpoint runs are available via k6-loadtest.yml dispatch.
+  # (cold) instance on its OWN direct URL (not the public domain). Note the cold
+  # box auto-claims the public domain at boot — before this gate runs — so a bad
+  # build may already be serving public traffic by now; this gate does NOT
+  # prevent that. What it does: a load-test failure blocks confirm-cutover and
+  # triggers rollback-on-failure below, which flips the public domain back to the
+  # still-running old instance. So it's detect-and-roll-back, not prevent-go-live.
+  # `spike` is the fast variant (~2–3 min); heavier soak/breakpoint runs are
+  # available via k6-loadtest.yml dispatch.
   k6-loadtest:
     needs: [wait-for-api-available, k6-correctness]
     uses: ./.github/workflows/k6-loadtest.yml
