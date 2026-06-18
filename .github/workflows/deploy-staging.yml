@@ -557,6 +557,8 @@ jobs:
   # app_id, so the _dstack-app-address TXT is identical; only the CNAME (→ node
   # gateway) needs to move back. Runs ONLY on a verify failure after the new box
   # came up (if it never came up, it never claimed, and the old box still serves).
+  # k6-smoke / k6-correctness intentionally removed from this branch's rollback
+  # trigger (see confirm-cutover comment above for why — stale account data).
   rollback-on-failure:
     needs: [determine-target, detect-changes, deploy, wait-for-api-available, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness]
     if: >-
@@ -568,10 +570,6 @@ jobs:
           && needs.determine-target.outputs.prev_live_cvm != ''
           && (needs.verify-attestation.result == 'failure'
               || needs.openapi-spec-check.result == 'failure') }}
-              # k6-smoke / k6-correctness intentionally removed from the rollback
-              # trigger on this branch. See the comment on confirm-cutover above
-              # — the k6 account data is stale; failures here are not real
-              # regressions and shouldn't auto-rollback a deploy.
     runs-on: self-hosted
     steps:
       - uses: actions/setup-node@v4
