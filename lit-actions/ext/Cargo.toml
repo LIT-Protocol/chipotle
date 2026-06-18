@@ -7,11 +7,9 @@ publish = { workspace = true }
 
 [lib]
 path = "lib.rs"
-test = false
 doctest = false
 
 [dependencies]
-atty = "0.2"
 deno_core = { workspace = true }
 deno_error = { workspace = true }
 ethabi = { version = "18", default-features = false, features = ["serde"] }
@@ -19,6 +17,13 @@ flume = { workspace = true }
 lazy_static = "1"
 lit-actions-grpc = { workspace = true }
 lit-observability = { workspace = true, features = ["channels"] }
+# Percent-decoding of proxy userinfo (user:pass) — generated proxy passwords
+# routinely contain reserved chars (@ : / +) that arrive %-encoded in the URL.
+percent-encoding = "2"
+# Matches lit-actions/server's reqwest exactly so feature-unification is a no-op
+# and we reuse the process-default aws_lc_rs provider installed in init_v8().
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots-no-provider"] }
+serde = { version = "1", features = ["derive"] }
 serde_json = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }

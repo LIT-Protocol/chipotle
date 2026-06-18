@@ -135,8 +135,9 @@ pub async fn new_account(
     )
     .await?;
 
-    // Best-effort: eagerly create the Stripe customer (with $0 balance) and set the email
-    // if provided.  Neither failure should prevent account creation.
+    // Best-effort: eagerly create the Stripe customer (with $0 balance), set the email
+    // if provided, and grant starter credits when STARTER_CREDITS_CENTS is configured.
+    // No failure here should prevent account creation.
     if let Some(stripe) = stripe_state {
         let wallet_hex = bytes_to_0x_hex(wallet_address.as_slice());
         match crate::stripe::get_customer_by_wallet(&wallet_hex, &stripe).await {
@@ -144,6 +145,9 @@ pub async fn new_account(
                 if !email.trim().is_empty() {
                     let _ = crate::stripe::set_customer_email(&customer_id, email.trim(), &stripe)
                         .await;
+                }
+                if let Err(e) = crate::stripe::grant_starter_credits(&customer_id, &stripe).await {
+                    tracing::warn!("stripe: failed to grant starter credits: {e}");
                 }
             }
             Err(e) => {
@@ -192,11 +196,12 @@ pub async fn create_wallet(
 pub async fn create_wallet_with_signature(
     req: Json<CreateWalletWithSignatureRequest>,
 ) -> Result<CreateWalletWithSignatureResponse, ApiStatus> {
-    let signer = crate::core::eip712::verify_eip712_signature(
+    let signer = crate::core::eip712::verify_eip712_signature_allow_contract_wallet(
         &req.typed_data,
         &req.signature,
         crate::core::eip712::PRIMARY_TYPE_CREATE_WALLET,
-    )?;
+    )
+    .await?;
     tracing::info!(
         "create_wallet_with_signature: minting PKP for ChainSecured signer {:?}",
         signer
@@ -216,11 +221,12 @@ pub async fn create_wallet_with_signature(
 pub async fn add_usage_api_key_with_signature(
     req: Json<AddUsageApiKeyWithSignatureRequest>,
 ) -> Result<AddUsageApiKeyWithSignatureResponse, ApiStatus> {
-    let signer = crate::core::eip712::verify_eip712_signature(
+    let signer = crate::core::eip712::verify_eip712_signature_allow_contract_wallet(
         &req.typed_data,
         &req.signature,
         crate::core::eip712::PRIMARY_TYPE_ADD_USAGE_API_KEY,
-    )?;
+    )
+    .await?;
     tracing::info!(
         "add_usage_api_key_with_signature: minting usage-key PKP for ChainSecured signer {:?}",
         signer
@@ -267,11 +273,12 @@ pub async fn convert_to_chain_secured_account(
         ));
     }
 
-    let signer = crate::core::eip712::verify_eip712_signature(
+    let signer = crate::core::eip712::verify_eip712_signature_allow_contract_wallet(
         &req.typed_data,
         &req.signature,
         crate::core::eip712::PRIMARY_TYPE_CONVERT_ACCOUNT,
-    )?;
+    )
+    .await?;
     if signer != claimed_address {
         return Err(ApiStatus::bad_request(
             anyhow::anyhow!("Signature does not match new_admin_wallet_address"),

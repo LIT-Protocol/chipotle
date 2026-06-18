@@ -1,0 +1,216 @@
+# Run a k6 load test (spike / soak / breakpoint / smoke) as a pass/fail gate.
+#
+# The selected spec defines its own k6 `thresholds` (e.g. spike: p(99)<30s,
+# checks rate>=0.8; breakpoint: p(95)<2s abortOnFail). k6 exits non-zero when a
+# threshold is breached, which fails this job — that is the regression gate.
+# (Phase 1: absolute thresholds only. A future phase adds run-over-run deltas.)
+#
+# Called from Deploy Staging against the freshly-deployed (cold) instance before
+# cutover, or manually via workflow_dispatch against any URL.
+#
+# Heads up: these specs exercise REAL Lit Actions (ECDSA sign, encrypt/decrypt)
+# and consume Stripe credits via ensureAccountCredits. Point them at a staging
+# network (test-mode Stripe), never prod, unless you mean it.
+
+name: k6 Load Test
+
+permissions:
+  contents: read
+
+on:
+  workflow_call:
+    inputs:
+      api_root_url:
+        description: "API base URL (e.g. https://example.com/core/v1)"
+        required: true
+        type: string
+      env:
+        description: "Target environment: 'prod' or 'staging'"
+        required: false
+        type: string
+        default: 'staging'
+      test:
+        description: "Which load test: spike | soak | breakpoint | smoke"
+        required: false
+        type: string
+        default: 'spike'
+      vus:
+        description: "Peak VUs (spike SPIK_VUS / soak SOAK_VUS / breakpoint BPT_MAX_VUS). Empty = spec default."
+        required: false
+        type: string
+        default: ''
+      duration:
+        description: "Sustain/step duration (spike SPIK_DURATION / soak SOAK_DURATION / breakpoint BPT_STEP_DURATION). Empty = spec default."
+        required: false
+        type: string
+        default: ''
+      steps:
+        description: "Breakpoint-only: comma-separated VU steps (BPT_STEPS), e.g. 1,10,20,30. Empty = spec default."
+        required: false
+        type: string
+        default: ''
+      scenario:
+        description: "Soak-only: restrict to a scenario group ('soak' or 'ramp'). Empty = all. The gate uses 'soak' to drop the ramp_* scenarios."
+        required: false
+        type: string
+        default: ''
+      create_accounts:
+        description: "Soak-only: create ephemeral accounts in setup instead of using the pre-seeded pool. The gate sets 'true' so it doesn't depend on the pool existing on a freshly-deployed box."
+        required: false
+        type: string
+        default: ''
+      p95_encrypt_ms:
+        description: "Soak-only: override encrypt/decrypt p95 ceiling (ms). Empty = spec default (350). Set high for a measurement run that shouldn't gate."
+        required: false
+        type: string
+        default: ''
+      p95_ecdsa_ms:
+        description: "Soak-only: override ecdsa-sign p95 ceiling (ms). Empty = spec default (700)."
+        required: false
+        type: string
+        default: ''
+    secrets:
+      accounts_json:
+        description: "Raw JSON content for pre-funded accounts file (written to a temp file at runtime)"
+        required: false
+  workflow_dispatch:
+    inputs:
+      api_root_url:
+        description: "API base URL (optional; uses k6 spec fallback when empty)"
+        required: false
+        type: string
+      env:
+        # Without this, a manual run leaves K6_ENV empty, which stripe.ts treats
+        # as non-prod and enables test-card top-ups — even against a prod URL.
+        # Defaulting to 'staging' keeps top-ups on for staging; pick 'prod' to
+        # disable funding when pointing at a live deployment.
+        description: "Target environment: 'staging' enables Stripe top-ups, 'prod' disables them"
+        required: false
+        type: choice
+        default: 'staging'
+        options:
+          - staging
+          - prod
+      test:
+        description: "Which load test to run"
+        required: false
+        type: choice
+        default: 'spike'
+        options:
+          - spike
+          - soak
+          - breakpoint
+          - smoke
+      vus:
+        description: "Peak VUs (empty = spec default)"
+        required: false
+        type: string
+        default: ''
+      duration:
+        description: "Sustain/step duration (empty = spec default)"
+        required: false
+        type: string
+        default: ''
+      steps:
+        description: "Breakpoint-only VU steps, e.g. 1,10,20,30 (empty = spec default)"
+        required: false
+        type: string
+        default: ''
+      scenario:
+        description: "Soak-only: restrict to a scenario group ('soak' or 'ramp'). Empty = all scenarios."
+        required: false
+        type: choice
+        default: ''
+        options:
+          - ''
+          - soak
+          - ramp
+      create_accounts:
+        description: "Soak-only: create ephemeral accounts in setup instead of using the pre-seeded pool"
+        required: false
+        type: choice
+        default: ''
+        options:
+          - ''
+          - 'true'
+      accounts_file:
+        description: "Optional accounts file override, relative to the k6/ dir (e.g. ./data/accounts.next.json)"
+        required: false
+        type: string
+
+jobs:
+  loadtest:
+    runs-on: self-hosted
+    env:
+      # `main` is the deploy branch and targets chipotle-next (test.chipotle.litprotocol.com);
+      # the legacy `next` branch is retired. chipotle-dev is deprecated.
+      K6_ACCOUNTS_FILE: ${{ inputs.accounts_file || (github.ref_name == 'main' && './data/accounts.next.json' || './data/accounts.dev.json') }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install k6
+        uses: grafana/setup-k6-action@v1
+
+      - name: Write accounts file from secret
+        id: accounts-file
+        env:
+          ACCOUNTS_JSON: ${{ secrets.accounts_json }}
+        run: |
+          if [ -n "$ACCOUNTS_JSON" ]; then
+            TMPFILE=$(mktemp "${RUNNER_TEMP}/k6-accounts-XXXXXX.json")
+            printf '%s' "$ACCOUNTS_JSON" > "$TMPFILE"
+            echo "path=$TMPFILE" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve spec path
+        id: spec
+        run: |
+          case "${{ inputs.test }}" in
+            smoke)      SPEC="k6/smoke.spec.ts" ;;
+            spike)      SPEC="k6/loadtest/spike.spec.ts" ;;
+            soak)       SPEC="k6/loadtest/soak.spec.ts" ;;
+            breakpoint) SPEC="k6/loadtest/breakpoint.spec.ts" ;;
+            *)
+              echo "::error::Unknown test '${{ inputs.test }}' (expected: spike|soak|breakpoint|smoke)"
+              exit 1
+              ;;
+          esac
+          echo "path=$SPEC" >> "$GITHUB_OUTPUT"
+
+      - name: "Run k6 load test: ${{ inputs.test }}"
+        env:
+          BASE_URL: ${{ inputs.api_root_url }}
+          K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-loadtest-${{ inputs.test }}
+          K6_ACCOUNTS_FILE: ${{ steps.accounts-file.outputs.path || env.K6_ACCOUNTS_FILE }}
+          K6_ENV: ${{ inputs.env }}
+          # One generic knob maps to the per-test env var the chosen spec reads.
+          # Empty values are falsy in the specs (`__ENV.X || "default"`), so each
+          # spec falls back to its own default when an input is left blank.
+          SPIK_VUS: ${{ inputs.vus }}
+          SOAK_VUS: ${{ inputs.vus }}
+          BPT_MAX_VUS: ${{ inputs.vus }}
+          SPIK_DURATION: ${{ inputs.duration }}
+          SOAK_DURATION: ${{ inputs.duration }}
+          BPT_STEP_DURATION: ${{ inputs.duration }}
+          BPT_STEPS: ${{ inputs.steps }}
+          SCENARIO: ${{ inputs.scenario }}
+          SOAK_CREATE_ACCOUNTS: ${{ inputs.create_accounts }}
+          SOAK_P95_ENCRYPT_MS: ${{ inputs.p95_encrypt_ms }}
+          SOAK_P95_ECDSA_MS: ${{ inputs.p95_ecdsa_ms }}
+        # pipefail keeps k6's exit code (the threshold gate) while teeing the
+        # full summary — incl. p50/p95/p99 + check rates — to an artifact.
+        run: |
+          set -o pipefail
+          k6 run "${{ steps.spec.outputs.path }}" 2>&1 | tee "k6-loadtest-${{ inputs.test }}.log"
+
+      - name: Upload k6 summary
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-loadtest-${{ inputs.test }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: k6-loadtest-${{ inputs.test }}.log
+          if-no-files-found: ignore
+
+      - name: Clean up accounts file
+        if: ${{ always() && steps.accounts-file.outputs.path }}
+        run: rm -f "${{ steps.accounts-file.outputs.path }}"

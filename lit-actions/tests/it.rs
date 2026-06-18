@@ -551,6 +551,65 @@ async fn fetch(mut client: TestClient) {
     assert!(client.received::<ExecutionResult>().success);
 }
 
+/// Exercises `Lit.Actions.proxiedFetch` against real Binance through a real
+/// egress proxy, executed in the actual runtime in-process. Opt-in: set
+/// `LIT_VENUES_TEST_PROXY` to a proxy URL (`http://user:pass@host:port`); skips
+/// cleanly when unset so CI stays green and no credentials are committed.
+/// (The direct-request control — geo-blocked 451 from a US IP vs. 200 via the
+/// proxy — is validated separately; the test mock holds one response per op
+/// type, so we keep this to a single proxied call.)
+///
+/// `#[ignore]` like `import_rewrite_cdn`: needs real outbound network, which the
+/// default CI/dev sandbox does not grant the test process. Run with
+/// `LIT_VENUES_TEST_PROXY=... cargo test -p lit-actions-tests --test integration proxied_fetch -- --ignored --nocapture`.
+#[rstest]
+#[ignore = "requires real network egress + LIT_VENUES_TEST_PROXY (see import_rewrite_cdn)"]
+#[tokio::test]
+async fn proxied_fetch(mut client: TestClient) {
+    let Ok(proxy) = std::env::var("LIT_VENUES_TEST_PROXY") else {
+        eprintln!("skipping proxied_fetch: set LIT_VENUES_TEST_PROXY to run");
+        return;
+    };
+
+    // proxy is embedded as a JS string literal via {:?}; setResponse below only
+    // ever echoes status/flags, never the proxy URL, so creds don't leak.
+    let code = formatdoc! {r#"
+        async function main() {{
+            const viaProxy = await Lit.Actions.proxiedFetch({{
+                url: "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
+                proxy: {proxy:?},
+            }});
+            const body = await viaProxy.text();
+            Lit.Actions.setResponse({{ response:
+                "proxyStatus=" + viaProxy.status + ";hasPrice=" + body.includes("price") }});
+        }}
+        "#,
+        proxy = proxy
+    };
+
+    client
+        .respond_with(IncrementFetchCountResponse { fetch_count: 1 })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    let response = client.received::<SetResponseRequest>().response;
+    eprintln!("proxied_fetch → {response}");
+    assert!(
+        response.contains("proxyStatus=200"),
+        "binance via proxy should return 200: {response}"
+    );
+    assert!(
+        response.contains("hasPrice=true"),
+        "expected a price field in the proxied response body: {response}"
+    );
+
+    // Drain queued op-request records so the GothamStore Drop check passes.
+    let _ = client.received::<IncrementFetchCountRequest>();
+    assert!(client.received::<ExecutionResult>().success);
+}
+
 #[rstest]
 #[tokio::test]
 async fn aes_decrypt(mut client: TestClient) {
@@ -1139,6 +1198,28 @@ async fn pool_concurrent_exhaustion() {
 /// runs an empty `nop` action, and returns. Used so concurrent tests
 /// don't share a single `TestClient` (which is sequential by design).
 async fn raw_execute_no_op(socket_path: &std::path::Path) -> Result<()> {
+    // Under heavy runner contention the server thread can be starved long
+    // enough that establishing a fresh connection trips the 1s
+    // `connect_timeout` (or the gRPC handshake races server startup),
+    // surfacing as a "transport error". With 20 simultaneous dials this is
+    // just a transient startup race, so retry the connect + handshake
+    // briefly instead of failing the test — mirrors the retry loop in
+    // `TestClient::execute_js`. Only the connection setup is retried; a
+    // real execution failure is reported immediately.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match raw_execute_no_op_once(socket_path).await {
+            Ok(()) => return Ok(()),
+            Err(_) if std::time::Instant::now() < deadline => {
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
+/// A single connect + handshake + execute attempt for [`raw_execute_no_op`].
+async fn raw_execute_no_op_once(socket_path: &std::path::Path) -> Result<()> {
     use lit_actions_server::proto::execute_js_response::Union as UnionResp;
 
     let (outbound_tx, outbound_rx) = flume::bounded::<ExecuteJsRequest>(0);

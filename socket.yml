@@ -1,0 +1,14 @@
+# Socket.dev configuration (https://docs.socket.dev/docs/socket-yml).
+# Socket.yml is only read from the repository root.
+#
+# We exclude examples/ from Socket analysis and PR alerts. Everything under
+# examples/ is standalone demo/sample code (Lit Action examples, hardhat
+# projects, dashboards) — not shipped in any production artifact — so its
+# transitive npm dependencies should not gate PRs or appear in Socket reports.
+# The first-party code (lit-api-server, lit-core, lit-actions, lit-payments,
+# e2e, etc.) is still scanned.
+version: 2
+
+projectIgnorePaths:
+  - "examples"
+  - "examples/**"

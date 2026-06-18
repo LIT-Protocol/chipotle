@@ -23,7 +23,8 @@
               "management/pricing",
               "management/crypto",
               "management/litkey",
-              "management/api_keys"
+              "management/api_keys",
+              "management/errors"
             ]
           },
           {
@@ -57,15 +58,19 @@
             "group": "Architecture",
             "pages": [
               "architecture/index",
+              "architecture/chain-secured",
               "architecture/groups",
               "architecture/authModel",
+              "architecture/self-hosting",
               "architecture/diagram",
               {
                 "group": "Security & Verification",
                 "pages": [
+                  "architecture/verification/attestation",
                   "architecture/verification/quick-verify",
                   "architecture/verification/index",
                   "architecture/verification/onchain-kms",
+                  "architecture/verification/upgrade-governance",
                   "architecture/verification/full-verification",
                   "architecture/verification/chain-of-trust"
                 ]

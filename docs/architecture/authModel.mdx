@@ -1,16 +1,16 @@
 ---
 title: "Authentication Model"
-description: "How accounts, API keys, PKPs, groups, and the TEE root key compose into a programmable KMS — and how self-sovereign vs SaaS emerges from configuration."
+description: "How accounts, API keys, PKPs, groups, and the TEE root key compose into a programmable KMS — and how API mode vs ChainSecured mode emerges from configuration."
 ---
 
 ## Core Insight
 
-There are no "modes." Self-sovereign vs SaaS is not a toggle — it's an emergent property of how you configure the same system. The only things that vary are:
+ChainSecured mode and API mode aren't a toggle in the code — they're an emergent property of how you configure the same system. The only things that vary are:
 
-1. **Who is the Account Owner** (TEE-derived wallet from Stytch auth vs SAFE vs raw EOA)
+1. **Who is the Account Owner** (a Lit-managed credential vs a SAFE or EOA you control)
 2. **What scopes the API keys have** (everything vs execute-only vs somewhere in between)
 
-A "self-sovereign" setup is just: owner = SAFE, API keys = execute-only. A "SaaS" setup is just: owner = TEE-derived wallet, API keys = broad scopes. The contracts don't know or care.
+A "ChainSecured-mode" setup is just: owner = a wallet you control (EOA/Safe), API keys = execute-only. An "API-mode" setup is just: owner = a Lit-managed credential, API keys = broad scopes. The contracts don't know or care.
 
 ---
 
@@ -23,8 +23,8 @@ The top-level identity. Just an address on Base. This address is the **owner** �
 The owner address can be:
 
 - An EOA (simple, but no recovery)
-- A TEE-derived wallet (SaaS happy path — user authenticates via Stytch with email/passkey/OAuth, TEE verifies the Stytch auth token and derives a deterministic wallet from the authenticated user ID)
-- A SAFE or any governance contract (self-sovereign — multisig, voting, timelocks, whatever)
+- A Lit-managed credential (API mode — the fast path: Lit holds the owner key and relays your writes)
+- A SAFE or any governance contract (ChainSecured mode — multisig, voting, timelocks, whatever)
 
 The contracts don't distinguish between these. `msg.sender == owner` is `msg.sender == owner`.
 
@@ -48,7 +48,7 @@ A key can have any combination of scopes. The owner grants scopes at registratio
 
 **Four of the seven scopes are per-group.** When you grant an API key `execute`, `group:manageActions`, `group:addPkp`, or `group:removePkp`, you specify _which groups_ it applies to. This is the key security property — a leaked onboarding key that has `group:addPkp(group_1)` can only add PKPs to group_1, not to some new insecure group that someone just created. And because it only has `group:addPkp` (not `group:removePkp`), it can't pull existing PKPs out of the group either.
 
-**Three scopes are account-wide.** `pkp:create` is account-wide because PKPs are created in the account's registry before being assigned to any group. Creating a PKP doesn't grant access to anything by itself — the PKP still has to be added to a group (which requires `group:addPkp` on that specific group) and someone has to have `execute` on that group to actually use it. `group:create` and `group:delete` are account-wide because groups aren't scoped to other groups. In SaaS mode, developers need these to build their app through the API. In self-sovereign mode, you simply don't grant these scopes to any API key, and then only the SAFE can create or delete groups.
+**Three scopes are account-wide.** `pkp:create` is account-wide because PKPs are created in the account's registry before being assigned to any group. Creating a PKP doesn't grant access to anything by itself — the PKP still has to be added to a group (which requires `group:addPkp` on that specific group) and someone has to have `execute` on that group to actually use it. `group:create` and `group:delete` are account-wide because groups aren't scoped to other groups. In API mode, developers need these to build their app through the API. In ChainSecured mode, you simply don't grant these scopes to any API key, and then only the SAFE can create or delete groups.
 
 **Everything else is owner-only:** adding/revoking API keys, updating scopes, transferring ownership. These are structural operations that affect the trust boundary itself.
 
@@ -89,10 +89,10 @@ The master secret managed by Phala's KMS. Access is governed by on-chain governa
 Account (owner address)
 │
 ├── API Keys (each with scopes)
-│     ├── key_dev:     [execute(*), pkp:create, group:create,             ← SaaS: broad scopes
+│     ├── key_dev:     [execute(*), pkp:create, group:create,             ← API mode: broad scopes
 │     │                 group:delete, group:manage*(*)]
-│     ├── key_server:  [execute(group_1)]                                 ← self-sovereign: execution only
-│     └── key_onboard: [pkp:create, group:addPkp(group_1)]               ← self-sovereign: onboarding
+│     ├── key_server:  [execute(group_1)]                                 ← ChainSecured: execution only
+│     └── key_onboard: [pkp:create, group:addPkp(group_1)]               ← ChainSecured: onboarding
 │
 ├── PKP Registry
 │     ├── pkp_001 (derivation path)
@@ -144,7 +144,7 @@ The Account Owner (SAFE, EOA, whatever) submits transactions directly to the per
 SAFE/EOA → tx → Permissions Contract (Base)
 ```
 
-This is how self-sovereign users handle governance operations. It's transparent and auditable — the SAFE proposal is visible on-chain before execution.
+This is how ChainSecured-mode users handle governance operations. It's transparent and auditable — the SAFE proposal is visible on-chain before execution.
 
 **Both paths write to the same contracts.** The contract authorization check is:
 
@@ -175,17 +175,17 @@ require(
 
 ---
 
-## Why Self-Sovereign Emerges from Configuration
+## Why ChainSecured Mode Emerges from Configuration
 
 Consider two setups:
 
-### Setup A: "SaaS mode"
+### Setup A: "API mode"
 
-- **Owner:** TEE-derived wallet (user authenticates via Stytch, TEE derives wallet from authenticated user ID)
+- **Owner:** a Lit-managed credential (the fast path)
 - **API key `dev_key`:** scopes = `[execute(*), pkp:create, group:create, group:delete, group:manageActions(*), group:addPkp(*), group:removePkp(*)]`
-- **Effect:** The developer can do everything via HTTP calls except manage API keys and transfer ownership (those are owner-only, done through the Stytch-authenticated dashboard). This is the full development experience — create groups, add actions, create PKPs, execute, iterate. Fast iteration, no multisig overhead. Recovery is via Stytch re-authentication — the TEE will derive the same wallet from the same user ID. When the app is production-ready, the developer can revoke the broad-scoped `dev_key` and replace it with purpose-built keys that have narrower scopes.
+- **Effect:** The developer can do everything via HTTP calls except manage API keys and transfer ownership (those are owner-only, done through the dashboard). This is the full development experience — create groups, add actions, create PKPs, execute, iterate. Fast iteration, no multisig overhead. Recovery is re-authenticating to the dashboard. When the app is production-ready, the developer can revoke the broad-scoped `dev_key` and replace it with purpose-built keys that have narrower scopes.
 
-### Setup B: "Self-sovereign mode"
+### Setup B: "ChainSecured mode"
 
 - **Owner:** A 3-of-5 SAFE
 - **API key `server_key`:** scopes = `[execute(group_1)]` — can only run actions on group_1
@@ -197,13 +197,13 @@ Consider two setups:
 
 ## Upgrade Flow Example: Swapping Actions in a Group
 
-### In SaaS mode (Setup A)
+### In API mode (Setup A)
 
 1. Pin new Lit Action JS to IPFS → get `QmNEW`
 2. `POST /groups/:id/actions` with `{add: ["QmNEW"], remove: ["QmOLD"]}` → TEE submits tx to update group
 3. Done. Next execution request uses new permissions. `dev_key` has `group:manageActions(*)`, so this is allowed on any group.
 
-### In self-sovereign mode (Setup B)
+### In ChainSecured mode (Setup B)
 
 1. Pin new Lit Action JS to IPFS → get `QmNEW`
 2. Propose a SAFE transaction batch:
@@ -229,25 +229,25 @@ This is the key reason `onboard_key` exists in Setup B — you don't want to hit
 
 ## Account Lifecycle
 
-### Onboarding (SaaS)
+### Onboarding (API mode)
 
-1. User signs up via Stytch (email, passkey, Google OAuth, etc.)
-2. TEE verifies the Stytch auth token and derives a deterministic wallet from the authenticated user ID → this becomes the Account Owner address
+1. User signs up through the dashboard
+2. The account is created with a Lit-managed owner credential → this becomes the Account Owner address
 3. System registers this on-chain as a new Account
 4. Owner creates a first group and a first API key with broad scopes
 5. User uses this API key for all HTTP interactions
 
-### Graduating to self-sovereign
+### Graduating to ChainSecured mode
 
 1. User deploys a SAFE on Base with their desired signer set
-2. User calls `transferOwnership(safeAddress)` — authenticated via Stytch (current owner) through the TEE relay
+2. User calls `transferOwnership(safeAddress)` — authorized by the current owner through the dashboard
 3. Account Owner is now the SAFE
 4. SAFE creates new API keys with restricted scopes, locked to specific groups (e.g. `server_key`, `onboard_key`)
 5. SAFE revokes the old broad-scoped API key
-6. Stytch is fully out of the loop — the SAFE is sovereign
+6. The managed credential is fully out of the loop — the SAFE is the sole on-chain owner
 
 ### Key rotation
 
-Owner registers a new API key address with the desired scopes, then revokes the old one. In SaaS mode, this is an HTTP call (TEE derives the owner wallet from Stytch auth and signs the tx). In self-sovereign mode, this requires a SAFE vote.
+Owner registers a new API key address with the desired scopes, then revokes the old one. In API mode, this is an HTTP call (the managed credential authorizes it). In ChainSecured mode, this requires a SAFE vote.
 
 ---

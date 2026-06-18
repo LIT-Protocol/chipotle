@@ -7,8 +7,8 @@ This guide walks you through creating an account, funding it, and running your f
 
 ## Zero to Lit Action
 
-1. [Create an account via the Dashboard](/management/dashboard#1-request-a-new-account-or-log-in), note down your API key
-2. [Add funds](/management/pricing#paying-with-a-credit-card-via-stripe) — click **Add Funds** in the Dashboard and pay with a credit card (minimum $5.00). Running Lit Actions and metered/write management operations consume credits, while read-only management calls (for example listing resources or checking your balance) are free.
+1. [Create an account via the Dashboard](/management/dashboard#1-request-a-new-account-or-log-in), note down your API key. Account creation takes ~15 seconds — it registers your account on-chain (Base).
+2. [Add funds](/management/pricing#paying-with-a-credit-card-via-stripe) — click **Add Funds** in the Dashboard (minimum $5.00) and pay with a credit card, [crypto](/management/crypto) (ETH, USDC, SOL and more), or [LITKEY](/management/litkey). Running Lit Actions and metered/write management operations consume credits, while read-only management calls (for example listing resources or checking your balance) are free. Unfunded metered calls return `402 Payment Required` — see [Errors](/management/errors).
 3. Add a usage API key — set its permissions by clicking **All Options**
 4. Run a Lit Action
    1. [From the Dashboard](/management/dashboard#7-run-lit-actions)
@@ -38,7 +38,7 @@ The same workflows are available via the REST API under `/core/v1/`. All authent
 **Workflow:**
 
 1. [New account or verify account (login)](/management/api_direct#1-new-account-or-verify-account-login)
-2. [Add funds via credit card](/management/pricing#paying-with-a-credit-card-via-stripe) (or [via the billing API](/management/api_direct#billing))
+2. [Add funds](/management/api_direct#2-add-funds) — card, crypto, or the billing API
 3. [Add usage API key](/management/api_direct#3-add-usage-api-key)
 4. [Create wallet (PKP)](/management/api_direct#4-create-a-wallet-pkp)
 5. [Add group and register IPFS action](/management/api_direct#5-add-group-and-register-ipfs-action)
@@ -58,4 +58,5 @@ The Dashboard is just your human-friendly configuration tool. Once your account 
 - [Lit Actions Overview](/lit-actions/index) — what they are and how they run
 - [Examples](/lit-actions/examples) — signing, encryption, HTTP fetching, contract calls
 - [Architecture](/architecture/index) — the TEE / on-chain / IPFS layers
+- [Chain Secured](/architecture/chain-secured) — why your keys' authority lives on-chain, and how an attested TEE enforces it
 - [OpenAPI Spec](https://api.chipotle.litprotocol.com/core/v1/openapi.json) / [Swagger UI](https://api.chipotle.litprotocol.com/core/v1/swagger-ui)
