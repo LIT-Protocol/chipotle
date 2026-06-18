@@ -353,4 +353,86 @@ contract AccountsTest is BaseTest {
         );
         writes.convertToChainSecuredAccount(hash, stranger);
     }
+
+    function test_setUsageApiKey_rejectsZeroUsageHash() public {
+        // Zero is the "does not exist" sentinel. Registering a zero usage hash
+        // would claim allApiKeyHashesToMaster[0] and corrupt existence checks.
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 hash = apiKeyHashOf(user);
+
+        uint256[] memory empty = new uint256[](0);
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "usageApiKeyHash must be non-zero"
+            )
+        );
+        writes.setUsageApiKey(
+            hash,
+            0,
+            block.timestamp + 7 days,
+            0,
+            "zero",
+            "zero",
+            false,
+            false,
+            false,
+            empty,
+            empty,
+            empty,
+            empty
+        );
+
+        // Nothing was registered; the zero slot must stay unclaimed.
+        ViewsFacet.UsageApiKeyReturn[] memory keys = views_.listApiKeys(hash, 0, 10);
+        assertEq(keys.length, 0);
+    }
+
+    function test_setUsageApiKey_rejectsPromotingWalletAlias() public {
+        // convertToChainSecuredAccount maps the new admin wallet hash to the
+        // account as a resolver alias, but that hash is NOT a usage key.
+        // setUsageApiKey must refuse to turn the alias into a usage key —
+        // otherwise a later removeUsageApiKey would delete the alias from
+        // allApiKeyHashesToMaster and orphan the admin wallet.
+        uint256 master = uint256(keccak256("managed-key"));
+        vm.prank(apiPayer);
+        writes.newAccount(master, true, "managed", "via api payer", apiPayer);
+        vm.prank(apiPayer);
+        writes.convertToChainSecuredAccount(master, user);
+
+        uint256 aliasHash = apiKeyHashOf(user);
+        // Sanity: the alias resolves to the account but is not a usage key.
+        assertEq(views_.getAccountWalletAddress(aliasHash), user);
+
+        uint256[] memory empty = new uint256[](0);
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.AccountAlreadyExists.selector,
+                aliasHash
+            )
+        );
+        writes.setUsageApiKey(
+            master,
+            aliasHash,
+            block.timestamp + 7 days,
+            0,
+            "promote",
+            "promote",
+            false,
+            false,
+            false,
+            empty,
+            empty,
+            empty,
+            empty
+        );
+
+        // The alias is untouched and still resolves to the account.
+        assertEq(views_.getAccountWalletAddress(aliasHash), user);
+        ViewsFacet.UsageApiKeyReturn[] memory keys = views_.listApiKeys(master, 0, 10);
+        assertEq(keys.length, 0);
+    }
 }

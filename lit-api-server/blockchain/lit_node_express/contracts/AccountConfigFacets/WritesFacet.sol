@@ -259,6 +259,13 @@ contract WritesFacet {
         uint256[] memory removePkpFromGroups,
         uint256[] memory executeInGroups
     ) public {
+        // Zero is the "does not exist" sentinel for allApiKeyHashesToMaster and
+        // for usageApiKeys[h].apiKeyHash. Allowing a zero usage hash would let an
+        // account claim allApiKeyHashesToMaster[0] and corrupt every existence
+        // check that treats 0 as "unset".
+        if (usageApiKeyHash == 0) {
+            revert AppStorage.InvalidRequest("usageApiKeyHash must be non-zero");
+        }
         if (manageIPFSIdsInGroups.length > 50) {
             revert AppStorage.InvalidRequest(
                 "manageIPFSIdsInGroups must be 50 items or fewer"
@@ -289,17 +296,25 @@ contract WritesFacet {
         // and overwrite allApiKeyHashesToMaster[victimMasterHash], hijacking
         // every later resolution of the victim's hash.
         uint256 existingUsageMaster = s.allApiKeyHashesToMaster[usageApiKeyHash];
-        // Reject a usageApiKeyHash that is itself a master account hash
-        // (a master hash resolves to itself).
-        if (existingUsageMaster == usageApiKeyHash && usageApiKeyHash != 0) {
-            revert AppStorage.AccountAlreadyExists(usageApiKeyHash);
-        }
-        // Reject a usageApiKeyHash already registered to a different account.
-        if (
-            existingUsageMaster != 0 &&
-            existingUsageMaster != masterAccountApiKeyHash
-        ) {
-            revert AppStorage.AccountAlreadyExists(usageApiKeyHash);
+        if (existingUsageMaster != 0) {
+            // The hash already resolves to an account. Only let it through when
+            // it is already a usage key OF THIS account (a legitimate update).
+            // Everything else is rejected:
+            //   - a master hash (resolves to itself),
+            //   - a hash registered to a different account (cross-account hijack),
+            //   - this account's own wallet/resolver alias created by
+            //     convertToChainSecuredAccount / transferChainSecuredAccountOwnership
+            //     that is not a usage key — promoting it would let a later
+            //     removeUsageApiKey delete the alias and orphan the wallet.
+            bool isExistingUsageKeyForThisAccount = existingUsageMaster ==
+                masterAccountApiKeyHash &&
+                s
+                .accounts[masterAccountApiKeyHash]
+                .usageApiKeys[usageApiKeyHash].apiKeyHash ==
+                usageApiKeyHash;
+            if (!isExistingUsageKeyForThisAccount) {
+                revert AppStorage.AccountAlreadyExists(usageApiKeyHash);
+            }
         }
         AppStorage.UsageApiKey storage apiKeyStorage = s
             .accounts[masterAccountApiKeyHash]
