@@ -141,7 +141,13 @@ jobs:
           # The `next` git branch is retired; `main` is the deploy branch and
           # targets the chipotle-next staging app (test.chipotle.litprotocol.com),
           # ping-ponged across its two instances. chipotle-dev is deprecated.
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          #
+          # Auto-deploys only fire on push to main. workflow_dispatch from any
+          # branch is permitted (and goes to the same staging CVM) so we can
+          # test feature branches against staging before merging — the prior
+          # version of this guard claimed to allow that in the error message
+          # but the condition itself rejected every non-main ref.
+          if [ "${{ github.ref }}" = "refs/heads/main" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             DEFAULT_APP_NAME="chipotle-next-rep-sa6xj"
             CVM_A="$NEXT_CVM_A"; CVM_B="$NEXT_CVM_B"
             echo "instance_type=tdx.small" >> "$GITHUB_OUTPUT"
