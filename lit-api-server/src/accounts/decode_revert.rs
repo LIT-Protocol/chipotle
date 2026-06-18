@@ -97,3 +97,29 @@ pub fn decode_contract_revert(err: &alloy::contract::Error) -> String {
 
     format!("{err}")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy::sol_types::SolError;
+
+    use crate::accounts::contracts::account_config_contract::AccountConfig;
+
+    /// The `AccountDoesNotExist` selector must resolve to its name. Billing's
+    /// `wallet_resolution_err` substring-matches on this name to return a 400
+    /// (account not found) rather than a 500, so a selector/name drift here
+    /// would silently turn missing-account lookups back into 500s.
+    #[test]
+    fn account_does_not_exist_selector_resolves_to_name() {
+        let selector = AccountConfig::AccountDoesNotExist::SELECTOR;
+        assert_eq!(
+            account_config_error_name(&selector),
+            Some("AccountDoesNotExist")
+        );
+    }
+
+    #[test]
+    fn unknown_selector_resolves_to_none() {
+        assert_eq!(account_config_error_name(&[0x00, 0x00, 0x00, 0x00]), None);
+    }
+}

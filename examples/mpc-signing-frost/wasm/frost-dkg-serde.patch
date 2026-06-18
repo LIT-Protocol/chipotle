@@ -1,0 +1,105 @@
+frost-dkg serde patch (prerequisite #1)
+=======================================
+Derives Serialize/Deserialize on `frost_dkg::Participant` so the stateless Lit
+Action can seal its DKG participant to its PKP between rounds and replay it.
+
+Against: frost-dkg 0.5.1 (crates.io). Apply from the crate root:
+    git apply frost-dkg-serde.patch          # in a frost-dkg checkout
+Or upstream it as a `serde` feature / PR (frost-dkg is Lit-authored). The wrapper
+crate (../wasm) compiles cleanly with this applied — verified with `cargo check`.
+
+Raw group/scalar fields use the group / prime_field / prime_field_vec serde
+helpers from elliptic-curve-tools; wrapped fields carry explicit #[serde(bound)],
+mirroring how data.rs already annotates Round1Data.
+
+------------------------------------------------------------------------------
+--- a/src/participant.rs
++++ b/src/participant.rs
+@@ -5,7 +5,7 @@
+ use super::*;
+ use elliptic_curve::group::GroupEncoding;
+ use elliptic_curve::{Field, Group};
+-use elliptic_curve_tools::SumOfProducts;
++use elliptic_curve_tools::{group, prime_field, prime_field_vec, SumOfProducts};
+ use rand_core::{CryptoRngCore, RngCore};
+ use serde::{Deserialize, Serialize};
+ use std::collections::BTreeMap;
+@@ -45,7 +45,14 @@
+ }
+ 
+ /// A DKG participant FSM
+-#[derive(Clone)]
++//
++// NOTE (lit-frost-wasm patch): added `Serialize, Deserialize` so the stateless
++// Lit Action can checkpoint its participant between DKG rounds. Raw group/scalar
++// fields use the `group` / `prime_field` / `prime_field_vec` serde helpers, and
++// wrapped fields carry explicit `#[serde(bound(...))]` — mirroring how
++// `Round1Data` is annotated in `data.rs`. Upstream this as a PR / `serde`
++// feature on frost-dkg. See examples/mpc-signing-frost/wasm/frost-dkg-serde.patch
++#[derive(Clone, Serialize, Deserialize)]
+ pub struct Participant<I, G>
+ where
+     I: ParticipantImpl<G> + Default,
+@@ -53,22 +60,62 @@
+     G::Scalar: ScalarHash,
+ {
+     pub(crate) ordinal: usize,
++    #[serde(bound(
++        serialize = "IdentifierPrimeField<G::Scalar>: Serialize",
++        deserialize = "IdentifierPrimeField<G::Scalar>: Deserialize<'de>"
++    ))]
+     pub(crate) id: IdentifierPrimeField<G::Scalar>,
+     pub(crate) threshold: usize,
+     pub(crate) limit: usize,
+     pub(crate) round: Round,
+     pub(crate) completed: bool,
++    #[serde(bound(
++        serialize = "SecretShare<G::Scalar>: Serialize",
++        deserialize = "SecretShare<G::Scalar>: Deserialize<'de>"
++    ))]
+     pub(crate) secret_shares: BTreeMap<usize, SecretShare<G::Scalar>>,
++    #[serde(bound(
++        serialize = "ValueGroup<G>: Serialize",
++        deserialize = "ValueGroup<G>: Deserialize<'de>"
++    ))]
+     pub(crate) feldman_verifiers: Vec<ValueGroup<G>>,
++    #[serde(with = "prime_field")]
+     pub(crate) original_secret: G::Scalar,
++    #[serde(with = "group")]
+     pub(crate) verifying_share: G,
++    #[serde(bound(
++        serialize = "SecretShare<G::Scalar>: Serialize",
++        deserialize = "SecretShare<G::Scalar>: Deserialize<'de>"
++    ))]
+     pub(crate) secret_share: SecretShare<G::Scalar>,
++    #[serde(with = "group")]
+     pub(crate) message_generator: G,
++    #[serde(bound(
++        serialize = "ValueGroup<G>: Serialize",
++        deserialize = "ValueGroup<G>: Deserialize<'de>"
++    ))]
+     pub(crate) public_key: ValueGroup<G>,
++    #[serde(with = "prime_field_vec")]
+     pub(crate) powers_of_i: Vec<G::Scalar>,
++    #[serde(bound(
++        serialize = "Round1Data<G>: Serialize",
++        deserialize = "Round1Data<G>: Deserialize<'de>"
++    ))]
+     pub(crate) received_round1_data: BTreeMap<usize, Round1Data<G>>,
++    #[serde(bound(
++        serialize = "Round2Data<G::Scalar>: Serialize",
++        deserialize = "Round2Data<G::Scalar>: Deserialize<'de>"
++    ))]
+     pub(crate) received_round2_data: BTreeMap<usize, Round2Data<G::Scalar>>,
++    #[serde(bound(
++        serialize = "IdentifierPrimeField<G::Scalar>: Serialize",
++        deserialize = "IdentifierPrimeField<G::Scalar>: Deserialize<'de>"
++    ))]
+     pub(crate) all_participant_ids: BTreeMap<usize, IdentifierPrimeField<G::Scalar>>,
++    #[serde(bound(
++        serialize = "IdentifierPrimeField<G::Scalar>: Serialize",
++        deserialize = "IdentifierPrimeField<G::Scalar>: Deserialize<'de>"
++    ))]
+     pub(crate) valid_participant_ids: BTreeMap<usize, IdentifierPrimeField<G::Scalar>>,
+     pub(crate) participant_impl: I,
+ }
