@@ -477,17 +477,7 @@ jobs:
   # DNS (see determine-target). Both jobs are no-ops outside ping-pong mode.
 
   confirm-cutover:
-    # STAGING-TEST BRANCH ONLY: k6-smoke + k6-correctness are removed from
-    # needs[]. The current k6 account data (k6/data/accounts.dev.json) is
-    # stale relative to the current staging contract — every test key
-    # reverts on-chain with AccountDoesNotExist, so k6 is red regardless of
-    # what code we deploy. This branch's purpose is to verify the auto
-    # top-up feature end-to-end on staging via the dashboard canary; k6's
-    # legacy /billing + /lit_action checks aren't on that critical path.
-    # Updating the test data is a separate ops task. DO NOT merge this
-    # relaxation to main — main's k6 gate stays intact there (this file is
-    # only loaded when running THIS branch's workflow).
-    needs: [determine-target, detect-changes, wait-for-api-available, verify-attestation, openapi-spec-check]
+    needs: [determine-target, detect-changes, wait-for-api-available, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness]
     if: ${{ needs.determine-target.outputs.pingpong == 'true' && needs.detect-changes.outputs.deploy_needed == 'true' }}
     uses: ./.github/workflows/wait-for-api-restart.yml
     with:
@@ -557,8 +547,6 @@ jobs:
   # app_id, so the _dstack-app-address TXT is identical; only the CNAME (→ node
   # gateway) needs to move back. Runs ONLY on a verify failure after the new box
   # came up (if it never came up, it never claimed, and the old box still serves).
-  # k6-smoke / k6-correctness intentionally removed from this branch's rollback
-  # trigger (see confirm-cutover comment above for why — stale account data).
   rollback-on-failure:
     needs: [determine-target, detect-changes, deploy, wait-for-api-available, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness]
     if: >-
@@ -569,7 +557,9 @@ jobs:
           && needs.wait-for-api-available.result == 'success'
           && needs.determine-target.outputs.prev_live_cvm != ''
           && (needs.verify-attestation.result == 'failure'
-              || needs.openapi-spec-check.result == 'failure') }}
+              || needs.openapi-spec-check.result == 'failure'
+              || needs.k6-smoke.result == 'failure'
+              || needs.k6-correctness.result == 'failure') }}
     runs-on: self-hosted
     steps:
       - uses: actions/setup-node@v4
