@@ -460,6 +460,18 @@ jobs:
     with:
       api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
 
+  # Performance regression gate. Runs a load test against the freshly-deployed
+  # (cold) instance on its direct URL — before it owns the public domain — so a
+  # build that falls over under load fails here and triggers rollback-on-failure
+  # below, never taking public traffic. `spike` is the fast variant (~2–3 min);
+  # heavier soak/breakpoint runs are available via k6-loadtest.yml dispatch.
+  k6-loadtest:
+    needs: [wait-for-api-available, k6-correctness]
+    uses: ./.github/workflows/k6-loadtest.yml
+    with:
+      api_root_url: ${{ needs.wait-for-api-available.outputs.api_root_url }}
+      test: spike
+
   # ───────────────────────── Zero-downtime cutover (ping-pong) ─────────────────────────
   # The cold CVM's dstack-ingress auto-claims the public domain on boot (as soon
   # as lit-api-server's container starts — docker-compose service_started; there
@@ -470,7 +482,7 @@ jobs:
   # DNS (see determine-target). Both jobs are no-ops outside ping-pong mode.
 
   confirm-cutover:
-    needs: [determine-target, detect-changes, wait-for-api-available, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness]
+    needs: [determine-target, detect-changes, wait-for-api-available, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness, k6-loadtest]
     if: ${{ needs.determine-target.outputs.pingpong == 'true' && needs.detect-changes.outputs.deploy_needed == 'true' }}
     uses: ./.github/workflows/wait-for-api-restart.yml
     with:
@@ -542,7 +554,7 @@ jobs:
   # gateway) needs to move back. Runs ONLY on a verify failure after the new box
   # came up (if it never came up, it never claimed, and the old box still serves).
   rollback-on-failure:
-    needs: [determine-target, detect-changes, deploy, wait-for-api-available, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness]
+    needs: [determine-target, detect-changes, deploy, wait-for-api-available, verify-attestation, openapi-spec-check, k6-smoke, k6-correctness, k6-loadtest]
     if: >-
       ${{ always()
           && needs.determine-target.outputs.pingpong == 'true'
@@ -553,7 +565,8 @@ jobs:
           && (needs.verify-attestation.result == 'failure'
               || needs.openapi-spec-check.result == 'failure'
               || needs.k6-smoke.result == 'failure'
-              || needs.k6-correctness.result == 'failure') }}
+              || needs.k6-correctness.result == 'failure'
+              || needs.k6-loadtest.result == 'failure') }}
     runs-on: self-hosted
     steps:
       - uses: actions/setup-node@v4
