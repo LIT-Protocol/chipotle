@@ -199,7 +199,24 @@ vulnerable paths (elliptic malleability, axios SSRF) aren't reachable by an
 attacker in a trusted local/CI deploy context. Not churning the lockfile for the
 ~5 low/med wins, since it leaves every critical/high in place.
 
-### 4c. Untouched
+### 4c. `e2e/pnpm-lock.yaml` (27 alerts) — ✅ 26 fixed
 
-`e2e/pnpm-lock.yaml` (27) and `lit-payments/contracts/package-lock.json` (9) — same
-dev/test-tooling profile; revisit with the same lens if needed.
+Playwright/synpress E2E test harness (dev/test only). All 27 alerts are transitive
+(nothing vulnerable is a direct dep). Added range-scoped `pnpm.overrides` to
+`e2e/package.json` pinning the vulnerable copies to patched versions —
+range-scoped so non-vulnerable majors (`ws@1`/`ws@7`, `glob@7`) are untouched:
+- `axios` 1.6.7 → **1.16.0** clears **21 alerts** (the single biggest lever).
+- `ws@8` → 8.21.0 (3), `form-data` → 4.0.6 (1), `glob@10` → 10.5.0 (1).
+`pnpm install --lockfile-only` regenerated the lockfile cleanly (pre-existing
+synpress/depay peer warnings unchanged).
+- **Remaining (3):** `#214` esbuild (medium; fix exists at 0.25.0 but it's a riskier
+  0.20→0.25 jump on synpress-cache's build — left unbumped), `#215` tsup and `#219`
+  elliptic (no fix). All dev-only → dismiss `tolerable_risk`.
+
+### 4d. `lit-payments/contracts/package-lock.json` (9 alerts)
+
+Hardhat contracts project — same profile as 4b (`lit_node_express`), already carries
+an `overrides` block (`ws`). Eight are non-breaking-fixable via npm `overrides`
+(tmp→0.2.6, serialize-javascript→7.0.5, cookie→0.7.0, js-yaml→4.2.0, undici→6.24.0,
+uuid→11.1.1); `#203` elliptic has no fix. Pending: fix the eight or dismiss all nine
+as dev/CI contract tooling (consistent with 4b).

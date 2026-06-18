@@ -1,0 +1,64 @@
+[package]
+name = "lit-frost-wasm"
+version = "0.0.1"
+edition = "2021"
+description = "wasm-bindgen wrapper over lit-frost (Ed25519 FROST signing) + frost-dkg (distributed key generation), for the mpc-signing-frost Lit example. Runs the SAME crypto in the Lit Action (web build) and on the user's machine (node build)."
+license = "MIT OR Apache-2.0"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rand_core = "0.6"
+# Pin to match the curve stack lit-frost / frost-dkg were locked against. A
+# fresh resolve grabs multiexp 0.4.2, whose `multiexp<G: Zeroize>` bound breaks
+# elliptic-curve-tools 0.1.2 (E0277: DefaultIsZeroes). Upstream pins =0.4.0.
+multiexp = "=0.4.0"
+serde-wasm-bindgen = "0.6"
+getrandom = { version = "0.2", features = ["js"] }
+
+# ── Lit's audited FROST signing library (github.com/LIT-Protocol/lit-frost) ──
+# Default features = full signing (do NOT enable `verify_only`).
+lit-frost = "0.4"
+
+# ── FROST distributed key generation (github.com/mikelodder7/frost-dkg) ──
+# default-features=false + curve25519 ONLY: the default feature set pulls blst
+# (a C library) and ed448/jubjub/p384/etc., none of which we need and several of
+# which will not compile to wasm32-unknown-unknown. Ed25519 lives behind
+# `curve25519`, which brings vsss-rs (with its own curve25519 feature) and the
+# `WrappedEdwards`/`WrappedScalar` group types we fix below.
+#
+# PREREQUISITE (see ./README.md): the stateless Lit Action must serialize its
+# DKG participant between rounds, but upstream `frost_dkg::Participant` derives
+# only `Clone`. This wrapper serializes it with serde, which needs a tiny
+# upstream patch (derive Serialize/Deserialize on `Participant`, `Round`, and the
+# `*ParticipantImpl` structs — all their fields are already serde-capable). Point
+# this at the Lit fork/branch carrying that patch until it lands on crates.io:
+#   frost-dkg = { git = "https://github.com/LIT-Protocol/frost-dkg", branch = "serde", default-features = false, features = ["curve25519"] }
+frost-dkg = { version = "0.5.1", default-features = false, features = ["curve25519"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+
+# ── Build override (commented so a fresh checkout still resolves) ──
+# The wrapper needs two small fixes to the Lit crates (see ./README.md
+# "prerequisites"), captured as ./frost-dkg-serde.patch and ./lit-frost-no-blst.patch.
+# To build locally before they're upstreamed:
+#   mkdir -p .vendor && cd .vendor
+#   cp -R "$(find ~/.cargo/registry/src -maxdepth 2 -name frost-dkg-0.5.1)" frost-dkg
+#   cp -R "$(find ~/.cargo/registry/src -maxdepth 2 -name lit-frost-0.4.0)" lit-frost
+#   chmod -R u+w frost-dkg lit-frost
+#   (cd frost-dkg && git apply ../../frost-dkg-serde.patch)
+#   (cd lit-frost && git apply ../../lit-frost-no-blst.patch)
+# then uncomment:
+# [patch.crates-io]
+# frost-dkg = { path = ".vendor/frost-dkg" }
+# lit-frost = { path = ".vendor/lit-frost" }
+#
+# The production path is to upstream both patches to the Lit crates and depend on
+# the published versions (then this whole block goes away).
