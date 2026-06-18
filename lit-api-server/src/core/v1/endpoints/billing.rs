@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::core::v1::guards::billing_auth::BillingAuth;
 use crate::core::v1::helpers::api_status::{ApiResult, ApiStatus, ErrMessage};
 use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{ConfirmPaymentRequest, CreatePaymentIntentRequest};
@@ -7,7 +8,6 @@ use crate::core::v1::models::response::{
     AccountOpResponse, BillingBalanceResponse, CreatePaymentIntentResponse, StripeConfigResponse,
 };
 use crate::stripe::{self, StripeState};
-use lit_billing_core::billing_auth::BillingAuth;
 use rocket::State;
 use rocket::serde::json::Json;
 use rocket::{get, post};
@@ -22,15 +22,20 @@ pub(super) fn billing_disabled_err() -> ApiStatus {
 
 /// Map wallet resolution errors to the correct HTTP status.
 ///
-/// "account has no wallet address" and contract reverts for missing accounts → 400.
+/// An API key that resolves to no account (typed [`UnknownApiKey`] or a
+/// contract revert for a missing account) → 401.
 /// Everything else (RPC failures, timeouts) → 500.
+///
+/// [`UnknownApiKey`]: crate::accounts::UnknownApiKey
 fn wallet_resolution_err(e: anyhow::Error) -> ApiStatus {
     let msg = e.to_string();
-    if msg.contains("account has no wallet address") || msg.contains("AccountDoesNotExist") {
-        ApiStatus::bad_request(
-            anyhow::anyhow!("account not found for API key"),
-            "Invalid API key",
-        )
+    let unknown_key = e.downcast_ref::<crate::accounts::UnknownApiKey>().is_some()
+        || msg.contains("AccountDoesNotExist")
+        // Legacy string form of the typed error, still produced by
+        // `get_account_wallet_address` and matched for defense-in-depth.
+        || msg.contains("account has no wallet address");
+    if unknown_key {
+        ApiStatus::unauthorized("Invalid API key — it does not resolve to any account")
     } else {
         // Log the underlying error for internal diagnostics without exposing details to clients.
         eprintln!("wallet_resolution_err internal failure: {e:?}");
@@ -168,20 +173,29 @@ mod tests {
     use super::*;
     use rocket::http::Status;
 
-    /// A missing account must map to 400, not 500. The wallet-lookup helpers
-    /// run the contract revert through `decode_contract_revert`, so the error
-    /// string contains the `AccountDoesNotExist` error name — this asserts the
-    /// substring match still routes it to a client error.
+    /// A missing account must map to 401 (the key resolves to no account),
+    /// not 500. The wallet-lookup helpers run the contract revert through
+    /// `decode_contract_revert`, so the error string contains the
+    /// `AccountDoesNotExist` error name — this asserts the substring match
+    /// still routes it to an auth error.
     #[test]
-    fn account_does_not_exist_maps_to_400() {
+    fn account_does_not_exist_maps_to_401() {
         let err = anyhow::anyhow!("Contract error: AccountDoesNotExist (0xd4a84737...)");
-        assert_eq!(wallet_resolution_err(err).status, Status::BadRequest);
+        assert_eq!(wallet_resolution_err(err).status, Status::Unauthorized);
     }
 
     #[test]
-    fn missing_wallet_address_maps_to_400() {
+    fn missing_wallet_address_maps_to_401() {
         let err = anyhow::anyhow!("account has no wallet address");
-        assert_eq!(wallet_resolution_err(err).status, Status::BadRequest);
+        assert_eq!(wallet_resolution_err(err).status, Status::Unauthorized);
+    }
+
+    /// The typed form (what `get_billing_wallet_address` actually returns for
+    /// a zero billing wallet) also maps to 401.
+    #[test]
+    fn typed_unknown_api_key_maps_to_401() {
+        let err = anyhow::Error::new(crate::accounts::UnknownApiKey);
+        assert_eq!(wallet_resolution_err(err).status, Status::Unauthorized);
     }
 
     /// RPC/transport failures (anything that isn't a known missing-account

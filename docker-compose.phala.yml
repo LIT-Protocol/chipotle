@@ -83,15 +83,6 @@ services:
       otel-collector:
         condition: service_healthy
         required: false
-    # Gates the zero-downtime cutover: dstack-ingress only auto-claims the
-    # custom domain once this reports healthy (see dstack-ingress depends_on
-    # below), so the public DNS never flips to a not-yet-ready API.
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health"]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 90s
     restart: unless-stopped
 
   # OTel Collector — receives OTLP (gRPC/HTTP) on 0.0.0.0:4317/4318 from all
@@ -134,11 +125,7 @@ services:
       DNS_PROVIDER: "route53"
       TARGET_ENDPOINT: "http://lit-api-server:8000"
       CERTBOT_EMAIL: "admin@litprotocol.com"
-      # SET_CAA must be false for ping-pong: with two instances (two in-TEE ACME
-      # accounts) sharing one custom domain, an accounturi-locked CAA written by
-      # one node would block the other node's ingress from (re)issuing its cert,
-      # so the cold node could fail to get a cert and never claim the domain.
-      SET_CAA: "false"
+      SET_CAA: "true"
       AWS_ACCESS_KEY_ID: "${CERTBOT_AWS_ACCESS_KEY_ID}"
       AWS_SECRET_ACCESS_KEY: "${CERTBOT_AWS_SECRET_ACCESS_KEY}"
       # STS role assumption — required by dstack-ingress for Route 53 access.
@@ -161,10 +148,7 @@ services:
       - cert-data:/etc/letsencrypt
     depends_on:
       lit-api-server:
-        # service_healthy (not service_started): hold the domain auto-claim
-        # until lit-api-server passes its /health check, so a freshly-deployed
-        # cold replica only takes the public DNS once it is actually serving.
-        condition: service_healthy
+        condition: service_started
     restart: unless-stopped
 
 volumes:
