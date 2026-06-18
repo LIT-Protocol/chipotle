@@ -601,10 +601,11 @@ jobs:
           # pre-installed aws is reused; --update keeps it idempotent across reruns
           # on a persistent self-hosted $HOME.
           if ! command -v aws >/dev/null 2>&1; then
-            curl -sSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
-            unzip -q -o /tmp/awscliv2.zip -d /tmp
-            /tmp/aws/install --update --install-dir "$HOME/.local/aws-cli" --bin-dir "$HOME/.local/bin"
-            rm -rf /tmp/awscliv2.zip /tmp/aws
+            tmp=$(mktemp -d)
+            trap 'rm -rf "$tmp"' EXIT
+            curl -fsSL --retry 3 "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "$tmp/awscliv2.zip"
+            unzip -q "$tmp/awscliv2.zip" -d "$tmp"
+            "$tmp/aws/install" --update --install-dir "$HOME/.local/aws-cli" --bin-dir "$HOME/.local/bin"
           fi
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
       - name: Roll the domain back to the previous instance, stop the bad one
