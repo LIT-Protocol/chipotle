@@ -188,9 +188,16 @@ pub const DISABLE_BILLING_ENV: &str = "LIT_DISABLE_BILLING";
 
 /// Read the Stripe keys from the environment.  Returns `None` if either is
 /// absent or empty (billing not configured).
+///
+/// Keys are trimmed of surrounding whitespace: a trailing newline (common when
+/// a key is piped in via `export FOO=$(cat secret)`) would otherwise corrupt the
+/// HTTP `Authorization` header and the prefix checks below.
 fn stripe_keys_from_env() -> Option<(String, String)> {
-    let secret_key = std::env::var("STRIPE_SECRET_KEY").ok()?;
-    let publishable_key = std::env::var("STRIPE_PUBLISHABLE_KEY").ok()?;
+    let secret_key = std::env::var("STRIPE_SECRET_KEY").ok()?.trim().to_string();
+    let publishable_key = std::env::var("STRIPE_PUBLISHABLE_KEY")
+        .ok()?
+        .trim()
+        .to_string();
     if secret_key.is_empty() || publishable_key.is_empty() {
         return None;
     }
@@ -214,6 +221,53 @@ fn billing_disabled() -> bool {
 /// local (non-production) builds so a dev machine can't charge real cards.
 fn is_live_key(key: &str) -> bool {
     key.starts_with("sk_live_") || key.starts_with("rk_live_") || key.starts_with("pk_live_")
+}
+
+/// Validate that the supplied keys are genuine *test-mode* Stripe keys of the
+/// correct role, for the local (non-production) billing policy (CPL-330).
+///
+/// A denylist of live prefixes is not enough on its own:
+///   - An arbitrary non-live string (e.g. `not-a-stripe-key`) would pass a
+///     "not live" check, start the server logging "test mode", and only fail
+///     when the first request hits Stripe — defeating the requirement to
+///     configure a real test account.
+///   - A *secret* key (`sk_test_…`/`rk_test_…`) placed in `STRIPE_PUBLISHABLE_KEY`
+///     would pass and then be served to unauthenticated clients via
+///     `GET /billing/stripe_config`, leaking secret material.
+///
+/// So we require positive, role-correct test prefixes:
+///   - secret:      `sk_test_…` or `rk_test_…`
+///   - publishable: `pk_test_…`
+///
+/// Pure and feature-independent so it is unit-tested under the default build
+/// (CI's `--all-features` run enables `production`, which skips the local policy
+/// path entirely).
+fn validate_local_test_keys(secret_key: &str, publishable_key: &str) -> Result<()> {
+    // Friendlier, more specific message for the live-key footgun.
+    if is_live_key(secret_key) || is_live_key(publishable_key) {
+        anyhow::bail!(
+            "Refusing to start: a LIVE Stripe key was supplied on a non-production build. Local \
+             runs must use TEST keys (sk_test_…/rk_test_…/pk_test_…) so a dev machine can't \
+             charge real cards.\n  Use a test key, or set {DISABLE_BILLING_ENV}=true to run \
+             payment-free."
+        );
+    }
+    if !(secret_key.starts_with("sk_test_") || secret_key.starts_with("rk_test_")) {
+        anyhow::bail!(
+            "STRIPE_SECRET_KEY is not a TEST secret key. Local runs require a real test Stripe \
+             account (CPL-330): the secret must start with sk_test_ or rk_test_.\n  Set a valid \
+             test key, or set {DISABLE_BILLING_ENV}=true to run payment-free."
+        );
+    }
+    if !publishable_key.starts_with("pk_test_") {
+        anyhow::bail!(
+            "STRIPE_PUBLISHABLE_KEY is not a TEST publishable key. It must start with pk_test_ \
+             (a secret key here would be served to unauthenticated clients via \
+             /billing/stripe_config).\n  Set a valid pk_test_ key, or set {DISABLE_BILLING_ENV}=true \
+             to run payment-free."
+        );
+    }
+    Ok(())
 }
 
 /// Build `StripeState` from the given keys, wiring up the in-process caches.
@@ -281,8 +335,11 @@ pub fn from_env() -> Option<Arc<StripeState>> {
 /// configured so local runs exercise the real billing path instead of silently
 /// dropping into payment-free mode (CPL-330).  The server refuses to start when:
 ///   - the keys are missing, or
-///   - the keys are live-mode keys (`sk_live_…` etc.), to keep a dev machine
-///     from charging real cards.
+///   - the keys are not role-correct *test* keys: the secret must be
+///     `sk_test_…`/`rk_test_…` and the publishable must be `pk_test_…`.  This
+///     rejects live keys (so a dev machine can't charge real cards), arbitrary
+///     non-Stripe strings, and a secret key mistakenly placed in the publishable
+///     slot (which would leak via `GET /billing/stripe_config`).
 ///
 /// Set `LIT_DISABLE_BILLING=true` to opt out and run payment-free.
 pub fn init() -> Result<Option<Arc<StripeState>>> {
@@ -313,14 +370,7 @@ pub fn init() -> Result<Option<Arc<StripeState>>> {
         );
     };
 
-    if is_live_key(&secret_key) || is_live_key(&publishable_key) {
-        anyhow::bail!(
-            "Refusing to start: a LIVE Stripe key was supplied on a non-production build. Local \
-             runs must use TEST keys (sk_test_…/rk_test_…/pk_test_…) so a dev machine can't \
-             charge real cards.\n  Use a test key, or set {DISABLE_BILLING_ENV}=true to run \
-             payment-free."
-        );
-    }
+    validate_local_test_keys(&secret_key, &publishable_key)?;
 
     let state = build_state(secret_key, publishable_key)?;
     tracing::info!("stripe: billing enabled (test mode)");
@@ -1021,5 +1071,44 @@ mod tests {
         assert!(!is_live_key("pk_test_abc123"));
         // A key with "live" elsewhere must not trip the prefix check.
         assert!(!is_live_key("sk_test_iamalivekey"));
+    }
+
+    #[test]
+    fn valid_test_keys_pass() {
+        assert!(validate_local_test_keys("sk_test_abc", "pk_test_abc").is_ok());
+        // Restricted secret keys are also acceptable.
+        assert!(validate_local_test_keys("rk_test_abc", "pk_test_abc").is_ok());
+    }
+
+    #[test]
+    fn live_keys_are_rejected() {
+        let err = validate_local_test_keys("sk_live_abc", "pk_test_abc")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("LIVE"), "expected live-key message, got: {err}");
+        assert!(validate_local_test_keys("sk_test_abc", "pk_live_abc").is_err());
+    }
+
+    #[test]
+    fn arbitrary_non_test_strings_are_rejected() {
+        // The headline P2 bypass: a non-live junk string must NOT be accepted as
+        // "test mode" and silently start the server.
+        assert!(validate_local_test_keys("not-a-stripe-key", "also-bad").is_err());
+        assert!(validate_local_test_keys("", "pk_test_abc").is_err());
+    }
+
+    #[test]
+    fn secret_key_in_publishable_slot_is_rejected() {
+        // The headline P1 leak: a secret in STRIPE_PUBLISHABLE_KEY would be served
+        // to unauthenticated clients via /billing/stripe_config. Reject it: a
+        // publishable key must start with pk_test_.
+        assert!(validate_local_test_keys("sk_test_abc", "sk_test_abc").is_err());
+        assert!(validate_local_test_keys("sk_test_abc", "rk_test_abc").is_err());
+    }
+
+    #[test]
+    fn wrong_role_prefixes_are_rejected() {
+        // A publishable key in the secret slot, and vice versa.
+        assert!(validate_local_test_keys("pk_test_abc", "pk_test_abc").is_err());
     }
 }
