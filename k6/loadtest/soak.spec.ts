@@ -34,14 +34,14 @@
  */
 import { checkAndLog, assertOk, warnOnHttpFailures } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
-import { PRECREATED_ACCOUNTS } from "../setup.ts";
+import { PRECREATED_ACCOUNTS, createAccountAndUsageKey } from "../setup.ts";
 import { sleep } from "k6";
 import {
   ECDSA_SIGN_CODE,
   ENCRYPT_CODE,
   DECRYPT_CODE,
 } from "../LitActionCode/index.ts";
-import { BASE_URL, COMMON_PARAMS } from "../defaults.ts";
+import { BASE_URL, COMMON_PARAMS, K6_RUN_ID } from "../defaults.ts";
 import { ensureAccountCredits } from "../stripe.ts";
 
 // Parse duration: "1h", "30m", "10m" etc.
@@ -57,6 +57,15 @@ const SOAK_VUS = parseInt(__ENV.SOAK_VUS || "3", 10);
 // latency legitimately rises) don't trip them.
 const SOAK_P95_ENCRYPT_MS = __ENV.SOAK_P95_ENCRYPT_MS || "350";
 const SOAK_P95_ECDSA_MS = __ENV.SOAK_P95_ECDSA_MS || "700";
+
+// Gate mode: create ephemeral accounts in setup() instead of reading the
+// pre-seeded pool. The deploy gate runs against a freshly-deployed (possibly
+// cold) instance that may not have the committed pool's accounts — relying on
+// the pool there produces spurious 401s ("key not recognized") and a false
+// rollback. Creating accounts against the actual target box is robust. Default
+// off so manual/endurance soaks keep reusing the cheap pre-seeded pool.
+const SOAK_CREATE_ACCOUNTS =
+  (__ENV.SOAK_CREATE_ACCOUNTS || "").toLowerCase() === "true";
 
 // Stages: 2min ramp-up, (duration - 4min) steady, 2min ramp-down
 const RAMP_UP = "2m";
@@ -194,9 +203,28 @@ export function setup(): SoakSetupData {
   // uses (which would waste Stripe top-ups and fail if the pool is < 8).
   const requiredAccounts =
     (runSoak ? SOAK_VUS : 0) + (runRamp ? RAMP_MAX_VUS : 0);
+
+  // Gate path: create fresh accounts against the actual target box so the run
+  // never depends on a pre-seeded pool existing on that instance.
+  // createAccountAndUsageKey already funds the account via ensureAccountCredits.
+  if (SOAK_CREATE_ACCOUNTS) {
+    const created: SoakAccountData[] = [];
+    for (let i = 0; i < requiredAccounts; i++) {
+      const acc = createAccountAndUsageKey({
+        accountName: `k6-soak-${K6_RUN_ID}-${i}`,
+        accountDescription: "ephemeral k6 soak gate account",
+        usageKeyName: `k6-soak-usage-${K6_RUN_ID}-${i}`,
+        usageKeyDescription: "ephemeral k6 soak gate usage key",
+        setupContext: "soak",
+      });
+      created.push({ usageApiKey: acc.usageApiKey, pkpId: acc.walletAddress });
+    }
+    return created;
+  }
+
   if (PRECREATED_ACCOUNTS.length < requiredAccounts) {
     throw new Error(
-      `Not enough pre-created accounts for soak test: need ${requiredAccounts}, found ${PRECREATED_ACCOUNTS.length}. Run accounts.seed.spec.ts with a higher ACCOUNTS_COUNT.`,
+      `Not enough pre-created accounts for soak test: need ${requiredAccounts}, found ${PRECREATED_ACCOUNTS.length}. Run accounts.seed.spec.ts with a higher ACCOUNTS_COUNT, or set SOAK_CREATE_ACCOUNTS=true to create ephemeral accounts.`,
     );
   }
 

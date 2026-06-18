@@ -487,6 +487,10 @@ jobs:
       vus: '2'
       duration: 3m
       scenario: soak
+      # Create ephemeral accounts against the freshly-deployed box rather than
+      # relying on the pre-seeded pool, which may not exist on this instance and
+      # would 401 → false rollback.
+      create_accounts: 'true'
 
   # ───────────────────────── Zero-downtime cutover (ping-pong) ─────────────────────────
   # The cold CVM's dstack-ingress auto-claims the public domain on boot (as soon

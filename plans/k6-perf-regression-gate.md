@@ -49,6 +49,8 @@ Switched the gate to a **low-VU soak** (`test: soak`, `vus: 2`, `duration: 3m`, 
 
 **Interim absolute ceilings (in `soak.spec.ts`, env-overridable):** `SOAK_P95_ENCRYPT_MS=350`, `SOAK_P95_ECDSA_MS=700` (~3× baseline). Catches gross regressions without false-failing on jitter; Phase 2 replaces with deltas.
 
+**Account provenance (fixed):** a validation run failed with 401 "key not recognized" — the committed `accounts.next.json` keys didn't resolve on the instance serving at that moment (they resolved fine ~15 min later). A gate that runs against a freshly-deployed / cold instance can't depend on a pre-seeded pool existing there. Fix: `SOAK_CREATE_ACCOUNTS=true` (new `create_accounts` workflow input, set by the gate) makes `soak.spec.ts` create ephemeral accounts via `createAccountAndUsageKey` against the actual target box in `setup()`, like the correctness specs do. Manual runs default to the pre-seeded pool. **Open question (possible prod concern, not yet investigated):** why valid accounts stopped resolving — is account/API-key state per-instance and not replicated across the ping-pong pair (→ real users 401 after cutover), or just cutover-timing? See [[pingpong-deploy-cvm-name-param]].
+
 **Open knob:** the soak scenario's hardcoded 2m ramp-up/down makes the gate ~7 min. If that's too slow per deploy, trim the ramps (→ ~4 min) or run on a dedicated box (Phase 3).
 
 ---
