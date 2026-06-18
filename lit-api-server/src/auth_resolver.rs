@@ -76,13 +76,24 @@ impl AuthResolver for LocalAuthResolver {
         let wallet_address_hex = match crate::accounts::get_billing_wallet_address(api_key).await {
             Ok(v) => v,
             Err(e) => {
-                // `accounts::get_billing_wallet_address` bails with "account
-                // has no wallet address" when the on-chain mapping returns
-                // Address::ZERO for this key hash — i.e. the key isn't
-                // registered. Any other anyhow error is transport / RPC /
-                // contract decoding noise → transient.
+                // `accounts::get_billing_wallet_address` signals "key not
+                // registered" via one of two paths depending on the deployed
+                // contract version:
+                //  - Older contract: returns Address::ZERO → server bails
+                //    with "account has no wallet address".
+                //  - Current contract (post-#481 revert-decoding): the
+                //    contract reverts with the custom error
+                //    `AccountDoesNotExist (0xd4a84737)`, which the decoder
+                //    surfaces as "Contract error: AccountDoesNotExist (...)".
+                // All three strings mean the same thing — bucket as
+                // BadCredentials (→ 401) so lit-payments stops retrying.
+                // Any other anyhow error is transport / RPC / contract
+                // decoding noise → transient (→ 503, signals retry).
                 let msg = format!("{e}");
-                if msg.contains("no wallet address") || msg.contains("Address::ZERO") {
+                if msg.contains("no wallet address")
+                    || msg.contains("Address::ZERO")
+                    || msg.contains("AccountDoesNotExist")
+                {
                     return Err(AuthError::BadCredentials(format!(
                         "api key not found on chain: {msg}"
                     )));
