@@ -195,21 +195,22 @@ export interface SoakAccountData {
 export type SoakSetupData = SoakAccountData[];
 
 export function setup(): SoakSetupData {
-  // Only provision/fund accounts for the scenarios that actually run. k6 gives
-  // each concurrent VU a globally-unique __VU, so the pool must cover the SUM of
-  // the running scenarios' peak VUs (soak peaks at SOAK_VUS total across its two
-  // scenarios; ramp peaks at RAMP_MAX_VUS). With SCENARIO=soak,SOAK_VUS=2 this is
-  // 2 — not 8 — so a soak-only gate doesn't demand or fund ramp accounts it never
-  // uses (which would waste Stripe top-ups and fail if the pool is < 8).
-  const requiredAccounts =
-    (runSoak ? SOAK_VUS : 0) + (runRamp ? RAMP_MAX_VUS : 0);
+  // Ideal account count = the actual peak concurrent VUs across the running
+  // scenarios. Each scenario is clamped to a minimum of 1 VU (see makeStages /
+  // Math.max(1, ...) in the scenario targets), so soak always runs 2 VUs even at
+  // SOAK_VUS=1 — compute the real peak, don't assume SOAK_VUS. VUs index the pool
+  // modulo its length (below), so a smaller pool still works by sharing accounts.
+  const soakPeak = runSoak
+    ? Math.max(1, Math.ceil(SOAK_VUS / 2)) + Math.max(1, Math.floor(SOAK_VUS / 2))
+    : 0;
+  const idealAccounts = soakPeak + (runRamp ? RAMP_MAX_VUS : 0);
 
   // Gate path: create fresh accounts against the actual target box so the run
   // never depends on a pre-seeded pool existing on that instance.
   // createAccountAndUsageKey already funds the account via ensureAccountCredits.
   if (SOAK_CREATE_ACCOUNTS) {
     const created: SoakAccountData[] = [];
-    for (let i = 0; i < requiredAccounts; i++) {
+    for (let i = 0; i < idealAccounts; i++) {
       const acc = createAccountAndUsageKey({
         accountName: `k6-soak-${K6_RUN_ID}-${i}`,
         accountDescription: "ephemeral k6 soak gate account",
@@ -222,15 +223,24 @@ export function setup(): SoakSetupData {
     return created;
   }
 
-  if (PRECREATED_ACCOUNTS.length < requiredAccounts) {
+  // Pre-seeded pool. Need at least one account; if the pool is smaller than the
+  // VU count, VUs share accounts (fine at low VU — e.g. a 2-VU prod baseline run
+  // against a single funded prod account). Warn so it's not silent.
+  if (PRECREATED_ACCOUNTS.length === 0) {
     throw new Error(
-      `Not enough pre-created accounts for soak test: need ${requiredAccounts}, found ${PRECREATED_ACCOUNTS.length}. Run accounts.seed.spec.ts with a higher ACCOUNTS_COUNT, or set SOAK_CREATE_ACCOUNTS=true to create ephemeral accounts.`,
+      `No pre-created accounts found. Run accounts.seed.spec.ts, point K6_ACCOUNTS_FILE at a pool, or set SOAK_CREATE_ACCOUNTS=true to create ephemeral accounts.`,
+    );
+  }
+  if (PRECREATED_ACCOUNTS.length < idealAccounts) {
+    console.warn(
+      `soak: only ${PRECREATED_ACCOUNTS.length} pre-created account(s) for ${idealAccounts} VU(s); VUs will share accounts. Fine at low VU; add more accounts to avoid per-account contention at higher VU.`,
     );
   }
 
+  const useCount = Math.min(idealAccounts, PRECREATED_ACCOUNTS.length);
   const accounts: SoakAccountData[] = [];
   const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
-  for (let i = 0; i < requiredAccounts; i++) {
+  for (let i = 0; i < useCount; i++) {
     const account = PRECREATED_ACCOUNTS[i];
     ensureAccountCredits(client, { "X-Api-Key": account.apiKey });
     accounts.push({ usageApiKey: account.usageApiKey, pkpId: account.walletAddress });
@@ -240,7 +250,7 @@ export function setup(): SoakSetupData {
 
 export function encryptDecrypt(setupData: SoakSetupData) {
   const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
-  const account = setupData[__VU - 1];
+  const account = setupData[(__VU - 1) % setupData.length];
   const usageKeyHeaders = { "X-Api-Key": account.usageApiKey };
 
   const challenge =
@@ -296,7 +306,7 @@ export function encryptDecrypt(setupData: SoakSetupData) {
 
 export function ecdsaSign(setupData: SoakSetupData) {
   const client = new LitApiServerClient({ baseUrl: BASE_URL, commonRequestParameters: COMMON_PARAMS });
-  const account = setupData[__VU - 1];
+  const account = setupData[(__VU - 1) % setupData.length];
   const usageKeyHeaders = { "X-Api-Key": account.usageApiKey };
 
   const litActionRes = client.litAction(
