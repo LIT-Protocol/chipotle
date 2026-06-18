@@ -588,8 +588,18 @@ pub async fn list_api_keys(
     page_number: U256,
     page_size: U256,
 ) -> Result<Vec<UsageApiKeyReturn>> {
+    list_api_keys_by_hash(api_key_hash(api_key), page_number, page_size).await
+}
+
+/// List the usage API keys under an account, identified by its on-chain
+/// `apiKeyHash` directly (rather than a raw API key string). Used by the
+/// on-chain account-event listener, which only has access to hashes.
+pub async fn list_api_keys_by_hash(
+    account_api_key_hash: U256,
+    page_number: U256,
+    page_size: U256,
+) -> Result<Vec<UsageApiKeyReturn>> {
     let contract = get_read_only_account_config_contract().await?;
-    let account_api_key_hash = api_key_hash(api_key);
     let page = contract
         .listApiKeys(account_api_key_hash, page_number, page_size)
         .call()
@@ -783,6 +793,22 @@ pub async fn get_account_wallet_address(key_or_hash: &str) -> Result<String> {
     Ok(format!("{:?}", wallet_address))
 }
 
+/// The key/hash does not resolve to any on-chain account.
+///
+/// Typed (rather than a bare string) so billing guards and endpoints can map
+/// it to `401 Unauthorized` instead of `402`/`500`. The Display text is kept
+/// identical to the legacy message for any remaining string-matching callers.
+#[derive(Debug, Clone, Copy)]
+pub struct UnknownApiKey;
+
+impl std::fmt::Display for UnknownApiKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "account has no wallet address")
+    }
+}
+
+impl std::error::Error for UnknownApiKey {}
+
 /// Resolve any account identity to the billing wallet address of its parent account.
 ///
 /// Same input shape as [`get_account_wallet_address`]. Differs in that the
@@ -811,7 +837,7 @@ pub async fn get_billing_wallet_address(key_or_hash: &str) -> Result<String> {
         .await
         .map_err(|e| anyhow::anyhow!("{}", decode_contract_revert(&e)))?;
     if wallet_address == Address::ZERO {
-        anyhow::bail!("account has no wallet address");
+        return Err(UnknownApiKey.into());
     }
     Ok(format!("{:?}", wallet_address))
 }

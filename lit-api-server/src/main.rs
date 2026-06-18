@@ -6,7 +6,6 @@ use lit_api_server::config;
 use lit_api_server::core;
 use lit_api_server::core::v1::guards::cpu_overload::CpuOverloadMonitor;
 use lit_api_server::dstack;
-use lit_api_server::internal;
 use lit_api_server::observability;
 use lit_api_server::restart::{RestartHandle, start_server_trigger_listener};
 use lit_api_server::stripe;
@@ -152,16 +151,15 @@ async fn main() -> Result<(), rocket::Error> {
 
     let cpu_monitor = CpuOverloadMonitor::start();
     let stripe_state = stripe::init();
-    let internal_config = internal::config::init();
-    // `Arc<dyn AuthResolver>` is the auth backplane both this service and
-    // lit-payments use. lit-api-server owns the on-chain plumbing, so it
-    // installs the local in-process resolver here.
-    let auth_resolver: Arc<dyn lit_billing_core::billing_auth::AuthResolver> =
-        Arc::new(lit_api_server::auth_resolver::LocalAuthResolver::new());
 
     // Initialize global singletons once, outside the restart loop, so they
     // aren't re-initialized (and don't re-log) on every Rocket rebuild.
     accounts::blockchain_cache::init();
+
+    // Watch the AccountConfig contract for account/permission mutation events
+    // (WritesFacet) and invalidate the corresponding blockchain-cache entries,
+    // so on-chain changes made outside this process are reflected before TTL.
+    lit_api_server::account_events::start_account_event_listener();
 
     // IPFS cache lives outside the restart loop so warm entries survive restarts.
     let ipfs_cache: Cache<String, Arc<String>> = Cache::builder()
@@ -197,8 +195,6 @@ async fn main() -> Result<(), rocket::Error> {
             chain_config.clone(),
             cpu_monitor.clone(),
             stripe_state.clone(),
-            internal_config.clone(),
-            auth_resolver.clone(),
             ipfs_cache.clone(),
         );
 
@@ -319,8 +315,6 @@ fn build_rocket(
     chain_config: Arc<lit_api_server::accounts::chain_config::ChainConfig>,
     cpu_monitor: CpuOverloadMonitor,
     stripe_state: Option<Arc<stripe::StripeState>>,
-    internal_config: Option<Arc<internal::InternalConfig>>,
-    auth_resolver: Arc<dyn lit_billing_core::billing_auth::AuthResolver>,
     ipfs_cache: Cache<String, Arc<String>>,
 ) -> rocket::Rocket<rocket::Build> {
     let allowed_methods = HashSet::from([
@@ -355,12 +349,16 @@ fn build_rocket(
         .attach(observability::ObservabilityFairing::new())
         .attach(cors)
         .attach(metrics_fairings)
+        // Settles the $0.01 management charge after (and only after) a
+        // successful response — see guards/billing.rs.
+        .attach(lit_api_server::core::v1::guards::billing::ManagementBillingFairing)
+        // JSON error bodies instead of Rocket's default HTML pages.
+        .register("/", lit_api_server::core::v1::catchers::catchers())
         .mount(
             "/",
             routes![openapi_json, openapi_json_redirect, swagger_ui_redirect],
         )
         .mount("/", core::v1::health::routes())
-        .mount("/", routes![internal::routes::invalidate_balance_cache])
         .mount("/core/v1/", core_routes)
         .mount("/core/v1/", core::v1::health::routes())
         .mount(
@@ -378,8 +376,6 @@ fn build_rocket(
         .manage(chain_config)
         .manage(cpu_monitor)
         .manage(stripe_state)
-        .manage(internal_config)
-        .manage(auth_resolver)
         .manage(core::v1::health::LitActionsSocketPath(
             std::path::PathBuf::from(core::v1::health::LIT_ACTIONS_SOCKET),
         ));
