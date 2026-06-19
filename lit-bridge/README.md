@@ -14,7 +14,7 @@ phased roadmap. This crate is the productized artifact (it replaces the old
 ```
 lit-bridge/
   src/                Rocket service: bridging UI host + /api/config (stateless)
-  static/             web UI (placeholder; Phase 0)
+  static/             web UI (index.html + bridge.js + style.css)
   action/             the bridge verification Lit Action + its unit tests
   contracts/          Foundry: BridgeConfigRegistry (control plane) + BridgeToken
   Dockerfile          repo-root build context; deployed to Railway
@@ -84,7 +84,17 @@ cargo run   # no secrets needed; stateless
 ```
 
 Endpoints: `GET /health`, `GET /` (UI), `GET /api/config` (registry chain +
-address for the UI to bootstrap from).
+address, fee, and the bridgeable chains the UI bootstraps from).
+
+The UI (`static/`) is **wallet-direct**: it loads ethers from a CDN, reads the
+chain list from `/api/config`, connects the user's wallet, and calls
+`BridgeToken.burn(amount, destChainId, recipient)` straight from the browser —
+attaching the relayer gas prepay (`destGasPrice × 300000 × 2`) as `value` so the
+mint is auto-relayed. It then watches `usedBurnIds(burnId)` on the destination to
+show completion. The service stores nothing; it just serves the page and the
+config. Populate the UI by setting **`CHAINS_JSON`** (a JSON array of
+`{chain_id,name,rpc,token,explorer}`; see `.env.example`) plus `TOKEN_SYMBOL` /
+`FEE_BPS`; with fewer than two chains the form shows a "not configured" state.
 
 ## Relayer (automation)
 
@@ -132,8 +142,13 @@ gotcha that bites otherwise). `scripts/proposeRepin.js` automates the propose st
 
 ## Status
 
-Live on testnet, confirmed end-to-end (manual transfer **and** auto-relay):
-Base Sepolia ↔ Arb Sepolia. Phases 0–4 done; Phase 5 partial (demo pair live).
-Still to do: governance handoff to the Base Safe, hardening, the full
-Alchemy ∩ Infura default chain set, a running lit-triggers deployment for the
-production relayer, and the real bridging UI.
+Live on **Base + Arbitrum mainnet**, confirmed end-to-end (manual transfer
+**and** auto-relay), with the fee skim + native gas prepay validated on-chain and
+the codex-review action fixes deployed. The registry is owned by the Base Safe
+and the signing account is chain-secured to it (governance handoff done). The
+wallet-direct bridging UI ships in `static/`.
+
+Still to do: the full Alchemy ∩ Infura default chain set, the
+treasury→gas conversion loop (deferred until real usage; done manually for now),
+and the collateral/synthetic *router* contracts needed to wrap an existing token
+(today only native burn/mint `BridgeToken`s are supported).

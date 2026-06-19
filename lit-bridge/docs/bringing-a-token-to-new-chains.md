@@ -20,6 +20,20 @@ This guide is for token issuers. Read it before you deploy anything.
   token already, that's the path you want; it's the next contract work.
 - ⛔ **Non-EVM chains** are out of scope.
 
+## Who owns what
+
+Two layers, owned by different parties:
+
+- **Shared platform** — the **BridgeConfigRegistry** (per-chain RPC config +
+  quorum) and the **signing oracle account** (the chain-secured Lit account). The
+  platform operator governs these with a Safe; they're the same for every token.
+- **Your token** — the **`BridgeToken` contracts** you deploy on each chain. *You*
+  own these (your Safe/EOA): you set your fee, wire your `bridgePartner`s, and
+  hold any sweepable gas prepay. The platform never owns your token.
+
+So "Safe-governed" refers to the *registry + oracle*; token ownership is always
+the issuer's. (If you run your own instance, you happen to own both layers.)
+
 ## Two ways to run it
 
 ### A. Your own instance (permissionless, recommended)

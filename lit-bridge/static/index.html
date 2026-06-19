@@ -4,35 +4,44 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>lit-bridge</title>
-    <style>
-      :root { color-scheme: dark; }
-      body {
-        font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
-        background: #0b0d12; color: #e6e8ee; margin: 0;
-        display: flex; min-height: 100vh; align-items: center; justify-content: center;
-      }
-      main { max-width: 640px; padding: 2.5rem; }
-      h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
-      .tag { color: #8b93a7; font-size: .95rem; margin-bottom: 2rem; }
-      .card { background: #151823; border: 1px solid #232838; border-radius: 12px; padding: 1.25rem 1.5rem; }
-      code { background: #0b0d12; padding: .15rem .4rem; border-radius: 5px; color: #9ecbff; }
-      ul { line-height: 1.7; padding-left: 1.2rem; }
-      a { color: #9ecbff; }
-    </style>
+    <link rel="stylesheet" href="/static/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/ethers@5.7.2/dist/ethers.umd.min.js"></script>
   </head>
   <body>
     <main>
-      <h1>lit-bridge</h1>
-      <div class="tag">Permissionless cross-chain token bridge — verification by a Lit Action, not a validator set.</div>
-      <div class="card">
-        <p>Service is up. The bridging UI is not built yet — this is the Phase&nbsp;0 scaffold. The service is stateless; transfer state is read straight from chain.</p>
-        <p>Working endpoints:</p>
-        <ul>
-          <li><code>GET /health</code> — liveness</li>
-          <li><code>GET /api/config</code> — registry chain + address (UI bootstrap)</li>
-        </ul>
-        <p>See <code>plans/hyperlane-competitor.md</code> for the roadmap.</p>
-      </div>
+      <header>
+        <h1>lit-bridge</h1>
+        <button id="connect" class="ghost">Connect wallet</button>
+      </header>
+      <p class="tag">Permissionless cross-chain token bridge — verified by a Lit Action, not a validator set.</p>
+
+      <section id="notconfigured" class="card hidden">
+        <p>No chains configured. Set <code>CHAINS_JSON</code> on the service to enable bridging.</p>
+      </section>
+
+      <section id="bridge" class="card hidden">
+        <div class="row">
+          <label>From<select id="from"></select></label>
+          <button id="swap" class="ghost" title="Swap direction">⇄</button>
+          <label>To<select id="to"></select></label>
+        </div>
+        <label class="amount">Amount
+          <input id="amount" type="text" inputmode="decimal" placeholder="0.0" />
+          <span id="balance" class="muted"></span>
+        </label>
+        <label>Recipient (on destination)
+          <input id="recipient" type="text" placeholder="0x… (defaults to your address)" />
+        </label>
+        <div id="quote" class="muted"></div>
+        <button id="go" disabled>Connect a wallet to bridge</button>
+        <div id="status" class="status"></div>
+      </section>
+
+      <footer>
+        <span id="feenote" class="muted"></span>
+        <a href="https://github.com/LIT-Protocol/chipotle" target="_blank" rel="noreferrer">How it works</a>
+      </footer>
     </main>
+    <script src="/static/bridge.js"></script>
   </body>
 </html>
