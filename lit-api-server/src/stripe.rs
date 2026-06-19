@@ -34,6 +34,51 @@ pub const COST_LIT_ACTION_PER_SECOND_CENTS: i64 = 1; // $0.01 per second of exec
 /// Minimum top-up (500 cents = $5.00).
 pub const MIN_TOPUP_CENTS: i64 = 500;
 
+// ─── Errors ──────────────────────────────────────────────────────────────────
+
+/// Why a billing check or charge failed.
+///
+/// Guards map each variant to a distinct HTTP status so callers can tell an
+/// auth problem (401) from a funding problem (402) from a billing-infra
+/// problem (503). Previously all three surfaced as `402 Payment Required`,
+/// which told developers with a typo'd key to add funds.
+#[derive(Debug)]
+pub enum BillingError {
+    /// The API key does not resolve to any on-chain account → 401.
+    InvalidApiKey,
+    /// The account exists but cannot cover the operation → 402.
+    InsufficientCredits {
+        /// Credits available, in cents (≥ 0; Stripe-balance sign already flipped).
+        available_cents: i64,
+        /// Cents this operation needs.
+        required_cents: i64,
+    },
+    /// Chain RPC or Stripe failed — not the caller's fault → 503.
+    Unavailable(anyhow::Error),
+}
+
+impl std::fmt::Display for BillingError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            BillingError::InvalidApiKey => {
+                write!(f, "API key does not resolve to any account")
+            }
+            BillingError::InsufficientCredits {
+                available_cents,
+                required_cents,
+            } => write!(
+                f,
+                "insufficient credits: have {}, need {}",
+                cents_to_display(*available_cents),
+                cents_to_display(*required_cents)
+            ),
+            BillingError::Unavailable(e) => write!(f, "billing unavailable: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for BillingError {}
+
 // ─── Observability ──────────────────────────────────────────────────────────
 //
 // Every charge is surfaced to the observability pipeline (CPL-329) so that spend
@@ -143,16 +188,103 @@ pub struct StripeState {
     /// for 60 seconds, so each customer triggers at most one Stripe GET per minute
     /// regardless of request rate.
     balance_refresh_in_flight: Cache<String, ()>,
+    /// Credits (in cents) granted to every new account, from `STARTER_CREDITS_CENTS`.
+    /// 0 (the default) disables the grant entirely.
+    starter_credits_cents: i64,
 }
 
-/// Initialise Stripe from environment variables.  Returns `None` if the env vars are absent
-/// (billing disabled — all charges are skipped).
-pub fn init() -> Option<Arc<StripeState>> {
-    let secret_key = std::env::var("STRIPE_SECRET_KEY").ok()?;
-    let publishable_key = std::env::var("STRIPE_PUBLISHABLE_KEY").ok()?;
+/// Env var that opts out of the local-development billing requirement (CPL-330).
+/// When set to a truthy value (`1`/`true`/`yes`/`on`) the server runs
+/// payment-free even on a local (non-production) build.
+pub const DISABLE_BILLING_ENV: &str = "LIT_DISABLE_BILLING";
+
+/// Read the Stripe keys from the environment.  Returns `None` if either is
+/// absent or empty (billing not configured).
+///
+/// Keys are trimmed of surrounding whitespace: a trailing newline (common when
+/// a key is piped in via `export FOO=$(cat secret)`) would otherwise corrupt the
+/// HTTP `Authorization` header and the prefix checks below.
+fn stripe_keys_from_env() -> Option<(String, String)> {
+    let secret_key = std::env::var("STRIPE_SECRET_KEY").ok()?.trim().to_string();
+    let publishable_key = std::env::var("STRIPE_PUBLISHABLE_KEY")
+        .ok()?
+        .trim()
+        .to_string();
     if secret_key.is_empty() || publishable_key.is_empty() {
         return None;
     }
+    Some((secret_key, publishable_key))
+}
+
+/// Whether billing has been explicitly disabled via [`DISABLE_BILLING_ENV`].
+fn billing_disabled() -> bool {
+    std::env::var(DISABLE_BILLING_ENV)
+        .map(|v| {
+            matches!(
+                v.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+/// A Stripe key is "live mode" when it starts with a live-mode prefix
+/// (`sk_live_`, `rk_live_`, `pk_live_`).  Used to keep live keys off
+/// local (non-production) builds so a dev machine can't charge real cards.
+fn is_live_key(key: &str) -> bool {
+    key.starts_with("sk_live_") || key.starts_with("rk_live_") || key.starts_with("pk_live_")
+}
+
+/// Validate that the supplied keys are genuine *test-mode* Stripe keys of the
+/// correct role, for the local (non-production) billing policy (CPL-330).
+///
+/// A denylist of live prefixes is not enough on its own:
+///   - An arbitrary non-live string (e.g. `not-a-stripe-key`) would pass a
+///     "not live" check, start the server logging "test mode", and only fail
+///     when the first request hits Stripe — defeating the requirement to
+///     configure a real test account.
+///   - A *secret* key (`sk_test_…`/`rk_test_…`) placed in `STRIPE_PUBLISHABLE_KEY`
+///     would pass and then be served to unauthenticated clients via
+///     `GET /billing/stripe_config`, leaking secret material.
+///
+/// So we require positive, role-correct test prefixes:
+///   - secret:      `sk_test_…` or `rk_test_…`
+///   - publishable: `pk_test_…`
+///
+/// Pure and feature-independent so it is unit-tested under the default build
+/// (CI's `--all-features` run enables `production`, which skips the local policy
+/// path entirely).
+fn validate_local_test_keys(secret_key: &str, publishable_key: &str) -> Result<()> {
+    // Friendlier, more specific message for the live-key footgun.
+    if is_live_key(secret_key) || is_live_key(publishable_key) {
+        anyhow::bail!(
+            "Refusing to start: a LIVE Stripe key was supplied on a non-production build. Local \
+             runs must use TEST keys (sk_test_…/rk_test_…/pk_test_…) so a dev machine can't \
+             charge real cards.\n  Use a test key, or set {DISABLE_BILLING_ENV}=true to run \
+             payment-free."
+        );
+    }
+    if !(secret_key.starts_with("sk_test_") || secret_key.starts_with("rk_test_")) {
+        anyhow::bail!(
+            "STRIPE_SECRET_KEY is not a TEST secret key. Local runs require a real test Stripe \
+             account (CPL-330): the secret must start with sk_test_ or rk_test_.\n  Set a valid \
+             test key, or set {DISABLE_BILLING_ENV}=true to run payment-free."
+        );
+    }
+    if !publishable_key.starts_with("pk_test_") {
+        anyhow::bail!(
+            "STRIPE_PUBLISHABLE_KEY is not a TEST publishable key. It must start with pk_test_ \
+             (a secret key here would be served to unauthenticated clients via \
+             /billing/stripe_config).\n  Set a valid pk_test_ key, or set {DISABLE_BILLING_ENV}=true \
+             to run payment-free."
+        );
+    }
+    Ok(())
+}
+
+/// Build `StripeState` from the given keys, wiring up the in-process caches.
+fn build_state(secret_key: String, publishable_key: String) -> Result<Arc<StripeState>> {
+    let client = StripeClient::new(secret_key)?;
     // Optional: without it, /billing/webhook is disabled (refund/dispute
     // clawbacks won't be applied automatically — see CPL-335).
     let webhook_secret = std::env::var("STRIPE_WEBHOOK_SECRET")
@@ -164,9 +296,6 @@ pub fn init() -> Option<Arc<StripeState>> {
              clawbacks will not debit credits automatically (CPL-335)"
         );
     }
-    let client = StripeClient::new(secret_key)
-        .map_err(|e| tracing::error!("stripe: failed to build HTTP client: {e}"))
-        .ok()?;
     let customer_cache = Cache::builder()
         .max_capacity(10_000)
         .time_to_idle(Duration::from_secs(600)) // 10 minutes
@@ -187,8 +316,14 @@ pub fn init() -> Option<Arc<StripeState>> {
         .max_capacity(100_000)
         .time_to_live(Duration::from_secs(4 * 24 * 3600)) // 4 days > Stripe's ~3-day retry window
         .build();
-    tracing::info!("stripe: billing enabled");
-    Some(Arc::new(StripeState {
+    let starter_credits_cents = read_starter_credits_env();
+    if starter_credits_cents > 0 {
+        tracing::info!(
+            starter_credits_cents,
+            "stripe: starter credits enabled for new accounts"
+        );
+    }
+    Ok(Arc::new(StripeState {
         publishable_key,
         client,
         webhook_secret,
@@ -197,7 +332,100 @@ pub fn init() -> Option<Arc<StripeState>> {
         wallet_cache,
         balance_cache,
         balance_refresh_in_flight,
+        starter_credits_cents,
     }))
+}
+
+/// Build `StripeState` directly from the environment with no policy enforcement.
+///
+/// Returns `None` when the keys are absent/empty, and logs+returns `None` when
+/// the client fails to build.  This is the historical `init()` behaviour and is
+/// used by out-of-band tooling (e.g. `stripe_report`) that must work against
+/// whatever account is configured — including live keys — regardless of build.
+pub fn from_env() -> Option<Arc<StripeState>> {
+    let (secret_key, publishable_key) = stripe_keys_from_env()?;
+    match build_state(secret_key, publishable_key) {
+        Ok(state) => Some(state),
+        Err(e) => {
+            tracing::error!("stripe: failed to build HTTP client: {e}");
+            None
+        }
+    }
+}
+
+/// Initialise Stripe billing, applying the local-development billing policy.
+///
+/// **Production builds** (`--features production`): billing is enabled when the
+/// `STRIPE_SECRET_KEY` / `STRIPE_PUBLISHABLE_KEY` env vars are present and
+/// disabled (returns `Ok(None)`) when they are absent — historical behaviour.
+/// Production legitimately uses live keys, so key mode is not constrained.
+///
+/// **Local / non-production builds**: by default a *test* Stripe account MUST be
+/// configured so local runs exercise the real billing path instead of silently
+/// dropping into payment-free mode (CPL-330).  The server refuses to start when:
+///   - the keys are missing, or
+///   - the keys are not role-correct *test* keys: the secret must be
+///     `sk_test_…`/`rk_test_…` and the publishable must be `pk_test_…`.  This
+///     rejects live keys (so a dev machine can't charge real cards), arbitrary
+///     non-Stripe strings, and a secret key mistakenly placed in the publishable
+///     slot (which would leak via `GET /billing/stripe_config`).
+///
+/// Set `LIT_DISABLE_BILLING=true` to opt out and run payment-free.
+pub fn init() -> Result<Option<Arc<StripeState>>> {
+    // Production keeps the historical "use billing iff configured" behaviour and
+    // does not constrain key mode (production legitimately uses live keys).
+    if cfg!(feature = "production") {
+        let state = from_env();
+        if state.is_some() {
+            tracing::info!("stripe: billing enabled");
+        }
+        return Ok(state);
+    }
+
+    // ── Local / non-production policy (CPL-330) ─────────────────────────────
+    if billing_disabled() {
+        tracing::warn!(
+            "{DISABLE_BILLING_ENV} is set — running payment-free. Local billing enforcement disabled."
+        );
+        return Ok(None);
+    }
+
+    let Some((secret_key, publishable_key)) = stripe_keys_from_env() else {
+        anyhow::bail!(
+            "Stripe billing is not configured. Local runs require a TEST Stripe account so the \
+             billing path is exercised (CPL-330).\n  \
+             Set STRIPE_SECRET_KEY (sk_test_… or rk_test_…) and STRIPE_PUBLISHABLE_KEY (pk_test_…),\n  \
+             or set {DISABLE_BILLING_ENV}=true to run payment-free."
+        );
+    };
+
+    validate_local_test_keys(&secret_key, &publishable_key)?;
+
+    let state = build_state(secret_key, publishable_key)?;
+    tracing::info!("stripe: billing enabled (test mode)");
+    Ok(Some(state))
+}
+
+/// Parse `STARTER_CREDITS_CENTS`. Unset, empty, unparseable, or negative → 0 (off).
+fn read_starter_credits_env() -> i64 {
+    let Ok(raw) = std::env::var("STARTER_CREDITS_CENTS") else {
+        return 0;
+    };
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return 0;
+    }
+    match raw.parse::<i64>() {
+        Ok(v) if v >= 0 => v,
+        Ok(v) => {
+            tracing::warn!("STARTER_CREDITS_CENTS is negative ({v}); starter credits disabled");
+            0
+        }
+        Err(e) => {
+            tracing::warn!("STARTER_CREDITS_CENTS unparseable ({e}); starter credits disabled");
+            0
+        }
+    }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -247,7 +475,16 @@ pub async fn resolve_wallet_address(api_key: &str, state: &StripeState) -> Resul
             crate::accounts::get_billing_wallet_address(api_key).await
         })
         .await
-        .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e}"));
+        // Moka wraps errors in `Arc`, which can't be unwrapped into the owned
+        // error. Re-wrapping as a string would erase the typed `UnknownApiKey`
+        // that guards rely on to answer 401 instead of 402 — so reconstruct it.
+        .map_err(|e: Arc<anyhow::Error>| {
+            if e.downcast_ref::<crate::accounts::UnknownApiKey>().is_some() {
+                anyhow::Error::new(crate::accounts::UnknownApiKey)
+            } else {
+                anyhow::anyhow!("{e}")
+            }
+        });
     tracing::debug!(
         success = result.is_ok(),
         "stripe::resolve_wallet_address: done"
@@ -352,6 +589,60 @@ fn should_update_balance_cache(cached: Option<i64>, fetched: i64) -> bool {
     }
 }
 
+/// Resolve the billing wallet, classifying failures for status mapping.
+async fn resolve_wallet_classified(
+    api_key: &str,
+    state: &StripeState,
+) -> std::result::Result<String, BillingError> {
+    resolve_wallet_address(api_key, state).await.map_err(|e| {
+        // `AccountDoesNotExist` arrives as a decoded contract-revert string
+        // (see accounts::get_billing_wallet_address) — same meaning as the
+        // typed zero-address case: this key maps to no account.
+        if e.downcast_ref::<crate::accounts::UnknownApiKey>().is_some()
+            || e.to_string().contains("AccountDoesNotExist")
+        {
+            BillingError::InvalidApiKey
+        } else {
+            BillingError::Unavailable(e)
+        }
+    })
+}
+
+/// Verify the account can cover `required_cents` WITHOUT charging.
+///
+/// Used by request guards so nothing is deducted before the request body has
+/// been validated and the handler has succeeded — the actual charge happens
+/// post-response (management ops) or during execution (lit actions). An
+/// insufficient balance is recorded as a rejected-charge billing event so the
+/// existing metrics keep seeing guard rejections.
+pub async fn check_credit(
+    api_key: &str,
+    required_cents: i64,
+    reason: BillingReason,
+    state: &StripeState,
+) -> std::result::Result<(), BillingError> {
+    let wallet = resolve_wallet_classified(api_key, state).await?;
+    let customer_id = get_customer_by_wallet(&wallet, state)
+        .await
+        .map_err(BillingError::Unavailable)?;
+    let balance = get_credit_balance(&customer_id, state)
+        .await
+        .map_err(BillingError::Unavailable)?;
+    if balance + required_cents > 0 {
+        record_billing_event(
+            reason,
+            &wallet,
+            required_cents,
+            OUTCOME_INSUFFICIENT_CREDITS,
+        );
+        return Err(BillingError::InsufficientCredits {
+            available_cents: (-balance).max(0),
+            required_cents,
+        });
+    }
+    Ok(())
+}
+
 /// Charge `cost_cents` against the customer's credit balance.
 ///
 /// Reads the cached balance directly (without triggering a background refresh) to
@@ -368,10 +659,12 @@ async fn charge(
     cost_cents: i64,
     reason: BillingReason,
     state: &StripeState,
-) -> Result<()> {
+) -> std::result::Result<(), BillingError> {
     tracing::debug!(cost_cents, "stripe::charge: starting");
-    let wallet = resolve_wallet_address(api_key, state).await?;
-    let customer_id = get_customer_by_wallet(&wallet, state).await?;
+    let wallet = resolve_wallet_classified(api_key, state).await?;
+    let customer_id = get_customer_by_wallet(&wallet, state)
+        .await
+        .map_err(BillingError::Unavailable)?;
 
     // Read the cache directly.  If missing, fall back to an inline Stripe fetch
     // using try_get_with to coalesce concurrent cache-miss requests for the same
@@ -388,17 +681,18 @@ async fn charge(
                     lit_billing_core::balance::fetch(&state2.client, &cid).await
                 })
                 .await
-                .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e}"))?
+                .map_err(|e: Arc<anyhow::Error>| {
+                    BillingError::Unavailable(anyhow::anyhow!("{e}"))
+                })?
         }
     };
 
     if balance + cost_cents > 0 {
         record_billing_event(reason, &wallet, cost_cents, OUTCOME_INSUFFICIENT_CREDITS);
-        anyhow::bail!(
-            "Insufficient credits: balance {} cents, need {} cents",
-            -balance,
-            cost_cents
-        );
+        return Err(BillingError::InsufficientCredits {
+            available_cents: (-balance).max(0),
+            required_cents: cost_cents,
+        });
     }
 
     // Credits are sufficient; the charge is accepted at this point (the actual
@@ -479,7 +773,10 @@ async fn charge(
 }
 
 /// Charge $0.01 for a management API call.
-pub async fn charge_management(api_key: &str, state: &StripeState) -> Result<()> {
+pub async fn charge_management(
+    api_key: &str,
+    state: &StripeState,
+) -> std::result::Result<(), BillingError> {
     charge(
         api_key,
         COST_MANAGEMENT_CENTS,
@@ -505,7 +802,39 @@ pub async fn charge_lit_action_time(
     if cost == 0 {
         return Ok(());
     }
-    charge(api_key, cost, BillingReason::LitAction, state).await
+    charge(api_key, cost, BillingReason::LitAction, state)
+        .await
+        .map_err(anyhow::Error::new)
+}
+
+/// Grant the configured starter credits to a newly created customer.
+///
+/// No-op when `STARTER_CREDITS_CENTS` is unset or 0 (the default). The Stripe
+/// POST carries a per-customer idempotency key, so a retried `new_account`
+/// cannot double-grant within Stripe's idempotency window; beyond that,
+/// customers are only ever created once per account wallet, and this is only
+/// called from account creation.
+pub async fn grant_starter_credits(customer_id: &str, state: &StripeState) -> Result<()> {
+    let cents = state.starter_credits_cents;
+    if cents <= 0 {
+        return Ok(());
+    }
+    let amount = (-cents).to_string(); // negative = credit to customer
+    state
+        .client
+        .post_with_idempotency(
+            &format!("customers/{customer_id}/balance_transactions"),
+            &[
+                ("amount", amount.as_str()),
+                ("currency", "usd"),
+                ("description", "Starter credits"),
+            ],
+            &format!("starter-credits-{customer_id}"),
+        )
+        .await?;
+    state.balance_cache.invalidate(customer_id).await;
+    tracing::info!(customer_id, cents, "stripe: granted starter credits");
+    Ok(())
 }
 
 /// Create a PaymentIntent for `amount_cents`.  Returns `(client_secret, payment_intent_id)`.
@@ -919,5 +1248,65 @@ mod tests {
     fn balance_refresh_preserves_multiple_decrements() {
         // Multiple charges: cache decremented to -950, Stripe still at -1000.
         assert!(!should_update_balance_cache(Some(-950), -1000));
+    }
+
+    // ── Local billing policy (CPL-330) ───────────────────────────────────────
+
+    #[test]
+    fn live_keys_are_detected() {
+        assert!(is_live_key("sk_live_abc123"));
+        assert!(is_live_key("rk_live_abc123"));
+        assert!(is_live_key("pk_live_abc123"));
+    }
+
+    #[test]
+    fn test_keys_are_not_live() {
+        assert!(!is_live_key("sk_test_abc123"));
+        assert!(!is_live_key("rk_test_abc123"));
+        assert!(!is_live_key("pk_test_abc123"));
+        // A key with "live" elsewhere must not trip the prefix check.
+        assert!(!is_live_key("sk_test_iamalivekey"));
+    }
+
+    #[test]
+    fn valid_test_keys_pass() {
+        assert!(validate_local_test_keys("sk_test_abc", "pk_test_abc").is_ok());
+        // Restricted secret keys are also acceptable.
+        assert!(validate_local_test_keys("rk_test_abc", "pk_test_abc").is_ok());
+    }
+
+    #[test]
+    fn live_keys_are_rejected() {
+        let err = validate_local_test_keys("sk_live_abc", "pk_test_abc")
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("LIVE"),
+            "expected live-key message, got: {err}"
+        );
+        assert!(validate_local_test_keys("sk_test_abc", "pk_live_abc").is_err());
+    }
+
+    #[test]
+    fn arbitrary_non_test_strings_are_rejected() {
+        // The headline P2 bypass: a non-live junk string must NOT be accepted as
+        // "test mode" and silently start the server.
+        assert!(validate_local_test_keys("not-a-stripe-key", "also-bad").is_err());
+        assert!(validate_local_test_keys("", "pk_test_abc").is_err());
+    }
+
+    #[test]
+    fn secret_key_in_publishable_slot_is_rejected() {
+        // The headline P1 leak: a secret in STRIPE_PUBLISHABLE_KEY would be served
+        // to unauthenticated clients via /billing/stripe_config. Reject it: a
+        // publishable key must start with pk_test_.
+        assert!(validate_local_test_keys("sk_test_abc", "sk_test_abc").is_err());
+        assert!(validate_local_test_keys("sk_test_abc", "rk_test_abc").is_err());
+    }
+
+    #[test]
+    fn wrong_role_prefixes_are_rejected() {
+        // A publishable key in the secret slot, and vice versa.
+        assert!(validate_local_test_keys("pk_test_abc", "pk_test_abc").is_err());
     }
 }
