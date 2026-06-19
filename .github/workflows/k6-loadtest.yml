@@ -69,6 +69,11 @@ on:
         required: false
         type: string
         default: ''
+      baseline_file:
+        description: "Soak-only: path to a committed baseline summary, relative to k6/loadtest/ (e.g. ../baselines/soak.next.json). When set, the gate fails on a p95 regression vs that baseline (max(baseline*1.3, baseline+50ms)) instead of the absolute ceilings."
+        required: false
+        type: string
+        default: ''
     secrets:
       accounts_json:
         description: "Raw JSON content for pre-funded accounts file (written to a temp file at runtime)"
@@ -197,6 +202,7 @@ jobs:
           SOAK_CREATE_ACCOUNTS: ${{ inputs.create_accounts }}
           SOAK_P95_ENCRYPT_MS: ${{ inputs.p95_encrypt_ms }}
           SOAK_P95_ECDSA_MS: ${{ inputs.p95_ecdsa_ms }}
+          SOAK_BASELINE_FILE: ${{ inputs.baseline_file }}
         # pipefail keeps k6's exit code (the threshold gate) while teeing the
         # full summary — incl. p50/p95/p99 + check rates — to an artifact.
         run: |
@@ -208,7 +214,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: k6-loadtest-${{ inputs.test }}-${{ github.run_id }}-${{ github.run_attempt }}
-          path: k6-loadtest-${{ inputs.test }}.log
+          path: |
+            k6-loadtest-${{ inputs.test }}.log
+            soak-summary.json
           if-no-files-found: ignore
 
       - name: Clean up accounts file
