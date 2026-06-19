@@ -1085,7 +1085,10 @@ mod tests {
         let err = validate_local_test_keys("sk_live_abc", "pk_test_abc")
             .unwrap_err()
             .to_string();
-        assert!(err.contains("LIVE"), "expected live-key message, got: {err}");
+        assert!(
+            err.contains("LIVE"),
+            "expected live-key message, got: {err}"
+        );
         assert!(validate_local_test_keys("sk_test_abc", "pk_live_abc").is_err());
     }
 
