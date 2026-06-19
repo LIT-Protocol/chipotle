@@ -491,6 +491,11 @@ jobs:
       # relying on the pre-seeded pool, which may not exist on this instance and
       # would 401 → false rollback.
       create_accounts: 'true'
+      # Phase 2: fail on a p95 regression vs the committed baseline (delta gate)
+      # rather than the staging-tuned absolute ceilings. Path is relative to
+      # k6/loadtest/ (where the spec's open() resolves from). Refresh the
+      # baseline with k6/update-soak-baseline.sh.
+      baseline_file: ../baselines/soak.next.json
 
   # ───────────────────────── Zero-downtime cutover (ping-pong) ─────────────────────────
   # The cold CVM's dstack-ingress auto-claims the public domain on boot (as soon
