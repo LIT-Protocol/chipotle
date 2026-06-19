@@ -151,7 +151,13 @@ async fn main() -> Result<(), rocket::Error> {
     };
 
     let cpu_monitor = CpuOverloadMonitor::start();
-    let stripe_state = stripe::init();
+    let stripe_state = match stripe::init() {
+        Ok(state) => state,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
     let internal_config = internal::config::init();
     // `Arc<dyn AuthResolver>` is the auth backplane both this service and
     // lit-payments use. lit-api-server owns the on-chain plumbing, so it
