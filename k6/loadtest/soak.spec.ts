@@ -32,7 +32,7 @@
  *   SOAK_DURATION  - Total test duration for soak scenario (default: 30m)
  *   SOAK_VUS       - Virtual users for soak scenario (default: 3)
  */
-import { checkAndLog, assertOk, warnOnHttpFailures } from "../helpers.ts";
+import { checkAndLog, assertOk } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
 import { PRECREATED_ACCOUNTS, createAccountAndUsageKey } from "../setup.ts";
 import { sleep } from "k6";
@@ -43,20 +43,96 @@ import {
 } from "../LitActionCode/index.ts";
 import { BASE_URL, COMMON_PARAMS, K6_RUN_ID } from "../defaults.ts";
 import { ensureAccountCredits } from "../stripe.ts";
+// @ts-ignore – remote JS lib, no type declarations
+import { textSummary } from "https://jslib.k6.io/k6-summary/0.1.0/index.js";
 
 // Parse duration: "1h", "30m", "10m" etc.
 const SOAK_DURATION = __ENV.SOAK_DURATION || "30m";
 const SOAK_VUS = parseInt(__ENV.SOAK_VUS || "3", 10);
 
-// Interim per-endpoint p95 latency ceilings (ms) for the deploy gate.
-// Coarse absolute ceilings at ~3x the observed low-load baseline on staging
-// (encrypt/decrypt ~106ms p95, ecdsa-sign ~274ms p95) — enough to catch gross
-// "we made this endpoint a lot slower" regressions without false-failing on
-// normal jitter. Phase 2 replaces these with run-over-run deltas vs a stored
-// baseline. Overridable via env so manual/endurance soaks at higher VU (where
-// latency legitimately rises) don't trip them.
+// Per-endpoint p95 latency ceilings (ms) for the deploy perf gate.
+//
+// When a committed baseline is provided (SOAK_BASELINE_FILE — a previously-saved
+// soak summary), the ceiling for each endpoint is DERIVED from that baseline's
+// p95: fail if this run is more than SOAK_P95_TOLERANCE over it, with a
+// SOAK_P95_FLOOR_MS absolute cushion so small-sample jitter doesn't false-fail.
+// Without a baseline (local runs, or before one is committed) we fall back to
+// these coarse absolute ceilings. All overridable via env.
 const SOAK_P95_ENCRYPT_MS = __ENV.SOAK_P95_ENCRYPT_MS || "350";
 const SOAK_P95_ECDSA_MS = __ENV.SOAK_P95_ECDSA_MS || "700";
+
+// Regression tolerance vs the baseline: fail if p95 > max(baseline*(1+tol),
+// baseline + floor).
+const SOAK_P95_TOLERANCE = parseFloat(__ENV.SOAK_P95_TOLERANCE || "0.30");
+const SOAK_P95_FLOOR_MS = parseFloat(__ENV.SOAK_P95_FLOOR_MS || "50");
+
+// Committed baseline. When SOAK_BASELINE_FILE is set the gate runs in baseline
+// mode and FAILS CLOSED: any problem loading the baseline, an invalid
+// tolerance/floor, or a missing/non-positive p95 for a running endpoint throws
+// at init so the run errors red. It never silently downgrades to the loose
+// absolute ceilings — that would let a real regression pass green. When unset
+// (local / measurement runs) we use the absolute SOAK_P95_*_MS ceilings.
+// open() resolves relative to THIS spec's dir (k6/loadtest/), so the gate
+// passes e.g. "../baselines/soak.next.json".
+const SOAK_BASELINE_FILE = __ENV.SOAK_BASELINE_FILE || "";
+const baselineMode = SOAK_BASELINE_FILE !== "";
+// deno-lint-ignore no-explicit-any
+let soakBaseline: any = null;
+if (baselineMode) {
+  let raw: string;
+  try {
+    raw = open(SOAK_BASELINE_FILE) as string;
+  } catch (e) {
+    throw new Error(
+      `soak: SOAK_BASELINE_FILE="${SOAK_BASELINE_FILE}" could not be opened (${String(
+        (e as Error).message ?? e,
+      )}). The gate fails closed — fix the path (relative to k6/loadtest/) or unset it.`,
+    );
+  }
+  try {
+    soakBaseline = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(
+      `soak: baseline ${SOAK_BASELINE_FILE} is not valid JSON (${String(
+        (e as Error).message ?? e,
+      )}).`,
+    );
+  }
+  if (!Number.isFinite(SOAK_P95_TOLERANCE) || SOAK_P95_TOLERANCE < 0) {
+    throw new Error(
+      `soak: SOAK_P95_TOLERANCE must be a non-negative number — a fraction, e.g. 0.30 = 30% (not 30); got "${__ENV.SOAK_P95_TOLERANCE}".`,
+    );
+  }
+  if (!Number.isFinite(SOAK_P95_FLOOR_MS) || SOAK_P95_FLOOR_MS < 0) {
+    throw new Error(
+      `soak: SOAK_P95_FLOOR_MS must be a non-negative number of ms; got "${__ENV.SOAK_P95_FLOOR_MS}".`,
+    );
+  }
+}
+
+// p95 ceiling (ms string for the k6 threshold) for an endpoint. In baseline
+// mode it is derived from the baseline p95 and throws if that p95 is absent or
+// non-positive (fail closed). Without a baseline it returns the absolute
+// fallback ceiling.
+function p95Ceiling(scenario: string, absoluteMs: string): string {
+  if (!baselineMode) return absoluteMs;
+  const base = soakBaseline?.scenarios?.[scenario]?.p95;
+  if (typeof base !== "number" || !(base > 0)) {
+    throw new Error(
+      `soak: baseline ${SOAK_BASELINE_FILE} has no valid p95 for "${scenario}" (got ${JSON.stringify(
+        base,
+      )}). The gate fails closed — regenerate the baseline with k6/update-soak-baseline.sh.`,
+    );
+  }
+  const ceil = Math.max(
+    base * (1 + SOAK_P95_TOLERANCE),
+    base + SOAK_P95_FLOOR_MS,
+  );
+  console.log(
+    `soak: ${scenario} p95 ceiling ${ceil.toFixed(0)}ms (baseline ${base}ms +${(SOAK_P95_TOLERANCE * 100).toFixed(0)}%/+${SOAK_P95_FLOOR_MS}ms)`,
+  );
+  return String(ceil);
+}
 
 // Gate mode: create ephemeral accounts in setup() instead of reading the
 // pre-seeded pool. The deploy gate runs against a freshly-deployed (possibly
@@ -168,11 +244,11 @@ if (runSoak) {
   // soak_* carry the interim per-endpoint p95 regression ceilings (the gate
   // runs SCENARIO=soak); keep the loose p99 "didn't fall over" bound too.
   thresholds["http_req_duration{scenario:soak_encrypt_decrypt}"] = [
-    `p(95)<${SOAK_P95_ENCRYPT_MS}`,
+    `p(95)<${p95Ceiling("soak_encrypt_decrypt", SOAK_P95_ENCRYPT_MS)}`,
     "p(99)<15000",
   ];
   thresholds["http_req_duration{scenario:soak_ecdsa_sign}"] = [
-    `p(95)<${SOAK_P95_ECDSA_MS}`,
+    `p(95)<${p95Ceiling("soak_ecdsa_sign", SOAK_P95_ECDSA_MS)}`,
     "p(99)<15000",
   ];
 }
@@ -184,6 +260,8 @@ if (runRamp) {
 export const options = {
   scenarios,
   setupTimeout: "3m", // accounts × 2 API calls each; ~6s/call; 3m allows for slow responses
+  // Include p(99) so the JSON summary / baseline captures it (default stats omit it).
+  summaryTrendStats: ["avg", "min", "med", "max", "p(95)", "p(99)"],
   thresholds,
 };
 
@@ -361,4 +439,54 @@ export function ecdsaSign(setupData: SoakSetupData) {
   sleep(2 + Math.random() * 2);
 }
 
-export const handleSummary = warnOnHttpFailures;
+/** Extract the trend stats for a (sub)metric, null-safe. */
+// deno-lint-ignore no-explicit-any
+function trend(data: any, sub: string) {
+  const v = data?.metrics?.[sub]?.values;
+  if (!v) return null;
+  return {
+    p50: v["med"],
+    p95: v["p(95)"],
+    p99: v["p(99)"],
+    avg: v["avg"],
+    max: v["max"],
+  };
+}
+
+/**
+ * Write a machine-readable summary (soak-summary.json) alongside the text
+ * summary. This file is BOTH the per-run artifact for the gate's regression
+ * comparison and the exact shape the committed baseline takes — so
+ * update-soak-baseline.sh just saves this file as the baseline. Keeps the
+ * HTTP-failure warning from the old warnOnHttpFailures.
+ */
+// deno-lint-ignore no-explicit-any
+export function handleSummary(data: any): Record<string, string> {
+  const summary = {
+    env: __ENV.K6_ENV || "",
+    base_url: BASE_URL,
+    correlation_id: K6_RUN_ID,
+    generated_at: new Date().toISOString(),
+    scenarios: {
+      soak_encrypt_decrypt: trend(
+        data,
+        "http_req_duration{scenario:soak_encrypt_decrypt}",
+      ),
+      soak_ecdsa_sign: trend(data, "http_req_duration{scenario:soak_ecdsa_sign}"),
+    },
+    checks_rate: data?.metrics?.checks?.values?.rate ?? null,
+    http_req_failed_rate: data?.metrics?.http_req_failed?.values?.rate ?? null,
+  };
+
+  const failed = data?.metrics?.http_req_failed;
+  if (failed && failed.values?.rate > 0) {
+    console.warn(
+      `\n⚠ WARNING: ${(failed.values.rate * 100).toFixed(1)}% of HTTP requests failed\n`,
+    );
+  }
+
+  return {
+    stdout: textSummary(data, { indent: " ", enableColors: true }),
+    "soak-summary.json": JSON.stringify(summary, null, 2),
+  };
+}

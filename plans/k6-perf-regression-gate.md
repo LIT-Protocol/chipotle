@@ -1,6 +1,6 @@
 # Gate releases on k6 load tests (perf regression gate)
 
-**Status:** Phase 1 shipped (PR #506). Gate vehicle switched spike → low-VU soak after a live test (see §3.1). Phase 2 not started.
+**Status:** Phase 1 shipped (PR #506). Gate vehicle switched spike → low-VU soak after a live test (see §3.1). Phase 2 (delta gate vs committed baseline) shipped (see §4). Phase 3 not started.
 **Scope:** Turn the existing k6 load tests (`k6/loadtest/{spike,soak,breakpoint}.spec.ts`) from manual-only tools into an automated perf-regression gate on the staging deploy, then into real run-over-run regression detection. Dedicated idle servers are earmarked as the stable load-generation / baseline hardware.
 
 ---
@@ -55,17 +55,18 @@ Switched the gate to a **low-VU soak** (`test: soak`, `vus: 2`, `duration: 3m`, 
 
 ---
 
-## 4. Phase 2 — real regression detection (TODO)
+## 4. Phase 2 — delta gate vs committed baseline ✅ SHIPPED
 
-The headline goal: gate on a **delta vs the last green release**, not just absolute thresholds.
+Gate on a **delta vs a committed baseline**, not absolute thresholds. Baseline is anchored in a committed file (not the last artifact) so cumulative drift is caught, and refreshed manually.
 
-- Add a `handleSummary` that writes structured JSON (replace/augment `warnOnHttpFailures`).
-- Persist each run's key metrics (p50/p95/p99 per scenario, check rate). Simplest: committed JSON or a bucket. Better: k6 → Prometheus remote-write → Grafana on the idle servers (native k6 Prometheus output) for dashboards + history.
-- Comparison step in CI: fail if e.g. `p95 > 1.2× baseline` for the last green release.
+- **Structured JSON output.** `soak.spec.ts` `handleSummary` now writes `soak-summary.json` (per-scenario p50/p95/p99/avg/max + check & failure rates). `summaryTrendStats` extended to include p(99). This file is both the per-run artifact and the exact shape the baseline takes.
+- **Committed baseline:** `k6/baselines/soak.next.json` (a saved summary). The deploy gate passes `baseline_file: ../baselines/soak.next.json` (path is relative to `k6/loadtest/` — where the spec's `open()` resolves).
+- **Delta gate (in-spec, reuses k6 thresholds).** When `SOAK_BASELINE_FILE` is set, each endpoint's p95 threshold is derived: `p95 < max(baseline*(1+SOAK_P95_TOLERANCE), baseline + SOAK_P95_FLOOR_MS)` (defaults 0.30 / 50ms — the floor stops ~60-130-sample jitter from false-failing). k6's exit code = the gate, so it flows through the existing cutover-block + rollback plumbing with no new job. No baseline / unreadable → falls back to the absolute `SOAK_P95_*_MS` ceilings.
+- **Manual baseline refresh:** `k6/update-soak-baseline.sh` runs a measurement soak against staging (create_accounts, no baseline → doesn't gate itself) and writes `k6/baselines/soak.next.json`. Run it + commit via PR when perf legitimately changes (e.g. got substantially faster). Per the decision: baseline updates are a deliberate manual op, not automated.
 
-**Folded-in from the Codex adversarial review of PR #506:**
-- **#4 — gate thresholds.** Partially addressed: the gate is now low-VU soak with interim per-endpoint p95 ceilings (§3.1), not the loose spike `checks>=0.8`/`p99<30s`. The real fix is still the delta gate above — replace the absolute `SOAK_P95_*_MS` ceilings with run-over-run deltas vs the last green release.
-- **#2 — reduce time-to-rollback.** `k6-loadtest` in `rollback-on-failure`'s `needs` means rollback can't start until the ~7-min soak finishes, even if an earlier independent gate (e.g. `verify-attestation`) already failed. Decouple fast-fail rollback from the slow load-test gate so a bad-but-live box is pulled back ASAP. (Pre-existing pattern — `k6-smoke`/`k6-correctness` already do this — but worth fixing while we're here.)
+**Folded-in Codex findings:** #4 (loose thresholds) — resolved: the gate is now a baseline-relative delta. #2 (time-to-rollback: rollback waits the full ~7-min soak even if an earlier gate failed) — **still open**, deferred to a fast-fail-decoupling change.
+
+**Not done (optional):** prod baseline gating (the manual prod soak still just measures with high ceilings); k6→Prometheus/Grafana history (the committed file + per-run artifacts suffice for the gate).
 
 ---
 

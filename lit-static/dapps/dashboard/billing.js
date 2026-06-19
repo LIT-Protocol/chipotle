@@ -228,7 +228,7 @@ export function resetBillingAvailability() {
  * Server validates `primaryType: "BillingAuth"` against the canonical schema
  * in `lit-api-server/src/core/eip712.rs` (CPL-286).
  */
-async function getWalletAuthHeader() {
+export async function getWalletAuthHeader() {
   const wallet = getChainSecuredWallet();
   if (!wallet) {
     throw new Error('No connected ChainSecured wallet — sign in first.');

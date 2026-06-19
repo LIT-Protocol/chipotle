@@ -1,0 +1,12 @@
+{
+  "env": "next",
+  "base_url": "https://test.chipotle.litprotocol.com/core/v1",
+  "generated_at": "2026-06-18",
+  "note": "Staging (next) soak latency baseline for the deploy perf gate. p95/p50/etc. in ms. The gate fails a deploy if a run's p95 exceeds max(baseline*1.3, baseline+50ms) per endpoint. Regenerate with k6/update-soak-baseline.sh and commit via PR when perf legitimately changes (e.g. got substantially faster). p99/max were not captured for the seed run; the script fills them on the next refresh.",
+  "scenarios": {
+    "soak_encrypt_decrypt": { "p50": 103, "p95": 112, "p99": null, "avg": 104, "max": 198 },
+    "soak_ecdsa_sign": { "p50": 252, "p95": 274, "p99": null, "avg": 254, "max": null }
+  },
+  "checks_rate": 1,
+  "http_req_failed_rate": 0
+}
