@@ -150,7 +150,13 @@ async fn main() -> Result<(), rocket::Error> {
     };
 
     let cpu_monitor = CpuOverloadMonitor::start();
-    let stripe_state = stripe::init();
+    let stripe_state = match stripe::init() {
+        Ok(state) => state,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
 
     // Initialize global singletons once, outside the restart loop, so they
     // aren't re-initialized (and don't re-log) on every Rocket rebuild.
