@@ -59,6 +59,16 @@ on:
         required: false
         type: string
         default: ''
+      p95_encrypt_ms:
+        description: "Soak-only: override encrypt/decrypt p95 ceiling (ms). Empty = spec default (350). Set high for a measurement run that shouldn't gate."
+        required: false
+        type: string
+        default: ''
+      p95_ecdsa_ms:
+        description: "Soak-only: override ecdsa-sign p95 ceiling (ms). Empty = spec default (700)."
+        required: false
+        type: string
+        default: ''
     secrets:
       accounts_json:
         description: "Raw JSON content for pre-funded accounts file (written to a temp file at runtime)"
@@ -185,6 +195,8 @@ jobs:
           BPT_STEPS: ${{ inputs.steps }}
           SCENARIO: ${{ inputs.scenario }}
           SOAK_CREATE_ACCOUNTS: ${{ inputs.create_accounts }}
+          SOAK_P95_ENCRYPT_MS: ${{ inputs.p95_encrypt_ms }}
+          SOAK_P95_ECDSA_MS: ${{ inputs.p95_ecdsa_ms }}
         # pipefail keeps k6's exit code (the threshold gate) while teeing the
         # full summary — incl. p50/p95/p99 + check rates — to an artifact.
         run: |

@@ -551,6 +551,65 @@ async fn fetch(mut client: TestClient) {
     assert!(client.received::<ExecutionResult>().success);
 }
 
+/// Exercises `Lit.Actions.proxiedFetch` against real Binance through a real
+/// egress proxy, executed in the actual runtime in-process. Opt-in: set
+/// `LIT_VENUES_TEST_PROXY` to a proxy URL (`http://user:pass@host:port`); skips
+/// cleanly when unset so CI stays green and no credentials are committed.
+/// (The direct-request control — geo-blocked 451 from a US IP vs. 200 via the
+/// proxy — is validated separately; the test mock holds one response per op
+/// type, so we keep this to a single proxied call.)
+///
+/// `#[ignore]` like `import_rewrite_cdn`: needs real outbound network, which the
+/// default CI/dev sandbox does not grant the test process. Run with
+/// `LIT_VENUES_TEST_PROXY=... cargo test -p lit-actions-tests --test integration proxied_fetch -- --ignored --nocapture`.
+#[rstest]
+#[ignore = "requires real network egress + LIT_VENUES_TEST_PROXY (see import_rewrite_cdn)"]
+#[tokio::test]
+async fn proxied_fetch(mut client: TestClient) {
+    let Ok(proxy) = std::env::var("LIT_VENUES_TEST_PROXY") else {
+        eprintln!("skipping proxied_fetch: set LIT_VENUES_TEST_PROXY to run");
+        return;
+    };
+
+    // proxy is embedded as a JS string literal via {:?}; setResponse below only
+    // ever echoes status/flags, never the proxy URL, so creds don't leak.
+    let code = formatdoc! {r#"
+        async function main() {{
+            const viaProxy = await Lit.Actions.proxiedFetch({{
+                url: "https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT",
+                proxy: {proxy:?},
+            }});
+            const body = await viaProxy.text();
+            Lit.Actions.setResponse({{ response:
+                "proxyStatus=" + viaProxy.status + ";hasPrice=" + body.includes("price") }});
+        }}
+        "#,
+        proxy = proxy
+    };
+
+    client
+        .respond_with(IncrementFetchCountResponse { fetch_count: 1 })
+        .respond_with(SetResponseResponse {})
+        .execute_js(code)
+        .await
+        .unwrap();
+
+    let response = client.received::<SetResponseRequest>().response;
+    eprintln!("proxied_fetch → {response}");
+    assert!(
+        response.contains("proxyStatus=200"),
+        "binance via proxy should return 200: {response}"
+    );
+    assert!(
+        response.contains("hasPrice=true"),
+        "expected a price field in the proxied response body: {response}"
+    );
+
+    // Drain queued op-request records so the GothamStore Drop check passes.
+    let _ = client.received::<IncrementFetchCountRequest>();
+    assert!(client.received::<ExecutionResult>().success);
+}
+
 #[rstest]
 #[tokio::test]
 async fn aes_decrypt(mut client: TestClient) {
