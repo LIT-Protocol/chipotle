@@ -66,39 +66,72 @@ const SOAK_P95_ECDSA_MS = __ENV.SOAK_P95_ECDSA_MS || "700";
 const SOAK_P95_TOLERANCE = parseFloat(__ENV.SOAK_P95_TOLERANCE || "0.30");
 const SOAK_P95_FLOOR_MS = parseFloat(__ENV.SOAK_P95_FLOOR_MS || "50");
 
-// Optional committed baseline. open() resolves relative to THIS spec's dir
-// (k6/loadtest/), so the gate passes e.g. "../baselines/soak.next.json".
-// Absent/unreadable → null → absolute fallback ceilings above.
+// Committed baseline. When SOAK_BASELINE_FILE is set the gate runs in baseline
+// mode and FAILS CLOSED: any problem loading the baseline, an invalid
+// tolerance/floor, or a missing/non-positive p95 for a running endpoint throws
+// at init so the run errors red. It never silently downgrades to the loose
+// absolute ceilings — that would let a real regression pass green. When unset
+// (local / measurement runs) we use the absolute SOAK_P95_*_MS ceilings.
+// open() resolves relative to THIS spec's dir (k6/loadtest/), so the gate
+// passes e.g. "../baselines/soak.next.json".
 const SOAK_BASELINE_FILE = __ENV.SOAK_BASELINE_FILE || "";
+const baselineMode = SOAK_BASELINE_FILE !== "";
 // deno-lint-ignore no-explicit-any
 let soakBaseline: any = null;
-if (SOAK_BASELINE_FILE) {
+if (baselineMode) {
+  let raw: string;
   try {
-    soakBaseline = JSON.parse(open(SOAK_BASELINE_FILE) as string);
+    raw = open(SOAK_BASELINE_FILE) as string;
   } catch (e) {
-    console.warn(
-      `soak: could not load baseline ${SOAK_BASELINE_FILE} (${String(
+    throw new Error(
+      `soak: SOAK_BASELINE_FILE="${SOAK_BASELINE_FILE}" could not be opened (${String(
         (e as Error).message ?? e,
-      )}); using absolute p95 ceilings`,
+      )}). The gate fails closed — fix the path (relative to k6/loadtest/) or unset it.`,
+    );
+  }
+  try {
+    soakBaseline = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(
+      `soak: baseline ${SOAK_BASELINE_FILE} is not valid JSON (${String(
+        (e as Error).message ?? e,
+      )}).`,
+    );
+  }
+  if (!Number.isFinite(SOAK_P95_TOLERANCE) || SOAK_P95_TOLERANCE < 0) {
+    throw new Error(
+      `soak: SOAK_P95_TOLERANCE must be a non-negative number — a fraction, e.g. 0.30 = 30% (not 30); got "${__ENV.SOAK_P95_TOLERANCE}".`,
+    );
+  }
+  if (!Number.isFinite(SOAK_P95_FLOOR_MS) || SOAK_P95_FLOOR_MS < 0) {
+    throw new Error(
+      `soak: SOAK_P95_FLOOR_MS must be a non-negative number of ms; got "${__ENV.SOAK_P95_FLOOR_MS}".`,
     );
   }
 }
 
-// p95 ceiling (ms, as a string for the k6 threshold) for an endpoint:
-// baseline-derived delta if we have a baseline p95, else the absolute fallback.
+// p95 ceiling (ms string for the k6 threshold) for an endpoint. In baseline
+// mode it is derived from the baseline p95 and throws if that p95 is absent or
+// non-positive (fail closed). Without a baseline it returns the absolute
+// fallback ceiling.
 function p95Ceiling(scenario: string, absoluteMs: string): string {
+  if (!baselineMode) return absoluteMs;
   const base = soakBaseline?.scenarios?.[scenario]?.p95;
-  if (typeof base === "number" && base > 0) {
-    const ceil = Math.max(
-      base * (1 + SOAK_P95_TOLERANCE),
-      base + SOAK_P95_FLOOR_MS,
+  if (typeof base !== "number" || !(base > 0)) {
+    throw new Error(
+      `soak: baseline ${SOAK_BASELINE_FILE} has no valid p95 for "${scenario}" (got ${JSON.stringify(
+        base,
+      )}). The gate fails closed — regenerate the baseline with k6/update-soak-baseline.sh.`,
     );
-    console.log(
-      `soak: ${scenario} p95 ceiling ${ceil.toFixed(0)}ms (baseline ${base}ms +${(SOAK_P95_TOLERANCE * 100).toFixed(0)}%/+${SOAK_P95_FLOOR_MS}ms)`,
-    );
-    return String(ceil);
   }
-  return absoluteMs;
+  const ceil = Math.max(
+    base * (1 + SOAK_P95_TOLERANCE),
+    base + SOAK_P95_FLOOR_MS,
+  );
+  console.log(
+    `soak: ${scenario} p95 ceiling ${ceil.toFixed(0)}ms (baseline ${base}ms +${(SOAK_P95_TOLERANCE * 100).toFixed(0)}%/+${SOAK_P95_FLOOR_MS}ms)`,
+  );
+  return String(ceil);
 }
 
 // Gate mode: create ephemeral accounts in setup() instead of reading the

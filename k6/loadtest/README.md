@@ -123,9 +123,13 @@ Anchoring on a *committed* baseline (not the previous run) is deliberate: it
 catches **cumulative** drift. Comparing only to the last run would let a steady
 few-percent-per-release creep pass forever and compound.
 
-If no baseline is provided (`SOAK_BASELINE_FILE` unset), the gate falls back to
-the coarse absolute ceilings `SOAK_P95_ENCRYPT_MS` (350) / `SOAK_P95_ECDSA_MS`
-(700).
+**Fail-closed:** when a baseline IS requested (`SOAK_BASELINE_FILE` set, as the
+deploy gate does), the run errors red if the baseline can't be opened, isn't
+valid JSON, has no positive p95 for a running endpoint, or the tolerance/floor
+are invalid. It never silently downgrades to the absolute ceilings — a broken
+baseline must not let a regression pass green. The absolute ceilings
+(`SOAK_P95_ENCRYPT_MS` 350 / `SOAK_P95_ECDSA_MS` 700) apply only when no baseline
+is requested (local / measurement runs).
 
 Each run also uploads `soak-summary.json` (per-scenario p50/p95/p99/avg/max +
 check & failure rates) as a build artifact — the same shape the baseline takes.
@@ -162,7 +166,7 @@ makes baseline changes reviewable, which is the point).
 | `SCENARIO`             | *all*   | `soak` (the gate) runs only the steady scenarios; drops `ramp_*`   |
 | `SOAK_CREATE_ACCOUNTS` | `false` | `true` → create ephemeral accounts in setup vs the pre-seeded pool |
 | `SOAK_BASELINE_FILE`   | *none*  | Path (relative to `k6/loadtest/`) to a baseline summary to gate on |
-| `SOAK_P95_TOLERANCE`   | `0.30`  | Allowed fractional p95 growth vs baseline                          |
+| `SOAK_P95_TOLERANCE`   | `0.30`  | Allowed p95 growth vs baseline, as a **fraction** (0.30 = 30%, not 30) |
 | `SOAK_P95_FLOOR_MS`    | `50`    | Absolute p95 cushion added on top of the tolerance                 |
 | `SOAK_P95_ENCRYPT_MS`  | `350`   | Absolute encrypt/decrypt p95 ceiling (fallback when no baseline)   |
 | `SOAK_P95_ECDSA_MS`    | `700`   | Absolute ecdsa-sign p95 ceiling (fallback when no baseline)        |

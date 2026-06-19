@@ -36,6 +36,15 @@ echo "  duration: ${DURATION} steady (+~4m ramp up/down)"
 echo "  accounts: ephemeral, created + test-mode-funded for this run"
 echo
 
+command -v python3 >/dev/null 2>&1 || {
+  echo "error: python3 is required to validate the measured summary before writing the baseline." >&2
+  exit 1
+}
+
+# No SOAK_BASELINE_FILE → not baseline mode, so the spec uses absolute ceilings.
+# Set them sky-high so this measurement run genuinely never gates itself on
+# latency (otherwise a legitimately-slower run would exit non-zero under set -e
+# before we capture the numbers).
 K6_CORRELATION_ID="baseline-$(date +%s)" \
 SOAK_CREATE_ACCOUNTS=true \
 SCENARIO=soak \
@@ -43,6 +52,8 @@ SOAK_VUS=2 \
 SOAK_DURATION="$DURATION" \
 BASE_URL="$BASE_URL" \
 K6_ENV=staging \
+SOAK_P95_ENCRYPT_MS=100000 \
+SOAK_P95_ECDSA_MS=100000 \
   k6 run loadtest/soak.spec.ts
 
 [ -f soak-summary.json ] || {
@@ -50,7 +61,43 @@ K6_ENV=staging \
   exit 1
 }
 
+# Validate the measurement before baking it into the gate's baseline: a degraded
+# or partial run (failed checks, HTTP failures, or a null/zero p95 from a
+# zero-sample scenario) must NOT become the accepted ceiling. Warn if it's
+# meaningfully slower than the current baseline, since you normally refresh to
+# TIGHTEN, not loosen.
 mkdir -p baselines
+python3 - "soak-summary.json" "$OUT" <<'PY'
+import json, os, sys
+new = json.load(open(sys.argv[1]))
+problems = []
+if new.get("checks_rate") != 1:
+    problems.append(f"checks_rate={new.get('checks_rate')} (want 1.0)")
+if new.get("http_req_failed_rate") not in (0, 0.0):
+    problems.append(f"http_req_failed_rate={new.get('http_req_failed_rate')} (want 0)")
+for name in ("soak_encrypt_decrypt", "soak_ecdsa_sign"):
+    sc = (new.get("scenarios") or {}).get(name)
+    p95 = sc.get("p95") if isinstance(sc, dict) else None
+    if not isinstance(p95, (int, float)) or isinstance(p95, bool) or p95 <= 0:
+        problems.append(f"{name}.p95={p95!r} (want a positive number)")
+if problems:
+    sys.stderr.write("error: measurement run was not clean — baseline NOT written:\n")
+    for p in problems:
+        sys.stderr.write(f"  - {p}\n")
+    sys.exit(1)
+cur_path = sys.argv[2]
+if os.path.exists(cur_path):
+    cur = json.load(open(cur_path))
+    for name in ("soak_encrypt_decrypt", "soak_ecdsa_sign"):
+        old = ((cur.get("scenarios") or {}).get(name) or {}).get("p95")
+        nw = new["scenarios"][name]["p95"]
+        if isinstance(old, (int, float)) and not isinstance(old, bool) and nw > old * 1.1:
+            sys.stderr.write(
+                f"WARNING: {name} p95 {nw:.0f}ms is >10% slower than the current "
+                f"baseline {old:.0f}ms — refreshes usually TIGHTEN. Double-check before committing.\n"
+            )
+PY
+
 mv soak-summary.json "$OUT"
 
 echo
