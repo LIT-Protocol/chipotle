@@ -141,7 +141,13 @@ jobs:
           # The `next` git branch is retired; `main` is the deploy branch and
           # targets the chipotle-next staging app (test.chipotle.litprotocol.com),
           # ping-ponged across its two instances. chipotle-dev is deprecated.
-          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+          #
+          # Auto-deploys only fire on push to main. workflow_dispatch from any
+          # branch is permitted (and goes to the same staging CVM) so we can
+          # test feature branches against staging before merging — the prior
+          # version of this guard claimed to allow that in the error message
+          # but the condition itself rejected every non-main ref.
+          if [ "${{ github.ref }}" = "refs/heads/main" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             DEFAULT_APP_NAME="chipotle-next-rep-sa6xj"
             CVM_A="$NEXT_CVM_A"; CVM_B="$NEXT_CVM_B"
             echo "instance_type=tdx.small" >> "$GITHUB_OUTPUT"
@@ -402,6 +408,7 @@ jobs:
           CERTBOT_AWS_ACCESS_KEY_ID: ${{ secrets.CERTBOT_AWS_ACCESS_KEY_ID }}
           CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
           CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
+          LIT_INTERNAL_SHARED_SECRET: ${{ secrets.LIT_INTERNAL_SHARED_SECRET }}
         run: |
           phala deploy \
             -c docker-compose.deploy.yml \
@@ -416,7 +423,8 @@ jobs:
             -e "CERTBOT_AWS_ACCESS_KEY_ID=$CERTBOT_AWS_ACCESS_KEY_ID" \
             -e "CERTBOT_AWS_SECRET_ACCESS_KEY=$CERTBOT_AWS_SECRET_ACCESS_KEY" \
             -e "CERTBOT_AWS_ROLE_ARN=$CERTBOT_AWS_ROLE_ARN" \
-            -e "CERTBOT_AWS_REGION=${{ vars.CERTBOT_AWS_REGION }}"
+            -e "CERTBOT_AWS_REGION=${{ vars.CERTBOT_AWS_REGION }}" \
+            -e "LIT_INTERNAL_SHARED_SECRET=$LIT_INTERNAL_SHARED_SECRET"
 
   wait-for-api-available:
     needs: [deploy, determine-target, detect-changes]
