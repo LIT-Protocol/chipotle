@@ -74,9 +74,10 @@ jobs:
           SAFE_PROPOSER_PRIVATE_KEY: ${{ secrets.SAFE_PROPOSER_PRIVATE_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_PUBLISHABLE_KEY: ${{ secrets.STRIPE_PUBLISHABLE_KEY }}
+          LIT_INTERNAL_SHARED_SECRET: ${{ secrets.LIT_INTERNAL_SHARED_SECRET }}
         run: |
           missing=()
-          for secret in GCP_SERVICE_ACCOUNT_JSON BASE_CHAIN_RPC CERTBOT_AWS_ACCESS_KEY_ID CERTBOT_AWS_SECRET_ACCESS_KEY CERTBOT_AWS_ROLE_ARN PHALA_CLOUD_API_KEY SAFE_PROPOSER_PRIVATE_KEY STRIPE_SECRET_KEY STRIPE_PUBLISHABLE_KEY; do
+          for secret in GCP_SERVICE_ACCOUNT_JSON BASE_CHAIN_RPC CERTBOT_AWS_ACCESS_KEY_ID CERTBOT_AWS_SECRET_ACCESS_KEY CERTBOT_AWS_ROLE_ARN PHALA_CLOUD_API_KEY SAFE_PROPOSER_PRIVATE_KEY STRIPE_SECRET_KEY STRIPE_PUBLISHABLE_KEY LIT_INTERNAL_SHARED_SECRET; do
             if [ -z "${!secret}" ]; then
               missing+=("$secret")
             fi
@@ -230,7 +231,8 @@ jobs:
                 "CERTBOT_AWS_ACCESS_KEY_ID",
                 "CERTBOT_AWS_SECRET_ACCESS_KEY",
                 "CERTBOT_AWS_ROLE_ARN",
-                "CERTBOT_AWS_REGION"
+                "CERTBOT_AWS_REGION",
+                "LIT_INTERNAL_SHARED_SECRET"
               ]
             }' > "$PROVISION_FILE"
           echo "Request payload size: $(wc -c < "$PROVISION_FILE") bytes"
@@ -344,6 +346,7 @@ jobs:
           CERTBOT_AWS_SECRET_ACCESS_KEY: ${{ secrets.CERTBOT_AWS_SECRET_ACCESS_KEY }}
           CERTBOT_AWS_ROLE_ARN: ${{ secrets.CERTBOT_AWS_ROLE_ARN }}
           CERTBOT_AWS_REGION: ${{ vars.CERTBOT_AWS_REGION }}
+          LIT_INTERNAL_SHARED_SECRET: ${{ secrets.LIT_INTERNAL_SHARED_SECRET }}
           ENCRYPT_PUBKEY: ${{ steps.fetch-pubkey.outputs.encrypt_pubkey }}
         run: |
           set -euo pipefail
@@ -368,6 +371,7 @@ jobs:
               { key: "CERTBOT_AWS_SECRET_ACCESS_KEY", value: process.env.CERTBOT_AWS_SECRET_ACCESS_KEY },
               { key: "CERTBOT_AWS_ROLE_ARN", value: process.env.CERTBOT_AWS_ROLE_ARN },
               { key: "CERTBOT_AWS_REGION", value: process.env.CERTBOT_AWS_REGION },
+              { key: "LIT_INTERNAL_SHARED_SECRET", value: process.env.LIT_INTERNAL_SHARED_SECRET },
             ];
             const pubkey = process.env.ENCRYPT_PUBKEY;
             encryptEnvVars(envs, pubkey).then(hex => process.stdout.write(hex));
