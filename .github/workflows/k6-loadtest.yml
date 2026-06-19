@@ -138,6 +138,11 @@ on:
         options:
           - ''
           - 'true'
+      baseline_file:
+        description: "Soak-only: committed baseline summary path, relative to k6/loadtest/ (e.g. ../baselines/soak.next.json). Set to gate on a p95 regression vs that baseline."
+        required: false
+        type: string
+        default: ''
       accounts_file:
         description: "Optional accounts file override, relative to the k6/ dir (e.g. ./data/accounts.next.json)"
         required: false
