@@ -193,7 +193,9 @@ if [[ "${SKIP_PREBUILD:-false}" != "true" ]]; then
 fi
 
 free_ports
-( cd "$ROOT" && setsid ./local_test.sh >>"$LOG" 2>&1 ) &
+# Benchmarks measure Lit Action latency, not billing; run payment-free so the
+# CPL-330 test-Stripe-key requirement doesn't block stack startup.
+( cd "$ROOT" && LIT_DISABLE_BILLING=true setsid ./local_test.sh >>"$LOG" 2>&1 ) &
 STACK_PID=$!
 trap 'stop_stack "$STACK_PID"' EXIT
 
