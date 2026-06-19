@@ -1,0 +1,25 @@
+# CODEOWNERS — required reviewers for security-critical surfaces.
+#
+# CPL-291: changes to on-chain contract code and to CI/CD workflows must not
+# land on a single self-approval. A PR touching any path below requires review
+# from the listed owner(s).
+#
+# IMPORTANT — this file only takes effect once branch protection on the default
+# branch enables "Require review from Code Owners". Configure that in
+# Settings → Branches.
+#
+# TODO(CPL-291 follow-up): replace the individual owner with a proper GitHub
+# team slug (e.g. @LIT-Protocol/contracts, @LIT-Protocol/platform-security)
+# once the teams exist. An unknown team here is silently ignored by GitHub, so
+# a real, verified handle is used in the meantime to keep the rule enforceable.
+
+# --- CI / CD pipeline -------------------------------------------------------
+/.github/                       @GTC6244
+/.github/workflows/             @GTC6244
+/.github/CODEOWNERS             @GTC6244
+
+# --- On-chain Diamond contract code + deployer ------------------------------
+/lit-api-server/blockchain/     @GTC6244
+
+# Node config files drive which network/Diamond a deploy targets.
+/lit-api-server/NodeConfig.*.toml  @GTC6244
