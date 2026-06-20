@@ -543,7 +543,11 @@ mod tests {
         assert_eq!(&calldata[68..100], &expected_len, "signature length = 65");
 
         assert_eq!(&calldata[100..165], &[0x22u8; 65], "signature bytes");
-        assert_eq!(&calldata[165..196], &[0u8; 31], "right-pad to word boundary");
+        assert_eq!(
+            &calldata[165..196],
+            &[0u8; 31],
+            "right-pad to word boundary"
+        );
     }
 
     /// An empty signature still encodes a valid (zero-length) bytes argument:
@@ -567,9 +571,13 @@ mod tests {
         let zeros56 = "0".repeat(56);
         let ones56 = "f".repeat(56);
         // Magic value, full 32-byte word, zero-padded -> accepted.
-        assert!(erc1271_result_is_magic(Some(&format!("0x1626ba7e{zeros56}"))));
+        assert!(erc1271_result_is_magic(Some(&format!(
+            "0x1626ba7e{zeros56}"
+        ))));
         // Magic value, full word, trailing junk ignored (matches alloy) -> accepted.
-        assert!(erc1271_result_is_magic(Some(&format!("0x1626ba7e{ones56}"))));
+        assert!(erc1271_result_is_magic(Some(&format!(
+            "0x1626ba7e{ones56}"
+        ))));
         // Short buffer the old loose decoder accepted -> now rejected.
         assert!(!erc1271_result_is_magic(Some("0x1626ba7e")));
         // EOA / empty result -> rejected.
@@ -578,6 +586,8 @@ mod tests {
         // Revert (no result) -> rejected.
         assert!(!erc1271_result_is_magic(None));
         // Full word, wrong magic (the EIP-1271 failure value) -> rejected.
-        assert!(!erc1271_result_is_magic(Some(&format!("0xffffffff{zeros56}"))));
+        assert!(!erc1271_result_is_magic(Some(&format!(
+            "0xffffffff{zeros56}"
+        ))));
     }
 }

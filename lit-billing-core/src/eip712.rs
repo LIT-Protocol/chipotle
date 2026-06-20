@@ -504,7 +504,11 @@ pub async fn verify_eip712_signature_allow_contract_wallet(
     // the signature is definitively not valid for this address by either
     // method, so we emit one unified error naming both paths.
     if verifier
-        .verify_erc1271(prepared.claimed_address, prepared.digest, &prepared.signature)
+        .verify_erc1271(
+            prepared.claimed_address,
+            prepared.digest,
+            &prepared.signature,
+        )
         .await?
     {
         return Ok(prepared.claimed_address);
@@ -1300,8 +1304,12 @@ mod tests {
     #[tokio::test]
     async fn allow_contract_wallet_accepts_eoa_without_calling_chain() {
         let wallet = PrivateKeySigner::random();
-        let (typed, sig) =
-            sign_canonical(&wallet, PRIMARY_TYPE_BILLING_AUTH, now_secs(), TEST_CHAIN_ID);
+        let (typed, sig) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_BILLING_AUTH,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         // Would reject (false) if consulted — proves the EOA path never asks it.
         let verifier = MockErc1271::returns(false);
         let recovered = verify_eip712_signature_allow_contract_wallet(
@@ -1326,8 +1334,12 @@ mod tests {
     #[tokio::test]
     async fn allow_contract_wallet_accepts_when_isvalidsignature_true() {
         let wallet = PrivateKeySigner::random();
-        let (typed, _) =
-            sign_canonical(&wallet, PRIMARY_TYPE_BILLING_AUTH, now_secs(), TEST_CHAIN_ID);
+        let (typed, _) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_BILLING_AUTH,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         let verifier = MockErc1271::returns(true);
         let recovered = verify_eip712_signature_allow_contract_wallet(
             &typed,
@@ -1347,8 +1359,12 @@ mod tests {
     #[tokio::test]
     async fn allow_contract_wallet_rejects_when_isvalidsignature_false() {
         let wallet = PrivateKeySigner::random();
-        let (typed, _) =
-            sign_canonical(&wallet, PRIMARY_TYPE_BILLING_AUTH, now_secs(), TEST_CHAIN_ID);
+        let (typed, _) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_BILLING_AUTH,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         let verifier = MockErc1271::returns(false);
         let err = verify_eip712_signature_allow_contract_wallet(
             &typed,
@@ -1368,8 +1384,12 @@ mod tests {
     #[tokio::test]
     async fn allow_contract_wallet_propagates_infra_error_as_internal() {
         let wallet = PrivateKeySigner::random();
-        let (typed, _) =
-            sign_canonical(&wallet, PRIMARY_TYPE_BILLING_AUTH, now_secs(), TEST_CHAIN_ID);
+        let (typed, _) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_BILLING_AUTH,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         let verifier = MockErc1271::infra_error();
         let err = verify_eip712_signature_allow_contract_wallet(
             &typed,
@@ -1391,8 +1411,12 @@ mod tests {
     #[test]
     fn eoa_only_rejects_contract_wallet_signature() {
         let wallet = PrivateKeySigner::random();
-        let (typed, _) =
-            sign_canonical(&wallet, PRIMARY_TYPE_BILLING_AUTH, now_secs(), TEST_CHAIN_ID);
+        let (typed, _) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_BILLING_AUTH,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         let err = verify_eip712_signature(
             &typed,
             &contract_wallet_shaped_sig(),
@@ -1408,8 +1432,12 @@ mod tests {
     #[test]
     fn rejects_oversized_signature() {
         let wallet = PrivateKeySigner::random();
-        let (typed, _) =
-            sign_canonical(&wallet, PRIMARY_TYPE_BILLING_AUTH, now_secs(), TEST_CHAIN_ID);
+        let (typed, _) = sign_canonical(
+            &wallet,
+            PRIMARY_TYPE_BILLING_AUTH,
+            now_secs(),
+            TEST_CHAIN_ID,
+        );
         let huge = format!("0x{}", "ab".repeat(MAX_SIGNATURE_BYTES + 1));
         let err = verify_eip712_signature(&typed, &huge, PRIMARY_TYPE_BILLING_AUTH, TEST_CHAIN_ID)
             .expect_err("must reject — signature exceeds cap");
