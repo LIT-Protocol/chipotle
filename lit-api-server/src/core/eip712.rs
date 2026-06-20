@@ -265,6 +265,14 @@ struct PreparedVerification {
 /// primary-type match, timestamp window) run before the expensive ECDSA
 /// recovery so junk traffic with stale, wrong-purpose, or wrong-chain
 /// payloads is dropped without doing crypto.
+///
+/// Test-only: every production caller (billing auth + the mint endpoints) now
+/// uses [`verify_eip712_signature_allow_contract_wallet`] so a smart-wallet
+/// master account is accepted everywhere. This EOA-only wrapper is retained to
+/// exercise the shared validation pipeline and the ECDSA recovery path
+/// directly in the test suite, and is gated `#[cfg(test)]` to keep it out of
+/// release builds (and satisfy clippy `-D warnings` dead-code).
+#[cfg(test)]
 pub(crate) fn verify_eip712_signature(
     typed_data_json: &serde_json::Value,
     signature_hex: &str,
@@ -280,8 +288,8 @@ pub(crate) fn verify_eip712_signature(
     ))
 }
 
-/// Like [`verify_eip712_signature`], but additionally accepts EIP-1271
-/// smart-contract-wallet signatures (e.g. a Gnosis Safe). When standard ECDSA
+/// Like the EOA-only `verify_eip712_signature`, but additionally accepts
+/// EIP-1271 smart-contract-wallet signatures (e.g. a Gnosis Safe). When standard ECDSA
 /// recovery does not match the claimed address, the claimed address is treated
 /// as a contract and `isValidSignature(digest, signature)` is called on-chain
 /// (against the node's configured chain — the same chain pinned in the EIP-712
