@@ -513,7 +513,10 @@ jobs:
   # release-time precheck fails closed. See deploy-prod-1-propose.yml.
   mark-perf-gate:
     needs: [k6-loadtest]
-    if: ${{ always() && needs.k6-loadtest.result != 'skipped' }}
+    # Only stamp the trusted status from a main deploy (push or dispatch on main);
+    # a workflow_dispatch run on a feature branch must not be able to forge
+    # perf-gate/soak on its SHA. Skipped (no status) when the soak was skipped.
+    if: ${{ always() && needs.k6-loadtest.result != 'skipped' && github.ref == 'refs/heads/main' }}
     runs-on: self-hosted
     permissions:
       statuses: write
