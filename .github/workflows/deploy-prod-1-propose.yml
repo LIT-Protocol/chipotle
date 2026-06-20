@@ -72,33 +72,30 @@ jobs:
   verify-staging-passed:
     runs-on: self-hosted
     permissions:
-      actions: read # query Deploy Staging workflow runs via the API
-      contents: read
+      statuses: read # read the perf-gate/soak commit status
     steps:
-      - name: Require a green Deploy Staging run for this commit
+      - name: Require the soak perf gate to have run green on this commit
         if: ${{ !inputs.skip_staging_check }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
         run: |
-          echo "Checking Deploy Staging status for ${SHA}..."
-          # --json pulls only status/conclusion/id (no commit messages), so the
-          # response stays small and free of raw control chars that break jq.
-          runs=$(gh run list --workflow=deploy-staging.yml -c "${SHA}" \
-            --json status,conclusion,databaseId --limit 50)
-          ok=$(echo "$runs" | jq '[.[] | select(.status=="completed" and .conclusion=="success")] | length')
-          if [ "${ok:-0}" -gt 0 ]; then
-            echo "✓ Deploy Staging passed for ${SHA}"
+          # Deploy Staging posts a perf-gate/soak commit status ONLY when the soak
+          # job actually ran and finished (success/failure). Requiring it here
+          # means the soak truly executed green on this exact commit — a run that
+          # merely concluded success because the gate was skipped (no
+          # deploy-relevant changes) posts no status and is rejected. gh api --jq
+          # processes the response directly (no shell jq round-trip). statuses are
+          # returned newest-first, so the first match per context is the latest.
+          state=$(gh api "repos/${GH_REPO}/commits/${SHA}/statuses" \
+            --jq 'map(select(.context=="perf-gate/soak")) | (first | .state) // "missing"')
+          echo "perf-gate/soak status for ${SHA}: ${state}"
+          if [ "$state" = "success" ]; then
+            echo "✓ soak perf gate ran green on ${SHA}"
             exit 0
           fi
-          echo "::error::No successful Deploy Staging run for ${SHA}. Refusing to propose a prod release — let the staging gate pass on this commit first (or re-run Deploy Staging). Override on manual dispatch with skip_staging_check=true only if staging is down for unrelated reasons."
-          if [ "$(echo "$runs" | jq 'length')" -eq 0 ]; then
-            echo "  (no Deploy Staging run found for this commit at all)"
-          else
-            echo "  Deploy Staging runs for this commit (status/conclusion/run-id):"
-            echo "$runs" | jq -r '.[] | "  \(.status)/\(.conclusion // "—") \(.databaseId)"'
-          fi
+          echo "::error::perf-gate/soak for ${SHA} is '${state}' (need 'success'). The staging soak gate must have run green on this exact commit before a prod release. If this commit had no deploy-relevant changes the soak was skipped — tag a commit that was deployed+gated, or re-run Deploy Staging on this SHA. Override on manual dispatch with skip_staging_check=true only if staging is down for unrelated reasons."
           exit 1
       - name: Staging check skipped (override)
         if: ${{ inputs.skip_staging_check }}
