@@ -79,24 +79,25 @@ jobs:
         if: ${{ !inputs.skip_staging_check }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
+          GH_REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
         run: |
           echo "Checking Deploy Staging status for ${SHA}..."
-          runs=$(gh api "repos/${REPO}/actions/workflows/deploy-staging.yml/runs?head_sha=${SHA}&per_page=50")
-          ok=$(echo "$runs" | jq '[.workflow_runs[] | select(.status=="completed" and .conclusion=="success")] | length')
+          # --json pulls only status/conclusion/id (no commit messages), so the
+          # response stays small and free of raw control chars that break jq.
+          runs=$(gh run list --workflow=deploy-staging.yml -c "${SHA}" \
+            --json status,conclusion,databaseId --limit 50)
+          ok=$(echo "$runs" | jq '[.[] | select(.status=="completed" and .conclusion=="success")] | length')
           if [ "${ok:-0}" -gt 0 ]; then
             echo "✓ Deploy Staging passed for ${SHA}"
-            echo "$runs" | jq -r '.workflow_runs[] | select(.status=="completed" and .conclusion=="success") | "  \(.html_url)"' | head -1
             exit 0
           fi
           echo "::error::No successful Deploy Staging run for ${SHA}. Refusing to propose a prod release — let the staging gate pass on this commit first (or re-run Deploy Staging). Override on manual dispatch with skip_staging_check=true only if staging is down for unrelated reasons."
-          total=$(echo "$runs" | jq '.workflow_runs | length')
-          if [ "${total:-0}" -eq 0 ]; then
+          if [ "$(echo "$runs" | jq 'length')" -eq 0 ]; then
             echo "  (no Deploy Staging run found for this commit at all)"
           else
-            echo "  Deploy Staging runs for this commit:"
-            echo "$runs" | jq -r '.workflow_runs[] | "  \(.status)/\(.conclusion // "—") \(.html_url)"'
+            echo "  Deploy Staging runs for this commit (status/conclusion/run-id):"
+            echo "$runs" | jq -r '.[] | "  \(.status)/\(.conclusion // "—") \(.databaseId)"'
           fi
           exit 1
       - name: Staging check skipped (override)
