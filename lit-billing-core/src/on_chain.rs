@@ -290,6 +290,28 @@ impl OnChainBillingResolver {
 /// attacker-supplied address can burn per request.
 const ERC1271_CALL_GAS_LIMIT: u64 = 1_000_000;
 
+/// Interpret an `isValidSignature` `eth_call` result. `None` is a revert / EOA
+/// (definitive non-acceptance). A real `returns (bytes4)` is ABI-encoded as one
+/// full 32-byte word with the value left-aligned, so we require a complete word
+/// (64 hex chars) before reading the first 4 bytes — a short or truncated buffer
+/// (including an EOA's empty `0x`) is not a valid acceptance. Trailing padding
+/// bytes are ignored, matching the alloy `FixedBytes<4>` decode on the
+/// lit-api-server account-management path so the two services agree on what
+/// counts as a valid EIP-1271 response.
+fn erc1271_result_is_magic(result: Option<&str>) -> bool {
+    let Some(hexdata) = result else {
+        return false;
+    };
+    let stripped = hexdata.strip_prefix("0x").unwrap_or(hexdata);
+    if stripped.len() < 64 {
+        return false;
+    }
+    matches!(
+        hex::decode(&stripped[..8]),
+        Ok(first4) if first4.as_slice() == crate::eip712::ERC1271_MAGIC_VALUE
+    )
+}
+
 /// ABI-encode the calldata for `isValidSignature(bytes32 hash, bytes signature)`:
 ///
 /// ```text
@@ -329,7 +351,7 @@ impl crate::eip712::Erc1271Verifier for OnChainBillingResolver {
         digest: B256,
         signature: &[u8],
     ) -> Result<bool, crate::eip712::Eip712Error> {
-        use crate::eip712::{ERC1271_MAGIC_VALUE, Eip712Error};
+        use crate::eip712::Eip712Error;
 
         let calldata = encode_is_valid_signature_calldata(digest, signature);
         let calldata_hex = format!("0x{}", hex::encode(&calldata));
@@ -346,25 +368,10 @@ impl crate::eip712::Erc1271Verifier for OnChainBillingResolver {
                 )
             })?;
 
-        // `returns (bytes4)` is ABI-encoded left-aligned in a 32-byte word, so
-        // the magic value (when present) occupies the first 4 bytes. A revert,
-        // an EOA (empty `0x`), or any non-magic return is a non-acceptance.
-        match result {
-            None => Ok(false),
-            Some(hexdata) => {
-                let stripped = hexdata.strip_prefix("0x").unwrap_or(&hexdata);
-                if stripped.len() < 8 {
-                    return Ok(false);
-                }
-                let first4 = hex::decode(&stripped[..8]).map_err(|e| {
-                    Eip712Error::internal(
-                        format!("decoding isValidSignature result: {e}"),
-                        "Signature verification failed to decode chain response",
-                    )
-                })?;
-                Ok(first4.as_slice() == ERC1271_MAGIC_VALUE)
-            }
-        }
+        // A revert, an EOA (empty `0x`), a short/truncated buffer, or any
+        // non-magic full-word return is a non-acceptance; only the ERC-1271
+        // magic value left-aligned in a 32-byte word counts.
+        Ok(erc1271_result_is_magic(result.as_deref()))
     }
 }
 
@@ -548,5 +555,29 @@ mod tests {
         let mut expected_len = [0u8; 32];
         expected_len[31] = 0;
         assert_eq!(&calldata[68..100], &expected_len);
+    }
+
+    /// The `isValidSignature` return decoder must require a full 32-byte ABI
+    /// word and only accept the magic value left-aligned in it. A short buffer
+    /// (e.g. a bare 4-byte `0x1626ba7e`), an EOA's empty `0x`, a revert
+    /// (`None`), or a non-magic word are all non-acceptances. Trailing padding
+    /// is ignored, matching the lit-api-server alloy `FixedBytes<4>` decode.
+    #[test]
+    fn erc1271_result_decode_requires_full_word() {
+        let zeros56 = "0".repeat(56);
+        let ones56 = "f".repeat(56);
+        // Magic value, full 32-byte word, zero-padded -> accepted.
+        assert!(erc1271_result_is_magic(Some(&format!("0x1626ba7e{zeros56}"))));
+        // Magic value, full word, trailing junk ignored (matches alloy) -> accepted.
+        assert!(erc1271_result_is_magic(Some(&format!("0x1626ba7e{ones56}"))));
+        // Short buffer the old loose decoder accepted -> now rejected.
+        assert!(!erc1271_result_is_magic(Some("0x1626ba7e")));
+        // EOA / empty result -> rejected.
+        assert!(!erc1271_result_is_magic(Some("0x")));
+        assert!(!erc1271_result_is_magic(Some("")));
+        // Revert (no result) -> rejected.
+        assert!(!erc1271_result_is_magic(None));
+        // Full word, wrong magic (the EIP-1271 failure value) -> rejected.
+        assert!(!erc1271_result_is_magic(Some(&format!("0xffffffff{zeros56}"))));
     }
 }
