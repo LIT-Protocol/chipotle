@@ -259,6 +259,13 @@ contract WritesFacet {
         uint256[] memory removePkpFromGroups,
         uint256[] memory executeInGroups
     ) public {
+        // Zero is the "does not exist" sentinel for allApiKeyHashesToMaster and
+        // for usageApiKeys[h].apiKeyHash. Allowing a zero usage hash would let an
+        // account claim allApiKeyHashesToMaster[0] and corrupt every existence
+        // check that treats 0 as "unset".
+        if (usageApiKeyHash == 0) {
+            revert AppStorage.InvalidRequest("usageApiKeyHash must be non-zero");
+        }
         if (manageIPFSIdsInGroups.length > 50) {
             revert AppStorage.InvalidRequest(
                 "manageIPFSIdsInGroups must be 50 items or fewer"
@@ -284,6 +291,31 @@ contract WritesFacet {
         uint256 masterAccountApiKeyHash = s.allApiKeyHashesToMaster[
             accountApiKeyHash
         ];
+        // Guard the account-resolution entry. Without this an attacker holding
+        // any account could call setUsageApiKey(theirHash, victimMasterHash, ...)
+        // and overwrite allApiKeyHashesToMaster[victimMasterHash], hijacking
+        // every later resolution of the victim's hash.
+        uint256 existingUsageMaster = s.allApiKeyHashesToMaster[usageApiKeyHash];
+        if (existingUsageMaster != 0) {
+            // The hash already resolves to an account. Only let it through when
+            // it is already a usage key OF THIS account (a legitimate update).
+            // Everything else is rejected:
+            //   - a master hash (resolves to itself),
+            //   - a hash registered to a different account (cross-account hijack),
+            //   - this account's own wallet/resolver alias created by
+            //     convertToChainSecuredAccount / transferChainSecuredAccountOwnership
+            //     that is not a usage key — promoting it would let a later
+            //     removeUsageApiKey delete the alias and orphan the wallet.
+            bool isExistingUsageKeyForThisAccount = existingUsageMaster ==
+                masterAccountApiKeyHash &&
+                s
+                .accounts[masterAccountApiKeyHash]
+                .usageApiKeys[usageApiKeyHash].apiKeyHash ==
+                usageApiKeyHash;
+            if (!isExistingUsageKeyForThisAccount) {
+                revert AppStorage.AccountAlreadyExists(usageApiKeyHash);
+            }
+        }
         AppStorage.UsageApiKey storage apiKeyStorage = s
             .accounts[masterAccountApiKeyHash]
             .usageApiKeys[usageApiKeyHash];
