@@ -65,41 +65,53 @@ on:
         default: false
 
 jobs:
-  # Refuse to propose a prod release for a commit that hasn't passed the staging
-  # gate. Deploy Staging runs post-merge on main, so a red gate can otherwise go
-  # unnoticed and a release gets cut from main anyway. Overridable on manual
-  # dispatch via skip_staging_check (never on a tag push).
+  # Refuse to propose a prod release unless the soak perf gate passed the last
+  # time it actually ran. Deploy Staging posts a perf-gate/soak commit status
+  # only on commits where the soak ran (deploy-relevant changes); commits that
+  # didn't change deployed code (e.g. a version-bump/release commit) have none
+  # and inherit the result of the last commit that did. So we walk the release
+  # commit's ancestry, find the most recent commit carrying a perf-gate/soak
+  # status, and require it to be success. Overridable on manual dispatch via
+  # skip_staging_check (never on a tag push).
   verify-staging-passed:
     runs-on: self-hosted
     permissions:
+      contents: read # list commit ancestry
       statuses: read # read the perf-gate/soak commit status
     steps:
-      - name: Require the soak perf gate to have run green on this commit
+      - name: Require the soak perf gate to have passed the last time it ran
         if: ${{ !inputs.skip_staging_check }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
+          MAX_ANCESTORS: "50"
         run: |
-          # Deploy Staging posts a perf-gate/soak commit status ONLY when the soak
-          # job actually ran and finished (success/failure). Requiring it here
-          # means the soak truly executed green on this exact commit — a run that
-          # merely concluded success because the gate was skipped (no
-          # deploy-relevant changes) posts no status and is rejected. gh api --jq
-          # processes the response directly (no shell jq round-trip). statuses are
-          # returned newest-first, so the first match per context is the latest.
-          state=$(gh api "repos/${GH_REPO}/commits/${SHA}/statuses" \
-            --jq 'map(select(.context=="perf-gate/soak")) | (first | .state) // "missing"')
-          echo "perf-gate/soak status for ${SHA}: ${state}"
-          if [ "$state" = "success" ]; then
-            echo "✓ soak perf gate ran green on ${SHA}"
-            exit 0
-          fi
-          echo "::error::perf-gate/soak for ${SHA} is '${state}' (need 'success'). The staging soak gate must have run green on this exact commit before a prod release. If this commit had no deploy-relevant changes the soak was skipped — tag a commit that was deployed+gated, or re-run Deploy Staging on this SHA. Override on manual dispatch with skip_staging_check=true only if staging is down for unrelated reasons."
+          # Walk newest-first from the release commit. The first ancestor that has
+          # a perf-gate/soak status is "the last time the soak needed to run"; its
+          # state decides the release. (gh api --jq processes the response stream
+          # directly — no shell jq round-trip, which avoids choking on control
+          # chars in commit messages.)
+          # Process substitution (not a pipe) so `exit` inside the loop exits the
+          # job, and so it works on bash 3.2+ (no mapfile dependency).
+          while read -r c; do
+            [ -n "$c" ] || continue
+            state=$(gh api "repos/${GH_REPO}/commits/${c}/statuses" \
+              --jq 'map(select(.context=="perf-gate/soak")) | (first | .state) // "none"')
+            [ "$state" = "none" ] && continue
+            if [ "$state" = "success" ]; then
+              echo "✓ soak perf gate passed at ${c} (the most recent commit that ran it)"
+              [ "$c" = "$SHA" ] || echo "  (${SHA} has no deploy-relevant change since ${c}, so it inherits that result)"
+              exit 0
+            fi
+            echo "::error::soak perf gate at ${c} (the most recent commit that ran it, an ancestor of ${SHA}) is '${state}', not 'success'. Fix perf and let Deploy Staging pass before releasing. Override on manual dispatch with skip_staging_check=true only if staging is down for unrelated reasons."
+            exit 1
+          done < <(gh api "repos/${GH_REPO}/commits?sha=${SHA}&per_page=${MAX_ANCESTORS}" --jq '.[].sha')
+          echo "::error::No perf-gate/soak status found on ${SHA} or its last ${MAX_ANCESTORS} ancestors. Has Deploy Staging run the soak gate on this line recently? Override on manual dispatch with skip_staging_check=true if appropriate."
           exit 1
       - name: Staging check skipped (override)
         if: ${{ inputs.skip_staging_check }}
-        run: echo "::warning::skip_staging_check=true — proceeding WITHOUT verifying the Deploy Staging gate for ${{ github.sha }}."
+        run: echo "::warning::skip_staging_check=true — proceeding WITHOUT verifying the soak perf gate for ${{ github.sha }}."
 
   validate-secrets:
     runs-on: self-hosted
