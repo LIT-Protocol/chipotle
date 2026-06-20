@@ -33,6 +33,12 @@ pub struct Config {
     pub token_symbol: Option<String>,
     /// Fee in basis points (matches the on-chain BridgeToken fee), shown in the UI.
     pub fee_bps: i64,
+    /// Flat fee in WHOLE tokens (matches the `FEE_FLAT` env that setup passes
+    /// through `parseUnits`), deducted on mint before the bps fee
+    /// (`feeFlat + amount*feeBps/1e4`). Surfaced so the UI quote isn't wrong when
+    /// the issuer set a nonzero flat fee. A decimal string the UI subtracts from
+    /// the human amount directly.
+    pub fee_flat: String,
     /// Bridgeable chains + token addresses (from CHAINS_JSON). Empty disables the UI's bridge form.
     pub chains: Vec<ChainInfo>,
 }
@@ -47,6 +53,7 @@ impl Config {
             registry_address: optional_trimmed("REGISTRY_ADDRESS"),
             token_symbol: optional_trimmed("TOKEN_SYMBOL"),
             fee_bps: optional_i64("FEE_BPS", 10)?,
+            fee_flat: optional_trimmed("FEE_FLAT").unwrap_or_else(|| "0".to_string()),
             chains: parse_chains()?,
         })
     }

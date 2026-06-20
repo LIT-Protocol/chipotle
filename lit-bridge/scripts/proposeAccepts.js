@@ -1,9 +1,14 @@
-// Propose the Ownable2Step acceptOwnership() Safe txs that complete the
-// governance handoff (registry + tokens -> Safe). transferOwnership was already
-// done by handoffToSafe.js (sets pendingOwner = Safe); this proposes the Safe's
-// acceptance. Per chain: only proposes if a Safe actually exists at the address
-// on that chain (Safes are per-chain; a missing Safe means the handoff for that
-// contract is stuck until the Safe is deployed there).
+// Propose the Ownable2Step acceptOwnership() Safe tx that completes the platform
+// governance handoff: the BridgeConfigRegistry -> Safe. transferOwnership was
+// already done by handoffToSafe.js (sets pendingOwner = Safe); this proposes the
+// Safe's acceptance. Only proposes if a Safe actually exists at the address on the
+// registry chain (Safes are per-chain; a missing Safe means the handoff is stuck
+// until the Safe is deployed there).
+//
+// The registry is the ONLY platform-owned contract — BridgeToken contracts are
+// per-issuer and handed off (if at all) by their own issuers, so they are NOT
+// proposed here. (Keep this in lockstep with handoffToSafe.js, which is also
+// registry-only.)
 //
 // Signs each SafeTx with the proposer/delegate key and POSTs to the chain's Safe
 // Transaction Service. The Safe owner then executes.
@@ -57,11 +62,13 @@ async function main() {
   if (!pk) throw new Error("SAFE_PROPOSER_KEY missing");
   const proposer = new ethers.Wallet(pk);
 
-  // (chain, contract) pairs whose ownership should land at the Safe.
+  // The platform-owned contract whose ownership should land at the Safe. Just the
+  // registry — tokens are per-issuer (see header). transferOwnership for these was
+  // proposed by handoffToSafe.js; proposing acceptOwnership for anything it didn't
+  // transfer would just queue a Safe tx that reverts (pendingOwner != Safe).
+  if (!process.env.REGISTRY_ADDRESS) throw new Error("REGISTRY_ADDRESS missing");
   const targets = [
     { chainId: 8453, sub: "base-mainnet", label: "registry (Base)", addr: process.env.REGISTRY_ADDRESS },
-    { chainId: 8453, sub: "base-mainnet", label: "token (Base)", addr: process.env.BRIDGE_TOKEN_BASE_MAINNET },
-    { chainId: 42161, sub: "arb-mainnet", label: "token (Arbitrum)", addr: process.env.BRIDGE_TOKEN_ARB_MAINNET },
   ];
 
   // Group by chain so we can assign sequential Safe nonces per chain.
