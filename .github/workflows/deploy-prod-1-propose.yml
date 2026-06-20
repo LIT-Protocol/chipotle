@@ -58,8 +58,51 @@ on:
         required: false
         type: string
         default: ""
+      skip_staging_check:
+        description: "Emergency override: propose even if this commit has no green Deploy Staging run (use only when staging is down for unrelated reasons)."
+        required: false
+        type: boolean
+        default: false
 
 jobs:
+  # Refuse to propose a prod release for a commit that hasn't passed the staging
+  # gate. Deploy Staging runs post-merge on main, so a red gate can otherwise go
+  # unnoticed and a release gets cut from main anyway. Overridable on manual
+  # dispatch via skip_staging_check (never on a tag push).
+  verify-staging-passed:
+    runs-on: self-hosted
+    permissions:
+      actions: read # query Deploy Staging workflow runs via the API
+      contents: read
+    steps:
+      - name: Require a green Deploy Staging run for this commit
+        if: ${{ !inputs.skip_staging_check }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+        run: |
+          echo "Checking Deploy Staging status for ${SHA}..."
+          runs=$(gh api "repos/${REPO}/actions/workflows/deploy-staging.yml/runs?head_sha=${SHA}&per_page=50")
+          ok=$(echo "$runs" | jq '[.workflow_runs[] | select(.status=="completed" and .conclusion=="success")] | length')
+          if [ "${ok:-0}" -gt 0 ]; then
+            echo "✓ Deploy Staging passed for ${SHA}"
+            echo "$runs" | jq -r '.workflow_runs[] | select(.status=="completed" and .conclusion=="success") | "  \(.html_url)"' | head -1
+            exit 0
+          fi
+          echo "::error::No successful Deploy Staging run for ${SHA}. Refusing to propose a prod release — let the staging gate pass on this commit first (or re-run Deploy Staging). Override on manual dispatch with skip_staging_check=true only if staging is down for unrelated reasons."
+          total=$(echo "$runs" | jq '.workflow_runs | length')
+          if [ "${total:-0}" -eq 0 ]; then
+            echo "  (no Deploy Staging run found for this commit at all)"
+          else
+            echo "  Deploy Staging runs for this commit:"
+            echo "$runs" | jq -r '.workflow_runs[] | "  \(.status)/\(.conclusion // "—") \(.html_url)"'
+          fi
+          exit 1
+      - name: Staging check skipped (override)
+        if: ${{ inputs.skip_staging_check }}
+        run: echo "::warning::skip_staging_check=true — proceeding WITHOUT verifying the Deploy Staging gate for ${{ github.sha }}."
+
   validate-secrets:
     runs-on: self-hosted
     steps:
@@ -88,7 +131,7 @@ jobs:
           fi
 
   build:
-    needs: [validate-secrets]
+    needs: [validate-secrets, verify-staging-passed]
     runs-on: self-hosted
     permissions:
       id-token: write  # required for Sigstore keyless signing (OIDC token)
