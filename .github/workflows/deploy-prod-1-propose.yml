@@ -58,8 +58,82 @@ on:
         required: false
         type: string
         default: ""
+      skip_staging_check:
+        description: "Emergency override: propose even if this commit has no green Deploy Staging run (use only when staging is down for unrelated reasons)."
+        required: false
+        type: boolean
+        default: false
 
 jobs:
+  # Refuse to propose a prod release unless the soak perf gate is green for the
+  # exact code being shipped. Two parts:
+  #   1. Find the most recent first-parent ancestor (mainline) that carries a
+  #      perf-gate/soak status — "the last time the soak ran" — and require it
+  #      to be success.
+  #   2. Require that NO image-affecting path changed between that gated commit
+  #      and the release commit. This is what makes "inherit" sound: a version-
+  #      bump/no-op release commit inherits the gated result, but a deploy-
+  #      relevant change whose soak hasn't run/passed (in-progress, failed before
+  #      the soak, or never gated) is caught here instead of silently inheriting
+  #      an older success.
+  # Overridable on manual dispatch via skip_staging_check (never on a tag push).
+  verify-staging-passed:
+    runs-on: self-hosted
+    permissions:
+      contents: read # checkout + read commit statuses
+      statuses: read
+    steps:
+      - uses: actions/checkout@v4
+        if: ${{ !inputs.skip_staging_check }}
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0 # full history for the first-parent walk + diff
+      - name: Require the soak gate green for the code being released
+        if: ${{ !inputs.skip_staging_check }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          MAX_ANCESTORS: "200"
+        run: |
+          set -euo pipefail
+          # Paths whose contents end up in the prod images / compose. Keep in sync
+          # with deploy-staging.yml's DEPLOY_PATHS (minus the staging-only entries:
+          # the workflow files and k6/, which don't affect prod image content).
+          IMAGE_PATHS=(lit-actions/ lit-api-server/ lit-billing-core/ lit-core/ \
+            otel-collector/ Dockerfile.lit-actions Dockerfile.lit-api-server \
+            Dockerfile.otel-collector docker-compose.phala.yml)
+
+          # 1. Most recent first-parent ancestor carrying a perf-gate/soak status.
+          gated=""; state=""
+          while read -r c; do
+            s=$(gh api "repos/${GH_REPO}/commits/${c}/statuses?per_page=100" \
+              --jq 'map(select(.context=="perf-gate/soak")) | (first | .state) // "none"')
+            if [ "$s" != "none" ]; then gated="$c"; state="$s"; break; fi
+          done < <(git rev-list --first-parent -n "${MAX_ANCESTORS}" "${SHA}")
+
+          if [ -z "$gated" ]; then
+            echo "::error::No perf-gate/soak status on any of the last ${MAX_ANCESTORS} first-parent ancestors of ${SHA}. Has Deploy Staging run the soak gate on main recently? Override with skip_staging_check=true (manual dispatch) if appropriate."
+            exit 1
+          fi
+          echo "Last soak-gated commit on mainline: ${gated} (perf-gate/soak=${state})"
+          if [ "$state" != "success" ]; then
+            echo "::error::soak perf gate at ${gated} is '${state}', not 'success'. Fix perf and let Deploy Staging pass before releasing."
+            exit 1
+          fi
+
+          # 2. No ungated image-affecting change between the gated commit and SHA.
+          if ! git diff --quiet "${gated}" "${SHA}" -- "${IMAGE_PATHS[@]}"; then
+            echo "::error::Image-affecting changes between the last soak-gated commit ${gated} and the release commit ${SHA} have NOT been soak-gated:"
+            git diff --name-only "${gated}" "${SHA}" -- "${IMAGE_PATHS[@]}" | sed 's/^/  /'
+            echo "Let Deploy Staging run+pass on the latest deploy-relevant commit before releasing, or override with skip_staging_check=true (manual dispatch)."
+            exit 1
+          fi
+          echo "✓ soak gate passed at ${gated} and no image-affecting change since → release allowed for ${SHA}"
+      - name: Staging check skipped (override)
+        if: ${{ inputs.skip_staging_check }}
+        run: echo "::warning::skip_staging_check=true — proceeding WITHOUT verifying the soak perf gate for ${{ github.sha }}."
+
   validate-secrets:
     runs-on: self-hosted
     steps:
@@ -88,7 +162,7 @@ jobs:
           fi
 
   build:
-    needs: [validate-secrets]
+    needs: [validate-secrets, verify-staging-passed]
     runs-on: self-hosted
     permissions:
       id-token: write  # required for Sigstore keyless signing (OIDC token)

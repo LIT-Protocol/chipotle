@@ -505,6 +505,37 @@ jobs:
       # baseline with k6/update-soak-baseline.sh.
       baseline_file: ../baselines/soak.next.json
 
+  # Record the soak gate result as a commit status on this SHA, so a prod release
+  # can require that the soak JOB actually ran green on the exact commit being
+  # released (not just that the overall Deploy Staging run concluded success,
+  # which is also true when the gate was SKIPPED for a no-deploy-relevant change).
+  # Skipped when k6-loadtest is skipped (deploy_needed=false) → no status posted →
+  # release-time precheck fails closed. See deploy-prod-1-propose.yml.
+  mark-perf-gate:
+    needs: [k6-loadtest]
+    # Only stamp the trusted status from a main deploy (push or dispatch on main);
+    # a workflow_dispatch run on a feature branch must not be able to forge
+    # perf-gate/soak on its SHA. Skipped (no status) when the soak was skipped.
+    if: ${{ always() && needs.k6-loadtest.result != 'skipped' && github.ref == 'refs/heads/main' }}
+    runs-on: self-hosted
+    permissions:
+      statuses: write
+    steps:
+      - name: Post perf-gate/soak commit status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          RESULT: ${{ needs.k6-loadtest.result }}
+        run: |
+          state=$([ "$RESULT" = "success" ] && echo success || echo failure)
+          echo "soak gate result=$RESULT → posting perf-gate/soak=$state on $SHA"
+          gh api -X POST "repos/${GH_REPO}/statuses/${SHA}" \
+            -f state="$state" \
+            -f context="perf-gate/soak" \
+            -f description="k6 soak perf gate: $RESULT" \
+            -f target_url="https://github.com/${GH_REPO}/actions/runs/${{ github.run_id }}"
+
   # ───────────────────────── Zero-downtime cutover (ping-pong) ─────────────────────────
   # The cold CVM's dstack-ingress auto-claims the public domain on boot (as soon
   # as lit-api-server's container starts — docker-compose service_started; there
