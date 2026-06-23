@@ -721,6 +721,25 @@ async fn async_await(mut client: TestClient) {
     }
 }
 
+/// Normalize the volatile `__litEvalCached` frame's `line:col` in a JS stack
+/// trace. That frame lives in the generated runtime file `99_patches.js`,
+/// whose line numbers shift whenever that file changes (e.g. the secp256k1
+/// warmup block at its tail). We still assert the frame is present and the full
+/// user-code stack is exact; we just stop pinning a line number we don't own.
+fn normalize_patches_line(s: &str) -> String {
+    let marker = "ext:lit_actions/99_patches.js:";
+    match s.find(marker) {
+        Some(start) => {
+            let after = start + marker.len();
+            match s[after..].find(')') {
+                Some(rel) => format!("{}LINE:COL{}", &s[..after], &s[after + rel..]),
+                None => s.to_string(),
+            }
+        }
+        None => s.to_string(),
+    }
+}
+
 #[rstest]
 #[tokio::test]
 async fn reference_error(mut client: TestClient) {
@@ -738,13 +757,13 @@ async fn reference_error(mut client: TestClient) {
         get_lit_action_ipfs_id(code)
     );
     assert_eq!(
-        res.unwrap_err().to_string(),
+        normalize_patches_line(&res.unwrap_err().to_string()),
         formatdoc! {r#"
             Uncaught (in promise) ReferenceError: nonexisting_function is not defined
                 at main ({script}:2:33)
                 at {script}:6:28
                 at {script}:10:11
-                at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:56:21)
+                at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:LINE:COL)
                 at <user_provided_script>:1:1
         "#, script = script}
         .trim()
@@ -770,13 +789,13 @@ async fn throw_error(mut client: TestClient) {
             get_lit_action_ipfs_id(code)
         );
         assert_eq!(
-            res.unwrap_err().to_string(),
+            normalize_patches_line(&res.unwrap_err().to_string()),
             formatdoc! {r#"
                 Uncaught (in promise) Error: boom
                     at main ({script}:3:7)
                     at {script}:9:28
                     at {script}:13:11
-                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:56:21)
+                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:LINE:COL)
                     at <user_provided_script>:1:1
             "#, script = script}
             .trim(),
@@ -797,13 +816,13 @@ async fn throw_error(mut client: TestClient) {
             get_lit_action_ipfs_id(code)
         );
         assert_eq!(
-            res.unwrap_err().to_string(),
+            normalize_patches_line(&res.unwrap_err().to_string()),
             formatdoc! {r#"
                 Uncaught (in promise) Error: boom
                     at main ({script}:3:11)
                     at {script}:9:28
                     at {script}:13:11
-                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:56:21)
+                    at globalThis.__litEvalCached (ext:lit_actions/99_patches.js:LINE:COL)
                     at <user_provided_script>:1:1
             "#, script = script}
             .trim(),
@@ -1257,3 +1276,34 @@ async fn raw_execute_no_op_once(socket_path: &std::path::Path) -> Result<()> {
 /// — kept here as a documentation marker so future readers find it.
 #[allow(dead_code)]
 fn pool_isolation_doc() {}
+
+/// The snapshot-build-time secp256k1 warmup (tail of `99_patches.js`) must run
+/// successfully and survive into every fresh, one-shot per-request isolate.
+/// `__litSecp256k1Warmed` is set true at build time only if the ethers sign
+/// path executed end-to-end. If ethers' API drifts (e.g. `SigningKey` or
+/// `signDigest` renamed) or the warmup throws, the marker is false and signing
+/// actions silently pay the cold base-point precompute (~100-150ms on the prod
+/// TEE) on every request. Assert the marker here so that regression is a loud
+/// CI failure, not a silent perf cliff. (That the precompute *table itself*
+/// survives serialization was validated separately via an A/B latency harness;
+/// this guards the warmup from quietly becoming a no-op.)
+#[rstest]
+#[tokio::test]
+async fn secp256k1_precompute_warmed_in_snapshot(mut client: TestClient) {
+    client
+        .respond_with(SetResponseResponse {})
+        .execute_js(
+            r#"async function main() { Lit.Actions.setResponse({ response: String(globalThis.__litSecp256k1Warmed) }) }"#,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        client.received::<SetResponseRequest>().response,
+        "true",
+        "secp256k1 warmup did not run at snapshot-build time; signing actions will pay \
+         the cold base-point precompute. Check the warmup block at the tail of \
+         lit-actions/ext/js/99_patches.js (ethers SigningKey/signDigest API drift?)."
+    );
+    assert!(client.received::<ExecutionResult>().success);
+}
