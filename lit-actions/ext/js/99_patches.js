@@ -63,3 +63,42 @@ globalThis.__litEvalCached = (source, specifier) => {
 // but is not available in the new one, and we don't want to break
 // existing code that expects it to be available
 globalThis.global = globalThis;
+
+// Prime ethers' secp256k1 base-point precompute table at snapshot-build time.
+//
+// ethers 5.7 (elliptic.js) builds a windowed base-point multiplication table
+// lazily, on the FIRST EC operation in an isolate. Merely evaluating the
+// library (the import at the top of this file) does not trigger it -- only an
+// actual key-derivation/signature op does. Because every Lit Action runs in a
+// fresh, one-shot isolate, an un-primed snapshot makes every signing request
+// pay that precompute again (~100-150ms on the production TEE CPU; measured
+// ~45-50ms cold vs ~2ms warm locally on the runtime's exact bundle). Doing one
+// throwaway op here runs it ONCE at snapshot-build time; the resulting table
+// hangs off the curve singleton (reachable from the live ethers module) and is
+// serialized into the startup snapshot, so every isolate boots warm. Verified:
+// in a fresh isolate the ethers-sign extra cost drops from ~40ms to ~13ms.
+//
+// Kept at the END of this file on purpose: the integration tests pin the line
+// number of __litEvalCached in asserted stack traces, so new code goes here to
+// avoid shifting it. Position is otherwise irrelevant -- the ethers import is
+// hoisted, so the curve is available regardless.
+//
+// Synchronous on purpose: snapshot-time evaluation does not drive the async
+// event loop, so we prime via the synchronous primitives -- the SigningKey
+// constructor derives the public key (g.mul, i.e. base-point precompute) and
+// signDigest is a synchronous ECDSA sign that warms the signing path -- rather
+// than the async Wallet.signMessage(). The key below is a well-known non-secret
+// test vector; nothing derived from it is retained.
+//
+// viem is intentionally not primed here: its bundle uses lazy esbuild module
+// initializers and is not exposed as a runtime global, so the same trick does
+// not apply cleanly. See CPL follow-up.
+try {
+  const _warmupKey =
+    '0x0000000000000000000000000000000000000000000000000000000000000001';
+  const _sk = new _ethers.utils.SigningKey(_warmupKey);
+  _sk.signDigest('0x' + '11'.repeat(32));
+} catch (_) {
+  // Best effort: a runtime/API drift must never break the snapshot build.
+  // Worst case we fall back to today's lazy-precompute-per-request cost.
+}
