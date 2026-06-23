@@ -199,6 +199,22 @@ LIT_ACCOUNTS_CONTRACT_ADDRESS=0x...  # same value as lit-api-server NodeConfig.t
 # wallet-sig or API-key verification).
 # LIT_API_SERVER_BASE_URL=http://localhost:8000
 # LIT_INTERNAL_SHARED_SECRET=$(openssl rand -base64 32)
+
+# Optional — gas funder (see "Gas funder" section below). Off entirely
+# unless GAS_FUNDER_PRIVATE_KEY is set. Leave GAS_FUNDER_ENABLED unset to
+# run in OBSERVE mode (alerts only, no on-chain sends).
+# GAS_FUNDER_PRIVATE_KEY=0x...           # dedicated low-value hot wallet
+# GAS_FUNDER_ALERT_EMAIL=you@litprotocol.com
+# GAS_FUNDER_RPC_URL=https://base-mainnet.g.alchemy.com/v2/...   # falls back to ALCHEMY_HTTPS_URL
+# GAS_FUNDER_LOW_WATER_WEI=500000000000000      # 0.0005 ETH — top up below this
+# GAS_FUNDER_HIGH_WATER_WEI=5000000000000000    # 0.005  ETH — top up to this
+# GAS_FUNDER_MAX_TX_WEI=5000000000000000        # 0.005  ETH — per-tx ceiling
+# GAS_FUNDER_DAILY_CAP_WEI=50000000000000000    # 0.05   ETH — rolling 24h ceiling
+# GAS_FUNDER_HOTWALLET_MIN_WEI=20000000000000000 # 0.02  ETH — "reload me" alert below this
+# GAS_FUNDER_ENABLED=true                # flip on once observe mode looks right
+# GAS_FUNDER_CHAIN_ID=8453               # default Base mainnet
+# GAS_FUNDER_INTERVAL_SECS=900           # default 15m
+# GAS_FUNDER_INCLUDE_ADMIN=true          # also monitor/fund the admin payer
 ```
 
 ## LITKEY browser payment claim flow
@@ -240,6 +256,53 @@ cargo run
 Visit <http://localhost:8000/login>, enter `chris@litprotocol.com` (or
 whatever's seeded in `migrations/20260518000002_seed_operators.sql`),
 check your inbox, click the link.
+
+## Gas funder
+
+Keeps the lit-api-server **API payer pool** topped up so on-chain writes
+(`new_account`, etc.) never fail with `insufficient funds for gas`.
+
+**Why it's needed.** lit-api-server signs writes from a pool of payer wallets
+whose keys live in the dstack TEE. Pool signer-selection is round-robin and
+**not balance-aware**, so a single drained wallet causes intermittent 500s.
+The in-TEE admin payer only rebalances on pool *resize*, never continuously,
+and nothing alerts on low balances. lit-payments runs out of the TEE hot path
+(Railway, single instance, already polling), so it's the natural home for an
+automated funder + alerter. Code: `src/gas_funder/`.
+
+**What it does each tick** (`GAS_FUNDER_INTERVAL_SECS`, default 15m):
+
+1. Fetches the **live** payer set from lit-api-server
+   (`GET /core/v1/get_api_payers`, plus `get_admin_api_payer` when
+   `GAS_FUNDER_INCLUDE_ADMIN`). The pool rotates, so it's re-read every tick.
+2. Reads each balance on-chain.
+3. Tops up any payer below `LOW_WATER` up to `HIGH_WATER`, clamped by
+   `MAX_TX` per send and a rolling-24h `DAILY_CAP` (summed from
+   `gas_funding_events`).
+
+**Modes.** Off entirely unless `GAS_FUNDER_PRIVATE_KEY` is set. With it set:
+
+- **OBSERVE** (default — `GAS_FUNDER_ENABLED` unset/false): reads balances and
+  emails alerts, but broadcasts **nothing**. Deploy here first to verify the
+  resolved addresses, thresholds, and tick logs before it can move funds.
+- **ACTIVE** (`GAS_FUNDER_ENABLED=true`): actually sends top-ups.
+
+**Safety rails.** Per-tx ceiling + rolling-24h ceiling; a `pending` row is
+written *before* each send (single instance + await-receipt ⇒ sequential
+nonces, no double-spend on restart); the hot wallet is checked to cover the
+whole round before any send. Routine top-ups are **silent** (info logs only).
+
+**Alerts** (email via Resend, to `GAS_FUNDER_ALERT_EMAIL`, deduped by a
+cooldown): hot-wallet-low **"reload me"** (the one wallet a human watches),
+send failure, hot wallet can't cover the round, and daily cap reached while
+payers are still low. In OBSERVE mode it also emails what it *would* have sent.
+
+**Custody note.** This puts a spendable key on Railway, outside the TEE. Treat
+it as a **gas tank**: dedicate a fresh key, keep its balance small, and let the
+"reload me" alert bound the loss if it's ever compromised.
+
+See the env vars in [Local development](#2-set-env-vars) and
+[Set service variables](#3-set-service-variables).
 
 ## Deploy to Railway
 
@@ -318,6 +381,23 @@ Optional operator caps if you want non-default values:
 ```sh
 MAX_GRANT_CENTS=2000
 MAX_DAILY_PER_OPERATOR_CENTS=10000
+```
+
+Optional gas funder (see [Gas funder](#gas-funder)). Off unless
+`GAS_FUNDER_PRIVATE_KEY` is set:
+
+```sh
+GAS_FUNDER_PRIVATE_KEY=0x...                    # dedicated low-value hot wallet
+GAS_FUNDER_ALERT_EMAIL=you@litprotocol.com
+GAS_FUNDER_RPC_URL=https://base-mainnet.g.alchemy.com/v2/...  # falls back to ALCHEMY_HTTPS_URL
+GAS_FUNDER_LOW_WATER_WEI=500000000000000        # 0.0005 ETH
+GAS_FUNDER_HIGH_WATER_WEI=5000000000000000      # 0.005  ETH
+GAS_FUNDER_MAX_TX_WEI=5000000000000000          # 0.005  ETH per tx
+GAS_FUNDER_DAILY_CAP_WEI=50000000000000000      # 0.05   ETH per rolling 24h
+GAS_FUNDER_HOTWALLET_MIN_WEI=20000000000000000  # 0.02   ETH — "reload me" alert
+# Start WITHOUT GAS_FUNDER_ENABLED (observe mode: alerts only). Once the
+# tick logs and emails look right, set GAS_FUNDER_ENABLED=true to send.
+# GAS_FUNDER_ENABLED=true
 ```
 
 Generate secrets locally and paste the values into Railway:
