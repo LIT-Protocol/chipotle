@@ -131,7 +131,7 @@ baseline must not let a regression pass green. The absolute ceilings
 (`SOAK_P95_ENCRYPT_MS` 350 / `SOAK_P95_ECDSA_MS` 700) apply only when no baseline
 is requested (local / measurement runs).
 
-Each run also uploads `soak-summary.json` (per-scenario p50/p95/p99/avg/max +
+Each run also uploads `soak-summary.json` (per-scenario p50/p95/p99/avg/min/max +
 check & failure rates) as a build artifact — the same shape the baseline takes.
 
 ### Refreshing the baseline — `update-soak-baseline.sh`

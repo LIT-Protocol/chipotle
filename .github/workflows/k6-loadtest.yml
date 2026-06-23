@@ -214,6 +214,11 @@ jobs:
           set -o pipefail
           k6 run "${{ steps.spec.outputs.path }}" 2>&1 | tee "k6-loadtest-${{ inputs.test }}.log"
 
+      - name: Post k6 load test summary
+        if: ${{ always() }}
+        continue-on-error: true
+        run: node scripts/k6-loadtest-github-summary.mjs soak-summary.json "${{ inputs.test }}"
+
       - name: Upload k6 summary
         if: ${{ always() }}
         uses: actions/upload-artifact@v4

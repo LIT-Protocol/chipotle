@@ -445,6 +445,7 @@ function trend(data: any, sub: string) {
   const v = data?.metrics?.[sub]?.values;
   if (!v) return null;
   return {
+    min: v["min"],
     p50: v["med"],
     p95: v["p(95)"],
     p99: v["p(99)"],
