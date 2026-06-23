@@ -79,11 +79,16 @@ on:
         description: "Raw JSON content for pre-funded accounts file (written to a temp file at runtime)"
         required: false
   workflow_dispatch:
+    # Defaults mirror the soak gate that Deploy Staging runs (see k6-loadtest job
+    # in deploy-staging.yml), so a manual "Run workflow" reproduces that gate.
+    # Difference: Deploy Staging points at the freshly-deployed cold box before
+    # cutover; a manual run targets the live staging domain instead.
     inputs:
       api_root_url:
         description: "API base URL (optional; uses k6 spec fallback when empty)"
         required: false
         type: string
+        default: 'https://test.chipotle.litprotocol.com/core/v1'
       env:
         # Without this, a manual run leaves K6_ENV empty, which stripe.ts treats
         # as non-prod and enables test-card top-ups — even against a prod URL.
@@ -100,7 +105,7 @@ on:
         description: "Which load test to run"
         required: false
         type: choice
-        default: 'spike'
+        default: 'soak'
         options:
           - spike
           - soak
@@ -110,12 +115,12 @@ on:
         description: "Peak VUs (empty = spec default)"
         required: false
         type: string
-        default: ''
+        default: '2'
       duration:
         description: "Sustain/step duration (empty = spec default)"
         required: false
         type: string
-        default: ''
+        default: '3m'
       steps:
         description: "Breakpoint-only VU steps, e.g. 1,10,20,30 (empty = spec default)"
         required: false
@@ -125,7 +130,7 @@ on:
         description: "Soak-only: restrict to a scenario group ('soak' or 'ramp'). Empty = all scenarios."
         required: false
         type: choice
-        default: ''
+        default: 'soak'
         options:
           - ''
           - soak
@@ -134,7 +139,7 @@ on:
         description: "Soak-only: create ephemeral accounts in setup instead of using the pre-seeded pool"
         required: false
         type: choice
-        default: ''
+        default: 'true'
         options:
           - ''
           - 'true'
@@ -142,7 +147,7 @@ on:
         description: "Soak-only: committed baseline summary path, relative to k6/loadtest/ (e.g. ../baselines/soak.next.json). Set to gate on a p95 regression vs that baseline."
         required: false
         type: string
-        default: ''
+        default: '../baselines/soak.next.json'
       accounts_file:
         description: "Optional accounts file override, relative to the k6/ dir (e.g. ./data/accounts.next.json)"
         required: false
