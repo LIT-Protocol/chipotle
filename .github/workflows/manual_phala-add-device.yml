@@ -47,15 +47,18 @@ jobs:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
           PRIVATE_KEY: ${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}
           ETH_RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
+          INPUT_APP_ID: ${{ inputs.app_id }}
+          INPUT_DEVICE_ID: ${{ inputs.device_id }}
         run: |
           phala allow-devices add \
-            "${{ inputs.app_id }}" \
-            "${{ inputs.device_id }}" \
+            "$INPUT_APP_ID" \
+            "$INPUT_DEVICE_ID" \
             --wait
 
       - name: Show updated allowlist
         env:
           PHALA_CLOUD_API_KEY: ${{ secrets.PHALA_CLOUD_API_KEY }}
           ETH_RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
+          INPUT_APP_ID: ${{ inputs.app_id }}
         run: |
-          phala allow-devices list "${{ inputs.app_id }}"
+          phala allow-devices list "$INPUT_APP_ID"
