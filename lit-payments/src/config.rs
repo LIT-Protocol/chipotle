@@ -149,6 +149,13 @@ pub struct GasFunderConfig {
     /// Also monitor/fund the admin payer (`get_admin_api_payer`) alongside the
     /// pool. `GAS_FUNDER_INCLUDE_ADMIN` (default true).
     pub include_admin: bool,
+    /// Optional recipient allowlist. `get_api_payers` is fetched over
+    /// unauthenticated HTTP, so a spoofed/MITM/misconfigured response could
+    /// name attacker addresses. When set, the funder will ONLY send to
+    /// addresses that are in BOTH the fetched payer set and this list, and
+    /// alerts on any fetched payer not on it. `GAS_FUNDER_ALLOWED_RECIPIENTS`
+    /// (comma-separated 0x addresses); unset = no allowlist (rely on caps).
+    pub allowed_recipients: Option<Vec<Address>>,
 }
 
 impl std::fmt::Debug for GasFunderConfig {
@@ -167,6 +174,7 @@ impl std::fmt::Debug for GasFunderConfig {
             .field("interval_secs", &self.interval_secs)
             .field("alert_email", &self.alert_email)
             .field("include_admin", &self.include_admin)
+            .field("allowed_recipients", &self.allowed_recipients)
             .finish()
     }
 }
@@ -267,7 +275,34 @@ fn parse_gas_funder_config() -> Result<Option<GasFunderConfig>> {
         interval_secs: optional_i64("GAS_FUNDER_INTERVAL_SECS", 900)?.max(30) as u64,
         alert_email: required("GAS_FUNDER_ALERT_EMAIL")?,
         include_admin: optional_bool("GAS_FUNDER_INCLUDE_ADMIN", true),
+        allowed_recipients: parse_allowed_recipients()?,
     }))
+}
+
+/// Parse the optional `GAS_FUNDER_ALLOWED_RECIPIENTS` allowlist (comma-separated
+/// 0x addresses). `None` when unset; an `Err` if set but any entry is not a
+/// valid address (fail loud rather than silently dropping a guard entry).
+fn parse_allowed_recipients() -> Result<Option<Vec<Address>>> {
+    let Some(raw) = optional_trimmed("GAS_FUNDER_ALLOWED_RECIPIENTS") else {
+        return Ok(None);
+    };
+    let mut out = Vec::new();
+    for entry in raw.split(',') {
+        let e = entry.trim();
+        if e.is_empty() {
+            continue;
+        }
+        let addr = Address::from_str(e).with_context(|| {
+            format!("GAS_FUNDER_ALLOWED_RECIPIENTS contains a non-address entry: {e:?}")
+        })?;
+        if !out.contains(&addr) {
+            out.push(addr);
+        }
+    }
+    if out.is_empty() {
+        anyhow::bail!("GAS_FUNDER_ALLOWED_RECIPIENTS is set but contains no valid addresses");
+    }
+    Ok(Some(out))
 }
 
 /// Parse a required base-10 wei amount into a `U256`. (A `0x`-prefixed value

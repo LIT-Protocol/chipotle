@@ -212,9 +212,10 @@ LIT_ACCOUNTS_CONTRACT_ADDRESS=0x...  # same value as lit-api-server NodeConfig.t
 # GAS_FUNDER_DAILY_CAP_WEI=50000000000000000    # 0.05   ETH — rolling 24h ceiling
 # GAS_FUNDER_HOTWALLET_MIN_WEI=20000000000000000 # 0.02  ETH — "reload me" alert below this
 # GAS_FUNDER_ENABLED=true                # flip on once observe mode looks right
-# GAS_FUNDER_CHAIN_ID=8453               # default Base mainnet
+# GAS_FUNDER_CHAIN_ID=8453               # default Base mainnet; verified against the RPC before any send
 # GAS_FUNDER_INTERVAL_SECS=900           # default 15m
 # GAS_FUNDER_INCLUDE_ADMIN=true          # also monitor/fund the admin payer
+# GAS_FUNDER_ALLOWED_RECIPIENTS=0xabc...,0xdef...  # optional: only ever fund these (defense vs spoofed get_api_payers)
 ```
 
 ## LITKEY browser payment claim flow
@@ -287,10 +288,21 @@ automated funder + alerter. Code: `src/gas_funder/`.
   resolved addresses, thresholds, and tick logs before it can move funds.
 - **ACTIVE** (`GAS_FUNDER_ENABLED=true`): actually sends top-ups.
 
-**Safety rails.** Per-tx ceiling + rolling-24h ceiling; a `pending` row is
-written *before* each send (single instance + await-receipt ⇒ sequential
-nonces, no double-spend on restart); the hot wallet is checked to cover the
-whole round before any send. Routine top-ups are **silent** (info logs only).
+**Safety rails.**
+- Per-tx ceiling + rolling-24h ceiling (DB-summed). Cap reads **fail closed** —
+  if the ledger can't be read, the tick funds nothing.
+- **Singleton advisory lock** (`pg_try_advisory_lock`) so a Railway deploy
+  overlap or stray second process can't run two funders against one budget.
+- Each send records `pending` → stamps the tx hash + `broadcast` **before**
+  awaiting the receipt, so a receipt timeout/RPC error never "forgets" money in
+  the mempool and re-sends it. The receipt wait is **bounded** (a stuck tx can't
+  freeze the loop), and a recipient with an in-flight/recent top-up is skipped.
+- Optional `GAS_FUNDER_ALLOWED_RECIPIENTS` allowlist: since `get_api_payers` is
+  unauthenticated, when set the funder only sends to allowlisted addresses and
+  alerts on any unexpected payer (spoof/MITM detection).
+- Before any send in ACTIVE mode it verifies the RPC's chain id matches
+  `GAS_FUNDER_CHAIN_ID` and that the hot wallet can cover the whole round.
+- Routine top-ups are **silent** (info logs only).
 
 **Alerts** (email via Resend, to `GAS_FUNDER_ALERT_EMAIL`, deduped by a
 cooldown): hot-wallet-low **"reload me"** (the one wallet a human watches),
@@ -395,6 +407,9 @@ GAS_FUNDER_HIGH_WATER_WEI=5000000000000000      # 0.005  ETH
 GAS_FUNDER_MAX_TX_WEI=5000000000000000          # 0.005  ETH per tx
 GAS_FUNDER_DAILY_CAP_WEI=50000000000000000      # 0.05   ETH per rolling 24h
 GAS_FUNDER_HOTWALLET_MIN_WEI=20000000000000000  # 0.02   ETH — "reload me" alert
+# Optional but recommended: restrict sends to a known set of addresses, so a
+# spoofed/MITM get_api_payers response can't redirect funds.
+# GAS_FUNDER_ALLOWED_RECIPIENTS=0xabc...,0xdef...
 # Start WITHOUT GAS_FUNDER_ENABLED (observe mode: alerts only). Once the
 # tick logs and emails look right, set GAS_FUNDER_ENABLED=true to send.
 # GAS_FUNDER_ENABLED=true

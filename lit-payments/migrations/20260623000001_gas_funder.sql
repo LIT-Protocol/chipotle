@@ -24,26 +24,33 @@ CREATE TABLE gas_funding_events (
     chain_id            BIGINT      NOT NULL,
     -- 0x-lowercased recipient (an API payer pool wallet or the admin payer).
     recipient           TEXT        NOT NULL,
-    -- Amount sent, in wei. NUMERIC holds the full 256-bit range; we bind/read
-    -- it as a base-10 string (U256) to avoid lossy float conversions.
-    amount_wei          NUMERIC     NOT NULL CHECK (amount_wei > 0),
+    -- Amount sent, in wei. NUMERIC(78,0) is integer-only (scale 0) and bounds
+    -- the precision to U256's max 78 decimal digits, so a malformed/fractional
+    -- row can't poison the cap sum. Bound/read as a base-10 string (U256) to
+    -- avoid lossy float conversions.
+    amount_wei          NUMERIC(78, 0) NOT NULL CHECK (amount_wei > 0),
     -- Recipient balance observed just before the send, for the audit trail.
-    balance_before_wei  NUMERIC,
+    balance_before_wei  NUMERIC(78, 0),
     tx_hash             TEXT,
-    -- 'pending' (recorded, not yet confirmed) | 'sent' (receipt, status 1)
-    -- | 'failed' (send error / revert / receipt error).
-    status              TEXT        NOT NULL CHECK (status IN ('pending', 'sent', 'failed')),
+    -- 'pending'   recorded, not yet broadcast
+    -- 'broadcast' accepted by the RPC (tx_hash set), receipt not yet observed
+    -- 'sent'      receipt with status 1
+    -- 'failed'    send error / revert (nothing of value moved)
+    -- Only 'failed' is excluded from the rolling cap; 'pending'/'broadcast'
+    -- count so in-flight money is never refunded and re-sent.
+    status              TEXT        NOT NULL
+                          CHECK (status IN ('pending', 'broadcast', 'sent', 'failed')),
     error               TEXT
 );
 
 -- Rolling-window sum for the daily cap query (created_at > now() - 24h).
 CREATE INDEX gas_funding_events_created_at_idx ON gas_funding_events (created_at DESC);
 
--- Small partial index to find interrupted sends (status='pending' that never
--- transitioned) for the stale-pending warning.
-CREATE INDEX gas_funding_events_pending_idx
-    ON gas_funding_events (created_at)
-    WHERE status = 'pending';
+-- Partial index to find interrupted/unconfirmed sends (still 'pending' or
+-- 'broadcast') for the stale-pending warning and the recent-funding guard.
+CREATE INDEX gas_funding_events_inflight_idx
+    ON gas_funding_events (recipient, created_at)
+    WHERE status IN ('pending', 'broadcast');
 
 -- One row per alert kind/key, holding the last time we emailed it. The
 -- funder upserts here under a cooldown so a persistently-low wallet emails
