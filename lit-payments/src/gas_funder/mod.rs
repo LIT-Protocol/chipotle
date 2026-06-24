@@ -598,9 +598,9 @@ async fn execute_topup(
         }
         // Leave the row `broadcast` (budget retained, hash recorded) — do NOT
         // mark failed; the funds may well have landed.
-        Ok(Err(e)) => anyhow::bail!(
-            "receipt error for {tx_hash} (left in-flight, budget retained): {e}"
-        ),
+        Ok(Err(e)) => {
+            anyhow::bail!("receipt error for {tx_hash} (left in-flight, budget retained): {e}")
+        }
         Err(_) => anyhow::bail!(
             "receipt timeout for {tx_hash} after {RECEIPT_TIMEOUT:?} (left in-flight, budget retained)"
         ),
@@ -735,7 +735,9 @@ async fn maybe_alert(
                 // The cooldown was already stamped; clear it so a failed send
                 // doesn't silence this alert for the whole window.
                 if let Err(e2) = db::reset_alert(pool, key).await {
-                    tracing::warn!("gas_funder: could not reset alert '{key}' after send failure: {e2}");
+                    tracing::warn!(
+                        "gas_funder: could not reset alert '{key}' after send failure: {e2}"
+                    );
                 }
             }
         }
@@ -797,14 +799,26 @@ mod tests {
             (addr(1), wei("100")), // at low-water
             (addr(2), wei("200")), // above
         ];
-        let plan = decide_topups(&balances, wei("100"), wei("500"), wei("1000"), wei("100000"));
+        let plan = decide_topups(
+            &balances,
+            wei("100"),
+            wei("500"),
+            wei("1000"),
+            wei("100000"),
+        );
         assert!(plan.is_empty());
     }
 
     #[test]
     fn tops_low_payer_up_to_high_water() {
         let balances = vec![(addr(1), wei("30"))];
-        let plan = decide_topups(&balances, wei("100"), wei("500"), wei("1000"), wei("100000"));
+        let plan = decide_topups(
+            &balances,
+            wei("100"),
+            wei("500"),
+            wei("1000"),
+            wei("100000"),
+        );
         assert_eq!(plan.len(), 1);
         assert_eq!(plan[0].recipient, addr(1));
         assert_eq!(plan[0].amount_wei, wei("470")); // 500 - 30
