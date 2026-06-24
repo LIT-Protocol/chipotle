@@ -228,12 +228,17 @@ the server's api\_payer signs the on-chain conversion on their behalf.
    key.
 2. Open the account dropdown and click **Convert to ChainSecured**.
    Confirm the irreversible-action prompt.
-3. **Connect the wallet** that will become the new admin. **EOA only —
-   the server verifies the EIP-712 signature via plain ECDSA `recover()`
-   and does not yet validate ERC-1271 contract-account signatures**, so
-   Safes and other contract wallets are not supported in this flow today.
-   The dashboard prompts a chain switch if your wallet isn't on the chain
-   reported by `GET /get_node_chain_config`.
+3. **Connect the wallet** that will become the new admin. Both EOAs and
+   smart-contract wallets (a Gnosis Safe, a ZeroDev/Kernel account, etc.)
+   are supported. You pass the **same** request shape either way — the
+   server first attempts standard ECDSA recovery, and if the signature
+   doesn't recover to the claimed address it treats that address as a
+   contract and verifies the signature via an on-chain ERC-1271
+   `isValidSignature(digest, signature)` call on the chain reported by
+   `GET /get_node_chain_config` (Base). The contract wallet must already
+   be **deployed** on that chain — counterfactual (ERC-6492) wallets are
+   not supported. The dashboard prompts a chain switch if your wallet
+   isn't on that chain.
 4. **Sign the EIP-712 ownership-transfer typed data.** The dashboard
    composes a typed-data envelope with `primaryType: "ConvertAccount"` —
    wallet UIs surface it as a labelled struct (`address`, `issuedAt`)
