@@ -347,6 +347,13 @@ The canonical typed-data shape (must match exactly — field declaration order i
 
 The server enforces a ±5-minute window on `issuedAt` as the only replay protection — no nonce store. Worst-case replay on the unauthenticated mint endpoints just produces an extra unattached PKP (compute cost only — see each endpoint below for specifics).
 
+**EOA and smart-contract wallets use identical parameters.** Every flow above (and the `X-Wallet-Auth` billing header) accepts both, with no extra field or flag to set — you always post the same `{ typed_data, signature }` (the `message.address` is your wallet address either way). The server first tries standard 65-byte ECDSA recovery; if the signature doesn't recover to the claimed `address`, it treats that address as a contract and verifies on-chain via ERC-1271 `isValidSignature(digest, signature)` on the domain's chain. Two value-level differences for the contract-wallet (e.g. Gnosis Safe, ZeroDev/Kernel) path:
+
+- `signature` is whatever the wallet produces — not necessarily a 65-byte ECDSA tuple. It may be longer (a Safe is roughly 65 bytes per owner plus overhead); the hard cap is 4 KiB.
+- The contract wallet must already be **deployed** on the domain's chain. Counterfactual (ERC-6492) wallets are not supported.
+
+The `"0x<65-byte hex>"` signatures shown in the request examples below are the EOA case; substitute your contract wallet's signature bytes for the ERC-1271 path.
+
 #### `POST /create_wallet_with_signature`
 
 Mints a PKP via DStack MPC after verifying a wallet-ownership signature. Used by `createWallet` in ChainSecured mode; the response is then passed to the on-chain `registerWalletDerivation` call (signed by the same wallet) to register the PKP to the account.
