@@ -67,6 +67,13 @@ nothing is charged. Error semantics: invalid key → 401, insufficient credits �
 402 (body states amount needed and how to fund), billing infra down → 503. See
 the [Errors reference](https://developer.litprotocol.com/management/errors).
 
+ChainSecured (sovereign) accounts split this: admin writes are wallet-signed
+contract calls that never reach the metered HTTP endpoints, so the
+`BilledManagementApiKey` guard never fires and the $0.01 management charge is
+*not* applied (the user pays Base gas instead). Lit Action execution still
+flows through `BilledLitActionApiKey` and bills $0.01/second exactly as in API
+mode. See [API Mode vs ChainSecured Mode](https://developer.litprotocol.com/management/account_modes#how-billing-splits-in-chainsecured-mode).
+
 ## OpenAPI
 
 The spec is generated from the route definitions:
