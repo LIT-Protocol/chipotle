@@ -1,12 +1,7 @@
 # TODOS
 
-## Dashboard: initLogin null dereference
-- **What:** Add null check for `#login-api-key` element in `initLogin()` (`auth.js`). Currently crashes if the element is absent.
-- **Why:** Every other `getElementById` in the codebase uses optional chaining. This is the only unguarded access — will throw if the login panel HTML changes.
-- **Effort:** XS (CC: ~2 min)
-- **Priority:** P1
-- **Depends on:** None
-- **Context:** Found by adversarial review during PR1 ship. Pre-existing in the monolith. Fix: `if (apiKeyInput && getApiKey()) apiKeyInput.value = '';`
+> Status verified against the code on 2026-06-25. Items confirmed implemented were
+> moved to **Completed** with evidence pointers. Items still open are listed below.
 
 ## Dashboard: setOnAuthReady fires before init* complete
 - **What:** Move `setOnAuthReady(...)` call inside `init()` after all `init*` calls, instead of at module evaluation time in `app.js`.
@@ -15,6 +10,7 @@
 - **Priority:** P2
 - **Depends on:** None
 - **Context:** Introduced by module refactor (PR1). Low risk but a real ordering hazard.
+- **Status (2026-06-25):** NOT DONE. `setOnAuthReady(...)` is still registered at module-eval time (`app.js:279`), before `init()` runs at `app.js:327`.
 
 ## Dashboard: _confirmResolve promise race in ui-utils.js
 - **What:** Guard `confirmDelete()` to reject or queue if a confirm dialog is already pending. Currently a second concurrent call overwrites `_confirmResolve`, permanently leaking the first promise.
@@ -23,6 +19,7 @@
 - **Priority:** P2
 - **Depends on:** None
 - **Context:** Pre-existing in the monolith. Found by adversarial review during PR1 ship.
+- **Status (2026-06-25):** NOT DONE. No concurrent-call guard at `ui-utils.js:150-168`; `_confirmResolve` is still overwritten unconditionally.
 
 ## Dashboard: msOutside listener accumulation in groups.js
 - **What:** Remove the `document` click listener (`msOutside`) when the multi-select modal closes, instead of relying on the `!wrap.isConnected` guard on next click.
@@ -31,6 +28,7 @@
 - **Priority:** P3
 - **Depends on:** None
 - **Context:** Pre-existing in the monolith. Found by adversarial review during PR1 ship.
+- **Status (2026-06-25):** NOT DONE. `groups.js:79` still relies on the `!wrap.isConnected` self-removal guard on the next click; no explicit `removeEventListener` on close.
 
 ## Dashboard: Form values read after closeModal in keys.js
 - **What:** In `openUsageKeyModal` save handler, collect all form values (group IDs, permission checkboxes) *before* calling `closeModal()`.
@@ -39,14 +37,7 @@
 - **Priority:** P3
 - **Depends on:** None
 - **Context:** Pre-existing in the monolith. Found by adversarial review during PR1 ship.
-
-## Dashboard: initActionRunner async getCode fallback
-- **What:** Initialize `getCode` and `getParams` fallback closures before the `await import(CodeJar)`, not only in the catch block.
-- **Why:** On slow connections, if a user clicks execute before CDN import resolves, `getCode`/`getParams` are `undefined` (declared with `let`). The inline fallback `codeEl?.textContent` works but is a fragile pattern.
-- **Effort:** XS (CC: ~2 min)
-- **Priority:** P3
-- **Depends on:** None
-- **Context:** Pre-existing pattern in the monolith. Found by adversarial review during PR1 ship.
+- **Status (2026-06-25):** NOT DONE. `keys.js` reads name/desc before `closeModal()` (line 212) but `getSelectedGroupIds(...)` is still called *after* close (line 215).
 
 ## P2: Startup Stripe key validation
 
@@ -65,6 +56,9 @@
 **Priority:** P2
 
 **Depends on:** Stripe client refactor (HTTP status preservation + request timeouts) — shipped in PR #184.
+
+**Status (2026-06-25):** NOT DONE. `stripe::init()` (`lit-api-server/src/stripe.rs:345-378`) still only checks env-var presence + local test-key format; no `validate_key()` / `GET /v1/balance` call exists.
+
 ## Enforce `max_get_keys_count` in handle_ops.rs
 
 **What:** The `max_get_keys_count` field exists on `Client`, is configurable via chain config, and exposed via the config endpoint — but key-returning handlers in `handle_ops.rs` (`GetPrivateKey`, `GetLitActionPrivateKey`, `GetLitActionPublicKey`, `GetLitActionWalletAddress`) never check it.
@@ -76,33 +70,17 @@
 **Risk:** Could break existing Lit Actions that exceed the (currently unenforced) limit. Consider logging a warning first, then enforcing in a follow-up.
 
 **Added:** 2026-03-26 via /plan-eng-review on branch GTC6244/chain-config-expand
-## K6 Security Tests
 
-- **Investigate contract group ID semantics for cross-account isolation test**
-  **Priority:** P1
-  **Context:** Adversarial review (Codex structured + adversarial) flagged that group IDs in AccountConfig.sol appear to be account-local (per-account auto-incrementing), not globally unique. If true, Test 9 (cross-account isolation) in `k6/correctness/api-key-security.spec.ts` passes Account A's `groupIdX` under Account B's auth, which would resolve to Account B's own group with that local ID — not Account A's group. The `listGroups` ID comparison is also unreliable under this model.
-  **Action:** Read `WritesFacet.sol` and `AccountConfig.sol` to confirm whether group IDs are account-scoped. If so, rewrite Test 9 to test isolation via name-based lookups or by verifying that Account B cannot see Account A's group names in `listGroups`.
-  **Branch:** GTC6244/k6-api-key-security-tests
-  **Noticed:** 2026-03-26
+**Status (2026-06-25):** NOT DONE. `max_get_keys_count` lives on `Client` (`actions/client/mod.rs:81`) but the four key handlers (`handle_ops.rs:117-154`) perform no count check, and `ExecutionState` (`models.rs:48-79`) has no counter field. (Contrast `IncrementFetchCount` at `handle_ops.rs:57-69`, which does enforce its limit.)
 
-- **Server should return 403 for management permission denials (not 500)**
-  **Priority:** P1
-  **Context:** Management operations (`addGroup`, `removeGroup`, `createWallet`, `addActionToGroup`, `addPkpToGroup`, `removePkpFromGroup`) return 500 (contract revert) when a usage key lacks the required permission. The security tests assert 403 as a forcing function. Until the server maps contract permission reverts to `ApiStatus::forbidden()` in `account_management.rs`, the negative tests for groups 2-7 and 13 will fail.
-  **Action:** In `lit-api-server/src/core/account_management.rs`, catch contract permission revert errors and return 403 Forbidden instead of 500 Internal Server Error.
-  **Branch:** GTC6244/k6-api-key-security-tests
-  **Noticed:** 2026-03-26
+## K6 Security: contract group ID semantics for cross-account isolation test (Test 9)
 
-## CPL-267 Sovereign Mode: blockchain_cache needs `invalidate_for_account_hash(hash)` primitive
-
-**What:** Add `invalidate_for_account_hash(api_key_hash: Bytes32)` to `lit-api-server/src/accounts/blockchain_cache.rs`. Existing invalidation functions (`invalidate_for_account`, `invalidate_for_key`) take raw api_key and hash internally, but the Phase 3 event listener only has the hashed apiKeyHash from chain event topics.
-
-**Why:** Blocker for Phase 3 event listener in CPL-267 sovereign mode. Without this primitive, listener can't invalidate cache entries for direct-write transactions.
-
-**How to fix:** Factor out the hash-based invalidation path from `invalidate_for_account` into a new public function. Existing callers keep their raw-key signature; listener calls the hash variant directly.
-
-**Priority:** P1 (blocks Phase 3)
-
-**Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode
+- **Priority:** P1
+- **Context:** Adversarial review flagged that group IDs in AccountConfig.sol appear account-local (per-account auto-incrementing), not globally unique. If true, Test 9 (cross-account isolation) in `k6/correctness/api-key-security.spec.ts` comparing raw `groupId`s is unreliable.
+- **Investigation result (2026-06-25): CONFIRMED account-scoped.** `WritesFacet.sol` `addGroup` increments a per-account counter and assigns `group.metadata.id = account.groupCount` (`WritesFacet.sol:379-383`); `AppStorage.Account` holds its own `groupCount` + `groups` mapping (`AppStorage.sol:82-102`). So two accounts can both own a group with id `1`.
+- **Remaining action:** Rewrite Test 9 to test isolation via name-based lookups (unique `k6-sec-group*-${K6_RUN_ID}` names) instead of raw integer ID comparison. Currently Test 9 (`api-key-security.spec.ts:412-436`) still uses `parseInt(g.id) === data.groupIdX`, which can false-negative when both accounts hold the same local ID.
+- **Branch:** GTC6244/k6-api-key-security-tests
+- **Status (2026-06-25):** PARTIAL — semantics investigation done; Test 9 rewrite still pending.
 
 ## CPL-267 Sovereign Mode: GC orphan prepared wallet keys
 
@@ -116,6 +94,8 @@
 
 **Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode
 
+**Status (2026-06-25):** NOT DONE. No prepared-wallet state tracking or background GC task found.
+
 ## CPL-267 Sovereign Mode: Document cache staleness window
 
 **What:** SDK + dashboard docs should state: "After a sovereign-mode write, reads on other server instances may show stale data for up to N seconds (polling interval)."
@@ -128,44 +108,18 @@
 
 **Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode
 
+**Status (2026-06-25):** NOT DONE. No staleness-window docs in SDK/dashboard; no listener-lag banner (only the existing ABI-drift banner exists).
+
 ## CPL-267 Sovereign Mode: 6-month adoption re-evaluation
 
 **What:** At 6 months post-ship of sovereign mode, review adoption metrics. If <5% of active accounts have converted or started sovereign, open a design doc to evaluate: (a) pivot to Approach B signed intents, (b) sunset sovereign mode, (c) continue parallel.
 
 **Why:** Driver was internal alignment, not customer demand. Codex outside voice flagged whole approach as potentially wrong first proof. We rejected pivot now for philosophical reasons, but committed to data-driven re-evaluation.
 
-**Priority:** P3 (reminder, not urgent)
+**Priority:** P3 (reminder, not urgent — date-based, no code to verify)
 
 **Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode
 
-## Completed
-
-## CPL-267 Sovereign Mode: Billing bypass documentation
-
-**What:** Admin writes in sovereign mode bypass Stripe billing guards (user's wallet pays gas directly to chain). Lit Action execution still charges via Stripe. Document this split explicitly in SDK + billing page.
-
-**Why:** Billing logic is per-op today (see `stripe::` in lit-api-server); sovereign admin writes never hit those guards. Accounting split must be visible to ops and support, otherwise conversion-to-sovereign looks like "billing broken."
-
-**Done (2026-06-25):** Documented the split in three places —
-`docs/management/pricing.mdx` (new "Billing in ChainSecured (sovereign) mode"
-section + billing-identity note), `docs/management/account_modes.mdx` (split
-the Billing table row, added a "How billing splits in ChainSecured mode"
-subsection with an ops/support `<Note>`), and `lit-api-server/README.md`
-(billing-model paragraph). The docs explain why a freshly-converted sovereign
-account can show zero Stripe charges and how ops can confirm a sovereign
-account via the on-chain `managed` flag.
-
-**Remaining (ops, not code):** Tagging sovereign customers in the Stripe
-dashboard (`mode: sovereign` metadata) is documented as a recommended ops
-convenience but not auto-applied — the Stripe customer is created lazily with
-only `metadata.wallet_address` and doesn't know the on-chain mode at creation
-time. Wiring an automatic label would require a contract read at customer
-creation plus a metadata update on conversion (touches `lit-billing-core`);
-deferred as it exceeds this P3 doc scope.
-
-**Priority:** P3
-
-**Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode
 ## Monitor: Keyboard Shortcuts
 - **What:** Add keyboard shortcuts to the Lit Node Monitor: R to refresh, F to fund all critical, S to toggle settings panel.
 - **Why:** Operators use this tool daily. Keyboard shortcuts reduce friction for the most common actions.
@@ -173,6 +127,7 @@ deferred as it exceeds this P3 doc scope.
 - **Priority:** P3
 - **Depends on:** Phase 1 and Phase 2 payer safety console features
 - **Context:** Deferred during CEO review of the payer safety console plan. Avoid conflicts with browser shortcuts (Ctrl+R, etc.) — use single-key shortcuts only when no input field is focused.
+- **Status (2026-06-25):** NOT DONE — was previously filed under "Completed" but verification found it unimplemented. The only keydown handler in `monitor/app.js:902-908` toggles accordions (Enter/Space); no R/F/S shortcuts exist.
 
 ## Monitor: Network Health Badge in Dropdown
 - **What:** Show a colored dot (green/yellow/red) next to each network name in the network selector dropdown, based on aggregate payer pool health for that network.
@@ -181,3 +136,35 @@ deferred as it exceeds this P3 doc scope.
 - **Priority:** P2
 - **Depends on:** Phase 1 health state logic
 - **Context:** Deferred during CEO review. Main complexity: requires background polling of all networks' payer balances simultaneously (not just the selected network), which increases RPC calls. Consider polling non-selected networks at a lower frequency (e.g., every 2 minutes vs 30 seconds for the active network).
+- **Status (2026-06-25):** NOT DONE — was previously filed under "Completed" but verification found it unimplemented. The network selector (`monitor/index.html:380-385`) is a plain `<select>`; no health dots, no multi-network background polling.
+
+## Completed
+
+> Verified implemented in code on 2026-06-25.
+
+## Dashboard: initLogin null dereference — DONE (2026-06-25)
+- **What:** Null check for `#login-api-key` element in `initLogin()` (`auth.js`).
+- **Evidence:** `auth.js:718-728` — `initLogin()` now guards with `if (!apiKeyInput) { … return; }` before any `.value` access (comment cites `TODOS.md:3-9`).
+- **Original priority:** P1. Found by adversarial review during PR1 ship.
+
+## Dashboard: initActionRunner async getCode fallback — DONE (2026-06-25)
+- **What:** Initialize `getCode`/`getParams` fallback closures before the `await import(CodeJar)`, not only in the catch block.
+- **Evidence:** `runner.js:20-42` — `let getCode; let getParams;` are declared before the `try`, then assigned in both the try and catch branches, so they're always defined.
+- **Original priority:** P3. Found by adversarial review during PR1 ship.
+
+## Server returns 403 for management permission denials (not 500) — DONE (2026-06-25)
+- **What:** Map contract permission reverts to 403 Forbidden instead of 500 in `account_management.rs`.
+- **Evidence:** `lit-api-server/src/core/account_management.rs:36-56` adds `map_contract_error()` matching `NotAllowedTo*` / `NotMasterAccount` / `NoAccountAccess` revert patterns and returning `ApiStatus::forbidden(...)`; applied to `add_group`, `remove_group`, `add_action_to_group`, `remove_action_from_group`, `add_pkp_to_group`, `remove_pkp_from_group`, and `convert_to_chain_secured_account`.
+- **Note:** Pattern-matches the stringified revert; a follow-up could decode the ABI revert selector directly (noted in code comment).
+- **Original priority:** P1. Branch GTC6244/k6-api-key-security-tests.
+
+## CPL-267 Sovereign Mode: blockchain_cache `invalidate_for_account_hash(hash)` primitive — DONE (2026-06-25)
+- **What:** Hash-based cache invalidation for the Phase 3 event listener (only has the hashed apiKeyHash from chain event topics).
+- **Evidence:** `lit-api-server/src/accounts/blockchain_cache.rs:283-305` — `pub async fn invalidate_for_account_hash(account_api_key_hash: U256)` (plus sibling `invalidate_for_hash`), consumed by the on-chain listener in `lit-api-server/src/account_events.rs`.
+- **Original priority:** P1 (blocked Phase 3). Added 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode.
+
+## CPL-267 Sovereign Mode: Billing bypass documentation — DONE (2026-06-25)
+- **What:** Document that sovereign (ChainSecured) admin writes bypass the Stripe management-charge guard (user pays Base gas directly) while Lit Action execution still bills $0.01/sec via Stripe, so a freshly-converted account showing dropped Stripe activity doesn't read as "billing broken."
+- **Evidence:** `docs/management/pricing.mdx` — new "Billing in ChainSecured (sovereign) mode" section + billing-identity note; `docs/management/account_modes.mdx` — split the Billing table row into admin-writes vs Lit-Actions, added "How billing splits in ChainSecured mode" subsection with an ops/support `<Note>`; `lit-api-server/README.md` — billing-model paragraph referencing the `BilledManagementApiKey`/`BilledLitActionApiKey` guards.
+- **Remaining (ops, not code):** Auto-tagging sovereign customers in Stripe (`mode: sovereign` metadata) is documented as a recommended ops convenience but not implemented — the customer is created lazily with only `metadata.wallet_address` and doesn't know the on-chain mode at creation; wiring it would need a contract read at customer creation plus a metadata update on conversion (touches `lit-billing-core`), out of P3 doc scope.
+- **Original priority:** P3. Added 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode. Shipped in PR #539.
