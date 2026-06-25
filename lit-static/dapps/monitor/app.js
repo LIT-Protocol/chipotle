@@ -907,6 +907,41 @@ document.addEventListener('keydown', (e) => {
   toggleAccordion(header.parentElement);
 });
 
+/* ═══ Global keyboard shortcuts ══════════════════════════════════════════════ */
+
+// True when the user is typing into a field — single-key shortcuts must not fire.
+function isTypingTarget(target) {
+  if (!target) return false;
+  const tag = target.tagName;
+  return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable;
+}
+
+// Single-key operator shortcuts. Deliberately bare keys (no modifiers) so they
+// never collide with browser shortcuts like Ctrl+R / Cmd+S; we bail out the
+// moment a modifier is held, a field is focused, or a modal dialog is open.
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+  if (e.repeat) return;
+  if (isTypingTarget(e.target)) return;
+  if (document.querySelector('dialog[open]')) return;
+
+  switch (e.key.toLowerCase()) {
+    case 'r': // Refresh all data
+      e.preventDefault();
+      el('btn-refresh-all')?.click();
+      break;
+    case 'f': // Fund all critical payers — wire up once the fund-all-critical
+      // action lands (Phase 1/2 payer safety console). No-ops safely until then.
+      e.preventDefault();
+      el('btn-fund-all-critical')?.click();
+      break;
+    case 's': // Toggle the settings (thresholds) panel
+      e.preventDefault();
+      el('btn-toggle-settings')?.click();
+      break;
+  }
+});
+
 /* ═══ Settings panel ═════════════════════════════════════════════════════════ */
 
 el('btn-toggle-settings')?.addEventListener('click', () => {
