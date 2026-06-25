@@ -151,6 +151,13 @@ export function initModalClose() {
 let _confirmResolve = null;
 
 export function confirmDelete(message, opts) {
+  // Guard against a concurrent call clobbering an in-flight dialog. There is a
+  // single confirm overlay, so a second dialog can't be shown anyway; resolving
+  // the loser as `false` (the safe default for a destructive action) avoids
+  // overwriting _confirmResolve and silently leaking the first caller's promise.
+  if (_confirmResolve) {
+    return Promise.resolve(false);
+  }
   return new Promise((resolve) => {
     _confirmResolve = resolve;
     const overlay = document.getElementById('confirm-overlay');
