@@ -920,7 +920,8 @@ function isTypingTarget(target) {
 // never collide with browser shortcuts like Ctrl+R / Cmd+S; we bail out the
 // moment a modifier is held, a field is focused, or a modal dialog is open.
 document.addEventListener('keydown', (e) => {
-  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+  if (e.repeat) return;
   if (isTypingTarget(e.target)) return;
   if (document.querySelector('dialog[open]')) return;
 
