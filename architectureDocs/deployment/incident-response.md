@@ -49,9 +49,13 @@ Goal: stop the bad version from obtaining keys and serving.
    the version from booting again — but a CVM that already holds its keys keeps
    running until restarted. The Phala account owner must explicitly **stop/redeploy**
    the affected CVM via the Phala CLI/dashboard to take it out of service.
-   The redeploy/restart command is `phala deploy -c docker-compose.deploy.yml
-   --cvm-id <app> --private-key "$PHALA_PRIVATE_KEY"` (see `justfile.deploy` and
-   [deployment.md](deployment.md)); it re-applies the compose and restarts the CVM in
+    The redeploy/restart command is:
+
+    ```bash
+    phala deploy -c docker-compose.deploy.yml --cvm-id <app> --private-key "$PHALA_PRIVATE_KEY"
+    ```
+
+    (See `justfile.deploy` and [deployment.md](deployment.md)); it re-applies the compose and restarts the CVM in
    place. **TODO/DECIDE (still open, verified 2026-06-25):** whether the built-in Phala
    gateway can drain in-flight traffic before the restart is not documented anywhere in
    the repo.
