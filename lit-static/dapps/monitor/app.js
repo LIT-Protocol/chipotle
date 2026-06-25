@@ -201,13 +201,13 @@ function copyText(text, triggerEl) {
 
 const THRESHOLD_DEFAULTS = { warning: 0.02, critical: 0.005, target: 0.05 };
 
-function thresholdStorageKey() {
-  return 'lit-monitor-thresholds-' + getServerUrl();
+function thresholdStorageKey(serverUrl) {
+  return 'lit-monitor-thresholds-' + (serverUrl ?? getServerUrl());
 }
 
-function getThresholds() {
+function getThresholds(serverUrl) {
   try {
-    const stored = JSON.parse(localStorage.getItem(thresholdStorageKey()));
+    const stored = JSON.parse(localStorage.getItem(thresholdStorageKey(serverUrl)));
     if (stored && typeof stored === 'object') {
       const result = { ...THRESHOLD_DEFAULTS };
       for (const key of ['warning', 'critical', 'target']) {
@@ -230,6 +230,21 @@ function classifyHealth(balance, thresholds) {
   if (balance < thresholds.critical) return 'critical';
   if (balance < thresholds.warning) return 'warning';
   return 'healthy';
+}
+
+// Roll a list of payer balances up to a single network-level health: the worst
+// health among payers with a known balance. 'unknown' when no payer balance can
+// be classified (no payers, or every balance fetch failed).
+const HEALTH_RANK = { healthy: 0, warning: 1, critical: 2 };
+
+function aggregateHealth(balances, thresholds) {
+  let worst = null;
+  for (const balance of balances || []) {
+    const h = classifyHealth(balance, thresholds);
+    if (h === 'unknown') continue;
+    if (worst == null || HEALTH_RANK[h] > HEALTH_RANK[worst]) worst = h;
+  }
+  return worst ?? 'unknown';
 }
 
 function loadThresholdInputs() {
@@ -298,6 +313,8 @@ function updateHealthSummary() {
   const bar = el('health-summary');
   if (!bar) return;
 
+  updateActiveNetworkBadge();
+
   if (payerData.length === 0) {
     bar.style.display = 'none';
     return;
@@ -333,6 +350,94 @@ function updateHealthSummary() {
 
 function getServerUrl() {
   return (el('network')?.value || '').replace(/\/$/, '');
+}
+
+/* ═══ Network health badges ══════════════════════════════════════════════════ */
+
+// Colored unicode circles render reliably inside native <option> elements, where
+// per-character CSS coloring is not possible.
+const HEALTH_EMOJI = { healthy: '\u{1F7E2}', warning: '\u{1F7E1}', critical: '\u{1F534}', unknown: '⚪' };
+
+// Non-selected networks are polled less aggressively than the active one (which
+// rides the 30s balance refresh) to keep the extra RPC load modest.
+const NETWORK_HEALTH_POLL_INTERVAL = 120_000;
+let networkHealthTimer = null;
+
+function setOptionBadge(opt, health) {
+  if (!opt) return;
+  const label = opt.dataset.label ?? opt.textContent;
+  opt.dataset.label = label;
+  opt.textContent = (HEALTH_EMOJI[health] || HEALTH_EMOJI.unknown) + ' ' + label;
+}
+
+// Fetch a single network's aggregate payer health without touching shared page
+// state — used for background polling of non-selected networks.
+async function fetchNetworkHealth(serverUrl) {
+  try {
+    const cfgRes = await fetch(`${serverUrl}/get_node_chain_config`);
+    if (!cfgRes.ok) return 'unknown';
+    const cfg = await cfgRes.json();
+
+    let rpcUrl = cfg.rpc_url ?? '';
+    if (!rpcUrl && cfg.chain_id != null && cfg.is_evm) {
+      rpcUrl = rpcUrlForChainId(cfg.chain_id) ?? '';
+    }
+    if (!rpcUrl) return 'unknown';
+
+    const payersRes = await fetch(`${serverUrl}/get_api_payers`);
+    if (!payersRes.ok) return 'unknown';
+    const payers = await payersRes.json();
+    if (!Array.isArray(payers) || payers.length === 0) return 'unknown';
+
+    const provider = new ethers.JsonRpcProvider(rpcUrl);
+    const results = await Promise.allSettled(payers.map(addr => provider.getBalance(addr)));
+    const balances = results.map(r =>
+      r.status === 'fulfilled' ? parseFloat(ethers.formatEther(r.value)) : null
+    );
+    return aggregateHealth(balances, getThresholds(serverUrl));
+  } catch {
+    return 'unknown';
+  }
+}
+
+// Update the active network's badge from the already-fetched payerData, so it
+// stays in sync with the 30s refresh cadence (and threshold edits) for free.
+function updateActiveNetworkBadge() {
+  const select = el('network');
+  if (!select) return;
+  const opt = select.selectedOptions?.[0] || select.options[select.selectedIndex];
+  if (!opt) return;
+  const health = payerData.length === 0
+    ? 'unknown'
+    : aggregateHealth(payerData.map(p => p.balance), getThresholds());
+  setOptionBadge(opt, health);
+}
+
+// Refresh badges for every network except the active one (kept fresh elsewhere).
+async function pollOtherNetworkHealth() {
+  const select = el('network');
+  if (!select) return;
+  const active = getServerUrl();
+  await Promise.all(Array.from(select.options).map(async (opt) => {
+    const url = opt.value.replace(/\/$/, '');
+    if (url === active) return;
+    setOptionBadge(opt, await fetchNetworkHealth(url));
+  }));
+}
+
+function startNetworkHealthPolling() {
+  stopNetworkHealthPolling();
+  pollOtherNetworkHealth().catch(err => console.error('Network health poll failed:', err));
+  networkHealthTimer = setInterval(() => {
+    pollOtherNetworkHealth().catch(err => console.error('Network health poll failed:', err));
+  }, NETWORK_HEALTH_POLL_INTERVAL);
+}
+
+function stopNetworkHealthPolling() {
+  if (networkHealthTimer) {
+    clearInterval(networkHealthTimer);
+    networkHealthTimer = null;
+  }
 }
 
 /* ═══ Known chain RPC URLs ═══════════════════════════════════════════════════ */
@@ -819,11 +924,13 @@ async function doAutoRefresh() {
 document.addEventListener('visibilitychange', async () => {
   if (document.hidden) {
     stopAutoRefresh();
+    stopNetworkHealthPolling();
   } else {
     try {
       await doAutoRefresh();
     } finally {
       startAutoRefresh();
+      startNetworkHealthPolling();
     }
   }
 });
@@ -1131,6 +1238,13 @@ el('btn-set-payer-count')?.addEventListener('click', async () => {
   const select = el('network');
   if (!select) return;
 
+  // Capture each option's clean label and seed an "unknown" health badge before
+  // any data loads, so the dot is present from first paint.
+  for (const opt of select.options) {
+    opt.dataset.label = opt.textContent;
+    setOptionBadge(opt, 'unknown');
+  }
+
   // Pre-select the option whose hostname matches the current page.
   const host = window.location.hostname;
   for (const opt of select.options) {
@@ -1141,4 +1255,5 @@ el('btn-set-payer-count')?.addEventListener('click', async () => {
 
   select.addEventListener('change', loadNetwork);
   loadNetwork();
+  startNetworkHealthPolling();
 })();
