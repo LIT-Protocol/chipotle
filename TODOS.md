@@ -94,7 +94,13 @@
 
 **Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode
 
-**Status (2026-06-25):** NOT DONE. No prepared-wallet state tracking or background GC task found.
+**Resolution (2026-06-25): WON'T FIX — premise invalid.** The orphan-key-growth concern doesn't match the architecture:
+
+- **Keys are derived on demand, never stored.** `dstack::v1::get_client_key(derivation_path)` → `dstack::get_key` (`lit-api-server/src/dstack/v1/dstack.rs:111`) deterministically derives a key from the TEE root key + path. Nothing is persisted per key, so no TEE state accumulates. The dstack SDK exposes only `get_quote`/`get_info`/`get_key` — there is no delete/revoke, so there is nothing to GC.
+- **The server keeps no record of prepared wallets.** `create_wallet_with_signature` (`lit-api-server/src/core/account_management.rs:196`) generates a random derivation path, derives the key, returns `wallet_address` + `derivation_path` to the user, and persists nothing.
+- **An orphan wallet is unreachable and untraceable.** Signing re-derives the path exclusively from on-chain `getWalletDerivation` (`lit-api-server/src/accounts/mod.rs:477`); without `registerWalletDerivation` the server can't find the path and use fails with 401 (`lit-api-server/src/auth_resolver.rs:95`).
+
+Implementing the proposed fix would *create* net-new persistent state that doesn't exist today (the opposite of bounding growth) and would have nothing meaningful to delete. The existing design already has the property this ticket wanted. If observability is desired later, scope it as a create-vs-register conversion metric — not a key GC.
 
 ## CPL-267 Sovereign Mode: Document cache staleness window
 
