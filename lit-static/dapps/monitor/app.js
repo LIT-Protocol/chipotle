@@ -1261,5 +1261,5 @@ el('btn-set-payer-count')?.addEventListener('click', async () => {
 
   select.addEventListener('change', loadNetwork);
   loadNetwork();
-  startNetworkHealthPolling();
+  if (!document.hidden) startNetworkHealthPolling();
 })();
