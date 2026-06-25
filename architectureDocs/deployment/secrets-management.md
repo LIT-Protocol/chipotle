@@ -43,11 +43,18 @@ From `docker-compose.phala.yml` (all set as encrypted Phala CVM env vars):
 
 - **Least privilege per credential.** Each credential should be scoped to exactly its
   function (e.g. the Route53 IAM principal limited to DNS-01 TXT records on the cert
-  domain; the GCP service account limited to telemetry ingestion). **TODO/DECIDE:**
-  confirm and document the IAM/role scopes actually in use.
-- **Dev vs prod separation.** Dev uses Stripe sandbox keys and the dev environment;
-  prod uses live keys. **TODO/DECIDE:** confirm separate Phala accounts/projects and
-  that no prod secret is reachable from a dev deploy.
+  domain; the GCP service account limited to telemetry ingestion). **TODO/DECIDE (still
+  open, 2026-06-25):** the live IAM policy/role documents live in AWS/GCP and are not
+  checked into this repo — only the credential *names* (`CERTBOT_AWS_*`,
+  `GCP_SERVICE_ACCOUNT_JSON`) appear here. Capture the actual scopes in this doc.
+- **Dev vs prod separation.** Partially confirmed (2026-06-25) from the deploy
+  workflows: staging (`deploy-staging.yml`) uses Stripe **sandbox** keys and GCP project
+  `chipotle-next`; prod (`deploy-prod-1-propose.yml`) uses **live** Stripe keys and GCP
+  project `chipotle-prod`, deploying to separate CVMs. **TODO/DECIDE (still open):** both
+  workflows reference the *same* `PHALA_CLOUD_API_KEY` secret, so a separate Phala
+  account/project per environment is **not** confirmed — verify whether staging and prod
+  use distinct Phala accounts (or GitHub environments scoping that secret) so no prod
+  secret is reachable from a dev deploy.
 - **Who can set/read.** Setting CVM secrets requires the Phala account credentials.
   **TODO/DECIDE:** name the owning role and how access is granted/revoked.
 - **Rotation.** **TODO/DECIDE:** define rotation cadence per credential and the
@@ -56,9 +63,14 @@ From `docker-compose.phala.yml` (all set as encrypted Phala CVM env vars):
 ## Telemetry egress note
 
 The `otel-collector` ships logs/metrics to GCP from inside the CVM — a data-plane
-egress out of the TEE. Ensure exported telemetry contains **no secrets or request
-plaintext** (only operational metrics and scrubbed logs). **TODO/DECIDE:** document
-the scrubbing/allow-list applied before export.
+egress out of the TEE. Exported telemetry must contain **no secrets or request
+plaintext** (only operational metrics and scrubbed logs). **Verified 2026-06-25:** the
+collector pipelines (`otel-collector/config.yaml`) apply only `memory_limiter`,
+`resource` (stamps `service.namespace`/`cloud.provider`), and `batch` — there is **no**
+`redaction`/`filter`/`attributes` scrubbing processor. The no-secrets guarantee
+therefore rests entirely on the application side not emitting secrets into spans/logs.
+**TODO/DECIDE:** either add a collector-side redaction/allow-list processor or document
+and enforce the source-side scrubbing contract.
 
 ## References
 

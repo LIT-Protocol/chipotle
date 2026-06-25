@@ -6,7 +6,10 @@ the *adversarial* and *failure* scenarios that one does not.
 
 > **Status:** several response steps below depend on operational decisions that are
 > not yet finalized (marked **TODO/DECIDE**). Treat this as the working runbook and
-> resolve the open items before relying on it in a real incident.
+> resolve the open items before relying on it in a real incident. The technical markers
+> were re-checked against the repo on 2026-06-25 and annotated inline with the verified
+> current state; the role-assignment markers (incident commander, Phala account owner,
+> comms) remain open org decisions with no answer in the repo.
 
 ## Roles & contacts
 
@@ -46,8 +49,16 @@ Goal: stop the bad version from obtaining keys and serving.
    the version from booting again — but a CVM that already holds its keys keeps
    running until restarted. The Phala account owner must explicitly **stop/redeploy**
    the affected CVM via the Phala CLI/dashboard to take it out of service.
-   **TODO/DECIDE:** confirm exact Phala command and whether gateway can drain traffic
-   first.
+    The redeploy/restart command is:
+
+    ```bash
+    phala deploy -c docker-compose.deploy.yml --cvm-id <app> --private-key "$PHALA_PRIVATE_KEY"
+    ```
+
+    (See `justfile.deploy` and [deployment.md](deployment.md)); it re-applies the compose and restarts the CVM in
+   place. **TODO/DECIDE (still open, verified 2026-06-25):** whether the built-in Phala
+   gateway can drain in-flight traffic before the restart is not documented anywhere in
+   the repo.
 3. **Re-deploy a known-good version** whose compose hash is still whitelisted.
 4. **Assess data exposure.** Any data the bad version could decrypt with its derived
    keys must be considered exposed.
@@ -81,7 +92,11 @@ can disrupt availability and reconfigure encrypted env injection.
   CVMs are unaffected** (they hold their keys); only restarts/new boots are blocked.
 - Do **not** force a redeploy during a KMS outage — a restarted CVM may fail to
   obtain keys and go down.
-- **TODO/DECIDE:** document RPC redundancy / fallback endpoints used by the KMS path.
+- **Verified 2026-06-25:** there is currently **no** RPC redundancy — the KMS/Base path
+  resolves a single `BASE_CHAIN_RPC` endpoint (`docker-compose.phala.yml`;
+  `lit-api-server/src/utils/chain_info.rs` `rpc_url()`), with no failover configured.
+  **TODO/DECIDE:** add fallback RPC endpoints (e.g. via eRPC — see
+  [deployment.md](deployment.md)) so a single-provider outage can't block CVM restarts.
 
 ## Scenario 5 — Secret compromise (Stripe, AWS, GCP, RPC)
 
@@ -100,9 +115,11 @@ timelock to provide a reaction window.
 
 - **Alert on governance writes.** Monitor `DstackApp` and the Safe for
   `addComposeHash` / `removeComposeHash`, `addOwner` / `swapOwner` / `removeOwner`,
-  and `changeThreshold` events; page on any unplanned occurrence. **TODO/DECIDE:**
-  wire this into the existing Grafana stack (see chipotle monitoring) or a
-  contract-watcher.
+  and `changeThreshold` events; page on any unplanned occurrence. **TODO/DECIDE
+  (verified not implemented, 2026-06-25):** no governance-event alerting exists in the
+  repo today — the otel-collector only forwards app telemetry to GCP, and the existing
+  on-chain listeners (`account_events.rs`, `restart.rs`) watch account/restart events,
+  not `DstackApp`/Safe governance. Still needs a Grafana alert or a contract-watcher.
 - **Alert on attestation drift.** Periodically confirm the live `compose_hash` from
   `/info` is still whitelisted and matches the expected release.
 - **Alert on CVM lifecycle changes** from the Phala account.

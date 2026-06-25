@@ -209,13 +209,22 @@ function openUsageKeyModal(item = null) {
     }
     const saveBtn = document.getElementById('modal-save-btn');
     if (saveBtn) saveBtn.disabled = true;
+    // Collect all form values BEFORE closeModal(). closeModal only hides the
+    // overlay today, but if it ever clears innerHTML these reads would return
+    // empty arrays/false and silently create a key with zero permissions.
+    const executeInGroups = getSelectedGroupIds('modal-usage-execute-groups');
+    const manageIpfsIdsInGroups = getSelectedGroupIds('modal-usage-manage-ipfs-groups');
+    const addPkpToGroups = getSelectedGroupIds('modal-usage-add-pkp-groups');
+    const removePkpFromGroups = getSelectedGroupIds('modal-usage-remove-pkp-groups');
+    const canCreateGroupsEl = document.getElementById('modal-usage-can-create-groups');
+    const canDeleteGroupsEl = document.getElementById('modal-usage-can-delete-groups');
+    const canCreatePkpsEl = document.getElementById('modal-usage-can-create-pkps');
+    const canCreateGroups = !!(canCreateGroupsEl && canCreateGroupsEl.checked);
+    const canDeleteGroups = !!(canDeleteGroupsEl && canDeleteGroupsEl.checked);
+    const canCreatePkps = !!(canCreatePkpsEl && canCreatePkpsEl.checked);
     closeModal();
     hideStatus('overview-status-usage-keys');
     if (isEdit) {
-      const executeInGroups = getSelectedGroupIds('modal-usage-execute-groups');
-      const manageIpfsIdsInGroups = getSelectedGroupIds('modal-usage-manage-ipfs-groups');
-      const addPkpToGroups = getSelectedGroupIds('modal-usage-add-pkp-groups');
-      const removePkpFromGroups = getSelectedGroupIds('modal-usage-remove-pkp-groups');
       try {
         showActionProgress('Updating usage API key', 'Saving changes to usage API key.');
         const client = await getClient();
@@ -251,13 +260,6 @@ function openUsageKeyModal(item = null) {
         closeActionProgress();
       }
     } else {
-      const canCreateGroups = document.getElementById('modal-usage-can-create-groups').checked;
-      const canDeleteGroups = document.getElementById('modal-usage-can-delete-groups').checked;
-      const canCreatePkps = document.getElementById('modal-usage-can-create-pkps').checked;
-      const executeInGroups = getSelectedGroupIds('modal-usage-execute-groups');
-      const manageIpfsIdsInGroups = getSelectedGroupIds('modal-usage-manage-ipfs-groups');
-      const addPkpToGroups = getSelectedGroupIds('modal-usage-add-pkp-groups');
-      const removePkpFromGroups = getSelectedGroupIds('modal-usage-remove-pkp-groups');
       try {
         showActionProgress('Adding usage API key', 'Creating a new usage API key for this account.');
         const client = await getClient();
