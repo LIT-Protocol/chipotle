@@ -138,19 +138,34 @@
 
 **Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode
 
+## Completed
+
 ## CPL-267 Sovereign Mode: Billing bypass documentation
 
 **What:** Admin writes in sovereign mode bypass Stripe billing guards (user's wallet pays gas directly to chain). Lit Action execution still charges via Stripe. Document this split explicitly in SDK + billing page.
 
 **Why:** Billing logic is per-op today (see `stripe::` in lit-api-server); sovereign admin writes never hit those guards. Accounting split must be visible to ops and support, otherwise conversion-to-sovereign looks like "billing broken."
 
-**How to fix:** Add note to `billing.md` or equivalent. Add sovereign-mode label to Stripe dashboard for per-account identification.
+**Done (2026-06-25):** Documented the split in three places —
+`docs/management/pricing.mdx` (new "Billing in ChainSecured (sovereign) mode"
+section + billing-identity note), `docs/management/account_modes.mdx` (split
+the Billing table row, added a "How billing splits in ChainSecured mode"
+subsection with an ops/support `<Note>`), and `lit-api-server/README.md`
+(billing-model paragraph). The docs explain why a freshly-converted sovereign
+account can show zero Stripe charges and how ops can confirm a sovereign
+account via the on-chain `managed` flag.
+
+**Remaining (ops, not code):** Tagging sovereign customers in the Stripe
+dashboard (`mode: sovereign` metadata) is documented as a recommended ops
+convenience but not auto-applied — the Stripe customer is created lazily with
+only `metadata.wallet_address` and doesn't know the on-chain mode at creation
+time. Wiring an automatic label would require a contract read at customer
+creation plus a metadata update on conversion (touches `lit-billing-core`);
+deferred as it exceeds this P3 doc scope.
 
 **Priority:** P3
 
 **Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode
-
-## Completed
 ## Monitor: Keyboard Shortcuts
 - **What:** Add keyboard shortcuts to the Lit Node Monitor: R to refresh, F to fund all critical, S to toggle settings panel.
 - **Why:** Operators use this tool daily. Keyboard shortcuts reduce friction for the most common actions.
