@@ -430,7 +430,10 @@ pub async fn validate_key(state: &StripeState) -> KeyCheck {
 /// — is availability, not a verdict on the key, so we degrade gracefully. Erring
 /// toward `Unavailable` means a Stripe blip can never take down our own startup.
 fn classify_key_check(e: &anyhow::Error) -> KeyCheck {
-    if let Some(se) = e.downcast_ref::<lit_billing_core::StripeError>() {
+    if let Some(se) = e
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<lit_billing_core::StripeError>())
+    {
         let code = se.status.as_u16();
         if code == 401 || code == 403 {
             return KeyCheck::AuthFailed(se.to_string());
