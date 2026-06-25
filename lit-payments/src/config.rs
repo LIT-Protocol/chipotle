@@ -279,30 +279,37 @@ fn parse_gas_funder_config() -> Result<Option<GasFunderConfig>> {
     }))
 }
 
-/// Parse the optional `GAS_FUNDER_ALLOWED_RECIPIENTS` allowlist (comma-separated
-/// 0x addresses). `None` when unset; an `Err` if set but any entry is not a
-/// valid address (fail loud rather than silently dropping a guard entry).
+/// Parse the optional `GAS_FUNDER_ALLOWED_RECIPIENTS` allowlist. `None` when
+/// unset; an `Err` if set but any entry is not a valid address (fail loud
+/// rather than silently dropping a guard entry).
 fn parse_allowed_recipients() -> Result<Option<Vec<Address>>> {
     let Some(raw) = optional_trimmed("GAS_FUNDER_ALLOWED_RECIPIENTS") else {
         return Ok(None);
     };
+    let list = parse_recipient_list(&raw).context("parsing GAS_FUNDER_ALLOWED_RECIPIENTS")?;
+    if list.is_empty() {
+        anyhow::bail!("GAS_FUNDER_ALLOWED_RECIPIENTS is set but contains no valid addresses");
+    }
+    Ok(Some(list))
+}
+
+/// Parse a comma-separated list of 0x addresses. Tolerates a pasted JSON array
+/// (surrounding `[ ]` and per-entry `"`/`'` quotes and whitespace), so the raw
+/// output of `curl .../get_api_payers` works as-is without hand-editing.
+fn parse_recipient_list(raw: &str) -> Result<Vec<Address>> {
+    let trimmed = raw.trim().trim_start_matches('[').trim_end_matches(']');
     let mut out = Vec::new();
-    for entry in raw.split(',') {
-        let e = entry.trim();
+    for entry in trimmed.split(',') {
+        let e = entry.trim().trim_matches(['"', '\'']).trim();
         if e.is_empty() {
             continue;
         }
-        let addr = Address::from_str(e).with_context(|| {
-            format!("GAS_FUNDER_ALLOWED_RECIPIENTS contains a non-address entry: {e:?}")
-        })?;
+        let addr = Address::from_str(e).with_context(|| format!("non-address entry: {e:?}"))?;
         if !out.contains(&addr) {
             out.push(addr);
         }
     }
-    if out.is_empty() {
-        anyhow::bail!("GAS_FUNDER_ALLOWED_RECIPIENTS is set but contains no valid addresses");
-    }
-    Ok(Some(out))
+    Ok(out)
 }
 
 /// Parse a required base-10 wei amount into a `U256`. (A `0x`-prefixed value
@@ -465,5 +472,22 @@ mod tests {
     fn validates_litkey_chain_runtime_config_bounds() {
         assert!(validate_chain_runtime_config(chain::BASE_CHAIN_ID).is_ok());
         assert!(validate_chain_runtime_config(0).is_err());
+    }
+
+    #[test]
+    fn parses_recipient_list_plain_and_raw_json_array() {
+        let plain = "0xf8e37f7fc324d3f7f415056dfdb192d2f07ca374, \
+                     0x8e05be38c8f3a877e9dd68f48c43962a3114937e";
+        // Exactly what `curl .../get_api_payers` returns, pasted verbatim.
+        let json = r#"["0xf8e37f7fc324d3f7f415056dfdb192d2f07ca374","0x8e05be38c8f3a877e9dd68f48c43962a3114937e"]"#;
+        let from_plain = parse_recipient_list(plain).unwrap();
+        let from_json = parse_recipient_list(json).unwrap();
+        assert_eq!(from_plain.len(), 2);
+        assert_eq!(from_plain, from_json);
+    }
+
+    #[test]
+    fn recipient_list_rejects_non_address_entries() {
+        assert!(parse_recipient_list("0xnope,not-an-address").is_err());
     }
 }
