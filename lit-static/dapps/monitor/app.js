@@ -415,14 +415,20 @@ function updateActiveNetworkBadge() {
 
 // Refresh badges for every network except the active one (kept fresh elsewhere).
 async function pollOtherNetworkHealth() {
-  const select = el('network');
-  if (!select) return;
-  const active = getServerUrl();
-  await Promise.all(Array.from(select.options).map(async (opt) => {
-    const url = opt.value.replace(/\/$/, '');
-    if (url === active) return;
-    setOptionBadge(opt, await fetchNetworkHealth(url));
-  }));
+  if (pollOtherNetworkHealth._inFlight) return;
+  pollOtherNetworkHealth._inFlight = true;
+  try {
+    const select = el('network');
+    if (!select) return;
+    const active = getServerUrl();
+    await Promise.all(Array.from(select.options).map(async (opt) => {
+      const url = opt.value.replace(/\/$/, '');
+      if (url === active) return;
+      setOptionBadge(opt, await fetchNetworkHealth(url));
+    }));
+  } finally {
+    pollOtherNetworkHealth._inFlight = false;
+  }
 }
 
 function startNetworkHealthPolling() {
