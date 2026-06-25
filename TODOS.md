@@ -110,20 +110,6 @@
 
 **Status (2026-06-25):** NOT DONE. No staleness-window docs in SDK/dashboard; no listener-lag banner (only the existing ABI-drift banner exists).
 
-## CPL-267 Sovereign Mode: Billing bypass documentation
-
-**What:** Admin writes in sovereign mode bypass Stripe billing guards (user's wallet pays gas directly to chain). Lit Action execution still charges via Stripe. Document this split explicitly in SDK + billing page.
-
-**Why:** Billing logic is per-op today (see `stripe::` in lit-api-server); sovereign admin writes never hit those guards. Accounting split must be visible to ops and support, otherwise conversion-to-sovereign looks like "billing broken."
-
-**How to fix:** Add note to `billing.md` or equivalent. Add sovereign-mode label to Stripe dashboard for per-account identification.
-
-**Priority:** P3
-
-**Added:** 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode
-
-**Status (2026-06-25):** NOT DONE. No `billing.md` (or equivalent) documents the bypass split; `lit-payments-app.md` mentions sovereign mode only re: `getBillingWalletAddress`.
-
 ## CPL-267 Sovereign Mode: 6-month adoption re-evaluation
 
 **What:** At 6 months post-ship of sovereign mode, review adoption metrics. If <5% of active accounts have converted or started sovereign, open a design doc to evaluate: (a) pivot to Approach B signed intents, (b) sunset sovereign mode, (c) continue parallel.
@@ -176,3 +162,9 @@
 - **What:** Hash-based cache invalidation for the Phase 3 event listener (only has the hashed apiKeyHash from chain event topics).
 - **Evidence:** `lit-api-server/src/accounts/blockchain_cache.rs:283-305` — `pub async fn invalidate_for_account_hash(account_api_key_hash: U256)` (plus sibling `invalidate_for_hash`), consumed by the on-chain listener in `lit-api-server/src/account_events.rs`.
 - **Original priority:** P1 (blocked Phase 3). Added 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode.
+
+## CPL-267 Sovereign Mode: Billing bypass documentation — DONE (2026-06-25)
+- **What:** Document that sovereign (ChainSecured) admin writes bypass the Stripe management-charge guard (user pays Base gas directly) while Lit Action execution still bills $0.01/sec via Stripe, so a freshly-converted account showing dropped Stripe activity doesn't read as "billing broken."
+- **Evidence:** `docs/management/pricing.mdx` — new "Billing in ChainSecured (sovereign) mode" section + billing-identity note; `docs/management/account_modes.mdx` — split the Billing table row into admin-writes vs Lit-Actions, added "How billing splits in ChainSecured mode" subsection with an ops/support `<Note>`; `lit-api-server/README.md` — billing-model paragraph referencing the `BilledManagementApiKey`/`BilledLitActionApiKey` guards.
+- **Remaining (ops, not code):** Auto-tagging sovereign customers in Stripe (`mode: sovereign` metadata) is documented as a recommended ops convenience but not implemented — the customer is created lazily with only `metadata.wallet_address` and doesn't know the on-chain mode at creation; wiring it would need a contract read at customer creation plus a metadata update on conversion (touches `lit-billing-core`), out of P3 doc scope.
+- **Original priority:** P3. Added 2026-04-21 via `/plan-eng-review` on branch feature/cpl-267-self-sovereign-mode. Shipped in PR #539.
