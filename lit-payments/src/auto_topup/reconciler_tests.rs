@@ -54,6 +54,8 @@ fn test_config(stripe_secret_key: String, db_url: String) -> Config {
         lit_accounts_contract_address: alloy_primitives::Address::ZERO,
         stripe_webhook_secret: "unused".into(),
         reconciler_interval_secs: 60,
+        enterprise_billing_interval_secs: 3600,
+        stripe_dashboard_base: "https://dashboard.stripe.com".to_string(),
         cors_allowed_origins: vec!["http://localhost".to_string()],
     }
 }

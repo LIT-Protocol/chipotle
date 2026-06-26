@@ -87,6 +87,15 @@ pub struct Config {
     /// `balance_transactions` write). Default 900 (15 minutes); set lower
     /// (e.g. 60) for local testing.
     pub reconciler_interval_secs: i64,
+    /// Interval (seconds) between enterprise committed-use billing sweeps. Each
+    /// sweep checks every active `enterprise_accounts` row and, when its anchor
+    /// day has arrived, drafts that cycle's invoice. Hourly is plenty (the work
+    /// is per-period idempotent); set lower for local testing. Default 3600.
+    pub enterprise_billing_interval_secs: i64,
+    /// Base URL for Stripe dashboard links in the enterprise review email.
+    /// Live: `https://dashboard.stripe.com`; test mode:
+    /// `https://dashboard.stripe.com/test`. Default is the live base.
+    pub stripe_dashboard_base: String,
     /// Exact-match CORS allowlist. Browser requests from any other origin
     /// will be rejected at the preflight gate. Default in production is
     /// the `PUBLIC_BASE_URL` (the dashboard is served from the same
@@ -128,6 +137,12 @@ impl Config {
             lit_accounts_contract_address: parse_accounts_contract_address()?,
             stripe_webhook_secret: required("STRIPE_WEBHOOK_SECRET")?,
             reconciler_interval_secs: optional_i64("RECONCILER_INTERVAL_SECS", 900)?,
+            enterprise_billing_interval_secs: optional_i64(
+                "ENTERPRISE_BILLING_INTERVAL_SECS",
+                3600,
+            )?,
+            stripe_dashboard_base: optional_trimmed("STRIPE_DASHBOARD_BASE")
+                .unwrap_or_else(|| "https://dashboard.stripe.com".to_string()),
             cors_allowed_origins,
         })
     }

@@ -47,6 +47,14 @@ async fn rocket() -> _ {
     rate::spawn_rate_poller(pool.clone());
     let per_customer_mutex = PerCustomerMutex::new();
     lit_payments::auto_topup::reconciler::spawn(cfg.clone(), stripe.clone(), pool.clone());
+    // Enterprise committed-use billing: monthly draft invoice + buffer regrant.
+    // See plans/enterprise-committed-billing.md.
+    lit_payments::enterprise::spawn(
+        cfg.clone(),
+        stripe.clone(),
+        pool.clone(),
+        mailer.clone(),
+    );
 
     // Codex P1 (Phase 8): exact-match CORS allowlist driven by
     // `cors_allowed_origins`. The prior config used
