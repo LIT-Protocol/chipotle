@@ -10,6 +10,7 @@ pub mod chain;
 pub mod config;
 pub mod db;
 pub mod enterprise;
+pub mod gas_funder;
 pub mod internal;
 pub mod mail;
 pub mod portal;

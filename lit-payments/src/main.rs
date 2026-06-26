@@ -55,6 +55,9 @@ async fn rocket() -> _ {
         pool.clone(),
         mailer.clone(),
     );
+    // Keep the lit-api-server API payer pool topped up (no-op unless
+    // GAS_FUNDER_PRIVATE_KEY is configured). Runs out of the TEE hot path.
+    lit_payments::gas_funder::spawn(cfg.clone(), pool.clone(), mailer.clone());
 
     // Codex P1 (Phase 8): exact-match CORS allowlist driven by
     // `cors_allowed_origins`. The prior config used

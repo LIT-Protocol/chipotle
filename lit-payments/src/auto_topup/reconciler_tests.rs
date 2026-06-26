@@ -57,6 +57,7 @@ fn test_config(stripe_secret_key: String, db_url: String) -> Config {
         enterprise_billing_interval_secs: 3600,
         stripe_dashboard_base: "https://dashboard.stripe.com".to_string(),
         cors_allowed_origins: vec!["http://localhost".to_string()],
+        gas_funder: None,
     }
 }
 
