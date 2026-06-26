@@ -26,8 +26,30 @@ pub async fn send_review_email(
     let overage = cents_to_display(inv.overage_cents);
     let total = cents_to_display(inv.total_cents);
 
+    // Metering sanity flag surfaced to the reviewer. 0 units for an active
+    // enterprise account is unusual and usually means an external credit hit the
+    // payer (which understates overage) or usage genuinely stopped — either way,
+    // worth a look before sending.
+    let caution = (inv.consumed_units == 0).then_some(
+        "0 units recorded this cycle — unusual for an active account. Verify the payer's Stripe \
+         balance and that no external credit (admin grant / LITKEY top-up) hit the payer account, \
+         which would understate overage.",
+    );
+    let text_caution = caution
+        .map(|c| format!("\n⚠ HEADS UP: {c}\n"))
+        .unwrap_or_default();
+    let html_caution = caution
+        .map(|c| {
+            format!(
+                "<p style=\"background:#fff3cd;border:1px solid #ffe69c;padding:8px;\">\
+                 ⚠ <b>Heads up:</b> {c}</p>"
+            )
+        })
+        .unwrap_or_default();
+
     let text = format!(
         "Draft invoice for {name} is ready for review.\n\
+         {text_caution}\
          \n\
          Period (issued): {period}\n\
          Committed cycle (advance): {committed_period}\n\
@@ -63,10 +85,12 @@ pub async fn send_review_email(
         invoice_cust = account.invoice_customer_id,
         payer_cust = account.payer_customer_id,
         target = account.target_credit_cents / 100,
+        text_caution = text_caution,
     );
 
     let html = format!(
         "<h2>Draft invoice for {name} is ready for review</h2>\
+         {html_caution}\
          <table cellpadding=\"4\">\
            <tr><td><b>Period (issued)</b></td><td>{period}</td></tr>\
            <tr><td><b>Committed cycle (advance)</b></td><td>{committed_period}</td></tr>\
@@ -103,6 +127,7 @@ pub async fn send_review_email(
         invoice_cust = account.invoice_customer_id,
         payer_cust = account.payer_customer_id,
         target = account.target_credit_cents / 100,
+        html_caution = html_caution,
     );
 
     mailer

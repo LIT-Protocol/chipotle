@@ -10,7 +10,7 @@ use super::types::{EnterpriseAccount, EnterpriseInvoice};
 const ACCOUNT_COLS: &str = "id, name, payer_customer_id, invoice_customer_id, \
     committed_fee_cents, included_units, overage_rate_hundredths_cent_per_unit, \
     target_credit_cents, billing_anchor_day, notify_email, auto_send, \
-    term_start, term_end, baseline_granted_at";
+    term_start, term_end, baseline_granted_at, baseline_attempted_at";
 
 const INVOICE_COLS: &str = "id, enterprise_account_id, period_key, period_start, period_end, \
     committed_period, consumed_units, included_units, overage_units, \
@@ -25,6 +25,21 @@ pub async fn list_active_accounts(pool: &PgPool) -> Result<Vec<EnterpriseAccount
     .fetch_all(pool)
     .await?;
     Ok(rows)
+}
+
+/// Stamp the baseline attempt window-start (idempotent: only when unset). Called
+/// before the baseline Stripe write so a lost success-record is recoverable
+/// within the idempotency window and refused past it.
+pub async fn mark_baseline_attempted(pool: &PgPool, account_id: i64) -> Result<()> {
+    sqlx::query(
+        "UPDATE enterprise_accounts \
+         SET baseline_attempted_at = now(), updated_at = now() \
+         WHERE id = $1 AND baseline_attempted_at IS NULL",
+    )
+    .bind(account_id)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 /// Record the one-time baseline buffer grant (or `"none"` when already funded).

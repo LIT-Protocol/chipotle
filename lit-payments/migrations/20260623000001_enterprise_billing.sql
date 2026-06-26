@@ -49,8 +49,17 @@ CREATE TABLE enterprise_accounts (
     -- has been written; gates the onboarding step so it never double-grants.
     baseline_balance_txn_id               TEXT,
     baseline_granted_at                   TIMESTAMPTZ,
+    -- Window-start for the baseline credit, stamped BEFORE the Stripe write so a
+    -- crash between the write and recording success is recoverable within
+    -- Stripe's idempotency window — and refused (not double-credited) past it.
+    baseline_attempted_at                 TIMESTAMPTZ,
     created_at                            TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at                            TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at                            TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- Payer and invoice customers are deliberately DIFFERENT Stripe customers.
+    CONSTRAINT enterprise_accounts_distinct_customers
+        CHECK (payer_customer_id <> invoice_customer_id),
+    CONSTRAINT enterprise_accounts_term_order
+        CHECK (term_start IS NULL OR term_end IS NULL OR term_start <= term_end)
 );
 
 CREATE TABLE enterprise_invoices (
@@ -66,16 +75,16 @@ CREATE TABLE enterprise_invoices (
     committed_period         TEXT        NOT NULL,
     -- Snapshot, frozen at first attempt so resume/retry never recomputes from a
     -- balance that the regrant has since changed.
-    consumed_units           BIGINT      NOT NULL,
-    included_units           BIGINT      NOT NULL,
-    overage_units            BIGINT      NOT NULL,
-    committed_fee_cents      BIGINT      NOT NULL,
-    overage_cents            BIGINT      NOT NULL,
-    total_cents              BIGINT      NOT NULL,
+    consumed_units           BIGINT      NOT NULL CHECK (consumed_units >= 0),
+    included_units           BIGINT      NOT NULL CHECK (included_units >= 0),
+    overage_units            BIGINT      NOT NULL CHECK (overage_units >= 0),
+    committed_fee_cents      BIGINT      NOT NULL CHECK (committed_fee_cents >= 0),
+    overage_cents            BIGINT      NOT NULL CHECK (overage_cents >= 0),
+    total_cents              BIGINT      NOT NULL CHECK (total_cents >= 0),
     stripe_invoice_id        TEXT,
     regrant_balance_txn_id   TEXT,
-    -- pending | draft | sent | paid | error | manual
-    status                   TEXT        NOT NULL DEFAULT 'pending',
+    status                   TEXT        NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'draft', 'sent', 'paid', 'error', 'manual')),
     notified_at              TIMESTAMPTZ,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -111,6 +120,13 @@ INSERT INTO enterprise_accounts (
 -- June 2026 committed fee was invoiced MANUALLY. Record it so the billing job's
 -- first generated invoice is the July anchor (July advance + June arrears
 -- overage) rather than re-billing June's committed fee.
+--
+-- NOTE on the window columns: this is the FIRST invoice, which is committed-fee
+-- in advance only (there is no prior cycle to meter), so period_start/period_end
+-- here are the committed cycle it paid for (2026-06-17 → 2026-07-17). Generated
+-- rows differ by design: their period_start/period_end is the ARREARS window
+-- (previous_anchor → anchor) that the overage line covers. consumed/overage are
+-- 0 because nothing was metered for this seed.
 INSERT INTO enterprise_invoices (
     enterprise_account_id, period_key, period_start, period_end, committed_period,
     consumed_units, included_units, overage_units,

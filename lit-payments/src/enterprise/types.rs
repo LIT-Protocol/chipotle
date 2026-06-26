@@ -23,6 +23,9 @@ pub struct EnterpriseAccount {
     pub term_end: Option<Date>,
     /// Set once the one-time buffer-establishment credit has been written.
     pub baseline_granted_at: Option<OffsetDateTime>,
+    /// Stamped before the baseline Stripe write; bounds the retry window so a
+    /// lost success-record can't double-credit past Stripe's idempotency TTL.
+    pub baseline_attempted_at: Option<OffsetDateTime>,
 }
 
 /// One generated (or manually recorded) invoice (`enterprise_invoices`). Also

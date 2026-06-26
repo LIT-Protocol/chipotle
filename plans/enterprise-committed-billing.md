@@ -159,6 +159,24 @@ June 2026 committed fee was invoiced manually. Mark June `sent` (manual) in
 `enterprise_invoices` and treat the onboarding grant as the starting target, so the job's
 first invoice = July $9k advance + June overage arrears — no double committed fee.
 
+## Post-review hardening (codex adversarial pass)
+- Term window (`term_start`/`term_end`) is checked **before** any money movement, so
+  no baseline buffer is granted before a contract starts, and billing + regrants stop
+  at `term_end` (renewal and any final invoice are manual).
+- Baseline grant now has the same retry-window guard as the regrant: `baseline_attempted_at`
+  is stamped before the Stripe write, and past the 23h idempotency window an unconfirmed
+  baseline refuses to re-credit and asks for human verification (no double $500k).
+- Invoice creation has the same 23h durability guard (no duplicate draft past the window).
+- Missed-cycle guard: if the immediately-preceding in-term anchor has no invoice row, the
+  job **refuses** to bill the current period (which would lump multi-cycle usage into one
+  allotment / skip a committed fee) and surfaces it for manual backfill.
+- Balance-range anomaly check logs when the payer balance is positive (buffer exhausted) or
+  below `-target` (external credit suspected); the review email flags a 0-unit cycle.
+- "Manual regrant required" messages now say to **verify whether the credit already landed**
+  (check the idempotency key) before any manual credit.
+- Migration constraints: status enum, non-negative amount columns, `payer <> invoice`
+  customer, `term_start <= term_end`.
+
 ## Honest caveats (accepted)
 - Management calls count toward the allotment as units, so a management-heavy month bills
   slightly differently than a strict compute-second reading — accepted; they're buying credits.
