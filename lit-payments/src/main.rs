@@ -49,12 +49,7 @@ async fn rocket() -> _ {
     lit_payments::auto_topup::reconciler::spawn(cfg.clone(), stripe.clone(), pool.clone());
     // Enterprise committed-use billing: monthly draft invoice + buffer regrant.
     // See plans/enterprise-committed-billing.md.
-    lit_payments::enterprise::spawn(
-        cfg.clone(),
-        stripe.clone(),
-        pool.clone(),
-        mailer.clone(),
-    );
+    lit_payments::enterprise::spawn(cfg.clone(), stripe.clone(), pool.clone(), mailer.clone());
     // Keep the lit-api-server API payer pool topped up (no-op unless
     // GAS_FUNDER_PRIVATE_KEY is configured). Runs out of the TEE hot path.
     lit_payments::gas_funder::spawn(cfg.clone(), pool.clone(), mailer.clone());

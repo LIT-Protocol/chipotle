@@ -66,19 +66,34 @@ mod tests {
 
     #[test]
     fn current_anchor_on_or_after_anchor_is_this_month() {
-        assert_eq!(current_anchor(date!(2026 - 07 - 17), 17), date!(2026 - 07 - 17));
-        assert_eq!(current_anchor(date!(2026 - 07 - 30), 17), date!(2026 - 07 - 17));
+        assert_eq!(
+            current_anchor(date!(2026 - 07 - 17), 17),
+            date!(2026 - 07 - 17)
+        );
+        assert_eq!(
+            current_anchor(date!(2026 - 07 - 30), 17),
+            date!(2026 - 07 - 17)
+        );
     }
 
     #[test]
     fn current_anchor_before_anchor_is_prev_month() {
-        assert_eq!(current_anchor(date!(2026 - 07 - 16), 17), date!(2026 - 06 - 17));
-        assert_eq!(current_anchor(date!(2026 - 07 - 01), 17), date!(2026 - 06 - 17));
+        assert_eq!(
+            current_anchor(date!(2026 - 07 - 16), 17),
+            date!(2026 - 06 - 17)
+        );
+        assert_eq!(
+            current_anchor(date!(2026 - 07 - 01), 17),
+            date!(2026 - 06 - 17)
+        );
     }
 
     #[test]
     fn current_anchor_crosses_year_boundary() {
-        assert_eq!(current_anchor(date!(2026 - 01 - 05), 17), date!(2025 - 12 - 17));
+        assert_eq!(
+            current_anchor(date!(2026 - 01 - 05), 17),
+            date!(2025 - 12 - 17)
+        );
     }
 
     #[test]
@@ -87,15 +102,24 @@ mod tests {
         assert_eq!(previous_anchor(a, 17), date!(2026 - 06 - 17));
         assert_eq!(next_anchor(a, 17), date!(2026 - 08 - 17));
         // January wraps to previous December.
-        assert_eq!(previous_anchor(date!(2026 - 01 - 17), 17), date!(2025 - 12 - 17));
+        assert_eq!(
+            previous_anchor(date!(2026 - 01 - 17), 17),
+            date!(2025 - 12 - 17)
+        );
         // December wraps to next January.
-        assert_eq!(next_anchor(date!(2026 - 12 - 17), 17), date!(2027 - 01 - 17));
+        assert_eq!(
+            next_anchor(date!(2026 - 12 - 17), 17),
+            date!(2027 - 01 - 17)
+        );
     }
 
     #[test]
     fn anchor_day_clamps_to_short_month() {
         // Anchor 31 in February clamps to the 28th (2026 is not a leap year).
-        assert_eq!(current_anchor(date!(2026 - 02 - 28), 31), date!(2026 - 02 - 28));
+        assert_eq!(
+            current_anchor(date!(2026 - 02 - 28), 31),
+            date!(2026 - 02 - 28)
+        );
     }
 
     #[test]

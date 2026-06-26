@@ -90,6 +90,9 @@ mod tests {
     fn regrant_magnitude_equals_consumed() {
         let target = 50_000_000;
         let balance = -47_000_000;
-        assert_eq!(-regrant_amount_cents(target, balance), consumed_units(target, balance));
+        assert_eq!(
+            -regrant_amount_cents(target, balance),
+            consumed_units(target, balance)
+        );
     }
 }
