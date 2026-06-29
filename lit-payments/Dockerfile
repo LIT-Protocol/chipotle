@@ -21,6 +21,14 @@ COPY lit-billing-core ./lit-billing-core
 COPY lit-payments    ./lit-payments
 
 WORKDIR /build/lit-payments
+# Cache-bust the compile. `sqlx::migrate!` embeds migration SQL + checksums into
+# the binary at COMPILE time and cargo does NOT recompile the crate when only a
+# file under migrations/ changes — so a warm build cache can ship a binary with
+# STALE embedded migrations (boot panic: "previously applied but has been
+# modified"). Bumping this token forces a clean compile so the embedded
+# migrations always match the migrations/ dir. BUMP ON EVERY migrations/ CHANGE.
+ARG MIGRATIONS_REV=20260629000001-r2
+RUN echo "migrations rev: ${MIGRATIONS_REV}"
 RUN cargo build --release --bin lit-payments
 
 # ── Runtime stage ──────────────────────────────────────────────────────────
