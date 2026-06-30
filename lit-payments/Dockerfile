@@ -39,6 +39,13 @@ RUN apt-get update \
 
 WORKDIR /app
 
+# Cache-bust before copying migrations into the runtime image. The app now loads
+# migrations from this directory at RUNTIME (see db::run_migrations), so these
+# files — not anything embedded in the binary — are the source of truth. Keep
+# this bust in lockstep with the builder one above. Bump on any migrations/ change.
+ARG MIGRATIONS_REV=20260629000001-r3
+RUN echo "runtime migrations rev: ${MIGRATIONS_REV}"
+
 COPY --from=builder /build/lit-payments/target/release/lit-payments /app/lit-payments
 COPY lit-payments/static     ./static
 COPY lit-payments/migrations ./migrations
