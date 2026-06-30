@@ -8,13 +8,13 @@ simulator locally. Source is organized by domain: `accounts/`, `actions/`, `core
 `dstack/`, `internal/`, `observability/`.
 
 ## Stack & Tooling
-- Toolchain: Stable Rust (latest)
-- Key Libraries: Tokio (async), Axum (web), Alloy/Ethers-rs (Web3 interaction)
+- Toolchain: Rust 1.91 (pinned via `rust-toolchain.toml`)
+- Key Libraries: Tokio (async), Rocket 0.5 (web), Tonic (gRPC client to lit-actions), Alloy (Web3 interaction)
 - Linting: `cargo clippy`
 
 ## Coding Rules
 - Error Handling: Do not use `.unwrap()` or `.expect()` in production paths. Use `Result` and propagate errors with `?`.
-- Async: Keep blocking operations outside of the Tokio executive thread using `tokio::task::spawn_blocking`.
+- Async: Keep blocking operations outside of the Tokio executor threads using `tokio::task::spawn_blocking`.
 - Types: Match Solidity types exactly when decoding events (e.g., `U256` mapping).
 
 ## Definition of Done

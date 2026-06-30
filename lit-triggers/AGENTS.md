@@ -8,13 +8,13 @@ dispatcher. Backed by Postgres. Key modules: `auth/`, `chain_events.rs`,
 `dispatcher.rs`, `chipotle.rs`, `crypto.rs`, `mail.rs`.
 
 ## Stack & Tooling
-- Toolchain: Stable Rust (latest)
-- Key Libraries: Tokio (async), Axum (web), Alloy/Ethers-rs (Web3 interaction)
+- Toolchain: Rust 1.91 (required by alloy)
+- Key Libraries: Tokio (async), Rocket 0.5 (web), alloy-primitives (Web3 types), Postgres
 - Linting: `cargo clippy`
 
 ## Coding Rules
 - Error Handling: Do not use `.unwrap()` or `.expect()` in production paths. Use `Result` and propagate errors with `?`.
-- Async: Keep blocking operations outside of the Tokio executive thread using `tokio::task::spawn_blocking`.
+- Async: Keep blocking operations outside of the Tokio executor threads using `tokio::task::spawn_blocking`.
 - Types: Match Solidity types exactly when decoding events (e.g., `U256` mapping).
 
 ## Definition of Done

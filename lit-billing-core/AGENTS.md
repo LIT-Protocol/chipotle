@@ -9,13 +9,14 @@ keyed by `metadata.wallet_address`; always look up via
 `reporting`, `format`, plus `billing_auth/` and EIP-712 helpers.
 
 ## Stack & Tooling
-- Toolchain: Stable Rust (latest)
-- Key Libraries: Tokio (async), Axum (web), Alloy/Ethers-rs (Web3 interaction)
+- Toolchain: Rust 1.91 (pinned via `rust-toolchain.toml`)
+- Crate type: shared library (no binary), consumed by lit-api-server and lit-payments
+- Key Libraries: Tokio (async), reqwest (Stripe HTTP client), Rocket 0.5 request guards (`FromRequest`), Alloy (Web3 / EIP-712)
 - Linting: `cargo clippy`
 
 ## Coding Rules
 - Error Handling: Do not use `.unwrap()` or `.expect()` in production paths. Use `Result` and propagate errors with `?`.
-- Async: Keep blocking operations outside of the Tokio executive thread using `tokio::task::spawn_blocking`.
+- Async: Keep blocking operations outside of the Tokio executor threads using `tokio::task::spawn_blocking`.
 - Types: Match Solidity types exactly when decoding events (e.g., `U256` mapping).
 
 ## Definition of Done

@@ -11,8 +11,9 @@ This is a Web3/crypto monorepo. It features a Rust backend, Solidity smart contr
 and a JavaScript/TypeScript frontend / monorepo tooling layer.
 
 ## Monorepo Architecture
-- Tooling: Rust crates built per-crate with Cargo (no repo-root workspace); the `e2e`
-  suite uses pnpm.
+- Tooling: there is no repo-root Cargo workspace — build each Rust crate from its own
+  `Cargo.toml`. Some crates are themselves multi-crate workspaces (e.g. `lit-actions`,
+  `lit-core`), so run `cargo` from that crate's directory. The `e2e` suite uses pnpm.
 - Language Boundaries:
   - `lit-actions`, `lit-api-server`, `lit-billing-core`, `lit-payments`,
     `lit-triggers`, `lit-core`: Rust (services & indexers)

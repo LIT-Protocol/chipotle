@@ -15,7 +15,7 @@ the `lit_node_express` output and uses a built-in dev wallet (Anvil account #0) 
 
 ## Coding Rules
 - Error Handling: Do not use `.unwrap()` or `.expect()` in production paths. Use `Result` and propagate errors with `?`.
-- Async: Keep blocking operations outside of the Tokio executive thread using `tokio::task::spawn_blocking`.
+- Async: Keep blocking operations outside of the Tokio executor threads using `tokio::task::spawn_blocking`.
 - Types: Match Solidity types exactly when encoding calldata / decoding events (e.g., `U256` mapping); these must track the `lit_node_express` contracts.
 - Never commit private keys; the dev wallet is for local/testnet only.
 

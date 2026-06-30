@@ -9,13 +9,13 @@ and a gas funder. Source is organized by domain: `auth/`, `auto_topup/`, `billin
 and `plans/auto-top-up.md` for design.
 
 ## Stack & Tooling
-- Toolchain: Stable Rust (latest)
-- Key Libraries: Tokio (async), Axum (web), Alloy/Ethers-rs (Web3 interaction)
+- Toolchain: Rust 1.91 (required by alloy)
+- Key Libraries: Tokio (async), Rocket 0.5 (web), Alloy (Web3 interaction)
 - Linting: `cargo clippy`
 
 ## Coding Rules
 - Error Handling: Do not use `.unwrap()` or `.expect()` in production paths. Use `Result` and propagate errors with `?`.
-- Async: Keep blocking operations outside of the Tokio executive thread using `tokio::task::spawn_blocking`.
+- Async: Keep blocking operations outside of the Tokio executor threads using `tokio::task::spawn_blocking`.
 - Types: Match Solidity types exactly when decoding events (e.g., `U256` mapping).
 
 ## Definition of Done
