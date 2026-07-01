@@ -320,6 +320,87 @@ Option B) once perf data shows the shared VM is the bottleneck.
 
 ---
 
+## Open questions to resolve before/early in the build (with recommended defaults)
+
+Each has a recommended v1 answer so the builder gets decisions, not just questions. Grounded in
+how JS actions work today (file:line refs included).
+
+### 1. Charging / payment — mostly "same as JS", two real decisions
+Today JS actions bill **flat $0.01 per wall-clock second** (`COST_LIT_ACTION_PER_SECOND_CENTS = 1`,
+`stripe.rs:33`; charge in `stripe.rs:774`), **min 1s**, accumulated via the `UpdateResourceUsage`
+op and flushed to Stripe every 5s (`handle_ops.rs:9,155-199`, `execution.rs:25-49,215`). Fetch
+count is a **quota only, not billed** (`handle_ops.rs:57-70`; per-fetch charging is commented out
+at `stripe.rs:59`).
+- **Reuse the exact metering primitive.** The guest SDK / supervisor emits `UpdateResourceUsage`
+  ticks over the op-loop just like the JS runtime; the per-second Stripe path is unchanged. No new
+  billing code.
+- **Decision — don't bill cold start.** Start the billing clock at *user-code start*, not sandbox
+  boot. JS runs from a warm pool; a gVisor sandbox has real cold-start. `execution_start` is set
+  api-server-side before the stream (`execution.rs:215`) — ensure the clock reflects user code, or
+  users pay for our provisioning.
+- **Decision — resource tiers (defer, but design the hook now).** JS is flat-rate regardless of
+  its 64 MB cap. A sandbox may request far more memory/vCPU, which costs us more. **v1:** keep flat
+  per-second at a single default tier. **Leave room** for a tier multiplier (memory/vCPU) on the
+  per-second rate later — don't hard-code "flat forever".
+
+### 2. Action identity & PKP permissioning — MUST be preserved (highest-risk item)
+Authorization is keyed on the **IPFS CID of the action code**: `ipfs_cid_to_u256 =
+keccak256(ipfs_id)` (`parse_with_hash.rs:74-106`) → on-chain `canUseWalletInAction(apiKeyHash,
+cidHash, walletAddress)` (`accounts/mod.rs:695-727`, cached `op_code_helpers/mod.rs:34-50`). The
+action's *own* derived key also comes from the CID (`get_lit_action_key("lit_action_{ipfs_id}")`,
+`dstack/v1/mod.rs:14-20`) — same CID ⇒ same key, deterministically.
+- **Decision — content-address the any-language artifact and reuse this model unchanged.** The
+  runner artifact (bundle/image/binary — see #3) gets a content hash used as `ipfs_id`. Then
+  permissions *and* action-key derivation work with **zero changes**, and PKP permissions bind to
+  exact code exactly as today. If the builder skips this and uses a mutable identity, the whole
+  permission + key-derivation model breaks. This is the one thing not to improvise.
+
+### 3. Code/artifact delivery & format — the biggest genuinely-open design axis
+JS actions arrive as inline code or an IPFS CID. "Any language" needs a defined artifact format.
+Options: (a) **source bundle + manifest** declaring entrypoint + a supported base runtime we
+preinstall; (b) **static binary / tarball**; (c) **full OCI image** (most flexible, but pull time
++ supply-chain/attestation surface).
+- **v1 recommendation:** a **content-addressed bundle** (tarball) with a small manifest
+  (entrypoint + declared base runtime from a supported set), hashed → IPFS CID (feeds #2). Runs on
+  the preinstalled base image. **Defer OCI images** to a later phase (image pull latency, registry
+  trust, larger measured surface). Document this as a decision so the builder doesn't default to
+  "bring any container" and inherit the hard problems first.
+
+### 4. Network egress & fetch quota — needs an enforcement model
+JS `fetch()` is an **in-process `reqwest` call** inside the runner, and quota is enforced only
+because the JS wrapper *cooperatively* calls `op_increment_fetch_count` before each fetch
+(`bindings.rs:95-102,407-459`; quota check `handle_ops.rs:57-70`). There is **no hard egress
+allowlist** — the proxy is optional/per-request. A sandbox running arbitrary code **won't
+cooperate**: it can open raw sockets and bypass the counter entirely.
+- **Decision — proxy-only egress.** Give the sandbox **no direct network**; route all HTTP through
+  a **lit proxy exposed over the op-loop** (the guest `lit` SDK provides `fetch`). Then the fetch
+  counter/quota is enforced by construction (there's no other path out), we keep the existing
+  venue-proxy feature, and we get egress logging. gVisor's netstack makes "no direct egress, one
+  proxied path" straightforward.
+- **Note (not a new risk):** user code holds the derived key *and* can fetch, so it can exfiltrate
+  the key — but that's **identical to today's JS model** (a JS action with `getPrivateKey` + fetch
+  can already do this), and the action is authored by the party who already holds the permission.
+  Proxy-only egress at least gives us logging/rate-limiting we don't fully have today.
+
+### 5. Resource limits & timeouts — define defaults + maxes
+JS defaults: **64 MB heap, 15-min timeout**. Sandboxes will be larger. Define the runner's
+**default and max** memory / vCPU / disk / timeout / pids, enforced by the supervisor's per-sandbox
+delegated cgroup (see "Resource limits" above). Tie the chosen tier to #1's pricing hook.
+
+### 6. Determinism / multi-node consensus — confirm N/A
+The classic Lit network runs actions on many nodes and compares results for signing consensus.
+This TEE single-server model (`lit-api-server` in one attested CVM) does **not** appear to do
+multi-node result comparison — so user code need **not** be deterministic. **Confirm** with the
+team before building; if wrong, it constrains the whole runtime.
+
+### 7. Guest job/response contract — mirror `main(params)` → `setResponse`
+Define how the job reaches the guest (code + `js_params` + `auth_context` + `http_headers`) and how
+the result returns (the `SetResponse` op). Keep semantics identical to JS: params in, one response
+out, `print` for logs. For arbitrary languages the `lit` SDK exposes this (e.g. read params from a
+known path/env; `lit set-response …`).
+
+---
+
 ## Constraint note
 
 Per standing guidance: all Phala/TEE experimentation stays on the **dev environment /
