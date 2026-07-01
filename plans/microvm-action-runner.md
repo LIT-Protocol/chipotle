@@ -255,6 +255,71 @@ no remaining "is it possible" unknowns. **Next is implementation**: deploy the r
 
 ---
 
+## Deployment topology on Phala
+
+### How Phala/dstack works
+A dstack **"app" = one CVM = one TDX VM** running **one `docker-compose`**. The compose file's
+`compose_hash` is what gets measured and attested — it *is* the app's identity. Multiple
+*containers* run inside that single VM; services are **never** split across VMs within an app.
+An app *can* be replicated to **N identical VMs** behind Phala's gateway for horizontal scale, but
+each VM runs the *whole* compose — so it's "1 app → N identical full-stack VMs," never "services
+sharded across VMs." To give a component its own VM/resources, it must be its **own app**.
+
+### Today
+One app, one VM (replicable), 4 containers in `docker-compose.phala.yml`:
+`lit-api-server` (Rocket :8000, holds keys, mounts `/var/run/dstack.sock`), `lit-actions`
+(JS runner, gRPC over the shared `lit-socket` volume), `otel-collector`, `dstack-ingress`
+(RA-TLS :443 → api-server). Note `lit-actions` and `lit-api-server` are already separate
+images/containers sharing the `lit-socket` unix-socket volume — that's the seam the new runner
+slots into.
+
+### Decision: Option A — new container in the existing compose (same VM)
+Start the gVisor runner as **another service in `docker-compose.phala.yml`**, in the same CVM:
+
+- New service (e.g. `lit-runner-gvisor`) mounts the same `lit-socket` volume → talks to
+  `lit-api-server` over the **identical op-loop path** the JS runner uses. Roughly "add a service
+  block."
+- `runsc` runs *inside* that container (nesting: CVM → container → gVisor sandbox). The container
+  needs the privileges exercised in the spikes (`privileged` / `SYS_ADMIN`-ish + the `--host-uds`
+  path); production should scope these down to the minimum that lets `runsc` create sandboxes.
+- **Shares the VM's attestation boundary and key-custody context** — raw keys stay inside the same
+  attested VM, so there is **zero new cross-VM trust plumbing**. Simplest and safest.
+
+**Graduate to Option B (its own dstack app / own VM) later** only when the runner needs dedicated
+resources, independent scaling/upgrade cadence, or a distinct trust profile. Cost of graduating: a
+secured CVM↔CVM channel (RA-TLS/mTLS between two attested apps) for the op-loop, plus its own
+attestation whitelisting. Raw-key custody still requires it to be a TEE, so a separate CVM is fine
+trust-wise — the cross-app channel is the new thing to secure.
+
+### Two operational flags
+1. **`compose_hash` changes are governed in production.** Adding the service changes the hash; in
+   prod the new hash + image must be whitelisted on the `DstackApp` contract on Base (governed
+   change, not a plain redeploy). On dev it's just a redeploy.
+2. **Resource contention** — see below.
+
+### Resource limits for the new container
+Today the compose sets **no** per-service `cpus`/`mem_limit`, so a heavy action could starve
+`lit-api-server` (noisy neighbor) since they share one VM. dstack runs plain `docker compose`
+(not swarm), so use the **non-swarm** compose keys (the `deploy.resources` block is ignored
+outside swarm). Apply **two layers**:
+
+- **Container-level cap (compose)** — bounds the runner's *total* footprint so `lit-api-server`
+  always has headroom. On the `lit-runner-gvisor` service set:
+  - `cpus:` — e.g. leave ≥1 vCPU reserved for api-server + ingress + otel; cap the runner at the
+    remainder.
+  - `mem_limit:` + `mem_reservation:` — hard ceiling + soft floor.
+  - `pids_limit:` — cap total processes (defense against fork bombs across sandboxes).
+- **Per-execution cap (supervisor)** — the runner supervisor gives *each* `runsc` sandbox its own
+  **delegated leaf cgroup** (the spike-1 fix) with per-execution CPU/memory/pids limits + timeout,
+  mirroring today's per-action 64 MB / 15-min budget. gVisor enforces the sandbox side; the leaf
+  cgroup enforces the host side.
+
+Net: compose limits keep the *runner as a whole* from starving its VM-mates; the supervisor's
+per-sandbox cgroups keep one tenant's action from starving another. Revisit the compose split (→
+Option B) once perf data shows the shared VM is the bottleneck.
+
+---
+
 ## Constraint note
 
 Per standing guidance: all Phala/TEE experimentation stays on the **dev environment /
