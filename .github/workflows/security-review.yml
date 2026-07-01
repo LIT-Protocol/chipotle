@@ -1,0 +1,174 @@
+name: Security Review (gated)
+
+# Runs a Trail of Bits "differential-review" security analysis on every PR and
+# GATES the merge: the job fails (red required check) when the review surfaces a
+# CRITICAL or HIGH severity finding at MEDIUM+ confidence.
+#
+# Make this a required status check in branch protection (Settings -> Branches)
+# so a failing review blocks merge.
+#
+# Security note: this uses `pull_request` (NOT `pull_request_target`). Fork PRs
+# therefore run with a read-only GITHUB_TOKEN and cannot exfiltrate secrets, at
+# the cost of the inline PR comment being skipped on forks (the gate + job
+# summary still work). Internal PRs get write access and post the review comment.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+concurrency:
+  group: security-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+  actions: read
+
+jobs:
+  security-review:
+    # Skip draft PRs to save spend; they re-trigger on `ready_for_review`.
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      # Gate policy (edit to taste). Findings matching BOTH lists block merge.
+      GATE_SEVERITIES: "CRITICAL HIGH"
+      GATE_MIN_CONFIDENCES: "HIGH MEDIUM"
+      VERDICT_FILE: ".security-review/verdict.json"
+    steps:
+      - name: Checkout PR head (full history for git blame / regression detection)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Fetch base ref
+        run: git fetch --no-tags origin "${{ github.event.pull_request.base.sha }}"
+
+      - name: Run differential security review
+        id: review
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          additional_permissions: |
+            actions: read
+          # Broad read/write + Bash/Task so the skill can git-blame, grep the
+          # codebase, delegate to the adversarial-modeler agent, and comment.
+          claude_args: '--allowedTools "Read,Write,Edit,Grep,Glob,Bash,Task"'
+          prompt: |
+            You are running as a GATED, automated security reviewer on pull request
+            #${{ github.event.pull_request.number }} in ${{ github.repository }}.
+
+            Base SHA: ${{ github.event.pull_request.base.sha }}
+            Head SHA: ${{ github.event.pull_request.head.sha }}
+            The changes under review are: `git diff ${{ github.event.pull_request.base.sha }}...HEAD`
+
+            TASK:
+            1. Use the `differential-review` skill (vendored at
+               `.claude/skills/differential-review/`) to perform a security-focused
+               differential review of ONLY the changes in the diff range above.
+               Follow its methodology: triage by risk, git-blame removed security
+               code to catch regressions, calculate blast radius, and run the
+               adversarial-modeler agent on any HIGH RISK change.
+            2. Write the human-readable report to `.security-review/report.md`.
+            3. Write a machine-readable verdict to `${{ env.VERDICT_FILE }}` EXACTLY
+               matching this JSON schema (this file is REQUIRED — the CI gate fails
+               closed if it is missing or unparseable):
+
+               {
+                 "schema_version": 1,
+                 "head_sha": "<head sha>",
+                 "base_sha": "<base sha>",
+                 "summary": "<=400 char plain-English summary of risk posture",
+                 "findings": [
+                   {
+                     "id": "F1",
+                     "title": "short title",
+                     "severity": "CRITICAL|HIGH|MEDIUM|LOW|INFO",
+                     "confidence": "HIGH|MEDIUM|LOW",
+                     "file": "path/to/file",
+                     "line": 123,
+                     "description": "what is wrong and why it is exploitable",
+                     "recommendation": "concrete fix"
+                   }
+                 ],
+                 "counts": {"CRITICAL":0,"HIGH":0,"MEDIUM":0,"LOW":0,"INFO":0}
+               }
+
+            SEVERITY/CONFIDENCE RULES:
+            - Only assign HIGH/MEDIUM confidence when you have concrete evidence
+              (line numbers + an attack scenario). Speculative concerns are LOW.
+            - Doc-only / formatting / comment changes: emit zero findings.
+            - Do NOT include a "gate" field; the gate is computed by CI from
+              `findings` so it cannot be misjudged in prose.
+            4. If you have write access, post a concise PR comment summarizing the
+               verdict (counts + top findings). If commenting fails (e.g. fork PR),
+               continue — do not error out.
+
+            Output a one-line final message: "verdict written: N findings".
+
+      - name: Evaluate gate
+        if: always()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          VERDICT="$VERDICT_FILE"
+
+          if [ ! -f "$VERDICT" ]; then
+            echo "::error title=Security review incomplete::No verdict file at $VERDICT. Failing closed."
+            {
+              echo "## 🔒 Security Review — FAILED (incomplete)"
+              echo ""
+              echo "The reviewer did not produce \`$VERDICT\`. Re-run the job; if it"
+              echo "keeps failing, inspect the **Run differential security review** step logs."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          if ! jq -e . "$VERDICT" >/dev/null 2>&1; then
+            echo "::error title=Security review invalid::$VERDICT is not valid JSON. Failing closed."
+            exit 1
+          fi
+
+          echo "Gate policy: severity in [$GATE_SEVERITIES] AND confidence in [$GATE_MIN_CONFIDENCES] blocks merge."
+
+          # Split the space-separated env lists inside jq so the logic does not
+          # depend on shell word-splitting behavior.
+          blocking=$(jq --arg sev "$GATE_SEVERITIES" --arg conf "$GATE_MIN_CONFIDENCES" '
+            ($sev | split(" ")) as $S | ($conf | split(" ")) as $C |
+            [.findings[]? | select((.severity as $s | $S | index($s)) and (.confidence as $c | $C | index($c)))]' \
+            "$VERDICT")
+          blocking_count=$(echo "$blocking" | jq 'length')
+          total=$(jq '.findings | length' "$VERDICT")
+          summary=$(jq -r '.summary // "(no summary)"' "$VERDICT")
+
+          {
+            echo "## 🔒 Security Review"
+            echo ""
+            echo "$summary"
+            echo ""
+            echo "**Findings:** $total total · **$blocking_count blocking** (severity ∈ {$GATE_SEVERITIES}, confidence ∈ {$GATE_MIN_CONFIDENCES})"
+            echo ""
+            if [ "$total" -gt 0 ]; then
+              echo "| Severity | Confidence | File:Line | Title |"
+              echo "|---|---|---|---|"
+              jq -r '.findings[]? | "| \(.severity) | \(.confidence) | \(.file // "?"):\(.line // "?") | \(.title) |"' "$VERDICT"
+              echo ""
+            fi
+            echo "<details><summary>Full report</summary>"
+            echo ""
+            echo '```'
+            [ -f .security-review/report.md ] && cat .security-review/report.md || echo "(report.md not produced)"
+            echo '```'
+            echo "</details>"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$blocking_count" -gt 0 ]; then
+            echo "::error title=Security gate failed::$blocking_count blocking finding(s). See job summary / PR comment."
+            exit 1
+          fi
+          echo "Security gate passed: no blocking findings."

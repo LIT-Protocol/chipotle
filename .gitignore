@@ -1,6 +1,10 @@
 .vscode
 .cursor
-.claude
+# Ignore local Claude state, but track the vendored security-review skill + agent
+# used by .github/workflows/security-review.yml
+.claude/*
+!.claude/skills/
+!.claude/agents/
 .agents
 .env
 docker-compose.deploy.yml
