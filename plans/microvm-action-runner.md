@@ -155,19 +155,83 @@ checkpoint/restore for fast resume (same warm/cold idea bhatti uses, minus the h
 
 ---
 
-## Spikes (priority order)
+## Spike 1 result — ✅ DONE (2026-07-01): gVisor runs inside a Phala TDX CVM
 
-| # | Spike | Answers | Cost |
-|---|-------|---------|------|
-| **1** | **Boot a `runsc` hello-world inside a dev Phala CVM.** gVisor's ptrace/systrap platform needs `PTRACE`/`seccomp` and possibly specific caps a locked-down guest might restrict. Confirm `runsc` runs at all. | Is the primary architecture viable inside TDX? Replaces the old "/dev/kvm?" spike. | small |
-| **2** | **Per-exec overlay rootfs + op-loop socket:** run a non-JS guest (Go/Python) in `runsc` that does one `getPrivateKey` + local sign + `setResponse` round-trip against a local api-server, over a mounted socket, with a per-exec tmpfs overlay. | Proves the language-agnostic ABI end-to-end + the FS isolation model. | medium |
-| **3** | **Sandbox escape / isolation review of gVisor inside TDX.** Threat-model tenant-A→tenant-B key theft; confirm the two-layer (Sentry + CVM kernel) argument holds for our config; check known `runsc` CVEs vs our kernel. | Is "tenant isolation inside the TEE" actually sufficient for raw-key custody? | medium |
-| **4** | **Pre-warm + perf:** warm-pool of `runsc` sandboxes (mirror `worker_pool.rs`); measure cold/warm start + a representative sign workload vs the current Deno path. | Latency/throughput acceptable? Checkpoint/restore needed? | medium |
-| **5** | **(Alt path) Per-execution TDX CVM:** measure Phala CVM provisioning/boot latency + cost for the max-isolation model. | Is per-exec-CVM ever worth it (high-value/long-running actions)? | small (external) |
+Deployed a throwaway `gvisor-spike` CVM (tdx.small, image `dstack-dev-0.5.9`, kernel
+`6.9.0-dstack`), downloaded `runsc release-20260622.0`, and booted sandboxes. **Result:**
 
-**Spikes 1 and 2 gate everything.** Spike 1 says whether `runsc` runs in the CVM at all; spike 2
-proves the any-language op-loop + per-exec FS. Image build, supervisor, guest SDKs, and examples
-all wait on those.
+- **systrap platform (modern default): WORKS.** **ptrace platform: WORKS.** Confirmed real
+  sandboxing, not passthrough — inside the sandbox `uname` reports `4.19.0-gvisor` (vs host
+  `6.9.0-dstack`) and dmesg shows gVisor's `Starting gVisor... / Synthesizing system calls...`
+  banner.
+- **kvm platform: N/A** — `/dev/kvm` absent (confirms TDX has no nested KVM, as predicted).
+- Kernel prerequisites all present: `tdx_guest` cpuinfo flag (real TDX), **user namespaces
+  enabled** (`user.max_user_namespaces = 7360`), **no yama `ptrace_scope`** restriction, no
+  seccomp on the host process.
+- **One real gotcha, now understood:** the first attempt failed for *all* platforms at the same
+  pre-platform step — `cgroup.subtree_control: device or resource busy`. This is the classic
+  cgroup-v2 "no internal processes" container-in-container issue (runsc tried to enable
+  controllers on a cgroup that already held PID 1), **not** a gVisor/kernel blocker. Fixed
+  instantly with `runsc --ignore-cgroups`. **Production implication:** the sandbox supervisor
+  must give each `runsc` sandbox a properly *delegated* leaf cgroup (or run with cgroup handling
+  disabled and enforce limits ourselves) — a solved problem, but a design item for the supervisor.
+- **Access pattern learned:** `phala deploy` auto-attaches `~/.ssh/id_*.pub` and picks a dev OS
+  image, so `phala ssh --cvm-id … -- 'docker exec <container> …'` gives a fast interactive loop —
+  no redeploy needed to iterate inside a running CVM.
+
+**Scratch compose:** `.context/spikes/docker-compose.gvisor-spike.yml`.
+
+---
+
+## Spike 2 result — ✅ DONE (2026-07-01): prod-image parity + host-UDS socket reachability
+
+Original "spike 2" was going to build a dummy op-loop server and prove a non-JS gRPC round-trip.
+**Dropped as redundant** — gRPC over a unix socket is the production path today, `lit-api-server`
+*is* the op-loop server, and protobuf has codegen for every language. The round-trip isn't in
+doubt. What *was* genuinely unverified were two cheap things, now both closed on a `gvisor-uds`
+CVM deployed on the **production** OS image (`dstack-0.5.9`, non-dev):
+
+- **Production-image parity: ✅.** gVisor boots identically on the prod image — sandbox reports
+  `4.19.0-gvisor`, host `6.9.0-dstack`, `tdx_guest` present. No dev-vs-prod kernel difference that
+  matters for us.
+- **Host-UDS gate (the one gVisor-specific wrinkle): ✅ understood.** By default a gVisor sandbox
+  **cannot** connect to a host unix domain socket — proven: without the flag, `socat` in the
+  sandbox got `connect(/tmp/op.sock): Connection refused`. Launch `runsc` with **`--host-uds=all`**
+  and it works — full round trip returned `PONG_FROM_HOST`. So the guest reaches the
+  `lit-api-server` socket iff the supervisor launches `runsc --host-uds=…` (or we expose the op-loop
+  over vsock/TCP instead). Known flag, not a research question.
+
+Scratch compose: `.context/spikes/docker-compose.gvisor-uds.yml`.
+
+**Both feasibility gates are now green.** No remaining "is it possible" unknowns — the rest is
+implementation. Remaining *research* items (isolation review, perf) are quality gates, not
+blockers, and move below.
+
+---
+
+## Feasibility: settled. What's left is implementation + quality gates.
+
+### Implementation phases (this is the actual work — not spikes)
+Deploy the **real `lit-api-server`** to a dev Phala box and build the runner against it:
+
+1. **Generalize the runner protocol.** Fork/rename the proto so the op-loop is language-neutral
+   (`ExecuteRequest` etc.); keep op semantics identical so api-server op-handlers are reused verbatim.
+2. **Sandbox supervisor** (replaces the Deno worker; mirror `worker_pool.rs`): launches `runsc`
+   per execution with `--host-uds`, a **delegated leaf cgroup** per sandbox (spike-1 fix), a
+   per-exec **overlay rootfs** (read-only base + tmpfs upper), and supervisor-level timeout/memory
+   enforcement.
+3. **Base sandbox image** with language runtimes + the preinstalled `lit` CLI/SDK.
+4. **Guest `lit` CLI/SDK**: receives the job (code + params + auth_context + headers), exposes the
+   ops to user code over the host-UDS op-loop socket.
+5. **Wire into `lit-api-server`** as a new runner target alongside the JS runner; examples in ≥2
+   non-JS languages (e.g. a Solana sign in Rust/Go/Python).
+
+### Quality gates (before shipping — not feasibility blockers)
+| Gate | Question |
+|---|---|
+| **Isolation review** | Threat-model tenant-A→tenant-B key theft; validate the two-layer (Sentry + CVM kernel) argument for our config; review known `runsc` CVEs vs kernel `6.9.0-dstack`; decide `--host-uds` scope (per-sandbox socket, not shared). |
+| **Perf / pre-warm** | Warm-pool of `runsc` sandboxes (mirror `worker_pool.rs`); measure cold/warm start + a representative sign workload vs the current Deno path; evaluate gVisor checkpoint/restore. |
+| **Alt path (optional)** | Per-execution TDX CVM for max-isolation/high-value workloads — measure Phala provisioning/boot latency + cost. |
 
 ---
 
@@ -181,10 +245,13 @@ no `/dev/kvm`, and runs any language.
 - **Firecracker was never the point** — *VM-grade tenant isolation without a hypervisor* was, and
   gVisor is the right tool inside a TEE.
 - **Per-execution TDX CVM** is the max-isolation alternative if gVisor's boundary proves
-  insufficient (spike 3) or for special high-value workloads — at the cost of seconds-scale boot.
+  insufficient (isolation review) or for special high-value workloads — at the cost of
+  seconds-scale boot.
 
-Do **spike 1 today**: it's the one thing that can kill the primary architecture, and it's a
-`runsc` hello-world in a dev CVM.
+**Feasibility is settled and green** — gVisor runs on systrap + ptrace inside a real TDX CVM
+(prod image), and a sandboxed process reaches the host op-loop socket via `--host-uds`. There are
+no remaining "is it possible" unknowns. **Next is implementation**: deploy the real
+`lit-api-server` to a dev Phala box and build the runner against it (phases above).
 
 ---
 
