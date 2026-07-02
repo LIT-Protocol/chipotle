@@ -320,84 +320,128 @@ Option B) once perf data shows the shared VM is the bottleneck.
 
 ---
 
-## Open questions to resolve before/early in the build (with recommended defaults)
+## Resolved design decisions (handoff)
 
-Each has a recommended v1 answer so the builder gets decisions, not just questions. Grounded in
-how JS actions work today (file:line refs included).
+All decided with the team (2026-07-01). Grounded in how JS actions work today (file:line refs).
 
-### 1. Charging / payment — mostly "same as JS", two real decisions
-Today JS actions bill **flat $0.01 per wall-clock second** (`COST_LIT_ACTION_PER_SECOND_CENTS = 1`,
-`stripe.rs:33`; charge in `stripe.rs:774`), **min 1s**, accumulated via the `UpdateResourceUsage`
-op and flushed to Stripe every 5s (`handle_ops.rs:9,155-199`, `execution.rs:25-49,215`). Fetch
-count is a **quota only, not billed** (`handle_ops.rs:57-70`; per-fetch charging is commented out
-at `stripe.rs:59`).
-- **Reuse the exact metering primitive.** The guest SDK / supervisor emits `UpdateResourceUsage`
-  ticks over the op-loop just like the JS runtime; the per-second Stripe path is unchanged. No new
+### 1. Charging / payment — reuse JS pricing; no cold-start charge
+JS actions bill **flat $0.01 per wall-clock second** (`COST_LIT_ACTION_PER_SECOND_CENTS = 1`,
+`stripe.rs:33`; charge `stripe.rs:774`), **min 1s**, accumulated via `UpdateResourceUsage` and
+flushed every 5s (`handle_ops.rs:9,155-199`, `execution.rs:25-49,215`).
+- **✅ Reuse the exact same pricing + metering primitive.** Guest SDK / supervisor emits
+  `UpdateResourceUsage` ticks over the op-loop; the per-second Stripe path is unchanged. No new
   billing code.
-- **Decision — don't bill cold start.** Start the billing clock at *user-code start*, not sandbox
-  boot. JS runs from a warm pool; a gVisor sandbox has real cold-start. `execution_start` is set
-  api-server-side before the stream (`execution.rs:215`) — ensure the clock reflects user code, or
-  users pay for our provisioning.
-- **Decision — resource tiers (defer, but design the hook now).** JS is flat-rate regardless of
-  its 64 MB cap. A sandbox may request far more memory/vCPU, which costs us more. **v1:** keep flat
-  per-second at a single default tier. **Leave room** for a tier multiplier (memory/vCPU) on the
-  per-second rate later — don't hard-code "flat forever".
+- **✅ Do not charge for cold boot.** Start the billing clock at *user-code start*, not sandbox
+  provisioning. `execution_start` is set api-server-side before the stream (`execution.rs:215`) —
+  the runner must signal "user code started" so the clock reflects user time, not our cold start.
+- **Cold-boot estimate:** plain `runsc` sandbox start is ~**100–300 ms** (Sentry + gofer), plus the
+  in-sandbox runtime init (static Go/Rust binary ~single-digit ms; Python ~30–100 ms; Node
+  ~100 ms). So realistic cold path ~**150–500 ms**. **Mitigated to ~ms via a warm pool** (pre-booted
+  sandboxes, one-execution-each, mirroring `worker_pool.rs`) and/or gVisor checkpoint/restore
+  (tens of ms). Net: users shouldn't perceive cold start once pre-warming exists, and either way
+  they aren't billed for it.
+- Resource-tier pricing stays a **future hook**, not v1 (see resource model below).
 
-### 2. Action identity & PKP permissioning — MUST be preserved (highest-risk item)
-Authorization is keyed on the **IPFS CID of the action code**: `ipfs_cid_to_u256 =
+### 2 + 3. Action identity, artifact format, and the "code string" fast path — combined decision
+Authorization is keyed on the **content hash (IPFS CID) of the action code**: `ipfs_cid_to_u256 =
 keccak256(ipfs_id)` (`parse_with_hash.rs:74-106`) → on-chain `canUseWalletInAction(apiKeyHash,
-cidHash, walletAddress)` (`accounts/mod.rs:695-727`, cached `op_code_helpers/mod.rs:34-50`). The
-action's *own* derived key also comes from the CID (`get_lit_action_key("lit_action_{ipfs_id}")`,
-`dstack/v1/mod.rs:14-20`) — same CID ⇒ same key, deterministically.
-- **Decision — content-address the any-language artifact and reuse this model unchanged.** The
-  runner artifact (bundle/image/binary — see #3) gets a content hash used as `ipfs_id`. Then
-  permissions *and* action-key derivation work with **zero changes**, and PKP permissions bind to
-  exact code exactly as today. If the builder skips this and uses a mutable identity, the whole
-  permission + key-derivation model breaks. This is the one thing not to improvise.
+cidHash, walletAddress)` (`accounts/mod.rs:695-727`, cached `op_code_helpers/mod.rs:34-50`), and the
+action's own key derives from the CID (`get_lit_action_key("lit_action_{ipfs_id}")`,
+`dstack/v1/mod.rs:14-20`). **Key insight from the team:** most users don't actually pin to IPFS —
+they send a **code string**, and `lit-api-server` **derives the CID from the bytes server-side**.
+IPFS pinning is slow and painful during dev iteration, so we preserve the "send bytes, we hash"
+model.
+- **✅ Artifact = a content-addressed bundle** loaded into the preinstalled base image. The bundle
+  (tarball: entrypoint + a manifest declaring the base runtime from a supported set + any files) is
+  the "code".
+- **✅ Preserve the code-string fast path.** The user **sends the bundle bytes inline**; the server
+  **derives the CID by hashing the bytes** (no IPFS round-trip, no pinning) and uses that CID for
+  permissions + key derivation — identical security model to JS today. Optionally a user *may* pass
+  a CID reference to a previously-cached/pinned bundle (production reuse), mirroring today's "inline
+  code OR `ipfs_id`" choice. Dev iteration stays fast; identity stays a content hash.
+- **Defer OCI images** to a later phase (pull latency, registry trust, larger measured surface).
 
-### 3. Code/artifact delivery & format — the biggest genuinely-open design axis
-JS actions arrive as inline code or an IPFS CID. "Any language" needs a defined artifact format.
-Options: (a) **source bundle + manifest** declaring entrypoint + a supported base runtime we
-preinstall; (b) **static binary / tarball**; (c) **full OCI image** (most flexible, but pull time
-+ supply-chain/attestation surface).
-- **v1 recommendation:** a **content-addressed bundle** (tarball) with a small manifest
-  (entrypoint + declared base runtime from a supported set), hashed → IPFS CID (feeds #2). Runs on
-  the preinstalled base image. **Defer OCI images** to a later phase (image pull latency, registry
-  trust, larger measured surface). Document this as a decision so the builder doesn't default to
-  "bring any container" and inherit the hard problems first.
+### 4. Network egress — drop the fetch *count* quota; use a bandwidth cap instead
+The fetch-count quota (`DEFAULT_MAX_FETCH_COUNT = 50`, `handle_ops.rs:57-70`) exists for a threat
+that **no longer applies**: it guarded the old **MPC / many-node** network against a single action
+fanning out a DDoS across all nodes. Everything now runs on **one TEE box**, so that risk is gone.
+- **✅ Replace the per-call count quota with a bandwidth/rate limit.** Since users already pay
+  **per second of execution**, a bandwidth ceiling (bytes/sec) naturally bounds abuse: limited
+  bandwidth × billed seconds ≈ the same protection, without an arbitrary "50 fetches" cap that
+  confuses users. Implement as an egress rate limit on the sandbox's network path (tc/netem on the
+  proxied path, or gVisor netstack throttling). Keep the existing 10 MiB per-response cap
+  (`PROXIED_FETCH_MAX_BYTES`) if useful; drop the count.
+- **Egress path:** keep a **single proxied egress path** (for the venue-proxy feature + egress
+  logging + where the bandwidth cap is applied) rather than raw sandbox networking. No hard domain
+  allowlist (parity with today).
+- **Note (not a new risk):** user code holds the derived key and can make network calls, so it can
+  exfiltrate the key — **identical to today's JS model**; the action author already holds the
+  permission.
 
-### 4. Network egress & fetch quota — needs an enforcement model
-JS `fetch()` is an **in-process `reqwest` call** inside the runner, and quota is enforced only
-because the JS wrapper *cooperatively* calls `op_increment_fetch_count` before each fetch
-(`bindings.rs:95-102,407-459`; quota check `handle_ops.rs:57-70`). There is **no hard egress
-allowlist** — the proxy is optional/per-request. A sandbox running arbitrary code **won't
-cooperate**: it can open raw sockets and bypass the counter entirely.
-- **Decision — proxy-only egress.** Give the sandbox **no direct network**; route all HTTP through
-  a **lit proxy exposed over the op-loop** (the guest `lit` SDK provides `fetch`). Then the fetch
-  counter/quota is enforced by construction (there's no other path out), we keep the existing
-  venue-proxy feature, and we get egress logging. gVisor's netstack makes "no direct egress, one
-  proxied path" straightforward.
-- **Note (not a new risk):** user code holds the derived key *and* can fetch, so it can exfiltrate
-  the key — but that's **identical to today's JS model** (a JS action with `getPrivateKey` + fetch
-  can already do this), and the action is authored by the party who already holds the permission.
-  Proxy-only egress at least gives us logging/rate-limiting we don't fully have today.
+### 5. Resource limits & timeouts — starting defaults (from current JS limits)
+Current JS limits (chain-config-driven via `ConfigKeys::LIT_ACTION_DEFAULT_*`, with `MAX_MAX_*`
+ceilings): **memory default 64 MB**; **timeout default 15 min, max 150 min** (`MAX_TIMEOUT_MS =
+DEFAULT_TIMEOUT_MS * 10`, `client/mod.rs:19-34`); **fetch count default 50** (being replaced, see
+#4); per-fetch 10 MiB / 30 s caps; **pool size 10**.
+- **✅ Pick starting numbers now, tune later.** Proposed runner v1 defaults (a whole OS/runtime
+  needs more than a 64 MB JS heap): **1 vCPU** (burstable), **memory default ~256–512 MB / max
+  ~2 GB**, **tmpfs disk ~512 MB–1 GB**, **timeout: reuse 15 min default / 150 min max**, plus a
+  **pids limit** (fork-bomb guard). Enforced by the supervisor's per-sandbox delegated cgroup.
+  Treat these as first-draft; confirm against real workloads in the perf gate.
 
-### 5. Resource limits & timeouts — define defaults + maxes
-JS defaults: **64 MB heap, 15-min timeout**. Sandboxes will be larger. Define the runner's
-**default and max** memory / vCPU / disk / timeout / pids, enforced by the supervisor's per-sandbox
-delegated cgroup (see "Resource limits" above). Tie the chosen tier to #1's pricing hook.
+### 6. Determinism / multi-node consensus — ✅ N/A
+Confirmed with the team: everything runs in a **single TEE**, no MPC / multiple nodes / result
+comparison. **User code need not be deterministic.** No consensus constraint on the runtime.
 
-### 6. Determinism / multi-node consensus — confirm N/A
-The classic Lit network runs actions on many nodes and compares results for signing consensus.
-This TEE single-server model (`lit-api-server` in one attested CVM) does **not** appear to do
-multi-node result comparison — so user code need **not** be deterministic. **Confirm** with the
-team before building; if wrong, it constrains the whole runtime.
+### 7. Guest job/response contract + termination — ✅ decided
+- **Params in:** the job (`js_params` + `auth_context` + `http_headers` + the bundle) is delivered
+  to the guest; the `lit` SDK/CLI (preinstalled in the base image) exposes them to user code.
+- **Response out:** the user calls a **preinstalled CLI**, e.g. `lit set-response '<json>'`, which
+  forwards the value over the op-loop `SetResponse` op. Logs via `lit print` / stdout.
+- **✅ Termination = the user's entrypoint process exits** (natural serverless/CLI semantics). No
+  explicit "I'm done" call: `set-response` just *records* the value; when the entrypoint (sandbox
+  PID 1) exits, gVisor tears down the whole sandbox (children included) and we return the
+  last-recorded response. Timeout and OOM are hard caps that also terminate. If they never call
+  `set-response`, the response is empty/null.
 
-### 7. Guest job/response contract — mirror `main(params)` → `setResponse`
-Define how the job reaches the guest (code + `js_params` + `auth_context` + `http_headers`) and how
-the result returns (the `SetResponse` op). Keep semantics identical to JS: params in, one response
-out, `print` for logs. For arbitrary languages the `lit` SDK exposes this (e.g. read params from a
-known path/env; `lit set-response …`).
+---
+
+## Resource allocation model (gVisor specifics)
+
+A gVisor sandbox is **not a fixed-size VM** — the Sentry is a host process constrained by the
+**cgroup** the supervisor assigns it. This is an advantage over a microVM for our billing:
+
+- **CPU:** set via the sandbox's cgroup (`cpu.max` quota — e.g. ~1 core, fractional or burstable;
+  `cpuset` to pin). Meterable as CPU-seconds if we ever want it.
+- **RAM grows on demand up to a ceiling.** gVisor allocates guest memory lazily as the workload
+  uses it — it is **not pre-allocated** the way Firecracker fixes RAM at boot. The supervisor sets a
+  cgroup **`memory.max` ceiling** (the tier max) for safety; actual usage floats up to it. So the
+  answer to "are we stuck with the RAM level at launch?" is **no** — usage is dynamic within the
+  ceiling.
+- **Charging for growth is therefore possible** (a gVisor-specific win): `memory.peak` / cgroup
+  accounting gives us per-execution memory usage, so a future tier/usage-based price can bill on
+  observed memory-seconds. **v1 stays flat per-second** (decision #1); we just make sure the
+  accounting is available so we're not blocked from usage pricing later.
+
+## Caching model
+
+Cache the expensive read-only pieces; give every execution a clean, ephemeral writable layer.
+
+- **Layer 1 — base image rootfs:** read-only lower layer with runtimes + `lit` CLI, shared by
+  **all** executions, always warm (baked into the CVM image).
+- **Layer 2 — artifact cache by content hash (CID):** unpack a bundle once into a read-only layer
+  keyed by its CID; a second call with the same CID is a cache hit — no re-upload/re-unpack. This is
+  the any-language analog of the existing `ActionCodeCache` / `ipfs_id` code cache.
+- **Layer 3 — warm sandbox pool** (optional): pre-booted `runsc` sandboxes ready to accept work
+  (mirror `worker_pool.rs`), and/or **checkpoint/restore** from a clean "runtime-loaded, pre-entry"
+  snapshot for near-instant clean starts.
+- **Clean state between runs (the key requirement):** each execution gets a **fresh `tmpfs` upper
+  layer** in the overlay + fresh PID/mount/net namespaces, so **nothing persists between runs** even
+  though Layers 1–2 are cached. Exactly the "cache the image, clean tmpfs each run" model.
+- **Security rule:** never reuse a *dirty* sandbox across executions/tenants — reuse the cached
+  read-only layers, but run each execution in its **own fresh sandbox instance** (fresh Sentry) or a
+  **restore-from-clean-snapshot**, so there is no memory or filesystem residue between tenants. (The
+  current JS pool already follows this: one execution per worker, then dropped.)
 
 ---
 
