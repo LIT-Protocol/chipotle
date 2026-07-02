@@ -7,7 +7,7 @@ use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
     AddUsageApiKeyRequest, AddUsageApiKeyWithSignatureRequest, ConvertToChainSecuredAccountRequest,
-    CreateWalletWithSignatureRequest, DeleteActionRequest, NewAccountRequest,
+    CreateWalletWithSignatureRequest, DeleteActionRequest, DeleteWalletRequest, NewAccountRequest,
     RemoveActionFromGroupRequest, RemoveGroupRequest, RemovePkpFromGroupRequest,
     RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
     UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
@@ -191,6 +191,41 @@ pub async fn create_wallet(
     Ok(CreateWalletResponse {
         wallet_address: bytes_to_0x_hex(wallet_address.as_slice()),
     })
+}
+
+/// Permanently delete a wallet (PKP) from an account.
+///
+/// HARD DELETE: wipes the on-chain registry entry including the derivation path, so the
+/// key can never be re-derived and anything secured by it becomes unrecoverable. There is
+/// no undo. Master account only (enforced on-chain).
+pub async fn delete_wallet(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    req: Json<DeleteWalletRequest>,
+) -> Result<AccountOpResponse, ApiStatus> {
+    let src = hex_to_bytes(req.wallet_address.trim_start_matches("0x")).map_err(|_| {
+        ApiStatus::bad_request(
+            anyhow::anyhow!("wallet_address is not valid hex"),
+            "wallet_address is not valid hex",
+        )
+    })?;
+    if src.len() != 20 {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("wallet_address must be 20 bytes"),
+            "wallet_address must be 20 bytes",
+        ));
+    }
+    let wallet_address = Address::from_slice(&src);
+    if wallet_address == Address::ZERO {
+        return Err(ApiStatus::bad_request(
+            anyhow::anyhow!("wallet_address must be non-zero"),
+            "wallet_address must be non-zero",
+        ));
+    }
+    accounts::remove_wallet_derivation(signer_pool, api_key, wallet_address)
+        .await
+        .map_err(|e| map_contract_error(e, "delete_wallet failed"))?;
+    Ok(AccountOpResponse { success: true })
 }
 
 pub async fn create_wallet_with_signature(

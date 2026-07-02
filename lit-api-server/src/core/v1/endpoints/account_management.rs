@@ -9,7 +9,7 @@ use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{
     AddActionRequest, AddActionToGroupRequest, AddGroupRequest, AddPkpToGroupRequest,
     AddUsageApiKeyRequest, AddUsageApiKeyWithSignatureRequest, ConvertToChainSecuredAccountRequest,
-    CreateWalletWithSignatureRequest, DeleteActionRequest, NewAccountRequest,
+    CreateWalletWithSignatureRequest, DeleteActionRequest, DeleteWalletRequest, NewAccountRequest,
     RemoveActionFromGroupRequest, RemoveGroupRequest, RemovePkpFromGroupRequest,
     RemoveUsageApiKeyRequest, UpdateActionMetadataRequest, UpdateGroupRequest,
     UpdateUsageApiKeyMetadataRequest, UpdateUsageApiKeyRequest,
@@ -308,6 +308,24 @@ pub(super) async fn delete_action(
     OpenApiResponse {
         response: ApiResult(
             account_management::delete_action(signer_pool.inner().clone(), api_key.0.as_str(), req)
+                .await,
+        )
+        .into(),
+    }
+}
+
+/// Permanently delete a wallet (PKP). HARD DELETE: wipes the on-chain derivation path so
+/// the key can never be re-derived and anything secured by it becomes unrecoverable.
+#[openapi(tag = "Account Management")]
+#[post("/delete_wallet", format = "json", data = "<req>")]
+pub(super) async fn delete_wallet(
+    signer_pool: &State<Arc<SignerPool>>,
+    api_key: BilledManagementApiKey,
+    req: Json<DeleteWalletRequest>,
+) -> OpenApiResponse<AccountOpResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(
+            account_management::delete_wallet(signer_pool.inner().clone(), api_key.0.as_str(), req)
                 .await,
         )
         .into(),

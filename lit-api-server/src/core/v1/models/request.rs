@@ -68,6 +68,16 @@ pub struct RemovePkpFromGroupRequest {
     pub pkp_id: String,
 }
 
+/// Request for delete_wallet (AccountConfig.removeWalletDerivation). API key via header.
+///
+/// HARD DELETE: permanently and irreversibly removes the wallet (PKP) and wipes its
+/// on-chain derivation path. Anything secured by the wallet becomes unrecoverable.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteWalletRequest {
+    /// Wallet (PKP) address to permanently delete (0x-prefixed 20-byte hex).
+    pub wallet_address: String,
+}
+
 /// Request for update_group (AccountConfig.updateGroup). API key via header.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct UpdateGroupRequest {
