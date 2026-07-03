@@ -7,10 +7,11 @@ name: Security Review (gated)
 # Make this a required status check in branch protection (Settings -> Branches)
 # so a failing review blocks merge.
 #
-# Security note: this uses `pull_request` (NOT `pull_request_target`). Fork PRs
-# therefore run with a read-only GITHUB_TOKEN and cannot exfiltrate secrets, at
-# the cost of the inline PR comment being skipped on forks (the gate + job
-# summary still work). Internal PRs get write access and post the review comment.
+# Security note: this uses `pull_request` (NOT `pull_request_target`), so secrets
+# (including CLAUDE_CODE_OAUTH_TOKEN) are NOT exposed to forked-repo PRs. The
+# review therefore cannot run on fork PRs; rather than fail closed and block them,
+# the gate detects the fork case and passes with a notice (see "Evaluate gate").
+# Same-repo (internal) PRs get the token, run the review, and are gated normally.
 
 on:
   pull_request:
@@ -49,6 +50,10 @@ jobs:
 
       - name: Run differential security review
         id: review
+        # Skip on forked-repo PRs: `pull_request` withholds secrets from forks, so
+        # the token is empty and the review cannot run. The gate step handles the
+        # fork case explicitly (passes with a notice) so forks are not blocked.
+        if: github.event.pull_request.head.repo.full_name == github.repository
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -116,9 +121,27 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           WORKFLOW_FILE: .github/workflows/security-review.yml
+          IS_FORK: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
         run: |
           set -euo pipefail
           VERDICT="$VERDICT_FILE"
+
+          # Forked-repo PRs: `pull_request` withholds secrets, so the review step
+          # was skipped (no token). Do not fail closed — that would block every
+          # fork PR. Pass with a notice; a maintainer can re-run from a same-repo
+          # branch to get a gated review.
+          if [ "$IS_FORK" = "true" ]; then
+            echo "::notice title=Security review not gating (fork PR)::Secrets are unavailable to forked-repo PRs, so the automated review cannot run. Push the branch to this repository for a gated review."
+            {
+              echo "## 🔒 Security Review — skipped (fork PR)"
+              echo ""
+              echo "GitHub withholds secrets from forked-repo pull requests, so the"
+              echo "automated reviewer could not run. This check does not block fork PRs."
+              echo ""
+              echo "A maintainer can re-run the review from a same-repo branch."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
 
           # anthropics/claude-code-action refuses to run ("workflow validation")
           # unless this workflow file is byte-identical to the copy on the default
@@ -162,6 +185,27 @@ jobs:
 
           if ! jq -e . "$VERDICT" >/dev/null 2>&1; then
             echo "::error title=Security review invalid::$VERDICT is not valid JSON. Failing closed."
+            exit 1
+          fi
+
+          # Schema validation (fail closed on anything unexpected). Valid-but-empty
+          # JSON like `{}` must NOT be treated as "0 findings" — require a
+          # `findings` array and, for every entry, a recognized severity AND
+          # confidence enum. A finding with a bogus/missing severity would silently
+          # evade the blocking filter below, so reject the whole verdict instead.
+          if ! jq -e '
+            (type == "object")
+            and ((.findings | type) == "array")
+            and (all(.findings[]?;
+                  (.severity   as $s | ["CRITICAL","HIGH","MEDIUM","LOW","INFO"] | index($s))
+              and (.confidence as $c | ["HIGH","MEDIUM","LOW"] | index($c))))
+          ' "$VERDICT" >/dev/null 2>&1; then
+            echo "::error title=Security review invalid::$VERDICT failed schema validation (needs a findings[] array with a valid severity + confidence on every entry). Failing closed."
+            {
+              echo "## 🔒 Security Review — FAILED (invalid verdict)"
+              echo ""
+              echo "The verdict file did not match the required schema. Failing closed."
+            } >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi
 
