@@ -544,7 +544,12 @@ pub async fn find_customer_by_wallet(
     // Cooldown: a recent search already came back empty. Skip Stripe rather
     // than issuing a Search per guarded request (rate-limit protection); the
     // 5-second TTL keeps the "not found" answer bounded, not permanent.
-    if state.customer_search_miss.get(wallet_address).await.is_some() {
+    if state
+        .customer_search_miss
+        .get(wallet_address)
+        .await
+        .is_some()
+    {
         return Ok(None);
     }
     let found = lit_billing_core::customer::find_by_wallet(&state.client, wallet_address).await?;

@@ -65,8 +65,11 @@ async fn search_oldest_by_wallet(
         .get("data")
         .and_then(|d| d.as_array())
         .map(|arr| {
-            arr.iter()
-                .min_by_key(|c| c.get("created").and_then(|v| v.as_i64()).unwrap_or(i64::MAX))
+            arr.iter().min_by_key(|c| {
+                c.get("created")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(i64::MAX)
+            })
         })
         .unwrap_or(None)
         .cloned();
