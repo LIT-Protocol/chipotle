@@ -203,7 +203,14 @@ pub async fn delete_wallet(
     api_key: &str,
     req: Json<DeleteWalletRequest>,
 ) -> Result<AccountOpResponse, ApiStatus> {
-    let src = hex_to_bytes(req.wallet_address.trim_start_matches("0x")).map_err(|_| {
+    // Accept the address with a `0x`/`0X` prefix or bare hex. hex_to_bytes only strips a
+    // lowercase `0x`, so normalize the uppercase prefix here before decoding.
+    let addr_hex = req
+        .wallet_address
+        .strip_prefix("0x")
+        .or_else(|| req.wallet_address.strip_prefix("0X"))
+        .unwrap_or(&req.wallet_address);
+    let src = hex_to_bytes(addr_hex).map_err(|_| {
         ApiStatus::bad_request(
             anyhow::anyhow!("wallet_address is not valid hex"),
             "wallet_address is not valid hex",

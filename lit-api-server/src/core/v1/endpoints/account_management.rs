@@ -316,6 +316,8 @@ pub(super) async fn delete_action(
 
 /// Permanently delete a wallet (PKP). HARD DELETE: wipes the on-chain derivation path so
 /// the key can never be re-derived and anything secured by it becomes unrecoverable.
+/// Requires the master (account) API key — usage API keys are rejected on-chain
+/// (`NotMasterAccount`).
 #[openapi(tag = "Account Management")]
 #[post("/delete_wallet", format = "json", data = "<req>")]
 pub(super) async fn delete_wallet(

@@ -92,12 +92,12 @@ export interface CreateWalletWithSignatureRequest {
 }
 
 /**
- * Request for delete_wallet (AccountConfig.removeWalletDerivation). API key via header.
+ * Request for delete_wallet (AccountConfig.removeWalletDerivation). Master (account) API key via header — usage API keys are rejected on-chain (`NotMasterAccount`).
 
 HARD DELETE: permanently and irreversibly removes the wallet (PKP) and wipes its on-chain derivation path. Anything secured by the wallet becomes unrecoverable.
  */
 export interface DeleteWalletRequest {
-  /** Wallet (PKP) address to permanently delete (0x-prefixed 20-byte hex). */
+  /** Wallet (PKP) address to permanently delete: 20-byte hex, with an optional `0x`/`0X` prefix. */
   wallet_address: string;
 }
 
@@ -1089,7 +1089,7 @@ Deprecated: minting is a metered write, so it should not live on a GET — link 
   }
 
   /**
-   * Permanently delete a wallet (PKP). HARD DELETE: wipes the on-chain derivation path so the key can never be re-derived and anything secured by it becomes unrecoverable.
+   * Permanently delete a wallet (PKP). HARD DELETE: wipes the on-chain derivation path so the key can never be re-derived and anything secured by it becomes unrecoverable. Requires the master (account) API key — usage API keys are rejected on-chain (`NotMasterAccount`).
    */
   deleteWallet(
     deleteWalletRequest: DeleteWalletRequest,

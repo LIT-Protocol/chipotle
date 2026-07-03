@@ -1134,6 +1134,9 @@ export class LitNodeSimpleApiClient {
    * is deleted the private key can NEVER be re-derived. Anything encrypted or otherwise
    * secured by this wallet becomes permanently unrecoverable. There is no undo.
    *
+   * Requires the master (account) API key — a usage API key is rejected on-chain
+   * (`NotMasterAccount`) and the call will revert.
+   *
    * @param {{ apiKey?: string, walletAddress: string, sovereignLifecycle?: object }} options
    * @returns {Promise<AccountOpResponse>}
    */
