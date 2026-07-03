@@ -1,8 +1,8 @@
 # Any-Language Lit Action Runner — Build Plan
 
-**Status:** Feasibility validated; ready to build
+**Status:** Feasibility validated; implementation spec complete — ready to build
 **Owner:** Chris
-**Updated:** 2026-07-01
+**Updated:** 2026-07-03
 
 ## Goal
 
@@ -50,7 +50,7 @@ gVisor sandbox supervisor (new; mirrors worker_pool.rs pre-warm pattern)
 runsc sandbox = Sentry (userspace kernel) + gofer (FS proxy)
    • overlay rootfs: read-only base image  +  per-exec writable tmpfs
    • own PID / mount / network namespaces
-   • host-UDS op-loop socket mounted in → raw derived key flows in, user's lib signs, dies with tmpfs
+   • per-exec host-UDS op socket mounted in → raw derived key flows in, user's lib signs, dies with tmpfs
    • preinstalled `lit` CLI/SDK exposes the ops to user code in any language
 ```
 
@@ -82,6 +82,67 @@ runsc sandbox = Sentry (userspace kernel) + gofer (FS proxy)
 - api-server gRPC client / socket: `lit-api-server/src/actions/client/execution.rs:162`
 - HTTP entry: `lit-api-server/src/core/v1/endpoints/actions.rs:24`
 - Phala deploy: `docker-compose.phala.yml`, `.github/workflows/deploy-staging.yml`
+
+## Proto & routing spec
+
+**Today:** one service, `Action.ExecuteJs(stream ExecuteJsRequest) returns (stream ExecuteJsResponse)`
+(`lit_actions.proto:5-6`). `ExecutionRequest` carries `code: string`, `js_params`, `auth_context`,
+`timeout`, `memory_limit`, `http_headers`, `ipfs_id` (proto:25-33). The op union is: `set_response`,
+`print`, `increment_fetch_count`, `update_resource_usage`, `aes_encrypt`, `aes_decrypt`,
+`get_private_key`, `get_lit_action_{private_key,public_key,wallet_address}`, `report_error`
+(proto:10-23). **lit-actions is the gRPC server; lit-api-server is the client**, connecting over the
+hardcoded socket `/tmp/lit_actions.sock` (`execution.rs:190`).
+
+**Changes:**
+- Extend `ExecutionRequest` with `oneof source { string code; bytes bundle; }` (a bare CID in
+  `ipfs_id` referencing a cached bundle also works, as today for JS). Entrypoint + runtime come from
+  the bundle's manifest, not the proto.
+- **Routing:** api-server picks the runner socket by source shape — JS `code`/`ipfs_id` → existing
+  `/tmp/lit_actions.sock`; `bundle` → the sandbox runner's socket (new, e.g.
+  `/tmp/lit_actions_vm.sock`, same `lit-socket` volume). Make the socket path per-runner config
+  instead of the current hardcode. The JS runner is untouched; the new runner implements the same
+  `Action` service, so `execution.rs` client code and all op handlers are reused verbatim.
+- **HTTP entry:** extend `LitActionRequest` (`models/request.rs:169-177`) with `bundle`
+  (base64, mutually exclusive with `code`/`ipfs_id`). Existing size limits already fit bundles:
+  `max_code_length` 16 MB default / 160 MB cap (`client/mod.rs:24,38`).
+- **v1 guest op surface:** same op set minus `increment_fetch_count` (replaced by the egress model
+  below); `update_resource_usage` is emitted by the supervisor, never the guest (see billing note).
+
+## Bundle format & manifest
+
+- **Format:** gzipped tarball. Manifest `lit.json` at the root:
+  `{ "runtime": "bin" | "python3.12" | "node22", "entrypoint": "./main.py", "env": {...} }`.
+  The `bin` runtime = user ships a static binary — every compiled language works day one with zero
+  runtime support from us.
+- **CID:** same `IpfsHasher` CIDv0 (sha2-256 multihash) over the exact bundle bytes as JS uses
+  today (`runtime.rs:288-291`, `core_features.rs:135-138`) — so `keccak256(cid)` permissions
+  (`parse_with_hash.rs:74-106`) and action-key derivation (`dstack/v1/mod.rs:14-20`) reuse verbatim.
+- **Extraction safety:** unpack as an unprivileged uid into a per-CID read-only dir; reject absolute
+  paths, `..` traversal, symlinks/hardlinks escaping the root, device/FIFO entries; cap unpacked
+  size (hard cap ~512 MB) and file count. Bundles are self-contained — **deps are vendored in the
+  bundle; no network installs at runtime** (predictable cold start, artifact = what runs).
+- **Cache:** per-CID unpacked layer + LRU eviction — the disk analog of `ActionCodeCache`
+  (100 MB / 30-min TTL today, `runtime.rs:62-63`); ours can be bigger (~5 GB disk LRU).
+
+## Op-loop scoping & job delivery
+
+Today there is **no execution ID in the proto** — the per-execution bidirectional stream *is* the
+auth boundary, and api-server authorizes every op against per-execution client state (api key +
+ipfs_id + wallet-permission cache, `handle_ops.rs:72-127`). Preserve exactly that:
+
+- The **supervisor** terminates each `ExecuteJs` stream, generates an `execution_id` (never trust
+  guest-supplied IDs), spawns the sandbox, and creates a **per-execution guest socket**
+  (`/run/lit/exec-<id>/ops.sock`, bind-mounted in — this is what `--host-uds` permits). It bridges
+  guest CLI calls 1:1 onto **that execution's stream only**. A sandbox can only reach its own
+  socket → cross-execution op forgery is structurally impossible, and the api-server trust model is
+  unchanged.
+- **Job delivery into the sandbox:** bundle unpacked read-only at `/action`; writable tmpfs workdir;
+  params and auth_context as files (`/lit/params.json`, `/lit/auth_context.json`); env
+  `LIT_OPS_SOCKET=/lit/ops.sock`. The guest `lit` CLI/SDK reads these — and the local-dev mock CLI
+  honors the same contract.
+- **stdout/stderr** are captured by the supervisor and forwarded via the `Print` op path, keeping
+  the existing 100 KB console cap (`client/mod.rs:25`). `lit set-response` forwards `SetResponse`;
+  the existing 1 MB response cap applies (`client/mod.rs:27`).
 
 ## Deployment topology on Phala
 
@@ -139,9 +200,12 @@ Grounded in how JS actions work today (file:line refs for the builder).
 
 1. **Charging — same as JS.** Flat **$0.01/wall-clock-second** (`stripe.rs:33,774`), min 1s, via
    the `UpdateResourceUsage` op flushed every 5s (`handle_ops.rs:9,155-199`, `execution.rs:215`).
-   The guest/supervisor emits the same usage ticks — no new billing code. **Do not bill cold boot:**
-   start the clock at *user-code start* (cold path is ~150–500 ms; hidden by the warm pool, and not
-   billed regardless).
+   Two mechanism notes: (a) **the supervisor emits the ticks, never the guest** — a malicious guest
+   could simply not tick (today the trusted runner samples every 500 ms, `runtime.rs`); (b) billing
+   elapsed is computed **api-server-side** from `execution_start`, which is set *before* boot
+   (`execution.rs:215`, `handle_ops.rs:161-167`) — so **"don't bill cold boot" needs a small
+   api-server change**: start the clock at the first usage tick (or an explicit started marker)
+   for sandbox executions. Cold path is ~150–500 ms, hidden by the warm pool.
 2. **Action identity — content hash, preserving the code-string path.** Permissions key on the
    code's IPFS CID: `keccak256(ipfs_id)` (`parse_with_hash.rs:74-106`) →
    `canUseWalletInAction(apiKeyHash, cidHash, wallet)` (`accounts/mod.rs:695-727`), and the action's
@@ -153,10 +217,17 @@ Grounded in how JS actions work today (file:line refs for the builder).
    OCI images deferred.
 3. **Egress — bandwidth cap, no fetch-count quota.** The `DEFAULT_MAX_FETCH_COUNT = 50` quota
    guarded the old MPC/many-node network against fan-out DDoS; on one TEE box that risk is gone.
-   Route egress through a **single proxied path** (keeps the venue-proxy feature + logging) and apply
-   a **bandwidth/rate limit** instead of a call count — since users pay per second, bandwidth × time
-   bounds abuse without an arbitrary cap. (User code holds the key and can exfiltrate via network —
-   identical to today's JS model; the author already holds the permission.)
+   Route egress through a **single proxied path** and apply a **bandwidth/rate limit** instead of a
+   call count — since users pay per second, bandwidth × time bounds abuse without an arbitrary cap.
+   **Mechanism** (note: today's JS fetch is *not* an op-loop op — it's local reqwest in lit-actions,
+   `op_lit_proxied_fetch` in `ext/bindings.rs:429`, 10 MB/30 s per request, venue-proxy chaining):
+   the sandbox gets gVisor netstack with **no default route**; the only egress is an HTTP(S) CONNECT
+   proxy the supervisor runs, exposed inside the sandbox with standard `HTTP_PROXY`/`HTTPS_PROXY`
+   env set. CONNECT preserves end-to-end TLS; the proxy is the choke point for byte counting,
+   throughput caps, logging, and venue-proxy chaining parity. Websockets work over CONNECT; raw
+   non-HTTP TCP is unsupported in v1 (document it). Libraries that ignore proxy env have no route —
+   **fail closed**. (User code holds the key and can exfiltrate via network — identical to today's
+   JS model; the author already holds the permission.)
 4. **Determinism — N/A.** Single TEE, no MPC/multi-node result comparison, so user code need not be
    deterministic.
 5. **Job/response contract + termination.** Params in via the `lit` SDK/CLI; response out via a
@@ -164,6 +235,38 @@ Grounded in how JS actions work today (file:line refs for the builder).
    `lit print`/stdout. **Termination = the entrypoint process exits** (serverless/CLI semantics) —
    `set-response` only *records* the value; on exit we return the last-recorded response and tear
    down the sandbox. Timeout/OOM are hard caps. No response set ⇒ empty response.
+
+## Supervisor lifecycle & failure handling
+
+- **Concurrency:** cap concurrent sandboxes (start at the JS pool's default of 10,
+  `LIT_ACTIONS_POOL_SIZE`, `server.rs:32-33`) with a small bounded queue; overflow → error on the
+  stream → HTTP 429 with retry-after. Mirror the worker-pool breaker (5 consecutive spawn failures
+  → open 60 s, `worker_pool.rs:44,50`).
+- **Exit mapping** — users must be able to tell these apart in the error response:
+  exit 0 → last recorded `set-response` (or empty); nonzero exit → error with exit code + stderr
+  tail; cgroup OOM kill (`memory.events` `oom_kill`) → "memory limit exceeded"; deadline → SIGKILL
+  the `runsc` process → "timed out".
+- **One sandbox per execution, never reused** — same rationale as the JS pool ("cheap to start,
+  expensive to scrub", `worker_pool.rs:5-8`).
+- **Crash reconciliation:** on supervisor startup, `runsc delete -f` every label-matched leftover
+  sandbox and remove orphaned leaf cgroups, exec dirs, and per-exec sockets; per-execution teardown
+  runs in a drop-guard so a panicking handler still cleans up.
+
+## Base sandbox image
+
+- **v1 runtimes:** `bin` (static binaries — Go/Rust/Zig/C covered for free), `python3.12`,
+  `node22`. Add more by demand; exact versions pinned in the manifest enum.
+- The image is built in CI and **pinned by digest in the compose file**, so it's part of the
+  attested `compose_hash` identity — no runtime pulls.
+- The `lit` CLI is a small static binary on `PATH`; language SDKs (pip/npm packages) either shell
+  out to it or speak gRPC-over-UDS directly. Keep the image lean — user deps live in the bundle.
+
+## Observability
+
+- Per-execution structured log line (execution_id, CID, api-key hash, duration, `memory.peak`,
+  egress bytes, exit class) → existing `otel-collector` container.
+- Metrics: warm-pool depth, spawn latency p50/p99, active sandboxes, queue depth, OOM/timeout/error
+  counts, egress bytes. `runsc` debug logs off by default; per-exec flag on dev.
 
 ## Local development & docs (build alongside, or fast-follow on adoption)
 
@@ -191,6 +294,31 @@ first-class deliverable**, not an afterthought:
   `--host-uds` to a per-sandbox socket, not a shared one.
 - **Perf / pre-warm** — warm-pool sizing, cold/warm start, a representative sign workload vs the
   current Deno path; evaluate checkpoint/restore.
+
+## Testing & CI
+
+gVisor's systrap/ptrace platforms run on stock Linux GitHub runners (no KVM needed), so real-runsc
+integration tests run in CI, not just on dev CVMs:
+
+- **E2E per language:** each shipped example (Go/`bin`, Python, Node) executes under real `runsc`
+  against a mock op-server implementing the `Action` service; assert response, logs, key ops.
+- **Malicious-bundle suite:** tar traversal / symlink escape, fork bomb (→ pids cap), memory hog
+  (→ OOM exit class), egress-bypass attempts (direct dial with no proxy → fails closed), probing
+  for other executions' sockets, oversized response/logs.
+- **Perf:** wire a sandbox sign workload into the existing k6 perf gate on deploy-staging.
+
+## Milestones
+
+1. **Walking skeleton (dev-only flag):** proto `oneof source` + api-server routing + minimal
+   supervisor (no pool, `bin` runtime only, `--ignore-cgroups` OK) → e2e Solana sign with a static
+   Go binary on a dev CVM.
+2. **Contract complete:** bundle/manifest + CID/permissions parity, Python + Node runtimes, guest
+   `lit` CLI/SDK, per-exec sockets, egress proxy, exit mapping.
+3. **Production shape:** delegated leaf cgroups + both limit layers, supervisor-emitted billing
+   ticks + cold-boot clock change, crash reconciliation, warm pool, observability;
+   malicious-bundle suite green in CI.
+4. **Gate & ship (dev):** isolation review + perf gate (above), compose change on dev, docs +
+   authoring skill, ≥2 non-JS examples published.
 
 ## Constraint note
 
