@@ -39,22 +39,49 @@ fn parse_summary(value: &serde_json::Value) -> Option<CustomerSummary> {
     })
 }
 
-/// Find the Stripe customer for this wallet without creating one if missing.
+/// Search Stripe for every customer with `metadata.wallet_address == wallet`
+/// and return the OLDEST match (smallest `created`).
 ///
-/// Returns `Ok(None)` if no customer has `metadata.wallet_address == wallet`.
-pub async fn find_by_wallet(client: &StripeClient, wallet_address: &str) -> Result<Option<String>> {
+/// Historic bug #555 minted duplicate customers for some wallets (a funded
+/// original plus a zero-credit duplicate created by the billing guard during
+/// search-index lag). Stripe search ordering is unspecified, so `limit=1`
+/// could return either record non-deterministically — caching the duplicate
+/// keeps a paying customer permanently rejected. Picking the oldest match is
+/// deterministic and selects the original customer, which is the one funding
+/// flows found and credited.
+async fn search_oldest_by_wallet(
+    client: &StripeClient,
+    wallet_address: &str,
+) -> Result<Option<serde_json::Value>> {
     let query = format!("metadata['wallet_address']:'{wallet_address}'");
     let resp = client
         .get(
             "customers/search",
-            &[("query", query.as_str()), ("limit", "1")],
+            &[("query", query.as_str()), ("limit", "100")],
         )
         .await?;
-    let id = resp
+    let oldest = resp
         .body
         .get("data")
         .and_then(|d| d.as_array())
-        .and_then(|arr| arr.first())
+        .map(|arr| {
+            arr.iter()
+                .min_by_key(|c| c.get("created").and_then(|v| v.as_i64()).unwrap_or(i64::MAX))
+        })
+        .unwrap_or(None)
+        .cloned();
+    Ok(oldest)
+}
+
+/// Find the Stripe customer for this wallet without creating one if missing.
+///
+/// Returns `Ok(None)` if no customer has `metadata.wallet_address == wallet`.
+/// When duplicates exist, deterministically returns the oldest (see
+/// [`search_oldest_by_wallet`]).
+pub async fn find_by_wallet(client: &StripeClient, wallet_address: &str) -> Result<Option<String>> {
+    let id = search_oldest_by_wallet(client, wallet_address)
+        .await?
+        .as_ref()
         .and_then(|c| c.get("id"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
@@ -64,22 +91,15 @@ pub async fn find_by_wallet(client: &StripeClient, wallet_address: &str) -> Resu
 /// Find the Stripe customer summary for this wallet without creating one if missing.
 ///
 /// Returns `Ok(None)` if no customer has `metadata.wallet_address == wallet`.
+/// When duplicates exist, deterministically returns the oldest (see
+/// [`search_oldest_by_wallet`]).
 pub async fn find_summary_by_wallet(
     client: &StripeClient,
     wallet_address: &str,
 ) -> Result<Option<CustomerSummary>> {
-    let query = format!("metadata['wallet_address']:'{wallet_address}'");
-    let resp = client
-        .get(
-            "customers/search",
-            &[("query", query.as_str()), ("limit", "1")],
-        )
-        .await?;
-    let summary = resp
-        .body
-        .get("data")
-        .and_then(|d| d.as_array())
-        .and_then(|arr| arr.first())
+    let summary = search_oldest_by_wallet(client, wallet_address)
+        .await?
+        .as_ref()
         .and_then(parse_summary);
     Ok(summary)
 }
@@ -105,13 +125,34 @@ pub async fn find_or_create_by_wallet(
     if let Some(id) = find_by_wallet(client, wallet_address).await? {
         return Ok(id);
     }
-    let resp = client
-        .post_with_idempotency(
-            "customers",
-            &[("metadata[wallet_address]", wallet_address)],
-            &customer_create_idempotency_key(wallet_address),
-        )
-        .await?;
+    let params = [("metadata[wallet_address]", wallet_address)];
+    let base_key = customer_create_idempotency_key(wallet_address);
+    let resp = match client
+        .post_with_idempotency("customers", &params, &base_key)
+        .await
+    {
+        Ok(resp) => resp,
+        Err(first_err) => {
+            // Stripe replays the FIRST response stored under an idempotency
+            // key for ≥24h — including 500s. Without a fallback, one transient
+            // failure would pin every create for this wallet to that replayed
+            // error for a day. Re-check search (a concurrent creator may have
+            // succeeded and become indexed), then retry once under a fallback
+            // key. The fallback key is equally deterministic, so racers on
+            // this path still converge on a single customer.
+            if let Some(id) = find_by_wallet(client, wallet_address).await? {
+                return Ok(id);
+            }
+            tracing::warn!(
+                wallet_address,
+                "stripe: customer create failed under primary idempotency key, \
+                 retrying under fallback key: {first_err}"
+            );
+            client
+                .post_with_idempotency("customers", &params, &format!("{base_key}-r2"))
+                .await?
+        }
+    };
     let id = resp
         .body
         .get("id")

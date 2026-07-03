@@ -162,6 +162,14 @@ pub struct StripeState {
     /// Avoids duplicate customer creation caused by Stripe Search API indexing lag.
     /// Uses `time_to_idle` so frequently accessed entries stay warm.
     customer_cache: Cache<String, String>,
+    /// wallet_address → recent "no customer found in Search" marker (5-sec TTL).
+    /// Rate-limits the guards' find-only lookup: without it, every guarded
+    /// request for a wallet with no (indexed) customer would issue a Stripe
+    /// Search call, so one unfunded key under load could burn through Stripe's
+    /// search rate limit. A 5-second cooldown bounds that to ~0.2 searches/sec
+    /// per wallet while only delaying post-funding recovery by ≤5s — a bounded
+    /// negative cache, unlike the permanent poisoning this replaces (#555).
+    customer_search_miss: Cache<String, ()>,
     /// api_key → billing wallet address cache.
     /// Resolves both master and usage API keys to the account's billing wallet address
     /// (the wallet used to identify the Stripe customer) via the on-chain
@@ -277,6 +285,10 @@ fn build_state(secret_key: String, publishable_key: String) -> Result<Arc<Stripe
         .max_capacity(10_000)
         .time_to_idle(Duration::from_secs(600)) // 10 minutes
         .build();
+    let customer_search_miss = Cache::builder()
+        .max_capacity(10_000)
+        .time_to_live(Duration::from_secs(5)) // short: bounds Search rate, not a poison
+        .build();
     let wallet_cache = Cache::builder()
         .max_capacity(10_000)
         .time_to_idle(Duration::from_secs(3600))
@@ -300,6 +312,7 @@ fn build_state(secret_key: String, publishable_key: String) -> Result<Arc<Stripe
         publishable_key,
         client,
         customer_cache,
+        customer_search_miss,
         wallet_cache,
         balance_cache,
         balance_refresh_in_flight,
@@ -528,12 +541,26 @@ pub async fn find_customer_by_wallet(
     if let Some(id) = state.customer_cache.get(wallet_address).await {
         return Ok(Some(id));
     }
+    // Cooldown: a recent search already came back empty. Skip Stripe rather
+    // than issuing a Search per guarded request (rate-limit protection); the
+    // 5-second TTL keeps the "not found" answer bounded, not permanent.
+    if state.customer_search_miss.get(wallet_address).await.is_some() {
+        return Ok(None);
+    }
     let found = lit_billing_core::customer::find_by_wallet(&state.client, wallet_address).await?;
-    if let Some(id) = &found {
-        state
-            .customer_cache
-            .insert(wallet_address.to_string(), id.clone())
-            .await;
+    match &found {
+        Some(id) => {
+            state
+                .customer_cache
+                .insert(wallet_address.to_string(), id.clone())
+                .await;
+        }
+        None => {
+            state
+                .customer_search_miss
+                .insert(wallet_address.to_string(), ())
+                .await;
+        }
     }
     Ok(found)
 }
