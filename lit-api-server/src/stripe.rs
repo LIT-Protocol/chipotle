@@ -477,6 +477,12 @@ pub async fn resolve_wallet_address(api_key: &str, state: &StripeState) -> Resul
 
 /// Find the Stripe customer for this wallet address, creating one if none exists.
 ///
+/// Only for paths where creating a customer is legitimate (account creation,
+/// top-ups, email registration, balance display). The billing guards
+/// (`check_credit` / `charge`) must use [`find_customer_by_wallet`] instead:
+/// the underlying lookup is Stripe Search, which is eventually consistent, so
+/// creating on a search miss can duplicate a freshly funded customer (#555).
+///
 /// Results are cached in memory to avoid duplicate customer creation caused by
 /// Stripe Search API indexing lag (newly created customers may not appear in
 /// search results for several seconds).
@@ -498,6 +504,38 @@ pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -
         })
         .await
         .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e}"))
+}
+
+/// Find the Stripe customer for this wallet address WITHOUT creating one.
+///
+/// Billing-guard variant of [`get_customer_by_wallet`] (#555): Stripe Search
+/// is eventually consistent (a freshly created customer can be invisible for
+/// tens of seconds), so a guard that creates on a search miss can mint a
+/// duplicate zero-credit customer for a wallet whose funded customer just
+/// isn't indexed yet — and caching that duplicate turns a transient index lag
+/// into a permanent 402. Here a miss is simply `Ok(None)`: nothing is created
+/// and nothing is cached, so the next request re-checks Stripe and heals as
+/// soon as the index catches up.
+///
+/// Positive results go into (and come from) the same `customer_cache` that
+/// `get_customer_by_wallet` uses, so a customer created eagerly at account
+/// creation is found here without touching Search at all.
+#[instrument(name = "stripe::find_customer_by_wallet", skip_all, err)]
+pub async fn find_customer_by_wallet(
+    wallet_address: &str,
+    state: &StripeState,
+) -> Result<Option<String>> {
+    if let Some(id) = state.customer_cache.get(wallet_address).await {
+        return Ok(Some(id));
+    }
+    let found = lit_billing_core::customer::find_by_wallet(&state.client, wallet_address).await?;
+    if let Some(id) = &found {
+        state
+            .customer_cache
+            .insert(wallet_address.to_string(), id.clone())
+            .await;
+    }
+    Ok(found)
 }
 
 /// Return the current credit balance in cents (≤ 0 means credits available; the Stripe
@@ -605,9 +643,26 @@ pub async fn check_credit(
     state: &StripeState,
 ) -> std::result::Result<(), BillingError> {
     let wallet = resolve_wallet_classified(api_key, state).await?;
-    let customer_id = get_customer_by_wallet(&wallet, state)
+    // No customer means no credits — answer 402 without creating one. Creating
+    // here would race Stripe Search's indexing lag and could shadow a freshly
+    // funded customer with a cached zero-credit duplicate (#555). A wallet
+    // whose customer just isn't indexed yet gets a *retryable* 402 that heals
+    // by itself within Stripe's indexing window.
+    let Some(customer_id) = find_customer_by_wallet(&wallet, state)
         .await
-        .map_err(BillingError::Unavailable)?;
+        .map_err(BillingError::Unavailable)?
+    else {
+        record_billing_event(
+            reason,
+            &wallet,
+            required_cents,
+            OUTCOME_INSUFFICIENT_CREDITS,
+        );
+        return Err(BillingError::InsufficientCredits {
+            available_cents: 0,
+            required_cents,
+        });
+    };
     let balance = get_credit_balance(&customer_id, state)
         .await
         .map_err(BillingError::Unavailable)?;
@@ -645,9 +700,18 @@ async fn charge(
 ) -> std::result::Result<(), BillingError> {
     tracing::debug!(cost_cents, "stripe::charge: starting");
     let wallet = resolve_wallet_classified(api_key, state).await?;
-    let customer_id = get_customer_by_wallet(&wallet, state)
+    // Same no-create rule as check_credit (#555): a missing customer is an
+    // insufficient-credits rejection, never a trigger to create one.
+    let Some(customer_id) = find_customer_by_wallet(&wallet, state)
         .await
-        .map_err(BillingError::Unavailable)?;
+        .map_err(BillingError::Unavailable)?
+    else {
+        record_billing_event(reason, &wallet, cost_cents, OUTCOME_INSUFFICIENT_CREDITS);
+        return Err(BillingError::InsufficientCredits {
+            available_cents: 0,
+            required_cents: cost_cents,
+        });
+    };
 
     // Read the cache directly.  If missing, fall back to an inline Stripe fetch
     // using try_get_with to coalesce concurrent cache-miss requests for the same

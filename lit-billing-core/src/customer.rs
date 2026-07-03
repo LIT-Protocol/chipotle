@@ -91,6 +91,13 @@ pub async fn find_summary_by_wallet(
 /// same wallet should layer their own request-coalescing cache on top of this
 /// (see `lit-api-server`'s `StripeState::customer_cache`). This function
 /// itself does no caching.
+///
+/// The create carries a wallet-derived `Idempotency-Key`, so two callers that
+/// both miss the (eventually consistent) search index and race to create —
+/// e.g. two api-server replicas, or a retried account creation — get the
+/// *same* customer back instead of minting duplicates. Stripe replays the
+/// original response for 24h, which comfortably covers the ~1-minute window
+/// in which the search index can miss a freshly created customer.
 pub async fn find_or_create_by_wallet(
     client: &StripeClient,
     wallet_address: &str,
@@ -99,7 +106,11 @@ pub async fn find_or_create_by_wallet(
         return Ok(id);
     }
     let resp = client
-        .post("customers", &[("metadata[wallet_address]", wallet_address)])
+        .post_with_idempotency(
+            "customers",
+            &[("metadata[wallet_address]", wallet_address)],
+            &customer_create_idempotency_key(wallet_address),
+        )
         .await?;
     let id = resp
         .body
@@ -107,6 +118,17 @@ pub async fn find_or_create_by_wallet(
         .and_then(|i| i.as_str())
         .ok_or_else(|| anyhow::anyhow!("Stripe: missing customer id"))?;
     Ok(id.to_string())
+}
+
+/// Idempotency key for creating the customer of `wallet_address`.
+///
+/// Deterministic per wallet so every service that creates customers through
+/// this module converges on a single Stripe customer even when the search
+/// index hasn't caught up yet. The wallet is used verbatim (not normalized):
+/// the create params embed the same string, and Stripe rejects a reused
+/// idempotency key whose params differ, so key and params must agree.
+fn customer_create_idempotency_key(wallet_address: &str) -> String {
+    format!("customer-create-{wallet_address}")
 }
 
 /// Search customers by email. Returns every match (Stripe allows multiple
@@ -140,4 +162,27 @@ pub async fn set_email(client: &StripeClient, customer_id: &str, email: &str) ->
         )
         .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The create idempotency key is part of the cross-service dedup contract:
+    /// every service creating a customer for the same wallet must derive the
+    /// same key, or racing creators mint duplicates again. Deterministic and
+    /// well under Stripe's 255-char idempotency-key limit (wallets are 42-char
+    /// 0x-hex strings).
+    #[test]
+    fn customer_create_idempotency_key_is_deterministic_and_wallet_scoped() {
+        let wallet = "0x00000000000000000000000000000000deadbeef";
+        let key = customer_create_idempotency_key(wallet);
+        assert_eq!(key, format!("customer-create-{wallet}"));
+        assert_eq!(key, customer_create_idempotency_key(wallet));
+        assert_ne!(
+            key,
+            customer_create_idempotency_key("0x00000000000000000000000000000000deadbee0")
+        );
+        assert!(key.len() <= 255);
+    }
 }
