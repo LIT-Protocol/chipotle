@@ -24,8 +24,12 @@
 // they run unchanged in the action OR on the client -- the same code decrypts on
 // whichever side holds the key.
 //
-// See README.md for how the bare, version-pinned jsDelivr specifiers below are
-// resolved by the Lit Action runtime, and for the bundle/vendor/publish options.
+// The bare, version-pinned specifiers below (e.g. "@noble/hashes@1.4.0/...") are
+// resolved by the Lit Action runtime's CDN module loader -- see
+// docs/lit-actions/imports.mdx. This module is written to live in the
+// examples/chipotle-primitives package (whose README covers the bundle / vendor /
+// publish options and the barrel export); used standalone, vendor or bundle the
+// @noble/hashes import the same way the other examples do.
 
 import { keccak_256 } from "@noble/hashes@1.4.0/sha3/+esm";
 import {
@@ -53,8 +57,14 @@ const toBytes = (data) =>
  * `sealToVault`, named for the text/file family.)
  * @param {{ pkpId: string, text: string }} params
  * @returns {Promise<string>} hex ciphertext (nonce + ciphertext + GCM tag)
+ * @throws if text is empty/blank -- the node rejects blank messages, and an
+ *   empty payload can't be decrypted back (the node rejects empty plaintext), so
+ *   we fail fast here with an action-level error rather than a low-level one.
  */
 export async function encryptText({ pkpId, text }) {
+  if (!text || text.trim() === "") {
+    throw new Error("encryptText: text must be a non-empty string");
+  }
   return Lit.Actions.Encrypt({ pkpId, message: text });
 }
 
@@ -75,9 +85,15 @@ export async function decryptText({ pkpId, ciphertext }) {
  * the enclave; for large files use deriveEncryptionKey + aesGcmEncrypt instead.
  * @param {{ pkpId: string, bytes: Uint8Array|ArrayBuffer }} params
  * @returns {Promise<string>} hex ciphertext
+ * @throws if bytes is empty -- an empty file hex-wraps to "" which the node
+ *   rejects (and empty plaintext can't be decrypted back), so fail fast here.
  */
 export async function encryptBytes({ pkpId, bytes }) {
-  return Lit.Actions.Encrypt({ pkpId, message: bytesToHex(toBytes(bytes)) });
+  const u8 = toBytes(bytes);
+  if (!u8 || u8.length === 0) {
+    throw new Error("encryptBytes: bytes must be non-empty");
+  }
+  return Lit.Actions.Encrypt({ pkpId, message: bytesToHex(u8) });
 }
 
 /**
