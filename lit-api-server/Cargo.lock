@@ -4606,6 +4606,7 @@ dependencies = [
  "apalis",
  "apalis-sql",
  "async-trait",
+ "base64 0.22.1",
  "base64_light",
  "blake3",
  "dcap-qvl",
