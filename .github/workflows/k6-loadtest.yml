@@ -163,6 +163,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The self-hosted runner doesn't have node on PATH; the summary step
+      # (scripts/k6-loadtest-github-summary.mjs) needs it. setup-node also
+      # provisions npm for any future tooling.
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Install k6
         uses: grafana/setup-k6-action@v1
 

@@ -9,6 +9,15 @@ license = "Apache-2.0"
 anyhow = "1.0"
 async-trait = "0.1"
 base64 = "0.22"
+# Provider + local-signer stack for the gas funder (broadcasts plain ETH
+# value transfers to top up the lit-api-server payer pool). Mirrors the
+# feature set lit-api-server uses on the same alloy 1.x line.
+alloy = { version = "1.0", features = [
+    "network",
+    "providers",
+    "rpc-types",
+    "signer-local",
+] }
 alloy-dyn-abi = "1.0"
 alloy-primitives = "1.0"
 alloy-serde = "1.0"

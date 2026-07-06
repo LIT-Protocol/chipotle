@@ -1,11 +1,11 @@
 {
   "env": "next",
   "base_url": "https://test.chipotle.litprotocol.com/core/v1",
-  "generated_at": "2026-06-18",
-  "note": "Staging (next) soak latency baseline for the deploy perf gate. p95/p50/etc. in ms. The gate fails a deploy if a run's p95 exceeds max(baseline*1.3, baseline+50ms) per endpoint. Regenerate with k6/update-soak-baseline.sh and commit via PR when perf legitimately changes (e.g. got substantially faster). p99/max were not captured for the seed run; the script fills them on the next refresh.",
+  "generated_at": "2026-06-23",
+  "note": "Staging (next) soak latency baseline for the deploy perf gate. p95/p50/etc. in ms. The gate fails a deploy if a run's p95 exceeds max(baseline*1.3, baseline+50ms) per endpoint. Refreshed after PR #521 (warm secp256k1 precompute into the V8 snapshot), which roughly halved ecdsa-sign latency (p95 274 -> 189). SOURCE: the post-merge Deploy Staging perf-gate run itself — GitHub Actions run 28063883865 — measured under the EXACT conditions the gate runs (CI-runner vantage, fresh create_accounts:true accounts, SOAK_VUS=2, 3m soak). That run was clean: checks 100%, 0 HTTP failures, 299 reqs. An independent local pre-seeded-pool run corroborated the direction (sign p95 ~147ms, encrypt ~73ms) but was intentionally NOT used as the baseline: lower laptop RTT + warm-pool derivation caches make it far tighter than gate conditions, which would cause false rollbacks. NOTE on encrypt: p95 rises 112 -> 143 vs the prior seed baseline not because encrypt regressed (it is unchanged by #521) but because the seed under-measured it; this is the same gate config showing encrypt's true p95. Regenerate with k6/update-soak-baseline.sh (needs SOAK_CREATE_ACCOUNTS healthy on staging — currently failing with a NoAccountAccess contract error) or by reading the numbers off a clean Deploy Staging perf-gate run.",
   "scenarios": {
-    "soak_encrypt_decrypt": { "p50": 103, "p95": 112, "p99": null, "avg": 104, "max": 198 },
-    "soak_ecdsa_sign": { "p50": 252, "p95": 274, "p99": null, "avg": 254, "max": null }
+    "soak_encrypt_decrypt": { "min": 84.54, "p50": 98.68, "p95": 142.64, "p99": 236.95, "avg": 107.01, "max": 747.86 },
+    "soak_ecdsa_sign": { "min": 145.2, "p50": 174.14, "p95": 188.81, "p99": 198.38, "avg": 173.67, "max": 227.22 }
   },
   "checks_rate": 1,
   "http_req_failed_rate": 0
