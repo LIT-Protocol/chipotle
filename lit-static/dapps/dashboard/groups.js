@@ -63,6 +63,25 @@ export function updateMultiSelectSummary(id) {
     : checked.map((c) => c.nextElementSibling.textContent).join(', ');
 }
 
+// Open a multi-select dropdown and start listening for outside clicks. The
+// document listener lives only while the dropdown is open (see closeMultiSelect),
+// so closing the modal never leaves orphan listeners accumulating on document.
+function openMultiSelect(wrap) {
+  wrap.classList.add('is-open');
+  if (wrap._msOutside) return;
+  const onOutside = (e) => { if (!wrap.contains(e.target)) closeMultiSelect(wrap); };
+  wrap._msOutside = onOutside;
+  document.addEventListener('click', onOutside);
+}
+
+function closeMultiSelect(wrap) {
+  wrap.classList.remove('is-open');
+  if (wrap._msOutside) {
+    document.removeEventListener('click', wrap._msOutside);
+    wrap._msOutside = null;
+  }
+}
+
 export function attachGroupMultiSelectLogic(id) {
   const wrap = document.getElementById(id);
   if (!wrap) return;
@@ -71,13 +90,9 @@ export function attachGroupMultiSelectLogic(id) {
 
   trigger.addEventListener('click', (e) => {
     e.preventDefault();
-    document.querySelectorAll('.ms-wrap.is-open').forEach((w) => { if (w !== wrap) w.classList.remove('is-open'); });
-    wrap.classList.toggle('is-open');
-  });
-
-  document.addEventListener('click', function msOutside(e) {
-    if (!wrap.isConnected) { document.removeEventListener('click', msOutside); return; }
-    if (!wrap.contains(e.target)) wrap.classList.remove('is-open');
+    if (wrap.classList.contains('is-open')) { closeMultiSelect(wrap); return; }
+    document.querySelectorAll('.ms-wrap.is-open').forEach((w) => { if (w !== wrap) closeMultiSelect(w); });
+    openMultiSelect(wrap);
   });
 
   wrap.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
