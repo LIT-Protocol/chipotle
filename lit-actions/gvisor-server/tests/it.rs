@@ -54,6 +54,27 @@ fn sh_bundle(script: &str) -> String {
     ])
 }
 
+/// Bundle with a `main.py` entrypoint run via `python3`.
+fn py_bundle(script: &str) -> String {
+    make_bundle(&[
+        ("lit.json", r#"{"entrypoint": ["python3", "main.py"]}"#),
+        ("main.py", script),
+    ])
+}
+
+/// Whether `python3` is on PATH. The process runtime runs the entrypoint on
+/// the host, so a Python bundle needs the interpreter present; skip (rather
+/// than fail) the Python test where it isn't, so the sh-only suite still runs.
+fn python3_available() -> bool {
+    std::process::Command::new("python3")
+        .arg("--version")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
 struct TestServer {
     socket_file: temp_file::TempFile,
     // Owns the bundle cache dir for the server's lifetime.
@@ -249,6 +270,48 @@ lit set-response '{"ok":true}'
         outcome.logs
     );
     assert_eq!(outcome.response, r#"{"ok":true}"#);
+    Ok(())
+}
+
+/// A "hello world" Python action: reads its params, logs a greeting, and
+/// records a JSON response — all via the guest `lit` CLI, the same op-loop
+/// path lit-api-server's `/lit_binary_action` drives.
+const PYTHON_HELLO_WORLD: &str = r#"
+import json
+import subprocess
+
+
+def lit(*args):
+    out = subprocess.run(["lit", *args], capture_output=True, text=True, check=True)
+    return out.stdout.rstrip("\n")
+
+
+params = json.loads(lit("params") or "null") or {}
+name = params.get("name", "world")
+lit("print", f"hello {name} from python")
+lit("set-response", json.dumps({"greeting": f"hello {name}"}))
+"#;
+
+#[tokio::test(flavor = "multi_thread")]
+async fn python_hello_world_bundle() -> Result<()> {
+    if !python3_available() {
+        eprintln!("skipping python_hello_world_bundle: python3 not found on PATH");
+        return Ok(());
+    }
+    let server = TestServer::start();
+    let request = ExecutionRequest {
+        code: py_bundle(PYTHON_HELLO_WORLD),
+        js_params: Some(br#"{"name":"lit"}"#.to_vec()),
+        ..Default::default()
+    };
+    let outcome = TestClient::default().execute(&server, request).await?;
+    assert!(outcome.result.success, "error: {}", outcome.result.error);
+    assert!(
+        outcome.logs.contains("hello lit from python\n"),
+        "logs: {:?}",
+        outcome.logs
+    );
+    assert_eq!(outcome.response, r#"{"greeting": "hello lit"}"#);
     Ok(())
 }
 
