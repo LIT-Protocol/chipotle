@@ -15,6 +15,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Reject two migration files that share a version prefix. sqlx keys migrations
+  # by the leading numeric token, so a collision crash-loops the service at boot
+  # ("previously applied but has been modified"). Cheap repo-wide guard.
+  migration-versions:
+    if: >
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    name: migration-versions
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reset workspace to HEAD
+        run: git checkout HEAD -- .
+      - name: Check for duplicate migration versions
+        run: ./scripts/check-migration-versions.sh
+
   check:
     if: >
       github.event_name == 'push' ||

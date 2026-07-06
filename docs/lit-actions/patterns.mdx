@@ -46,6 +46,10 @@ async function rpc(url, method, params) {
 
 Because the whitelist is part of the action code, changing providers or adding chains changes the IPFS CID and therefore the action-derived signer address. That is a feature: contracts that verify action-identity signatures are explicitly trusting this exact code and these exact external data sources.
 
+<Note>
+Helpers like `assertAllowedRpc` and `rpc` are exactly the kind of logic worth sharing across actions. Instead of copy-pasting them into every action, publish them as a version-pinned npm package and import them — see [Composability — Publish Your Own Packages](/lit-actions/imports#composability-publish-your-own-packages).
+</Note>
+
 ---
 
 ## Multi-Source Consensus
