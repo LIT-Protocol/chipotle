@@ -93,11 +93,24 @@ fn billing_error_status(request: &Request<'_>, e: BillingError) -> Status {
                     cents_to_display(required_cents),
                     cents_to_display(available_cents),
                 ),
-                format!(
-                    "Add funds (minimum $5.00, card or crypto) in the dashboard at \
-                     {DASHBOARD_URL} or via POST /core/v1/billing/create_payment_intent. \
-                     Check your balance with GET /core/v1/billing/balance."
-                ),
+                if available_cents == 0 {
+                    // A $0 balance can also mean the customer was funded moments
+                    // ago and Stripe's search index hasn't caught up yet (#555)
+                    // — that case is transient and heals within about a minute.
+                    format!(
+                        "Add funds (minimum $5.00, card or crypto) in the dashboard at \
+                         {DASHBOARD_URL} or via POST /core/v1/billing/create_payment_intent. \
+                         If you added funds within the last minute, retry shortly — new \
+                         billing accounts can take up to a minute to become visible. \
+                         Check your balance with GET /core/v1/billing/balance."
+                    )
+                } else {
+                    format!(
+                        "Add funds (minimum $5.00, card or crypto) in the dashboard at \
+                         {DASHBOARD_URL} or via POST /core/v1/billing/create_payment_intent. \
+                         Check your balance with GET /core/v1/billing/balance."
+                    )
+                },
             );
             Status::PaymentRequired
         }
