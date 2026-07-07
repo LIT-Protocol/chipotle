@@ -423,3 +423,83 @@ Sharing a PKP ID (the wallet address) with users is safe because:
 - The only way to get plaintext is to run an action that holds the right PKP and chooses to call `Decrypt` — so your gating logic is the sole enforcement point.
 
 Users can hold the `pkpId` and the `ciphertext` indefinitely. They gain access to the plaintext only if and when the gating logic inside the action is satisfied.
+
+---
+
+## Multiple PKPs in a Single Action — Separating App Secrets from User Signing
+
+Nothing limits a Lit Action to one PKP. Every `getPrivateKey`, `Encrypt`, and `Decrypt` call names a `pkpId`, so a single execution can use **several PKPs for different purposes** — as long as each PKP and the action's IPFS CID are in the same [group](/architecture/groups). This unlocks a pattern that is often warranted in production: use one PKP as an **app-owned vault** that guards shared secrets like third-party API keys, and give each end user their **own discrete PKP** for signing.
+
+The two roles have opposite sharing models, which is exactly why they belong in separate PKPs:
+
+| PKP | Role | Who it belongs to |
+|---|---|---|
+| **App-secrets PKP** | Holds the ciphertext of an API key (or other credential) the app must use on every call. Its ID is **hardcoded** in the action. | The app. One vault, shared across all users. |
+| **User PKP** | Signs on behalf of one user. Its ID is passed via `js_params`. | The user. One discrete wallet per user. |
+
+Keeping them separate means a user's signing wallet never has any relationship to your API key, and rotating or revoking one user's PKP has no effect on the shared secret or on any other user.
+
+### The pattern
+
+The action below does both jobs in one execution: it decrypts a shared API key from the **app-secrets PKP**, calls an external service with it, then signs the result with the **caller's own PKP**.
+
+```javascript
+// js_params: { userPkpId, payload }
+// userPkpId is the caller's discrete signing PKP — the gateway has already
+// verified it belongs to the caller's account and is permitted in this group.
+async function main({ userPkpId, payload }) {
+  // Hardcode the app-secrets PKP so a caller cannot substitute their own vault.
+  const APP_SECRETS_PKP = "0xAppSecretsVaultAddress";
+
+  // Ciphertext of the shared API key, sealed once against APP_SECRETS_PKP.
+  // Bake it in (as here) or pass it from your backend — it is opaque without the key.
+  const ENCRYPTED_API_KEY = "<ciphertext>";
+
+  // 1. Decrypt the shared secret inside the TEE using the APP's PKP.
+  const apiKey = await Lit.Actions.Decrypt({
+    pkpId: APP_SECRETS_PKP,
+    ciphertext: ENCRYPTED_API_KEY,
+  });
+
+  // 2. Use the secret to do app-level work — the key never leaves the enclave.
+  const res = await fetch("https://api.your-service.com/process", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const result = await res.json();
+
+  // 3. Sign the result with the USER's own PKP — a wallet the app never controls.
+  const userWallet = new ethers.Wallet(
+    await Lit.Actions.getPrivateKey({ pkpId: userPkpId })
+  );
+  const signature = await userWallet.signMessage(JSON.stringify(result));
+
+  // Return the signed result — never the API key.
+  return { result, signature, signer: userWallet.address };
+}
+```
+
+### Why this is safe
+
+- **The app secret is hardcoded, not caller-supplied.** `APP_SECRETS_PKP` is baked into the action source, so it is part of the immutable IPFS CID. A caller cannot point the decrypt at a different vault, and because the ciphertext only decrypts against that PKP inside the TEE, the plaintext key never reaches the caller. See [Securing RPC URLs](#securing-rpc-urls--hiding-api-keys-with-encryption) and the [Secrets guide](/lit-actions/secrets) for the vault lifecycle.
+- **The user PKP is caller-supplied, but ownership-bound.** `js_params` are untrusted, but the gateway only lets a caller use PKPs that belong to their account and are permitted in the group — so passing `userPkpId` cannot reach another user's wallet or the app-secrets vault. If you want defense-in-depth, gate the user's request with a signature check, as in [Gating Logic](#gating-logic--aka-access-control-conditions).
+- **All referenced PKPs must be in the group.** Both `APP_SECRETS_PKP` and every user PKP have to be members of the same group as the action's IPFS CID, or the `Decrypt` / `getPrivateKey` call is rejected before it runs.
+
+### Grouping the PKPs
+
+```
+Account
+ └── Group
+      ├── IPFS CID: "process-and-sign" action   ← the code above
+      ├── PKP: "app-secrets"                     ← shared vault, hardcoded in the action
+      ├── PKP: "user-alice-signer"               ← one discrete signer per user
+      ├── PKP: "user-bob-signer"
+      └── Usage API Key                          ← triggers the action
+```
+
+Add each user's signing PKP to the group as you onboard them; the single `app-secrets` PKP stays constant. Because the action code references the app vault by a hardcoded address and the user vault by parameter, you never republish the action to add a user — you only update group membership. See the [Groups guide](/architecture/groups) for how to manage membership.
+
+<Note>
+This is the multi-PKP generalization of two single-PKP patterns already covered here: [PKP Wallets as Data Vaults](#encrypt--decrypt--pkp-wallets-as-data-vaults) (the app-secrets side) and [A Wallet Bound to the Action — and a Unique One Per User](#a-wallet-bound-to-the-action--and-a-unique-one-per-user) (the per-user side). Reach for it whenever one execution needs both a shared, app-controlled credential and a per-user signing identity.
+</Note>
