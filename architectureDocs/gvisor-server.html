@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gVisor Server — Any-Language Lit Action Runner</title>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0b0f;
+    --surface: #12141c;
+    --surface-2: #1a1d2a;
+    --border: #2a2d3a;
+    --border-light: #3a3d4a;
+    --text: #e2e4ed;
+    --text-dim: #8b8fa3;
+    --text-muted: #5a5e72;
+    --accent-gv: #00e5a0;       /* gVisor runner */
+    --accent-gv-dim: #00e5a020;
+    --accent-api: #6366f1;      /* lit-api-server */
+    --accent-api-dim: #6366f120;
+    --accent-js: #f59e0b;       /* JS runner */
+    --accent-js-dim: #f59e0b20;
+    --accent-warn: #ec4899;
+    --accent-warn-dim: #ec489920;
+    --mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    line-height: 1.65;
+    min-height: 100vh;
+  }
+
+  .noise {
+    position: fixed;
+    inset: 0;
+    opacity: 0.03;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    pointer-events: none;
+    z-index: 999;
+  }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 240px minmax(0, 1fr);
+    max-width: 1280px;
+    margin: 0 auto;
+  }
+
+  /* ---- sidebar nav ---- */
+  nav {
+    position: sticky;
+    top: 0;
+    align-self: start;
+    height: 100vh;
+    overflow-y: auto;
+    padding: 40px 20px 40px 32px;
+    border-right: 1px solid var(--border);
+  }
+  nav .brand {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent-gv);
+    margin-bottom: 20px;
+    opacity: .85;
+  }
+  nav a {
+    display: block;
+    color: var(--text-dim);
+    text-decoration: none;
+    font-size: 13.5px;
+    padding: 5px 0;
+    border-left: 2px solid transparent;
+    padding-left: 12px;
+    margin-left: -14px;
+    transition: color .15s, border-color .15s;
+  }
+  nav a:hover { color: var(--text); border-left-color: var(--accent-gv); }
+
+  /* ---- main ---- */
+  main {
+    padding: 56px 56px 120px;
+    min-width: 0;
+  }
+
+  header .tag {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--accent-gv);
+    opacity: .8;
+  }
+  header h1 {
+    font-size: 40px;
+    font-weight: 700;
+    letter-spacing: -1.2px;
+    margin: 12px 0 14px;
+    background: linear-gradient(135deg, var(--text) 0%, var(--text-dim) 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+  }
+  header .lede {
+    color: var(--text-dim);
+    font-size: 16px;
+    max-width: 760px;
+  }
+  header .src {
+    margin-top: 18px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--text-muted);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: inline-block;
+  }
+  header .src b { color: var(--accent-gv); font-weight: 600; }
+
+  h2 {
+    font-size: 24px;
+    font-weight: 650;
+    letter-spacing: -.4px;
+    margin: 56px 0 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    scroll-margin-top: 24px;
+  }
+  h3 {
+    font-size: 17px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 30px 0 12px;
+  }
+  p { color: var(--text-dim); margin: 12px 0; max-width: 860px; }
+  strong { color: var(--text); font-weight: 600; }
+  a { color: var(--accent-gv); }
+
+  ul { margin: 12px 0 12px 4px; max-width: 860px; }
+  li { color: var(--text-dim); margin: 7px 0; padding-left: 22px; position: relative; list-style: none; }
+  li::before {
+    content: "▸";
+    position: absolute;
+    left: 2px;
+    color: var(--accent-gv);
+    opacity: .7;
+    font-size: 12px;
+    top: 1px;
+  }
+
+  code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 1px 6px;
+    color: #b6e3d4;
+  }
+
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 20px 22px;
+    overflow-x: auto;
+    margin: 18px 0;
+    box-shadow: 0 0 40px #00e5a008;
+  }
+  pre code {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--text);
+    white-space: pre;
+  }
+  pre.ascii code { color: var(--text-dim); }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    max-width: 960px;
+    margin: 20px 0;
+    font-size: 13.5px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  thead th {
+    color: var(--accent-gv);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border-light);
+  }
+  tbody tr:hover { background: var(--surface); }
+  td { color: var(--text-dim); }
+  td code { font-size: 11.5px; }
+
+  blockquote {
+    border-left: 3px solid var(--accent-api);
+    background: var(--accent-api-dim);
+    border-radius: 0 8px 8px 0;
+    padding: 12px 18px;
+    margin: 18px 0;
+    max-width: 860px;
+    color: var(--text-dim);
+    font-size: 14px;
+  }
+
+  .callout {
+    border: 1px solid var(--border-light);
+    border-left: 3px solid var(--accent-warn);
+    background: var(--accent-warn-dim);
+    border-radius: 0 8px 8px 0;
+    padding: 14px 18px;
+    margin: 20px 0;
+    max-width: 860px;
+    font-size: 14px;
+    color: var(--text-dim);
+  }
+  .callout b { color: var(--accent-warn); }
+
+  .legend {
+    display: flex;
+    gap: 22px;
+    flex-wrap: wrap;
+    margin: 22px 0 4px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+  .legend span { display: flex; align-items: center; gap: 7px; color: var(--text-dim); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .dot.gv { background: var(--accent-gv); box-shadow: 0 0 8px var(--accent-gv); }
+  .dot.api { background: var(--accent-api); box-shadow: 0 0 8px var(--accent-api); }
+  .dot.js { background: var(--accent-js); box-shadow: 0 0 8px var(--accent-js); }
+
+  footer {
+    margin-top: 72px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 12.5px;
+    font-family: var(--mono);
+  }
+
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    nav { position: static; height: auto; border-right: none; border-bottom: 1px solid var(--border); }
+    main { padding: 32px 22px 80px; }
+  }
+</style>
+</head>
+<body>
+<div class="noise"></div>
+<div class="layout">
+
+  <nav>
+    <div class="brand">Architecture</div>
+    <a href="#insight">Core Insight</a>
+    <a href="#where">Where it sits</a>
+    <a href="#wire">Wire contract</a>
+    <a href="#internals">Crate internals</a>
+    <a href="#lifecycle">Request lifecycle</a>
+    <a href="#relationship">Relationship to api-server</a>
+    <a href="#bundle">Bundle format &amp; cache</a>
+    <a href="#cli">Guest <code>lit</code> CLI</a>
+    <a href="#isolation">Isolation model</a>
+    <a href="#compare">JS vs gVisor</a>
+    <a href="#deploy">Deployment</a>
+    <a href="#security">Security boundaries</a>
+    <a href="#status">Status &amp; follow-ups</a>
+  </nav>
+
+  <main>
+    <header>
+      <div class="tag">lit-actions · gvisor-server</div>
+      <h1>gVisor Server — Any-Language Lit Action Runner</h1>
+      <p class="lede">
+        Runs Lit Actions written in <strong>any language</strong> inside a
+        per-execution gVisor (<code>runsc</code>) sandbox, speaking the
+        <strong>identical gRPC op-loop</strong> as the JS runner — just on a
+        different Unix socket.
+      </p>
+      <div class="src">
+        Source PRs: <b>#557</b> (the <code>gvisor-server</code> crate) ·
+        <b>#558</b> (the <code>/lit_binary_action</code> wiring). #558 is stacked on #557.
+      </div>
+    </header>
+
+    <h2 id="insight">Core Insight</h2>
+    <p>
+      The gVisor server (<code>lit-actions/gvisor-server</code>, crate
+      <code>lit-actions-gvisor-server</code>, binary <code>lit_actions_gvisor</code>)
+      lets a Lit Action be written in <strong>any language</strong> — Python,
+      shell, a compiled binary — instead of only JavaScript. It achieves this
+      without touching the protocol, the JS runner, or the security model, by a
+      single design decision:
+    </p>
+    <p>
+      <strong>It speaks the exact same gRPC op-loop as the JS runner, on its own
+      Unix socket.</strong> From lit-api-server's point of view there is no new
+      runner — it is the same <code>Action.ExecuteJs</code> bidirectional
+      stream, the same op handlers, the same billing path. The only things that
+      differ are (1) the socket the client dials, (2) the shape of the
+      <code>code</code> payload (a content-addressed <em>bundle</em> instead of
+      JS source), and (3) the sandbox that runs it (a per-execution gVisor
+      sandbox instead of a Deno/V8 isolate).
+    </p>
+    <p>
+      Because the two runners share the proto verbatim — the guest-ops messages
+      are <code>extern_path</code>'d to the op-loop proto types at build time —
+      <strong>the two interfaces cannot drift apart</strong>. Any op the JS
+      runner supports, the gVisor runner supports, because they are literally
+      the same messages handled by the same lit-api-server code.
+    </p>
+
+    <h2 id="where">Where it sits</h2>
+    <div class="legend">
+      <span><i class="dot api"></i> lit-api-server</span>
+      <span><i class="dot js"></i> JS runner</span>
+      <span><i class="dot gv"></i> gVisor runner</span>
+    </div>
+    <pre class="ascii"><code>┌─────────────────────────────────────────────────────────────────────┐
+│ CVM (Phala TDX) — one attested identity, holds root/signer keys       │
+│                                                                       │
+│   client ── HTTPS ──▶ lit-api-server (Rocket)                         │
+│                          │                                            │
+│              ┌───────────┴───────────┐                               │
+│              │                        │                               │
+│      POST /lit_action          POST /lit_binary_action               │
+│              │                        │                               │
+│              ▼                        ▼                               │
+│   Client{socket=JS sock}     Client{socket=gVisor sock}              │
+│              │                        │   (identical Client type,     │
+│              │                        │    identical op-loop code —    │
+│              │                        │    only socket_path differs)   │
+│              │  Action.ExecuteJs      │  Action.ExecuteJs             │
+│              │  (bidi gRPC/UDS)       │  (bidi gRPC/UDS)              │
+│              ▼                        ▼                               │
+│   /tmp/lit_actions.sock      /tmp/lit_actions_gvisor.sock            │
+│              │                        │                               │
+│              ▼                        ▼                               │
+│   lit-actions (JS runner)    lit_actions_gvisor (this crate)          │
+│     Deno / V8 isolate          Supervisor + sandbox runtime           │
+│                                       │                               │
+│                                       ▼  one runsc sandbox per exec    │
+│                                ┌─────────────────────────────┐        │
+│                                │ gVisor (runsc) sandbox        │       │
+│                                │  • RO base rootfs + memory    │       │
+│                                │    overlay (--overlay2)       │       │
+│                                │  • bundle RO-mounted /action  │       │
+│                                │  • tmpfs /tmp                 │       │
+│                                │  • op socket at /run/lit/     │       │
+│                                │    ops.sock (--host-uds=all)  │       │
+│                                │  • preinstalled `lit` CLI     │       │
+│                                │  • entrypoint = user code     │       │
+│                                └─────────────────────────────┘        │
+└─────────────────────────────────────────────────────────────────────┘</code></pre>
+    <p>
+      Both runners share the same <code>lit-socket</code> volume
+      (<code>/tmp</code> in compose) and the same attested CVM identity, so
+      adding the gVisor runner introduces <strong>no new cross-VM trust
+      plumbing</strong> — it is a second process next to the JS runner.
+    </p>
+
+    <h2 id="wire">The wire contract (unchanged)</h2>
+    <p>
+      The gVisor server implements the <code>Action</code> gRPC service from
+      <code>lit-actions/grpc/schema/lit_actions.proto</code> — the same service
+      the JS runner serves. Its <code>execute_js</code> handler
+      (<code>src/server.rs</code>) is a structural clone of the JS runner's:
+      rendezvous (zero-capacity) channels give strict one-op-in-flight ordering,
+      the first stream message must be the <code>Execute</code> request, an
+      all-whitespace <code>code</code> is the empty-action shortcut, and the
+      final message is either a <code>tonic::Status</code> error (timeout/cancel)
+      or a success/failure <code>ExecutionResult</code>.
+    </p>
+    <p>How the existing <code>ExecutionRequest</code> fields are reused for a bundle:</p>
+    <table>
+      <thead><tr><th>Field</th><th>JS runner meaning</th><th>gVisor runner meaning</th></tr></thead>
+      <tbody>
+        <tr><td><code>code</code></td><td>JS source string</td><td><strong>base64 tar/tar.gz bundle</strong>, or <code>cid:&lt;id&gt;</code> referencing an already-cached bundle</td></tr>
+        <tr><td><code>ipfs_id</code></td><td>server-derived CID of the JS source</td><td>server-derived CID of the <strong>raw tar bytes</strong>; also the bundle-cache key</td></tr>
+        <tr><td><code>js_params</code></td><td>params exposed to the action</td><td>same — exposed to guest via <code>lit params</code></td></tr>
+        <tr><td><code>auth_context</code></td><td>auth context JSON</td><td>same — exposed via <code>lit auth-context</code></td></tr>
+        <tr><td><code>http_headers</code></td><td>request headers</td><td>same (incl. <code>x-request-id</code>, privacy-mode tag)</td></tr>
+        <tr><td><code>timeout</code> / <code>memory_limit</code></td><td>execution limits</td><td>same (clamped by the supervisor)</td></tr>
+      </tbody>
+    </table>
+    <p>
+      Ops (<code>Print</code>, <code>SetResponse</code>,
+      <code>GetPrivateKey</code>, <code>GetLitActionPrivateKey</code>,
+      <code>GetLitActionPublicKey</code>, <code>GetLitActionWalletAddress</code>,
+      <code>AesEncrypt</code>, <code>AesDecrypt</code>,
+      <code>IncrementFetchCount</code>, <code>UpdateResourceUsage</code>) are
+      proxied <strong>1:1</strong> onto the op-loop. Every op that touches a
+      secret (key derivation, AES) is executed <strong>by
+      lit-api-server</strong>, never inside the sandbox — the sandbox only asks.
+    </p>
+
+    <h2 id="internals">Crate internals</h2>
+    <p>
+      The crate is a thin, well-separated pipeline. Shared guest-visible
+      constants (<code>GUEST_ACTION_DIR=/action</code>,
+      <code>GUEST_SOCK_DIR=/run/lit</code>, <code>OP_SOCK_FILE=ops.sock</code>,
+      <code>LIT_OP_SOCK</code>, <code>LIT_ACTION_IPFS_ID</code>) live in
+      <code>sandbox/mod.rs</code> so the runtimes, the supervisor, the
+      <code>lit</code> CLI, and the docs cannot drift.
+    </p>
+    <table>
+      <thead><tr><th>Module</th><th>Responsibility</th></tr></thead>
+      <tbody>
+        <tr><td><code>server.rs</code></td><td><code>Action</code> gRPC front-end. Same protocol surface as the JS runner; drives the op-loop stream and hands the first request to the supervisor.</td></tr>
+        <tr><td><code>supervisor.rs</code></td><td>One execution end-to-end: resolve bundle → bind per-exec op socket → spawn sandbox → wait (timeout / 500 ms usage ticks / fatal op errors / log forwarding) → teardown. Mirrors the JS runner's <code>execute_with_worker</code>.</td></tr>
+        <tr><td><code>bridge.rs</code></td><td><code>OpBridge</code> — serializes concurrent op producers (guest RPCs, usage ticks, stdout/stderr forwarding) onto the single-op-in-flight op-loop with a tokio <code>Mutex</code>. Surfaces <code>ReportError</code> as an <code>Err</code>.</td></tr>
+        <tr><td><code>guest_service.rs</code></td><td>Per-execution <code>GuestOps</code> gRPC service on the sandbox's op socket. Every handler is a one-line forward through <code>OpBridge</code>. Also serves <code>GetJob</code>.</td></tr>
+        <tr><td><code>proto.rs</code> / <code>schema/lit_guest.proto</code></td><td>The <code>GuestOps</code> service + <code>Job</code> envelope. Op payload types are <code>extern_path</code>'d to the op-loop proto, so guest ops == op-loop ops.</td></tr>
+        <tr><td><code>bundle.rs</code></td><td>Content-addressed bundle cache — the any-language analog of the JS <code>ActionCodeCache</code>. Decodes/unpacks tar(.gz), validates the <code>lit.json</code> manifest, hardens against hostile archives.</td></tr>
+        <tr><td><code>sandbox/mod.rs</code></td><td><code>SandboxRuntime</code> trait + <code>ExecSpec</code>. The abstraction both runtimes implement.</td></tr>
+        <tr><td><code>sandbox/runsc.rs</code></td><td><strong>Production</strong> runtime: builds the OCI spec, one <code>runsc</code> sandbox per execution, <code>runsc kill</code> / <code>delete</code> teardown.</td></tr>
+        <tr><td><code>sandbox/process.rs</code></td><td><strong>Dev/CI only</strong> runtime: runs the entrypoint as a plain child process (NO isolation). Same guest contract, so a bundle behaves identically.</td></tr>
+        <tr><td><code>bin/lit.rs</code></td><td>The guest <code>lit</code> CLI shipped in the base image.</td></tr>
+        <tr><td><code>main.rs</code></td><td>CLI/env parsing, runtime selection, server bootstrap.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>The op bridge — why it exists</h3>
+    <p>
+      The op-loop allows exactly <strong>one op in flight</strong>: the runner
+      sends an <code>ExecuteJsResponse</code> (op request) and lit-api-server
+      replies with exactly one <code>ExecuteJsRequest</code> (the op response,
+      or <code>ReportError</code>). The JS runner gets this ordering for free
+      from V8's single thread. Here the producers are genuinely concurrent — the
+      guest may call <code>lit</code> from multiple threads, the supervisor emits
+      usage ticks every 500 ms, and stdout/stderr are forwarded as
+      <code>Print</code> ops. <code>OpBridge::round_trip</code> holds a mutex
+      across each send+recv pair so producers can never interleave. This is the
+      crux that lets an untrusted multi-threaded guest share a
+      strictly-sequential op stream.
+    </p>
+
+    <h2 id="lifecycle">Request lifecycle (end-to-end)</h2>
+    <pre class="ascii"><code>client                lit-api-server                 lit_actions_gvisor              runsc sandbox
+  │                        │                                 │                            │
+  │ POST /lit_binary_action│                                 │                            │
+  │  {bundle|checksum,      │                                 │                            │
+  │   js_params}           │                                 │                            │
+  ├───────────────────────▶│                                 │                            │
+  │           resolve_binary_bundle():                       │                            │
+  │           • decode base64 (whitespace-tolerant)          │                            │
+  │           • checksum = IPFS-hash(raw tar bytes)          │                            │
+  │           • authorize on DERIVED checksum                │                            │
+  │             (ipfs_cid_to_u256 → can_execute_action)      │                            │
+  │           build Client{ socket_path = gVisor socket }    │                            │
+  │                        │  Action.ExecuteJs (bidi/UDS)    │                            │
+  │                        ├────────────────────────────────▶│                            │
+  │                        │  ExecutionRequest{code,ipfs_id, │                            │
+  │                        │   js_params,timeout,…}          │                            │
+  │                        │                    BundleCache.resolve():                    │
+  │                        │                     unpack tar → /cache/&lt;cid&gt;                 │
+  │                        │                    bind per-exec op socket, serve GuestOps    │
+  │                        │                                 │  runsc run (OCI spec)      │
+  │                        │                                 ├───────────────────────────▶│
+  │                        │                                 │       entrypoint runs      │
+  │                        │                                 │       (any language)       │
+  │                        │                                 │◀── lit get-private-key ────┤
+  │                        │◀── GetPrivateKey op ────────────┤   (over /run/lit/ops.sock) │
+  │        (key derived in-TEE, returned)  ─────────────────▶│──── secret ───────────────▶│
+  │                        │◀── UpdateResourceUsage (500ms) ─┤                            │
+  │      bill wall-clock; may set cancel_action ────────────▶│                            │
+  │                        │◀── Print(stdout/stderr) ────────┤                            │
+  │                        │                                 │   entrypoint exits 0/n     │
+  │                        │◀── ExecutionResult(success) ────┤◀───────────────────────────┤
+  │◀── {response,logs} ────┤                                 │   teardown: kill+delete    │</code></pre>
+    <p>Key semantics (all mirror the JS runner exactly):</p>
+    <ul>
+      <li><strong>Termination = the entrypoint exits</strong> (serverless/CLI semantics). Exit <code>0</code> → success with the last-recorded response; non-zero → failure with a stderr tail. <code>lit set-response</code> only <em>records</em> the response server-side.</li>
+      <li><strong>Timeout</strong> → <code>DeadlineExceeded</code>; <strong>billing cancel</strong> (a usage tick returns <code>cancel_action</code>) → <code>ResourceExhausted</code>. Same status codes and messages as JS.</li>
+      <li><strong>Usage ticks</strong> every 500 ms come from the <em>supervisor</em>, never from guest code (the <code>UpdateResourceUsage</code> op is deliberately absent from <code>GuestOps</code>). v1 bills flat wall-clock per second; <code>used_kb</code> is <code>0</code> for now.</li>
+      <li><strong>Log forwarding</strong> reads raw bytes (not lines) so the pipe always drains, decodes lossily, chunks long lines (64 KB), and keeps an 8 KB stderr tail. A <code>Print</code> rejected by lit-api-server (log quota / <code>ReportError</code>) is fatal — parity with a throwing <code>console.log</code>.</li>
+    </ul>
+
+    <h2 id="relationship">Relationship to lit-api-server (PR #558)</h2>
+    <p>
+      PR #558 is described as "purely the lit-api-server socket wiring"
+      follow-up from #557 — <strong>no protocol, op-handler, or runtime
+      changes</strong>. The changes:
+    </p>
+    <ul>
+      <li><strong><code>actions/client/execution.rs</code></strong> — the enabler. The <code>Client</code> now honors its <code>socket_path</code> field (previously hardcoded to the JS socket). The JS path leaves it unset and falls back to <code>/tmp/lit_actions.sock</code>; the binary path sets it to the gVisor socket. <code>GrpcClientPool</code> pools connections keyed by socket path, so one pool serves both runners.</li>
+      <li><strong><code>core/v1/endpoints/actions.rs</code></strong> — new <code>/lit_binary_action</code> handler. Same guards as <code>/lit_action</code> (<code>CpuAvailable</code>, <code>BilledLitActionApiKey</code>), same response type (<code>LitActionResponse</code>).</li>
+      <li><strong><code>core/v1/models/request.rs</code></strong> — <code>LitBinaryActionRequest { bundle?, checksum?, js_params? }</code>. Provide <code>bundle</code> (base64 tar/tar.gz) or <code>checksum</code> (CID of an already-cached bundle).</li>
+      <li><strong><code>core/core_features.rs</code></strong> — <code>lit_binary_action()</code> + <code>resolve_binary_bundle()</code>. The security-critical part (below).</li>
+      <li><strong><code>core/v1/health.rs</code></strong> — <code>/health</code> also probes the gVisor socket (<code>lit_actions_gvisor_reachable</code>), but <strong>informational only</strong> — it does <em>not</em> gate health, so nodes stay healthy before the runner is rolled out. The probe logic was refactored into a shared <code>probe_socket()</code> used for both sockets.</li>
+      <li><strong><code>main.rs</code></strong> — <code>LitActionsGvisorSocketPath</code> managed state + the <code>LIT_ACTIONS_GVISOR_SOCKET</code> env override (default <code>/tmp/lit_actions_gvisor.sock</code>).</li>
+      <li><strong><code>docker-compose.phala.yml</code></strong> — the <code>lit-actions-gvisor</code> service; api-server <code>depends_on</code> it. Adding the service changes <code>compose_hash</code> (governed in prod).</li>
+      <li><strong><code>Cargo.toml</code> / <code>k6/litApiServer.ts</code></strong> — <code>base64 = "0.22"</code> (matched to the gVisor crate); regenerated k6 client with the new route.</li>
+    </ul>
+
+    <h3>Authorization — derived, never client-supplied</h3>
+    <p>
+      The permission model is unchanged from JS actions. On-chain, an action is
+      authorized by the keccak hash of its content id;
+      <code>can_execute_action</code> doesn't care whether those bytes are a
+      JS-source CID or a bundle CID.
+    </p>
+    <p>
+      <code>resolve_binary_bundle()</code> enforces the invariant that
+      <strong>you can only run bytes you actually submitted</strong>:
+    </p>
+    <ul>
+      <li>With <code>bundle</code>: decode the base64 <em>exactly as the runner will</em> (strip whitespace, STANDARD alphabet), then <code>checksum = IPFS-hash(raw tar bytes)</code>. Authorization runs on this <strong>derived</strong> checksum. A client-supplied <code>checksum</code> is only a hint — if it disagrees, it is logged and ignored. So a caller can never authorize CID A and execute bytes B.</li>
+      <li>With only <code>checksum</code>: emit <code>cid:&lt;checksum&gt;</code> (the runner resolves it from its own bundle cache) and authorize on that checksum — it maps back to the exact bytes that hashed to it.</li>
+    </ul>
+    <p>
+      The same <code>IpfsHasher</code> is used here and on-chain at registration,
+      so a bundle registered on-chain matches the checksum derived at execution
+      time. Note the two caches are distinct: <strong>lit-api-server needs no
+      server-side code cache for binary actions — the gVisor runner owns the
+      bundle cache.</strong>
+    </p>
+
+    <h2 id="bundle">Bundle format &amp; cache</h2>
+    <p>A bundle is a <code>tar</code> or <code>tar.gz</code> archive with a <code>lit.json</code> manifest at its root:</p>
+    <pre><code>{
+  "entrypoint": ["python3", "main.py"],
+  "runtime": "python3",
+  "env": { "PYTHONUNBUFFERED": "1" }
+}</code></pre>
+    <ul>
+      <li><code>entrypoint</code> — an argv array run verbatim, <strong>or</strong> a string treated as a shell script path (run as <code>sh &lt;path&gt;</code>; no exec bit needed).</li>
+      <li><code>runtime</code> — informational for now (the v1 base image ships all supported runtimes).</li>
+      <li><code>env</code> — optional extra environment variables.</li>
+    </ul>
+    <p><code>BundleCache</code> (<code>bundle.rs</code>) resolves <code>code</code> to an unpacked directory:</p>
+    <ul>
+      <li><code>cid:&lt;id&gt;</code> → must already be cached (else "resend the bundle bytes").</li>
+      <li>base64 payload → decode, derive the CID (server <code>ipfs_id</code> if supplied, else a local <code>sha256-&lt;hex&gt;</code> pseudo-id for tests), unpack once, cache by CID.</li>
+      <li>Unpack is <strong>atomic</strong>: unpack into a temp sibling then <code>rename</code>, so a concurrent resolve of the same CID either wins the rename or finds the winner's directory — never a half-unpacked one. The unpacked dir is <strong>read-only and shared</strong> across executions; per-run writes go to the sandbox's tmpfs.</li>
+    </ul>
+    <div class="callout">
+      <b>Hostile-archive hardening.</b> Only regular files and directories are
+      allowed (symlinks/devices/FIFOs rejected — they could alias outside the
+      bundle); setuid/setgid/sticky bits are stripped (rwx kept for binary
+      entrypoints); <code>unpack_in</code> refuses path traversal; caps of 256 MB
+      unpacked / 10 000 entries guard against zip bombs; the manifest is
+      validated <em>before</em> the bundle is published under its CID.
+    </div>
+
+    <h2 id="cli">Guest <code>lit</code> CLI</h2>
+    <p>
+      Preinstalled in the base image (<code>bin/lit.rs</code>), the
+      <code>lit</code> CLI is how action code in any language reaches the
+      op-loop. It connects to <code>$LIT_OP_SOCK</code> (default
+      <code>/run/lit/ops.sock</code>) and translates each subcommand into one
+      <code>GuestOps</code> RPC. Alternatively a language SDK can link
+      <code>schema/lit_guest.proto</code> directly for the same surface.
+    </p>
+    <pre><code>lit job                          # full job JSON (params, authContext, headers, cid)
+lit params                       # jsParams JSON
+lit auth-context                 # authContext JSON
+lit print "hello"                # append to action logs
+lit set-response '{"ok":true}'   # record the response ("-" reads stdin)
+lit get-private-key &lt;pkpId&gt;      # raw derived key for a permitted PKP wallet
+lit get-action-private-key       # this action's own derived key
+lit get-action-public-key [cid]
+lit get-action-wallet-address [cid]
+lit aes-encrypt &lt;pkpId&gt; &lt;msg&gt;    # / aes-decrypt (value or "-" for stdin)
+lit increment-fetch-count</code></pre>
+    <p>
+      Results go to stdout with a trailing newline; op failures (including
+      <code>ReportError</code> text from lit-api-server, e.g. permission denials)
+      go to stderr and exit non-zero. Large payloads use <code>-</code>/stdin to
+      avoid the argv limit.
+    </p>
+
+    <h2 id="isolation">Isolation model (gVisor / runsc)</h2>
+    <p>
+      The production runtime spawns <strong>one <code>runsc</code> sandbox per
+      execution</strong> with an OCI spec (<code>sandbox/runsc.rs</code>) that:
+    </p>
+    <ul>
+      <li>roots at the shared read-only base rootfs with a per-exec <strong>in-memory overlay</strong> (<code>--overlay2=root:memory</code>) — the sandbox can write anywhere, nothing survives it, and the base image is never mutated;</li>
+      <li>bind-mounts the bundle <strong>read-only</strong> at <code>/action</code>, gives writable scratch via a size-capped tmpfs at <code>/tmp</code>, and bind-mounts the <strong>per-exec</strong> op socket at <code>/run/lit/ops.sock</code> (<code>--host-uds=all</code> is required for the sandbox to reach it);</li>
+      <li>runs as uid 0 <em>inside</em> the sandbox — the gVisor Sentry plus the CVM are the isolation boundary, so the base image needn't carry users;</li>
+      <li>applies cgroup limits (memory / pids) via a <strong>delegated leaf cgroup</strong> (<code>lit-sandboxes/&lt;exec-id&gt;</code>), required to avoid cgroup-v2 <code>subtree_control: EBUSY</code> when nested in a container;</li>
+      <li>uses fresh PID/IPC/UTS/mount/network namespaces.</li>
+    </ul>
+    <p>Spike-validated invariants (2026-07-01, Phala TDX dev CVMs):</p>
+    <ul>
+      <li><code>--host-uds=all</code> is mandatory (the socket exposed is per-sandbox, in a 0700 host tempdir — never a shared one).</li>
+      <li>Nested-in-container needs the delegated leaf cgroup; <code>--ignore-cgroups</code> sidesteps it for dev/tests at the cost of per-exec cgroup limits (the supervisor timeout still applies).</li>
+      <li><code>systrap</code> (default) and <code>ptrace</code> platforms both work inside TDX; there is no <code>/dev/kvm</code> in the CVM, so the kvm platform is not an option.</li>
+    </ul>
+    <p>
+      The <code>process</code> runtime (dev/CI) runs the entrypoint as a plain
+      child process with <strong>no isolation</strong> — same env vars, same
+      op-socket location, same argv, its own process group for whole-tree kill —
+      so a bundle developed against it behaves identically under runsc. It exists
+      so the integration tests (<code>tests/it.rs</code>) can exercise the full
+      loop on any host, macOS included.
+    </p>
+    <h3>Limits (first-draft defaults)</h3>
+    <table>
+      <thead><tr><th>Limit</th><th>Default</th><th>Max</th><th>Enforced by</th></tr></thead>
+      <tbody>
+        <tr><td>timeout</td><td>15 min</td><td>150 min</td><td>supervisor</td></tr>
+        <tr><td>memory</td><td>512 MB</td><td>2 GB</td><td>sandbox cgroup</td></tr>
+        <tr><td>pids</td><td>128</td><td>—</td><td>sandbox cgroup</td></tr>
+        <tr><td>tmpfs (/tmp)</td><td>512 MB</td><td>—</td><td>tmpfs mount size</td></tr>
+      </tbody>
+    </table>
+    <p>
+      Memory grows on demand up to the ceiling (gVisor is not a fixed-size VM),
+      so per-exec <code>memory.peak</code> stays meterable for future
+      usage-based pricing.
+    </p>
+
+    <h2 id="compare">JS runner vs gVisor runner</h2>
+    <table>
+      <thead><tr><th>Aspect</th><th>JS runner (<code>lit-actions</code>)</th><th>gVisor runner (<code>lit_actions_gvisor</code>)</th></tr></thead>
+      <tbody>
+        <tr><td>Languages</td><td>JavaScript only</td><td>Any (Python, shell, compiled binaries, …)</td></tr>
+        <tr><td>Isolation</td><td>Deno / V8 isolate</td><td>Per-execution gVisor (<code>runsc</code>) sandbox</td></tr>
+        <tr><td><code>code</code> payload</td><td>JS source</td><td>base64 tar(.gz) bundle, or <code>cid:&lt;id&gt;</code></td></tr>
+        <tr><td>Op surface</td><td>op-loop</td><td><strong>identical</strong> op-loop (extern_path'd)</td></tr>
+        <tr><td>Op access from code</td><td>JS bindings</td><td><code>lit</code> CLI / <code>lit_guest.proto</code> client</td></tr>
+        <tr><td>Socket</td><td><code>/tmp/lit_actions.sock</code></td><td><code>/tmp/lit_actions_gvisor.sock</code></td></tr>
+        <tr><td>api-server route</td><td><code>/lit_action</code></td><td><code>/lit_binary_action</code></td></tr>
+        <tr><td>Code cache</td><td><code>ActionCodeCache</code> (api-server)</td><td><code>BundleCache</code> (runner)</td></tr>
+        <tr><td>Termination</td><td>script returns</td><td>entrypoint process exits</td></tr>
+        <tr><td>Health gating</td><td>gates <code>/health</code></td><td>informational only</td></tr>
+        <tr><td>Default memory</td><td>64 MB</td><td>512 MB</td></tr>
+      </tbody>
+    </table>
+
+    <h2 id="deploy">Deployment (Phala)</h2>
+    <p>
+      Ships as a new <code>lit-actions-gvisor</code> container in the existing
+      <code>docker-compose.phala.yml</code> — same CVM, same attested identity.
+      It mounts the shared <code>lit-socket</code> volume and serves its own
+      socket there; lit-api-server <code>depends_on</code> it and routes
+      <code>/lit_binary_action</code> to it. The container currently needs
+      <code>privileged</code> to create nested runsc sandboxes (the spikes used
+      it — <strong>scope down before production</strong>).
+    </p>
+    <pre><code>lit-actions-gvisor:
+  image: ${DOCKER_IMAGE_LIT_ACTIONS_GVISOR}
+  command: [lit_actions_gvisor, --socket, /tmp/lit_actions_gvisor.sock,
+            --rootfs, /var/lib/lit/sandbox-rootfs]
+  privileged: true            # nested runsc; scope down for production
+  volumes: [ "lit-socket:/tmp" ]</code></pre>
+    <p>
+      Deploy caveats: the pipeline must build + substitute
+      <code>DOCKER_IMAGE_LIT_ACTIONS_GVISOR</code>; adding the compose service
+      changes <code>compose_hash</code> (<strong>governed</strong> in prod);
+      bundles are bounded by the existing <code>max_code_length</code> (large
+      bundles may need it raised in chain config).
+    </p>
+
+    <h2 id="security">Security boundaries (summary)</h2>
+    <ul>
+      <li><strong>Secrets never enter the sandbox.</strong> Key derivation and AES run <em>in lit-api-server</em> (in the TEE); the sandbox only issues ops and receives results. The op socket is per-execution, in a 0700 host tempdir.</li>
+      <li><strong>Authorization is on server-derived content ids</strong>, never client-supplied — you can only execute bytes you actually submitted.</li>
+      <li><strong>Untrusted code runs in a gVisor sandbox</strong> with a memory-overlay root (base image immutable), read-only bundle mount, capped tmpfs, cgroup memory/pid limits, and a hard supervisor timeout with <code>runsc kill --all</code> teardown.</li>
+      <li><strong>Untrusted bundles are hardened at unpack</strong> (no symlinks/devices, stripped setuid, no path traversal, zip-bomb caps, manifest validated before publish).</li>
+      <li><strong>The op-loop stays strictly sequential</strong> even under a concurrent guest (<code>OpBridge</code> mutex), so an adversarial multi-threaded action can't corrupt the protocol stream.</li>
+    </ul>
+
+    <h2 id="status">Current status &amp; follow-ups</h2>
+    <p>At the time of writing (#557 + #558 open/stacked):</p>
+    <ul>
+      <li>The crate is complete with 12 end-to-end integration tests (real op-loop, real bundles, real <code>lit</code> CLI via the <code>process</code> runtime) + 6 bundle unit tests.</li>
+      <li>runsc specifics are spike-validated but need a Linux dev CVM pass for the isolation/perf quality gates.</li>
+    </ul>
+    <p>Named v1 non-goals / follow-ups:</p>
+    <ul>
+      <li>Warm pool / checkpoint-restore for near-instant starts (cold start ~150–500 ms, currently unbilled; excluding unpack/boot from billing is an api-server change).</li>
+      <li>Egress bandwidth cap via a single proxied path (replaces the JS fetch-count quota; <code>increment-fetch-count</code> is proxied for parity meanwhile).</li>
+      <li><code>memory.peak</code> metering into <code>UpdateResourceUsage.used_kb</code> (currently 0).</li>
+      <li>Bundle-cache eviction (currently unbounded, keyed by CID).</li>
+      <li>Local-mode <code>lit</code> CLI deriving keys from a local private key (DX).</li>
+      <li>OTLP telemetry export (JS runner's <code>otlp</code> feature); stdout tracing only.</li>
+      <li>Base rootfs image build + the compose <code>compose_hash</code> governance change.</li>
+    </ul>
+
+    <footer>
+      CPL-344 · Architecture gVisor Server · derived from PRs #557 &amp; #558 ·
+      companion to <code>gvisor-server.md</code>
+    </footer>
+  </main>
+</div>
+</body>
+</html>
