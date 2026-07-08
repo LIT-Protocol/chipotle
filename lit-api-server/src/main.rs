@@ -2,6 +2,7 @@ use lit_api_server::accounts;
 use lit_api_server::accounts::chain_config::start_chain_config;
 use lit_api_server::accounts::signer_pool::start_signer_pool;
 use lit_api_server::actions::grpc::GrpcClientPool;
+use lit_api_server::actions::languages::SupportedLanguages;
 use lit_api_server::config;
 use lit_api_server::core;
 use lit_api_server::core::v1::guards::cpu_overload::CpuOverloadMonitor;
@@ -158,6 +159,17 @@ async fn main() -> Result<(), rocket::Error> {
             std::process::exit(1);
         }
     };
+    // Fail fast on a bad language allowlist so a deploy-config typo can't
+    // boot a node that misadvertises its capability surface.
+    let supported_languages = match SupportedLanguages::from_env() {
+        Ok(languages) => Arc::new(languages),
+        Err(e) => {
+            eprintln!("Failed to parse supported languages: {e:?}. Exiting.");
+            std::process::exit(1);
+        }
+    };
+    tracing::info!("Supported languages: {supported_languages}");
+
     let internal_config = internal::config::init();
     // `Arc<dyn AuthResolver>` is the auth backplane both this service and
     // lit-payments use. lit-api-server owns the on-chain plumbing, so it
@@ -211,6 +223,7 @@ async fn main() -> Result<(), rocket::Error> {
             internal_config.clone(),
             auth_resolver.clone(),
             ipfs_cache.clone(),
+            supported_languages.clone(),
         );
 
         let rocket = match r.ignite().await {
@@ -325,6 +338,7 @@ async fn await_server_handle(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_rocket(
     signer_pool: Arc<lit_api_server::accounts::signer_pool::SignerPool>,
     chain_config: Arc<lit_api_server::accounts::chain_config::ChainConfig>,
@@ -333,6 +347,7 @@ fn build_rocket(
     internal_config: Option<Arc<internal::InternalConfig>>,
     auth_resolver: Arc<dyn lit_billing_core::billing_auth::AuthResolver>,
     ipfs_cache: Cache<String, Arc<String>>,
+    supported_languages: Arc<SupportedLanguages>,
 ) -> rocket::Rocket<rocket::Build> {
     let allowed_methods = HashSet::from([
         Method::from_str("Get").expect("Invalid method: Get"),
@@ -396,6 +411,7 @@ fn build_rocket(
         .manage(stripe_state)
         .manage(internal_config)
         .manage(auth_resolver)
+        .manage(supported_languages)
         .manage(core::v1::health::LitActionsSocketPath(
             std::path::PathBuf::from(core::v1::health::LIT_ACTIONS_SOCKET),
         ));

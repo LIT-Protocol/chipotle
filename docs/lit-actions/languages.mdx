@@ -1,0 +1,96 @@
+---
+title: "Language Support"
+description: "Discover which languages, runtimes, and execution methods a node supports."
+---
+
+## Overview
+
+Lit Actions are written in JavaScript today, and support for additional languages (starting with Python, plus compiled languages like Rust) is rolling out. Because language availability varies by node and environment — the `next` environment enables languages before production does — clients should not hardcode assumptions about what a node runs. Instead, ask the node.
+
+`GET /get_supported_languages` advertises the node's capability surface: every language it accepts, the runtime versions it can provision, and the execution methods each language supports. The endpoint requires no authentication — like `/get_lit_action_client_config`, it exists so you can discover capability before uploading anything.
+
+## The discovery endpoint
+
+```bash
+curl https://<node>/core/v1/get_supported_languages
+```
+
+Example response:
+
+```json
+{
+  "languages": [
+    {
+      "name": "javascript",
+      "display_name": "JavaScript",
+      "execution_model": "deno",
+      "runtimes": [],
+      "methods": ["raw_script"]
+    },
+    {
+      "name": "python",
+      "display_name": "Python",
+      "execution_model": "gvisor",
+      "runtimes": [
+        { "id": "python3.13", "version": "3.13.1", "is_default": true, "prewarmed": true },
+        { "id": "python3.12", "version": "3.12.7", "is_default": false, "prewarmed": true }
+      ],
+      "methods": ["raw_script", "bundle"]
+    },
+    {
+      "name": "rust",
+      "display_name": "Rust (compiled binary)",
+      "execution_model": "gvisor",
+      "runtimes": [],
+      "methods": ["bundle"]
+    }
+  ]
+}
+```
+
+A node that has not enabled multi-language support returns only the `javascript` entry.
+
+## Field reference
+
+### `LanguageFeature`
+
+| Field | Meaning |
+|---|---|
+| `name` | Stable id used in requests, e.g. `"python"`, `"rust"`, `"javascript"`. |
+| `display_name` | Human label, e.g. `"Python"`. |
+| `execution_model` | The underlying runner: `"deno"` (JavaScript) or `"gvisor"` (everything else, run in a gVisor sandbox). |
+| `runtimes` | Runtime versions the node can provision for this language. Empty for compiled/static languages, which bring their own binary. |
+| `methods` | Which execution methods this language accepts on this node. |
+
+### `runtimes[]`
+
+| Field | Meaning |
+|---|---|
+| `id` | The value you pass as `runtime` when submitting an action, e.g. `"python3.13"`. |
+| `version` | Full version string, e.g. `"3.13.1"`. |
+| `is_default` | Used when you omit `runtime` from a request. |
+| `prewarmed` | Whether this runtime's install layers are already materialized on the node. A cold runtime may still be accepted on `next` but pays a one-time provisioning cost; production only admits pre-warmed runtimes. |
+
+### `methods[]`
+
+| Method | Meaning |
+|---|---|
+| `raw_script` | Send source code directly with a `language` (and optional `runtime`); the server packages it for execution. This is how JavaScript actions work today via `/lit_action`. |
+| `bundle` | Upload a code bundle (tar) whose startup script provisions what it needs, or ships a static binary. |
+| `oci_bundle` | Upload a self-contained OCI image that brings its own runtime. Node-gated; production may restrict this to a curated set of base images. |
+
+## Using the endpoint
+
+Before submitting a non-JavaScript action, check that the `(language, method)` pair you intend to use is advertised — a node rejects requests outside its allowlist before any sandbox spins up. If you pick a `runtime`, use one of the advertised `id`s (or omit it to get the default).
+
+Language availability is deployment configuration, not a protocol constant: the same request can be accepted on `next` and rejected in production while a language is being rolled out. Query the environment you are targeting.
+
+<Note>
+Multi-language execution is rolling out in phases. The discovery endpoint is live everywhere, but the non-JavaScript execution paths (`raw_script` for Python, code bundles, OCI bundles) become available as the corresponding phases land. A node only advertises what it can actually run.
+</Note>
+
+## Related pages
+
+- [Lit Actions overview](/lit-actions/index)
+- [Secrets](/lit-actions/secrets) — how actions access PKP-derived secrets, regardless of language
+- [Limits](/lit-actions/limits) — payload and execution limits that apply to all actions
