@@ -22,9 +22,11 @@ cannot drift apart**. Any op the JS runner supports, the gVisor runner supports,
 because they are literally the same messages handled by the same lit-api-server
 code.
 
-> Source PRs: **#557** (the `gvisor-server` crate) and **#558** (the
-> `/lit_binary_action` wiring in lit-api-server). Both were open/stacked at the
-> time of writing; #558 is stacked on #557.
+> Source PRs:
+> [#557](https://github.com/LIT-Protocol/chipotle/pull/557) (the `gvisor-server`
+> crate) and
+> [#558](https://github.com/LIT-Protocol/chipotle/pull/558) (the
+> `/lit_binary_action` wiring in lit-api-server).
 
 ---
 
@@ -96,11 +98,14 @@ How the existing `ExecutionRequest` fields are reused for a bundle:
 | `http_headers` | request headers | same (incl. `x-request-id`, privacy-mode tag) |
 | `timeout` / `memory_limit` | execution limits | same (clamped by the supervisor) |
 
-Ops (`Print`, `SetResponse`, `GetPrivateKey`, `GetLitActionPrivateKey`,
-`GetLitActionPublicKey`, `GetLitActionWalletAddress`, `AesEncrypt`,
-`AesDecrypt`, `IncrementFetchCount`, `UpdateResourceUsage`) are proxied **1:1**
-onto the op-loop. Every op that touches a secret (key derivation, AES) is
-executed **by lit-api-server**, never inside the sandbox — the sandbox only asks.
+Guest-callable ops (`Print`, `SetResponse`, `GetPrivateKey`,
+`GetLitActionPrivateKey`, `GetLitActionPublicKey`, `GetLitActionWalletAddress`,
+`AesEncrypt`, `AesDecrypt`, `IncrementFetchCount`) are proxied **1:1** from guest
+code onto the op-loop. `UpdateResourceUsage` is also carried on the op-loop, but
+it is emitted by the *supervisor* (usage ticks) and is deliberately absent from
+`GuestOps` — guest code can never issue it (see the lifecycle section below).
+Every op that touches a secret (key derivation, AES) is executed **by
+lit-api-server**, never inside the sandbox — the sandbox only asks.
 
 ---
 
@@ -425,7 +430,7 @@ Deploy caveats: the pipeline must build + substitute
 
 ## Current status & follow-ups
 
-At the time of writing (#557 + #558 open/stacked):
+As of the initial implementation ([#557](https://github.com/LIT-Protocol/chipotle/pull/557) + [#558](https://github.com/LIT-Protocol/chipotle/pull/558)):
 
 - The crate is complete with 12 end-to-end integration tests (real op-loop, real
   bundles, real `lit` CLI via the `process` runtime) + 6 bundle unit tests.

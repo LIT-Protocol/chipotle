@@ -300,8 +300,11 @@
         different Unix socket.
       </p>
       <div class="src">
-        Source PRs: <b>#557</b> (the <code>gvisor-server</code> crate) ·
-        <b>#558</b> (the <code>/lit_binary_action</code> wiring). #558 is stacked on #557.
+        Source PRs:
+        <a href="https://github.com/LIT-Protocol/chipotle/pull/557">#557</a>
+        (the <code>gvisor-server</code> crate) ·
+        <a href="https://github.com/LIT-Protocol/chipotle/pull/558">#558</a>
+        (the <code>/lit_binary_action</code> wiring).
       </div>
     </header>
 
@@ -406,13 +409,16 @@
       </tbody>
     </table>
     <p>
-      Ops (<code>Print</code>, <code>SetResponse</code>,
+      Guest-callable ops (<code>Print</code>, <code>SetResponse</code>,
       <code>GetPrivateKey</code>, <code>GetLitActionPrivateKey</code>,
       <code>GetLitActionPublicKey</code>, <code>GetLitActionWalletAddress</code>,
       <code>AesEncrypt</code>, <code>AesDecrypt</code>,
-      <code>IncrementFetchCount</code>, <code>UpdateResourceUsage</code>) are
-      proxied <strong>1:1</strong> onto the op-loop. Every op that touches a
-      secret (key derivation, AES) is executed <strong>by
+      <code>IncrementFetchCount</code>) are proxied <strong>1:1</strong> from
+      guest code onto the op-loop. <code>UpdateResourceUsage</code> is also
+      carried on the op-loop, but it is emitted by the <em>supervisor</em> (usage
+      ticks) and is deliberately absent from <code>GuestOps</code> — guest code
+      can never issue it (see the lifecycle section below). Every op that touches
+      a secret (key derivation, AES) is executed <strong>by
       lit-api-server</strong>, never inside the sandbox — the sandbox only asks.
     </p>
 
@@ -686,7 +692,7 @@ lit increment-fetch-count</code></pre>
     </ul>
 
     <h2 id="status">Current status &amp; follow-ups</h2>
-    <p>At the time of writing (#557 + #558 open/stacked):</p>
+    <p>As of the initial implementation (<a href="https://github.com/LIT-Protocol/chipotle/pull/557">#557</a> + <a href="https://github.com/LIT-Protocol/chipotle/pull/558">#558</a>):</p>
     <ul>
       <li>The crate is complete with 12 end-to-end integration tests (real op-loop, real bundles, real <code>lit</code> CLI via the <code>process</code> runtime) + 6 bundle unit tests.</li>
       <li>runsc specifics are spike-validated but need a Linux dev CVM pass for the isolation/perf quality gates.</li>
