@@ -1,5 +1,5 @@
 [workspace]
-members = ["cli", "ext", "grpc", "server", "snapshot", "tests"]
+members = ["cli", "ext", "grpc", "gvisor-server", "server", "snapshot", "tests"]
 resolver = "2"
 
 [workspace.package]
