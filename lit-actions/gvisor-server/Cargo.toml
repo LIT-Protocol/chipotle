@@ -1,0 +1,53 @@
+[package]
+name = "lit-actions-gvisor-server"
+description = "Any-language Lit Action runner: gVisor sandbox supervisor speaking the lit-actions op-loop"
+version = { workspace = true }
+edition = { workspace = true }
+publish = { workspace = true }
+
+[lib]
+path = "src/lib.rs"
+doctest = false
+
+[[bin]]
+name = "lit_actions_gvisor"
+path = "src/main.rs"
+test = false
+doctest = false
+
+# Guest-side CLI preinstalled in the sandbox base image. It lives in this
+# crate so the guest wire contract and the supervisor that serves it cannot
+# drift apart.
+[[bin]]
+name = "lit"
+path = "src/bin/lit.rs"
+test = false
+doctest = false
+
+[dependencies]
+anyhow = { workspace = true }
+base64 = "0.22"
+clap = { version = "4", features = ["derive", "env"] }
+flate2 = "1"
+flume = { workspace = true }
+lit-actions-grpc = { workspace = true }
+lit-observability = { workspace = true }
+nix = { version = "0.30", features = ["signal"] }
+prost = "0.13"
+serde = { version = "1", features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = "0.10"
+tar = "0.4"
+tempfile = "3"
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+tonic = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+
+[dev-dependencies]
+pretty_assertions = "1"
+temp-file = "0.1"

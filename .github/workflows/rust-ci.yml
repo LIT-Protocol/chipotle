@@ -107,8 +107,11 @@ jobs:
       # matrix job via taiki-e/install-action, which uses prebuilt binaries.
       # The pre-existing advisory backlog lives in deny.toml's [advisories.ignore]
       # block; new RUSTSEC IDs fail CI by default.
-      # Version is pinned: cargo-deny@latest silently broke CI once (0.20.0 moved
-      # the global `--config` flag off the `check` subcommand). Bump deliberately.
+      #
+      # Pinned: an unpinned `cargo-deny` broke CI when 0.20.2 moved `--config`
+      # from the `check` subcommand to the top-level command. The advisory DB
+      # is fetched fresh at runtime, so pinning the tool does not freeze the
+      # advisory data — bump the pin deliberately.
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny@0.20.2

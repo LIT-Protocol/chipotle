@@ -309,6 +309,57 @@ contract AccountsTest is BaseTest {
         writes.registerWalletDerivation(hash, pkpAddr, 43, "dup", "dup");
     }
 
+    function test_removeWalletDerivation_hardDeletesAndCompacts() public {
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 hash = apiKeyHashOf(user);
+
+        address pkpA = address(0xA11CE);
+        address pkpB = address(0xB0B);
+        address pkpC = address(0xCA75);
+        vm.startPrank(user);
+        writes.registerWalletDerivation(hash, pkpA, 11, "a", "a");
+        writes.registerWalletDerivation(hash, pkpB, 22, "b", "b");
+        writes.registerWalletDerivation(hash, pkpC, 33, "c", "c");
+        vm.stopPrank();
+
+        // Remove the middle wallet.
+        vm.prank(user);
+        writes.removeWalletDerivation(hash, pkpB);
+
+        // Derivation path is wiped (hard delete → unrecoverable).
+        assertEq(views_.getWalletDerivation(hash, pkpB), 0);
+
+        // listPkps stays gap-free with the survivors (swap-and-pop compaction).
+        AppStorage.PkpData[] memory pkps = views_.listPkps(hash, 0, 10);
+        assertEq(pkps.length, 2);
+        bool sawA;
+        bool sawC;
+        for (uint256 i = 0; i < pkps.length; i++) {
+            if (pkps[i].pkpId == pkpA) sawA = true;
+            if (pkps[i].pkpId == pkpC) sawC = true;
+            assertTrue(pkps[i].pkpId != pkpB, "deleted pkp still listed");
+        }
+        assertTrue(sawA && sawC, "survivors missing after compaction");
+
+        // The address can be registered again after deletion (metadata fully cleared).
+        vm.prank(user);
+        writes.registerWalletDerivation(hash, pkpB, 44, "b2", "b2");
+        assertEq(views_.getWalletDerivation(hash, pkpB), 44);
+    }
+
+    function test_removeWalletDerivation_unregisteredReverts() public {
+        vm.prank(user);
+        writes.newChainSecuredAccount("alice", "primary");
+        uint256 hash = apiKeyHashOf(user);
+
+        vm.prank(user);
+        vm.expectRevert(
+            abi.encodeWithSelector(AppStorage.InvalidRequest.selector, "PKP not registered")
+        );
+        writes.removeWalletDerivation(hash, address(0xDEAD));
+    }
+
     function test_views_unknownAccountReverts() public {
         // Any read that resolves through `getReadOnlyAccount` should revert for a
         // hash that has never been written. Using `getAccountWalletAddress` as the

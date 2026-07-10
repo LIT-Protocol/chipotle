@@ -28,7 +28,7 @@
 
 import { ACCOUNT_CONFIG_VIEW_ABI } from './account_config_view_abi.js';
 
-export const ACCOUNT_CONFIG_ABI_VERSION = '2026-05-13.1';
+export const ACCOUNT_CONFIG_ABI_VERSION = '2026-06-30.1';
 
 const WRITE_FUNCTIONS = [
   {
@@ -155,6 +155,16 @@ const WRITE_FUNCTIONS = [
       { internalType: 'address', name: 'pkpId', type: 'address' },
     ],
     name: 'removePkpFromGroup',
+    outputs: [],
+    stateMutability: 'nonpayable',
+    type: 'function',
+  },
+  {
+    inputs: [
+      { internalType: 'uint256', name: 'apiKeyHash', type: 'uint256' },
+      { internalType: 'address', name: 'pkpId', type: 'address' },
+    ],
+    name: 'removeWalletDerivation',
     outputs: [],
     stateMutability: 'nonpayable',
     type: 'function',
