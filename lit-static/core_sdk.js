@@ -17,6 +17,18 @@
  * `rpcUrl` or a signer that carries its own provider (any ethers v6 signer
  * with `signer.provider` set). The dashboard typically calls
  * `getNodeChainConfig()` first and passes the values in.
+ *
+ * Read-after-write staleness (API mode): server-mediated reads (e.g.
+ * `listApiKeys`, `listGroups`, `listWallets`, `listActions`) are served from a
+ * per-instance cache that an event listener refreshes by polling the chain
+ * about every 10s. After an on-chain write the server didn't originate — most
+ * commonly a ChainSecured (sovereign) wallet write, or a write made via another
+ * API-server instance — reads on a given instance can lag by up to that poll
+ * interval (~10s). Behind a load balancer, consecutive reads can hit different
+ * instances and briefly disagree. Sovereign-mode reads go straight to the chain
+ * via your RPC/signer and are not affected. The `/health` endpoint reports
+ * `account_event_listener_lag_seconds` if you need to detect a lagging instance.
+ * See docs/management/account_modes.mdx ("Read-after-write staleness").
  */
 
 import { ACCOUNT_CONFIG_VIEW_ABI } from './account_config_view_abi.js';

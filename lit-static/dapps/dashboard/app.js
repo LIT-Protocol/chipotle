@@ -13,6 +13,7 @@ import { initActions, loadActions } from './actions.js';
 import { initWallets, loadWallets } from './wallets.js';
 import { initActionRunner } from './runner.js';
 import { initAbout } from './about.js';
+import { startListenerLagMonitor } from './listener_lag.js';
 
 // ----- Preload all tables (with error visibility) -----
 
@@ -284,6 +285,9 @@ setOnAuthReady(() => {
   refreshChangeOwnershipVisibility();
   updateChainSecuredRpcUrlUI();
   handleBillingReturn();
+  // Watch the connected server's account-event listener and warn if its cache
+  // is lagging the chain (reads may be stale). Idempotent across re-auths.
+  startListenerLagMonitor();
 });
 
 // ----- Init -----

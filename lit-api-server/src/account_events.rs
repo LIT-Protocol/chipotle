@@ -20,10 +20,11 @@ use alloy::providers::Provider;
 use alloy::rpc::types::Filter;
 use alloy::sol_types::SolEvent;
 use std::collections::HashSet;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Polling interval for checking new account-mutation events.
-const EVENT_POLL_INTERVAL: Duration = Duration::from_secs(10);
+pub const EVENT_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Maximum number of consecutive startup failures before giving up.
 const MAX_LISTENER_RETRIES: u32 = 5;
@@ -35,6 +36,44 @@ const DEAD_WARN_INTERVAL: Duration = Duration::from_secs(300);
 /// given up. Ops can alert on this reaching `0` (or absent) — otherwise a dead
 /// listener is invisible after its single startup-failure error scrolls away.
 const LISTENER_UP_GAUGE: &str = "account_event_listener.up";
+
+/// Wall-clock unix-seconds at which the listener last confirmed it was current
+/// with the chain head (either after processing a batch of logs, or after
+/// observing that no new blocks had been produced). `0` means it has not yet
+/// completed a poll — i.e. the listener never started or is still on its first
+/// iteration. Updated with [`Ordering::Relaxed`]: this is a monotonic-ish
+/// liveness timestamp, not a synchronization point, and a few hundred
+/// milliseconds of staleness in the reported lag is immaterial.
+static LAST_CAUGHT_UP_UNIX_SECS: AtomicU64 = AtomicU64::new(0);
+
+fn now_unix_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Record that the listener is current with the chain head as of now.
+fn mark_caught_up() {
+    LAST_CAUGHT_UP_UNIX_SECS.store(now_unix_secs(), Ordering::Relaxed);
+}
+
+/// Seconds since the account-event listener last confirmed it was current with
+/// the chain head, or `None` if it has not yet completed a poll.
+///
+/// Healthy values stay at or below [`EVENT_POLL_INTERVAL`] (~10s). A value that
+/// climbs well above it means the listener is stalled (RPC errors, a slow
+/// `eth_getLogs`) or has died — in which case on-chain account mutations are no
+/// longer invalidating the per-instance permission cache, so reads served by
+/// this instance may be stale. Exposed (unauthenticated) via `GET /health` as
+/// `account_event_listener_lag_seconds` so clients/ops can surface staleness.
+pub fn listener_lag_seconds() -> Option<u64> {
+    let last = LAST_CAUGHT_UP_UNIX_SECS.load(Ordering::Relaxed);
+    if last == 0 {
+        return None;
+    }
+    Some(now_unix_secs().saturating_sub(last))
+}
 
 /// Expand `$mac!(EventType, |e| vec![..account hashes..])` once per `WritesFacet`
 /// account/permission mutation event. Used to build both the log filter's topic
@@ -230,6 +269,10 @@ async fn run_event_listener() -> anyhow::Result<()> {
         "Account event listener started"
     );
     metrics::gauge!(LISTENER_UP_GAUGE).set(1.0);
+    // We've just read the chain head, so we're current as of now. Seeds the lag
+    // gauge so `/health` reports a real lag immediately rather than `null` until
+    // the first poll tick fires one interval later.
+    mark_caught_up();
 
     let mut last_checked_block = start_block.saturating_sub(1);
     let mut interval = tokio::time::interval(EVENT_POLL_INTERVAL);
@@ -247,6 +290,8 @@ async fn run_event_listener() -> anyhow::Result<()> {
         };
 
         if latest_block <= last_checked_block {
+            // No new blocks since the last poll — already current with the head.
+            mark_caught_up();
             continue;
         }
 
@@ -265,6 +310,8 @@ async fn run_event_listener() -> anyhow::Result<()> {
                 // Only advance once logs are successfully processed; on error we
                 // retry the same range on the next tick.
                 last_checked_block = latest_block;
+                // Processed everything up to the head we observed this tick.
+                mark_caught_up();
             }
             Err(e) => {
                 tracing::warn!(
@@ -392,6 +439,28 @@ mod tests {
             usageApiKeyHash: usage,
         });
         assert_eq!(account_hashes_from_log(&removed), vec![account, usage]);
+    }
+
+    #[test]
+    fn listener_lag_reports_none_until_first_poll_then_small() {
+        // The listener never starts in unit tests, and this static is touched by
+        // no other test, so we own it here. `0` (never polled) reads as None.
+        LAST_CAUGHT_UP_UNIX_SECS.store(0, Ordering::Relaxed);
+        assert_eq!(listener_lag_seconds(), None);
+
+        // After a successful poll the lag is the elapsed wall-clock time, which
+        // is ~0 immediately after marking.
+        mark_caught_up();
+        let lag = listener_lag_seconds().expect("lag is Some after a poll");
+        assert!(lag <= 2, "fresh lag should be near zero, got {lag}");
+
+        // A stale timestamp surfaces as a large lag rather than wrapping.
+        LAST_CAUGHT_UP_UNIX_SECS.store(now_unix_secs().saturating_sub(120), Ordering::Relaxed);
+        let lag = listener_lag_seconds().expect("lag is Some");
+        assert!(
+            lag >= 120,
+            "stale lag should reflect elapsed time, got {lag}"
+        );
     }
 
     #[test]

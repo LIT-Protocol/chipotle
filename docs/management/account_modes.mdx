@@ -164,6 +164,55 @@ Base RPC works, e.g. `https://mainnet.base.org` or
 prefers the wallet's RPC, so this fallback only matters for the brief
 window before `connectSigner(signer)` runs.
 
+## Read-after-write staleness
+
+Each API-server instance keeps a **per-instance cache** of on-chain
+account and permission state. An event listener refreshes that cache by
+polling the chain for account-mutation events roughly every **10 seconds**
+(the poll interval). The node was deliberately built with a per-instance
+listener rather than a single leader, so behind a load balancer there are
+N independent views of chain state.
+
+The practical consequence:
+
+> After an on-chain write that a given instance did not originate, reads
+> served by that instance may show stale data for up to ~10 seconds (one
+> polling interval) until its listener catches up. Behind a load balancer,
+> consecutive reads can land on different instances and briefly disagree.
+
+This window is reachable whenever a write happens **outside** the instance
+serving your reads — most commonly:
+
+- A **ChainSecured (sovereign) wallet write** (the contract emits the event;
+  no API server originated it, so every instance learns of it only on its
+  next poll).
+- A write made through a **different API-server instance** behind the load
+  balancer.
+- A transaction sent **directly to the contract**.
+
+Which reads are affected:
+
+- **API mode** reads (`listApiKeys`, `listGroups`, `listWallets`,
+  `listActions`, ...) go through the server cache and are subject to this
+  window.
+- **Sovereign-mode** reads call the contract directly via your RPC/signer
+  (no server round-trip) and reflect chain head immediately — they are
+  **not** subject to the cache window.
+
+If you need read-your-write certainty after a sovereign write that other
+clients will read in API mode, either wait out one poll interval (~10s) or
+read the contract directly.
+
+<Note>
+A healthy instance keeps its lag at or below the poll interval. The
+`GET /health` endpoint reports `account_event_listener_lag_seconds`
+(unauthenticated; `null` until the listener's first poll). A value that
+stays well above ~10s means that instance's listener is stalled or dead and
+its cached reads may be substantially out of date until it recovers or the
+process restarts. The Chipotle Dashboard polls this and shows a staleness
+banner when an instance reports more than 30s of lag.
+</Note>
+
 ## Using the dashboard
 
 The Chipotle Dashboard offers both modes side-by-side on the login screen:

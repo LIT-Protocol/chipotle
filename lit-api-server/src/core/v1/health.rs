@@ -33,6 +33,14 @@ pub struct HealthResponse {
     pub lit_actions_reachable: bool,
     pub cpu_available: bool,
     pub billing_keys_present: bool,
+    /// Seconds the on-chain account-event listener is behind the chain head, or
+    /// `null` if it has not yet completed a poll. Healthy values sit at or below
+    /// the ~10s poll interval; a large value means this instance's permission
+    /// cache is no longer being invalidated by on-chain writes and its reads may
+    /// be stale. Informational only — does NOT affect the health status (a
+    /// lagging listener still serves traffic, just from a staler cache). Clients
+    /// (e.g. the dashboard) surface a staleness banner when this exceeds 30s.
+    pub account_event_listener_lag_seconds: Option<u64>,
 }
 
 pub fn routes() -> Vec<Route> {
@@ -80,8 +88,10 @@ async fn health(
 
     let cpu_available = !cpu_monitor.is_overloaded();
     let billing_keys_present = stripe_state.is_some();
+    let account_event_listener_lag_seconds = crate::account_events::listener_lag_seconds();
 
-    // billing_keys_present is informational only — does NOT affect health status.
+    // billing_keys_present and account_event_listener_lag_seconds are
+    // informational only — neither affects health status.
     let healthy = lit_actions_reachable && cpu_available;
 
     let status = if healthy {
@@ -96,6 +106,7 @@ async fn health(
             lit_actions_reachable,
             cpu_available,
             billing_keys_present,
+            account_event_listener_lag_seconds,
         }),
     )
 }
@@ -161,6 +172,31 @@ mod tests {
         let response = client.get("/health").dispatch().await;
         let body: HealthResponse = response.into_json().await.expect("valid json");
         assert!(body.cpu_available);
+    }
+
+    #[tokio::test]
+    async fn health_always_serializes_listener_lag_field() {
+        // The field is always present in the JSON (as a number or `null`) so
+        // clients can rely on its key. We assert on the raw body rather than the
+        // deserialized value because the lag is backed by a process-global the
+        // account_events unit tests also exercise — asserting a specific value
+        // here would race with them. (`Option` would silently deserialize a
+        // missing key as `None`, so a deserialize round-trip can't prove the key
+        // is emitted.)
+        let client = Client::tracked(build_rocket(false, None))
+            .await
+            .expect("valid rocket");
+        let body = client
+            .get("/health")
+            .dispatch()
+            .await
+            .into_string()
+            .await
+            .expect("body");
+        assert!(
+            body.contains("account_event_listener_lag_seconds"),
+            "health body must always include the listener-lag key, got: {body}"
+        );
     }
 
     #[tokio::test]

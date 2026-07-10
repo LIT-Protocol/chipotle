@@ -74,6 +74,29 @@ async function main({ pkpId }) {
 ```
  Choose the API key (account or usage key) to use for the request, then click **Execute**. The node runs the action and returns signatures, response, and logs. The key you use must be allowed to run that action (via the group and IPFS CID configuration).
 
+## When data looks out of date
+
+The dashboard reads your account configuration (keys, groups, wallets,
+actions) from the API server, which serves those reads from a short-lived
+cache. That cache is refreshed by a listener that polls the chain about
+every **10 seconds**.
+
+So right after a change lands on-chain — especially a **ChainSecured
+(wallet-signed) write**, or a change made from another device or directly
+against the contract — the dashboard can briefly show the previous state.
+It catches up on its own within a few seconds; a manual refresh after a
+moment will show the latest state.
+
+<Note>
+If a server is having trouble keeping up, the dashboard shows an amber
+banner near the top of the page: *"This server is catching up to recent
+on-chain changes..."* It means reads may be more than 30 seconds out of
+date. The banner clears automatically once the server catches up — no
+action is needed on your part. Avoid making rapid back-to-back
+configuration changes while it's visible, since the table you're looking at
+may not yet reflect your last change.
+</Note>
+
 ## Daily Usage
 
 The dashboard is just your human-friendly configuration tool. Once your account and keys are set up to your liking, you can simply call the lit-action endpoint with your usage key each time you, your dApp or cron job needs to execute a lit action. So the only daily use step is

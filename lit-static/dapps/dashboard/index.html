@@ -184,6 +184,10 @@
           <!-- ABI drift banner (post-wallet-connect, sovereign only) -->
           <div id="abi-drift-banner" class="abi-drift-banner" role="alert" style="display:none;"></div>
 
+          <!-- Listener-lag staleness banner (shown when the API server's
+               account-event listener is >30s behind the chain head) -->
+          <div id="listener-lag-banner" class="listener-lag-banner" role="status" aria-live="polite" style="display:none;"></div>
+
           <!-- New account API key banner (shown once after account creation) -->
           <div id="new-account-banner" class="new-account-banner" style="display:none;" role="alert" aria-live="assertive">
             <div class="new-account-banner-body">
