@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package com.litprotocol.actions.guest;
+
+import "lit_actions.proto";
+
+// Ops exposed to sandboxed guest code over the per-execution host-UDS socket.
+//
+// Each RPC is a thin unary wrapper around one op of the ExecuteJs op-loop
+// (lit_actions.proto): the supervisor forwards every call onto the op-loop
+// stream verbatim, so op semantics — and the lit-api-server op handlers —
+// are identical to the JS runner's. The request/response messages ARE the
+// op-loop messages (mapped via extern_path in build.rs), so the two
+// interfaces cannot drift apart.
+//
+// UpdateResourceUsage is deliberately absent: usage ticks are emitted by the
+// supervisor, never by (untrusted) guest code.
+service GuestOps {
+  // Fetch the job assigned to this sandbox (params, auth context, headers).
+  rpc GetJob(GetJobRequest) returns (Job) {}
+
+  rpc Print(com.litprotocol.actions.ExecuteJsResponse.PrintRequest)
+      returns (com.litprotocol.actions.ExecuteJsRequest.PrintResponse) {}
+  rpc SetResponse(com.litprotocol.actions.ExecuteJsResponse.SetResponseRequest)
+      returns (com.litprotocol.actions.ExecuteJsRequest.SetResponseResponse) {}
+  rpc IncrementFetchCount(com.litprotocol.actions.ExecuteJsResponse.IncrementFetchCountRequest)
+      returns (com.litprotocol.actions.ExecuteJsRequest.IncrementFetchCountResponse) {}
+  rpc AesEncrypt(com.litprotocol.actions.ExecuteJsResponse.AesEncryptRequest)
+      returns (com.litprotocol.actions.ExecuteJsRequest.AesEncryptResponse) {}
+  rpc AesDecrypt(com.litprotocol.actions.ExecuteJsResponse.AesDecryptRequest)
+      returns (com.litprotocol.actions.ExecuteJsRequest.AesDecryptResponse) {}
+  rpc GetPrivateKey(com.litprotocol.actions.ExecuteJsResponse.GetPrivateKeyRequest)
+      returns (com.litprotocol.actions.ExecuteJsRequest.GetPrivateKeyResponse) {}
+  rpc GetLitActionPrivateKey(com.litprotocol.actions.ExecuteJsResponse.GetLitActionPrivateKeyRequest)
+      returns (com.litprotocol.actions.ExecuteJsRequest.GetLitActionPrivateKeyResponse) {}
+  rpc GetLitActionPublicKey(com.litprotocol.actions.ExecuteJsResponse.GetLitActionPublicKeyRequest)
+      returns (com.litprotocol.actions.ExecuteJsRequest.GetLitActionPublicKeyResponse) {}
+  rpc GetLitActionWalletAddress(com.litprotocol.actions.ExecuteJsResponse.GetLitActionWalletAddressRequest)
+      returns (com.litprotocol.actions.ExecuteJsRequest.GetLitActionWalletAddressResponse) {}
+}
+
+message GetJobRequest {}
+
+// The execution job as received from lit-api-server, minus the bundle itself
+// (already unpacked at /action inside the sandbox).
+message Job {
+  optional bytes js_params = 1;     // JSON, verbatim from ExecutionRequest
+  optional bytes auth_context = 2;  // JSON, verbatim from ExecutionRequest
+  map<string, string> http_headers = 3;
+  string ipfs_id = 4;               // content id (CID) of the running bundle
+  uint64 timeout_ms = 5;            // effective (clamped) execution timeout
+}
