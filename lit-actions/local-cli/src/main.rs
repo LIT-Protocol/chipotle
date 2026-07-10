@@ -133,18 +133,34 @@ fn value_or_stdin(value: Option<String>) -> Result<String> {
             std::io::stdin()
                 .read_to_string(&mut buf)
                 .context("failed to read value from stdin")?;
-            Ok(buf.trim_end_matches('\n').to_string())
+            // Strip a trailing newline (LF or CRLF) so piped values match
+            // what was typed; CRLF files/pipes on Windows would otherwise
+            // leave a stray `\r` in ciphertext/plaintext.
+            Ok(buf.trim_end_matches(['\r', '\n']).to_string())
         }
     }
 }
 
-/// Locate the job file: explicit flag/env, else `lit.job.json` if present.
-fn resolve_job_path(explicit: Option<PathBuf>) -> Option<PathBuf> {
+/// Locate the job file: explicit flag/env, else `lit.job.json` in `base_dir`
+/// if present. For `lit run`, `base_dir` is the bundle directory so job
+/// discovery follows the action, not the parent process's CWD.
+fn resolve_job_path(explicit: Option<PathBuf>, base_dir: &Path) -> Option<PathBuf> {
     if let Some(p) = explicit {
         return Some(p);
     }
-    let default = PathBuf::from(DEFAULT_JOB_FILE);
+    let default = base_dir.join(DEFAULT_JOB_FILE);
     default.exists().then_some(default)
+}
+
+/// Load the job, discovering `lit.job.json` under `base_dir` when no `--job`
+/// was given, then applying the `--ipfs-id` override.
+fn load_job(cli: &Cli, base_dir: &Path) -> Result<Job> {
+    let job_path = resolve_job_path(cli.job.clone(), base_dir);
+    let mut job = Job::load(job_path.as_deref(), DEFAULT_IPFS_ID)?;
+    if let Some(id) = &cli.ipfs_id {
+        job.ipfs_id = id.clone();
+    }
+    Ok(job)
 }
 
 fn main() -> ExitCode {
@@ -161,22 +177,18 @@ fn main() -> ExitCode {
 fn run(cli: Cli) -> Result<ExitCode> {
     let state = State::open(&cli.state_dir)?;
 
-    let job_path = resolve_job_path(cli.job.clone());
-    let mut job = Job::load(job_path.as_deref(), DEFAULT_IPFS_ID)?;
-    if let Some(id) = &cli.ipfs_id {
-        job.ipfs_id = id.clone();
-    }
-
-    // `run` orchestrates child processes; every other command needs the
-    // master key up front.
+    // `run` orchestrates child processes and resolves its job relative to the
+    // bundle directory (see cmd_run); every other command reads the job from
+    // the current working directory and needs the master key up front.
     if let Cmd::Run {
         manifest,
         keep_state,
     } = &cli.cmd
     {
-        return cmd_run(&cli, &state, &job, manifest, *keep_state);
+        return cmd_run(&cli, &state, manifest, *keep_state);
     }
 
+    let job = load_job(&cli, Path::new("."))?;
     let master = state.master_key(cli.key.as_deref())?;
 
     match cli.cmd {
@@ -240,13 +252,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
 /// the child's `lit` calls resolve back here, wire the job/state through the
 /// environment (exactly as the sandbox sets `LIT_OP_SOCK`), then surface the
 /// recorded response — the local analog of the supervisor.
-fn cmd_run(
-    cli: &Cli,
-    state: &State,
-    job: &Job,
-    manifest_path: &Path,
-    keep_state: bool,
-) -> Result<ExitCode> {
+fn cmd_run(cli: &Cli, state: &State, manifest_path: &Path, keep_state: bool) -> Result<ExitCode> {
     let raw = std::fs::read(manifest_path)
         .with_context(|| format!("failed to read manifest {}", manifest_path.display()))?;
     let manifest: manifest::Manifest = serde_json::from_slice(&raw)
@@ -258,23 +264,32 @@ fn cmd_run(
     }
 
     // The entrypoint runs from the manifest's directory so relative script
-    // paths resolve, so state/job paths handed to the child must be absolute.
+    // paths resolve; state/job paths handed to the child must be absolute.
     let action_dir = manifest_path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+
+    // Discover the job next to the bundle (not the parent CWD), so the child
+    // and the CID we export below agree with the action's own `lit.job.json`.
+    let job_path = resolve_job_path(cli.job.clone(), &action_dir);
+    let job = load_job(cli, &action_dir)?;
+
     let abs_state_dir = std::fs::canonicalize(&cli.state_dir)
         .with_context(|| format!("failed to resolve state dir {}", cli.state_dir.display()))?;
 
+    // Prepend this binary's dir so the child's `lit` calls resolve back here,
+    // preserving any existing PATH portably (Windows uses `;`, not `:`).
     let self_dir = std::env::current_exe()
         .context("failed to locate current executable")?
         .parent()
         .context("executable has no parent dir")?
         .to_path_buf();
-    let path_env = match std::env::var_os("PATH") {
-        Some(existing) => format!("{}:{}", self_dir.display(), existing.to_string_lossy()),
-        None => self_dir.display().to_string(),
-    };
+    let mut path_entries = vec![self_dir];
+    if let Some(existing) = std::env::var_os("PATH") {
+        path_entries.extend(std::env::split_paths(&existing));
+    }
+    let path_env = std::env::join_paths(path_entries).context("failed to build child PATH")?;
 
     let mut cmd = std::process::Command::new(&argv[0]);
     cmd.args(&argv[1..])
@@ -288,7 +303,7 @@ fn cmd_run(
     if let Some(key) = &cli.key {
         cmd.env("LIT_LOCAL_PRIVATE_KEY", key);
     }
-    if let Some(job_path) = resolve_job_path(cli.job.clone()) {
+    if let Some(job_path) = job_path {
         let abs = std::fs::canonicalize(&job_path)
             .with_context(|| format!("failed to resolve job file {}", job_path.display()))?;
         cmd.env("LIT_LOCAL_JOB", abs);
@@ -301,22 +316,23 @@ fn cmd_run(
     );
     let status = cmd
         .status()
-        .with_context(|| format!("failed to spawn entrypoint {:?}", argv))?;
-
-    // Serverless semantics: exit 0 returns the last recorded response.
-    match state.response()? {
-        Some(response) => {
-            eprintln!("lit: --- recorded response ---");
-            println!("{response}");
-        }
-        None => eprintln!("lit: (no response recorded)"),
-    }
+        .with_context(|| format!("failed to spawn entrypoint {argv:?}"))?;
 
     if status.success() {
+        // Serverless semantics: only a clean exit returns the recorded
+        // response. On failure we must NOT print it — a caller reading stdout
+        // would otherwise mistake a failed run for a successful one.
+        match state.response()? {
+            Some(response) => {
+                eprintln!("lit: --- recorded response ---");
+                println!("{response}");
+            }
+            None => eprintln!("lit: (no response recorded)"),
+        }
         Ok(ExitCode::SUCCESS)
     } else {
         let code = status.code().unwrap_or(1);
-        eprintln!("lit: action exited with status {status}");
+        eprintln!("lit: action exited with status {status} (no response returned)");
         Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))
     }
 }

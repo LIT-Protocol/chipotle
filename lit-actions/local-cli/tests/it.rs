@@ -207,12 +207,60 @@ fn run_executes_a_shell_bundle_and_surfaces_response() {
 }
 
 #[test]
-fn run_propagates_nonzero_exit() {
+fn run_propagates_nonzero_exit_and_withholds_response() {
     let (dir, state) = workspace();
     let d = dir.path();
     std::fs::write(d.join("lit.json"), r#"{"entrypoint":"run.sh"}"#).unwrap();
-    std::fs::write(d.join("run.sh"), "echo boom >&2\nexit 3\n").unwrap();
+    // Record a response, then fail: a failed run must NOT surface it on stdout.
+    std::fs::write(
+        d.join("run.sh"),
+        "lit set-response should-not-be-printed\necho boom >&2\nexit 3\n",
+    )
+    .unwrap();
 
     let out = lit(d, &state, &["run"]);
     assert_eq!(out.status.code(), Some(3));
+    assert!(
+        String::from_utf8_lossy(&out.stdout).trim().is_empty(),
+        "stdout must be empty on failure, got: {:?}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}
+
+#[test]
+fn run_discovers_job_next_to_the_bundle() {
+    // `lit run` from a parent dir must read the bundle's own lit.job.json,
+    // not one in the caller's CWD, and export its CID to the action.
+    let (dir, state) = workspace();
+    let d = dir.path();
+    let bundle = d.join("bundle");
+    std::fs::create_dir(&bundle).unwrap();
+    std::fs::write(bundle.join("lit.json"), r#"{"entrypoint":"run.sh"}"#).unwrap();
+    std::fs::write(
+        bundle.join("lit.job.json"),
+        r#"{"ipfsId":"QmBundleCid","jsParams":{"from":"bundle"}}"#,
+    )
+    .unwrap();
+    // A decoy job file in the caller's CWD that must be ignored.
+    std::fs::write(
+        d.join("lit.job.json"),
+        r#"{"ipfsId":"QmWrong","jsParams":{"from":"cwd"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        bundle.join("run.sh"),
+        "lit set-response \"$(lit params)|$LIT_ACTION_IPFS_ID\"\n",
+    )
+    .unwrap();
+
+    let out = lit(d, &state, &["run", "--manifest", "bundle/lit.json"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim_end(),
+        r#"{"from":"bundle"}|QmBundleCid"#
+    );
 }
