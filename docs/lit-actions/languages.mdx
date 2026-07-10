@@ -32,8 +32,8 @@ Example response:
       "display_name": "Python",
       "execution_model": "gvisor",
       "runtimes": [
-        { "id": "python3.13", "version": "3.13.1", "is_default": true, "prewarmed": true },
-        { "id": "python3.12", "version": "3.12.7", "is_default": false, "prewarmed": true }
+        { "id": "python3.13", "version": "3.13.1", "is_default": true, "prewarmed": false },
+        { "id": "python3.12", "version": "3.12.7", "is_default": false, "prewarmed": false }
       ],
       "methods": ["raw_script", "bundle"]
     },
@@ -48,7 +48,7 @@ Example response:
 }
 ```
 
-A node that has not enabled multi-language support returns only the `javascript` entry.
+A node that has not enabled multi-language support returns only the `javascript` entry. While multi-language execution is still rolling out, `prewarmed` is `false` for every runtime — pre-warmed cache profiles arrive in a later phase (see the note below).
 
 ## Field reference
 

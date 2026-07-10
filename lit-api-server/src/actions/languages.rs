@@ -16,8 +16,11 @@
 //!
 //! e.g. `javascript|raw_script; python:python3.13:python3.12|raw_script,bundle; rust|bundle`
 //!
-//! The first runtime listed for a language is its default. Repeated `|` are
-//! tolerated on parse (`javascript||raw_script` == `javascript|raw_script`).
+//! The first runtime listed for a language is its default. Omitting the
+//! runtime list for a runtime-bearing language (e.g. `python|raw_script`)
+//! enables all runtimes this build knows about, with the first as default;
+//! list them explicitly to restrict to a subset. Repeated `|` are tolerated
+//! on parse (`javascript||raw_script` == `javascript|raw_script`).
 
 use anyhow::{Context, Result, anyhow, bail};
 use rocket_okapi::okapi::schemars::JsonSchema;
@@ -209,6 +212,25 @@ impl SupportedLanguages {
                     prewarmed: false,
                 });
             }
+            // A runtime-bearing language listed with no explicit runtimes
+            // (e.g. `python|raw_script`) means "all runtimes this build knows"
+            // — otherwise we'd advertise the language with an empty `runtimes`
+            // array and no default for clients that omit `runtime`. Restrict to
+            // a subset (what prod does) by listing them explicitly. Languages
+            // with no known runtimes (js, rust) correctly stay empty.
+            if runtimes.is_empty() {
+                runtimes = known
+                    .runtimes
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (id, version))| LanguageRuntime {
+                        id: id.to_string(),
+                        version: version.to_string(),
+                        is_default: i == 0,
+                        prewarmed: false,
+                    })
+                    .collect();
+            }
 
             let mut methods: Vec<ExecutionMethod> = Vec::new();
             for token in methods_field.split(',').map(str::trim) {
@@ -343,6 +365,25 @@ mod tests {
     fn rejects_unknown_runtime() {
         let err = SupportedLanguages::parse("python:python2.7|bundle").unwrap_err();
         assert!(err.to_string().contains("unknown runtime"), "{err}");
+    }
+
+    #[test]
+    fn runtime_bearing_language_without_listed_runtimes_gets_all_known() {
+        // `python|...` with no runtime list must not advertise an empty
+        // `runtimes` (and no default) — it enables every known runtime.
+        let parsed = SupportedLanguages::parse("python|raw_script,bundle").unwrap();
+        let python = &parsed.languages()[0];
+        assert_eq!(python.runtimes.len(), 2);
+        assert_eq!(python.runtimes[0].id, "python3.13");
+        assert!(python.runtimes[0].is_default);
+        assert_eq!(python.runtimes[1].id, "python3.12");
+        assert!(!python.runtimes[1].is_default);
+    }
+
+    #[test]
+    fn runtime_less_language_without_runtimes_stays_empty() {
+        let parsed = SupportedLanguages::parse("rust|bundle").unwrap();
+        assert!(parsed.languages()[0].runtimes.is_empty());
     }
 
     #[test]
