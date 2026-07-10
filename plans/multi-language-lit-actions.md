@@ -23,20 +23,25 @@ The remaining work — this plan — is the product surface on top of that runne
 We start with **Python** (interpreted, raw-script + bundle) and **Rust**
 (compiled, bundle-only) as the reference languages.
 
-## What already exists (do not rebuild)
+## Prerequisites (delivered by other PRs — not in this branch)
 
-This plan assumes #557/#558/#559 have landed. Recap of the machinery it relies
-on, so the scope below is only the *delta*:
+> ⚠️ **The paths below do not exist on this branch.** They are delivered by the
+> **open, not-yet-merged** PRs #557/#558/#559 and are listed here as
+> prerequisites this plan builds on — see Phase 0. The plan is only valid once
+> those land; nothing in this doc-only PR adds or modifies that code.
 
-| Piece | Where | Status |
+Recap of the machinery this plan relies on, so the scope below is only the
+*delta*:
+
+| Piece | Where (once #557/#558/#559 land) | Delivered by |
 |---|---|---|
-| gVisor any-language runner | `lit-actions/gvisor-server` (Action gRPC service + `runsc` supervisor) | #557 |
-| Guest `lit` CLI (ops from any language) | `lit-actions/gvisor-server/src/bin/lit.rs`, baked into sandbox rootfs at `/usr/local/bin/lit` | #557 |
-| Bundle format (`lit.json` manifest + tar) | `gvisor-server/README.md` | #557 |
-| `POST /lit_binary_action` (bundle path) | `lit-api-server` `core_features` + `endpoints/actions.rs`; request `LitBinaryActionRequest { bundle, checksum, js_params }` | #558 |
-| Socket wiring + compose service `lit-actions-gvisor` | `execution.rs`, `main.rs` (`LIT_ACTIONS_GVISOR_SOCKET`), `docker-compose.phala.yml` | #558 |
-| Sandbox rootfs image | `gvisor-server/image/Dockerfile.rootfs` (today ships `python3`, `jq`, `curl`, the `lit` CLI — **this plan strips the runtimes**, see Runtime provisioning) | #557 |
-| Architecture doc | `architectureDocs/gvisor-server.md` | #559 |
+| gVisor any-language runner | `lit-actions/gvisor-server` (Action gRPC service + `runsc` supervisor) | #557 (open) |
+| Guest `lit` CLI (ops from any language) | `lit-actions/gvisor-server/src/bin/lit.rs`, baked into sandbox rootfs at `/usr/local/bin/lit` | #557 (open) |
+| Bundle format (`lit.json` manifest + tar) | `gvisor-server/README.md` | #557 (open) |
+| `POST /lit_binary_action` (bundle path) | `lit-api-server` `core_features` + `endpoints/actions.rs`; request `LitBinaryActionRequest { bundle, checksum, js_params }` | #558 (open) |
+| Socket wiring + compose service `lit-actions-gvisor` | `execution.rs`, `main.rs` (`LIT_ACTIONS_GVISOR_SOCKET`), `docker-compose.phala.yml` | #558 (open) |
+| Sandbox rootfs image | `gvisor-server/image/Dockerfile.rootfs` (as of #557 ships `python3`, `jq`, `curl`, the `lit` CLI — **this plan strips the runtimes**, see Runtime provisioning) | #557 (open) |
+| Architecture doc | `architectureDocs/gvisor-server.md` | #559 (open) |
 
 The **wire contract is unchanged**: the bundle rides in `ExecutionRequest.code`
 (base64 tar/tar.gz, or `cid:<id>`), `ipfs_id` is the server-derived checksum
@@ -472,8 +477,11 @@ lit increment-fetch-count
 `lit.json`:
 
 ```json
-{ "entrypoint": "run.sh", "runtime": "python3.13" }
+{ "entrypoint": "run.sh", "runtime": "python3.12" }
 ```
+
+(`runtime` matches the version `run.sh` installs and invokes below — the manifest
+`runtime` is authoritative for prefetch/policy, so the two must agree.)
 
 `run.sh` (the startup bash script — provisions the interpreter, fetches the key,
 feeds the app via env + stdin, never argv):
