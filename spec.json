@@ -310,6 +310,55 @@
         }
       }
     },
+    "/delete_wallet": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "description": "Permanently delete a wallet (PKP). HARD DELETE: wipes the on-chain derivation path so the key can never be re-derived and anything secured by it becomes unrecoverable. Requires the master (account) API key — usage API keys are rejected on-chain (`NotMasterAccount`).",
+        "operationId": "delete_wallet",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteWalletRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountOpResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/lit_action": {
       "post": {
         "tags": [
@@ -1450,6 +1499,45 @@
         }
       }
     },
+    "/cache_metadata": {
+      "get": {
+        "tags": [
+          "Configuration"
+        ],
+        "description": "CPL-351: metadata about the action code cached for the caller's account. Returns TTL/size/last-run metadata only — never the cached code itself.",
+        "operationId": "get_cache_metadata",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CacheMetadataResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/get_api_payers": {
       "get": {
         "tags": [
@@ -1895,6 +1983,19 @@
           },
           "signature": {
             "description": "65-byte 0x-prefixed signature (r||s||v) over the EIP-712 digest of `typed_data`.",
+            "type": "string"
+          }
+        }
+      },
+      "DeleteWalletRequest": {
+        "description": "Request for delete_wallet (AccountConfig.removeWalletDerivation). Master (account) API key via header — usage API keys are rejected on-chain (`NotMasterAccount`).\n\nHARD DELETE: permanently and irreversibly removes the wallet (PKP) and wipes its on-chain derivation path. Anything secured by the wallet becomes unrecoverable.",
+        "type": "object",
+        "required": [
+          "wallet_address"
+        ],
+        "properties": {
+          "wallet_address": {
+            "description": "Wallet (PKP) address to permanently delete: 20-byte hex, with an optional `0x`/`0X` prefix.",
             "type": "string"
           }
         }
@@ -2546,6 +2647,89 @@
             "type": "integer",
             "format": "uint64",
             "minimum": 0.0
+          }
+        }
+      },
+      "CacheMetadataResponse": {
+        "description": "GET /cache_metadata — metadata for the cached action code correlated to the authenticated master account. Excludes the cached binaries themselves.",
+        "type": "object",
+        "required": [
+          "account_address",
+          "entries",
+          "entry_count",
+          "total_size_bytes"
+        ],
+        "properties": {
+          "account_address": {
+            "description": "On-chain account wallet address the caller's key resolves to.",
+            "type": "string"
+          },
+          "entry_count": {
+            "description": "Number of cached entries correlated to this account.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "total_size_bytes": {
+            "description": "Sum of `size_bytes` across the returned entries.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "entries": {
+            "description": "The cached entries, sorted by most recent execution first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CacheEntryMetadataItem"
+            }
+          }
+        }
+      },
+      "CacheEntryMetadataItem": {
+        "description": "One cached action-code entry in a `GET /cache_metadata` response (CPL-351).\n\nDescribes the cached data only — never the code/binary itself.",
+        "type": "object",
+        "required": [
+          "created_at_ms",
+          "ipfs_id",
+          "last_run_at_ms",
+          "run_count",
+          "size_bytes"
+        ],
+        "properties": {
+          "ipfs_id": {
+            "description": "IPFS id (cache key) of the cached action code.",
+            "type": "string"
+          },
+          "size_bytes": {
+            "description": "Size of the cached code in bytes.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "created_at_ms": {
+            "description": "Unix-epoch milliseconds when the entry was first cached.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "last_run_at_ms": {
+            "description": "Unix-epoch milliseconds of the most recent execution.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "run_count": {
+            "description": "Number of executions recorded against this entry.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "ttl_seconds": {
+            "description": "Time-to-live of the entry, in seconds. `None` for the API-server IPFS cache, which is capacity-bounded (LRU) rather than time-expired.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0,
+            "nullable": true
           }
         }
       },

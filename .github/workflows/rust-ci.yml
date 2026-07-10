@@ -109,8 +109,9 @@ jobs:
       # block; new RUSTSEC IDs fail CI by default.
       # Pin the version: cargo-deny 0.20 relocated `--config` from the `check`
       # subcommand to a root-level flag, so an unpinned upgrade silently breaks
-      # the invocation below. The advisory DB is fetched at runtime, so pinning
-      # the binary does not stale the supply-chain data.
+      # the invocation below (this bit CI when install-action pulled 0.20.2).
+      # The advisory DB is fetched fresh at runtime, so pinning the binary does
+      # not stale the supply-chain data — bump the pin deliberately.
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deny@0.20.2

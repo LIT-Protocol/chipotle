@@ -159,6 +159,31 @@ async fn main() -> Result<(), rocket::Error> {
             std::process::exit(1);
         }
     };
+    // `init()` only confirms the keys are present and well-formed. Exercise them
+    // against Stripe once so a revoked / wrong-environment key fails loudly at
+    // boot instead of silently on the first customer charge. An auth failure is
+    // fatal; a Stripe outage is not (billing stays enabled and retries on the
+    // first real request).
+    if let Some(state) = &stripe_state {
+        match stripe::validate_key(state).await {
+            stripe::KeyCheck::Ok => {
+                tracing::info!("stripe: key validated against GET /v1/balance");
+            }
+            stripe::KeyCheck::Unavailable(msg) => {
+                tracing::warn!(
+                    "stripe: could not validate key at startup ({msg}). Stripe may be \
+                     unreachable; billing stays enabled and will retry on the first request."
+                );
+            }
+            stripe::KeyCheck::AuthFailed(msg) => {
+                eprintln!(
+                    "stripe: the configured key was rejected by Stripe ({msg}). The key is \
+                     revoked, malformed, or for the wrong environment. Exiting."
+                );
+                std::process::exit(1);
+            }
+        }
+    }
     let internal_config = internal::config::init();
     // `Arc<dyn AuthResolver>` is the auth backplane both this service and
     // lit-payments use. lit-api-server owns the on-chain plumbing, so it
