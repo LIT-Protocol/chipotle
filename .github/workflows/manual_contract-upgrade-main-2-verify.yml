@@ -75,7 +75,15 @@ jobs:
         id: config
         run: |
           CONFIG="lit-api-server/NodeConfig.main.toml"
+          if [ ! -f "$CONFIG" ]; then
+            echo "::error::$CONFIG not found."
+            exit 1
+          fi
           ADDRESS=$(grep '^contract_address' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          if [ -z "$ADDRESS" ]; then
+            echo "::error::contract_address not found in $CONFIG — cannot verify facets."
+            exit 1
+          fi
           echo "address=$ADDRESS" >> "$GITHUB_OUTPUT"
 
       - name: Verify diamond facets match source code

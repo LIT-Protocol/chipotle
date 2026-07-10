@@ -32,7 +32,7 @@ task("execute-safe-tx", "Verify a Safe transaction has been executed and return 
     if (safeTransaction.isSuccessful === false) {
       console.error(
         `\nSafe transaction was executed but REVERTED on-chain (tx: ${safeTransaction.transactionHash}). ` +
-        `The addComposeHash call did not succeed. Check the transaction on Basescan.`
+        `The operation did not succeed. Check the transaction on Basescan.`
       );
       process.exit(1);
     }

@@ -52,7 +52,11 @@ concurrency:
 jobs:
   # ---------------------------------------------------------------------------
   # main → Base mainnet production Diamond. Safe-routed propose flow only.
-  # No direct signing key is ever exposed to this job.
+  # The Diamond owner/upgrade authority is never exposed to this job: the
+  # diamondCut is only *proposed* to the Safe multisig, whose signers must
+  # approve and execute it. A proposer EOA (SAFE_PROPOSER_PRIVATE_KEY) is used
+  # to deploy facets and sign the Safe proposal, but that key cannot upgrade
+  # the Diamond on its own.
   # ---------------------------------------------------------------------------
   propose-main:
     if: ${{ inputs.branch == 'main' }}
@@ -115,6 +119,10 @@ jobs:
         env:
           DEPLOYER_KEY: ${{ secrets.SAFE_PROPOSER_PRIVATE_KEY }}
         run: |
+          if [ -z "$DEPLOYER_KEY" ]; then
+            echo "::error::secrets.SAFE_PROPOSER_PRIVATE_KEY is not configured — refusing to fall back to the deployer's built-in default key."
+            exit 1
+          fi
           ../rust_generator_and_deployer/target/debug/contract_deployer \
             --action=propose-update \
             --network=${{ steps.config.outputs.network }} \
@@ -135,7 +143,11 @@ jobs:
             --proposal diamond_cut_proposal.json \
             --network base \
             2>&1 | tee /dev/stderr)
-          SAFE_TX_HASH=$(echo "$OUTPUT" | grep '^Safe TX Hash:' | awk '{print $NF}')
+          SAFE_TX_HASH=$(echo "$OUTPUT" | grep '^SAFE_TX_HASH=' | tail -1 | cut -d= -f2)
+          if [ -z "$SAFE_TX_HASH" ]; then
+            echo "::error::Could not extract SAFE_TX_HASH from propose-diamond-cut output — proposal may have failed."
+            exit 1
+          fi
           echo "## Contract Upgrade Proposal (main)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "**Diamond:** \`${{ steps.config.outputs.address }}\`" >> "$GITHUB_STEP_SUMMARY"
