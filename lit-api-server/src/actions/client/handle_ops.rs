@@ -115,6 +115,7 @@ impl Client {
                 .into()
             }
             UnionResponse::GetPrivateKey(GetPrivateKeyRequest { pkp_id }) => {
+                self.check_get_keys_limit()?;
                 if !op_code_helpers::can_use_wallet_in_action_cached(
                     &mut self.state,
                     &self.api_key,
@@ -131,6 +132,7 @@ impl Client {
                 GetPrivateKeyResponse { secret }.into()
             }
             UnionResponse::GetLitActionPrivateKey(GetLitActionPrivateKeyRequest {}) => {
+                self.check_get_keys_limit()?;
                 let secret =
                     op_code_helpers::private_keys::get_lit_action_private_key(&self.ipfs_id)
                         .await
@@ -138,6 +140,7 @@ impl Client {
                 GetLitActionPrivateKeyResponse { secret }.into()
             }
             UnionResponse::GetLitActionPublicKey(GetLitActionPublicKeyRequest { ipfs_id }) => {
+                self.check_get_keys_limit()?;
                 let public_key = op_code_helpers::private_keys::get_lit_action_public_key(&ipfs_id)
                     .await
                     .map_err(|e| anyhow::anyhow!(e.to_string()))?;
@@ -146,6 +149,7 @@ impl Client {
             UnionResponse::GetLitActionWalletAddress(GetLitActionWalletAddressRequest {
                 ipfs_id,
             }) => {
+                self.check_get_keys_limit()?;
                 let wallet_address =
                     op_code_helpers::private_keys::get_lit_action_wallet_address(&ipfs_id)
                         .await
@@ -200,5 +204,54 @@ impl Client {
             }
             UnionResponse::Result(_) => unreachable!(), // handled in main loop
         })
+    }
+
+    /// Increments the key-op counter and bails if the per-session
+    /// `max_get_keys_count` limit is exceeded. Called by every key-returning
+    /// handler (GetPrivateKey, GetLitActionPrivateKey, GetLitActionPublicKey,
+    /// GetLitActionWalletAddress).
+    fn check_get_keys_limit(&mut self) -> Result<()> {
+        self.state.get_keys_count += 1;
+        if self.state.get_keys_count > self.max_get_keys_count {
+            bail!(
+                "You may not perform more than {} key operations per session and you have attempted to exceed that limit.",
+                self.max_get_keys_count
+            );
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::actions::client::ClientBuilder;
+
+    #[test]
+    fn get_keys_limit_allows_up_to_max_then_bails() {
+        let limit = 3u32;
+        let mut client = ClientBuilder::default()
+            .max_get_keys_count(limit)
+            .build()
+            .unwrap();
+
+        // The first `limit` key ops are allowed.
+        for i in 1..=limit {
+            assert!(
+                client.check_get_keys_limit().is_ok(),
+                "key op #{i} should be within the limit of {limit}"
+            );
+            assert_eq!(client.state.get_keys_count, i);
+        }
+
+        // The next one exceeds the limit and must bail.
+        let err = client
+            .check_get_keys_limit()
+            .expect_err("exceeding the limit should error");
+        assert!(
+            err.to_string().contains(&limit.to_string()),
+            "error should mention the limit: {err}"
+        );
+        // The counter still advanced past the limit.
+        assert_eq!(client.state.get_keys_count, limit + 1);
     }
 }
