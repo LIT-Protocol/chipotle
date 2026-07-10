@@ -390,6 +390,74 @@ pub fn init() -> Result<Option<Arc<StripeState>>> {
     Ok(Some(state))
 }
 
+// ─── Startup key validation ────────────────────────────────────────────────
+//
+// `init()` only checks that the keys are *present* and well-formed. A key that
+// is present but revoked, or for the wrong Stripe environment (a live key in a
+// test deployment, or vice versa), passes `init()` and then fails every real
+// billing request — a silent failure discovered only when the first customer
+// is charged. `validate_key()` closes that gap by exercising the key against
+// Stripe once at boot.
+
+/// Outcome of the startup key check ([`validate_key`]).
+///
+/// The split between [`AuthFailed`](KeyCheck::AuthFailed) and
+/// [`Unavailable`](KeyCheck::Unavailable) is the whole point: a bad *key* is a
+/// fatal misconfiguration the operator must fix, whereas a Stripe *outage* says
+/// nothing about the key and must not stop the server from booting.
+#[derive(Debug)]
+pub enum KeyCheck {
+    /// `GET /v1/balance` returned success — the key authenticates against Stripe.
+    Ok,
+    /// Stripe rejected the credentials (HTTP 401/403). The key is revoked,
+    /// malformed, or for the wrong environment. Fatal: the caller should refuse
+    /// to start rather than run with billing that can never succeed.
+    AuthFailed(String),
+    /// Stripe could not be reached (5xx, timeout, transport error) or returned an
+    /// otherwise non-auth error. Inconclusive and not the key's fault: the caller
+    /// should keep billing enabled and let the first real billing request retry.
+    Unavailable(String),
+}
+
+/// Validate the configured Stripe secret key at startup via `GET /v1/balance`.
+///
+/// `/v1/balance` is the cheapest authenticated read Stripe offers: it touches no
+/// customer data and its only precondition is a working key, which makes it a
+/// clean liveness probe for the credentials.
+///
+/// Returns a [`KeyCheck`]: callers treat [`KeyCheck::AuthFailed`] as fatal and
+/// [`KeyCheck::Unavailable`] as a soft warning (billing stays enabled). This is
+/// a free function rather than a method so the auth/availability classification
+/// in [`classify_key_check`] can be unit-tested without a live Stripe.
+pub async fn validate_key(state: &StripeState) -> KeyCheck {
+    match state.client.get("balance", &[]).await {
+        Ok(_) => KeyCheck::Ok,
+        Err(e) => classify_key_check(&e),
+    }
+}
+
+/// Map a `GET /v1/balance` error to a [`KeyCheck`].
+///
+/// Only a definitive auth rejection (HTTP 401/403) is treated as fatal. Every
+/// other error — 5xx, rate limits, timeouts, transport failures, malformed JSON
+/// — is availability, not a verdict on the key, so we degrade gracefully. Erring
+/// toward `Unavailable` means a Stripe blip can never take down our own startup.
+fn classify_key_check(e: &anyhow::Error) -> KeyCheck {
+    if let Some(se) = e
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<lit_billing_core::StripeError>())
+    {
+        let code = se.status.as_u16();
+        if code == 401 || code == 403 {
+            return KeyCheck::AuthFailed(se.to_string());
+        }
+        return KeyCheck::Unavailable(se.to_string());
+    }
+    // No StripeError on the chain → transport/timeout/JSON error from reqwest,
+    // never an authentication signal.
+    KeyCheck::Unavailable(e.to_string())
+}
+
 /// Parse `STARTER_CREDITS_CENTS`. Unset, empty, unparseable, or negative → 0 (off).
 fn read_starter_credits_env() -> i64 {
     let Ok(raw) = std::env::var("STARTER_CREDITS_CENTS") else {
@@ -1221,5 +1289,81 @@ mod tests {
     fn wrong_role_prefixes_are_rejected() {
         // A publishable key in the secret slot, and vice versa.
         assert!(validate_local_test_keys("pk_test_abc", "pk_test_abc").is_err());
+    }
+
+    // ── Startup key validation (validate_key) ────────────────────────────────
+
+    /// Build the `anyhow::Error` shape that `client.get()` produces for a Stripe
+    /// HTTP error: a `StripeError` carrying the status and body.
+    fn stripe_err(status: reqwest::StatusCode, error_type: &str) -> anyhow::Error {
+        anyhow::Error::new(lit_billing_core::StripeError {
+            status,
+            body: serde_json::json!({ "error": { "type": error_type } }),
+        })
+    }
+
+    #[test]
+    fn key_check_401_is_fatal_auth_failure() {
+        // A revoked / wrong-environment key — the case this whole feature exists
+        // to catch. Must be fatal so the server refuses to boot.
+        let check = classify_key_check(&stripe_err(
+            reqwest::StatusCode::UNAUTHORIZED,
+            "authentication_error",
+        ));
+        assert!(
+            matches!(check, KeyCheck::AuthFailed(_)),
+            "401 must be AuthFailed, got: {check:?}"
+        );
+    }
+
+    #[test]
+    fn key_check_403_is_fatal_auth_failure() {
+        // A restricted key lacking the required permission is also unrecoverable
+        // without operator action, so it is fatal like 401.
+        let check = classify_key_check(&stripe_err(
+            reqwest::StatusCode::FORBIDDEN,
+            "permission_error",
+        ));
+        assert!(
+            matches!(check, KeyCheck::AuthFailed(_)),
+            "403 must be AuthFailed, got: {check:?}"
+        );
+    }
+
+    #[test]
+    fn key_check_5xx_is_graceful_unavailable() {
+        // Stripe being down says nothing about the key: degrade, don't exit.
+        let check = classify_key_check(&stripe_err(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            "api_error",
+        ));
+        assert!(
+            matches!(check, KeyCheck::Unavailable(_)),
+            "5xx must be Unavailable, got: {check:?}"
+        );
+    }
+
+    #[test]
+    fn key_check_429_rate_limit_is_graceful() {
+        // A rate-limited probe is transient, not an auth verdict.
+        let check = classify_key_check(&stripe_err(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            "rate_limit_error",
+        ));
+        assert!(
+            matches!(check, KeyCheck::Unavailable(_)),
+            "429 must be Unavailable, got: {check:?}"
+        );
+    }
+
+    #[test]
+    fn key_check_transport_error_is_graceful() {
+        // A timeout / connection error arrives as a plain anyhow error with no
+        // StripeError on the chain — it is availability, never auth.
+        let check = classify_key_check(&anyhow::anyhow!("connection timed out"));
+        assert!(
+            matches!(check, KeyCheck::Unavailable(_)),
+            "transport error must be Unavailable, got: {check:?}"
+        );
     }
 }
