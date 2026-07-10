@@ -9,16 +9,19 @@ use crate::actions::client::{
 };
 use crate::actions::grpc::GrpcClientPool;
 use crate::core::v1::helpers::api_status::ApiStatus;
-use crate::core::v1::models::request::LitActionRequest;
+use crate::core::v1::models::request::{LitActionRequest, LitBinaryActionRequest};
 use crate::core::v1::models::response::{LitActionClientConfigResponse, LitActionResponse};
 use crate::observability::RequestSpan;
 use crate::stripe::StripeState;
 use crate::utils::parse_with_hash::ipfs_cid_to_u256;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use ipfs_hasher::IpfsHasher;
 use moka::future::Cache;
 use rocket::serde::json::Json;
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{Instrument, instrument};
 
@@ -86,7 +89,7 @@ pub async fn lit_action(
 
     let mut client = match builder.build().map_err(|e| e.to_string()) {
         Ok(client) => client,
-        Err(e) => return Err(anyhow::anyhow!("failed to build client: {:?}", e).into()),
+        Err(e) => return Err(anyhow::anyhow!("failed to build client: {e}").into()),
     };
 
     let js_params = lit_action_request.js_params.clone();
@@ -122,6 +125,121 @@ pub async fn lit_action(
     Ok(lit_action_response)
 }
 
+/// Execute an any-language action **bundle** on the gVisor runner.
+///
+/// Mirrors [`lit_action`] but targets a different backend socket and carries a
+/// tar(.gz) bundle instead of JS source. The runner speaks the identical gRPC
+/// op-loop, so the `Client` machinery (billing, retries, op handling) is
+/// reused verbatim — only three things differ: the socket the client connects
+/// to, the `code` payload (base64 bundle or `cid:<checksum>`), and that the
+/// authorized content id is derived from the raw tar bytes.
+#[allow(clippy::too_many_arguments)]
+#[instrument(
+    name = "core_features::lit_binary_action",
+    level = "debug",
+    skip_all,
+    err
+)]
+pub async fn lit_binary_action(
+    request_span: &RequestSpan,
+    api_key: &str,
+    grpc_client_pool: &GrpcClientPool<tonic::transport::Channel>,
+    ipfs_cache: &Cache<String, Arc<String>>,
+    http_client: &reqwest::Client,
+    chain_config: Arc<ChainConfig>,
+    stripe_state: Option<Arc<StripeState>>,
+    gvisor_socket: PathBuf,
+    request: Json<LitBinaryActionRequest>,
+) -> Result<LitActionResponse, ApiStatus> {
+    let request_id = request_span.request_id.clone();
+
+    let mut http_headers = BTreeMap::new();
+    http_headers.insert("x-request-id".to_string(), request_id.clone());
+    if let Some(ref cid) = request_span.correlation_id {
+        http_headers.insert("x-correlation-id".to_string(), cid.clone());
+    }
+
+    let (code_for_runner, checksum) = resolve_binary_bundle(&request.bundle, &request.checksum)?;
+
+    // Authorize on the derived checksum exactly like the JS path authorizes on
+    // the derived IPFS CID: `can_execute_action` keccak-hashes the id string,
+    // so on-chain registration of the same bundle bytes matches here.
+    let cid_hash = ipfs_cid_to_u256(&checksum)?;
+    let can_execute = can_execute_action(api_key, cid_hash)
+        .instrument(tracing::debug_span!(
+            "lit_binary_action::can_execute_action"
+        ))
+        .await?;
+    if !can_execute {
+        let msg = format!(
+            "The provided API key is not authorized to execute the specified action ({checksum}/{cid_hash})."
+        );
+        return Err(ApiStatus::forbidden(msg));
+    }
+
+    // The gVisor runner still routes ops (fetch, key derivation, …) back
+    // through this server's op handlers, so wire the same execution env the JS
+    // path uses.
+    let deno_execution_env = DenoExecutionEnv {
+        ipfs_cache: Some(moka::future::Cache::clone(ipfs_cache)),
+        http_client: Some(reqwest::Client::clone(http_client)),
+    };
+
+    let mut builder = get_lit_action_client_builder(chain_config)
+        .instrument(tracing::debug_span!(
+            "lit_binary_action::build_client_config"
+        ))
+        .await;
+    builder
+        .js_env(deno_execution_env)
+        .request_id(request_id.clone())
+        .http_headers(http_headers)
+        .api_key(api_key.to_string())
+        .ipfs_id(checksum.clone())
+        // The only routing difference from `lit_action`: point the client at
+        // the gVisor runner's socket instead of the JS runner's default.
+        .socket_path(gvisor_socket)
+        .client_grpc_channels((*grpc_client_pool).clone());
+
+    if let Some(stripe) = stripe_state {
+        builder.stripe_state(stripe);
+    }
+
+    let mut client = match builder.build().map_err(|e| e.to_string()) {
+        Ok(client) => client,
+        Err(e) => return Err(anyhow::anyhow!("failed to build client: {e}").into()),
+    };
+
+    let execution_options = crate::actions::client::models::ExecutionOptions {
+        code: code_for_runner,
+        globals: request.js_params.clone(),
+        action_ipfs_id: Some(checksum),
+    };
+
+    let result = match client
+        .execute_js(execution_options)
+        .instrument(tracing::debug_span!("lit_binary_action::execute_js"))
+        .await
+    {
+        Ok(result) => result,
+        Err(e) => return Err(anyhow::anyhow!("Actions failed with : {:?}", e).into()),
+    };
+
+    let response = match serde_json::from_str::<serde_json::Value>(&result.response) {
+        Ok(response) => response,
+        Err(e) => {
+            tracing::error!("failed to parse response: {:?}", e);
+            json!(result.response)
+        }
+    };
+
+    Ok(LitActionResponse {
+        response,
+        logs: result.logs,
+        has_error: false,
+    })
+}
+
 pub async fn get_lit_action_client_config(
     chain_config: Arc<ChainConfig>,
 ) -> Result<LitActionClientConfigResponse, ApiStatus> {
@@ -133,8 +251,15 @@ pub async fn get_lit_action_client_config(
 }
 
 fn get_lit_action_ipfs_id(code: &str) -> String {
-    let ipfs_hasher = IpfsHasher::default();
-    ipfs_hasher.compute(code.as_bytes())
+    get_lit_action_ipfs_id_bytes(code.as_bytes())
+}
+
+/// Content id (IPFS CID) of arbitrary bytes. For JS actions the bytes are the
+/// UTF-8 source; for binary actions they are the raw tar bytes of the bundle.
+/// The same hasher is used on-chain when an action is registered, so the CID
+/// derived here is exactly what `can_execute_action` authorizes against.
+fn get_lit_action_ipfs_id_bytes(bytes: &[u8]) -> String {
+    IpfsHasher::default().compute(bytes)
 }
 
 /// Resolve the action code and its IPFS ID without modifying the cache.
@@ -181,6 +306,95 @@ async fn resolve_action_code(
             anyhow::anyhow!("missing code and ipfs_id"),
             "Either `code` or `ipfs_id` must be provided.",
         )),
+    }
+}
+
+/// Resolve a binary action request into the `code` payload the gVisor runner
+/// expects and the content id used for authorization.
+///
+/// * With `bundle`: decode the base64 exactly as the runner will
+///   (whitespace-tolerant, STANDARD alphabet) and derive the checksum from the
+///   raw tar bytes — this derived value, never a client-supplied one, is what
+///   we authorize on. The original base64 string is passed through as `code`.
+/// * With only `checksum`: emit a `cid:<checksum>` reference the runner
+///   resolves from its own bundle cache, and authorize on the supplied
+///   checksum (it maps back to the exact bytes that hashed to it).
+///
+/// This is the binary analog of [`resolve_action_code`]; unlike that path it
+/// needs no server-side code cache — the gVisor runner owns the bundle cache.
+fn resolve_binary_bundle(
+    bundle: &Option<String>,
+    checksum: &Option<String>,
+) -> Result<(String, String), ApiStatus> {
+    let bundle_b64 = bundle.as_deref().filter(|s| !s.is_empty());
+    let checksum_hint = checksum.as_deref().filter(|s| !s.is_empty());
+
+    match (bundle_b64, checksum_hint) {
+        (Some(b64), hint) => {
+            // Strip whitespace before decoding so the derived checksum covers
+            // exactly the bytes the runner unpacks (it does the same), and
+            // forward the *compacted* base64 so the bytes the runner executes
+            // are provably the ones we hashed — not reliant on the runner
+            // repeating the whitespace stripping.
+            let compact: String = b64.split_whitespace().collect();
+            let raw = BASE64.decode(compact.as_bytes()).map_err(|e| {
+                ApiStatus::bad_request(
+                    anyhow::anyhow!("invalid base64 bundle: {e}"),
+                    "`bundle` must be base64-encoded tar or tar.gz bytes.",
+                )
+            })?;
+            // An empty (or whitespace-only) payload decodes to zero bytes and
+            // would yield a deterministic checksum of nothing — reject it
+            // rather than authorize/execute a degenerate "empty bundle".
+            if raw.is_empty() {
+                return Err(ApiStatus::bad_request(
+                    anyhow::anyhow!("empty bundle payload"),
+                    "`bundle` must be a non-empty base64-encoded tar or tar.gz.",
+                ));
+            }
+            let derived_checksum = get_lit_action_ipfs_id_bytes(&raw);
+            if let Some(hint) = hint
+                && hint != derived_checksum
+            {
+                tracing::debug!(
+                    supplied_checksum = hint,
+                    derived_checksum = %derived_checksum,
+                    "Supplied checksum does not match derived hash of bundle; using derived hash"
+                );
+            }
+            Ok((compact, derived_checksum))
+        }
+        (None, Some(checksum)) => {
+            // Client-supplied id — validate it against the runner's rules here
+            // so a malformed checksum is a clean 400 at the API boundary rather
+            // than a late, opaque failure after auth/billing setup.
+            validate_checksum(checksum)?;
+            Ok((format!("cid:{checksum}"), checksum.to_string()))
+        }
+        (None, None) => Err(ApiStatus::bad_request(
+            anyhow::anyhow!("missing bundle and checksum"),
+            "Either `bundle` or `checksum` must be provided.",
+        )),
+    }
+}
+
+/// Validate a client-supplied content id against the gVisor runner's bundle
+/// cache rules (it doubles as a cache directory name): non-empty, at most 128
+/// chars, and filename-safe (ASCII alphanumerics plus `-`/`_`). Kept in sync
+/// with `lit_actions_gvisor_server::bundle::validate_cid`.
+fn validate_checksum(checksum: &str) -> Result<(), ApiStatus> {
+    let ok = !checksum.is_empty()
+        && checksum.len() <= 128
+        && checksum
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    if ok {
+        Ok(())
+    } else {
+        Err(ApiStatus::bad_request(
+            anyhow::anyhow!("invalid checksum: {checksum:?}"),
+            "`checksum` must be a filename-safe content id (alphanumerics, `-`, `_`; ≤128 chars).",
+        ))
     }
 }
 
@@ -318,6 +532,57 @@ async fn get_lit_action_client_builder(chain_config: Arc<ChainConfig>) -> Client
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_binary_bundle_derives_checksum_and_forwards_compacted() {
+        // resolve_binary_bundle only base64-decodes + hashes the bytes (the
+        // runner parses the tar), so arbitrary non-empty bytes suffice here.
+        let raw = b"fake-tar-bundle-bytes";
+        let b64 = BASE64.encode(raw);
+        // Inject whitespace the way a wrapped/pretty-printed payload might.
+        let wrapped = format!("{}\n  {}", &b64[..10], &b64[10..]);
+        let (code, checksum) = resolve_binary_bundle(&Some(wrapped), &None).expect("valid bundle");
+        // Forwarded payload is the whitespace-stripped base64 (== the bytes we
+        // hashed), never the wrapped input.
+        assert_eq!(code, b64);
+        // Checksum is derived from the raw bytes, matching direct hashing.
+        assert_eq!(checksum, get_lit_action_ipfs_id_bytes(raw));
+    }
+
+    #[test]
+    fn resolve_binary_bundle_rejects_empty_payload() {
+        // Whitespace-only compacts to empty → decodes to zero bytes.
+        let err = resolve_binary_bundle(&Some("   \n\t ".to_string()), &None).unwrap_err();
+        assert_eq!(err.status, rocket::http::Status::BadRequest);
+    }
+
+    #[test]
+    fn resolve_binary_bundle_rejects_invalid_base64() {
+        let err =
+            resolve_binary_bundle(&Some("!!! not base64 !!!".to_string()), &None).unwrap_err();
+        assert_eq!(err.status, rocket::http::Status::BadRequest);
+    }
+
+    #[test]
+    fn resolve_binary_bundle_checksum_only_becomes_cid_reference() {
+        let (code, checksum) =
+            resolve_binary_bundle(&None, &Some("QmValidCid123".to_string())).expect("valid cid");
+        assert_eq!(code, "cid:QmValidCid123");
+        assert_eq!(checksum, "QmValidCid123");
+    }
+
+    #[test]
+    fn resolve_binary_bundle_rejects_unsafe_checksum() {
+        // Path-traversal-ish id the runner would reject late — caught here.
+        let err = resolve_binary_bundle(&None, &Some("../../etc/passwd".to_string())).unwrap_err();
+        assert_eq!(err.status, rocket::http::Status::BadRequest);
+    }
+
+    #[test]
+    fn resolve_binary_bundle_requires_bundle_or_checksum() {
+        let err = resolve_binary_bundle(&None, &None).unwrap_err();
+        assert_eq!(err.status, rocket::http::Status::BadRequest);
+    }
 
     #[test]
     fn parse_config_value_valid() {
