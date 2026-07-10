@@ -67,6 +67,15 @@ services:
       - /tmp/lit_actions_gvisor.sock
       - --rootfs
       - /var/lib/lit/sandbox-rootfs
+    # SECURITY: privileged grants ~full host capabilities. It is the
+    # spike-validated setting for creating nested runsc sandboxes and is kept
+    # deliberately until the minimal profile is validated on a Linux TDX CVM
+    # (tracked follow-up — see gvisor-server/README.md "runsc notes").
+    # The likely tighter replacement, to confirm before production, is:
+    #   cap_add: [SYS_ADMIN, NET_ADMIN]
+    #   security_opt: [seccomp:unconfined, apparmor:unconfined]
+    #   devices: []            # no /dev/kvm in the CVM (systrap/ptrace only)
+    # Swap `privileged: true` for that set once verified to run runsc nested.
     privileged: true
     environment:
       RUST_LOG: *rust-log

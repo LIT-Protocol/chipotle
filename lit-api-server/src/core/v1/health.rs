@@ -114,10 +114,12 @@ async fn probe_socket(
             // promoting to warn would flood logs (and on-call) during any
             // sustained lit-actions outage. The JSON response already signals
             // the failure; this line just records the *reason*.
+            // Generic wording since this probes both runners (JS and gVisor);
+            // the `socket` field identifies exactly which one failed.
             tracing::debug!(
                 socket = %socket_key,
                 error = %e,
-                "lit-actions socket connect failed during /health probe"
+                "runner socket connect failed during /health probe"
             );
             false
         }

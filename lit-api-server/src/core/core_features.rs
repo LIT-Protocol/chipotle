@@ -89,7 +89,7 @@ pub async fn lit_action(
 
     let mut client = match builder.build().map_err(|e| e.to_string()) {
         Ok(client) => client,
-        Err(e) => return Err(anyhow::anyhow!("failed to build client: {:?}", e).into()),
+        Err(e) => return Err(anyhow::anyhow!("failed to build client: {e}").into()),
     };
 
     let js_params = lit_action_request.js_params.clone();
@@ -207,7 +207,7 @@ pub async fn lit_binary_action(
 
     let mut client = match builder.build().map_err(|e| e.to_string()) {
         Ok(client) => client,
-        Err(e) => return Err(anyhow::anyhow!("failed to build client: {:?}", e).into()),
+        Err(e) => return Err(anyhow::anyhow!("failed to build client: {e}").into()),
     };
 
     let execution_options = crate::actions::client::models::ExecutionOptions {
@@ -332,7 +332,10 @@ fn resolve_binary_bundle(
     match (bundle_b64, checksum_hint) {
         (Some(b64), hint) => {
             // Strip whitespace before decoding so the derived checksum covers
-            // exactly the bytes the runner unpacks (it does the same).
+            // exactly the bytes the runner unpacks (it does the same), and
+            // forward the *compacted* base64 so the bytes the runner executes
+            // are provably the ones we hashed — not reliant on the runner
+            // repeating the whitespace stripping.
             let compact: String = b64.split_whitespace().collect();
             let raw = BASE64.decode(compact.as_bytes()).map_err(|e| {
                 ApiStatus::bad_request(
@@ -340,6 +343,15 @@ fn resolve_binary_bundle(
                     "`bundle` must be base64-encoded tar or tar.gz bytes.",
                 )
             })?;
+            // An empty (or whitespace-only) payload decodes to zero bytes and
+            // would yield a deterministic checksum of nothing — reject it
+            // rather than authorize/execute a degenerate "empty bundle".
+            if raw.is_empty() {
+                return Err(ApiStatus::bad_request(
+                    anyhow::anyhow!("empty bundle payload"),
+                    "`bundle` must be a non-empty base64-encoded tar or tar.gz.",
+                ));
+            }
             let derived_checksum = get_lit_action_ipfs_id_bytes(&raw);
             if let Some(hint) = hint
                 && hint != derived_checksum
@@ -350,13 +362,39 @@ fn resolve_binary_bundle(
                     "Supplied checksum does not match derived hash of bundle; using derived hash"
                 );
             }
-            Ok((b64.to_string(), derived_checksum))
+            Ok((compact, derived_checksum))
         }
-        (None, Some(checksum)) => Ok((format!("cid:{checksum}"), checksum.to_string())),
+        (None, Some(checksum)) => {
+            // Client-supplied id — validate it against the runner's rules here
+            // so a malformed checksum is a clean 400 at the API boundary rather
+            // than a late, opaque failure after auth/billing setup.
+            validate_checksum(checksum)?;
+            Ok((format!("cid:{checksum}"), checksum.to_string()))
+        }
         (None, None) => Err(ApiStatus::bad_request(
             anyhow::anyhow!("missing bundle and checksum"),
             "Either `bundle` or `checksum` must be provided.",
         )),
+    }
+}
+
+/// Validate a client-supplied content id against the gVisor runner's bundle
+/// cache rules (it doubles as a cache directory name): non-empty, at most 128
+/// chars, and filename-safe (ASCII alphanumerics plus `-`/`_`). Kept in sync
+/// with `lit_actions_gvisor_server::bundle::validate_cid`.
+fn validate_checksum(checksum: &str) -> Result<(), ApiStatus> {
+    let ok = !checksum.is_empty()
+        && checksum.len() <= 128
+        && checksum
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    if ok {
+        Ok(())
+    } else {
+        Err(ApiStatus::bad_request(
+            anyhow::anyhow!("invalid checksum: {checksum:?}"),
+            "`checksum` must be a filename-safe content id (alphanumerics, `-`, `_`; ≤128 chars).",
+        ))
     }
 }
 
@@ -494,6 +532,57 @@ async fn get_lit_action_client_builder(chain_config: Arc<ChainConfig>) -> Client
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resolve_binary_bundle_derives_checksum_and_forwards_compacted() {
+        // resolve_binary_bundle only base64-decodes + hashes the bytes (the
+        // runner parses the tar), so arbitrary non-empty bytes suffice here.
+        let raw = b"fake-tar-bundle-bytes";
+        let b64 = BASE64.encode(raw);
+        // Inject whitespace the way a wrapped/pretty-printed payload might.
+        let wrapped = format!("{}\n  {}", &b64[..10], &b64[10..]);
+        let (code, checksum) = resolve_binary_bundle(&Some(wrapped), &None).expect("valid bundle");
+        // Forwarded payload is the whitespace-stripped base64 (== the bytes we
+        // hashed), never the wrapped input.
+        assert_eq!(code, b64);
+        // Checksum is derived from the raw bytes, matching direct hashing.
+        assert_eq!(checksum, get_lit_action_ipfs_id_bytes(raw));
+    }
+
+    #[test]
+    fn resolve_binary_bundle_rejects_empty_payload() {
+        // Whitespace-only compacts to empty → decodes to zero bytes.
+        let err = resolve_binary_bundle(&Some("   \n\t ".to_string()), &None).unwrap_err();
+        assert_eq!(err.status, rocket::http::Status::BadRequest);
+    }
+
+    #[test]
+    fn resolve_binary_bundle_rejects_invalid_base64() {
+        let err =
+            resolve_binary_bundle(&Some("!!! not base64 !!!".to_string()), &None).unwrap_err();
+        assert_eq!(err.status, rocket::http::Status::BadRequest);
+    }
+
+    #[test]
+    fn resolve_binary_bundle_checksum_only_becomes_cid_reference() {
+        let (code, checksum) =
+            resolve_binary_bundle(&None, &Some("QmValidCid123".to_string())).expect("valid cid");
+        assert_eq!(code, "cid:QmValidCid123");
+        assert_eq!(checksum, "QmValidCid123");
+    }
+
+    #[test]
+    fn resolve_binary_bundle_rejects_unsafe_checksum() {
+        // Path-traversal-ish id the runner would reject late — caught here.
+        let err = resolve_binary_bundle(&None, &Some("../../etc/passwd".to_string())).unwrap_err();
+        assert_eq!(err.status, rocket::http::Status::BadRequest);
+    }
+
+    #[test]
+    fn resolve_binary_bundle_requires_bundle_or_checksum() {
+        let err = resolve_binary_bundle(&None, &None).unwrap_err();
+        assert_eq!(err.status, rocket::http::Status::BadRequest);
+    }
 
     #[test]
     fn parse_config_value_valid() {
