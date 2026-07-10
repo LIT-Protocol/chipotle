@@ -277,7 +277,7 @@ function refreshChangeOwnershipVisibility() {
 
 // ----- Auth ready callback -----
 
-setOnAuthReady(() => {
+function onAuthReady() {
   updateStatCards();
   preloadAllTables();
   updateUsageKeyOverrideUI();
@@ -288,7 +288,7 @@ setOnAuthReady(() => {
   // Watch the connected server's account-event listener and warn if its cache
   // is lagging the chain (reads may be stale). Idempotent across re-auths.
   startListenerLagMonitor();
-});
+}
 
 // ----- Init -----
 
@@ -326,6 +326,16 @@ function init() {
   initUsageKeyOverride();
   initChainSecuredRpc();
   initAbout();
+
+  // Register the auth-ready callback only after every init* call above has
+  // attached its button listeners. Registering at module-eval time let
+  // initLogin()'s synchronous updateAuthUI() (auth.js) fire _onAuthReady
+  // mid-init for already-logged-in sessions — before button-disable wiring
+  // ran, leaving a brief duplicate-click window. Because initLogin() already
+  // ran (and skipped the then-null callback), trigger the flow once here for
+  // sessions restored from a previous visit.
+  setOnAuthReady(onAuthReady);
+  if (isAuthenticated()) onAuthReady();
 }
 
 init();

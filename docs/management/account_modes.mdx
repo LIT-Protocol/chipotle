@@ -36,12 +36,50 @@ actions, registering PKPs, minting usage keys, etc.
 | Auditability             | Server logs + on-chain events                         | On-chain events only; every change is wallet-signed  |
 | Dashboard surface        | Same management UI                                    | Same management UI; writes prompt the wallet         |
 | Lit Action execution     | Usage API key in `X-Api-Key`                          | Usage API key in `X-Api-Key` (minted from contract)  |
-| Billing                  | Stripe credits on the account                         | Stripe credits on the account (same flow)            |
+| Billing — admin writes   | Stripe credits ($0.01/call)                           | **Not** billed via Stripe — you pay gas on-chain     |
+| Billing — Lit Actions    | Stripe credits ($0.01/sec)                            | Stripe credits ($0.01/sec) — identical to API mode   |
 
 In the SDK and contracts, ChainSecured mode is the `sovereign` mode
 (`mode: 'sovereign'`); earlier material called it *self-sovereign*. Same
 thing — wallet ownership of the account on Base, with no required server
 round-trip for admin writes.
+
+### How billing splits in ChainSecured mode
+
+This is the one place the two modes diverge on billing, and it surprises
+people: **admin writes and Lit Action execution are billed on different
+rails.**
+
+- **Admin writes** (create group, add action, mint usage key, ...) in
+  ChainSecured mode are wallet-signed transactions you submit directly to
+  the `AccountConfig` contract. They never pass through the server's
+  metered HTTP endpoint, so they never hit the Stripe credit guard. You
+  pay the **Base gas** for each write from your connected wallet, and
+  **nothing is charged to Stripe** — there is no `$0.01` management charge.
+- **Lit Action execution** is unchanged. Runs are still metered at
+  `$0.01/second` against your Stripe credit balance, exactly as in API
+  mode, because execution goes through the server regardless of who owns
+  the account.
+
+In API mode both halves are billed to Stripe — admin writes at `$0.01`
+each (the server relays the tx and covers gas) and execution at
+`$0.01/second`. Converting to ChainSecured moves only the admin-write half
+off Stripe and onto your wallet's gas; the execution half is untouched.
+
+<Note>
+**For ops and support:** after a customer converts to ChainSecured, their
+Stripe activity drops to *Lit Action execution only* — admin writes stop
+appearing in Stripe entirely. This is expected, not "billing broken." A
+freshly-converted account that only does admin writes (and no executions)
+can legitimately show **zero** Stripe charges. The Stripe credit balance
+itself is preserved across conversion (see
+[Converting an API account to ChainSecured](#converting-an-api-account-to-chainsecured)).
+To confirm an account is sovereign, take the Stripe customer's
+`metadata.wallet_address` and read the account's on-chain `managed` flag
+(`managed = false` ⇒ ChainSecured). A recommended ops convenience is to
+tag such customers in the Stripe dashboard (e.g. a `mode: sovereign`
+metadata field) so they're filterable without an on-chain lookup.
+</Note>
 
 ## When to pick which
 
