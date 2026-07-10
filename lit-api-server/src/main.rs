@@ -4,6 +4,7 @@ use lit_api_server::accounts::signer_pool::start_signer_pool;
 use lit_api_server::actions::grpc::GrpcClientPool;
 use lit_api_server::config;
 use lit_api_server::core;
+use lit_api_server::core::cache_metadata::CacheMetadataIndex;
 use lit_api_server::core::v1::guards::cpu_overload::CpuOverloadMonitor;
 use lit_api_server::dstack;
 use lit_api_server::internal;
@@ -174,11 +175,26 @@ async fn main() -> Result<(), rocket::Error> {
     // so on-chain changes made outside this process are reflected before TTL.
     lit_api_server::account_events::start_account_event_listener();
 
+    // CPL-351: secondary metadata index correlating cached action code with the
+    // master account that ran it. Lives outside the restart loop (like the cache
+    // it shadows) so metadata survives Rocket rebuilds.
+    let cache_metadata_index = Arc::new(CacheMetadataIndex::new());
+
     // IPFS cache lives outside the restart loop so warm entries survive restarts.
-    let ipfs_cache: Cache<String, Arc<String>> = Cache::builder()
-        .weigher(|_key, value: &Arc<String>| -> u32 { value.len().try_into().unwrap_or(u32::MAX) })
-        .max_capacity(1024 * 1024 * 1024) // 1 GB
-        .build();
+    // The eviction listener keeps the metadata index consistent: when a binary
+    // is evicted (capacity), replaced, or removed, its metadata is dropped too.
+    let ipfs_cache: Cache<String, Arc<String>> = {
+        let metadata_for_eviction = cache_metadata_index.clone();
+        Cache::builder()
+            .weigher(|_key, value: &Arc<String>| -> u32 {
+                value.len().try_into().unwrap_or(u32::MAX)
+            })
+            .max_capacity(1024 * 1024 * 1024) // 1 GB
+            .eviction_listener(move |key: Arc<String>, _value, _cause| {
+                metadata_for_eviction.remove_entry(&key);
+            })
+            .build()
+    };
 
     // Restart metrics: total restart count for logging.
     let mut restart_count: u64 = 0;
@@ -211,6 +227,7 @@ async fn main() -> Result<(), rocket::Error> {
             internal_config.clone(),
             auth_resolver.clone(),
             ipfs_cache.clone(),
+            cache_metadata_index.clone(),
         );
 
         let rocket = match r.ignite().await {
@@ -333,6 +350,7 @@ fn build_rocket(
     internal_config: Option<Arc<internal::InternalConfig>>,
     auth_resolver: Arc<dyn lit_billing_core::billing_auth::AuthResolver>,
     ipfs_cache: Cache<String, Arc<String>>,
+    cache_metadata_index: Arc<CacheMetadataIndex>,
 ) -> rocket::Rocket<rocket::Build> {
     let allowed_methods = HashSet::from([
         Method::from_str("Get").expect("Invalid method: Get"),
@@ -387,6 +405,7 @@ fn build_rocket(
             }),
         )
         .manage(ipfs_cache)
+        .manage(cache_metadata_index)
         .manage(openapi_spec)
         .manage(default_http_client())
         .manage(GrpcClientPool::<tonic::transport::Channel>::new())

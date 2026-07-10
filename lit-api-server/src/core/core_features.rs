@@ -8,9 +8,12 @@ use crate::actions::client::{
     MAX_MAX_RETRIES, MAX_MEMORY_LIMIT_MB, MAX_TIMEOUT_MS,
 };
 use crate::actions::grpc::GrpcClientPool;
+use crate::core::cache_metadata::CacheMetadataIndex;
 use crate::core::v1::helpers::api_status::ApiStatus;
 use crate::core::v1::models::request::LitActionRequest;
-use crate::core::v1::models::response::{LitActionClientConfigResponse, LitActionResponse};
+use crate::core::v1::models::response::{
+    CacheEntryMetadataItem, CacheMetadataResponse, LitActionClientConfigResponse, LitActionResponse,
+};
 use crate::observability::RequestSpan;
 use crate::stripe::StripeState;
 use crate::utils::parse_with_hash::ipfs_cid_to_u256;
@@ -29,6 +32,7 @@ pub async fn lit_action(
     api_key: &str,
     grpc_client_pool: &GrpcClientPool<tonic::transport::Channel>,
     ipfs_cache: &Cache<String, Arc<String>>,
+    cache_metadata: &CacheMetadataIndex,
     http_client: &reqwest::Client,
     chain_config: Arc<ChainConfig>,
     stripe_state: Option<Arc<StripeState>>,
@@ -63,6 +67,22 @@ pub async fn lit_action(
     ipfs_cache
         .insert(derived_ipfs_id.clone(), Arc::new(code_to_run.clone()))
         .await;
+
+    // CPL-351: correlate the cached binary with the caller's master account so
+    // its metadata can be surfaced by `GET /cache_metadata`. Best-effort — a
+    // failed on-chain wallet lookup must never fail action execution.
+    match crate::accounts::get_account_wallet_address(api_key).await {
+        Ok(account_address) => cache_metadata.record_execution(
+            &derived_ipfs_id,
+            code_to_run.len() as u64,
+            &account_address,
+            std::time::SystemTime::now(),
+        ),
+        Err(e) => tracing::debug!(
+            ipfs_id = %derived_ipfs_id,
+            "cache_metadata: skipped recording (wallet lookup failed): {e}"
+        ),
+    }
 
     let deno_execution_env = DenoExecutionEnv {
         ipfs_cache: Some(moka::future::Cache::clone(ipfs_cache)),
@@ -120,6 +140,59 @@ pub async fn lit_action(
     };
 
     Ok(lit_action_response)
+}
+
+/// CPL-351: metadata about the action code cached for the caller's master
+/// account. Resolves the API key to its on-chain account wallet address (the
+/// identity shared by the master key and all its usage keys) and returns the
+/// secondary-index metadata for that account. Never returns cached code.
+pub async fn get_cache_metadata(
+    api_key: &str,
+    cache_metadata: &CacheMetadataIndex,
+) -> Result<CacheMetadataResponse, ApiStatus> {
+    let account_address = crate::accounts::get_account_wallet_address(api_key)
+        .await
+        .map_err(|e| {
+            ApiStatus::bad_request(
+                anyhow::anyhow!("failed to resolve account for API key: {e}"),
+                "Could not resolve the account for the provided API key.",
+            )
+        })?;
+
+    let mut entries: Vec<CacheEntryMetadataItem> = cache_metadata
+        .entries_for_account(&account_address)
+        .into_iter()
+        .map(|m| CacheEntryMetadataItem {
+            ipfs_id: m.ipfs_id,
+            size_bytes: m.size_bytes,
+            created_at_ms: system_time_to_millis(m.created_at),
+            last_run_at_ms: system_time_to_millis(m.last_run_at),
+            run_count: m.run_count,
+            // The API-server IPFS cache is capacity-bounded (LRU), not
+            // time-expired, so there is no per-entry TTL to report.
+            ttl_seconds: None,
+        })
+        .collect();
+
+    // Most recently executed first.
+    entries.sort_by(|a, b| b.last_run_at_ms.cmp(&a.last_run_at_ms));
+
+    let total_size_bytes = entries.iter().map(|e| e.size_bytes).sum();
+
+    Ok(CacheMetadataResponse {
+        account_address,
+        entry_count: entries.len() as u64,
+        total_size_bytes,
+        entries,
+    })
+}
+
+/// Convert a `SystemTime` to Unix-epoch milliseconds, saturating pre-epoch
+/// times to 0.
+fn system_time_to_millis(t: std::time::SystemTime) -> u64 {
+    t.duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 pub async fn get_lit_action_client_config(

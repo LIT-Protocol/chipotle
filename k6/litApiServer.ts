@@ -368,6 +368,62 @@ export interface LitActionClientConfigResponse {
 }
 
 /**
+ * GET /cache_metadata — metadata for the cached action code correlated to the authenticated master account. Excludes the cached binaries themselves.
+ */
+export interface CacheMetadataResponse {
+  /** On-chain account wallet address the caller's key resolves to. */
+  account_address: string;
+  /**
+   * Number of cached entries correlated to this account.
+   * @minimum 0
+   */
+  entry_count: number;
+  /**
+   * Sum of `size_bytes` across the returned entries.
+   * @minimum 0
+   */
+  total_size_bytes: number;
+  /** The cached entries, sorted by most recent execution first. */
+  entries: CacheEntryMetadataItem[];
+}
+
+/**
+ * One cached action-code entry in a `GET /cache_metadata` response (CPL-351).
+
+Describes the cached data only — never the code/binary itself.
+ */
+export interface CacheEntryMetadataItem {
+  /** IPFS id (cache key) of the cached action code. */
+  ipfs_id: string;
+  /**
+   * Size of the cached code in bytes.
+   * @minimum 0
+   */
+  size_bytes: number;
+  /**
+   * Unix-epoch milliseconds when the entry was first cached.
+   * @minimum 0
+   */
+  created_at_ms: number;
+  /**
+   * Unix-epoch milliseconds of the most recent execution.
+   * @minimum 0
+   */
+  last_run_at_ms: number;
+  /**
+   * Number of executions recorded against this entry.
+   * @minimum 0
+   */
+  run_count: number;
+  /**
+   * Time-to-live of the entry, in seconds. `None` for the API-server IPFS cache, which is capacity-bounded (LRU) rather than time-expired.
+   * @minimum 0
+   * @nullable
+   */
+  ttl_seconds?: number | null;
+}
+
+/**
  * GET /billing/stripe_config — returns the Stripe publishable key for Stripe.js.
  */
 export interface StripeConfigResponse {
@@ -714,6 +770,15 @@ export type GetChainConfigKeysDefault = ChainConfigKeysResponse | ErrMessage;
 export type GetLitActionClientConfigDefault =
   | LitActionClientConfigResponse
   | ErrMessage;
+
+export type GetCacheMetadataHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type GetCacheMetadataDefault = CacheMetadataResponse | ErrMessage;
 
 export type GetApiPayersDefault = string[] | ErrMessage;
 
@@ -2121,6 +2186,49 @@ Deprecated: minting is a metered write, so it should not live on a GET — link 
       response,
       data,
       operationId: "get_lit_action_client_config",
+    };
+  }
+
+  /**
+   * CPL-351: metadata about the action code cached for the caller's account. Returns TTL/size/last-run metadata only — never the cached code itself.
+   */
+  getCacheMetadata(
+    headers: GetCacheMetadataHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: GetCacheMetadataDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/cache_metadata`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request("GET", k6url.toString(), undefined, {
+      ...mergedRequestParameters,
+      headers: {
+        ...mergedRequestParameters?.headers,
+        // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+        ...Object.fromEntries(
+          Object.entries(headers || {}).map(([key, value]) => [
+            key,
+            String(value),
+          ]),
+        ),
+      },
+    });
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "get_cache_metadata",
     };
   }
 
