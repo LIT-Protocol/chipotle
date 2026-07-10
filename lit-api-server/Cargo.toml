@@ -21,6 +21,9 @@ apalis-sql = { version = "0.6.0", features = ["sqlite", "tokio-comp"] }
 
 anyhow = "1.0"
 async-trait = "0.1"
+# STANDARD base64 engine, matched to lit-actions-gvisor-server so a bundle
+# decodes to byte-identical tar bytes on both sides (checksum derivation).
+base64 = "0.22"
 base64_light = "0.1"
 dstack-sdk = "0.1.2"
 derive_builder = "0.12.0"

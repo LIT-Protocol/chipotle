@@ -123,6 +123,35 @@ export interface LitActionRequest {
 }
 
 /**
+ * Parameters passed to the action (exposed to guest code via `lit params`).
+ * @nullable
+ */
+export type LitBinaryActionRequestJsParams = unknown | null;
+
+/**
+ * POST /lit_binary_action
+
+Executes an any-language action **bundle** in the gVisor runner. Provide either `bundle` (a base64-encoded tar/tar.gz containing a `lit.json` manifest at its root) or `checksum` (the content id of a bundle the runner already cached). When `bundle` is supplied the server derives the checksum from the decoded tar bytes and authorizes on that derived value — a client-supplied `checksum` is only a hint and is ignored if it disagrees.
+ */
+export interface LitBinaryActionRequest {
+  /**
+   * Base64-encoded tar or tar.gz bundle. Optional when `checksum` refers to a previously-submitted bundle the runner still has cached.
+   * @nullable
+   */
+  bundle?: string | null;
+  /**
+   * Content id (IPFS CID) of the bundle. Required when `bundle` is omitted; when `bundle` is present it is only a hint, validated against the value derived from the bundle bytes.
+   * @nullable
+   */
+  checksum?: string | null;
+  /**
+   * Parameters passed to the action (exposed to guest code via `lit params`).
+   * @nullable
+   */
+  js_params?: LitBinaryActionRequestJsParams;
+}
+
+/**
  * Response for add_group, includes the on-chain group ID.
  */
 export interface AddGroupResponse {
@@ -486,6 +515,15 @@ export type LitActionHeaders = {
 };
 
 export type LitActionDefault = LitActionResponse | ErrMessage;
+
+export type LitBinaryActionHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type LitBinaryActionDefault = LitActionResponse | ErrMessage;
 
 export type GetLitActionIpfsIdDefault = string | ErrMessage;
 
@@ -1113,6 +1151,56 @@ Deprecated: minting is a metered write, so it should not live on a GET — link 
       response,
       data,
       operationId: "lit_action",
+    };
+  }
+
+  /**
+   * Execute an any-language action bundle on the gVisor runner. Same billing, CPU-gating, and response shape as `/lit_action`; differs only in payload (a tar bundle instead of JS) and backend socket.
+   */
+  litBinaryAction(
+    litBinaryActionRequest: LitBinaryActionRequest,
+    headers: LitBinaryActionHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: LitBinaryActionDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/lit_binary_action`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      JSON.stringify(litBinaryActionRequest),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
+        },
+      },
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "lit_binary_action",
     };
   }
 

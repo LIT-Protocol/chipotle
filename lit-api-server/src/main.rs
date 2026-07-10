@@ -423,6 +423,15 @@ fn build_rocket(
         .manage(auth_resolver)
         .manage(core::v1::health::LitActionsSocketPath(
             std::path::PathBuf::from(core::v1::health::LIT_ACTIONS_SOCKET),
+        ))
+        // Socket of the any-language (gVisor) runner backing /lit_binary_action.
+        // Overridable at boot (prod mounts it under /var/run/lit); defaults to
+        // the shared /tmp location alongside the JS runner's socket.
+        .manage(core::v1::health::LitActionsGvisorSocketPath(
+            std::path::PathBuf::from(
+                std::env::var("LIT_ACTIONS_GVISOR_SOCKET")
+                    .unwrap_or_else(|_| core::v1::health::LIT_ACTIONS_GVISOR_SOCKET.to_string()),
+            ),
         ));
 
     // /attestation at root — per Phala Get Attestation
