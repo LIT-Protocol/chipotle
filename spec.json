@@ -310,6 +310,55 @@
         }
       }
     },
+    "/delete_wallet": {
+      "post": {
+        "tags": [
+          "Account Management"
+        ],
+        "description": "Permanently delete a wallet (PKP). HARD DELETE: wipes the on-chain derivation path so the key can never be re-derived and anything secured by it becomes unrecoverable. Requires the master (account) API key — usage API keys are rejected on-chain (`NotMasterAccount`).",
+        "operationId": "delete_wallet",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteWalletRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountOpResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/lit_action": {
       "post": {
         "tags": [
@@ -1895,6 +1944,19 @@
           },
           "signature": {
             "description": "65-byte 0x-prefixed signature (r||s||v) over the EIP-712 digest of `typed_data`.",
+            "type": "string"
+          }
+        }
+      },
+      "DeleteWalletRequest": {
+        "description": "Request for delete_wallet (AccountConfig.removeWalletDerivation). Master (account) API key via header — usage API keys are rejected on-chain (`NotMasterAccount`).\n\nHARD DELETE: permanently and irreversibly removes the wallet (PKP) and wipes its on-chain derivation path. Anything secured by the wallet becomes unrecoverable.",
+        "type": "object",
+        "required": [
+          "wallet_address"
+        ],
+        "properties": {
+          "wallet_address": {
+            "description": "Wallet (PKP) address to permanently delete: 20-byte hex, with an optional `0x`/`0X` prefix.",
             "type": "string"
           }
         }
