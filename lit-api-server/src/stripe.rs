@@ -162,6 +162,14 @@ pub struct StripeState {
     /// Avoids duplicate customer creation caused by Stripe Search API indexing lag.
     /// Uses `time_to_idle` so frequently accessed entries stay warm.
     customer_cache: Cache<String, String>,
+    /// wallet_address → recent "no customer found in Search" marker (5-sec TTL).
+    /// Rate-limits the guards' find-only lookup: without it, every guarded
+    /// request for a wallet with no (indexed) customer would issue a Stripe
+    /// Search call, so one unfunded key under load could burn through Stripe's
+    /// search rate limit. A 5-second cooldown bounds that to ~0.2 searches/sec
+    /// per wallet while only delaying post-funding recovery by ≤5s — a bounded
+    /// negative cache, unlike the permanent poisoning this replaces (#555).
+    customer_search_miss: Cache<String, ()>,
     /// api_key → billing wallet address cache.
     /// Resolves both master and usage API keys to the account's billing wallet address
     /// (the wallet used to identify the Stripe customer) via the on-chain
@@ -277,6 +285,10 @@ fn build_state(secret_key: String, publishable_key: String) -> Result<Arc<Stripe
         .max_capacity(10_000)
         .time_to_idle(Duration::from_secs(600)) // 10 minutes
         .build();
+    let customer_search_miss = Cache::builder()
+        .max_capacity(10_000)
+        .time_to_live(Duration::from_secs(5)) // short: bounds Search rate, not a poison
+        .build();
     let wallet_cache = Cache::builder()
         .max_capacity(10_000)
         .time_to_idle(Duration::from_secs(3600))
@@ -300,6 +312,7 @@ fn build_state(secret_key: String, publishable_key: String) -> Result<Arc<Stripe
         publishable_key,
         client,
         customer_cache,
+        customer_search_miss,
         wallet_cache,
         balance_cache,
         balance_refresh_in_flight,
@@ -545,6 +558,12 @@ pub async fn resolve_wallet_address(api_key: &str, state: &StripeState) -> Resul
 
 /// Find the Stripe customer for this wallet address, creating one if none exists.
 ///
+/// Only for paths where creating a customer is legitimate (account creation,
+/// top-ups, email registration, balance display). The billing guards
+/// (`check_credit` / `charge`) must use [`find_customer_by_wallet`] instead:
+/// the underlying lookup is Stripe Search, which is eventually consistent, so
+/// creating on a search miss can duplicate a freshly funded customer (#555).
+///
 /// Results are cached in memory to avoid duplicate customer creation caused by
 /// Stripe Search API indexing lag (newly created customers may not appear in
 /// search results for several seconds).
@@ -566,6 +585,57 @@ pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -
         })
         .await
         .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e}"))
+}
+
+/// Find the Stripe customer for this wallet address WITHOUT creating one.
+///
+/// Billing-guard variant of [`get_customer_by_wallet`] (#555): Stripe Search
+/// is eventually consistent (a freshly created customer can be invisible for
+/// tens of seconds), so a guard that creates on a search miss can mint a
+/// duplicate zero-credit customer for a wallet whose funded customer just
+/// isn't indexed yet — and caching that duplicate turns a transient index lag
+/// into a permanent 402. Here a miss is simply `Ok(None)`: nothing is created
+/// and nothing is cached, so the next request re-checks Stripe and heals as
+/// soon as the index catches up.
+///
+/// Positive results go into (and come from) the same `customer_cache` that
+/// `get_customer_by_wallet` uses, so a customer created eagerly at account
+/// creation is found here without touching Search at all.
+#[instrument(name = "stripe::find_customer_by_wallet", skip_all, err)]
+pub async fn find_customer_by_wallet(
+    wallet_address: &str,
+    state: &StripeState,
+) -> Result<Option<String>> {
+    if let Some(id) = state.customer_cache.get(wallet_address).await {
+        return Ok(Some(id));
+    }
+    // Cooldown: a recent search already came back empty. Skip Stripe rather
+    // than issuing a Search per guarded request (rate-limit protection); the
+    // 5-second TTL keeps the "not found" answer bounded, not permanent.
+    if state
+        .customer_search_miss
+        .get(wallet_address)
+        .await
+        .is_some()
+    {
+        return Ok(None);
+    }
+    let found = lit_billing_core::customer::find_by_wallet(&state.client, wallet_address).await?;
+    match &found {
+        Some(id) => {
+            state
+                .customer_cache
+                .insert(wallet_address.to_string(), id.clone())
+                .await;
+        }
+        None => {
+            state
+                .customer_search_miss
+                .insert(wallet_address.to_string(), ())
+                .await;
+        }
+    }
+    Ok(found)
 }
 
 /// Return the current credit balance in cents (≤ 0 means credits available; the Stripe
@@ -673,9 +743,26 @@ pub async fn check_credit(
     state: &StripeState,
 ) -> std::result::Result<(), BillingError> {
     let wallet = resolve_wallet_classified(api_key, state).await?;
-    let customer_id = get_customer_by_wallet(&wallet, state)
+    // No customer means no credits — answer 402 without creating one. Creating
+    // here would race Stripe Search's indexing lag and could shadow a freshly
+    // funded customer with a cached zero-credit duplicate (#555). A wallet
+    // whose customer just isn't indexed yet gets a *retryable* 402 that heals
+    // by itself within Stripe's indexing window.
+    let Some(customer_id) = find_customer_by_wallet(&wallet, state)
         .await
-        .map_err(BillingError::Unavailable)?;
+        .map_err(BillingError::Unavailable)?
+    else {
+        record_billing_event(
+            reason,
+            &wallet,
+            required_cents,
+            OUTCOME_INSUFFICIENT_CREDITS,
+        );
+        return Err(BillingError::InsufficientCredits {
+            available_cents: 0,
+            required_cents,
+        });
+    };
     let balance = get_credit_balance(&customer_id, state)
         .await
         .map_err(BillingError::Unavailable)?;
@@ -713,9 +800,18 @@ async fn charge(
 ) -> std::result::Result<(), BillingError> {
     tracing::debug!(cost_cents, "stripe::charge: starting");
     let wallet = resolve_wallet_classified(api_key, state).await?;
-    let customer_id = get_customer_by_wallet(&wallet, state)
+    // Same no-create rule as check_credit (#555): a missing customer is an
+    // insufficient-credits rejection, never a trigger to create one.
+    let Some(customer_id) = find_customer_by_wallet(&wallet, state)
         .await
-        .map_err(BillingError::Unavailable)?;
+        .map_err(BillingError::Unavailable)?
+    else {
+        record_billing_event(reason, &wallet, cost_cents, OUTCOME_INSUFFICIENT_CREDITS);
+        return Err(BillingError::InsufficientCredits {
+            available_cents: 0,
+            required_cents: cost_cents,
+        });
+    };
 
     // Read the cache directly.  If missing, fall back to an inline Stripe fetch
     // using try_get_with to coalesce concurrent cache-miss requests for the same
