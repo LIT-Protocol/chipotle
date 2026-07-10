@@ -64,6 +64,10 @@ contract WritesFacet {
         address indexed pkpId,
         uint256 derivationPath
     );
+    event WalletDerivationRemoved(
+        uint256 indexed apiKeyHash,
+        address indexed pkpId
+    );
     event UsageApiKeyRemoved(
         uint256 indexed accountApiKeyHash,
         uint256 indexed usageApiKeyHash
@@ -685,6 +689,55 @@ contract WritesFacet {
         s.pkpCount++;
         s.allPkpIds[s.pkpCount] = pkpId;
         emit WalletDerivationRegistered(masterHash, pkpId, derivationPath);
+    }
+
+    /// @notice Permanently and irreversibly remove a registered wallet (PKP) from an account.
+    /// @dev HARD DELETE. This wipes the on-chain metadata for the wallet, including its
+    ///      `derivationPath`. Keys are stateless derivations from that path and are never
+    ///      stored anywhere else, so once the path is deleted the private key can never be
+    ///      re-derived. Anything encrypted or otherwise secured by this wallet becomes
+    ///      permanently unrecoverable. There is no undo. The wallet is also removed from
+    ///      every group it belongs to. Only the master account may call this.
+    ///
+    ///      The global `allPkpIds` "ever generated" ledger is intentionally left untouched;
+    ///      it records only the address (never the path) and serves as an append-only history.
+    function removeWalletDerivation(uint256 apiKeyHash, address pkpId) public {
+        SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
+        SecurityLib.revertIfNotMasterAccount(apiKeyHash);
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        AppStorage.Account storage account = s.accounts[apiKeyHash];
+        // pkpData[pkpId].id is the derivationPath, which registerWalletDerivation
+        // guarantees is non-zero for a registered wallet. Zero => not registered.
+        if (account.pkpData[pkpId].id == 0) {
+            revert AppStorage.InvalidRequest("PKP not registered");
+        }
+
+        // Swap-and-pop within the counter-indexed pkpIds mapping so that listPkps
+        // (which iterates indices 0..pkpCount) stays gap-free after removal.
+        uint256 count = account.pkpCount;
+        for (uint256 i = 0; i < count; i++) {
+            if (account.pkpIds[i] == pkpId) {
+                if (i != count - 1) {
+                    account.pkpIds[i] = account.pkpIds[count - 1];
+                }
+                delete account.pkpIds[count - 1];
+                account.pkpCount = count - 1;
+                break;
+            }
+        }
+
+        // Wipe the wallet metadata. Deleting derivationPath here is what makes the
+        // key permanently unrecoverable.
+        delete account.pkpData[pkpId];
+
+        // Remove the wallet from every group that references it to avoid stale entries.
+        uint256 groupCount = account.groupList.length();
+        for (uint256 i = 0; i < groupCount; i++) {
+            uint256 groupId = account.groupList.at(i);
+            account.groups[groupId].pkpId.remove(pkpId);
+        }
+
+        emit WalletDerivationRemoved(apiKeyHash, pkpId);
     }
 
     function setNodeConfiguration(

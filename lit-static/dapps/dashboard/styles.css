@@ -2335,3 +2335,46 @@ textarea.input.textarea-sm {
 #add-card-modal-status.info { color: var(--primary, #3c50e0); }
 #add-card-modal-status.error { color: var(--danger, #dc2626); }
 #add-card-modal-status.success { color: var(--success, #16a34a); }
+
+/* ----- Wallets: actions column + permanent-delete danger modal ----- */
+.data-table th.col-actions,
+.data-table td.col-actions {
+  text-align: right;
+  white-space: nowrap;
+  width: 1%;
+}
+
+.danger-panel {
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  padding: 16px;
+}
+
+.danger-panel .danger-lead {
+  margin: 0 0 10px;
+  color: var(--danger);
+}
+
+.danger-panel .danger-list {
+  margin: 0 0 12px;
+  padding-left: 20px;
+}
+
+.danger-panel .danger-list li {
+  margin-bottom: 6px;
+  line-height: 1.45;
+}
+
+.danger-panel .danger-target {
+  margin: 4px 0 14px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--danger) 25%, transparent);
+  word-break: break-all;
+}
+
+.danger-panel .danger-confirm-target {
+  margin: 4px 0 6px;
+  font-weight: 600;
+  word-break: break-all;
+}

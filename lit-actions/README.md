@@ -27,6 +27,7 @@ sequenceDiagram
 - `grpc` - Protobuf definitions and gRPC glue code
 - `server` - gRPC server that runs JS code using Deno + Lit Actions
 - `cli` - `lit_actions` tool built on top of `server`
+- `gvisor-server` - any-language runner: same gRPC op-loop on its own socket, one gVisor sandbox per execution (see its README)
 - `tests` - Integration tests and benchmarks
 
 ## Local testing

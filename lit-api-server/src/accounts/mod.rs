@@ -466,6 +466,27 @@ pub async fn register_wallet_derivation(
     Ok(result)
 }
 
+/// Permanently remove a registered wallet (PKP) from an account
+/// (AccountConfig.removeWalletDerivation).
+///
+/// HARD DELETE: wipes the on-chain metadata including the derivation path. Because
+/// keys are stateless derivations of that path, once it is gone the key can never be
+/// re-derived and anything secured by the wallet becomes permanently unrecoverable.
+/// Also removes the wallet from every group it belongs to. Master account only.
+pub async fn remove_wallet_derivation(
+    signer_pool: Arc<SignerPool>,
+    api_key: &str,
+    wallet_address: Address,
+) -> Result<bool> {
+    let (contract, signer_address, client) =
+        get_signable_account_config_contract(signer_pool.clone()).await?;
+    let account_api_key_hash = api_key_hash(api_key);
+    let function_call = contract.removeWalletDerivation(account_api_key_hash, wallet_address);
+    let result = send_transaction(function_call, signer_pool, signer_address, client).await?;
+    blockchain_cache::invalidate_for_account(api_key).await;
+    Ok(result)
+}
+
 /// Get the derivation path for a wallet address under an account (read-only).
 /// `wallet_address` is the hex address (with or without 0x). Returns the U256 derivation path, or errors if not set.
 #[instrument(

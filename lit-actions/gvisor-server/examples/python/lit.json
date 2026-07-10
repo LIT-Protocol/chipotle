@@ -1,0 +1,5 @@
+{
+  "entrypoint": ["python3", "main.py"],
+  "runtime": "python3",
+  "env": { "PYTHONUNBUFFERED": "1" }
+}

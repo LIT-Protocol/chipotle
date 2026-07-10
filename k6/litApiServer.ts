@@ -91,6 +91,16 @@ export interface CreateWalletWithSignatureRequest {
   signature: string;
 }
 
+/**
+ * Request for delete_wallet (AccountConfig.removeWalletDerivation). Master (account) API key via header — usage API keys are rejected on-chain (`NotMasterAccount`).
+
+HARD DELETE: permanently and irreversibly removes the wallet (PKP) and wipes its on-chain derivation path. Anything secured by the wallet becomes unrecoverable.
+ */
+export interface DeleteWalletRequest {
+  /** Wallet (PKP) address to permanently delete: 20-byte hex, with an optional `0x`/`0X` prefix. */
+  wallet_address: string;
+}
+
 export interface LitActionResponse {
   response: unknown;
   logs: string;
@@ -477,6 +487,15 @@ export type CreateWalletPostDefault = CreateWalletResponse | ErrMessage;
 export type CreateWalletWithSignatureDefault =
   | CreateWalletWithSignatureResponse
   | ErrMessage;
+
+export type DeleteWalletHeaders = {
+  /**
+   * Account or usage API key. Alternatively use Authorization: Bearer <key>.
+   */
+  "X-Api-Key": string;
+};
+
+export type DeleteWalletDefault = AccountOpResponse | ErrMessage;
 
 export type LitActionHeaders = {
   /**
@@ -1066,6 +1085,56 @@ Deprecated: minting is a metered write, so it should not live on a GET — link 
       response,
       data,
       operationId: "create_wallet_with_signature",
+    };
+  }
+
+  /**
+   * Permanently delete a wallet (PKP). HARD DELETE: wipes the on-chain derivation path so the key can never be re-derived and anything secured by it becomes unrecoverable. Requires the master (account) API key — usage API keys are rejected on-chain (`NotMasterAccount`).
+   */
+  deleteWallet(
+    deleteWalletRequest: DeleteWalletRequest,
+    headers: DeleteWalletHeaders,
+    requestParameters?: Params,
+  ): {
+    response: Response;
+    data: DeleteWalletDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/delete_wallet`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "POST",
+      k6url.toString(),
+      JSON.stringify(deleteWalletRequest),
+      {
+        ...mergedRequestParameters,
+        headers: {
+          ...mergedRequestParameters?.headers,
+          "Content-Type": "application/json",
+          // In the schema, headers can be of any type like number but k6 accepts only strings as headers, hence converting all headers to string
+          ...Object.fromEntries(
+            Object.entries(headers || {}).map(([key, value]) => [
+              key,
+              String(value),
+            ]),
+          ),
+        },
+      },
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "delete_wallet",
     };
   }
 
