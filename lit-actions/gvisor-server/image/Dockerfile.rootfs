@@ -1,0 +1,40 @@
+# Base sandbox rootfs for gVisor-run Lit Actions.
+#
+# This image is NOT run as a container: it is exported to a directory that
+# every runsc sandbox shares read-only (--rootfs), with per-execution writes
+# going to gVisor's in-memory overlay. Build + export:
+#
+#   docker build -f image/Dockerfile.rootfs -t lit-sandbox-rootfs ../..
+#   docker export $(docker create lit-sandbox-rootfs) \
+#     | tar -x -C /var/lib/lit/sandbox-rootfs
+#
+# Keep this deliberately small: every runtime added here is attack surface
+# inside the sandbox and bytes in the CVM image.
+
+# ---- build the guest `lit` CLI ------------------------------------------
+FROM rust:1.91-bookworm AS lit-cli
+WORKDIR /src
+# Build context is the lit repo root (the CLI needs lit-actions/grpc and
+# lit-core/lit-observability from the workspace).
+COPY lit-core /src/lit-core
+COPY lit-actions /src/lit-actions
+RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler \
+    && cargo build --release --manifest-path lit-actions/Cargo.toml \
+       -p lit-actions-gvisor-server --bin lit
+
+# ---- sandbox rootfs -------------------------------------------------------
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        python3 \
+        python3-pip \
+        curl \
+        jq \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=lit-cli /src/lit-actions/target/release/lit /usr/local/bin/lit
+
+# Guest-contract paths (see sandbox/mod.rs): the supervisor bind-mounts the
+# bundle at /action and the op socket dir at /run/lit.
+RUN mkdir -p /action /run/lit
+ENV LIT_OP_SOCK=/run/lit/ops.sock
+WORKDIR /action
