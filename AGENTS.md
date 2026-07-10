@@ -1,35 +1,31 @@
-# Agent instructions
+# Repository Agent Context (Root)
 
-## Running E2E tests (`e2e/`)
+## Purpose
+Monorepo root for Chipotle — the Lit Protocol management API and its surrounding
+services. This file holds repo-wide conventions; each subfolder has its own
+`AGENTS.md` describing what lives there. Start here, then read the folder-level file
+before modifying code.
 
-When you (an AI agent) run the Playwright E2E suite, you must produce and inspect
-screenshots of what actually happened on screen — for passing tests too, not just
-failures. A green exit code is not sufficient evidence that the UI did what the
-test claims.
+## Project Overview
+This is a Web3/crypto monorepo. It features a Rust backend, Solidity smart contracts,
+and a JavaScript/TypeScript frontend / monorepo tooling layer.
 
-1. **Run with `AGENT_SCREENSHOTS=1`** (the stack must already be up — `make -C e2e up`):
+## Monorepo Architecture
+- Tooling: there is no repo-root Cargo workspace — build each Rust crate from its own
+  `Cargo.toml`. Some crates are themselves multi-crate workspaces (e.g. `lit-actions`,
+  `lit-core`), so run `cargo` from that crate's directory. The `e2e` suite uses pnpm.
+- Language Boundaries:
+  - `lit-actions`, `lit-api-server`, `lit-billing-core`, `lit-payments`,
+    `lit-triggers`, `lit-core`: Rust (services & indexers)
+  - `lit-static`: JavaScript (static dapps, SDK bundles, contract ABIs)
+  - `e2e`: TypeScript / Playwright (end-to-end tests) — see `e2e/AGENTS.md`
+  - `otel-collector`: OpenTelemetry collector config
 
-   ```sh
-   cd e2e && AGENT_SCREENSHOTS=1 pnpm test        # or pnpm test:api / test:eoa / test:wc / test:flows
-   ```
-
-   This flips `playwright.config.ts` to `screenshot: 'on'`, so every test —
-   pass or fail — writes a PNG into `e2e/test-results/<test-name>/`.
-
-2. **After the run, open the screenshots with the Read tool** and describe what is
-   visible: dashboard state, wallet dialogs, error banners. Verify the screen
-   matches what the test asserts, and flag anything that looks wrong even if the
-   test passed.
-
-3. **For step-by-step evidence, add `--trace on`.** Example:
-
-   - `pnpm test -- --trace on` (or `pnpm test:api -- --trace on`, etc.)
-
-   The trace zip in `e2e/test-results/` contains a screenshot of every action; point the user at
-   `pnpm exec playwright show-trace <zip>` to replay it.
-
-4. **Include the screenshot file paths in your final report** so the user can open
-   them directly.
-
-Note: the `api-mode` project is HTTP-only, so its screenshots are blank pages —
-visual evidence matters for the `eoa`, `walletconnect`, and `flows-*` projects.
+## Global Constraints
+- CRITICAL: Never mix package commands. Use each language's own tool — `cargo`
+  (per-crate `--manifest-path`) for Rust, `pnpm` for the `e2e` suite. There is no
+  repo-root cargo workspace, so build each crate from its own `Cargo.toml`.
+- Always check for a folder-level `AGENTS.md` inside subdirectories before modifying
+  code there.
+- Language boundaries are strict. Do not introduce Rust dependencies into JS tools, or
+  vice versa, without human approval.
