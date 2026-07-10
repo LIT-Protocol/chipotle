@@ -2,12 +2,31 @@
 #
 # Network and contract address are always read from the NodeConfig file
 # for the selected branch:
-#   main → lit-api-server/NodeConfig.main.toml
-#   next → lit-api-server/NodeConfig.next.toml
+#   main → lit-api-server/NodeConfig.main.toml   (Base mainnet — production-critical)
+#   next → lit-api-server/NodeConfig.next.toml   (Base — testing/staging Diamond)
+#
+# Branch behaviour (CPL-291 hardening):
+#   main → NEVER signed directly. Facets are deployed and a diamondCut is
+#          PROPOSED to the Safe multisig (vars.SAFE_ADDRESS_CHIPOTLE_MAIN).
+#          Safe signers must approve + execute, then run
+#          "Contract Upgrade Main 2: Verify". Gated by the `production-base`
+#          GitHub environment (required reviewers).
+#   next → direct `--action=update` against the testing Diamond, gated by the
+#          `staging-base` GitHub environment (light protection).
+#
+# REQUIRED GitHub environments (Settings → Environments), each with reviewers
+# configured to taste:
+#   production-base  - required reviewers (multi-person approval) for `main`
+#   staging-base     - light gate for `next`
 #
 # Required secrets:
-#   CONTRACT_DEPLOYER_SECRET_SEPOLIA - deployer wallet private key (Base Sepolia)
-#   PHALA_DSTACKAPP_PRIVATE_KEY    - deployer wallet private key (Base Mainnet)
+#   SAFE_PROPOSER_PRIVATE_KEY      - EOA used to deploy facets + propose Safe txs (main)
+#   CONTRACT_DEPLOYER_SECRET_SEPOLIA - deployer wallet private key (non-base networks, next)
+#   PHALA_DSTACKAPP_PRIVATE_KEY    - deployer wallet private key (Base, next)
+#   BASE_CHAIN_RPC                 - RPC endpoint for Base
+#
+# Required vars:
+#   SAFE_ADDRESS_CHIPOTLE_MAIN     - Safe multisig that owns the main Diamond
 
 name: Contract Upgrade
 
@@ -31,17 +50,129 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  contract-upgrade:
+  # ---------------------------------------------------------------------------
+  # main → Base mainnet production Diamond. Safe-routed propose flow only.
+  # The Diamond owner/upgrade authority is never exposed to this job: the
+  # diamondCut is only *proposed* to the Safe multisig, whose signers must
+  # approve and execute it. A proposer EOA (SAFE_PROPOSER_PRIVATE_KEY) is used
+  # to deploy facets and sign the Safe proposal, but that key cannot upgrade
+  # the Diamond on its own.
+  # ---------------------------------------------------------------------------
+  propose-main:
+    if: ${{ inputs.branch == 'main' }}
     runs-on: self-hosted
+    environment: production-base
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
+          ref: main
 
       - name: Read config from NodeConfig
         id: config
         run: |
-          CONFIG="lit-api-server/NodeConfig.${{ inputs.branch }}.toml"
+          CONFIG="lit-api-server/NodeConfig.main.toml"
+
+          if [ ! -f "$CONFIG" ]; then
+            echo "::error::$CONFIG not found."
+            exit 1
+          fi
+
+          NETWORK=$(grep '^name' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+          ADDRESS=$(grep '^contract_address' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+
+          if [ "$NETWORK" != "base" ]; then
+            echo "::error::main NodeConfig must target the 'base' network (got '$NETWORK')."
+            exit 1
+          fi
+          if [ -z "${{ vars.SAFE_ADDRESS_CHIPOTLE_MAIN }}" ]; then
+            echo "::error::vars.SAFE_ADDRESS_CHIPOTLE_MAIN is not configured — cannot Safe-route the upgrade."
+            exit 1
+          fi
+
+          echo "network=$NETWORK" >> "$GITHUB_OUTPUT"
+          echo "address=$ADDRESS" >> "$GITHUB_OUTPUT"
+          echo "Resolved from $CONFIG: network=$NETWORK address=$ADDRESS"
+
+      - uses: dtolnay/rust-toolchain@1.91
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install contract dependencies
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: npm ci
+
+      - name: Compile contracts
+        working-directory: lit-api-server/blockchain/lit_node_express
+        run: |
+          npx hardhat clean
+          npx hardhat compile
+          node generate-diamond-abi.mjs
+
+      - name: Build contract deployer
+        working-directory: lit-api-server/blockchain/rust_generator_and_deployer
+        run: cargo build --locked --bin contract_deployer
+
+      - name: Deploy facets and generate proposal
+        working-directory: lit-api-server/blockchain/lit_node_express
+        env:
+          DEPLOYER_KEY: ${{ secrets.SAFE_PROPOSER_PRIVATE_KEY }}
+        run: |
+          if [ -z "$DEPLOYER_KEY" ]; then
+            echo "::error::secrets.SAFE_PROPOSER_PRIVATE_KEY is not configured — refusing to fall back to the deployer's built-in default key."
+            exit 1
+          fi
+          ../rust_generator_and_deployer/target/debug/contract_deployer \
+            --action=propose-update \
+            --network=${{ steps.config.outputs.network }} \
+            --abifolder=artifacts/contracts \
+            --secret="$DEPLOYER_KEY" \
+            --address=${{ steps.config.outputs.address }} \
+            --rpc-url=${{ secrets.BASE_CHAIN_RPC }} \
+            --output=diamond_cut_proposal.json
+
+      - name: Propose diamondCut to Safe multisig
+        working-directory: lit-api-server/blockchain/lit_node_express
+        env:
+          PROPOSER_PRIVATE_KEY: ${{ secrets.SAFE_PROPOSER_PRIVATE_KEY }}
+          BASE_RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
+        run: |
+          OUTPUT=$(npx hardhat propose-diamond-cut \
+            --safe "${{ vars.SAFE_ADDRESS_CHIPOTLE_MAIN }}" \
+            --proposal diamond_cut_proposal.json \
+            --network base \
+            2>&1 | tee /dev/stderr)
+          SAFE_TX_HASH=$(echo "$OUTPUT" | grep '^SAFE_TX_HASH=' | tail -1 | cut -d= -f2)
+          if [ -z "$SAFE_TX_HASH" ]; then
+            echo "::error::Could not extract SAFE_TX_HASH from propose-diamond-cut output — proposal may have failed."
+            exit 1
+          fi
+          echo "## Contract Upgrade Proposal (main)" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Diamond:** \`${{ steps.config.outputs.address }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Safe TX Hash:** \`$SAFE_TX_HASH\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Signers can review and approve in the [Safe UI](https://app.safe.global/transactions/queue?safe=base:${{ vars.SAFE_ADDRESS_CHIPOTLE_MAIN }})." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "After execution, run **Contract Upgrade Main 2: Verify** with this Safe TX Hash." >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # next → testing/staging Diamond. Direct upgrade behind a light environment gate.
+  # ---------------------------------------------------------------------------
+  upgrade-next:
+    if: ${{ inputs.branch == 'next' }}
+    runs-on: self-hosted
+    environment: staging-base
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: next
+
+      - name: Read config from NodeConfig
+        id: config
+        run: |
+          CONFIG="lit-api-server/NodeConfig.next.toml"
 
           if [ ! -f "$CONFIG" ]; then
             echo "::error::$CONFIG not found."
