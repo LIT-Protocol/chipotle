@@ -280,11 +280,14 @@ where
             consecutive_failures += 1;
 
             if consecutive_failures >= policy.failure_limit {
+                // Count only the closed→open transition, not every failure past
+                // the limit — otherwise the counter tracks failures-while-open
+                // rather than breaker openings and reads misleadingly high.
                 if !state.breaker_open() {
                     state.set_breaker_open(true);
+                    metrics::counter!("supervisor.breaker_open_total", "task" => name.clone())
+                        .increment(1);
                 }
-                metrics::counter!("supervisor.breaker_open_total", "task" => name.clone())
-                    .increment(1);
                 tracing::error!(
                     task = %name,
                     consecutive_failures,

@@ -37,7 +37,11 @@ impl RestartHandle {
 }
 
 /// Sentinel meaning "the watermark has never been set" — the first-ever start.
-const WATERMARK_UNSET: u64 = 0;
+///
+/// `u64::MAX` (not `0`) so a legitimately persisted watermark of block 0 — a
+/// listener that first ran at genesis — is treated as a real cursor rather than
+/// "unset". A block height of `u64::MAX` is not reachable in practice.
+const WATERMARK_UNSET: u64 = u64::MAX;
 
 /// Create the persisted block watermark shared across listener re-spawns.
 ///
@@ -51,11 +55,12 @@ pub fn new_block_watermark() -> Arc<AtomicU64> {
 
 /// Decide the `last_checked_block` cursor for a (re)start.
 ///
-/// First-ever start (watermark unset) begins at `current_head - 1`: we do not
-/// replay historical events on a cold boot. A re-spawn resumes from the persisted
-/// watermark, so the range `watermark+1..=head` is re-scanned and any event emitted
-/// while the listener was down is still delivered (the restart trigger is
-/// idempotent — a duplicate `try_send` collapses to one queued restart).
+/// First-ever start (watermark unset, i.e. `u64::MAX`) begins at `current_head - 1`:
+/// we do not replay historical events on a cold boot. A re-spawn resumes from the
+/// persisted watermark — including a genuine `0` — so the range `watermark+1..=head`
+/// is re-scanned and any event emitted while the listener was down is still
+/// delivered (the restart trigger is idempotent — a duplicate `try_send` collapses
+/// to one queued restart).
 fn resume_cursor(watermark: u64, current_head: u64) -> u64 {
     if watermark == WATERMARK_UNSET {
         current_head.saturating_sub(1)
@@ -178,6 +183,15 @@ mod tests {
         assert_eq!(resume_cursor(WATERMARK_UNSET, 100), 99);
         // Genesis edge: head 0 saturates to 0.
         assert_eq!(resume_cursor(WATERMARK_UNSET, 0), 0);
+    }
+
+    /// A persisted watermark of block 0 (listener first ran at genesis) is a real
+    /// cursor, NOT the "unset" sentinel: resume from 0 and re-scan 1..=head rather
+    /// than jumping to head-1 and skipping early blocks (codex #6 / sentinel fix).
+    #[test]
+    fn resume_cursor_treats_block_zero_watermark_as_genuine() {
+        assert_eq!(resume_cursor(0, 100), 0);
+        assert_ne!(resume_cursor(0, 100), 99);
     }
 
     /// Missed-event fix (codex #6): a re-spawn resumes from the persisted

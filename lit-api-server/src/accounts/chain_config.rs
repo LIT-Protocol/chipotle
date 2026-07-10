@@ -85,15 +85,22 @@ impl ChainConfig {
 
 /// Build the [`ChainConfig`] handle with an initial snapshot loaded from chain.
 ///
+/// **Infallible by design** — a first-boot load failure yields an *empty* snapshot
+/// rather than aborting startup. Chain config is non-critical: callers fall back to
+/// built-in defaults for any missing key (see `core_features`), and the supervised
+/// [`run_config_refresh_loop`] populates the snapshot within one refresh interval.
+/// Failing the whole boot on a transient RPC blip would be strictly more fragile and
+/// would contradict the retain-last-good design. The empty-config case is logged at
+/// ERROR by [`load_config_from_chain`]. Once a good snapshot exists it is retained
+/// across refreshes and re-spawns.
+///
 /// Does **not** spawn the refresh loop — wire [`run_config_refresh_loop`] into the
-/// supervisor so a panic/return re-spawns it while the snapshot persists. An empty
-/// snapshot is only ever produced here, on a first-boot load failure; once a good
-/// snapshot exists it is retained across refreshes and re-spawns.
-pub async fn start_chain_config() -> Result<ChainConfig> {
+/// supervisor so a panic/return re-spawns it while the snapshot persists.
+pub async fn start_chain_config() -> ChainConfig {
     let initial_values = load_config_from_chain().await;
-    Ok(ChainConfig {
+    ChainConfig {
         snapshot: Arc::new(ArcSwap::from_pointee(initial_values)),
-    })
+    }
 }
 
 async fn load_config_from_chain() -> ConfigValues {

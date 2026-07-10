@@ -152,13 +152,11 @@ async fn main() -> Result<(), rocket::Error> {
     let task_health = TaskHealth::new();
     let supervisor_policy = SupervisorPolicy::default();
 
-    let chain_config = match start_chain_config().await {
-        Ok(cfg) => Arc::new(cfg),
-        Err(e) => {
-            eprintln!("Failed to start chain config: {:?}. Exiting.", e);
-            std::process::exit(1);
-        }
-    };
+    // Chain config never fails to start: it is non-critical (missing keys fall
+    // back to built-in defaults, and the supervised refresh loop below populates
+    // the snapshot within one refresh interval), so a transient RPC blip at boot
+    // must not abort startup.
+    let chain_config = Arc::new(start_chain_config().await);
 
     // Supervise the chain-config refresh loop. The config snapshot lives in the
     // `chain_config` handle, independent of the loop task, so reads keep serving
