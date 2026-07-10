@@ -107,14 +107,18 @@ jobs:
       # matrix job via taiki-e/install-action, which uses prebuilt binaries.
       # The pre-existing advisory backlog lives in deny.toml's [advisories.ignore]
       # block; new RUSTSEC IDs fail CI by default.
+      # Pin the version: cargo-deny 0.20.0 refactored its CLI (moved `--config`
+      # to the root), so an unpinned `@latest` silently breaks the invocation
+      # below whenever a new major lands. Bump this deliberately.
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-deny
+          tool: cargo-deny@0.20.2
 
       - name: deny
         working-directory: ${{ matrix.crate }}
-        # -W advisory-not-detected / unmatched-source: the deny.toml ignore +
-        # allow-git lists are the union across all four workspaces, so each
-        # individual workspace sees entries that don't apply — downgrade those
-        # lints to warnings so they don't fail the build.
-        run: cargo deny check --config ${{ github.workspace }}/deny.toml -W advisory-not-detected -W unmatched-source advisories sources
+        # `--config` is a root-level flag (must precede the `check` subcommand as
+        # of cargo-deny 0.20). -W advisory-not-detected / unmatched-source: the
+        # deny.toml ignore + allow-git lists are the union across all four
+        # workspaces, so each individual workspace sees entries that don't apply —
+        # downgrade those lints to warnings so they don't fail the build.
+        run: cargo deny --config ${{ github.workspace }}/deny.toml check -W advisory-not-detected -W unmatched-source advisories sources
