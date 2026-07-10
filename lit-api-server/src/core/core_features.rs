@@ -187,11 +187,12 @@ pub async fn get_cache_metadata(
     })
 }
 
-/// Convert a `SystemTime` to Unix-epoch milliseconds, saturating pre-epoch
-/// times to 0.
+/// Convert a `SystemTime` to Unix-epoch milliseconds. Pre-epoch times saturate
+/// to 0; a value beyond `u64::MAX` ms (~year 584 million) saturates to
+/// `u64::MAX` rather than silently truncating the `u128`.
 fn system_time_to_millis(t: std::time::SystemTime) -> u64 {
     t.duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
+        .map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
         .unwrap_or(0)
 }
 

@@ -342,6 +342,7 @@ async fn await_server_handle(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn build_rocket(
     signer_pool: Arc<lit_api_server::accounts::signer_pool::SignerPool>,
     chain_config: Arc<lit_api_server::accounts::chain_config::ChainConfig>,

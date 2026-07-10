@@ -25,22 +25,36 @@ use std::time::SystemTime;
 /// Deliberately excludes the cached code/binary — this struct is safe to
 /// surface over the API.
 #[derive(Clone, Debug)]
-pub struct CacheEntryMetadata {
+struct CacheEntryMetadata {
     /// IPFS id (primary cache key) of the cached action code.
-    pub ipfs_id: String,
+    ipfs_id: String,
     /// Size of the cached code in bytes.
-    pub size_bytes: u64,
+    size_bytes: u64,
     /// When this entry was first recorded in the cache.
-    pub created_at: SystemTime,
+    created_at: SystemTime,
     /// When this entry was most recently executed.
-    pub last_run_at: SystemTime,
+    last_run_at: SystemTime,
     /// Total number of executions recorded against this entry (across every
     /// account that has run it).
-    pub run_count: u64,
+    run_count: u64,
     /// Account wallet addresses (master-account identities) that have executed
     /// this entry. Used both for the reverse lookup and to keep the secondary
     /// index consistent on eviction.
-    pub account_addresses: HashSet<String>,
+    account_addresses: HashSet<String>,
+}
+
+/// A cheap, read-only projection of a cache entry's metadata for a single
+/// account lookup. Excludes `account_addresses` so a widely-shared entry does
+/// not force a clone of a large `HashSet` on every `GET /cache_metadata`.
+#[derive(Clone, Debug)]
+pub struct CacheEntrySnapshot {
+    pub ipfs_id: String,
+    pub size_bytes: u64,
+    pub created_at: SystemTime,
+    pub last_run_at: SystemTime,
+    pub run_count: u64,
+    /// Number of distinct accounts correlated with this entry.
+    pub account_count: usize,
 }
 
 #[derive(Default)]
@@ -75,7 +89,10 @@ impl CacheMetadataIndex {
         account_address: &str,
         now: SystemTime,
     ) {
-        let mut st = self.state.write().expect("cache_metadata lock poisoned");
+        // Recover from a poisoned lock rather than panic: this runs on the hot
+        // action-execution path, and a partially-written best-effort metadata
+        // entry is never a correctness or safety hazard.
+        let mut st = self.state.write().unwrap_or_else(|e| e.into_inner());
 
         let entry = st
             .entries
@@ -104,7 +121,9 @@ impl CacheMetadataIndex {
     /// Called from the primary cache's eviction listener when a binary is
     /// evicted (capacity pressure), replaced, or explicitly removed.
     pub fn remove_entry(&self, ipfs_id: &str) {
-        let mut st = self.state.write().expect("cache_metadata lock poisoned");
+        // Runs inside the moka eviction listener, which must be panic-free —
+        // recover a poisoned lock instead of aborting the eviction.
+        let mut st = self.state.write().unwrap_or_else(|e| e.into_inner());
         let Some(meta) = st.entries.remove(ipfs_id) else {
             return;
         };
@@ -123,13 +142,23 @@ impl CacheMetadataIndex {
 
     /// Secondary lookup: metadata for every cache entry `account_address` has
     /// executed. Returns an empty vec for an unknown account.
-    pub fn entries_for_account(&self, account_address: &str) -> Vec<CacheEntryMetadata> {
-        let st = self.state.read().expect("cache_metadata lock poisoned");
+    pub fn entries_for_account(&self, account_address: &str) -> Vec<CacheEntrySnapshot> {
+        // Recover a poisoned lock rather than panic a GET request — a metadata
+        // read must never be an availability risk.
+        let st = self.state.read().unwrap_or_else(|e| e.into_inner());
         let Some(ids) = st.by_account.get(account_address) else {
             return Vec::new();
         };
         ids.iter()
-            .filter_map(|id| st.entries.get(id).cloned())
+            .filter_map(|id| st.entries.get(id))
+            .map(|m| CacheEntrySnapshot {
+                ipfs_id: m.ipfs_id.clone(),
+                size_bytes: m.size_bytes,
+                created_at: m.created_at,
+                last_run_at: m.last_run_at,
+                run_count: m.run_count,
+                account_count: m.account_addresses.len(),
+            })
             .collect()
     }
 }
@@ -193,7 +222,7 @@ mod tests {
         // Both accounts point at the same underlying entry.
         let a = &idx.entries_for_account(A)[0];
         assert_eq!(a.run_count, 2);
-        assert_eq!(a.account_addresses.len(), 2);
+        assert_eq!(a.account_count, 2);
     }
 
     #[test]
