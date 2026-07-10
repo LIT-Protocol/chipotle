@@ -11,7 +11,7 @@ import { ethCallContract, ERC20, ERC1155, SANCTIONS } from "./lit-action-onchain
 
 // Chainalysis on-chain sanctions oracle (Ethereum mainnet). Hardcoded here so
 // the screened set is fixed by the action's CID, not by the caller.
-export const CHAINALYSIS_SANCTIONS_ORACLE =
+const CHAINALYSIS_SANCTIONS_ORACLE =
   "0x40C57923924B5c5c5455c48D93317139ADDaC8fb";
 
 /** Deny unless native balance >= minWei. */

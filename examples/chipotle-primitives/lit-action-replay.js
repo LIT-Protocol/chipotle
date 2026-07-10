@@ -14,12 +14,18 @@ export function newNonce() {
 
 /** Unix-seconds deadline `seconds` into the future. Fold into every digest. */
 export function withDeadline(seconds) {
-  return Math.floor(Date.now() / 1000) + seconds;
+  const n = Number(seconds);
+  if (!Number.isInteger(n) || n < 0) {
+    deny("deadline offset must be a non-negative integer");
+  }
+  return Math.floor(Date.now() / 1000) + n;
 }
 
 /** Reject a stale authorization before signing. Returns the seconds remaining. */
 export function assertNotExpired({ deadline }) {
+  const d = Number(deadline);
+  if (!Number.isInteger(d)) deny("deadline must be a unix-seconds integer");
   const now = Math.floor(Date.now() / 1000);
-  if (now > Number(deadline)) deny(`authorization expired ${now - deadline}s ago`);
-  return Number(deadline) - now;
+  if (now > d) deny(`authorization expired ${now - d}s ago`);
+  return d - now;
 }

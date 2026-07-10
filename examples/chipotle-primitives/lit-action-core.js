@@ -69,7 +69,7 @@ function coerceAbiValue(type, v) {
  * `defaultAbiCoder.encode(types, values)`. Implemented by building a synthetic
  * function fragment, encoding through micro-eth-signer's audited ABI coder, and
  * stripping the 4-byte selector -- so the bytes are the bare head/tail tuple
- * encoding a Solidity contract re-derives with `abi.decode`.
+ * encoding a Solidity contract re-derives with `abi.encode`.
  *
  * @param {string[]} types e.g. ["address","uint256","bytes32"]
  * @param {any[]} values   integers as number|bigint|string, address/bytes as 0x-hex
