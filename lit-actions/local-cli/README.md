@@ -82,8 +82,10 @@ The bundle manifest is the same `lit.json` the sandbox uses:
 script (`sh <path>`). Serverless semantics: the run ends when the entrypoint
 exits; a non-zero exit is propagated as this process's exit code.
 
-See `examples/shell` and `examples/python` — the same bundles the
-gvisor-server ships, so they run in both places.
+See `examples/shell` and `examples/python` — bundles adapted from the
+gvisor-server examples (they exercise a few more ops for demonstration). The
+manifest format and `lit` calls are identical, so the same bundle shape runs
+in both places.
 
 ## Command surface
 
@@ -126,6 +128,13 @@ per-PKP secret doubles as the wallet key and the AES-256 key, exactly as
 `get_client_key` does in lit-api-server. This is a **local development
 stand-in**, not a secure key-management scheme: the master key sits in
 plaintext under `.lit-local/`.
+
+There is **no permission/scoping analog locally**: the TEE folds the caller's
+API key into the derivation path (`pkp_id_to_derviation_path(api_key, pkp_id)`)
+and checks that the API key may use the wallet in the action, whereas here
+`get-private-key <pkpId>` derives purely from the id and always succeeds.
+Values won't match production, and access control is out of scope for local
+testing.
 
 ## Relationship to gvisor-server (PR #557)
 

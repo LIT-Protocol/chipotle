@@ -228,6 +228,57 @@ fn run_propagates_nonzero_exit_and_withholds_response() {
 }
 
 #[test]
+fn read_only_command_leaves_no_state_dir() {
+    let (dir, state) = workspace();
+    // A read-only command must not generate a master key or create .lit-local.
+    assert_eq!(stdout(&lit(dir.path(), &state, &["params"])), "null");
+    assert!(!state.exists(), "params must not create the state dir");
+}
+
+#[test]
+fn cli_env_wiring_overrides_manifest_env() {
+    // The manifest tries to set LIT_ACTION_IPFS_ID; the CLI's --ipfs-id must
+    // win (manifest.env is applied first so CLI wiring can't be clobbered).
+    let (dir, state) = workspace();
+    let d = dir.path();
+    std::fs::write(
+        d.join("lit.json"),
+        r#"{"entrypoint":"run.sh","env":{"LIT_ACTION_IPFS_ID":"QmFromManifest"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        d.join("run.sh"),
+        "lit set-response \"$LIT_ACTION_IPFS_ID\"\n",
+    )
+    .unwrap();
+
+    let out = lit(d, &state, &["--ipfs-id", "QmFromFlag", "run"]);
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim_end(),
+        "QmFromFlag"
+    );
+}
+
+#[test]
+fn empty_plaintext_does_not_round_trip() {
+    // Parity with the TEE: encrypting "" yields a ciphertext that fails to
+    // decrypt rather than returning an empty string.
+    let (dir, state) = workspace();
+    let d = dir.path();
+    let ct = stdout(&lit(d, &state, &["aes-encrypt", "pkp-1", ""]));
+    assert!(
+        !lit(d, &state, &["aes-decrypt", "pkp-1", &ct])
+            .status
+            .success()
+    );
+}
+
+#[test]
 fn run_discovers_job_next_to_the_bundle() {
     // `lit run` from a parent dir must read the bundle's own lit.job.json,
     // not one in the caller's CWD, and export its CID to the action.

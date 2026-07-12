@@ -45,6 +45,14 @@ pub fn aes_decrypt(key: &[u8; 32], ciphertext_with_nonce: &str) -> Result<String
         .decrypt(nonce, &bytes[NONCE_LEN..])
         .map_err(|_| anyhow!("decryption failed (invalid key or corrupted ciphertext)"))?;
 
+    // TEE parity: lit-api-server rejects an empty decrypted payload
+    // (`actions::aes`), so an empty-plaintext ciphertext is undecryptable
+    // there. Match that here so `aes-encrypt ""` doesn't "work locally,
+    // break in the TEE".
+    if decrypted.is_empty() {
+        bail!("decryption failed (invalid key or corrupted ciphertext)");
+    }
+
     Ok(String::from_utf8_lossy(&decrypted).to_string())
 }
 
@@ -76,5 +84,14 @@ mod tests {
             aes_encrypt(&key, "same").unwrap(),
             aes_encrypt(&key, "same").unwrap()
         );
+    }
+
+    #[test]
+    fn empty_plaintext_is_undecryptable_matching_the_tee() {
+        // The TEE rejects an empty decrypted payload; encrypting "" must not
+        // round-trip locally either.
+        let key = [9u8; 32];
+        let ct = aes_encrypt(&key, "").unwrap();
+        assert!(aes_decrypt(&key, &ct).is_err());
     }
 }

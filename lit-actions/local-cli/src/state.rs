@@ -23,15 +23,21 @@ pub struct State {
 }
 
 impl State {
+    /// Records the dir but does NOT create it: read-only commands
+    /// (`job`/`params`/…) leave no `.lit-local/` behind. Writers call
+    /// [`Self::ensure_dir`] first.
     pub fn open(dir: impl Into<PathBuf>) -> Result<Self> {
-        let dir = dir.into();
-        std::fs::create_dir_all(&dir)
-            .with_context(|| format!("failed to create state dir {}", dir.display()))?;
-        Ok(Self { dir })
+        Ok(Self { dir: dir.into() })
     }
 
     fn path(&self, file: &str) -> PathBuf {
         self.dir.join(file)
+    }
+
+    /// Create the state dir on first write.
+    pub fn ensure_dir(&self) -> Result<()> {
+        std::fs::create_dir_all(&self.dir)
+            .with_context(|| format!("failed to create state dir {}", self.dir.display()))
     }
 
     /// Resolve the 32-byte master key.
@@ -53,6 +59,7 @@ impl State {
 
         let mut key = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut key);
+        self.ensure_dir()?;
         write_private(
             &path,
             format!("{}\n", hexutil::bytes_to_0x_hex(&key)).as_bytes(),
@@ -66,6 +73,7 @@ impl State {
     }
 
     pub fn append_log(&self, message: &str) -> Result<()> {
+        self.ensure_dir()?;
         let mut f = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -76,6 +84,7 @@ impl State {
     }
 
     pub fn set_response(&self, response: &str) -> Result<()> {
+        self.ensure_dir()?;
         std::fs::write(self.path(RESPONSE_FILE), response).context("failed to record response")
     }
 
@@ -96,6 +105,7 @@ impl State {
             Err(e) => return Err(e).context("failed to read fetch count"),
         };
         let next = current + 1;
+        self.ensure_dir()?;
         std::fs::write(&path, next.to_string()).context("failed to write fetch count")?;
         Ok(next)
     }

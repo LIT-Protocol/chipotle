@@ -189,7 +189,10 @@ fn run(cli: Cli) -> Result<ExitCode> {
     }
 
     let job = load_job(&cli, Path::new("."))?;
-    let master = state.master_key(cli.key.as_deref())?;
+    // Resolve the master key lazily: read-only commands (job/params/…) must
+    // not generate or touch a key just to run.
+    let key_arg = cli.key.clone();
+    let master = || state.master_key(key_arg.as_deref());
 
     match cli.cmd {
         Cmd::Job => println!("{:#}", job.to_json()),
@@ -209,16 +212,16 @@ fn run(cli: Cli) -> Result<ExitCode> {
             eprintln!("lit: recorded response ({} bytes)", response.len());
         }
         Cmd::GetPrivateKey { pkp_id } => {
-            let secret = keys::pkp_secret(&master, &pkp_id);
+            let secret = keys::pkp_secret(&master()?, &pkp_id);
             println!("{}", hexutil::bytes_to_0x_hex(&secret));
         }
         Cmd::GetActionPrivateKey => {
-            let secret = keys::action_secret(&master, &job.ipfs_id);
+            let secret = keys::action_secret(&master()?, &job.ipfs_id);
             println!("{}", hexutil::bytes_to_0x_hex(&secret));
         }
         Cmd::GetActionPublicKey { ipfs_id } => {
             let cid = ipfs_id.unwrap_or_else(|| job.ipfs_id.clone());
-            let signer = keys::action_signer(&master, &cid)?;
+            let signer = keys::action_signer(&master()?, &cid)?;
             println!(
                 "{}",
                 hexutil::bytes_to_0x_hex(&keys::public_key_bytes(&signer))
@@ -226,17 +229,17 @@ fn run(cli: Cli) -> Result<ExitCode> {
         }
         Cmd::GetActionWalletAddress { ipfs_id } => {
             let cid = ipfs_id.unwrap_or_else(|| job.ipfs_id.clone());
-            let signer = keys::action_signer(&master, &cid)?;
+            let signer = keys::action_signer(&master()?, &cid)?;
             println!("{}", hexutil::bytes_to_0x_hex(signer.address().as_slice()));
         }
         Cmd::AesEncrypt { pkp_id, message } => {
             let message = value_or_stdin(message)?;
-            let key = keys::pkp_secret(&master, &pkp_id);
+            let key = keys::pkp_secret(&master()?, &pkp_id);
             println!("{}", crypto::aes_encrypt(&key, &message)?);
         }
         Cmd::AesDecrypt { pkp_id, ciphertext } => {
             let ciphertext = value_or_stdin(ciphertext)?;
-            let key = keys::pkp_secret(&master, &pkp_id);
+            let key = keys::pkp_secret(&master()?, &pkp_id);
             println!("{}", crypto::aes_decrypt(&key, &ciphertext)?);
         }
         Cmd::IncrementFetchCount => {
@@ -275,6 +278,9 @@ fn cmd_run(cli: &Cli, state: &State, manifest_path: &Path, keep_state: bool) -> 
     let job_path = resolve_job_path(cli.job.clone(), &action_dir);
     let job = load_job(cli, &action_dir)?;
 
+    // The child writes state here, so create it now and hand over an
+    // absolute path (the child runs in the bundle dir, not this CWD).
+    state.ensure_dir()?;
     let abs_state_dir = std::fs::canonicalize(&cli.state_dir)
         .with_context(|| format!("failed to resolve state dir {}", cli.state_dir.display()))?;
 
@@ -292,14 +298,16 @@ fn cmd_run(cli: &Cli, state: &State, manifest_path: &Path, keep_state: bool) -> 
     let path_env = std::env::join_paths(path_entries).context("failed to build child PATH")?;
 
     let mut cmd = std::process::Command::new(&argv[0]);
-    cmd.args(&argv[1..])
-        .current_dir(&action_dir)
-        .env("PATH", path_env)
-        .env("LIT_LOCAL_STATE_DIR", &abs_state_dir)
-        .env(ENV_ACTION_IPFS_ID, &job.ipfs_id);
+    cmd.args(&argv[1..]).current_dir(&action_dir);
+    // Apply the manifest's env FIRST so none of the CLI's wiring below can be
+    // clobbered by a bundle that sets PATH / LIT_LOCAL_STATE_DIR / etc.
+    // (parity with "the sandbox controls the environment").
     for (k, v) in &manifest.env {
         cmd.env(k, v);
     }
+    cmd.env("PATH", path_env)
+        .env("LIT_LOCAL_STATE_DIR", &abs_state_dir)
+        .env(ENV_ACTION_IPFS_ID, &job.ipfs_id);
     if let Some(key) = &cli.key {
         cmd.env("LIT_LOCAL_PRIVATE_KEY", key);
     }
