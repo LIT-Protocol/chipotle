@@ -138,6 +138,9 @@ fn publish_refresh(snapshot: &ArcSwap<ConfigValues>, new_values: Option<ConfigVa
 /// fetch (stuck RPC await) stops the heartbeat and the watchdog notices.
 pub async fn run_config_refresh_loop(snapshot: Arc<ArcSwap<ConfigValues>>, state: Arc<TaskState>) {
     let mut interval = tokio::time::interval(Duration::from_secs(REFRESH_INTERVAL_SECS));
+    // A refresh that runs long shouldn't trigger back-to-back catch-up ticks; skip
+    // missed ticks and resume the steady cadence.
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     interval.tick().await; // discard the immediate first tick
 
     loop {

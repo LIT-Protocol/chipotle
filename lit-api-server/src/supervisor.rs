@@ -195,11 +195,14 @@ impl Default for SupervisorPolicy {
 
 /// Capped exponential backoff for the `n`-th consecutive failure (1-based).
 ///
-/// 50 ms, 100, 200, 400, 800, 1600, 3200, 5000 (capped). Shift is bounded to 7 —
-/// shifting a `u64` by ≥64 bits is UB (panics in debug). Mirrors
-/// `worker_pool::schedule_replacement`.
+/// With the default policy: 50 ms, 100, 200, 400, 800, 1600, 3200, 5000 (capped at
+/// `backoff_max`). The shift is bounded to 62 purely to avoid `u64` shift overflow
+/// (≥64 bits is UB); the `saturating_mul` + `min(max_ms)` is what actually enforces
+/// `backoff_max`, so the cap is honoured for *any* base/max (not just the default —
+/// a low cap here would otherwise silently top the curve out at `128 × base`).
+/// Mirrors `worker_pool::schedule_replacement`.
 fn backoff_for(consecutive_failures: u32, policy: &SupervisorPolicy) -> Duration {
-    let shift = consecutive_failures.saturating_sub(1).min(7);
+    let shift = consecutive_failures.saturating_sub(1).min(62);
     let base_ms = policy.backoff_base.as_millis() as u64;
     let max_ms = policy.backoff_max.as_millis() as u64;
     Duration::from_millis(base_ms.saturating_mul(1u64 << shift).min(max_ms))
@@ -221,11 +224,20 @@ fn backoff_for(consecutive_failures: u32, policy: &SupervisorPolicy) -> Duration
 /// the post-cooldown re-spawn behaves as a half-open trial.
 pub fn supervise<F, Fut>(name: &str, health: TaskHealth, policy: SupervisorPolicy, factory: F)
 where
-    F: Fn(Arc<TaskState>) -> Fut + Send + 'static,
+    // `Sync` (in addition to `Send`) so the factory can be shared into each child
+    // task via `Arc<F>` — that is what lets a panic in `factory` itself be isolated
+    // rather than unwinding the supervisor. All call sites capture only `Sync`
+    // state (Arcs, an mpsc `Sender`, `Copy` config), so this costs nothing.
+    F: Fn(Arc<TaskState>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = ()> + Send + 'static,
 {
     let name = name.to_string();
     let state = health.register(&name);
+    // Share the factory into each child task so a panic in `factory` *itself*
+    // (before its future is spawned) is isolated as a child `JoinError` and
+    // re-spawned, rather than unwinding this supervisor task and silently ending
+    // supervision.
+    let factory = Arc::new(factory);
 
     tokio::spawn(async move {
         let mut consecutive_failures: u32 = 0;
@@ -235,27 +247,49 @@ where
             // a task as stale during its backoff window.
             state.beat();
 
-            let started = tokio::time::Instant::now();
-            // Spawn the factory's future as its OWN task: a panic inside it is
-            // isolated and surfaces as `Err(JoinError)` here, instead of unwinding
-            // through this supervisor. We do NOT `catch_unwind` the future directly —
-            // async state machines aren't `UnwindSafe` and `AssertUnwindSafe` across
-            // await points is a footgun.
-            let outcome = tokio::spawn(factory(state.clone())).await;
-            let ran = started.elapsed();
+            let f = factory.clone();
+            let st = state.clone();
+            // Run the factory *and* its future as their OWN task: a panic in either
+            // is isolated and surfaces as `Err(JoinError)` below, instead of
+            // unwinding through this supervisor. We do NOT `catch_unwind` the future
+            // directly — async state machines aren't `UnwindSafe` and
+            // `AssertUnwindSafe` across await points is a footgun.
+            let handle = tokio::spawn(async move { f(st).await });
+            tokio::pin!(handle);
+
+            // Race the running task against `healthy_after`. If it survives that
+            // long, treat it as recovered *while still alive* and close the breaker
+            // now — otherwise the breaker would only ever re-close on the task's
+            // *next death*, so a task that recovers after a cooldown and then runs
+            // forever would be reported degraded (ERROR log + gauge=1) indefinitely.
+            let healthy_timer = tokio::time::sleep(policy.healthy_after);
+            tokio::pin!(healthy_timer);
+            let mut recovered = false;
+
+            let outcome = loop {
+                tokio::select! {
+                    res = &mut handle => break res,
+                    _ = &mut healthy_timer, if !recovered => {
+                        recovered = true;
+                        consecutive_failures = 0;
+                        if state.breaker_open() {
+                            state.set_breaker_open(false);
+                            tracing::info!(task = %name, "supervised task recovered; breaker closed");
+                        }
+                    }
+                }
+            };
 
             match &outcome {
                 Ok(()) => {
                     tracing::warn!(
                         task = %name,
-                        ran_secs = ran.as_secs_f64(),
                         "supervised task returned unexpectedly; re-spawning"
                     );
                 }
                 Err(e) if e.is_panic() => {
                     tracing::error!(
                         task = %name,
-                        ran_secs = ran.as_secs_f64(),
                         "supervised task PANICKED; re-spawning (enclave kept warm)"
                     );
                 }
@@ -264,16 +298,6 @@ where
                     // supervising rather than hot-loop against a dying runtime.
                     tracing::info!(task = %name, "supervised task cancelled; supervisor stopping");
                     return;
-                }
-            }
-
-            // A task that stayed up long enough counts as recovered: this death is
-            // an isolated incident, not a crash loop.
-            if ran >= policy.healthy_after {
-                consecutive_failures = 0;
-                if state.breaker_open() {
-                    state.set_breaker_open(false);
-                    tracing::info!(task = %name, "supervised task recovered; breaker closed");
                 }
             }
 
@@ -338,42 +362,57 @@ impl Default for WatchdogConfig {
 /// a human or the existing on-chain `ServerTriggered` path decides if a real
 /// restart is warranted.
 pub fn spawn_watchdog(health: TaskHealth, config: WatchdogConfig) {
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(config.poll_interval);
-        let threshold_ms = config.staleness_threshold.as_millis() as u64;
+    // Run the watchdog itself under the supervisor so a logic panic in it
+    // re-spawns rather than silently ending all unhealthy-task alerting. (A
+    // *wedge* in the watchdog is still unguarded — quis custodiet — but a panic is
+    // not, and the loop below also beats its own heartbeat so it appears in its
+    // own registry.)
+    let scan_health = health.clone();
+    supervise(
+        "supervisor_watchdog",
+        health,
+        SupervisorPolicy::default(),
+        move |state| watchdog_loop(scan_health.clone(), config, state),
+    );
+}
 
-        loop {
-            interval.tick().await;
+async fn watchdog_loop(health: TaskHealth, config: WatchdogConfig, state: Arc<TaskState>) {
+    let mut interval = tokio::time::interval(config.poll_interval);
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let threshold_ms = config.staleness_threshold.as_millis() as u64;
 
-            let now = now_ms();
-            let unhealthy = health.unhealthy(now, threshold_ms);
-            let unhealthy_names: std::collections::HashSet<&str> =
-                unhealthy.iter().map(|r| r.name.as_str()).collect();
+    loop {
+        interval.tick().await;
+        state.beat();
 
-            // Publish a per-task gauge (1 = unhealthy, 0 = healthy) so the signal is
-            // visible even between log lines.
-            for task in health.tasks() {
-                let value = if unhealthy_names.contains(task.name()) {
-                    1.0
-                } else {
-                    0.0
-                };
-                metrics::gauge!("supervisor.task_unhealthy", "task" => task.name().to_string())
-                    .set(value);
-            }
+        let now = now_ms();
+        let unhealthy = health.unhealthy(now, threshold_ms);
+        let unhealthy_names: std::collections::HashSet<&str> =
+            unhealthy.iter().map(|r| r.name.as_str()).collect();
 
-            for report in unhealthy {
-                tracing::error!(
-                    task = %report.name,
-                    stale = report.stale,
-                    breaker_open = report.breaker_open,
-                    last_heartbeat_ms = report.last_heartbeat_ms,
-                    age_ms = now.saturating_sub(report.last_heartbeat_ms),
-                    "supervised task UNHEALTHY (stale heartbeat or open breaker) — investigate"
-                );
-            }
+        // Publish a per-task gauge (1 = unhealthy, 0 = healthy) so the signal is
+        // visible even between log lines.
+        for task in health.tasks() {
+            let value = if unhealthy_names.contains(task.name()) {
+                1.0
+            } else {
+                0.0
+            };
+            metrics::gauge!("supervisor.task_unhealthy", "task" => task.name().to_string())
+                .set(value);
         }
-    });
+
+        for report in unhealthy {
+            tracing::error!(
+                task = %report.name,
+                stale = report.stale,
+                breaker_open = report.breaker_open,
+                last_heartbeat_ms = report.last_heartbeat_ms,
+                age_ms = now.saturating_sub(report.last_heartbeat_ms),
+                "supervised task UNHEALTHY (stale heartbeat or open breaker) — investigate"
+            );
+        }
+    }
 }
 
 #[cfg(test)]
@@ -488,6 +527,61 @@ mod tests {
         // Capped at backoff_max (5 s) — and the shift never overflows.
         assert_eq!(backoff_for(8, &p), Duration::from_secs(5));
         assert_eq!(backoff_for(1000, &p), Duration::from_secs(5));
+
+        // Non-default policy: backoff_max must actually be honoured (regression for
+        // the old shift-cap-of-7 that topped the curve out at 128 × base).
+        let wide = SupervisorPolicy {
+            backoff_base: Duration::from_millis(1),
+            backoff_max: Duration::from_secs(60),
+            ..SupervisorPolicy::default()
+        };
+        assert_eq!(backoff_for(40, &wide), Duration::from_secs(60));
+        assert_eq!(backoff_for(10_000, &wide), Duration::from_secs(60));
+    }
+
+    /// Finding 1: once a task recovers and stays up past `healthy_after`, the
+    /// breaker must close *while the task is still alive* — not only on its next
+    /// death — otherwise a recovered task is reported degraded forever.
+    #[tokio::test]
+    async fn breaker_closes_once_recovered_task_stays_alive() {
+        let health = TaskHealth::new();
+        let attempts = Arc::new(AtomicU32::new(0));
+        let policy = SupervisorPolicy {
+            backoff_base: Duration::from_millis(1),
+            backoff_max: Duration::from_millis(2),
+            failure_limit: 2,
+            cooldown: Duration::from_millis(2),
+            healthy_after: Duration::from_millis(50),
+        };
+
+        let a = attempts.clone();
+        supervise("recovers", health.clone(), policy, move |state| {
+            let a = a.clone();
+            async move {
+                let attempt = a.fetch_add(1, Ordering::SeqCst);
+                if attempt < 2 {
+                    panic!("fail to open the breaker");
+                }
+                // Recovered generation: stays alive and beats forever.
+                loop {
+                    state.beat();
+                    tokio::time::sleep(Duration::from_millis(2)).await;
+                }
+            }
+        });
+
+        let state = health.register("recovers");
+        // Breaker opens after the 2 initial panics...
+        assert!(
+            wait_until(Duration::from_secs(2), || state.breaker_open()).await,
+            "breaker should open after failure_limit panics"
+        );
+        // ...then closes once the recovered generation survives `healthy_after`,
+        // even though it never dies again.
+        assert!(
+            wait_until(Duration::from_secs(2), || !state.breaker_open()).await,
+            "breaker should re-close while the recovered task is still alive"
+        );
     }
 
     #[test]
