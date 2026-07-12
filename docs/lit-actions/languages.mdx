@@ -69,7 +69,7 @@ A node that has not enabled multi-language support returns only the `javascript`
 | `id` | The value you pass as `runtime` when submitting an action, e.g. `"python3.13"`. |
 | `version` | Full version string, e.g. `"3.13.1"`. |
 | `is_default` | Used when you omit `runtime` from a request. |
-| `prewarmed` | Whether this runtime's install layers are already materialized on the node. A cold runtime may still be accepted on `next` but pays a one-time provisioning cost; production only admits pre-warmed runtimes. |
+| `prewarmed` | Whether this runtime's install layers are already materialized on the node. Once execution lands, a cold runtime will still be accepted on `next` but pays a one-time provisioning cost, while production will only admit pre-warmed runtimes. Currently `false` for every runtime (see the note below). |
 
 ### `methods[]`
 

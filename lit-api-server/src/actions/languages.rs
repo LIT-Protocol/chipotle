@@ -218,7 +218,7 @@ impl SupportedLanguages {
             // array and no default for clients that omit `runtime`. Restrict to
             // a subset (what prod does) by listing them explicitly. Languages
             // with no known runtimes (js, rust) correctly stay empty.
-            if runtimes.is_empty() {
+            if runtimes.is_empty() && !known.runtimes.is_empty() {
                 runtimes = known
                     .runtimes
                     .iter()
@@ -230,6 +230,20 @@ impl SupportedLanguages {
                         prewarmed: false,
                     })
                     .collect();
+                // Boot-time signal for the implicit expansion: because the set
+                // is the build's known runtimes, adding one to KNOWN_LANGUAGES
+                // later silently widens any allowlist that omits an explicit
+                // list. Log it so that widening is visible without a config
+                // diff. Prod pins the set explicitly and never hits this path.
+                tracing::info!(
+                    language = known.name,
+                    runtimes = runtimes
+                        .iter()
+                        .map(|r| r.id.as_str())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                    "language allowlist omitted runtimes; defaulting to all runtimes known to this build"
+                );
             }
 
             let mut methods: Vec<ExecutionMethod> = Vec::new();
@@ -344,6 +358,22 @@ mod tests {
         assert_eq!(
             SupportedLanguages::parse(&parsed.to_string()).unwrap(),
             parsed
+        );
+    }
+
+    #[test]
+    fn tolerates_repeated_and_trailing_pipes() {
+        // The empty-field filter that lets `javascript||raw_script` parse also
+        // makes a trailing `|` harmless — pin both so the tolerance is
+        // intentional, not an accident of a future refactor.
+        let canonical = SupportedLanguages::parse("javascript|raw_script").unwrap();
+        assert_eq!(
+            SupportedLanguages::parse("javascript||raw_script").unwrap(),
+            canonical
+        );
+        assert_eq!(
+            SupportedLanguages::parse("javascript|raw_script|").unwrap(),
+            canonical
         );
     }
 
