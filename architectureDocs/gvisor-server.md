@@ -432,8 +432,8 @@ Deploy caveats: the pipeline must build + substitute
 
 As of the initial implementation ([#557](https://github.com/LIT-Protocol/chipotle/pull/557) + [#558](https://github.com/LIT-Protocol/chipotle/pull/558)):
 
-- The crate is complete with 12 end-to-end integration tests (real op-loop, real
-  bundles, real `lit` CLI via the `process` runtime) + 6 bundle unit tests.
+- The crate is complete, with an end-to-end integration suite (real op-loop,
+  real bundles, real `lit` CLI via the `process` runtime) plus bundle unit tests.
 - runsc specifics are spike-validated but need a Linux dev CVM pass for the
   isolation/perf quality gates.
 

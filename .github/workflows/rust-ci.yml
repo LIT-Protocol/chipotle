@@ -118,9 +118,10 @@ jobs:
 
       - name: deny
         working-directory: ${{ matrix.crate }}
-        # `--config` is a top-level flag (before `check`) as of cargo-deny 0.20.
         # -W advisory-not-detected / unmatched-source: the deny.toml ignore +
         # allow-git lists are the union across all four workspaces, so each
         # individual workspace sees entries that don't apply — downgrade those
         # lints to warnings so they don't fail the build.
+        # NB: as of cargo-deny 0.20, --config is a top-level flag and must
+        # come before `check`.
         run: cargo deny --config ${{ github.workspace }}/deny.toml check -W advisory-not-detected -W unmatched-source advisories sources
