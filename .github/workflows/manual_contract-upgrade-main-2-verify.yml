@@ -59,10 +59,26 @@ jobs:
         working-directory: lit-api-server/blockchain/lit_node_express
         env:
           BASE_RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
+          # Pass dispatcher-controlled input via env: rather than interpolating
+          # it into the shell script, and validate its shape first.
+          SAFE_TX_HASH: ${{ inputs.safe_tx_hash }}
+          SAFE_ADDRESS: ${{ vars.SAFE_ADDRESS_CHIPOTLE_MAIN }}
         run: |
+          if ! printf '%s' "$SAFE_TX_HASH" | grep -Eq '^0x[a-fA-F0-9]{64}$'; then
+            echo "::error::Invalid safe_tx_hash '$SAFE_TX_HASH' (expected 0x + 64 hex chars)."
+            exit 1
+          fi
+          if [ -z "$SAFE_ADDRESS" ]; then
+            echo "::error::vars.SAFE_ADDRESS_CHIPOTLE_MAIN is not configured — cannot bind the tx to the expected Safe."
+            exit 1
+          fi
+          # --safe pins verification to our Safe: execute-safe-tx asserts the tx
+          # actually belongs to it, so an executed hash from any other Safe on
+          # Base cannot pass this gate.
           OUTPUT=$(npx hardhat execute-safe-tx \
             --network base \
-            --safe-tx-hash "${{ inputs.safe_tx_hash }}" \
+            --safe "$SAFE_ADDRESS" \
+            --safe-tx-hash "$SAFE_TX_HASH" \
             2>&1 | tee /dev/stderr)
           TX_HASH=$(echo "$OUTPUT" | grep '^TX_HASH=' | cut -d= -f2)
           if [ -z "$TX_HASH" ]; then

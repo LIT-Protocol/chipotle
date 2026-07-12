@@ -6,7 +6,9 @@
 #
 # IMPORTANT — this file only takes effect once branch protection on the default
 # branch enables "Require review from Code Owners". Configure that in
-# Settings → Branches.
+# Settings → Branches. Note this gates the DEFAULT branch only: the `next`
+# branch that upgrade-next deploys from gets no CODEOWNERS coverage unless it
+# also receives branch protection (acceptable for staging).
 #
 # TODO(CPL-291 follow-up): replace the individual owner with a proper GitHub
 # team slug (e.g. @LIT-Protocol/contracts, @LIT-Protocol/platform-security)

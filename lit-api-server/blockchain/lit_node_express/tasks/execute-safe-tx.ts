@@ -21,6 +21,20 @@ task("execute-safe-tx", "Verify a Safe transaction has been executed and return 
     const safeAddress = taskArgs.safe || safeTransaction.safe;
     console.log(`Safe: ${safeAddress}`);
 
+    // When an expected Safe is supplied, assert the tx actually belongs to it.
+    // Otherwise an executed tx hash from *any* Safe on this chain would pass
+    // verification and get reported as the on-chain upgrade tx.
+    if (
+      taskArgs.safe &&
+      safeTransaction.safe.toLowerCase() !== taskArgs.safe.toLowerCase()
+    ) {
+      console.error(
+        `\nSafe transaction ${safeTxHash} belongs to Safe ${safeTransaction.safe}, ` +
+          `not the expected ${taskArgs.safe}.`
+      );
+      process.exit(1);
+    }
+
     if (!safeTransaction.isExecuted || !safeTransaction.transactionHash) {
       console.error(
         `\nSafe transaction has not been executed yet. ` +

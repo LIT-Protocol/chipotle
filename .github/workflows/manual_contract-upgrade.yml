@@ -84,6 +84,13 @@ jobs:
             echo "::error::main NodeConfig must target the 'base' network (got '$NETWORK')."
             exit 1
           fi
+          # ADDRESS comes from a checked-out file a PR can mutate and is fed to
+          # later shell steps — reject anything that isn't a plain EVM address
+          # so a crafted NodeConfig cannot inject shell (CPL-293, PR #485).
+          if ! printf '%s' "$ADDRESS" | grep -Eq '^0x[a-fA-F0-9]{40}$'; then
+            echo "::error::Invalid contract_address '$ADDRESS' in $CONFIG (expected 0x + 40 hex chars)."
+            exit 1
+          fi
           if [ -z "${{ vars.SAFE_ADDRESS_CHIPOTLE_MAIN }}" ]; then
             echo "::error::vars.SAFE_ADDRESS_CHIPOTLE_MAIN is not configured — cannot Safe-route the upgrade."
             exit 1
@@ -118,6 +125,9 @@ jobs:
         working-directory: lit-api-server/blockchain/lit_node_express
         env:
           DEPLOYER_KEY: ${{ secrets.SAFE_PROPOSER_PRIVATE_KEY }}
+          NETWORK: ${{ steps.config.outputs.network }}
+          ADDRESS: ${{ steps.config.outputs.address }}
+          RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
         run: |
           if [ -z "$DEPLOYER_KEY" ]; then
             echo "::error::secrets.SAFE_PROPOSER_PRIVATE_KEY is not configured — refusing to fall back to the deployer's built-in default key."
@@ -125,11 +135,11 @@ jobs:
           fi
           ../rust_generator_and_deployer/target/debug/contract_deployer \
             --action=propose-update \
-            --network=${{ steps.config.outputs.network }} \
+            --network="$NETWORK" \
             --abifolder=artifacts/contracts \
             --secret="$DEPLOYER_KEY" \
-            --address=${{ steps.config.outputs.address }} \
-            --rpc-url=${{ secrets.BASE_CHAIN_RPC }} \
+            --address="$ADDRESS" \
+            --rpc-url="$RPC_URL" \
             --output=diamond_cut_proposal.json
 
       - name: Propose diamondCut to Safe multisig
@@ -137,9 +147,11 @@ jobs:
         env:
           PROPOSER_PRIVATE_KEY: ${{ secrets.SAFE_PROPOSER_PRIVATE_KEY }}
           BASE_RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
+          SAFE_ADDRESS: ${{ vars.SAFE_ADDRESS_CHIPOTLE_MAIN }}
+          ADDRESS: ${{ steps.config.outputs.address }}
         run: |
           OUTPUT=$(npx hardhat propose-diamond-cut \
-            --safe "${{ vars.SAFE_ADDRESS_CHIPOTLE_MAIN }}" \
+            --safe "$SAFE_ADDRESS" \
             --proposal diamond_cut_proposal.json \
             --network base \
             2>&1 | tee /dev/stderr)
@@ -150,10 +162,10 @@ jobs:
           fi
           echo "## Contract Upgrade Proposal (main)" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "**Diamond:** \`${{ steps.config.outputs.address }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Diamond:** \`$ADDRESS\`" >> "$GITHUB_STEP_SUMMARY"
           echo "**Safe TX Hash:** \`$SAFE_TX_HASH\`" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
-          echo "Signers can review and approve in the [Safe UI](https://app.safe.global/transactions/queue?safe=base:${{ vars.SAFE_ADDRESS_CHIPOTLE_MAIN }})." >> "$GITHUB_STEP_SUMMARY"
+          echo "Signers can review and approve in the [Safe UI](https://app.safe.global/transactions/queue?safe=base:$SAFE_ADDRESS)." >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "After execution, run **Contract Upgrade Main 2: Verify** with this Safe TX Hash." >> "$GITHUB_STEP_SUMMARY"
 
@@ -181,6 +193,22 @@ jobs:
 
           NETWORK=$(grep '^name' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
           ADDRESS=$(grep '^contract_address' "$CONFIG" | head -1 | sed 's/.*= *"\(.*\)"/\1/')
+
+          # NETWORK/ADDRESS come from a checked-out file the `next` branch can
+          # mutate and are consumed by later shell steps — validate them against
+          # the deployer's accepted networks / a plain EVM address so a crafted
+          # NodeConfig cannot inject shell (CPL-293, PR #485).
+          case "$NETWORK" in
+            anvil|yellowstone|base-sepolia|base) ;;
+            *)
+              echo "::error::Invalid network '$NETWORK' in $CONFIG (expected anvil, yellowstone, base-sepolia, or base)."
+              exit 1
+              ;;
+          esac
+          if ! printf '%s' "$ADDRESS" | grep -Eq '^0x[a-fA-F0-9]{40}$'; then
+            echo "::error::Invalid contract_address '$ADDRESS' in $CONFIG (expected 0x + 40 hex chars)."
+            exit 1
+          fi
 
           echo "network=$NETWORK" >> "$GITHUB_OUTPUT"
           echo "address=$ADDRESS" >> "$GITHUB_OUTPUT"
@@ -211,11 +239,21 @@ jobs:
         working-directory: lit-api-server/blockchain/lit_node_express
         env:
           DEPLOYER_KEY: ${{ steps.config.outputs.network == 'base' && secrets.PHALA_DSTACKAPP_PRIVATE_KEY || (steps.config.outputs.network != 'base' && secrets.CONTRACT_DEPLOYER_SECRET_SEPOLIA) }}
+          NETWORK: ${{ steps.config.outputs.network }}
+          ADDRESS: ${{ steps.config.outputs.address }}
+          RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
         run: |
+          # The DEPLOYER_KEY ternary yields "" (base, key unset) or the literal
+          # "false" (non-base, key unset); reject both so we never fall back to
+          # contract_deployer's built-in default key.
+          if [ -z "$DEPLOYER_KEY" ] || [ "$DEPLOYER_KEY" = "false" ]; then
+            echo "::error::Deployer key for network '$NETWORK' is not configured (PHALA_DSTACKAPP_PRIVATE_KEY / CONTRACT_DEPLOYER_SECRET_SEPOLIA)."
+            exit 1
+          fi
           ../rust_generator_and_deployer/target/debug/contract_deployer \
             --action=update \
-            --network=${{ steps.config.outputs.network }} \
+            --network="$NETWORK" \
             --abifolder=artifacts/contracts \
             --secret="$DEPLOYER_KEY" \
-            --address=${{ steps.config.outputs.address }} \
-            --rpc-url=${{ secrets.BASE_CHAIN_RPC }}
+            --address="$ADDRESS" \
+            --rpc-url="$RPC_URL"
