@@ -41,7 +41,7 @@ pub(super) async fn lit_action(
                 api_key.0.as_str(),
                 grpc_client_pool.inner(),
                 ipfs_cache.inner(),
-                cache_metadata.inner(),
+                cache_metadata.inner().clone(),
                 http_client.inner(),
                 chain_config.inner().clone(),
                 stripe_state.inner().clone(),

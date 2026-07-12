@@ -207,7 +207,11 @@ async fn main() -> Result<(), rocket::Error> {
 
     // IPFS cache lives outside the restart loop so warm entries survive restarts.
     // The eviction listener keeps the metadata index consistent: when a binary
-    // is evicted (capacity), replaced, or removed, its metadata is dropped too.
+    // leaves the cache (capacity, expiry, or explicit invalidation) its metadata
+    // is dropped too. `RemovalCause::Replaced` is explicitly NOT a removal — the
+    // key is still cached, only its value changed — and `lit_action` re-inserts
+    // on every request, so treating Replaced as a removal would wipe live
+    // metadata (run_count/created_at) on every re-run of a cached action.
     let ipfs_cache: Cache<String, Arc<String>> = {
         let metadata_for_eviction = cache_metadata_index.clone();
         Cache::builder()
@@ -215,8 +219,10 @@ async fn main() -> Result<(), rocket::Error> {
                 value.len().try_into().unwrap_or(u32::MAX)
             })
             .max_capacity(1024 * 1024 * 1024) // 1 GB
-            .eviction_listener(move |key: Arc<String>, _value, _cause| {
-                metadata_for_eviction.remove_entry(&key);
+            .eviction_listener(move |key: Arc<String>, _value, cause| {
+                if cause != moka::notification::RemovalCause::Replaced {
+                    metadata_for_eviction.remove_entry(&key);
+                }
             })
             .build()
     };

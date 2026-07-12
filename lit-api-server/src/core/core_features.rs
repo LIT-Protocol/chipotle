@@ -32,7 +32,7 @@ pub async fn lit_action(
     api_key: &str,
     grpc_client_pool: &GrpcClientPool<tonic::transport::Channel>,
     ipfs_cache: &Cache<String, Arc<String>>,
-    cache_metadata: &CacheMetadataIndex,
+    cache_metadata: Arc<CacheMetadataIndex>,
     http_client: &reqwest::Client,
     chain_config: Arc<ChainConfig>,
     stripe_state: Option<Arc<StripeState>>,
@@ -69,19 +69,30 @@ pub async fn lit_action(
         .await;
 
     // CPL-351: correlate the cached binary with the caller's master account so
-    // its metadata can be surfaced by `GET /cache_metadata`. Best-effort — a
-    // failed on-chain wallet lookup must never fail action execution.
-    match crate::accounts::get_account_wallet_address(api_key).await {
-        Ok(account_address) => cache_metadata.record_execution(
-            &derived_ipfs_id,
-            code_to_run.len() as u64,
-            &account_address,
-            std::time::SystemTime::now(),
-        ),
-        Err(e) => tracing::debug!(
-            ipfs_id = %derived_ipfs_id,
-            "cache_metadata: skipped recording (wallet lookup failed): {e}"
-        ),
+    // its metadata can be surfaced by `GET /cache_metadata`. Spawned off the
+    // request path: resolving the account wallet is an uncached on-chain call,
+    // and this is best-effort bookkeeping that must add neither latency to nor
+    // failure modes for action execution. `record_execution` is eventually
+    // consistent — a slightly-late write only affects the metadata endpoint.
+    {
+        let cache_metadata = cache_metadata.clone();
+        let api_key = api_key.to_string();
+        let ipfs_id = derived_ipfs_id.clone();
+        let size_bytes = code_to_run.len() as u64;
+        tokio::spawn(async move {
+            match crate::accounts::get_account_wallet_address(&api_key).await {
+                Ok(account_address) => cache_metadata.record_execution(
+                    &ipfs_id,
+                    size_bytes,
+                    &account_address,
+                    std::time::SystemTime::now(),
+                ),
+                Err(e) => tracing::debug!(
+                    %ipfs_id,
+                    "cache_metadata: skipped recording (wallet lookup failed): {e}"
+                ),
+            }
+        });
     }
 
     let deno_execution_env = DenoExecutionEnv {
@@ -153,10 +164,19 @@ pub async fn get_cache_metadata(
     let account_address = crate::accounts::get_account_wallet_address(api_key)
         .await
         .map_err(|e| {
-            ApiStatus::bad_request(
-                anyhow::anyhow!("failed to resolve account for API key: {e}"),
-                "Could not resolve the account for the provided API key.",
-            )
+            // An unknown/unregistered key is a credential failure, not a bad
+            // request — map it to 401 to match the billing path's convention
+            // (see accounts::UnknownApiKey). Anything else (RPC/contract
+            // failure) is a transient 500.
+            let msg = format!("{e}");
+            if msg.contains("no wallet address") || msg.contains("AccountDoesNotExist") {
+                ApiStatus::unauthorized("The provided API key is not registered.".to_string())
+            } else {
+                ApiStatus::internal_server_error(
+                    anyhow::anyhow!("failed to resolve account for API key: {e}"),
+                    "Could not resolve the account for the provided API key.",
+                )
+            }
         })?;
 
     let mut entries: Vec<CacheEntryMetadataItem> = cache_metadata

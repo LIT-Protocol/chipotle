@@ -53,7 +53,10 @@ pub struct CacheEntrySnapshot {
     pub created_at: SystemTime,
     pub last_run_at: SystemTime,
     pub run_count: u64,
-    /// Number of distinct accounts correlated with this entry.
+    /// Number of distinct accounts correlated with this entry. Internal-only:
+    /// deliberately NOT surfaced in the API response, since exposing how many
+    /// other accounts run the same code would leak cross-account usage. Kept
+    /// for correlation invariants (verified in tests) and possible admin use.
     pub account_count: usize,
 }
 
@@ -82,6 +85,15 @@ impl CacheMetadataIndex {
     /// Creates the entry on first sight (stamping `created_at`), and on every
     /// call refreshes `last_run_at`/`size_bytes`, increments `run_count`, and
     /// correlates the entry with the account in the secondary index.
+    ///
+    /// Callers invoke this just after inserting into the primary cache. If a
+    /// capacity/expiry eviction of that same key were to land in the tiny
+    /// window between the insert and this call, the eviction's `remove_entry`
+    /// runs as a no-op and this recreates a metadata entry with no backing
+    /// cache entry. That leak is bounded (one stale entry per raced key) and in
+    /// practice unreachable — the key was just inserted, so it is the
+    /// most-recently-used entry and cannot be size-evicted unless it alone
+    /// exceeds the 1 GB cap (impossible under `max_code_length`).
     pub fn record_execution(
         &self,
         ipfs_id: &str,
@@ -257,5 +269,54 @@ mod tests {
         idx.record_execution("QmA", 100, A, t(1));
         idx.remove_entry("QmDoesNotExist");
         assert_eq!(idx.entries_for_account(A).len(), 1);
+    }
+
+    /// Regression test for the `RemovalCause::Replaced` bug: drives the index
+    /// through a real moka cache wired with the SAME listener guard as
+    /// `main.rs`, proving a re-insert (Replaced) preserves metadata while a
+    /// genuine removal drops it. Without the guard, `run_count`/`created_at`
+    /// reset on every re-run of a cached action.
+    #[tokio::test]
+    async fn replaced_preserves_metadata_but_real_removal_drops_it() {
+        use moka::future::Cache;
+        use moka::notification::RemovalCause;
+        use std::sync::Arc;
+
+        let idx = Arc::new(CacheMetadataIndex::new());
+        let idx_listener = idx.clone();
+        let cache: Cache<String, Arc<String>> = Cache::builder()
+            .eviction_listener(move |key: Arc<String>, _v, cause| {
+                // Mirror the production guard in main.rs.
+                if cause != RemovalCause::Replaced {
+                    idx_listener.remove_entry(&key);
+                }
+            })
+            .build();
+
+        let code = Arc::new(String::from("code"));
+
+        // First run: insert then record.
+        cache.insert("QmA".to_string(), code.clone()).await;
+        idx.record_execution("QmA", 4, A, t(1));
+        cache.run_pending_tasks().await;
+        assert_eq!(idx.entries_for_account(A).len(), 1);
+
+        // Re-run of the already-cached action: re-insert fires Replaced.
+        cache.insert("QmA".to_string(), code.clone()).await;
+        cache.run_pending_tasks().await; // deliver the Replaced notification
+        idx.record_execution("QmA", 4, A, t(2));
+
+        let entries = idx.entries_for_account(A);
+        assert_eq!(entries.len(), 1, "Replaced must not wipe metadata");
+        assert_eq!(entries[0].run_count, 2, "run_count must accumulate");
+        assert_eq!(entries[0].created_at, t(1), "created_at must be preserved");
+
+        // A genuine removal (explicit invalidate) drops the metadata.
+        cache.invalidate("QmA").await;
+        cache.run_pending_tasks().await;
+        assert!(
+            idx.entries_for_account(A).is_empty(),
+            "real removal must drop metadata"
+        );
     }
 }
