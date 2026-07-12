@@ -33,13 +33,16 @@ pub struct HealthResponse {
     pub lit_actions_reachable: bool,
     pub cpu_available: bool,
     pub billing_keys_present: bool,
-    /// Seconds the on-chain account-event listener is behind the chain head, or
-    /// `null` if it has not yet completed a poll. Healthy values sit at or below
-    /// the ~10s poll interval; a large value means this instance's permission
-    /// cache is no longer being invalidated by on-chain writes and its reads may
-    /// be stale. Informational only — does NOT affect the health status (a
-    /// lagging listener still serves traffic, just from a staler cache). Clients
-    /// (e.g. the dashboard) surface a staleness banner when this exceeds 30s.
+    /// Seconds since the on-chain account-event listener last confirmed it was
+    /// current with the chain head, or `null` if it has not yet completed a poll.
+    /// Healthy values sit at or below the ~10s poll interval; a large value means
+    /// this instance's execute-path authorization cache is no longer being
+    /// invalidated by on-chain writes, so a just-changed permission can take
+    /// until the cache TTL (30s for denials, 5min for grants) to take effect on
+    /// this instance. Informational only — does NOT affect the health status (a
+    /// lagging listener still serves traffic; list/read endpoints stay live
+    /// regardless). Clients (e.g. the dashboard) surface a staleness banner when
+    /// this exceeds 30s.
     pub account_event_listener_lag_seconds: Option<u64>,
 }
 

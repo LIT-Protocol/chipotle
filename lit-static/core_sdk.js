@@ -18,16 +18,19 @@
  * with `signer.provider` set). The dashboard typically calls
  * `getNodeChainConfig()` first and passes the values in.
  *
- * Read-after-write staleness (API mode): server-mediated reads (e.g.
- * `listApiKeys`, `listGroups`, `listWallets`, `listActions`) are served from a
- * per-instance cache that an event listener refreshes by polling the chain
- * about every 10s. After an on-chain write the server didn't originate — most
- * commonly a ChainSecured (sovereign) wallet write, or a write made via another
- * API-server instance — reads on a given instance can lag by up to that poll
- * interval (~10s). Behind a load balancer, consecutive reads can hit different
- * instances and briefly disagree. Sovereign-mode reads go straight to the chain
- * via your RPC/signer and are not affected. The `/health` endpoint reports
- * `account_event_listener_lag_seconds` if you need to detect a lagging instance.
+ * Read-after-write staleness: list/read methods (`listApiKeys`, `listGroups`,
+ * `listWallets`, `listActions`, ...) are NOT cached — they do a live contract
+ * call and reflect chain head in both modes. The per-instance cache sits on the
+ * action-execution path (authorization decisions + wallet-derivation lookups),
+ * and an event listener invalidates it by polling the chain ~every 10s. So after
+ * an on-chain write the server didn't originate — most commonly a ChainSecured
+ * (sovereign) wallet write, or a write via another API-server instance — a
+ * just-granted permission may still be denied, or a just-revoked one may still
+ * succeed, when running an action, for up to ~one poll interval (~10s) while the
+ * listener is healthy (or up to the cache TTL — 30s for denials, 5min for grants
+ * — if it is stalled). Behind a load balancer, consecutive executions can hit
+ * different instances and briefly disagree. The `GET /core/v1/health` endpoint
+ * reports `account_event_listener_lag_seconds` to detect a lagging instance.
  * See docs/management/account_modes.mdx ("Read-after-write staleness").
  */
 

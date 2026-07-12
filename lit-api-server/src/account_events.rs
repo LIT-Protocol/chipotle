@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// Polling interval for checking new account-mutation events.
-pub const EVENT_POLL_INTERVAL: Duration = Duration::from_secs(10);
+const EVENT_POLL_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Maximum number of consecutive startup failures before giving up.
 const MAX_LISTENER_RETRIES: u32 = 5;
@@ -44,6 +44,10 @@ const LISTENER_UP_GAUGE: &str = "account_event_listener.up";
 /// iteration. Updated with [`Ordering::Relaxed`]: this is a monotonic-ish
 /// liveness timestamp, not a synchronization point, and a few hundred
 /// milliseconds of staleness in the reported lag is immaterial.
+///
+/// Process-global: only [`mark_caught_up`] writes it (from the single listener
+/// task). Any test that mutates it races every other test, so keep such tests
+/// to one (see the `listener_lag_*` unit test) or serialize them.
 static LAST_CAUGHT_UP_UNIX_SECS: AtomicU64 = AtomicU64::new(0);
 
 fn now_unix_secs() -> u64 {
@@ -61,12 +65,18 @@ fn mark_caught_up() {
 /// Seconds since the account-event listener last confirmed it was current with
 /// the chain head, or `None` if it has not yet completed a poll.
 ///
-/// Healthy values stay at or below [`EVENT_POLL_INTERVAL`] (~10s). A value that
-/// climbs well above it means the listener is stalled (RPC errors, a slow
-/// `eth_getLogs`) or has died — in which case on-chain account mutations are no
-/// longer invalidating the per-instance permission cache, so reads served by
-/// this instance may be stale. Exposed (unauthenticated) via `GET /health` as
+/// Healthy values stay at or below the poll interval (~10s). A value that climbs
+/// well above it means the listener is stalled (RPC errors, a slow `eth_getLogs`)
+/// or has died — in which case on-chain account mutations are no longer
+/// invalidating the per-instance execute-path authorization cache, so a
+/// just-changed permission can take until that cache's TTL to apply on this
+/// instance. Exposed (unauthenticated) via `GET /core/v1/health` as
 /// `account_event_listener_lag_seconds` so clients/ops can surface staleness.
+///
+/// Caveat: this measures time-since-last-poll, not events-missed. It resets to
+/// ~0 whenever the listener (re)starts — and a restart skips events emitted
+/// while it was down (those are covered only by cache TTL expiry) — so treat it
+/// as a liveness signal, not proof that every mutation was observed.
 pub fn listener_lag_seconds() -> Option<u64> {
     let last = LAST_CAUGHT_UP_UNIX_SECS.load(Ordering::Relaxed);
     if last == 0 {

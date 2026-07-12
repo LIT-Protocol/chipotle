@@ -204,22 +204,28 @@ window before `connectSigner(signer)` runs.
 
 ## Read-after-write staleness
 
-Each API-server instance keeps a **per-instance cache** of on-chain
-account and permission state. An event listener refreshes that cache by
-polling the chain for account-mutation events roughly every **10 seconds**
-(the poll interval). The node was deliberately built with a per-instance
-listener rather than a single leader, so behind a load balancer there are
-N independent views of chain state.
+Each API-server instance keeps a **per-instance cache** on the
+**action-execution** path. It caches on-chain **authorization decisions** —
+whether an API key may execute a given action or use a given wallet in an
+action — and the **wallet-derivation lookups** those checks depend on. An
+event listener polls the chain for account-mutation events roughly every
+**10 seconds** and **invalidates** the affected account's cached entries
+when it sees a change. The node was deliberately built with a per-instance
+listener rather than a single leader, so behind a load balancer there are N
+independent caches, each catching up on its own poll.
 
-The practical consequence:
+Two things are **not** cached and are therefore never stale:
 
-> After an on-chain write that a given instance did not originate, reads
-> served by that instance may show stale data for up to ~10 seconds (one
-> polling interval) until its listener catches up. Behind a load balancer,
-> consecutive reads can land on different instances and briefly disagree.
+- **List/read endpoints** (`listApiKeys`, `listGroups`, `listWallets`,
+  `listActions`, ...) do a live contract call on every request, so they
+  reflect chain head (modulo your RPC node's own lag). This is true in API
+  mode and in sovereign mode (where reads go directly to the chain via your
+  RPC/signer).
+- Anything you read to *display* configuration — the dashboard's tables of
+  keys, groups, wallets, and actions — is live for the same reason.
 
-This window is reachable whenever a write happens **outside** the instance
-serving your reads — most commonly:
+The window bites on the **execute path**, and only when a permission change
+lands **outside** the instance running the action — most commonly:
 
 - A **ChainSecured (sovereign) wallet write** (the contract emits the event;
   no API server originated it, so every instance learns of it only on its
@@ -228,27 +234,36 @@ serving your reads — most commonly:
   balancer.
 - A transaction sent **directly to the contract**.
 
-Which reads are affected:
+> After such a write, an instance that hasn't yet observed the event can
+> make the *pre-write* authorization decision when it runs an action: a
+> **just-granted** permission may still be denied (403), or a **just-revoked**
+> permission may still succeed. Behind a load balancer, consecutive
+> executions can hit different instances and briefly disagree.
 
-- **API mode** reads (`listApiKeys`, `listGroups`, `listWallets`,
-  `listActions`, ...) go through the server cache and are subject to this
-  window.
-- **Sovereign-mode** reads call the contract directly via your RPC/signer
-  (no server round-trip) and reflect chain head immediately — they are
-  **not** subject to the cache window.
+How long the stale decision can persist:
 
-If you need read-your-write certainty after a sovereign write that other
-clients will read in API mode, either wait out one poll interval (~10s) or
-read the contract directly.
+- **Listener healthy:** until its next poll observes the event and
+  invalidates — at most ~one poll interval (**~10s**).
+- **Listener stalled or dead:** the cache still self-heals via TTL — stale
+  **denials** clear within **30s**, stale **grants** within **5 minutes**.
+  A dead listener regresses the window to those TTLs; it is never open-ended.
+
+If you need a permission change to take effect immediately everywhere,
+wait out one poll interval (~10s) before relying on the new authorization
+on the execute path.
 
 <Note>
-A healthy instance keeps its lag at or below the poll interval. The
-`GET /health` endpoint reports `account_event_listener_lag_seconds`
-(unauthenticated; `null` until the listener's first poll). A value that
-stays well above ~10s means that instance's listener is stalled or dead and
-its cached reads may be substantially out of date until it recovers or the
-process restarts. The Chipotle Dashboard polls this and shows a staleness
-banner when an instance reports more than 30s of lag.
+A healthy instance keeps its listener lag at or below the poll interval. The
+unauthenticated `GET /core/v1/health` endpoint reports
+`account_event_listener_lag_seconds` (`null` until the listener's first
+poll). A value that stays well above ~10s means that instance's listener is
+stalled or dead, so cache invalidation has stopped and execute-path
+authorization falls back to the TTL bounds above. The Chipotle Dashboard
+polls this and shows a staleness banner when an instance reports more than
+30s of lag. (Caveat: the lag resets to ~0 whenever the listener process
+restarts, even though a restart skips events emitted while it was down —
+those are covered only by TTL expiry — so treat the metric as a liveness
+signal, not a guarantee that no event was missed.)
 </Note>
 
 ## Using the dashboard
