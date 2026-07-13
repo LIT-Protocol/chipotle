@@ -189,3 +189,10 @@ pub struct VersionResponse {
     pub commit_version: String,
     pub submodule_versions: Vec<(String, String)>,
 }
+
+/// Returned by `/get_supported_languages` — the node's language capability
+/// surface (see `actions::languages`).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SupportedLanguagesResponse {
+    pub languages: Vec<crate::actions::languages::LanguageFeature>,
+}

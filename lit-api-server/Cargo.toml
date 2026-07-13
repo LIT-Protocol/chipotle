@@ -37,6 +37,7 @@ alloy = { version = "1.0", features = [
     "sol-types",
 ] }
 git-version = "0.3.9"
+arc-swap = "1"
 flume = "0.11.0"
 futures = "0.3.31"
 hex = "0.4"
