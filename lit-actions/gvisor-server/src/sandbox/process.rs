@@ -70,9 +70,15 @@ fn copy_dir(from: &Path, to: &Path) -> Result<()> {
             copy_dir(&entry.path(), &target)?;
         } else if file_type.is_file() {
             fs::copy(entry.path(), &target)?;
+        } else {
+            // Bundle unpack rejects link/device/FIFO tar entries, so nothing
+            // else can exist here. Fail loudly rather than stage a bundle
+            // that would behave differently under the runsc runtime.
+            anyhow::bail!(
+                "unsupported file type in bundle: {}",
+                entry.path().display()
+            );
         }
-        // Symlinks are skipped: the tar unpack step never creates links that
-        // escape the bundle, but there is no reason to follow them here.
     }
     Ok(())
 }
