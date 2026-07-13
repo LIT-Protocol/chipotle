@@ -23,7 +23,9 @@ that produced this file (see "Audit method").
 - **Feature:** language capability registry + unauthenticated
   `GET /get_supported_languages` discovery endpoint (CPL-349 phase 1).
 - **Landed on main:** PR #562 (`1d99c9e0`, 2026-07-12) — after v1.1.10
-  (cut 2026-06-23). The endpoint does not exist in any released server; the
+  (tagged 2026-06-22 EDT / 2026-06-23 UTC; the changelog's release table uses
+  the tagger's local date). The endpoint does not exist in any released
+  server; the
   page's claim that "the discovery endpoint is live everywhere" is only true
   once a release containing #562 ships.
 - **To restore:**
