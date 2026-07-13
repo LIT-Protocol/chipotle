@@ -1,5 +1,5 @@
 use lit_api_server::accounts;
-use lit_api_server::accounts::chain_config::start_chain_config;
+use lit_api_server::accounts::chain_config::{run_config_refresh_loop, start_chain_config};
 use lit_api_server::accounts::signer_pool::start_signer_pool;
 use lit_api_server::actions::grpc::GrpcClientPool;
 use lit_api_server::actions::languages::SupportedLanguages;
@@ -9,8 +9,9 @@ use lit_api_server::core::v1::guards::cpu_overload::CpuOverloadMonitor;
 use lit_api_server::dstack;
 use lit_api_server::internal;
 use lit_api_server::observability;
-use lit_api_server::restart::{RestartHandle, start_server_trigger_listener};
+use lit_api_server::restart::{self, RestartHandle};
 use lit_api_server::stripe;
+use lit_api_server::supervisor::{self, SupervisorPolicy, TaskHealth, WatchdogConfig};
 use lit_api_server::utils::chain_info::Chain;
 use moka::future::Cache;
 use rocket::response::Redirect;
@@ -143,15 +144,46 @@ async fn main() -> Result<(), rocket::Error> {
 
     let signer_pool = Arc::new(signer_pool);
 
-    let chain_config = match start_chain_config().await {
-        Ok(cfg) => Arc::new(cfg),
-        Err(e) => {
-            eprintln!("Failed to start chain config: {:?}. Exiting.", e);
-            std::process::exit(1);
-        }
-    };
+    // In-process supervisor for the non-critical background actors. Inside the
+    // TEE a panicked background task must NOT escalate to a process exit (that
+    // forces dstack re-attestation + sealed-key re-derivation), so we re-spawn in
+    // place and keep the enclave warm. The signer pool is intentionally NOT
+    // supervised here — its nonce-ownership recovery is a separate design,
+    // deferred to a follow-up.
+    let task_health = TaskHealth::new();
+    let supervisor_policy = SupervisorPolicy::default();
 
-    let cpu_monitor = CpuOverloadMonitor::start();
+    // Chain config never fails to start: it is non-critical (missing keys fall
+    // back to built-in defaults, and the supervised refresh loop below populates
+    // the snapshot within one refresh interval), so a transient RPC blip at boot
+    // must not abort startup.
+    let chain_config = Arc::new(start_chain_config().await);
+
+    // Supervise the chain-config refresh loop. The config snapshot lives in the
+    // `chain_config` handle, independent of the loop task, so reads keep serving
+    // the last-good values across a re-spawn.
+    {
+        let snapshot = chain_config.snapshot_handle();
+        supervisor::supervise(
+            "chain_config_refresh",
+            task_health.clone(),
+            supervisor_policy,
+            move |state| run_config_refresh_loop(snapshot.clone(), state),
+        );
+    }
+
+    let cpu_monitor = CpuOverloadMonitor::new();
+    // Supervise the CPU sampling loop. It fails open (load shedding OFF) if it
+    // ever dies, so a stale `true` can't wedge `/health` at 503.
+    {
+        let monitor = cpu_monitor.clone();
+        supervisor::supervise(
+            "cpu_overload_monitor",
+            task_health.clone(),
+            supervisor_policy,
+            move |state| monitor.run(state),
+        );
+    }
     let stripe_state = match stripe::init() {
         Ok(state) => state,
         Err(e) => {
@@ -231,9 +263,31 @@ async fn main() -> Result<(), rocket::Error> {
     //                             restart signal received
     let (restart_tx, mut restart_rx) = mpsc::channel::<()>(1);
 
-    // Start the on-chain event listener that watches for ServerTriggered events
-    // from the contract owner and sends restart signals via the channel.
-    start_server_trigger_listener(RestartHandle::new(restart_tx.clone()));
+    // Start the on-chain event listener (supervised). It watches for
+    // ServerTriggered events from the contract owner and sends restart signals via
+    // the channel. A persisted block watermark survives re-spawns so an event
+    // emitted while the listener is briefly down is re-scanned, not skipped. The
+    // supervisor replaces the old "give up after 5 failures → silent exit" with
+    // retry-forever + degraded alert, so restart signals are never permanently
+    // ignored.
+    {
+        let handle = RestartHandle::new(restart_tx.clone());
+        let watermark = restart::new_block_watermark();
+        supervisor::supervise(
+            "server_trigger_listener",
+            task_health.clone(),
+            supervisor_policy,
+            move |state| {
+                restart::run_server_trigger_listener(handle.clone(), watermark.clone(), state)
+            },
+        );
+    }
+
+    // Heartbeat-staleness watchdog over all supervised tasks. Catches wedges (the
+    // failure the re-spawn path cannot) and open breakers. Observability only — no
+    // process exit, no `/health` flip (the Phala gateway serves from one instance,
+    // so there is no peer to drain to).
+    supervisor::spawn_watchdog(task_health.clone(), WatchdogConfig::default());
 
     // Restart loop protection: track timestamps of recent restarts.
     let mut restart_timestamps: Vec<std::time::Instant> = Vec::new();
