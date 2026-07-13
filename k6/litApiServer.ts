@@ -378,6 +378,58 @@ export interface LitActionClientConfigResponse {
 }
 
 /**
+ * Returned by `/get_supported_languages` — the node's language capability surface (see `actions::languages`).
+ */
+export interface SupportedLanguagesResponse {
+  languages: LanguageFeature[];
+}
+
+/**
+ * One supported language, as advertised by `GET /get_supported_languages`.
+ */
+export interface LanguageFeature {
+  /** Stable id used in requests, e.g. "python", "rust", "javascript". */
+  name: string;
+  /** Human label, e.g. "Python". */
+  display_name: string;
+  /** Underlying runner: "deno" (JS) or "gvisor" (everything else). */
+  execution_model: ExecutionModel;
+  /** Provisionable runtime versions — each maps to an install recipe and a cache profile (NOT baked into the image). Multiple may coexist (e.g. 3.12 and 3.13). Empty for compiled/static languages. */
+  runtimes: LanguageRuntime[];
+  /** Which methods this language accepts on this node. */
+  methods: ExecutionMethod[];
+}
+
+export type ExecutionModel =
+  (typeof ExecutionModel)[keyof typeof ExecutionModel];
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ExecutionModel = {
+  deno: "deno",
+  gvisor: "gvisor",
+} as const;
+
+export interface LanguageRuntime {
+  /** Value clients pass as `runtime` and the manifest's `runtime` field, e.g. "python3.13". Selects an install recipe + cache profile. */
+  id: string;
+  /** Full version string, e.g. "3.13.1". */
+  version: string;
+  /** Chosen when the client omits `runtime`. */
+  is_default: boolean;
+  /** True once this profile's install layers are materialized in the gVisor runner's cache. Always false until the install cache lands (CPL-349 phase 2); pre-warm status is wired in phase 5. */
+  prewarmed: boolean;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-redeclare
+export const ExecutionMethod = {
+  raw_script: "raw_script",
+  bundle: "bundle",
+  oci_bundle: "oci_bundle",
+} as const;
+export type ExecutionMethod =
+  (typeof ExecutionMethod)[keyof typeof ExecutionMethod];
+
+/**
  * GET /billing/stripe_config — returns the Stripe publishable key for Stripe.js.
  */
 export interface StripeConfigResponse {
@@ -732,6 +784,10 @@ export type GetChainConfigKeysDefault = ChainConfigKeysResponse | ErrMessage;
 
 export type GetLitActionClientConfigDefault =
   | LitActionClientConfigResponse
+  | ErrMessage;
+
+export type GetSupportedLanguagesDefault =
+  | SupportedLanguagesResponse
   | ErrMessage;
 
 export type GetApiPayersDefault = string[] | ErrMessage;
@@ -2190,6 +2246,39 @@ Deprecated: minting is a metered write, so it should not live on a GET — link 
       response,
       data,
       operationId: "get_lit_action_client_config",
+    };
+  }
+
+  /**
+   * Advertises the node's language capability surface: which languages, runtimes, and execution methods this node admits. No guards — like `get_lit_action_client_config`, it exists so clients can discover capability before uploading anything.
+   */
+  getSupportedLanguages(requestParameters?: Params): {
+    response: Response;
+    data: GetSupportedLanguagesDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/get_supported_languages`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "GET",
+      k6url.toString(),
+      undefined,
+      mergedRequestParameters,
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "get_supported_languages",
     };
   }
 

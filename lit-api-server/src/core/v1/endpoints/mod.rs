@@ -47,6 +47,7 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         get_node_chain_config,
         get_chain_config_keys,
         get_lit_action_client_config,
+        get_supported_languages,
         get_api_payers,
         get_admin_api_payer,
         billing_stripe_config,
