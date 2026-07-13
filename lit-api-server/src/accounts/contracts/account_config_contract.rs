@@ -1651,6 +1651,7 @@ interface AccountConfig {
     event UsageApiKeyRemoved(uint256 indexed accountApiKeyHash, uint256 indexed usageApiKeyHash);
     event UsageApiKeySet(uint256 indexed accountApiKeyHash, uint256 indexed usageApiKeyHash);
     event WalletDerivationRegistered(uint256 indexed apiKeyHash, address indexed pkpId, uint256 derivationPath);
+    event WalletDerivationRemoved(uint256 indexed apiKeyHash, address indexed pkpId);
 
     function accountCount() external view returns (uint256);
     function accountExistsAndIsMutable(uint256 apiKeyHash) external view returns (bool);
@@ -1701,6 +1702,7 @@ interface AccountConfig {
     function removeGroup(uint256 apiKeyHash, uint256 groupId) external;
     function removePkpFromGroup(uint256 apiKeyHash, uint256 groupId, address pkpId) external;
     function removeUsageApiKey(uint256 accountApiKeyHash, uint256 usageApiKeyHash) external;
+    function removeWalletDerivation(uint256 apiKeyHash, address pkpId) external;
     function requestedApiPayerCount() external view returns (uint256);
     function serverTrigger(uint256 value) external;
     function setAdminApiPayerAccount(address newAdminApiPayerAccount) external;
@@ -3022,6 +3024,24 @@ interface AccountConfig {
   },
   {
     "type": "function",
+    "name": "removeWalletDerivation",
+    "inputs": [
+      {
+        "name": "apiKeyHash",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "pkpId",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "requestedApiPayerCount",
     "inputs": [],
     "outputs": [
@@ -3855,6 +3875,25 @@ interface AccountConfig {
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "WalletDerivationRemoved",
+    "inputs": [
+      {
+        "name": "apiKeyHash",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
+      },
+      {
+        "name": "pkpId",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
       }
     ],
     "anonymous": false
@@ -8652,6 +8691,120 @@ pub mod AccountConfig {
         impl From<&WalletDerivationRegistered> for alloy_sol_types::private::LogData {
             #[inline]
             fn from(this: &WalletDerivationRegistered) -> alloy_sol_types::private::LogData {
+                alloy_sol_types::SolEvent::encode_log_data(this)
+            }
+        }
+    };
+    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
+    /*Event with signature `WalletDerivationRemoved(uint256,address)` and selector `0x54608f087c443f014222be218d509a0fc7df741e5c6d1907c0471700db119167`.
+    ```solidity
+    event WalletDerivationRemoved(uint256 indexed apiKeyHash, address indexed pkpId);
+    ```*/
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
+    #[derive(Clone)]
+    pub struct WalletDerivationRemoved {
+        #[allow(missing_docs)]
+        pub apiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
+        #[allow(missing_docs)]
+        pub pkpId: alloy::sol_types::private::Address,
+    }
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
+    const _: () = {
+        use alloy::sol_types as alloy_sol_types;
+        #[automatically_derived]
+        impl alloy_sol_types::SolEvent for WalletDerivationRemoved {
+            type DataTuple<'a> = ();
+            type DataToken<'a> = <Self::DataTuple<'a> as alloy_sol_types::SolType>::Token<'a>;
+            type TopicList = (
+                alloy_sol_types::sol_data::FixedBytes<32>,
+                alloy::sol_types::sol_data::Uint<256>,
+                alloy::sol_types::sol_data::Address,
+            );
+            const SIGNATURE: &'static str = "WalletDerivationRemoved(uint256,address)";
+            const SIGNATURE_HASH: alloy_sol_types::private::B256 =
+                alloy_sol_types::private::B256::new([
+                    84u8, 96u8, 143u8, 8u8, 124u8, 68u8, 63u8, 1u8, 66u8, 34u8, 190u8, 33u8, 141u8,
+                    80u8, 154u8, 15u8, 199u8, 223u8, 116u8, 30u8, 92u8, 109u8, 25u8, 7u8, 192u8,
+                    71u8, 23u8, 0u8, 219u8, 17u8, 145u8, 103u8,
+                ]);
+            const ANONYMOUS: bool = false;
+            #[allow(unused_variables)]
+            #[inline]
+            fn new(
+                topics: <Self::TopicList as alloy_sol_types::SolType>::RustType,
+                data: <Self::DataTuple<'_> as alloy_sol_types::SolType>::RustType,
+            ) -> Self {
+                Self {
+                    apiKeyHash: topics.1,
+                    pkpId: topics.2,
+                }
+            }
+            #[inline]
+            fn check_signature(
+                topics: &<Self::TopicList as alloy_sol_types::SolType>::RustType,
+            ) -> alloy_sol_types::Result<()> {
+                if topics.0 != Self::SIGNATURE_HASH {
+                    return Err(alloy_sol_types::Error::invalid_event_signature_hash(
+                        Self::SIGNATURE,
+                        topics.0,
+                        Self::SIGNATURE_HASH,
+                    ));
+                }
+                Ok(())
+            }
+            #[inline]
+            fn tokenize_body(&self) -> Self::DataToken<'_> {
+                ()
+            }
+            #[inline]
+            fn topics(&self) -> <Self::TopicList as alloy_sol_types::SolType>::RustType {
+                (
+                    Self::SIGNATURE_HASH.into(),
+                    self.apiKeyHash.clone(),
+                    self.pkpId.clone(),
+                )
+            }
+            #[inline]
+            fn encode_topics_raw(
+                &self,
+                out: &mut [alloy_sol_types::abi::token::WordToken],
+            ) -> alloy_sol_types::Result<()> {
+                if out.len() < <Self::TopicList as alloy_sol_types::TopicList>::COUNT {
+                    return Err(alloy_sol_types::Error::Overrun);
+                }
+                out[0usize] = alloy_sol_types::abi::token::WordToken(Self::SIGNATURE_HASH);
+                out[1usize] = <alloy::sol_types::sol_data::Uint<
+                    256,
+                > as alloy_sol_types::EventTopic>::encode_topic(&self.apiKeyHash);
+                out[2usize] = <alloy::sol_types::sol_data::Address as alloy_sol_types::EventTopic>::encode_topic(
+                    &self.pkpId,
+                );
+                Ok(())
+            }
+        }
+        #[automatically_derived]
+        impl alloy_sol_types::private::IntoLogData for WalletDerivationRemoved {
+            fn to_log_data(&self) -> alloy_sol_types::private::LogData {
+                From::from(self)
+            }
+            fn into_log_data(self) -> alloy_sol_types::private::LogData {
+                From::from(&self)
+            }
+        }
+        #[automatically_derived]
+        impl From<&WalletDerivationRemoved> for alloy_sol_types::private::LogData {
+            #[inline]
+            fn from(this: &WalletDerivationRemoved) -> alloy_sol_types::private::LogData {
                 alloy_sol_types::SolEvent::encode_log_data(this)
             }
         }
@@ -16154,6 +16307,155 @@ pub mod AccountConfig {
         }
     };
     #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
+    /*Function with signature `removeWalletDerivation(uint256,address)` and selector `0xffdde08e`.
+    ```solidity
+    function removeWalletDerivation(uint256 apiKeyHash, address pkpId) external;
+    ```*/
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
+    #[derive(Clone)]
+    pub struct removeWalletDerivationCall {
+        #[allow(missing_docs)]
+        pub apiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
+        #[allow(missing_docs)]
+        pub pkpId: alloy::sol_types::private::Address,
+    }
+    //Container type for the return parameters of the [`removeWalletDerivation(uint256,address)`](removeWalletDerivationCall) function.
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
+    #[derive(Clone)]
+    pub struct removeWalletDerivationReturn {}
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
+    const _: () = {
+        use alloy::sol_types as alloy_sol_types;
+        {
+            #[doc(hidden)]
+            #[allow(dead_code)]
+            type UnderlyingSolTuple<'a> = (
+                alloy::sol_types::sol_data::Uint<256>,
+                alloy::sol_types::sol_data::Address,
+            );
+            #[doc(hidden)]
+            type UnderlyingRustTuple<'a> = (
+                alloy::sol_types::private::primitives::aliases::U256,
+                alloy::sol_types::private::Address,
+            );
+            #[cfg(test)]
+            #[allow(dead_code, unreachable_patterns)]
+            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
+                match _t {
+                    alloy_sol_types::private::AssertTypeEq::<
+                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
+                    >(_) => {}
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<removeWalletDerivationCall> for UnderlyingRustTuple<'_> {
+                fn from(value: removeWalletDerivationCall) -> Self {
+                    (value.apiKeyHash, value.pkpId)
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<UnderlyingRustTuple<'_>> for removeWalletDerivationCall {
+                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
+                    Self {
+                        apiKeyHash: tuple.0,
+                        pkpId: tuple.1,
+                    }
+                }
+            }
+        }
+        {
+            #[doc(hidden)]
+            #[allow(dead_code)]
+            type UnderlyingSolTuple<'a> = ();
+            #[doc(hidden)]
+            type UnderlyingRustTuple<'a> = ();
+            #[cfg(test)]
+            #[allow(dead_code, unreachable_patterns)]
+            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
+                match _t {
+                    alloy_sol_types::private::AssertTypeEq::<
+                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
+                    >(_) => {}
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<removeWalletDerivationReturn> for UnderlyingRustTuple<'_> {
+                fn from(value: removeWalletDerivationReturn) -> Self {
+                    ()
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<UnderlyingRustTuple<'_>> for removeWalletDerivationReturn {
+                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
+                    Self {}
+                }
+            }
+        }
+        impl removeWalletDerivationReturn {
+            fn _tokenize(
+                &self,
+            ) -> <removeWalletDerivationCall as alloy_sol_types::SolCall>::ReturnToken<'_>
+            {
+                ()
+            }
+        }
+        #[automatically_derived]
+        impl alloy_sol_types::SolCall for removeWalletDerivationCall {
+            type Parameters<'a> = (
+                alloy::sol_types::sol_data::Uint<256>,
+                alloy::sol_types::sol_data::Address,
+            );
+            type Token<'a> = <Self::Parameters<'a> as alloy_sol_types::SolType>::Token<'a>;
+            type Return = removeWalletDerivationReturn;
+            type ReturnTuple<'a> = ();
+            type ReturnToken<'a> = <Self::ReturnTuple<'a> as alloy_sol_types::SolType>::Token<'a>;
+            const SIGNATURE: &'static str = "removeWalletDerivation(uint256,address)";
+            const SELECTOR: [u8; 4] = [255u8, 221u8, 224u8, 142u8];
+            #[inline]
+            fn new<'a>(
+                tuple: <Self::Parameters<'a> as alloy_sol_types::SolType>::RustType,
+            ) -> Self {
+                tuple.into()
+            }
+            #[inline]
+            fn tokenize(&self) -> Self::Token<'_> {
+                (
+                    <alloy::sol_types::sol_data::Uint<256> as alloy_sol_types::SolType>::tokenize(
+                        &self.apiKeyHash,
+                    ),
+                    <alloy::sol_types::sol_data::Address as alloy_sol_types::SolType>::tokenize(
+                        &self.pkpId,
+                    ),
+                )
+            }
+            #[inline]
+            fn tokenize_returns(ret: &Self::Return) -> Self::ReturnToken<'_> {
+                removeWalletDerivationReturn::_tokenize(ret)
+            }
+            #[inline]
+            fn abi_decode_returns(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
+                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence(data)
+                    .map(Into::into)
+            }
+            #[inline]
+            fn abi_decode_returns_validate(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
+                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence_validate(
+                    data,
+                )
+                .map(Into::into)
+            }
+        }
+    };
+    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
     /*Function with signature `requestedApiPayerCount()` and selector `0x34b7f87a`.
     ```solidity
     function requestedApiPayerCount() external view returns (uint256);
@@ -18760,6 +19062,8 @@ pub mod AccountConfig {
         #[allow(missing_docs)]
         removeUsageApiKey(removeUsageApiKeyCall),
         #[allow(missing_docs)]
+        removeWalletDerivation(removeWalletDerivationCall),
+        #[allow(missing_docs)]
         requestedApiPayerCount(requestedApiPayerCountCall),
         #[allow(missing_docs)]
         serverTrigger(serverTriggerCall),
@@ -18865,6 +19169,7 @@ pub mod AccountConfig {
             [247u8, 92u8, 139u8, 45u8],
             [253u8, 191u8, 201u8, 183u8],
             [255u8, 31u8, 224u8, 12u8],
+            [255u8, 221u8, 224u8, 142u8],
         ];
         // The names of the variants in the same order as `SELECTORS`.
         pub const VARIANT_NAMES: &'static [&'static str] = &[
@@ -18933,6 +19238,7 @@ pub mod AccountConfig {
             ::core::stringify!(listGroups),
             ::core::stringify!(setRebalanceAmount),
             ::core::stringify!(canExecuteAction),
+            ::core::stringify!(removeWalletDerivation),
         ];
         // The signatures in the same order as `SELECTORS`.
         pub const SIGNATURES: &'static [&'static str] = &[
@@ -19001,6 +19307,7 @@ pub mod AccountConfig {
             <listGroupsCall as alloy_sol_types::SolCall>::SIGNATURE,
             <setRebalanceAmountCall as alloy_sol_types::SolCall>::SIGNATURE,
             <canExecuteActionCall as alloy_sol_types::SolCall>::SIGNATURE,
+            <removeWalletDerivationCall as alloy_sol_types::SolCall>::SIGNATURE,
         ];
         // Returns the signature for the given selector, if known.
         #[inline]
@@ -19025,7 +19332,7 @@ pub mod AccountConfig {
     impl alloy_sol_types::SolInterface for AccountConfigCalls {
         const NAME: &'static str = "AccountConfigCalls";
         const MIN_DATA_LENGTH: usize = 0usize;
-        const COUNT: usize = 65usize;
+        const COUNT: usize = 66usize;
         #[inline]
         fn selector(&self) -> [u8; 4] {
             match self {
@@ -19137,6 +19444,9 @@ pub mod AccountConfig {
                 }
                 Self::removeUsageApiKey(_) => {
                     <removeUsageApiKeyCall as alloy_sol_types::SolCall>::SELECTOR
+                }
+                Self::removeWalletDerivation(_) => {
+                    <removeWalletDerivationCall as alloy_sol_types::SolCall>::SELECTOR
                 }
                 Self::requestedApiPayerCount(_) => {
                     <requestedApiPayerCountCall as alloy_sol_types::SolCall>::SELECTOR
@@ -19762,6 +20072,17 @@ pub mod AccountConfig {
                             .map(AccountConfigCalls::canExecuteAction)
                     }
                     canExecuteAction
+                },
+                {
+                    fn removeWalletDerivation(
+                        data: &[u8],
+                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
+                        <removeWalletDerivationCall as alloy_sol_types::SolCall>::abi_decode_raw(
+                            data,
+                        )
+                        .map(AccountConfigCalls::removeWalletDerivation)
+                    }
+                    removeWalletDerivation
                 },
             ];
             let Ok(idx) = Self::SELECTORS.binary_search(&selector) else {
@@ -20413,6 +20734,17 @@ pub mod AccountConfig {
                     }
                     canExecuteAction
                 },
+                {
+                    fn removeWalletDerivation(
+                        data: &[u8],
+                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
+                        <removeWalletDerivationCall as alloy_sol_types::SolCall>::abi_decode_raw_validate(
+                                data,
+                            )
+                            .map(AccountConfigCalls::removeWalletDerivation)
+                    }
+                    removeWalletDerivation
+                },
             ];
             let Ok(idx) = Self::SELECTORS.binary_search(&selector) else {
                 return Err(alloy_sol_types::Error::unknown_selector(
@@ -20649,6 +20981,11 @@ pub mod AccountConfig {
                 }
                 Self::removeUsageApiKey(inner) => {
                     <removeUsageApiKeyCall as alloy_sol_types::SolCall>::abi_encoded_size(
+                        inner,
+                    )
+                }
+                Self::removeWalletDerivation(inner) => {
+                    <removeWalletDerivationCall as alloy_sol_types::SolCall>::abi_encoded_size(
                         inner,
                     )
                 }
@@ -21025,6 +21362,12 @@ pub mod AccountConfig {
                 }
                 Self::removeUsageApiKey(inner) => {
                     <removeUsageApiKeyCall as alloy_sol_types::SolCall>::abi_encode_raw(
+                        inner,
+                        out,
+                    )
+                }
+                Self::removeWalletDerivation(inner) => {
+                    <removeWalletDerivationCall as alloy_sol_types::SolCall>::abi_encode_raw(
                         inner,
                         out,
                     )
@@ -22018,6 +22361,8 @@ pub mod AccountConfig {
         UsageApiKeySet(UsageApiKeySet),
         #[allow(missing_docs)]
         WalletDerivationRegistered(WalletDerivationRegistered),
+        #[allow(missing_docs)]
+        WalletDerivationRemoved(WalletDerivationRemoved),
     }
     impl AccountConfigEvents {
         // All the selectors of this enum.
@@ -22098,6 +22443,11 @@ pub mod AccountConfig {
                 14u8, 118u8, 226u8, 139u8, 3u8, 97u8, 35u8,
             ],
             [
+                84u8, 96u8, 143u8, 8u8, 124u8, 68u8, 63u8, 1u8, 66u8, 34u8, 190u8, 33u8, 141u8,
+                80u8, 154u8, 15u8, 199u8, 223u8, 116u8, 30u8, 92u8, 109u8, 25u8, 7u8, 192u8, 71u8,
+                23u8, 0u8, 219u8, 17u8, 145u8, 103u8,
+            ],
+            [
                 101u8, 101u8, 159u8, 191u8, 59u8, 171u8, 23u8, 140u8, 233u8, 109u8, 203u8, 78u8,
                 169u8, 91u8, 163u8, 144u8, 12u8, 174u8, 54u8, 249u8, 66u8, 110u8, 153u8, 32u8,
                 183u8, 148u8, 9u8, 149u8, 246u8, 43u8, 6u8, 191u8,
@@ -22169,6 +22519,7 @@ pub mod AccountConfig {
             ::core::stringify!(ConfigOperatorUpdated),
             ::core::stringify!(GroupRemoved),
             ::core::stringify!(PricingUpdated),
+            ::core::stringify!(WalletDerivationRemoved),
             ::core::stringify!(GroupUpdated),
             ::core::stringify!(ApiKeyDebited),
             ::core::stringify!(RebalanceAmountUpdated),
@@ -22197,6 +22548,7 @@ pub mod AccountConfig {
             <ConfigOperatorUpdated as alloy_sol_types::SolEvent>::SIGNATURE,
             <GroupRemoved as alloy_sol_types::SolEvent>::SIGNATURE,
             <PricingUpdated as alloy_sol_types::SolEvent>::SIGNATURE,
+            <WalletDerivationRemoved as alloy_sol_types::SolEvent>::SIGNATURE,
             <GroupUpdated as alloy_sol_types::SolEvent>::SIGNATURE,
             <ApiKeyDebited as alloy_sol_types::SolEvent>::SIGNATURE,
             <RebalanceAmountUpdated as alloy_sol_types::SolEvent>::SIGNATURE,
@@ -22231,7 +22583,7 @@ pub mod AccountConfig {
     #[automatically_derived]
     impl alloy_sol_types::SolEventInterface for AccountConfigEvents {
         const NAME: &'static str = "AccountConfigEvents";
-        const COUNT: usize = 25usize;
+        const COUNT: usize = 26usize;
         fn decode_raw_log(
             topics: &[alloy_sol_types::Word],
             data: &[u8],
@@ -22436,6 +22788,15 @@ pub mod AccountConfig {
                         )
                         .map(Self::WalletDerivationRegistered)
                 }
+                Some(
+                    <WalletDerivationRemoved as alloy_sol_types::SolEvent>::SIGNATURE_HASH,
+                ) => {
+                    <WalletDerivationRemoved as alloy_sol_types::SolEvent>::decode_raw_log(
+                            topics,
+                            data,
+                        )
+                        .map(Self::WalletDerivationRemoved)
+                }
                 _ => {
                     alloy_sol_types::private::Err(alloy_sol_types::Error::InvalidLog {
                         name: <Self as alloy_sol_types::SolEventInterface>::NAME,
@@ -22529,6 +22890,9 @@ pub mod AccountConfig {
                 Self::WalletDerivationRegistered(inner) => {
                     alloy_sol_types::private::IntoLogData::to_log_data(inner)
                 }
+                Self::WalletDerivationRemoved(inner) => {
+                    alloy_sol_types::private::IntoLogData::to_log_data(inner)
+                }
             }
         }
         fn into_log_data(self) -> alloy_sol_types::private::LogData {
@@ -22606,6 +22970,9 @@ pub mod AccountConfig {
                     alloy_sol_types::private::IntoLogData::into_log_data(inner)
                 }
                 Self::WalletDerivationRegistered(inner) => {
+                    alloy_sol_types::private::IntoLogData::into_log_data(inner)
+                }
+                Self::WalletDerivationRemoved(inner) => {
                     alloy_sol_types::private::IntoLogData::into_log_data(inner)
                 }
             }
@@ -23211,6 +23578,14 @@ pub mod AccountConfig {
                 usageApiKeyHash,
             })
         }
+        //Creates a new call builder for the [`removeWalletDerivation`] function.
+        pub fn removeWalletDerivation(
+            &self,
+            apiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
+            pkpId: alloy::sol_types::private::Address,
+        ) -> alloy_contract::SolCallBuilder<&P, removeWalletDerivationCall, N> {
+            self.call_builder(&removeWalletDerivationCall { apiKeyHash, pkpId })
+        }
         //Creates a new call builder for the [`requestedApiPayerCount`] function.
         pub fn requestedApiPayerCount(
             &self,
@@ -23547,6 +23922,12 @@ pub mod AccountConfig {
             &self,
         ) -> alloy_contract::Event<&P, WalletDerivationRegistered, N> {
             self.event_filter::<WalletDerivationRegistered>()
+        }
+        //Creates a new event filter for the [`WalletDerivationRemoved`] event.
+        pub fn WalletDerivationRemoved_filter(
+            &self,
+        ) -> alloy_contract::Event<&P, WalletDerivationRemoved, N> {
+            self.event_filter::<WalletDerivationRemoved>()
         }
     }
 }

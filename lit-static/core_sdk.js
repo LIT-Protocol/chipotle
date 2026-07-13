@@ -1126,6 +1126,43 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
+   * POST /core/v1/delete_wallet
+   * Permanently and irreversibly delete a wallet (PKP).
+   *
+   * HARD DELETE: this wipes the on-chain derivation path for the wallet. Because keys
+   * are stateless derivations of that path and are never stored anywhere else, once it
+   * is deleted the private key can NEVER be re-derived. Anything encrypted or otherwise
+   * secured by this wallet becomes permanently unrecoverable. There is no undo.
+   *
+   * Requires the master (account) API key — a usage API key is rejected on-chain
+   * (`NotMasterAccount`) and the call will revert.
+   *
+   * @param {{ apiKey?: string, walletAddress: string, sovereignLifecycle?: object }} options
+   * @returns {Promise<AccountOpResponse>}
+   */
+  async deleteWallet({ apiKey, walletAddress, sovereignLifecycle } = {}) {
+    if (this.mode === 'sovereign') {
+      const contract = await this._getWriteContract();
+      const hash = await this._adminHash(apiKey);
+      const { txHash } = await runContractWrite({
+        contract, method: 'removeWalletDerivation',
+        args: [hash, walletAddress],
+        ...(sovereignLifecycle ?? {}),
+      });
+      return { success: true, transaction_hash: txHash };
+    }
+    const body = {
+      wallet_address: walletAddress,
+    };
+    const res = await fetch(`${this.baseUrl}/delete_wallet`, {
+      method: 'POST',
+      headers: headersWithApiKey(apiKey, { 'Content-Type': 'application/json' }),
+      body: JSON.stringify(body),
+    });
+    return parseResponse(res, 'delete_wallet');
+  }
+
+  /**
    * POST /core/v1/add_usage_api_key
    * Add a usage API key to an account. Server creates and returns the new key.
    * @param {AddUsageApiKeyOptions} options
