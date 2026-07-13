@@ -125,6 +125,22 @@ impl BundleCache {
         let mut entries: usize = 0;
         for entry in archive.entries().context("bundle is not a tar archive")? {
             let mut entry = entry.context("failed to read bundle tar entry")?;
+            // Bundle bytes are untrusted: only plain files and directories
+            // are allowed. Links could alias outside the bundle, and
+            // device/FIFO nodes have no business on the runner's filesystem.
+            match entry.header().entry_type() {
+                tar::EntryType::Regular | tar::EntryType::Directory => {}
+                // Metadata pseudo-entries (pax/GNU extensions) are consumed
+                // by the tar crate itself; skip any that leak through.
+                tar::EntryType::XGlobalHeader
+                | tar::EntryType::XHeader
+                | tar::EntryType::GNULongName
+                | tar::EntryType::GNULongLink => continue,
+                other => bail!(
+                    "bundle contains unsupported tar entry type {other:?} \
+                     (only regular files and directories are allowed)"
+                ),
+            }
             entries += 1;
             ensure!(
                 entries <= MAX_ENTRIES,
@@ -140,6 +156,10 @@ impl BundleCache {
                 .unpack_in(tmp.path())
                 .context("failed to unpack bundle tar entry")?;
         }
+
+        // Preserved modes come from untrusted input: keep rwx bits (bundled
+        // binaries need exec) but strip setuid/setgid/sticky.
+        strip_special_mode_bits(tmp.path())?;
 
         // Validate the manifest (when present) before publishing so a bundle
         // with a broken lit.json is never cached under its CID.
@@ -161,6 +181,23 @@ impl BundleCache {
 fn load(cid: String, dir: PathBuf) -> Result<Bundle> {
     let manifest = read_manifest(&dir)?;
     Ok(Bundle { cid, dir, manifest })
+}
+
+/// Recursively clear setuid/setgid/sticky bits, keeping the rwx bits intact.
+fn strip_special_mode_bits(dir: &std::path::Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt as _;
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        let mode = entry.metadata()?.permissions().mode();
+        if mode & 0o7000 != 0 {
+            fs::set_permissions(&path, fs::Permissions::from_mode(mode & 0o777))?;
+        }
+        if entry.file_type()?.is_dir() {
+            strip_special_mode_bits(&path)?;
+        }
+    }
+    Ok(())
 }
 
 fn read_manifest(dir: &std::path::Path) -> Result<Manifest> {
@@ -234,6 +271,75 @@ mod tests {
         // Second resolve via cid: reference hits the cache.
         let via_ref = cache.resolve(&format!("cid:{}", bundle.cid), None).unwrap();
         assert_eq!(via_ref.dir, bundle.dir);
+    }
+
+    #[test]
+    fn symlink_entries_are_rejected() {
+        let root = tempfile::tempdir().unwrap();
+        let cache = BundleCache::new(root.path()).unwrap();
+
+        let mut tar_bytes = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tar_bytes);
+            let script = "echo hi\n";
+            let mut header = tar::Header::new_gnu();
+            header.set_size(script.len() as u64);
+            header.set_mode(0o644);
+            header.set_cksum();
+            builder
+                .append_data(&mut header, STARTUP_SCRIPT_FILE, script.as_bytes())
+                .unwrap();
+            let mut link = tar::Header::new_gnu();
+            link.set_entry_type(tar::EntryType::Symlink);
+            link.set_size(0);
+            link.set_cksum();
+            builder
+                .append_link(&mut link, "data.txt", "/etc/passwd")
+                .unwrap();
+            builder.finish().unwrap();
+        }
+        let code = BASE64.encode(&tar_bytes);
+
+        let err = cache.resolve(&code, None).unwrap_err();
+        assert!(
+            err.to_string().contains("unsupported tar entry type"),
+            "{err:#}"
+        );
+    }
+
+    #[test]
+    fn setuid_bits_are_stripped_but_exec_kept() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let root = tempfile::tempdir().unwrap();
+        let cache = BundleCache::new(root.path()).unwrap();
+
+        let mut tar_bytes = Vec::new();
+        {
+            let mut builder = tar::Builder::new(&mut tar_bytes);
+            for (name, contents, mode) in [
+                (STARTUP_SCRIPT_FILE, "./run\n", 0o644),
+                ("run", "#!/bin/sh\n", 0o4755), // setuid + exec
+            ] {
+                let mut header = tar::Header::new_gnu();
+                header.set_size(contents.len() as u64);
+                header.set_mode(mode);
+                header.set_cksum();
+                builder
+                    .append_data(&mut header, name, contents.as_bytes())
+                    .unwrap();
+            }
+            builder.finish().unwrap();
+        }
+        let code = BASE64.encode(&tar_bytes);
+
+        let bundle = cache.resolve(&code, None).unwrap();
+        let mode = std::fs::metadata(bundle.dir.join("run"))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o7000, 0, "special bits must be stripped");
+        assert_eq!(mode & 0o755, 0o755, "rwx bits must be kept");
     }
 
     #[test]

@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use anyhow::{Context as _, Result, anyhow, bail};
 use lit_actions_grpc::proto::*;
-use tokio::io::{AsyncBufReadExt as _, AsyncRead, BufReader};
+use tokio::io::{AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, BufReader};
 use tokio::net::UnixListener;
 use tokio::sync::{mpsc, oneshot};
 use tokio_stream::wrappers::UnixListenerStream;
@@ -50,6 +50,9 @@ pub const USAGE_TICK_INTERVAL_MS: u64 = 500;
 
 /// How much trailing stderr to include in a failure result.
 const STDERR_TAIL_BYTES: usize = 8 * 1024;
+/// Cap on a single forwarded output line; longer lines are forwarded in
+/// chunks of this size so guest output can't balloon runner memory.
+const FORWARD_CHUNK_BYTES: u64 = 64 * 1024;
 
 /// Per-value / total caps on js-params injected into the sandbox
 /// environment. Oversized values are skipped (still available via
@@ -413,30 +416,51 @@ async fn usage_tick(bridge: &OpBridge, started: tokio::time::Instant) -> Result<
     Ok(())
 }
 
-/// Line-forward a guest output stream as Print ops. Non-UTF-8 output stops
-/// forwarding for that stream (the op-loop carries strings); the process
-/// itself keeps running.
+/// Line-forward a guest output stream as Print ops.
+///
+/// Reads raw bytes (not `lines()`): the pipe must ALWAYS keep draining, or a
+/// guest that writes after a decode error would fill the pipe and block until
+/// timeout. Non-UTF-8 bytes are decoded lossily (the op-loop carries
+/// strings), and a single line is forwarded in `FORWARD_CHUNK_BYTES` pieces
+/// so an endless no-newline writer can't balloon runner memory.
 async fn forward_output<R: AsyncRead + Unpin>(
     stream: R,
     bridge: Arc<OpBridge>,
     tail: Option<Arc<Mutex<String>>>,
     fatal_tx: mpsc::Sender<anyhow::Error>,
 ) {
-    let mut lines = BufReader::new(stream).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        if let Some(tail) = &tail {
-            push_tail(tail, &line);
-        }
-        if let Err(e) = bridge
-            .print(PrintRequest {
-                message: format!("{line}\n"),
-            })
-            .await
-        {
-            let _ = fatal_tx
-                .send(anyhow!("forwarding action output failed: {e:#}"))
-                .await;
-            return;
+    let mut reader = BufReader::new(stream);
+    let mut buf = Vec::with_capacity(256);
+    loop {
+        buf.clear();
+        // Fresh `take` per iteration re-arms the chunk cap.
+        let read = (&mut reader)
+            .take(FORWARD_CHUNK_BYTES)
+            .read_until(b'\n', &mut buf)
+            .await;
+        match read {
+            Ok(0) => return, // EOF
+            Ok(_) => {
+                let line = String::from_utf8_lossy(&buf);
+                let line = line.trim_end_matches(['\n', '\r']);
+                if let Some(tail) = &tail {
+                    push_tail(tail, line);
+                }
+                if let Err(e) = bridge
+                    .print(PrintRequest {
+                        message: format!("{line}\n"),
+                    })
+                    .await
+                {
+                    let _ = fatal_tx
+                        .send(anyhow!("forwarding action output failed: {e:#}"))
+                        .await;
+                    return;
+                }
+            }
+            // A real pipe error: the reader is unusable; child teardown
+            // closes the other end.
+            Err(_) => return,
         }
     }
 }

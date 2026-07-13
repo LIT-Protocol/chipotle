@@ -326,6 +326,32 @@ async fn stdout_is_forwarded_as_logs() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn non_utf8_output_keeps_draining_and_completes() -> Result<()> {
+    let server = TestServer::start();
+    // Invalid UTF-8 on stdout must not stop the log forwarder (an undrained
+    // pipe would block the guest); the run still completes normally.
+    let code = sh_bundle(
+        r#"
+printf 'before binary\n'
+printf '\377\376\375 raw bytes\n'
+printf 'after binary\n'
+lit set-response survived
+"#,
+    );
+    let outcome = TestClient::default()
+        .execute(&server, exec_request(code))
+        .await?;
+    assert!(outcome.result.success, "error: {}", outcome.result.error);
+    assert!(
+        outcome.logs.contains("before binary\n") && outcome.logs.contains("after binary\n"),
+        "logs: {:?}",
+        outcome.logs
+    );
+    assert_eq!(outcome.response, "survived");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn secrets_round_trip_through_guest_cli() -> Result<()> {
     let server = TestServer::start();
     let code = sh_bundle(

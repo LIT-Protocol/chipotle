@@ -230,7 +230,7 @@ pub async fn lit_binary_action(
         .await
     {
         Ok(result) => result,
-        Err(e) => return Err(anyhow::anyhow!("Actions failed with : {:?}", e).into()),
+        Err(e) => return Err(anyhow::anyhow!("action execution failed: {e:#}").into()),
     };
 
     let response = match serde_json::from_str::<serde_json::Value>(&result.response) {
