@@ -4605,6 +4605,7 @@ dependencies = [
  "anyhow",
  "apalis",
  "apalis-sql",
+ "arc-swap",
  "async-trait",
  "base64_light",
  "blake3",

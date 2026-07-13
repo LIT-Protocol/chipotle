@@ -12,5 +12,6 @@ pub mod internal;
 pub mod observability;
 pub mod restart;
 pub mod stripe;
+pub mod supervisor;
 pub mod utils;
 pub mod version;
