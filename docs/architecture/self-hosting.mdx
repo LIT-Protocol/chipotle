@@ -52,6 +52,20 @@ There are two common levels of ownership:
 
 For local development, start with the repository's `README.md` and `local_test.sh`. For production-oriented deployment details, see the deployment and verification references below.
 
+## Where you can deploy
+
+Lit Chipotle runs anywhere [dstack](https://github.com/Dstack-TEE/dstack) runs. dstack is Docker Compose native, so the same images and compose files the hosted service uses deploy unchanged across any supported platform:
+
+| Platform | Status | Attestation |
+| --- | --- | --- |
+| **Bare metal Intel TDX** | Available | TDX |
+| **Bare metal AMD SEV-SNP** | Available | SEV-SNP |
+| **[Phala Cloud](https://cloud.phala.network)** (managed) | Available | TDX |
+| **GCP Confidential VMs** | Available | TDX + TPM |
+| **AWS Nitro Enclaves** | Available | NSM |
+
+dstack also supports NVIDIA Confidential Computing (H100, Blackwell) for confidential GPU workloads alongside the CPU TEE. This list tracks the [dstack supported platforms table](https://github.com/Dstack-TEE/dstack#supported-platforms) — as dstack adds platforms, they become self-hosting targets for Lit Chipotle. For preparing your own TDX or SEV-SNP host, see dstack's [hardware enablement](https://github.com/Dstack-TEE/dstack/blob/master/docs/hardware-enablement.md) and [self-hosted onboarding](https://github.com/Dstack-TEE/dstack/blob/master/docs/onboarding.md) guides.
+
 ## Tradeoffs
 
 Self-hosting gives you more control, but it moves more responsibility onto your team.
@@ -106,7 +120,7 @@ The hosted service is usually the better default when you want to ship quickly, 
 
 A production self-hosted deployment usually needs:
 
-- A TEE environment such as Phala Cloud / dstack.
+- A TEE environment running dstack — any platform from [Where you can deploy](#where-you-can-deploy).
 - A reproducible Docker build and release pipeline.
 - Chain configuration and deployed permission contracts.
 - RPC endpoints for the chains your actions and management flows depend on.
