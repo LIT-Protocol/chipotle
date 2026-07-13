@@ -187,7 +187,11 @@ anywhere (macOS included):
 cargo test -p lit-actions-gvisor-server
 ```
 
-`image/` has the base-image Dockerfile; `examples/` has bundle examples.
+`image/` has the base-image Dockerfile; `examples/` has bundle examples —
+`shell`/`python` are minimal, and `claude` installs Claude Code from its
+`startup.sh` onto the base rootfs (debian:bookworm-slim) and runs a headless
+prompt, demonstrating a startup script that provisions its own toolchain
+(needs sandbox network egress + an `ANTHROPIC_API_KEY` js-param).
 
 ## v1 non-goals / follow-ups
 
