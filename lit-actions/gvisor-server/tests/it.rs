@@ -46,20 +46,14 @@ fn make_bundle(files: &[(&str, &str)]) -> String {
     BASE64.encode(gz.finish().unwrap())
 }
 
-/// Bundle with a `run.sh` entrypoint.
+/// Bundle whose root `startup.sh` is the script to run.
 fn sh_bundle(script: &str) -> String {
-    make_bundle(&[
-        ("lit.json", r#"{"entrypoint": ["/bin/sh", "run.sh"]}"#),
-        ("run.sh", script),
-    ])
+    make_bundle(&[("startup.sh", script)])
 }
 
-/// Bundle with a `main.py` entrypoint run via `python3`.
+/// Python payload bundle: `startup.sh` launches the interpreter.
 fn py_bundle(script: &str) -> String {
-    make_bundle(&[
-        ("lit.json", r#"{"entrypoint": ["python3", "main.py"]}"#),
-        ("main.py", script),
-    ])
+    make_bundle(&[("startup.sh", "python3 main.py\n"), ("main.py", script)])
 }
 
 /// Whether `python3` is on PATH. The process runtime runs the entrypoint on
@@ -364,6 +358,115 @@ async fn js_params_flow_to_guest() -> Result<()> {
     let outcome = TestClient::default().execute(&server, request).await?;
     assert!(outcome.result.success, "error: {}", outcome.result.error);
     assert_eq!(outcome.response, r#"{"a":1}"#);
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn request_startup_script_overrides_bundle_script() -> Result<()> {
+    let server = TestServer::start();
+    let request = ExecutionRequest {
+        code: sh_bundle("lit set-response from-bundle\n"),
+        startup_script: Some("lit set-response from-request\n".to_string()),
+        ..Default::default()
+    };
+    let outcome = TestClient::default().execute(&server, request).await?;
+    assert!(outcome.result.success, "error: {}", outcome.result.error);
+    assert_eq!(outcome.response, "from-request");
+    Ok(())
+}
+
+/// The CPL-355 rationale end-to-end: one cached bundle, different
+/// per-request startup scripts, no bundle bytes resent.
+#[tokio::test(flavor = "multi_thread")]
+async fn cached_bundle_serves_different_startup_scripts() -> Result<()> {
+    let server = TestServer::start();
+    let client = TestClient::default();
+
+    // Ship a payload-only bundle (no startup.sh of its own) with script A.
+    let request = ExecutionRequest {
+        code: make_bundle(&[("payload.txt", "shared payload\n")]),
+        ipfs_id: Some("QmSharedPayload1".to_string()),
+        startup_script: Some("lit set-response \"A: $(cat payload.txt)\"\n".to_string()),
+        ..Default::default()
+    };
+    let outcome = client.execute(&server, request).await?;
+    assert!(outcome.result.success, "error: {}", outcome.result.error);
+    assert_eq!(outcome.response, "A: shared payload");
+
+    // Re-run against the cache with script B — only the script changes.
+    let request = ExecutionRequest {
+        code: "cid:QmSharedPayload1".to_string(),
+        ipfs_id: Some("QmSharedPayload1".to_string()),
+        startup_script: Some("lit set-response \"B: $(cat payload.txt)\"\n".to_string()),
+        ..Default::default()
+    };
+    let outcome = client.execute(&server, request).await?;
+    assert!(outcome.result.success, "error: {}", outcome.result.error);
+    assert_eq!(outcome.response, "B: shared payload");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn missing_startup_script_fails_cleanly() -> Result<()> {
+    let server = TestServer::start();
+    let outcome = TestClient::default()
+        .execute(
+            &server,
+            exec_request(make_bundle(&[("payload.txt", "no script here\n")])),
+        )
+        .await?;
+    assert!(!outcome.result.success);
+    assert!(
+        outcome.result.error.contains("startup.sh"),
+        "error: {}",
+        outcome.result.error
+    );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn js_params_are_injected_as_env_vars() -> Result<()> {
+    let server = TestServer::start();
+    let request = ExecutionRequest {
+        code: sh_bundle("lit set-response \"$name-$count-$flag\"\n"),
+        js_params: Some(br#"{"name":"lit","count":2,"flag":true}"#.to_vec()),
+        ..Default::default()
+    };
+    let outcome = TestClient::default().execute(&server, request).await?;
+    assert!(outcome.result.success, "error: {}", outcome.result.error);
+    assert_eq!(outcome.response, "lit-2-true");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn reserved_js_param_names_do_not_clobber_runtime_env() -> Result<()> {
+    let server = TestServer::start();
+    // If PATH were injected, the `lit` calls below could not resolve at all.
+    let request = ExecutionRequest {
+        code: sh_bundle("lit set-response \"$ok\"\n"),
+        js_params: Some(br#"{"PATH":"/nonexistent","LIT_OP_SOCK":"/nope","ok":"yes"}"#.to_vec()),
+        ..Default::default()
+    };
+    let outcome = TestClient::default().execute(&server, request).await?;
+    assert!(outcome.result.success, "error: {}", outcome.result.error);
+    assert_eq!(outcome.response, "yes");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn manifest_env_applies_and_wins_over_js_params() -> Result<()> {
+    let server = TestServer::start();
+    let request = ExecutionRequest {
+        code: make_bundle(&[
+            ("lit.json", r#"{"env": {"GREETING": "from-manifest"}}"#),
+            ("startup.sh", "lit set-response \"$GREETING\"\n"),
+        ]),
+        js_params: Some(br#"{"GREETING":"from-params"}"#.to_vec()),
+        ..Default::default()
+    };
+    let outcome = TestClient::default().execute(&server, request).await?;
+    assert!(outcome.result.success, "error: {}", outcome.result.error);
+    assert_eq!(outcome.response, "from-manifest");
     Ok(())
 }
 

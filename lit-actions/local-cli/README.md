@@ -58,33 +58,36 @@ lit aes-decrypt my-pkp "$CT"     # hello
 
 `lit run` is a **local-only** convenience with no counterpart in the guest
 CLI (production actions never call it). It mirrors what the gvisor-server
-supervisor does: read the bundle's `lit.json`, execute its entrypoint with
-`lit` on `PATH` and the job wired through the environment, then print the
-recorded response.
+supervisor does (CPL-355): execute **`bash startup.sh`** — the only thing a
+sandbox ever runs — with `lit` on `PATH`, the job wired through the
+environment, and top-level js-params injected as environment variables, then
+print the recorded response.
 
 ```sh
 cd examples/shell
 lit run
-# lit: running ["/bin/sh", "run.sh"] (cid local-action, runtime unspecified)
+# lit: running bash /…/examples/shell/startup.sh (cid local-action, runtime unspecified)
 # hello from a shell action
 # ...
 # lit: --- recorded response ---
 # {"ok": true, "lang": "sh"}
 ```
 
-The bundle manifest is the same `lit.json` the sandbox uses:
+The script is the bundle's root `startup.sh`, or pass `--startup-script
+other.sh` — the local analog of the `startup_script` field on
+`/lit_binary_action`, which lets one bundle serve many scripts. An optional
+`lit.json` (same as the sandbox's) carries metadata only:
 
 ```json
-{ "entrypoint": ["python3", "main.py"], "runtime": "python3", "env": { "PYTHONUNBUFFERED": "1" } }
+{ "runtime": "python3", "env": { "PYTHONUNBUFFERED": "1" } }
 ```
 
-`entrypoint` is an argv array run verbatim, or a string treated as a shell
-script (`sh <path>`). Serverless semantics: the run ends when the entrypoint
-exits; a non-zero exit is propagated as this process's exit code.
+Serverless semantics: the run ends when the startup script exits; a non-zero
+exit is propagated as this process's exit code.
 
 See `examples/shell` and `examples/python` — bundles adapted from the
 gvisor-server examples (they exercise a few more ops for demonstration). The
-manifest format and `lit` calls are identical, so the same bundle shape runs
+bundle layout and `lit` calls are identical, so the same bundle shape runs
 in both places.
 
 ## Command surface
@@ -102,7 +105,7 @@ lit get-action-wallet-address [cid]
 lit aes-encrypt <pkpId> <msg>   # AES-256-GCM, hex (msg "-"/omitted reads stdin)
 lit aes-decrypt <pkpId> <ct>
 lit increment-fetch-count       # prints the new count
-lit run [--manifest lit.json] [--keep-state]   # local-only: run a bundle
+lit run [--dir .] [--startup-script <file>] [--keep-state]   # local-only: run a bundle
 ```
 
 ## Configuration

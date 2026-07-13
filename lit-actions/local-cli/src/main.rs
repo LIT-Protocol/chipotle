@@ -111,12 +111,19 @@ enum Cmd {
     },
     /// Increment the action's HTTP fetch counter; prints the new count
     IncrementFetchCount,
-    /// Local-only: run a bundle's entrypoint with `lit` on PATH and the job
-    /// wired up, then print the recorded response (mirrors the supervisor).
+    /// Local-only: run a bundle exactly like the sandbox does — `bash
+    /// startup.sh` with `lit` on PATH, the job wired up, and top-level
+    /// js-params injected as environment variables — then print the
+    /// recorded response (mirrors the supervisor).
     Run {
-        /// Path to the bundle manifest.
-        #[arg(long, default_value = "lit.json")]
-        manifest: PathBuf,
+        /// Bundle directory (working directory of the startup script;
+        /// holds the optional lit.json / lit.job.json).
+        #[arg(long, default_value = ".")]
+        dir: PathBuf,
+        /// Startup script to run instead of the bundle's own `startup.sh`
+        /// (the local analog of the request-supplied `startup_script`).
+        #[arg(long)]
+        startup_script: Option<PathBuf>,
         /// Keep response/logs/counter from a previous run instead of
         /// clearing them first.
         #[arg(long)]
@@ -181,11 +188,12 @@ fn run(cli: Cli) -> Result<ExitCode> {
     // bundle directory (see cmd_run); every other command reads the job from
     // the current working directory and needs the master key up front.
     if let Cmd::Run {
-        manifest,
+        dir,
+        startup_script,
         keep_state,
     } = &cli.cmd
     {
-        return cmd_run(&cli, &state, manifest, *keep_state);
+        return cmd_run(&cli, &state, dir, startup_script.as_deref(), *keep_state);
     }
 
     let job = load_job(&cli, Path::new("."))?;
@@ -251,32 +259,113 @@ fn run(cli: Cli) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-/// Run a bundle's entrypoint locally: prepend this binary's dir to PATH so
-/// the child's `lit` calls resolve back here, wire the job/state through the
-/// environment (exactly as the sandbox sets `LIT_OP_SOCK`), then surface the
-/// recorded response — the local analog of the supervisor.
-fn cmd_run(cli: &Cli, state: &State, manifest_path: &Path, keep_state: bool) -> Result<ExitCode> {
-    let raw = std::fs::read(manifest_path)
-        .with_context(|| format!("failed to read manifest {}", manifest_path.display()))?;
-    let manifest: manifest::Manifest = serde_json::from_slice(&raw)
-        .with_context(|| format!("manifest {} is invalid", manifest_path.display()))?;
-    let argv = manifest.entrypoint.to_argv()?;
+/// Bundle files mirroring the sandbox contract (see gvisor-server).
+const MANIFEST_FILE: &str = "lit.json";
+const STARTUP_SCRIPT_FILE: &str = "startup.sh";
+
+/// Env-injection rules mirroring the supervisor's `js_params_env`
+/// (gvisor-server/src/supervisor.rs): per-value / total caps, and names the
+/// runtime owns that params may never shadow. Locally the runtime-owned set
+/// additionally covers the LIT_LOCAL_* wiring (applied after, so this is
+/// parity, not protection).
+const MAX_PARAM_ENV_VALUE_BYTES: usize = 64 * 1024;
+const MAX_PARAM_ENV_TOTAL_BYTES: usize = 1024 * 1024;
+const RESERVED_ENV: [&str; 8] = [
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "LIT_OP_SOCK",
+    ENV_ACTION_IPFS_ID,
+    "LIT_LOCAL_STATE_DIR",
+    "LIT_LOCAL_PRIVATE_KEY",
+    "LIT_LOCAL_JOB",
+];
+
+/// Top-level js-params as environment variables for the startup script:
+/// string values verbatim, everything else as compact JSON. Params with
+/// invalid/reserved names or oversized values are skipped — `lit params`
+/// always has the full data. Mirrors the supervisor exactly so a script
+/// developed here sees the same environment in the sandbox.
+fn js_params_env(js_params: &serde_json::Value) -> Vec<(String, String)> {
+    let serde_json::Value::Object(params) = js_params else {
+        return Vec::new();
+    };
+
+    let mut env = Vec::new();
+    let mut total = 0usize;
+    for (name, value) in params {
+        if !is_valid_env_name(name) || RESERVED_ENV.contains(&name.as_str()) {
+            continue;
+        }
+        let value = match value {
+            serde_json::Value::String(s) => s.clone(),
+            other => other.to_string(),
+        };
+        if value.len() > MAX_PARAM_ENV_VALUE_BYTES
+            || total + name.len() + value.len() > MAX_PARAM_ENV_TOTAL_BYTES
+        {
+            continue;
+        }
+        total += name.len() + value.len();
+        env.push((name.clone(), value));
+    }
+    env
+}
+
+fn is_valid_env_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && !name.as_bytes()[0].is_ascii_digit()
+        && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+}
+
+/// Run a bundle locally exactly like the sandbox: `bash startup.sh` (the
+/// `--startup-script` override or the bundle's own, never anything else),
+/// with this binary's dir prepended to PATH so the child's `lit` calls
+/// resolve back here, the job/state wired through the environment, and
+/// top-level js-params injected as env vars — the local analog of the
+/// supervisor.
+fn cmd_run(
+    cli: &Cli,
+    state: &State,
+    action_dir: &Path,
+    startup_script: Option<&Path>,
+    keep_state: bool,
+) -> Result<ExitCode> {
+    let manifest_path = action_dir.join(MANIFEST_FILE);
+    let manifest: manifest::Manifest = if manifest_path.is_file() {
+        let raw = std::fs::read(&manifest_path)
+            .with_context(|| format!("failed to read manifest {}", manifest_path.display()))?;
+        serde_json::from_slice(&raw)
+            .with_context(|| format!("manifest {} is invalid", manifest_path.display()))?
+    } else {
+        manifest::Manifest::default()
+    };
+
+    // Resolve the startup script now (absolute — the child runs in the
+    // bundle dir) and fail before touching any state if there is none.
+    let script = match startup_script {
+        Some(p) => std::fs::canonicalize(p)
+            .with_context(|| format!("failed to resolve startup script {}", p.display()))?,
+        None => {
+            let bundled = action_dir.join(STARTUP_SCRIPT_FILE);
+            anyhow::ensure!(
+                bundled.is_file(),
+                "nothing to execute: no --startup-script given and {} has no {STARTUP_SCRIPT_FILE}",
+                action_dir.display()
+            );
+            std::fs::canonicalize(&bundled)?
+        }
+    };
 
     if !keep_state {
         state.reset_run()?;
     }
 
-    // The entrypoint runs from the manifest's directory so relative script
-    // paths resolve; state/job paths handed to the child must be absolute.
-    let action_dir = manifest_path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-
     // Discover the job next to the bundle (not the parent CWD), so the child
     // and the CID we export below agree with the action's own `lit.job.json`.
-    let job_path = resolve_job_path(cli.job.clone(), &action_dir);
-    let job = load_job(cli, &action_dir)?;
+    let job_path = resolve_job_path(cli.job.clone(), action_dir);
+    let job = load_job(cli, action_dir)?;
 
     // The child writes state here, so create it now and hand over an
     // absolute path (the child runs in the bundle dir, not this CWD).
@@ -297,11 +386,18 @@ fn cmd_run(cli: &Cli, state: &State, manifest_path: &Path, keep_state: bool) -> 
     }
     let path_env = std::env::join_paths(path_entries).context("failed to build child PATH")?;
 
-    let mut cmd = std::process::Command::new(&argv[0]);
-    cmd.args(&argv[1..]).current_dir(&action_dir);
-    // Apply the manifest's env FIRST so none of the CLI's wiring below can be
-    // clobbered by a bundle that sets PATH / LIT_LOCAL_STATE_DIR / etc.
-    // (parity with "the sandbox controls the environment").
+    // The sandbox only ever executes `bash startup.sh`; same here. `bash` is
+    // resolved from PATH so this also works where /bin/bash is not a thing.
+    let mut cmd = std::process::Command::new("bash");
+    cmd.arg(&script).current_dir(action_dir);
+    // Env layering mirrors the supervisor: js-params first, then the
+    // manifest's env (a param name colliding with a manifest variable must
+    // not silently reconfigure the bundle), then the CLI's wiring below so
+    // none of it can be clobbered by a bundle that sets PATH /
+    // LIT_LOCAL_STATE_DIR / etc. ("the sandbox controls the environment").
+    for (k, v) in js_params_env(&job.js_params) {
+        cmd.env(k, v);
+    }
     for (k, v) in &manifest.env {
         cmd.env(k, v);
     }
@@ -319,12 +415,13 @@ fn cmd_run(cli: &Cli, state: &State, manifest_path: &Path, keep_state: bool) -> 
 
     let runtime = manifest.runtime.as_deref().unwrap_or("unspecified");
     eprintln!(
-        "lit: running {argv:?} (cid {}, runtime {runtime})",
+        "lit: running bash {} (cid {}, runtime {runtime})",
+        script.display(),
         job.ipfs_id
     );
     let status = cmd
         .status()
-        .with_context(|| format!("failed to spawn entrypoint {argv:?}"))?;
+        .with_context(|| format!("failed to spawn startup script {}", script.display()))?;
 
     if status.success() {
         // Serverless semantics: only a clean exit returns the recorded

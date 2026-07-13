@@ -28,6 +28,17 @@ code.
 > [#558](https://github.com/LIT-Protocol/chipotle/pull/558) (the
 > `/lit_binary_action` wiring in lit-api-server).
 
+> **Update (2026-07, CPL-355):** the manifest `entrypoint` model described in
+> this snapshot has been replaced. The sandbox now only ever executes
+> **`bash startup.sh`** — supplied per-request via
+> `ExecutionRequest.startup_script` / the endpoint's `startup_script` field
+> (mounted read-only at `/startup/startup.sh`), falling back to a `startup.sh`
+> at the bundle root. Bundles are pure payload (`lit.json` is optional, its
+> `entrypoint` ignored), so one cached bundle serves many different startup
+> scripts with full cache hits, and top-level js-params are injected into the
+> sandbox environment. See `lit-actions/gvisor-server/README.md` for the
+> current contract; entrypoint references below are historical.
+
 ---
 
 ## Where it sits
