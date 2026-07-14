@@ -16,7 +16,7 @@ use crate::core::v1::models::response::{
     AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse,
     AddUsageApiKeyWithSignatureResponse, ApiKeyItem, ChainConfigKeysResponse, CreateWalletResponse,
     CreateWalletWithSignatureResponse, ListMetadataItem, NewAccountResponse,
-    NodeChainConfigResponse, WalletItem,
+    NodeChainConfigResponse, PrepareWalletResponse, WalletItem,
 };
 use crate::dstack::v1::get_client_key;
 use crate::stripe::StripeState;
@@ -250,6 +250,44 @@ pub async fn create_wallet_with_signature(
     );
     let (_public_key, wallet_address, _secret, derivation_u256) = create_new_wallet().await?;
     Ok(CreateWalletWithSignatureResponse {
+        wallet_address: bytes_to_0x_hex(wallet_address.as_slice()),
+        derivation_path: format!("0x{:x}", derivation_u256),
+    })
+}
+
+/// Return a fresh derived wallet address + derivation path with **no owner
+/// signature and no API key** — the no-signature equivalent of
+/// `create_wallet_with_signature`. Lets a ChainSecured client obtain a PKP
+/// address before registering it, so the whole owner ceremony collapses into a
+/// single signed bind UserOp instead of one WebAuthn prompt per mint.
+///
+/// The EIP-712 signature on the sibling endpoint authorizes nothing durable: it
+/// gates only the mint API's shape, and a caller can self-sign it trivially, so it
+/// is not an access-control or rate-limit boundary. What actually attaches a PKP to
+/// an account is the client's own on-chain `registerWalletDerivation` (see
+/// `core::eip712`). Dropping the signature only removes UX friction, not a security
+/// check — an un-registered response is equivalent to a discarded keypair
+/// (compute-only cost).
+///
+/// This does NOT make the derivation path a secret: paths are public (emitted by
+/// `registerWalletDerivation` and readable via `getWalletDerivation`), and the
+/// contract's per-account uniqueness does not stop a different account from
+/// registering an observed path. That cross-account hijack is a pre-existing issue
+/// independent of this endpoint (paths/addresses are already public today) and is
+/// tracked in chipotle#575 — this endpoint neither introduces nor widens it.
+///
+/// NOT IDEMPOTENT: every call generates a fresh random derivation path and thus a
+/// brand-new wallet. Retrying returns a *different* address; concurrent callers
+/// each get their own wallet with no server-side dedup. Callers that must
+/// converge on one wallet coordinate client-side. See
+/// `docs/management/api_direct.mdx`.
+pub async fn prepare_wallet() -> Result<PrepareWalletResponse, ApiStatus> {
+    let (_public_key, wallet_address, _secret, derivation_u256) = create_new_wallet().await?;
+    tracing::info!(
+        "prepare_wallet: generated unregistered PKP {:?}",
+        wallet_address
+    );
+    Ok(PrepareWalletResponse {
         wallet_address: bytes_to_0x_hex(wallet_address.as_slice()),
         derivation_path: format!("0x{:x}", derivation_u256),
     })

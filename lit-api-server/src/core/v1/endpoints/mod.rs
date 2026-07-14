@@ -22,6 +22,7 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         create_wallet,
         create_wallet_post,
         create_wallet_with_signature,
+        prepare_wallet,
         delete_wallet,
         lit_action,
         get_lit_action_ipfs_id,

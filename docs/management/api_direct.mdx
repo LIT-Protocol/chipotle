@@ -380,6 +380,10 @@ No API key required. `primaryType` must be `CreateWallet`.
 
 Pass `derivation_path` verbatim into `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` on the AccountConfig contract — until that lands, the PKP exists in MPC but is not registered to any account.
 
+<Note>
+If you don't need the wallet-ownership signature step, [`POST /prepare_wallet`](#post-prepare-wallet) returns the same `{ wallet_address, derivation_path }` with no signature and no API key. Because the on-chain `registerWalletDerivation` (inside your owner-signed transaction) is the real authorization boundary, the signature here authorizes nothing durable — dropping it lets you collapse the whole ceremony into a single wallet prompt.
+</Note>
+
 ```bash
 curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/create_wallet_with_signature" \
   -H "Content-Type: application/json" \
@@ -403,6 +407,38 @@ curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/create_wallet_with
     "signature": "0x..."
   }'
 ```
+
+#### `POST /prepare_wallet`
+
+The no-signature equivalent of `create_wallet_with_signature`. Returns a freshly derived `{ wallet_address, derivation_path }` so you can register the PKP on-chain yourself — folding the whole ChainSecured owner ceremony into a **single** signed transaction (the bind UserOp) instead of one wallet prompt per mint.
+
+The wallet-ownership signature on `create_wallet_with_signature` authorizes nothing durable: the real authorization boundary is your own on-chain `registerWalletDerivation`, signed inside your owner transaction. So this endpoint safely omits it.
+
+**No API key. No request body.** The server generates the derivation path itself (256-bit CSPRNG entropy); you cannot supply your own.
+
+**Response:**
+
+```json
+{
+  "wallet_address": "0x...",
+  "derivation_path": "0x..."
+}
+```
+
+Pass `derivation_path` verbatim into `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)`. Until that on-chain call lands, the PKP exists in MPC but is registered to no account — an un-registered response is equivalent to a discarded keypair (compute-only cost, exactly like a replay of the signature endpoints).
+
+```bash
+curl -s -X POST "https://api.chipotle.litprotocol.com/core/v1/prepare_wallet"
+```
+
+<Warning>
+**`prepare_wallet` is not idempotent.** Every call returns a **brand-new** wallet with a fresh random derivation path:
+
+- **Retrying returns a different address.** If a call succeeds but your network drops the response, calling again does **not** recover the same wallet — it mints another one. Treat each response as throwaway until you've registered it on-chain, and register exactly once.
+- **Concurrent callers each get their own wallet.** There is no server-side dedup. If two systems both "ensure the account has a wallet," they will each get a different address and each fire a different bind UserOp, leaving the account with **two** wallets rather than one shared wallet. To converge on a single wallet, coordinate client-side (check the existing PKP registry via `list_wallets` first, or designate a single writer).
+
+There is no meaningful *collision* risk between concurrent callers: each gets an independent 256-bit random path, so deriving the same address is cryptographically negligible. If the same address somehow were registered twice **within one account**, the second call reverts (`"PKP already registered"`) — note that guard is per-account, so it does not prevent a *different* account from registering an address it observed elsewhere.
+</Warning>
 
 #### `POST /convert_to_chain_secured_account`
 

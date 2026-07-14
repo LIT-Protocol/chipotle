@@ -29,6 +29,25 @@ pub struct CreateWalletWithSignatureResponse {
     pub derivation_path: String,
 }
 
+/// Returned by `POST /prepare_wallet`. Same shape as
+/// `CreateWalletWithSignatureResponse` but obtained with no owner signature and
+/// no API key. The client MUST follow up with an on-chain
+/// `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)`
+/// call — until that lands the PKP exists in MPC but is registered to no account,
+/// which makes an un-registered response equivalent to a discarded keypair.
+///
+/// NOT IDEMPOTENT: every call returns a brand-new wallet (a fresh random
+/// derivation path). Retrying does not return the previous address; concurrent
+/// callers each get a different wallet with no server-side dedup. See
+/// `docs/management/api_direct.mdx` for the full concurrency semantics.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct PrepareWalletResponse {
+    pub wallet_address: String,
+    /// 0x-prefixed lowercase hex (uint256). Pass through verbatim to
+    /// `registerWalletDerivation`'s `derivationPath` arg.
+    pub derivation_path: String,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LitActionResponse {
     pub response: serde_json::Value,
