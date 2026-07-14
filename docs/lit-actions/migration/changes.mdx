@@ -1,4 +1,7 @@
-# Lit Actions: Migration from Datil or Naga 
+---
+title: "Migration from Datil or Naga"
+description: "How deprecated Naga Lit Actions SDK calls map to their current equivalents."
+---
 
 This document is a reference for developers migrating from the Naga Lit Actions SDK to the current SDK.
 It covers all actions available in both generations and explains how deprecated Naga actions map to current equivalents.
@@ -7,7 +10,7 @@ It covers all actions available in both generations and explains how deprecated 
 
 The current Lit Actions SDK is a streamlined runtime focused on cryptographic key operations and action identity.
 Many capabilities that previously required runtime API calls — permission checking, access control, multi-party signing coordination — are now handled **on-chain** through the security model managed by the
-[Dashboard application](https://developer.litprotocol.com/) or accessed directly on-chain.
+[Dashboard application](https://dashboard.chipotle.litprotocol.com/dapps/dashboard/) or accessed directly on-chain.
 
 > **Deprecated actions** generally have equivalent functionality derived through the combination of **new actions** and the **on-chain security settings** provided by the Dashboard application (or accessed directly on-chain).
 > Permissions, group membership, and access control are now encoded at account-creation time rather than checked dynamically at execution time.
