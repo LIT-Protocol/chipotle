@@ -248,6 +248,39 @@ fn run_startup_script_flag_overrides_bundle_script() {
 }
 
 #[test]
+fn run_startup_script_resolves_against_cwd_not_dir() {
+    // A relative --startup-script is CWD-relative (like every path flag);
+    // the script still executes with --dir as its working directory.
+    let (dir, state) = workspace();
+    let d = dir.path();
+    let bundle = d.join("bundle");
+    std::fs::create_dir(&bundle).unwrap();
+    std::fs::write(bundle.join("startup.sh"), "lit set-response from-bundle\n").unwrap();
+    std::fs::write(bundle.join("payload.txt"), "payload").unwrap();
+    // Script lives in the CWD, not the bundle, and reads a bundle file.
+    std::fs::write(
+        d.join("send.sh"),
+        "lit set-response \"cwd-script: $(cat payload.txt)\"\n",
+    )
+    .unwrap();
+
+    let out = lit(
+        d,
+        &state,
+        &["run", "--dir", "bundle", "--startup-script", "send.sh"],
+    );
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&out.stdout).trim_end(),
+        "cwd-script: payload"
+    );
+}
+
+#[test]
 fn run_without_any_startup_script_fails() {
     let (dir, state) = workspace();
     let out = lit(dir.path(), &state, &["run"]);
@@ -293,7 +326,8 @@ fn read_only_command_leaves_no_state_dir() {
 #[test]
 fn cli_env_wiring_overrides_manifest_env() {
     // The manifest tries to set LIT_ACTION_IPFS_ID; the CLI's --ipfs-id must
-    // win (manifest.env is applied first so CLI wiring can't be clobbered).
+    // win (reserved names are filtered from manifest env, same as the
+    // sandbox, and the CLI wiring is applied last).
     let (dir, state) = workspace();
     let d = dir.path();
     std::fs::write(

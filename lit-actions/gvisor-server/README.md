@@ -77,7 +77,8 @@ An optional `lit.json` manifest at the bundle root may carry metadata:
 
 - `runtime` — informational for now (the v1 base image ships all supported
   runtimes).
-- `env` — extra environment variables; these win over js-param injection.
+- `env` — extra environment variables; these win over js-param injection,
+  but runtime-owned names (the reserved set above) are ignored here too.
 - A legacy `entrypoint` field is ignored: incoming bundles are re-written to
   the startup-script contract.
 

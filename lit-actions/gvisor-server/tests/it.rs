@@ -497,6 +497,28 @@ async fn manifest_env_applies_and_wins_over_js_params() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn manifest_env_cannot_shadow_runtime_owned_vars() -> Result<()> {
+    let server = TestServer::start();
+    // If the manifest's LIT_OP_SOCK reached the child env it would override
+    // the runtime-set value (process runtime sets it before spec.env) and
+    // sever the op loop — the `lit` call below could never reach the host.
+    let request = ExecutionRequest {
+        code: make_bundle(&[
+            (
+                "lit.json",
+                r#"{"env": {"LIT_OP_SOCK": "/nonexistent/ops.sock", "KEPT": "yes"}}"#,
+            ),
+            ("startup.sh", "lit set-response \"$KEPT\"\n"),
+        ]),
+        ..Default::default()
+    };
+    let outcome = TestClient::default().execute(&server, request).await?;
+    assert!(outcome.result.success, "error: {}", outcome.result.error);
+    assert_eq!(outcome.response, "yes");
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn nonzero_exit_reports_failure_with_stderr() -> Result<()> {
     let server = TestServer::start();
     let code = sh_bundle("echo boom >&2\nexit 3\n");

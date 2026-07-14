@@ -122,6 +122,8 @@ enum Cmd {
         dir: PathBuf,
         /// Startup script to run instead of the bundle's own `startup.sh`
         /// (the local analog of the request-supplied `startup_script`).
+        /// A relative path is resolved against the current working
+        /// directory — not `--dir` — like every other path flag.
         #[arg(long)]
         startup_script: Option<PathBuf>,
         /// Keep response/logs/counter from a previous run instead of
@@ -345,8 +347,13 @@ fn cmd_run(
     // Resolve the startup script now (absolute — the child runs in the
     // bundle dir) and fail before touching any state if there is none.
     let script = match startup_script {
-        Some(p) => std::fs::canonicalize(p)
-            .with_context(|| format!("failed to resolve startup script {}", p.display()))?,
+        Some(p) => std::fs::canonicalize(p).with_context(|| {
+            format!(
+                "failed to resolve startup script {} (a relative path is resolved \
+                 against the current directory, not --dir)",
+                p.display()
+            )
+        })?,
         None => {
             let bundled = action_dir.join(STARTUP_SCRIPT_FILE);
             anyhow::ensure!(
@@ -392,13 +399,16 @@ fn cmd_run(
     cmd.arg(&script).current_dir(action_dir);
     // Env layering mirrors the supervisor: js-params first, then the
     // manifest's env (a param name colliding with a manifest variable must
-    // not silently reconfigure the bundle), then the CLI's wiring below so
-    // none of it can be clobbered by a bundle that sets PATH /
-    // LIT_LOCAL_STATE_DIR / etc. ("the sandbox controls the environment").
+    // not silently reconfigure the bundle), then the CLI's wiring below.
+    // RESERVED_ENV names are dropped from both sources, exactly like the
+    // sandbox ("the sandbox controls the environment").
     for (k, v) in js_params_env(&job.js_params) {
         cmd.env(k, v);
     }
     for (k, v) in &manifest.env {
+        if RESERVED_ENV.contains(&k.as_str()) {
+            continue;
+        }
         cmd.env(k, v);
     }
     cmd.env("PATH", path_env)

@@ -75,8 +75,10 @@ lit run
 
 The script is the bundle's root `startup.sh`, or pass `--startup-script
 other.sh` — the local analog of the `startup_script` field on
-`/lit_binary_action`, which lets one bundle serve many scripts. An optional
-`lit.json` (same as the sandbox's) carries metadata only:
+`/lit_binary_action`, which lets one bundle serve many scripts. A relative
+`--startup-script` path is resolved against your current working directory
+(not `--dir`), like every other path flag. An optional `lit.json` (same as
+the sandbox's) carries metadata only:
 
 ```json
 { "runtime": "python3", "env": { "PYTHONUNBUFFERED": "1" } }

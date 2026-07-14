@@ -60,8 +60,10 @@ const FORWARD_CHUNK_BYTES: u64 = 64 * 1024;
 const MAX_PARAM_ENV_VALUE_BYTES: usize = 64 * 1024;
 const MAX_PARAM_ENV_TOTAL_BYTES: usize = 1024 * 1024;
 
-/// Environment variables the runtime owns; js-params may not shadow them
-/// (a param named PATH must not break `lit` resolution inside the guest).
+/// Environment variables the runtime owns; neither js-params nor manifest
+/// env may shadow them (a param named PATH must not break `lit` resolution
+/// inside the guest, and a manifest-set LIT_OP_SOCK must not sever the op
+/// loop).
 const RESERVED_ENV: [&str; 5] = ["PATH", "HOME", "TMPDIR", ENV_OP_SOCK, ENV_ACTION_IPFS_ID];
 
 pub struct Supervisor {
@@ -324,10 +326,18 @@ fn build_spec(
     js_params: Option<&[u8]>,
 ) -> ExecSpec {
     // Layering: js-params first, then manifest env — a param name colliding
-    // with a manifest variable must not silently reconfigure the bundle —
-    // and the runtime-owned LIT_* / RESERVED_ENV vars are never shadowed.
+    // with a manifest variable must not silently reconfigure the bundle.
+    // RESERVED_ENV names are dropped from BOTH sources: a manifest that set
+    // LIT_OP_SOCK would sever the guest op loop under the process runtime,
+    // and a duplicate PATH / LIT_ACTION_IPFS_ID in the OCI env list has
+    // undefined precedence. `spec.env` therefore never carries a
+    // runtime-owned name; the runtimes and the push below own those.
     let mut env = js_params_env(js_params);
     for (k, v) in &bundle.manifest.env {
+        if RESERVED_ENV.contains(&k.as_str()) {
+            debug!(name = %k, "manifest env not injected: reserved name");
+            continue;
+        }
         env.retain(|(name, _)| name != k);
         env.push((k.clone(), v.clone()));
     }
