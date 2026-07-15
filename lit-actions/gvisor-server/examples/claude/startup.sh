@@ -15,7 +15,10 @@
 set -euo pipefail
 
 lit print "installing Claude Code on $(. /etc/os-release && echo "$PRETTY_NAME")"
-curl -fsSL https://claude.ai/install.sh | bash
+INSTALLER="$(mktemp)"
+curl -fsSL https://claude.ai/install.sh -o "$INSTALLER"
+bash "$INSTALLER"
+rm -f "$INSTALLER"
 export PATH="$HOME/.local/bin:$PATH"
 
 VERSION="$(claude --version)"
