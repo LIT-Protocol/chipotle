@@ -188,6 +188,29 @@ pub struct LitActionRequest {
     pub js_params: Option<serde_json::Value>,
 }
 
+/// POST /lit_binary_action
+///
+/// Executes an any-language action **bundle** in the gVisor runner. Provide
+/// either `bundle` (a base64-encoded tar/tar.gz containing a `lit.json`
+/// manifest at its root) or `checksum` (the content id of a bundle the runner
+/// already cached). When `bundle` is supplied the server derives the checksum
+/// from the decoded tar bytes and authorizes on that derived value — a
+/// client-supplied `checksum` is only a hint and is ignored if it disagrees.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct LitBinaryActionRequest {
+    /// Base64-encoded tar or tar.gz bundle. Optional when `checksum` refers to
+    /// a previously-submitted bundle the runner still has cached.
+    #[serde(default)]
+    pub bundle: Option<String>,
+    /// Content id (IPFS CID) of the bundle. Required when `bundle` is omitted;
+    /// when `bundle` is present it is only a hint, validated against the value
+    /// derived from the bundle bytes.
+    #[serde(default)]
+    pub checksum: Option<String>,
+    /// Parameters passed to the action (exposed to guest code via `lit params`).
+    pub js_params: Option<serde_json::Value>,
+}
+
 /// POST /billing/create_payment_intent
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct CreatePaymentIntentRequest {

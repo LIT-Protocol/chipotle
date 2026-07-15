@@ -29,7 +29,6 @@
               "lit-actions/secrets",
               "lit-actions/imports",
               "lit-actions/wasm",
-              "lit-actions/languages",
               "lit-actions/limits",
               {
                 "group": "Migration",
