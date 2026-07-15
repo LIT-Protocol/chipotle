@@ -163,6 +163,15 @@ contract ViewsFacet {
         return account.pkpData[walletAddress].id;
     }
 
+    /// @notice Return the master apiKeyHash that first registered a pkpId, or 0 if
+    ///         the pkpId has never been bound (pre-migration wallet or never registered).
+    /// @dev The binding survives removeWalletDerivation by design; used to audit the
+    ///      global first-owner rule and the one-time backfill migration.
+    function getPkpOwnerMaster(address pkpId) public view returns (uint256) {
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        return s.pkpIdToOwnerMaster[pkpId];
+    }
+
     function listApiKeys(
         uint256 accountApiKeyHash,
         uint256 pageNumber,

@@ -348,6 +348,121 @@ contract AccountsTest is BaseTest {
         assertEq(views_.getWalletDerivation(hash, pkpB), 44);
     }
 
+    function test_registerWalletDerivation_crossAccountHijackReverts() public {
+        // Victim registers a wallet; its derivationPath is public on-chain.
+        vm.prank(user);
+        writes.newChainSecuredAccount("victim", "victim");
+        uint256 victimHash = apiKeyHashOf(user);
+
+        address pkpAddr = address(0xBEEF);
+        vm.prank(user);
+        writes.registerWalletDerivation(victimHash, pkpAddr, 42, "v", "v");
+        assertEq(views_.getPkpOwnerMaster(pkpAddr), victimHash);
+
+        // Attacker with their own account cannot register the victim's pkpId,
+        // even though the attacker's account has no entry for it.
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "PKP owned by another account"
+            )
+        );
+        writes.registerWalletDerivation(attackerHash, pkpAddr, 42, "a", "a");
+    }
+
+    function test_pkpOwnerBinding_survivesRemoveWalletDerivation() public {
+        vm.prank(user);
+        writes.newChainSecuredAccount("victim", "victim");
+        uint256 victimHash = apiKeyHashOf(user);
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+
+        address pkpAddr = address(0xBEEF);
+        vm.prank(user);
+        writes.registerWalletDerivation(victimHash, pkpAddr, 42, "v", "v");
+        vm.prank(user);
+        writes.removeWalletDerivation(victimHash, pkpAddr);
+
+        // Binding is kept after the hard delete.
+        assertEq(views_.getPkpOwnerMaster(pkpAddr), victimHash);
+
+        // Attacker still cannot claim the deleted address.
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "PKP owned by another account"
+            )
+        );
+        writes.registerWalletDerivation(attackerHash, pkpAddr, 42, "a", "a");
+
+        // The original owner can re-register (recovery / re-add after delete).
+        vm.prank(user);
+        writes.registerWalletDerivation(victimHash, pkpAddr, 42, "v2", "v2");
+        assertEq(views_.getWalletDerivation(victimHash, pkpAddr), 42);
+        assertEq(views_.getPkpOwnerMaster(pkpAddr), victimHash);
+    }
+
+    function test_backfillPkpOwners_bindsLegacyWalletsAndBlocksHijack() public {
+        vm.prank(user);
+        writes.newChainSecuredAccount("legacy", "legacy");
+        uint256 legacyHash = apiKeyHashOf(user);
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+
+        // Simulate a pre-migration wallet: registered in the account but with no
+        // global owner binding (as if registered before the upgrade).
+        address legacyPkp = address(0x1E9AC7);
+        assertEq(views_.getPkpOwnerMaster(legacyPkp), 0);
+
+        address[] memory pkpIds = new address[](1);
+        pkpIds[0] = legacyPkp;
+        uint256[] memory masters = new uint256[](1);
+        masters[0] = legacyHash;
+
+        // Only the diamond owner or config operator may backfill.
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.OnlyConfigOperatorOrOwner.selector,
+                stranger
+            )
+        );
+        writes.backfillPkpOwners(pkpIds, masters);
+
+        vm.prank(owner);
+        writes.backfillPkpOwners(pkpIds, masters);
+        assertEq(views_.getPkpOwnerMaster(legacyPkp), legacyHash);
+
+        // Backfill never re-assigns an existing binding (idempotent, skip-if-set).
+        masters[0] = attackerHash;
+        vm.prank(owner);
+        writes.backfillPkpOwners(pkpIds, masters);
+        assertEq(views_.getPkpOwnerMaster(legacyPkp), legacyHash);
+
+        // Post-backfill, the attacker cannot register the legacy wallet...
+        vm.prank(stranger);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "PKP owned by another account"
+            )
+        );
+        writes.registerWalletDerivation(attackerHash, legacyPkp, 7, "a", "a");
+
+        // ...but the legacy owner can (e.g. #450 recovery re-registration).
+        vm.prank(user);
+        writes.registerWalletDerivation(legacyHash, legacyPkp, 7, "l", "l");
+        assertEq(views_.getWalletDerivation(legacyHash, legacyPkp), 7);
+    }
+
     function test_removeWalletDerivation_unregisteredReverts() public {
         vm.prank(user);
         writes.newChainSecuredAccount("alice", "primary");

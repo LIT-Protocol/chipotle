@@ -193,6 +193,17 @@
     {
       "inputs": [
         {
+          "internalType": "address",
+          "name": "caller",
+          "type": "address"
+        }
+      ],
+      "name": "OnlyConfigOperatorOrOwner",
+      "type": "error"
+    },
+    {
+      "inputs": [
+        {
           "internalType": "uint256",
           "name": "apiKeyHash",
           "type": "uint256"
@@ -471,6 +482,25 @@
       "inputs": [
         {
           "indexed": true,
+          "internalType": "address",
+          "name": "pkpId",
+          "type": "address"
+        },
+        {
+          "indexed": true,
+          "internalType": "uint256",
+          "name": "masterHash",
+          "type": "uint256"
+        }
+      ],
+      "name": "PkpOwnerBackfilled",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
           "internalType": "uint256",
           "name": "apiKeyHash",
           "type": "uint256"
@@ -682,6 +712,24 @@
         }
       ],
       "name": "addPkpToGroup",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address[]",
+          "name": "pkpIds",
+          "type": "address[]"
+        },
+        {
+          "internalType": "uint256[]",
+          "name": "masterHashes",
+          "type": "uint256[]"
+        }
+      ],
+      "name": "backfillPkpOwners",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
@@ -1450,6 +1498,25 @@
     {
       "inputs": [
         {
+          "internalType": "address",
+          "name": "pkpId",
+          "type": "address"
+        }
+      ],
+      "name": "getPkpOwnerMaster",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
           "internalType": "uint256",
           "name": "apiKeyHash",
           "type": "uint256"
@@ -2096,17 +2163,6 @@
         }
       ],
       "name": "NotContractOwner",
-      "type": "error"
-    },
-    {
-      "inputs": [
-        {
-          "internalType": "address",
-          "name": "caller",
-          "type": "address"
-        }
-      ],
-      "name": "OnlyConfigOperatorOrOwner",
       "type": "error"
     },
     {
