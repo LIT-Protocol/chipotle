@@ -17,10 +17,13 @@ use rocket::http::Status;
 use rocket::serde::json::Json;
 use rocket::{Route, State, get, routes};
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 pub const LIT_ACTIONS_SOCKET: &str = "/tmp/lit_actions.sock";
+/// Default socket of the any-language (gVisor) runner. Overridable at boot via
+/// the `LIT_ACTIONS_GVISOR_SOCKET` env var (prod mounts it under /var/run/lit).
+pub const LIT_ACTIONS_GVISOR_SOCKET: &str = "/tmp/lit_actions_gvisor.sock";
 
 /// Wrapper around the lit-actions socket path so it can be injected via
 /// Rocket managed state. Tests build the rocket with a path guaranteed not to
@@ -28,9 +31,17 @@ pub const LIT_ACTIONS_SOCKET: &str = "/tmp/lit_actions.sock";
 /// `/tmp/lit_actions.sock`.
 pub struct LitActionsSocketPath(pub PathBuf);
 
+/// Socket of the any-language (gVisor) runner — the `/lit_binary_action`
+/// backend. Injected the same way as `LitActionsSocketPath`.
+pub struct LitActionsGvisorSocketPath(pub PathBuf);
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HealthResponse {
     pub lit_actions_reachable: bool,
+    /// Reachability of the gVisor runner. Informational only — does NOT gate
+    /// health status, so a node still reports healthy before the gVisor
+    /// container is rolled out (or if the binary route is unused).
+    pub lit_actions_gvisor_reachable: bool,
     pub cpu_available: bool,
     pub billing_keys_present: bool,
     /// Seconds since the on-chain account-event listener last confirmed it was
@@ -57,44 +68,18 @@ async fn health(
     cpu_monitor: &State<CpuOverloadMonitor>,
     stripe_state: &State<Option<Arc<StripeState>>>,
     socket_path: &State<LitActionsSocketPath>,
+    gvisor_socket_path: &State<LitActionsGvisorSocketPath>,
 ) -> (Status, Json<HealthResponse>) {
-    let socket_key = socket_path.0.to_string_lossy();
-    // Check if we have a pooled gRPC connection to lit-actions.  If not, try
-    // to connect (1s timeout via connect_to_socket).  This avoids the deadlock
-    // where NLB marks the node unhealthy → no traffic → lazy connection never
-    // established → stays unhealthy.  A successful connect also populates the
-    // pool so subsequent probes are a cheap HashMap lookup.
-    let lit_actions_reachable = if grpc_pool.get_connection(&socket_key).await.is_some() {
-        true
-    } else {
-        match unix::connect_to_socket(socket_path.0.clone()).await {
-            Ok(channel) => {
-                grpc_pool.add_connection(&socket_key, channel).await;
-                true
-            }
-            Err(e) => {
-                // Surface the connect error so /health failures are debuggable
-                // without an exec into the container. /health is unauthenticated
-                // and polled by the NLB on a short interval, so log at debug —
-                // promoting to warn would flood logs (and on-call) during any
-                // sustained lit-actions outage. The JSON response already
-                // signals the failure; this line just records the *reason*.
-                tracing::debug!(
-                    socket = %socket_key,
-                    error = %e,
-                    "lit-actions socket connect failed during /health probe"
-                );
-                false
-            }
-        }
-    };
+    let lit_actions_reachable = probe_socket(grpc_pool, &socket_path.0).await;
+    let lit_actions_gvisor_reachable = probe_socket(grpc_pool, &gvisor_socket_path.0).await;
 
     let cpu_available = !cpu_monitor.is_overloaded();
     let billing_keys_present = stripe_state.is_some();
     let account_event_listener_lag_seconds = crate::account_events::listener_lag_seconds();
 
-    // billing_keys_present and account_event_listener_lag_seconds are
-    // informational only — neither affects health status.
+    // Only lit_actions_reachable + cpu_available gate health.
+    // billing_keys_present, lit_actions_gvisor_reachable, and
+    // account_event_listener_lag_seconds are informational only.
     let healthy = lit_actions_reachable && cpu_available;
 
     let status = if healthy {
@@ -107,11 +92,52 @@ async fn health(
         status,
         Json(HealthResponse {
             lit_actions_reachable,
+            lit_actions_gvisor_reachable,
             cpu_available,
             billing_keys_present,
             account_event_listener_lag_seconds,
         }),
     )
+}
+
+/// Probe a lit-actions gRPC socket for reachability, reusing the shared pool.
+///
+/// If we already have a pooled connection, that's a cheap HashMap hit.
+/// Otherwise try to connect (1s timeout via `connect_to_socket`); a success
+/// also populates the pool so subsequent probes stay cheap. This mirrors the
+/// pooling the execution path uses, so a healthy probe warms the same
+/// connection real traffic reuses — avoiding the deadlock where the NLB marks
+/// the node unhealthy, cuts traffic, and the lazy connection never forms.
+async fn probe_socket(
+    grpc_pool: &GrpcClientPool<tonic::transport::Channel>,
+    socket_path: &Path,
+) -> bool {
+    let socket_key = socket_path.to_string_lossy();
+    if grpc_pool.get_connection(&socket_key).await.is_some() {
+        return true;
+    }
+    match unix::connect_to_socket(socket_path.to_path_buf()).await {
+        Ok(channel) => {
+            grpc_pool.add_connection(&socket_key, channel).await;
+            true
+        }
+        Err(e) => {
+            // Surface the connect error so /health failures are debuggable
+            // without an exec into the container. /health is unauthenticated
+            // and polled by the NLB on a short interval, so log at debug —
+            // promoting to warn would flood logs (and on-call) during any
+            // sustained lit-actions outage. The JSON response already signals
+            // the failure; this line just records the *reason*.
+            // Generic wording since this probes both runners (JS and gVisor);
+            // the `socket` field identifies exactly which one failed.
+            tracing::debug!(
+                socket = %socket_key,
+                error = %e,
+                "runner socket connect failed during /health probe"
+            );
+            false
+        }
+    }
 }
 
 #[cfg(test)]
@@ -159,11 +185,13 @@ mod tests {
         // lit-actions process running for local dev), which would flip the
         // expected "unreachable" result to "reachable".
         let socket = LitActionsSocketPath(unique_nonexistent_socket_path());
+        let gvisor_socket = LitActionsGvisorSocketPath(unique_nonexistent_socket_path());
         rocket::build()
             .manage(pool)
             .manage(monitor)
             .manage(stripe_state)
             .manage(socket)
+            .manage(gvisor_socket)
             .mount("/", routes![health])
     }
 
@@ -211,6 +239,19 @@ mod tests {
         assert_eq!(response.status(), Status::ServiceUnavailable);
         let body: HealthResponse = response.into_json().await.expect("valid json");
         assert!(!body.lit_actions_reachable);
+    }
+
+    #[tokio::test]
+    async fn health_reports_gvisor_unreachable_when_no_socket() {
+        // With no gVisor socket present the field reports false, but because it
+        // is informational it must not, on its own, flip the status to 503
+        // (that only happens here because the JS socket is also absent).
+        let client = Client::tracked(build_rocket(false, None))
+            .await
+            .expect("valid rocket");
+        let response = client.get("/health").dispatch().await;
+        let body: HealthResponse = response.into_json().await.expect("valid json");
+        assert!(!body.lit_actions_gvisor_reachable);
     }
 
     #[tokio::test]
