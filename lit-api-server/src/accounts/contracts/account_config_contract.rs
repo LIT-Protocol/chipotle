@@ -1642,6 +1642,7 @@ interface AccountConfig {
     event GroupRemoved(uint256 indexed apiKeyHash, uint256 indexed groupId);
     event GroupUpdated(uint256 indexed accountApiKeyHash, uint256 indexed groupId);
     event PkpAddedToGroup(uint256 indexed apiKeyHash, uint256 indexed groupId, address pkpId);
+    event PkpOwnerBackfilled(address indexed pkpId, uint256 indexed masterHash);
     event PkpRemovedFromGroup(uint256 indexed apiKeyHash, uint256 indexed groupId, address pkpId);
     event PricingOperatorUpdated(address indexed newPricingOperator);
     event PricingUpdated(uint256 indexed pricingItemId, uint256 price);
@@ -1663,6 +1664,7 @@ interface AccountConfig {
     function apiKeyCanExecuteForAnyGroup(uint256 apiKeyHash, uint256[] memory groupIds) external view returns (bool);
     function apiPayerCount() external view returns (uint256);
     function api_payers() external view returns (address[] memory);
+    function backfillPkpOwners(address[] memory pkpIds, uint256[] memory masterHashes) external;
     function canExecuteAction(uint256 apiKeyHash, uint256 cidHash) external view returns (bool);
     function canExecuteActionAndUseWallet(uint256 apiKeyHash, uint256 cidHash, address walletAddress) external view returns (bool canExecute, bool canUseWallet);
     function canExecuteActionFast(uint256 apiKeyHash, uint256 cidHash) external view returns (bool);
@@ -1674,6 +1676,7 @@ interface AccountConfig {
     function debitApiKey(uint256 apiKeyHash, uint256 amount) external;
     function getAccountWalletAddress(uint256 apiKeyHash) external view returns (address);
     function getBillingWalletAddress(uint256 apiKeyHash) external view returns (address);
+    function getPkpOwnerMaster(address pkpId) external view returns (uint256);
     function getPricing(uint256 pricingItemId) external view returns (uint256);
     function getWalletDerivation(uint256 apiKeyHash, address walletAddress) external view returns (uint256);
     function groupIdsForAction(uint256 apiKeyHash, uint256 cidHash) external view returns (uint256[] memory);
@@ -1952,6 +1955,24 @@ interface AccountConfig {
   },
   {
     "type": "function",
+    "name": "backfillPkpOwners",
+    "inputs": [
+      {
+        "name": "pkpIds",
+        "type": "address[]",
+        "internalType": "address[]"
+      },
+      {
+        "name": "masterHashes",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "canExecuteAction",
     "inputs": [
       {
@@ -2191,6 +2212,25 @@ interface AccountConfig {
         "name": "",
         "type": "address",
         "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPkpOwnerMaster",
+    "inputs": [
+      {
+        "name": "pkpId",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ],
     "stateMutability": "view"
@@ -3690,6 +3730,25 @@ interface AccountConfig {
         "type": "address",
         "indexed": false,
         "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PkpOwnerBackfilled",
+    "inputs": [
+      {
+        "name": "pkpId",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "masterHash",
+        "type": "uint256",
+        "indexed": true,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -7664,6 +7723,120 @@ pub mod AccountConfig {
         }
     };
     #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
+    /*Event with signature `PkpOwnerBackfilled(address,uint256)` and selector `0x30af16efa92e1e313413b3b542aaad6085038078dfc320d3b4436ace4d48b65b`.
+    ```solidity
+    event PkpOwnerBackfilled(address indexed pkpId, uint256 indexed masterHash);
+    ```*/
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
+    #[derive(Clone)]
+    pub struct PkpOwnerBackfilled {
+        #[allow(missing_docs)]
+        pub pkpId: alloy::sol_types::private::Address,
+        #[allow(missing_docs)]
+        pub masterHash: alloy::sol_types::private::primitives::aliases::U256,
+    }
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
+    const _: () = {
+        use alloy::sol_types as alloy_sol_types;
+        #[automatically_derived]
+        impl alloy_sol_types::SolEvent for PkpOwnerBackfilled {
+            type DataTuple<'a> = ();
+            type DataToken<'a> = <Self::DataTuple<'a> as alloy_sol_types::SolType>::Token<'a>;
+            type TopicList = (
+                alloy_sol_types::sol_data::FixedBytes<32>,
+                alloy::sol_types::sol_data::Address,
+                alloy::sol_types::sol_data::Uint<256>,
+            );
+            const SIGNATURE: &'static str = "PkpOwnerBackfilled(address,uint256)";
+            const SIGNATURE_HASH: alloy_sol_types::private::B256 =
+                alloy_sol_types::private::B256::new([
+                    48u8, 175u8, 22u8, 239u8, 169u8, 46u8, 30u8, 49u8, 52u8, 19u8, 179u8, 181u8,
+                    66u8, 170u8, 173u8, 96u8, 133u8, 3u8, 128u8, 120u8, 223u8, 195u8, 32u8, 211u8,
+                    180u8, 67u8, 106u8, 206u8, 77u8, 72u8, 182u8, 91u8,
+                ]);
+            const ANONYMOUS: bool = false;
+            #[allow(unused_variables)]
+            #[inline]
+            fn new(
+                topics: <Self::TopicList as alloy_sol_types::SolType>::RustType,
+                data: <Self::DataTuple<'_> as alloy_sol_types::SolType>::RustType,
+            ) -> Self {
+                Self {
+                    pkpId: topics.1,
+                    masterHash: topics.2,
+                }
+            }
+            #[inline]
+            fn check_signature(
+                topics: &<Self::TopicList as alloy_sol_types::SolType>::RustType,
+            ) -> alloy_sol_types::Result<()> {
+                if topics.0 != Self::SIGNATURE_HASH {
+                    return Err(alloy_sol_types::Error::invalid_event_signature_hash(
+                        Self::SIGNATURE,
+                        topics.0,
+                        Self::SIGNATURE_HASH,
+                    ));
+                }
+                Ok(())
+            }
+            #[inline]
+            fn tokenize_body(&self) -> Self::DataToken<'_> {
+                ()
+            }
+            #[inline]
+            fn topics(&self) -> <Self::TopicList as alloy_sol_types::SolType>::RustType {
+                (
+                    Self::SIGNATURE_HASH.into(),
+                    self.pkpId.clone(),
+                    self.masterHash.clone(),
+                )
+            }
+            #[inline]
+            fn encode_topics_raw(
+                &self,
+                out: &mut [alloy_sol_types::abi::token::WordToken],
+            ) -> alloy_sol_types::Result<()> {
+                if out.len() < <Self::TopicList as alloy_sol_types::TopicList>::COUNT {
+                    return Err(alloy_sol_types::Error::Overrun);
+                }
+                out[0usize] = alloy_sol_types::abi::token::WordToken(Self::SIGNATURE_HASH);
+                out[1usize] = <alloy::sol_types::sol_data::Address as alloy_sol_types::EventTopic>::encode_topic(
+                    &self.pkpId,
+                );
+                out[2usize] = <alloy::sol_types::sol_data::Uint<
+                    256,
+                > as alloy_sol_types::EventTopic>::encode_topic(&self.masterHash);
+                Ok(())
+            }
+        }
+        #[automatically_derived]
+        impl alloy_sol_types::private::IntoLogData for PkpOwnerBackfilled {
+            fn to_log_data(&self) -> alloy_sol_types::private::LogData {
+                From::from(self)
+            }
+            fn into_log_data(self) -> alloy_sol_types::private::LogData {
+                From::from(&self)
+            }
+        }
+        #[automatically_derived]
+        impl From<&PkpOwnerBackfilled> for alloy_sol_types::private::LogData {
+            #[inline]
+            fn from(this: &PkpOwnerBackfilled) -> alloy_sol_types::private::LogData {
+                alloy_sol_types::SolEvent::encode_log_data(this)
+            }
+        }
+    };
+    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
     /*Event with signature `PkpRemovedFromGroup(uint256,uint256,address)` and selector `0x071e211a142d40078c2724eb4fc9fc3bd257912c5a496497605f420355521145`.
     ```solidity
     event PkpRemovedFromGroup(uint256 indexed apiKeyHash, uint256 indexed groupId, address pkpId);
@@ -10292,6 +10465,157 @@ pub mod AccountConfig {
         }
     };
     #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
+    /*Function with signature `backfillPkpOwners(address[],uint256[])` and selector `0x41275609`.
+    ```solidity
+    function backfillPkpOwners(address[] memory pkpIds, uint256[] memory masterHashes) external;
+    ```*/
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
+    #[derive(Clone)]
+    pub struct backfillPkpOwnersCall {
+        #[allow(missing_docs)]
+        pub pkpIds: alloy::sol_types::private::Vec<alloy::sol_types::private::Address>,
+        #[allow(missing_docs)]
+        pub masterHashes:
+            alloy::sol_types::private::Vec<alloy::sol_types::private::primitives::aliases::U256>,
+    }
+    //Container type for the return parameters of the [`backfillPkpOwners(address[],uint256[])`](backfillPkpOwnersCall) function.
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
+    #[derive(Clone)]
+    pub struct backfillPkpOwnersReturn {}
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
+    const _: () = {
+        use alloy::sol_types as alloy_sol_types;
+        {
+            #[doc(hidden)]
+            #[allow(dead_code)]
+            type UnderlyingSolTuple<'a> = (
+                alloy::sol_types::sol_data::Array<alloy::sol_types::sol_data::Address>,
+                alloy::sol_types::sol_data::Array<alloy::sol_types::sol_data::Uint<256>>,
+            );
+            #[doc(hidden)]
+            type UnderlyingRustTuple<'a> = (
+                alloy::sol_types::private::Vec<alloy::sol_types::private::Address>,
+                alloy::sol_types::private::Vec<
+                    alloy::sol_types::private::primitives::aliases::U256,
+                >,
+            );
+            #[cfg(test)]
+            #[allow(dead_code, unreachable_patterns)]
+            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
+                match _t {
+                    alloy_sol_types::private::AssertTypeEq::<
+                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
+                    >(_) => {}
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<backfillPkpOwnersCall> for UnderlyingRustTuple<'_> {
+                fn from(value: backfillPkpOwnersCall) -> Self {
+                    (value.pkpIds, value.masterHashes)
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<UnderlyingRustTuple<'_>> for backfillPkpOwnersCall {
+                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
+                    Self {
+                        pkpIds: tuple.0,
+                        masterHashes: tuple.1,
+                    }
+                }
+            }
+        }
+        {
+            #[doc(hidden)]
+            #[allow(dead_code)]
+            type UnderlyingSolTuple<'a> = ();
+            #[doc(hidden)]
+            type UnderlyingRustTuple<'a> = ();
+            #[cfg(test)]
+            #[allow(dead_code, unreachable_patterns)]
+            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
+                match _t {
+                    alloy_sol_types::private::AssertTypeEq::<
+                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
+                    >(_) => {}
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<backfillPkpOwnersReturn> for UnderlyingRustTuple<'_> {
+                fn from(value: backfillPkpOwnersReturn) -> Self {
+                    ()
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<UnderlyingRustTuple<'_>> for backfillPkpOwnersReturn {
+                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
+                    Self {}
+                }
+            }
+        }
+        impl backfillPkpOwnersReturn {
+            fn _tokenize(
+                &self,
+            ) -> <backfillPkpOwnersCall as alloy_sol_types::SolCall>::ReturnToken<'_> {
+                ()
+            }
+        }
+        #[automatically_derived]
+        impl alloy_sol_types::SolCall for backfillPkpOwnersCall {
+            type Parameters<'a> = (
+                alloy::sol_types::sol_data::Array<alloy::sol_types::sol_data::Address>,
+                alloy::sol_types::sol_data::Array<alloy::sol_types::sol_data::Uint<256>>,
+            );
+            type Token<'a> = <Self::Parameters<'a> as alloy_sol_types::SolType>::Token<'a>;
+            type Return = backfillPkpOwnersReturn;
+            type ReturnTuple<'a> = ();
+            type ReturnToken<'a> = <Self::ReturnTuple<'a> as alloy_sol_types::SolType>::Token<'a>;
+            const SIGNATURE: &'static str = "backfillPkpOwners(address[],uint256[])";
+            const SELECTOR: [u8; 4] = [65u8, 39u8, 86u8, 9u8];
+            #[inline]
+            fn new<'a>(
+                tuple: <Self::Parameters<'a> as alloy_sol_types::SolType>::RustType,
+            ) -> Self {
+                tuple.into()
+            }
+            #[inline]
+            fn tokenize(&self) -> Self::Token<'_> {
+                (
+                    <alloy::sol_types::sol_data::Array<
+                        alloy::sol_types::sol_data::Address,
+                    > as alloy_sol_types::SolType>::tokenize(&self.pkpIds),
+                    <alloy::sol_types::sol_data::Array<
+                        alloy::sol_types::sol_data::Uint<256>,
+                    > as alloy_sol_types::SolType>::tokenize(&self.masterHashes),
+                )
+            }
+            #[inline]
+            fn tokenize_returns(ret: &Self::Return) -> Self::ReturnToken<'_> {
+                backfillPkpOwnersReturn::_tokenize(ret)
+            }
+            #[inline]
+            fn abi_decode_returns(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
+                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence(data)
+                    .map(Into::into)
+            }
+            #[inline]
+            fn abi_decode_returns_validate(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
+                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence_validate(
+                    data,
+                )
+                .map(Into::into)
+            }
+        }
+    };
+    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
     /*Function with signature `canExecuteAction(uint256,uint256)` and selector `0xff1fe00c`.
     ```solidity
     function canExecuteAction(uint256 apiKeyHash, uint256 cidHash) external view returns (bool);
@@ -11947,6 +12271,145 @@ pub mod AccountConfig {
                 )
                 .map(|r| {
                     let r: getBillingWalletAddressReturn = r.into();
+                    r._0
+                })
+            }
+        }
+    };
+    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
+    /*Function with signature `getPkpOwnerMaster(address)` and selector `0xb43595c1`.
+    ```solidity
+    function getPkpOwnerMaster(address pkpId) external view returns (uint256);
+    ```*/
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
+    #[derive(Clone)]
+    pub struct getPkpOwnerMasterCall {
+        #[allow(missing_docs)]
+        pub pkpId: alloy::sol_types::private::Address,
+    }
+    #[derive(serde::Serialize, serde::Deserialize, Default, Debug, PartialEq, Eq, Hash)]
+    //Container type for the return parameters of the [`getPkpOwnerMaster(address)`](getPkpOwnerMasterCall) function.
+    #[allow(non_camel_case_types, non_snake_case, clippy::pub_underscore_fields)]
+    #[derive(Clone)]
+    pub struct getPkpOwnerMasterReturn {
+        #[allow(missing_docs)]
+        pub _0: alloy::sol_types::private::primitives::aliases::U256,
+    }
+    #[allow(
+        non_camel_case_types,
+        non_snake_case,
+        clippy::pub_underscore_fields,
+        clippy::style
+    )]
+    const _: () = {
+        use alloy::sol_types as alloy_sol_types;
+        {
+            #[doc(hidden)]
+            #[allow(dead_code)]
+            type UnderlyingSolTuple<'a> = (alloy::sol_types::sol_data::Address,);
+            #[doc(hidden)]
+            type UnderlyingRustTuple<'a> = (alloy::sol_types::private::Address,);
+            #[cfg(test)]
+            #[allow(dead_code, unreachable_patterns)]
+            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
+                match _t {
+                    alloy_sol_types::private::AssertTypeEq::<
+                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
+                    >(_) => {}
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<getPkpOwnerMasterCall> for UnderlyingRustTuple<'_> {
+                fn from(value: getPkpOwnerMasterCall) -> Self {
+                    (value.pkpId,)
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<UnderlyingRustTuple<'_>> for getPkpOwnerMasterCall {
+                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
+                    Self { pkpId: tuple.0 }
+                }
+            }
+        }
+        {
+            #[doc(hidden)]
+            #[allow(dead_code)]
+            type UnderlyingSolTuple<'a> = (alloy::sol_types::sol_data::Uint<256>,);
+            #[doc(hidden)]
+            type UnderlyingRustTuple<'a> = (alloy::sol_types::private::primitives::aliases::U256,);
+            #[cfg(test)]
+            #[allow(dead_code, unreachable_patterns)]
+            fn _type_assertion(_t: alloy_sol_types::private::AssertTypeEq<UnderlyingRustTuple>) {
+                match _t {
+                    alloy_sol_types::private::AssertTypeEq::<
+                        <UnderlyingSolTuple as alloy_sol_types::SolType>::RustType,
+                    >(_) => {}
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<getPkpOwnerMasterReturn> for UnderlyingRustTuple<'_> {
+                fn from(value: getPkpOwnerMasterReturn) -> Self {
+                    (value._0,)
+                }
+            }
+            #[automatically_derived]
+            #[doc(hidden)]
+            impl ::core::convert::From<UnderlyingRustTuple<'_>> for getPkpOwnerMasterReturn {
+                fn from(tuple: UnderlyingRustTuple<'_>) -> Self {
+                    Self { _0: tuple.0 }
+                }
+            }
+        }
+        #[automatically_derived]
+        impl alloy_sol_types::SolCall for getPkpOwnerMasterCall {
+            type Parameters<'a> = (alloy::sol_types::sol_data::Address,);
+            type Token<'a> = <Self::Parameters<'a> as alloy_sol_types::SolType>::Token<'a>;
+            type Return = alloy::sol_types::private::primitives::aliases::U256;
+            type ReturnTuple<'a> = (alloy::sol_types::sol_data::Uint<256>,);
+            type ReturnToken<'a> = <Self::ReturnTuple<'a> as alloy_sol_types::SolType>::Token<'a>;
+            const SIGNATURE: &'static str = "getPkpOwnerMaster(address)";
+            const SELECTOR: [u8; 4] = [180u8, 53u8, 149u8, 193u8];
+            #[inline]
+            fn new<'a>(
+                tuple: <Self::Parameters<'a> as alloy_sol_types::SolType>::RustType,
+            ) -> Self {
+                tuple.into()
+            }
+            #[inline]
+            fn tokenize(&self) -> Self::Token<'_> {
+                (
+                    <alloy::sol_types::sol_data::Address as alloy_sol_types::SolType>::tokenize(
+                        &self.pkpId,
+                    ),
+                )
+            }
+            #[inline]
+            fn tokenize_returns(ret: &Self::Return) -> Self::ReturnToken<'_> {
+                (
+                    <alloy::sol_types::sol_data::Uint<256> as alloy_sol_types::SolType>::tokenize(
+                        ret,
+                    ),
+                )
+            }
+            #[inline]
+            fn abi_decode_returns(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
+                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence(data).map(
+                    |r| {
+                        let r: getPkpOwnerMasterReturn = r.into();
+                        r._0
+                    },
+                )
+            }
+            #[inline]
+            fn abi_decode_returns_validate(data: &[u8]) -> alloy_sol_types::Result<Self::Return> {
+                <Self::ReturnTuple<'_> as alloy_sol_types::SolType>::abi_decode_sequence_validate(
+                    data,
+                )
+                .map(|r| {
+                    let r: getPkpOwnerMasterReturn = r.into();
                     r._0
                 })
             }
@@ -18684,6 +19147,8 @@ pub mod AccountConfig {
         #[allow(missing_docs)]
         api_payers(api_payersCall),
         #[allow(missing_docs)]
+        backfillPkpOwners(backfillPkpOwnersCall),
+        #[allow(missing_docs)]
         canExecuteAction(canExecuteActionCall),
         #[allow(missing_docs)]
         canExecuteActionAndUseWallet(canExecuteActionAndUseWalletCall),
@@ -18705,6 +19170,8 @@ pub mod AccountConfig {
         getAccountWalletAddress(getAccountWalletAddressCall),
         #[allow(missing_docs)]
         getBillingWalletAddress(getBillingWalletAddressCall),
+        #[allow(missing_docs)]
+        getPkpOwnerMaster(getPkpOwnerMasterCall),
         #[allow(missing_docs)]
         getPricing(getPricingCall),
         #[allow(missing_docs)]
@@ -18819,6 +19286,7 @@ pub mod AccountConfig {
             [56u8, 54u8, 3u8, 254u8],
             [64u8, 180u8, 212u8, 83u8],
             [64u8, 212u8, 65u8, 27u8],
+            [65u8, 39u8, 86u8, 9u8],
             [74u8, 66u8, 196u8, 10u8],
             [77u8, 190u8, 191u8, 229u8],
             [80u8, 64u8, 144u8, 1u8],
@@ -18848,6 +19316,7 @@ pub mod AccountConfig {
             [166u8, 182u8, 182u8, 114u8],
             [174u8, 140u8, 73u8, 165u8],
             [178u8, 2u8, 138u8, 151u8],
+            [180u8, 53u8, 149u8, 193u8],
             [180u8, 155u8, 139u8, 137u8],
             [184u8, 3u8, 127u8, 254u8],
             [192u8, 1u8, 188u8, 121u8],
@@ -18887,6 +19356,7 @@ pub mod AccountConfig {
             ::core::stringify!(adminApiPayerAccount),
             ::core::stringify!(debitApiKey),
             ::core::stringify!(removeAction),
+            ::core::stringify!(backfillPkpOwners),
             ::core::stringify!(removePkpFromGroup),
             ::core::stringify!(newChainSecuredAccount),
             ::core::stringify!(listPkps),
@@ -18916,6 +19386,7 @@ pub mod AccountConfig {
             ::core::stringify!(updateActionMetadata),
             ::core::stringify!(setApiPayers),
             ::core::stringify!(canExecuteActionAndUseWallet),
+            ::core::stringify!(getPkpOwnerMaster),
             ::core::stringify!(addAction),
             ::core::stringify!(apiPayerCount),
             ::core::stringify!(setAdminApiPayerAccount),
@@ -18955,6 +19426,7 @@ pub mod AccountConfig {
             <adminApiPayerAccountCall as alloy_sol_types::SolCall>::SIGNATURE,
             <debitApiKeyCall as alloy_sol_types::SolCall>::SIGNATURE,
             <removeActionCall as alloy_sol_types::SolCall>::SIGNATURE,
+            <backfillPkpOwnersCall as alloy_sol_types::SolCall>::SIGNATURE,
             <removePkpFromGroupCall as alloy_sol_types::SolCall>::SIGNATURE,
             <newChainSecuredAccountCall as alloy_sol_types::SolCall>::SIGNATURE,
             <listPkpsCall as alloy_sol_types::SolCall>::SIGNATURE,
@@ -18984,6 +19456,7 @@ pub mod AccountConfig {
             <updateActionMetadataCall as alloy_sol_types::SolCall>::SIGNATURE,
             <setApiPayersCall as alloy_sol_types::SolCall>::SIGNATURE,
             <canExecuteActionAndUseWalletCall as alloy_sol_types::SolCall>::SIGNATURE,
+            <getPkpOwnerMasterCall as alloy_sol_types::SolCall>::SIGNATURE,
             <addActionCall as alloy_sol_types::SolCall>::SIGNATURE,
             <apiPayerCountCall as alloy_sol_types::SolCall>::SIGNATURE,
             <setAdminApiPayerAccountCall as alloy_sol_types::SolCall>::SIGNATURE,
@@ -19025,7 +19498,7 @@ pub mod AccountConfig {
     impl alloy_sol_types::SolInterface for AccountConfigCalls {
         const NAME: &'static str = "AccountConfigCalls";
         const MIN_DATA_LENGTH: usize = 0usize;
-        const COUNT: usize = 65usize;
+        const COUNT: usize = 67usize;
         #[inline]
         fn selector(&self) -> [u8; 4] {
             match self {
@@ -19048,6 +19521,9 @@ pub mod AccountConfig {
                 }
                 Self::apiPayerCount(_) => <apiPayerCountCall as alloy_sol_types::SolCall>::SELECTOR,
                 Self::api_payers(_) => <api_payersCall as alloy_sol_types::SolCall>::SELECTOR,
+                Self::backfillPkpOwners(_) => {
+                    <backfillPkpOwnersCall as alloy_sol_types::SolCall>::SELECTOR
+                }
                 Self::canExecuteAction(_) => {
                     <canExecuteActionCall as alloy_sol_types::SolCall>::SELECTOR
                 }
@@ -19076,6 +19552,9 @@ pub mod AccountConfig {
                 }
                 Self::getBillingWalletAddress(_) => {
                     <getBillingWalletAddressCall as alloy_sol_types::SolCall>::SELECTOR
+                }
+                Self::getPkpOwnerMaster(_) => {
+                    <getPkpOwnerMasterCall as alloy_sol_types::SolCall>::SELECTOR
                 }
                 Self::getPricing(_) => <getPricingCall as alloy_sol_types::SolCall>::SELECTOR,
                 Self::getWalletDerivation(_) => {
@@ -19358,6 +19837,15 @@ pub mod AccountConfig {
                     removeAction
                 },
                 {
+                    fn backfillPkpOwners(
+                        data: &[u8],
+                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
+                        <backfillPkpOwnersCall as alloy_sol_types::SolCall>::abi_decode_raw(data)
+                            .map(AccountConfigCalls::backfillPkpOwners)
+                    }
+                    backfillPkpOwners
+                },
+                {
                     fn removePkpFromGroup(
                         data: &[u8],
                     ) -> alloy_sol_types::Result<AccountConfigCalls> {
@@ -19627,6 +20115,15 @@ pub mod AccountConfig {
                             .map(AccountConfigCalls::canExecuteActionAndUseWallet)
                     }
                     canExecuteActionAndUseWallet
+                },
+                {
+                    fn getPkpOwnerMaster(
+                        data: &[u8],
+                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
+                        <getPkpOwnerMasterCall as alloy_sol_types::SolCall>::abi_decode_raw(data)
+                            .map(AccountConfigCalls::getPkpOwnerMaster)
+                    }
+                    getPkpOwnerMaster
                 },
                 {
                     fn addAction(data: &[u8]) -> alloy_sol_types::Result<AccountConfigCalls> {
@@ -19968,6 +20465,17 @@ pub mod AccountConfig {
                     removeAction
                 },
                 {
+                    fn backfillPkpOwners(
+                        data: &[u8],
+                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
+                        <backfillPkpOwnersCall as alloy_sol_types::SolCall>::abi_decode_raw_validate(
+                                data,
+                            )
+                            .map(AccountConfigCalls::backfillPkpOwners)
+                    }
+                    backfillPkpOwners
+                },
+                {
                     fn removePkpFromGroup(
                         data: &[u8],
                     ) -> alloy_sol_types::Result<AccountConfigCalls> {
@@ -20261,6 +20769,17 @@ pub mod AccountConfig {
                     canExecuteActionAndUseWallet
                 },
                 {
+                    fn getPkpOwnerMaster(
+                        data: &[u8],
+                    ) -> alloy_sol_types::Result<AccountConfigCalls> {
+                        <getPkpOwnerMasterCall as alloy_sol_types::SolCall>::abi_decode_raw_validate(
+                                data,
+                            )
+                            .map(AccountConfigCalls::getPkpOwnerMaster)
+                    }
+                    getPkpOwnerMaster
+                },
+                {
                     fn addAction(data: &[u8]) -> alloy_sol_types::Result<AccountConfigCalls> {
                         <addActionCall as alloy_sol_types::SolCall>::abi_decode_raw_validate(data)
                             .map(AccountConfigCalls::addAction)
@@ -20474,6 +20993,11 @@ pub mod AccountConfig {
                 Self::api_payers(inner) => {
                     <api_payersCall as alloy_sol_types::SolCall>::abi_encoded_size(inner)
                 }
+                Self::backfillPkpOwners(inner) => {
+                    <backfillPkpOwnersCall as alloy_sol_types::SolCall>::abi_encoded_size(
+                        inner,
+                    )
+                }
                 Self::canExecuteAction(inner) => {
                     <canExecuteActionCall as alloy_sol_types::SolCall>::abi_encoded_size(
                         inner,
@@ -20526,6 +21050,11 @@ pub mod AccountConfig {
                 }
                 Self::getBillingWalletAddress(inner) => {
                     <getBillingWalletAddressCall as alloy_sol_types::SolCall>::abi_encoded_size(
+                        inner,
+                    )
+                }
+                Self::getPkpOwnerMaster(inner) => {
+                    <getPkpOwnerMasterCall as alloy_sol_types::SolCall>::abi_encoded_size(
                         inner,
                     )
                 }
@@ -20801,6 +21330,12 @@ pub mod AccountConfig {
                         out,
                     )
                 }
+                Self::backfillPkpOwners(inner) => {
+                    <backfillPkpOwnersCall as alloy_sol_types::SolCall>::abi_encode_raw(
+                        inner,
+                        out,
+                    )
+                }
                 Self::canExecuteAction(inner) => {
                     <canExecuteActionCall as alloy_sol_types::SolCall>::abi_encode_raw(
                         inner,
@@ -20863,6 +21398,12 @@ pub mod AccountConfig {
                 }
                 Self::getBillingWalletAddress(inner) => {
                     <getBillingWalletAddressCall as alloy_sol_types::SolCall>::abi_encode_raw(
+                        inner,
+                        out,
+                    )
+                }
+                Self::getPkpOwnerMaster(inner) => {
+                    <getPkpOwnerMasterCall as alloy_sol_types::SolCall>::abi_encode_raw(
                         inner,
                         out,
                     )
@@ -22001,6 +22542,8 @@ pub mod AccountConfig {
         #[allow(missing_docs)]
         PkpAddedToGroup(PkpAddedToGroup),
         #[allow(missing_docs)]
+        PkpOwnerBackfilled(PkpOwnerBackfilled),
+        #[allow(missing_docs)]
         PkpRemovedFromGroup(PkpRemovedFromGroup),
         #[allow(missing_docs)]
         PricingOperatorUpdated(PricingOperatorUpdated),
@@ -22093,6 +22636,11 @@ pub mod AccountConfig {
                 119u8, 55u8, 139u8, 233u8, 237u8, 223u8, 93u8,
             ],
             [
+                48u8, 175u8, 22u8, 239u8, 169u8, 46u8, 30u8, 49u8, 52u8, 19u8, 179u8, 181u8, 66u8,
+                170u8, 173u8, 96u8, 133u8, 3u8, 128u8, 120u8, 223u8, 195u8, 32u8, 211u8, 180u8,
+                67u8, 106u8, 206u8, 77u8, 72u8, 182u8, 91u8,
+            ],
+            [
                 51u8, 95u8, 90u8, 252u8, 131u8, 254u8, 140u8, 90u8, 1u8, 26u8, 150u8, 220u8, 57u8,
                 188u8, 206u8, 159u8, 185u8, 212u8, 111u8, 181u8, 152u8, 101u8, 2u8, 247u8, 4u8,
                 14u8, 118u8, 226u8, 139u8, 3u8, 97u8, 35u8,
@@ -22168,6 +22716,7 @@ pub mod AccountConfig {
             ::core::stringify!(WalletDerivationRegistered),
             ::core::stringify!(ConfigOperatorUpdated),
             ::core::stringify!(GroupRemoved),
+            ::core::stringify!(PkpOwnerBackfilled),
             ::core::stringify!(PricingUpdated),
             ::core::stringify!(GroupUpdated),
             ::core::stringify!(ApiKeyDebited),
@@ -22196,6 +22745,7 @@ pub mod AccountConfig {
             <WalletDerivationRegistered as alloy_sol_types::SolEvent>::SIGNATURE,
             <ConfigOperatorUpdated as alloy_sol_types::SolEvent>::SIGNATURE,
             <GroupRemoved as alloy_sol_types::SolEvent>::SIGNATURE,
+            <PkpOwnerBackfilled as alloy_sol_types::SolEvent>::SIGNATURE,
             <PricingUpdated as alloy_sol_types::SolEvent>::SIGNATURE,
             <GroupUpdated as alloy_sol_types::SolEvent>::SIGNATURE,
             <ApiKeyDebited as alloy_sol_types::SolEvent>::SIGNATURE,
@@ -22231,7 +22781,7 @@ pub mod AccountConfig {
     #[automatically_derived]
     impl alloy_sol_types::SolEventInterface for AccountConfigEvents {
         const NAME: &'static str = "AccountConfigEvents";
-        const COUNT: usize = 25usize;
+        const COUNT: usize = 26usize;
         fn decode_raw_log(
             topics: &[alloy_sol_types::Word],
             data: &[u8],
@@ -22360,6 +22910,15 @@ pub mod AccountConfig {
                             data,
                         )
                         .map(Self::PkpAddedToGroup)
+                }
+                Some(
+                    <PkpOwnerBackfilled as alloy_sol_types::SolEvent>::SIGNATURE_HASH,
+                ) => {
+                    <PkpOwnerBackfilled as alloy_sol_types::SolEvent>::decode_raw_log(
+                            topics,
+                            data,
+                        )
+                        .map(Self::PkpOwnerBackfilled)
                 }
                 Some(
                     <PkpRemovedFromGroup as alloy_sol_types::SolEvent>::SIGNATURE_HASH,
@@ -22502,6 +23061,9 @@ pub mod AccountConfig {
                 Self::PkpAddedToGroup(inner) => {
                     alloy_sol_types::private::IntoLogData::to_log_data(inner)
                 }
+                Self::PkpOwnerBackfilled(inner) => {
+                    alloy_sol_types::private::IntoLogData::to_log_data(inner)
+                }
                 Self::PkpRemovedFromGroup(inner) => {
                     alloy_sol_types::private::IntoLogData::to_log_data(inner)
                 }
@@ -22579,6 +23141,9 @@ pub mod AccountConfig {
                     alloy_sol_types::private::IntoLogData::into_log_data(inner)
                 }
                 Self::PkpAddedToGroup(inner) => {
+                    alloy_sol_types::private::IntoLogData::into_log_data(inner)
+                }
+                Self::PkpOwnerBackfilled(inner) => {
                     alloy_sol_types::private::IntoLogData::into_log_data(inner)
                 }
                 Self::PkpRemovedFromGroup(inner) => {
@@ -22817,6 +23382,19 @@ pub mod AccountConfig {
         pub fn api_payers(&self) -> alloy_contract::SolCallBuilder<&P, api_payersCall, N> {
             self.call_builder(&api_payersCall)
         }
+        //Creates a new call builder for the [`backfillPkpOwners`] function.
+        pub fn backfillPkpOwners(
+            &self,
+            pkpIds: alloy::sol_types::private::Vec<alloy::sol_types::private::Address>,
+            masterHashes: alloy::sol_types::private::Vec<
+                alloy::sol_types::private::primitives::aliases::U256,
+            >,
+        ) -> alloy_contract::SolCallBuilder<&P, backfillPkpOwnersCall, N> {
+            self.call_builder(&backfillPkpOwnersCall {
+                pkpIds,
+                masterHashes,
+            })
+        }
         //Creates a new call builder for the [`canExecuteAction`] function.
         pub fn canExecuteAction(
             &self,
@@ -22922,6 +23500,13 @@ pub mod AccountConfig {
             apiKeyHash: alloy::sol_types::private::primitives::aliases::U256,
         ) -> alloy_contract::SolCallBuilder<&P, getBillingWalletAddressCall, N> {
             self.call_builder(&getBillingWalletAddressCall { apiKeyHash })
+        }
+        //Creates a new call builder for the [`getPkpOwnerMaster`] function.
+        pub fn getPkpOwnerMaster(
+            &self,
+            pkpId: alloy::sol_types::private::Address,
+        ) -> alloy_contract::SolCallBuilder<&P, getPkpOwnerMasterCall, N> {
+            self.call_builder(&getPkpOwnerMasterCall { pkpId })
         }
         //Creates a new call builder for the [`getPricing`] function.
         pub fn getPricing(
@@ -23499,6 +24084,12 @@ pub mod AccountConfig {
         //Creates a new event filter for the [`PkpAddedToGroup`] event.
         pub fn PkpAddedToGroup_filter(&self) -> alloy_contract::Event<&P, PkpAddedToGroup, N> {
             self.event_filter::<PkpAddedToGroup>()
+        }
+        //Creates a new event filter for the [`PkpOwnerBackfilled`] event.
+        pub fn PkpOwnerBackfilled_filter(
+            &self,
+        ) -> alloy_contract::Event<&P, PkpOwnerBackfilled, N> {
+            self.event_filter::<PkpOwnerBackfilled>()
         }
         //Creates a new event filter for the [`PkpRemovedFromGroup`] event.
         pub fn PkpRemovedFromGroup_filter(
