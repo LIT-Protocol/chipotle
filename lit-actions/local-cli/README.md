@@ -87,10 +87,12 @@ the sandbox's) carries metadata only:
 Serverless semantics: the run ends when the startup script exits; a non-zero
 exit is propagated as this process's exit code.
 
-See `examples/shell` and `examples/python` — bundles adapted from the
-gvisor-server examples (they exercise a few more ops for demonstration). The
-bundle layout and `lit` calls are identical, so the same bundle shape runs
-in both places.
+See `examples/shell`, `examples/python`, and `examples/claude` — bundles
+adapted from the gvisor-server examples (they exercise a few more ops for
+demonstration). The bundle layout and `lit` calls are identical, so the same
+bundle shape runs in both places. `examples/claude` executes the official
+Claude Code installer script (`https://claude.ai/install.sh`) before running
+a headless prompt (needs `curl`/`jq`, network, and an `ANTHROPIC_API_KEY` js-param); run locally it installs onto your machine.
 
 ## Command surface
 
