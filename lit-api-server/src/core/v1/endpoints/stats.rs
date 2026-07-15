@@ -7,6 +7,8 @@
 
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::accounts::blockchain_cache;
 use crate::core::v1::health::LitActionsSocketPath;
@@ -29,6 +31,32 @@ pub const LIT_ACTIONS_GVISOR_SOCKET_ENV: &str = "LIT_ACTIONS_GVISOR_SOCKET";
 /// `docker-compose.phala.yml` and `architectureDocs/gvisor-server.md`.
 pub const LIT_ACTIONS_GVISOR_SOCKET: &str = "/tmp/lit_actions_gvisor.sock";
 
+/// Flushing moka's pending maintenance (`run_pending_tasks`) makes the counts
+/// exact, but this endpoint is public — a request flood must not be able to
+/// force cache maintenance in a tight loop. Flush at most once per this
+/// interval; between flushes the raw counts are served (they may lag moka's
+/// internal buffers slightly, which is fine for a 30s-cadence dashboard).
+const FLUSH_INTERVAL_SECS: u64 = 10;
+
+/// True when this request wins the right to flush cache maintenance —
+/// at most one caller per [`FLUSH_INTERVAL_SECS`] across all requests.
+fn claim_flush_slot() -> bool {
+    static LAST_FLUSH_SECS: AtomicU64 = AtomicU64::new(0);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    try_claim_flush_slot(&LAST_FLUSH_SECS, now)
+}
+
+fn try_claim_flush_slot(last_flush_secs: &AtomicU64, now: u64) -> bool {
+    let last = last_flush_secs.load(Ordering::Relaxed);
+    now.saturating_sub(last) >= FLUSH_INTERVAL_SECS
+        && last_flush_secs
+            .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok()
+}
+
 #[openapi(tag = "Configuration")]
 #[get("/get_system_stats")]
 pub(super) async fn get_system_stats(
@@ -36,11 +64,14 @@ pub(super) async fn get_system_stats(
     stripe_state: &State<Option<Arc<StripeState>>>,
     js_socket: &State<LitActionsSocketPath>,
 ) -> OpenApiResponse<SystemStatsResponse, ErrMessage> {
+    let flush = claim_flush_slot();
     let mut caches = Vec::new();
 
     // JS action-code cache: its weigher is source length, so weighted_size
     // is the bytes of cached Lit Action source.
-    ipfs_cache.run_pending_tasks().await;
+    if flush {
+        ipfs_cache.run_pending_tasks().await;
+    }
     caches.push(CacheStats {
         name: "action_code".to_string(),
         description: "JS Lit Action source cached by IPFS CID".to_string(),
@@ -54,6 +85,7 @@ pub(super) async fn get_system_stats(
                 "permission_execute_action",
                 "canExecuteAction results",
                 bc.execute_action_cache(),
+                flush,
             )
             .await,
         );
@@ -62,6 +94,7 @@ pub(super) async fn get_system_stats(
                 "permission_use_wallet",
                 "canUseWalletInAction results",
                 bc.use_wallet_cache(),
+                flush,
             )
             .await,
         );
@@ -70,6 +103,7 @@ pub(super) async fn get_system_stats(
                 "permission_execute_and_wallet",
                 "canExecuteActionAndUseWallet results",
                 bc.execute_and_wallet_cache(),
+                flush,
             )
             .await,
         );
@@ -78,6 +112,7 @@ pub(super) async fn get_system_stats(
                 "wallet_derivation",
                 "getWalletDerivation results",
                 bc.wallet_derivation_cache(),
+                flush,
             )
             .await,
         );
@@ -90,7 +125,7 @@ pub(super) async fn get_system_stats(
     }
 
     if let Some(stripe) = stripe_state.inner() {
-        for (name, entry_count) in stripe.cache_entry_counts().await {
+        for (name, entry_count) in stripe.cache_entry_counts(flush).await {
             let description = match name {
                 "billing_customer" => "Stripe customer IDs by billing wallet",
                 "billing_wallet" => "Billing wallet addresses by API key",
@@ -133,11 +168,18 @@ pub(super) async fn get_system_stats(
 }
 
 /// Entry-count stats for a cache without a byte weigher.
-async fn entry_stats<V>(name: &str, description: &str, cache: &Cache<String, V>) -> CacheStats
+async fn entry_stats<V>(
+    name: &str,
+    description: &str,
+    cache: &Cache<String, V>,
+    flush: bool,
+) -> CacheStats
 where
     V: Clone + Send + Sync + 'static,
 {
-    cache.run_pending_tasks().await;
+    if flush {
+        cache.run_pending_tasks().await;
+    }
     CacheStats {
         name: name.to_string(),
         description: description.to_string(),
@@ -190,6 +232,25 @@ mod tests {
     }
 
     #[test]
+    fn flush_slot_throttles_to_one_claim_per_interval() {
+        let last = AtomicU64::new(0);
+        // Fresh slot (epoch 0): first caller claims, second in the same
+        // second is throttled.
+        assert!(try_claim_flush_slot(&last, 1_000));
+        assert!(!try_claim_flush_slot(&last, 1_000));
+        // Still inside the interval: throttled.
+        assert!(!try_claim_flush_slot(
+            &last,
+            1_000 + FLUSH_INTERVAL_SECS - 1
+        ));
+        // Interval elapsed: claimable again, exactly once.
+        assert!(try_claim_flush_slot(&last, 1_000 + FLUSH_INTERVAL_SECS));
+        assert!(!try_claim_flush_slot(&last, 1_000 + FLUSH_INTERVAL_SECS));
+        // Clock skew backwards never claims (saturating_sub).
+        assert!(!try_claim_flush_slot(&last, 500));
+    }
+
+    #[test]
     fn get_system_stats_reports_caches_and_runners() {
         let ipfs_cache: Cache<String, Arc<String>> = Cache::builder()
             .weigher(|_k, v: &Arc<String>| v.len().try_into().unwrap_or(u32::MAX))
@@ -197,12 +258,15 @@ mod tests {
             .build();
         // moka's future-cache insert is async; the blocking rocket Client
         // below brings its own runtime, so seed the cache in a scratch one.
+        // Flush the pending insert here so the asserted counts are exact even
+        // when the endpoint's throttled flush slot was consumed elsewhere.
         rocket::tokio::runtime::Runtime::new()
             .expect("runtime")
             .block_on(async {
                 ipfs_cache
                     .insert("QmTest".to_string(), Arc::new("code".to_string()))
                     .await;
+                ipfs_cache.run_pending_tasks().await;
             });
 
         let rocket = rocket::build()

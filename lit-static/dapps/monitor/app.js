@@ -982,20 +982,31 @@ function renderRuntimes(health, stats) {
 function renderMemory(mem) {
   const body = el('memory-body');
   if (!body) return;
-  if (!mem || mem.total_kb == null) {
+  // Fields are independently nullable — render whatever procfs provided
+  // rather than blanking the card when only /proc/meminfo is missing.
+  if (!mem || (mem.total_kb == null && mem.process_rss_kb == null)) {
     body.innerHTML = '<span class="sys-empty">Memory figures unavailable (no procfs on this node).</span>';
     return;
   }
-  const pct = mem.used_kb != null ? (Number(mem.used_kb) / Number(mem.total_kb)) * 100 : null;
-  const cls = pct == null ? '' : pct >= 85 ? 'critical' : pct >= 70 ? 'warning' : '';
-  body.innerHTML =
-    `<div class="sys-row" style="border-bottom:none;padding-bottom:0">` +
-      `<span class="sys-label">Used</span>` +
-      `<span class="sys-value">${fmtKb(mem.used_kb)} / ${fmtKb(mem.total_kb)}${pct != null ? ` (${pct.toFixed(1)}%)` : ''}</span>` +
-    `</div>` +
-    `<div class="gauge"><div class="gauge-fill ${cls}" style="width:${pct == null ? 0 : Math.min(100, pct).toFixed(1)}%"></div></div>` +
-    `<div class="sys-row"><span class="sys-label">Available</span><span class="sys-value">${fmtKb(mem.available_kb)}</span></div>` +
-    `<div class="sys-row"><span class="sys-label">API server RSS</span><span class="sys-value">${fmtKb(mem.process_rss_kb)}</span></div>`;
+  const parts = [];
+  if (mem.total_kb != null) {
+    const pct = mem.used_kb != null ? (Number(mem.used_kb) / Number(mem.total_kb)) * 100 : null;
+    const cls = pct == null ? '' : pct >= 85 ? 'critical' : pct >= 70 ? 'warning' : '';
+    parts.push(
+      `<div class="sys-row" style="border-bottom:none;padding-bottom:0">` +
+        `<span class="sys-label">Used</span>` +
+        `<span class="sys-value">${fmtKb(mem.used_kb)} / ${fmtKb(mem.total_kb)}${pct != null ? ` (${pct.toFixed(1)}%)` : ''}</span>` +
+      `</div>`,
+      `<div class="gauge"><div class="gauge-fill ${cls}" style="width:${pct == null ? 0 : Math.min(100, pct).toFixed(1)}%"></div></div>`,
+      `<div class="sys-row"><span class="sys-label">Available</span><span class="sys-value">${fmtKb(mem.available_kb)}</span></div>`
+    );
+  } else {
+    parts.push('<div class="sys-empty" style="margin-bottom:0.35rem">CVM totals unavailable (no /proc/meminfo on this node).</div>');
+  }
+  if (mem.process_rss_kb != null) {
+    parts.push(`<div class="sys-row"><span class="sys-label">API server RSS</span><span class="sys-value">${fmtKb(mem.process_rss_kb)}</span></div>`);
+  }
+  body.innerHTML = parts.join('');
 }
 
 function renderCaches(caches) {
@@ -1189,6 +1200,7 @@ async function refreshBalances() {
       fetchContractValues(),
       fetchNodeConfigValues(),
       refreshSystemDashboard(serverUrl),
+      fetchSupportedLanguages(serverUrl),
     ]);
     updateHealthSummary(); // pick up admin reserve after fetchContractValues
   } finally {

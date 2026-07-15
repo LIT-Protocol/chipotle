@@ -514,12 +514,15 @@ impl StripeState {
     }
 
     /// Entry counts of the billing caches, for `/get_system_stats`.
-    /// `run_pending_tasks` flushes moka's internal buffers first so the
-    /// counts reflect completed inserts/evictions rather than lagging them.
-    pub async fn cache_entry_counts(&self) -> [(&'static str, u64); 3] {
-        self.customer_cache.run_pending_tasks().await;
-        self.wallet_cache.run_pending_tasks().await;
-        self.balance_cache.run_pending_tasks().await;
+    /// With `flush`, moka's internal buffers are flushed first so the counts
+    /// reflect completed inserts/evictions rather than lagging them — the
+    /// caller throttles flushes because the endpoint is public.
+    pub async fn cache_entry_counts(&self, flush: bool) -> [(&'static str, u64); 3] {
+        if flush {
+            self.customer_cache.run_pending_tasks().await;
+            self.wallet_cache.run_pending_tasks().await;
+            self.balance_cache.run_pending_tasks().await;
+        }
         [
             ("billing_customer", self.customer_cache.entry_count()),
             ("billing_wallet", self.wallet_cache.entry_count()),
