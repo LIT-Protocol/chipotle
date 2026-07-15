@@ -22,8 +22,10 @@ use tokio::process::Command;
 use tracing::warn;
 
 use super::{
-    ENV_OP_SOCK, ExecSpec, GUEST_ACTION_DIR, GUEST_SOCK_DIR, OP_SOCK_FILE, SandboxRuntime,
+    ENV_OP_SOCK, ExecSpec, GUEST_ACTION_DIR, GUEST_SOCK_DIR, GUEST_STARTUP_DIR, OP_SOCK_FILE,
+    STARTUP_SHELL, SandboxRuntime,
 };
+use crate::bundle::STARTUP_SCRIPT_FILE;
 
 #[derive(Debug, Clone)]
 pub struct RunscConfig {
@@ -73,8 +75,6 @@ impl SandboxRuntime for RunscRuntime {
     }
 
     fn command(&self, spec: &ExecSpec) -> Result<Command> {
-        ensure!(!spec.argv.is_empty(), "empty entrypoint argv");
-
         let oci_dir = spec.exec_dir.join("oci");
         fs::create_dir_all(&oci_dir).context("failed to create OCI bundle dir")?;
         fs::write(
@@ -135,9 +135,12 @@ impl SandboxRuntime for RunscRuntime {
 
 /// Minimal OCI runtime spec for one execution.
 ///
-/// The action bundle is bind-mounted read-only at /action (the shared cache
-/// copy must never be written); writable scratch space is /tmp, a per-exec
-/// size-capped tmpfs. Root writes land in the `--overlay2` memory upper.
+/// The process args are fixed: the sandbox only ever executes
+/// `bash /startup/startup.sh` — the per-exec startup script the supervisor
+/// materialized, bind-mounted read-only at /startup. The action bundle is
+/// bind-mounted read-only at /action (the shared cache copy must never be
+/// written); writable scratch space is /tmp, a per-exec size-capped tmpfs.
+/// Root writes land in the `--overlay2` memory upper.
 fn oci_spec(cfg: &RunscConfig, spec: &ExecSpec) -> serde_json::Value {
     let mut env = vec![
         "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin".to_string(),
@@ -155,7 +158,7 @@ fn oci_spec(cfg: &RunscConfig, spec: &ExecSpec) -> serde_json::Value {
             // Root inside the sandbox: the gVisor Sentry (plus the CVM) is
             // the isolation boundary, and the base image needn't carry users.
             "user": { "uid": 0, "gid": 0 },
-            "args": spec.argv,
+            "args": [STARTUP_SHELL, format!("{GUEST_STARTUP_DIR}/{STARTUP_SCRIPT_FILE}")],
             "cwd": GUEST_ACTION_DIR,
             "env": env,
             "rlimits": [
@@ -183,6 +186,12 @@ fn oci_spec(cfg: &RunscConfig, spec: &ExecSpec) -> serde_json::Value {
                 "destination": GUEST_ACTION_DIR,
                 "type": "bind",
                 "source": spec.bundle_dir,
+                "options": ["bind", "ro"]
+            },
+            {
+                "destination": GUEST_STARTUP_DIR,
+                "type": "bind",
+                "source": spec.startup_dir,
                 "options": ["bind", "ro"]
             },
             {

@@ -83,6 +83,7 @@ impl Client {
             let execution = Box::pin(self.execute_js_inner(
                 opts.code.clone(),
                 opts.globals.clone(),
+                opts.startup_script.clone(),
                 // &auth_context,
                 0,
             ));
@@ -164,6 +165,7 @@ impl Client {
         &mut self,
         code: String,
         globals: Option<serde_json::Value>,
+        startup_script: Option<String>,
         // auth_context: &models::AuthContext,
         call_depth: u32,
     ) -> Result<ExecutionState> {
@@ -173,21 +175,28 @@ impl Client {
             .transpose()
             .context("failed to serialize js_params")?;
         let js_params_len = js_params_bytes.as_ref().map_or(0, Vec::len);
-        let combined_len = code.len() + js_params_len;
+        let startup_script_len = startup_script.as_ref().map_or(0, String::len);
+        let combined_len = code.len() + js_params_len + startup_script_len;
         if combined_len > self.max_code_length as usize {
             bail!(
-                "Combined code + js_params payload is too large ({} bytes: {} code + {} js_params). Max combined size is {} bytes.",
+                "Combined code + js_params + startup_script payload is too large ({} bytes: {} code + {} js_params + {} startup_script). Max combined size is {} bytes.",
                 combined_len,
                 code.len(),
                 js_params_len,
+                startup_script_len,
                 self.max_code_length,
             );
         }
 
         let (outbound_tx, outbound_rx) = flume::bounded(0);
 
-        // let socket_path = self.socket_path();
-        let socket_path = PathBuf::from("/tmp/lit_actions.sock");
+        // Route to whichever runner this client was built for: the binary
+        // (gVisor) route sets `socket_path` explicitly; the JS route leaves it
+        // unset and falls back to the JS runner's socket.
+        let socket_path = self
+            .socket_path
+            .clone()
+            .unwrap_or_else(|| PathBuf::from(crate::core::v1::health::LIT_ACTIONS_SOCKET));
         tracing::debug!("execution::grpc_channel: connecting");
         let channel = self
             .client_grpc_channels
@@ -229,6 +238,7 @@ impl Client {
                     } else {
                         Some(self.ipfs_id.clone())
                     },
+                    startup_script,
                 }
                 .into(),
             )
