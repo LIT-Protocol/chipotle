@@ -1772,6 +1772,33 @@
           }
         }
       }
+    },
+    "/get_system_stats": {
+      "get": {
+        "tags": [
+          "Configuration"
+        ],
+        "operationId": "get_system_stats",
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SystemStatsResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -2862,6 +2889,111 @@
               "maxItems": 2,
               "minItems": 2
             }
+          }
+        }
+      },
+      "SystemStatsResponse": {
+        "description": "Returned by `/get_system_stats` — CVM memory usage and in-process cache statistics powering the monitor dapp's system dashboard.",
+        "type": "object",
+        "required": [
+          "caches",
+          "memory",
+          "runners"
+        ],
+        "properties": {
+          "memory": {
+            "$ref": "#/components/schemas/MemoryStats"
+          },
+          "caches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CacheStats"
+            }
+          },
+          "runners": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunnerInfo"
+            }
+          }
+        }
+      },
+      "MemoryStats": {
+        "description": "CVM-level memory figures from `/proc/meminfo` plus this process's resident set from `/proc/self/status`. Fields are `None` on platforms without procfs (e.g. local macOS development).",
+        "type": "object",
+        "properties": {
+          "total_kb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0,
+            "nullable": true
+          },
+          "available_kb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0,
+            "nullable": true
+          },
+          "used_kb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0,
+            "nullable": true
+          },
+          "process_rss_kb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0,
+            "nullable": true
+          }
+        }
+      },
+      "CacheStats": {
+        "description": "Entry statistics for one in-process cache.",
+        "type": "object",
+        "required": [
+          "description",
+          "entry_count",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "entry_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "approx_bytes": {
+            "description": "Approximate bytes held, for caches built with a byte weigher. `None` when the cache only counts entries.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0,
+            "nullable": true
+          }
+        }
+      },
+      "RunnerInfo": {
+        "description": "Presence of a Lit Action runner's Unix socket. `socket_present` means the runner container has been deployed and created its socket — it is not a liveness probe (`/health` covers reachability).",
+        "type": "object",
+        "required": [
+          "name",
+          "socket_path",
+          "socket_present"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "socket_path": {
+            "type": "string"
+          },
+          "socket_present": {
+            "type": "boolean"
           }
         }
       }

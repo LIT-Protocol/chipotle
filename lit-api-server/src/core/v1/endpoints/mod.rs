@@ -2,11 +2,13 @@ mod account_management;
 mod actions;
 mod billing;
 mod configuration;
+mod stats;
 
 use self::account_management::*;
 use self::actions::*;
 use self::billing::*;
 use self::configuration::*;
+use self::stats::*;
 
 use rocket::Route;
 use rocket_okapi::okapi::openapi3::OpenApi;
@@ -56,5 +58,6 @@ pub fn routes_with_spec() -> (Vec<Route>, OpenApi) {
         billing_create_payment_intent,
         billing_confirm_payment,
         get_version,
+        get_system_stats,
     ]
 }
