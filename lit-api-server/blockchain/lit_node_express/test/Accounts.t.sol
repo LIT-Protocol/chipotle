@@ -463,6 +463,72 @@ contract AccountsTest is BaseTest {
         assertEq(views_.getWalletDerivation(legacyHash, legacyPkp), 7);
     }
 
+    /// @dev Storage slot of `pkpIdToOwnerMaster[pkpId]`. The mapping is the last
+    ///      field of AccountConfigStorage (field index 18, counting the two
+    ///      EnumerableSet fields as 2 slots each) at base slot
+    ///      keccak256("com.litprotocol.accountconfig.storage"). Used to plant the
+    ///      pre-fix on-chain state that the public API can no longer create.
+    function _pkpOwnerSlot(address pkpId) internal pure returns (bytes32) {
+        bytes32 base = keccak256("com.litprotocol.accountconfig.storage");
+        bytes32 mapSlot = bytes32(uint256(base) + 18);
+        return keccak256(abi.encode(pkpId, mapSlot));
+    }
+
+    function test_getWalletDerivation_preExistingHijackFailsClosed() public {
+        // Register under the attacker legitimately: sets owner=attacker AND the
+        // attacker's account-local pkpData entry (this is the stale row a pre-fix
+        // hijack would have left behind).
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("attacker", "attacker");
+        uint256 attackerHash = apiKeyHashOf(stranger);
+        address pkpAddr = address(0xBEEF);
+        vm.prank(stranger);
+        writes.registerWalletDerivation(attackerHash, pkpAddr, 42, "a", "a");
+
+        // Sanity: verify our slot math matches the contract's own getter before
+        // we rely on vm.store — guards against a silent storage-layout drift.
+        assertEq(
+            uint256(vm.load(address(views_), _pkpOwnerSlot(pkpAddr))),
+            attackerHash
+        );
+
+        // Simulate the post-backfill truth: the VICTIM was the real first owner.
+        uint256 victimHash = apiKeyHashOf(user);
+        vm.store(address(views_), _pkpOwnerSlot(pkpAddr), bytes32(victimHash));
+        assertEq(views_.getPkpOwnerMaster(pkpAddr), victimHash);
+
+        // The node's signing path calls getWalletDerivation with the caller's
+        // account hash. The attacker still has a local entry, but the view now
+        // fails closed because the wallet is owned by another account — this is
+        // what neutralizes a hijack that already happened before the upgrade.
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "PKP owned by another account"
+            )
+        );
+        views_.getWalletDerivation(attackerHash, pkpAddr);
+    }
+
+    function test_getWalletDerivation_legacyUnboundStillReadable() public {
+        // A pre-migration wallet has a local entry but no owner binding yet
+        // (owner==0). It must keep resolving so signing doesn't break in the
+        // window between the facet upgrade and the backfill run.
+        vm.prank(stranger);
+        writes.newChainSecuredAccount("u", "u");
+        uint256 hash = apiKeyHashOf(stranger);
+        address pkpAddr = address(0xBEEF);
+        vm.prank(stranger);
+        writes.registerWalletDerivation(hash, pkpAddr, 42, "a", "a");
+
+        // Clear the binding to reproduce the not-yet-backfilled legacy state.
+        vm.store(address(views_), _pkpOwnerSlot(pkpAddr), bytes32(uint256(0)));
+        assertEq(views_.getPkpOwnerMaster(pkpAddr), 0);
+
+        // owner==0 falls through: the wallet still resolves for its account.
+        assertEq(views_.getWalletDerivation(hash, pkpAddr), 42);
+    }
+
     function test_removeWalletDerivation_unregisteredReverts() public {
         vm.prank(user);
         writes.newChainSecuredAccount("alice", "primary");

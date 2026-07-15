@@ -34,12 +34,22 @@ task(
   .addOptionalParam("fromBlock", "Block to start scanning events from", "0")
   .addOptionalParam("chunkSize", "getLogs block range per request", "10000")
   .addOptionalParam("batchSize", "pkpIds per backfill transaction", "200")
+  .addOptionalParam(
+    "confirmations",
+    "Blocks to stay behind chain head to avoid reorgs (0 = use the 'finalized' tag)",
+    "0"
+  )
   .addFlag("execute", "Send the backfill transactions (default is dry-run)")
+  .addFlag(
+    "allowConflicts",
+    "Proceed even if pkpIds were registered by multiple accounts (pre-fix hijacks). Off by default: conflicts are a hard stop under --execute."
+  )
   .setAction(async (taskArgs, hre) => {
     const { diamond: diamondAddress } = taskArgs;
     const fromBlock = parseInt(taskArgs.fromBlock, 10);
     const chunkSize = parseInt(taskArgs.chunkSize, 10);
     const batchSize = parseInt(taskArgs.batchSize, 10);
+    const confirmations = parseInt(taskArgs.confirmations, 10);
 
     const rpcUrl =
       (hre.network.config as { url?: string }).url || "https://mainnet.base.org";
@@ -52,60 +62,92 @@ task(
     // 1. Scan all WalletDerivationRegistered events. The event's first indexed
     //    arg is the master apiKeyHash (WritesFacet emits masterHash, never a
     //    usage-key hash), so it is exactly the value pkpIdToOwnerMaster needs.
-    const latestBlock = await provider.getBlockNumber();
-    console.log(`Scanning events from block ${fromBlock} to ${latestBlock}...`);
+    //    Scan to a finalized/confirmed head, not `latest`: a reorg that reranks
+    //    the first registrant would otherwise bind the wrong owner. The scanned
+    //    upper bound is fixed up front so the whole run reasons over one range.
+    let latestBlock: number;
+    if (confirmations > 0) {
+      latestBlock = (await provider.getBlockNumber()) - confirmations;
+    } else {
+      const finalized = await provider.getBlock("finalized");
+      if (!finalized) {
+        throw new Error(
+          "Provider does not support the 'finalized' block tag; pass --confirmations N instead"
+        );
+      }
+      latestBlock = finalized.number;
+    }
+    if (latestBlock < fromBlock) {
+      console.log("No finalized blocks in range yet. Nothing to do.");
+      return;
+    }
+    console.log(
+      `Scanning events from block ${fromBlock} to ${latestBlock} (finalized head)...`
+    );
 
     const filter = readOnly.filters.WalletDerivationRegistered();
-    const firstByPkp = new Map<string, FirstRegistration>();
-    let totalEvents = 0;
-
+    const allLogs: ethers.EventLog[] = [];
     for (let start = fromBlock; start <= latestBlock; start += chunkSize) {
       const end = Math.min(start + chunkSize - 1, latestBlock);
       const logs = await readOnly.queryFilter(filter, start, end);
-      totalEvents += logs.length;
-      // queryFilter returns logs in chain order (block, then log index), so the
-      // first occurrence per pkpId within and across chunks is the first ever.
-      for (const log of logs) {
-        const parsed = log as ethers.EventLog;
-        const masterHash = parsed.args[0] as bigint;
-        const pkpId = (parsed.args[1] as string).toLowerCase();
-        const existing = firstByPkp.get(pkpId);
-        if (!existing) {
-          firstByPkp.set(pkpId, {
-            pkpId: parsed.args[1] as string,
-            masterHash,
-            blockNumber: log.blockNumber,
-            txHash: log.transactionHash,
-            conflicts: [],
-          });
-        } else if (
-          existing.masterHash !== masterHash &&
-          !existing.conflicts.includes(masterHash)
-        ) {
-          existing.conflicts.push(masterHash);
-        }
-      }
+      for (const log of logs) allLogs.push(log as ethers.EventLog);
       if (end < latestBlock) {
         process.stdout.write(
-          `\r  scanned up to block ${end} (${totalEvents} events, ${firstByPkp.size} wallets)`
+          `\r  scanned up to block ${end} (${allLogs.length} events)`
         );
       }
     }
-    console.log(
-      `\nFound ${totalEvents} registration events across ${firstByPkp.size} distinct pkpIds.`
+
+    // Sort explicitly by (blockNumber, transactionIndex, logIndex) rather than
+    // trusting provider ordering — "first registration wins" is only correct if
+    // we actually process logs in chain order, and getLogs ordering is not
+    // guaranteed across or within chunks.
+    allLogs.sort(
+      (a, b) =>
+        a.blockNumber - b.blockNumber ||
+        a.transactionIndex - b.transactionIndex ||
+        a.index - b.index
     );
 
-    // 2. Surface pkpIds registered by more than one master account. First
-    //    registration wins (matching the contract rule), but each conflict is a
-    //    wallet another account also claimed pre-fix — review them manually,
-    //    since the later registrant could sign with the first owner's key
-    //    until this backfill lands.
+    const firstByPkp = new Map<string, FirstRegistration>();
+    for (const log of allLogs) {
+      const masterHash = log.args[0] as bigint;
+      const pkpId = (log.args[1] as string).toLowerCase();
+      const existing = firstByPkp.get(pkpId);
+      if (!existing) {
+        firstByPkp.set(pkpId, {
+          pkpId: log.args[1] as string,
+          masterHash,
+          blockNumber: log.blockNumber,
+          txHash: log.transactionHash,
+          conflicts: [],
+        });
+      } else if (
+        existing.masterHash !== masterHash &&
+        !existing.conflicts.includes(masterHash)
+      ) {
+        existing.conflicts.push(masterHash);
+      }
+    }
+    console.log(
+      `\nFound ${allLogs.length} registration events across ${firstByPkp.size} distinct pkpIds.`
+    );
+
+    // 2. Surface pkpIds registered by more than one master account. Each is a
+    //    wallet another account also claimed pre-fix — a probable hijack. The
+    //    backfill binds the FIRST registrant, and the hardened getWalletDerivation
+    //    then refuses to serve the later registrant's stale local entry. But a
+    //    conflict still means: (a) verify the first registrant is genuinely the
+    //    rightful owner (an attacker who registered BEFORE the victim would be
+    //    bound as owner here), and (b) the later account's pkpData row should be
+    //    removed. So conflicts are a HARD STOP under --execute unless the
+    //    operator has reviewed them and passes --allow-conflicts.
     const conflicted = [...firstByPkp.values()].filter(
       (r) => r.conflicts.length > 0
     );
     if (conflicted.length > 0) {
       console.log(
-        `\n⚠️  ${conflicted.length} pkpId(s) were registered by MULTIPLE master accounts (possible pre-fix hijack):`
+        `\n⚠️  ${conflicted.length} pkpId(s) were registered by MULTIPLE master accounts (probable pre-fix hijack):`
       );
       for (const r of conflicted) {
         console.log(
@@ -116,8 +158,13 @@ task(
         }
       }
       console.log(
-        "  First registration wins in this backfill; investigate the later registrants."
+        "  Backfill binds the FIRST registrant; the later registrant's stale pkpData row must be removed separately."
       );
+      if (taskArgs.execute && !taskArgs.allowConflicts) {
+        throw new Error(
+          `Refusing to --execute with ${conflicted.length} unresolved conflict(s). Review them, remediate the later registrants, then re-run with --allow-conflicts.`
+        );
+      }
     }
 
     // 3. Drop pkpIds that are already bound (post-fix registrations, or a
