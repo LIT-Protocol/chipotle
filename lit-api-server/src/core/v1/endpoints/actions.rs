@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::accounts::chain_config::ChainConfig;
 use crate::actions::grpc::GrpcClientPool;
 use crate::core::core_features;
+use crate::core::spending_rules::SpendingRulesState;
 use crate::core::v1::guards::billing::BilledLitActionApiKey;
 use crate::core::v1::guards::cpu_overload::CpuAvailable;
 use crate::core::v1::health::LitActionsGvisorSocketPath;
@@ -31,6 +32,7 @@ pub(super) async fn lit_action(
     http_client: &State<reqwest::Client>,
     chain_config: &State<Arc<ChainConfig>>,
     stripe_state: &State<Option<Arc<StripeState>>>,
+    spending: &State<SpendingRulesState>,
     lit_action_request: Json<LitActionRequest>,
 ) -> OpenApiResponse<LitActionResponse, ErrMessage> {
     OpenApiResponse {
@@ -43,6 +45,7 @@ pub(super) async fn lit_action(
                 http_client.inner(),
                 chain_config.inner().clone(),
                 stripe_state.inner().clone(),
+                spending.inner(),
                 lit_action_request,
             )
             .await,

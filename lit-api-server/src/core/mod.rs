@@ -3,6 +3,7 @@ use crate::utils::{parse_with_hash::pkp_id_to_h160, u256_to_derviation_path};
 pub mod account_management;
 pub mod core_features;
 pub mod eip712;
+pub mod spending_rules;
 pub mod v1;
 
 pub async fn pkp_id_to_derviation_path(api_key: &str, pkp_id: &str) -> Result<String, String> {

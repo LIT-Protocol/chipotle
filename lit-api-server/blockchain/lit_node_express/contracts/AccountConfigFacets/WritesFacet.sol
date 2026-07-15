@@ -25,6 +25,11 @@ contract WritesFacet {
         uint256 indexed accountApiKeyHash,
         uint256 indexed usageApiKeyHash
     );
+    event SpendingRulesFlagSet(
+        uint256 indexed accountApiKeyHash,
+        uint256 indexed usageApiKeyHash,
+        bool hasSpendingRules
+    );
     event GroupAdded(uint256 indexed apiKeyHash, uint256 indexed groupId);
     event GroupUpdated(
         uint256 indexed accountApiKeyHash,
@@ -355,6 +360,28 @@ contract WritesFacet {
         );
         s.allApiKeyHashesToMaster[usageApiKeyHash] = masterAccountApiKeyHash;
         emit UsageApiKeySet(masterAccountApiKeyHash, usageApiKeyHash);
+    }
+
+    /// @notice Set the off-chain spending-rules flag for a usage API key.
+    /// @dev When true, the gateway enforces this key's off-chain spending rules
+    ///      (rolling spend cap, rate/concurrency limits, origin allowlist); when
+    ///      false it skips all of that on the hot path. Same account-access
+    ///      control as setUsageApiKey. The detailed rules live off-chain (see
+    ///      lit-payments); this only flips the gate. See
+    ///      plans/chipotle-lambda-parity.md.
+    function setSpendingRulesFlag(
+        uint256 accountApiKeyHash,
+        uint256 usageApiKeyHash,
+        bool hasSpendingRules
+    ) public {
+        SecurityLib.revertIfNoAccountAccess(accountApiKeyHash, msg.sender);
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        s.usageKeyHasSpendingRules[usageApiKeyHash] = hasSpendingRules;
+        emit SpendingRulesFlagSet(
+            accountApiKeyHash,
+            usageApiKeyHash,
+            hasSpendingRules
+        );
     }
 
     function addGroup(

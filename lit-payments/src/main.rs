@@ -11,6 +11,7 @@ use lit_payments::auto_topup::webhook::mutex::PerCustomerMutex;
 use lit_payments::billing as billing_routes;
 use lit_payments::portal::routes as portal_routes;
 use lit_payments::rate;
+use lit_payments::spending::routes as spending_routes;
 use lit_payments::{auth, chain, config, db, mail};
 use rocket::fs::{FileServer, NamedFile};
 use rocket::http::Status;
@@ -111,6 +112,12 @@ async fn rocket() -> _ {
                 chain::get_payment_config,
                 chain::claim_payment,
                 rate::override_rate,
+                spending_routes::put_rules,
+                spending_routes::get_rules,
+                spending_routes::list_rules,
+                spending_routes::delete_rules,
+                spending_routes::internal_get_rules,
+                spending_routes::internal_charge,
                 billing_routes::setup_intent::setup_intent,
                 billing_routes::auto_topup_config::get_auto_topup_config,
                 billing_routes::auto_topup_config::put_auto_topup_config,

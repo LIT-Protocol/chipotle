@@ -15,3 +15,4 @@ pub mod internal;
 pub mod mail;
 pub mod portal;
 pub mod rate;
+pub mod spending;

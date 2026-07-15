@@ -489,6 +489,7 @@ fn build_rocket(
         .manage(chain_config)
         .manage(cpu_monitor)
         .manage(stripe_state)
+        .manage(core::spending_rules::SpendingRulesState::from_env())
         .manage(internal_config)
         .manage(auth_resolver)
         .manage(supported_languages)

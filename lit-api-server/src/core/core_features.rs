@@ -1,5 +1,6 @@
-use crate::accounts::can_execute_action;
+use crate::accounts::can_execute_action_with_spending_rules;
 use crate::accounts::chain_config::{ChainConfig, ConfigKeys};
+use crate::core::spending_rules::SpendingRulesState;
 use crate::actions::client::ClientBuilder;
 use crate::actions::client::models::DenoExecutionEnv;
 use crate::actions::client::{
@@ -35,6 +36,7 @@ pub async fn lit_action(
     http_client: &reqwest::Client,
     chain_config: Arc<ChainConfig>,
     stripe_state: Option<Arc<StripeState>>,
+    spending: &SpendingRulesState,
     lit_action_request: Json<LitActionRequest>,
 ) -> Result<LitActionResponse, ApiStatus> {
     let request_id = request_span.request_id.clone();
@@ -52,7 +54,10 @@ pub async fn lit_action(
     )
     .await?;
     let cid_hash = ipfs_cid_to_u256(&derived_ipfs_id)?;
-    let can_execute = can_execute_action(api_key, cid_hash)
+    // Single multicall returns the execute permission AND the zero-latency
+    // spending-rules gate. has_spending_rules is false for almost every key, so
+    // the spending-rules path below is skipped entirely for them.
+    let (can_execute, has_spending_rules) = can_execute_action_with_spending_rules(api_key, cid_hash)
         .instrument(tracing::debug_span!("lit_action::can_execute_action"))
         .await?;
     if !can_execute {
@@ -61,6 +66,11 @@ pub async fn lit_action(
         );
         return Err(ApiStatus::forbidden(msg));
     }
+
+    // Enforce per-key spending rules (rolling cap / rate / concurrency) before
+    // execution. Inert unless the key is flagged AND enforcement is configured.
+    // The returned admission holds any concurrency permit until end of scope.
+    let admission = spending.admit(api_key, has_spending_rules).await?;
 
     // Cache after authorization so unauthorized requests cannot pollute the cache.
     ipfs_cache
@@ -99,6 +109,7 @@ pub async fn lit_action(
         action_ipfs_id: Some(derived_ipfs_id),
     };
 
+    let exec_start = std::time::Instant::now();
     let result = match client
         .execute_js(execution_options)
         .instrument(tracing::debug_span!("lit_action::execute_js"))
@@ -107,6 +118,11 @@ pub async fn lit_action(
         Ok(result) => result,
         Err(e) => return Err(anyhow::anyhow!("Actions failed with : {:?}", e).into()),
     };
+
+    // Record execution against the key's rolling spend counter (no-op unless the
+    // key has a spend cap). Off the response path — the local update is in-memory
+    // and the lit-payments write is fire-and-forget.
+    admission.record_seconds(exec_start.elapsed().as_secs_f64().ceil() as u64);
 
     let response = match serde_json::from_str::<serde_json::Value>(&result.response) {
         Ok(response) => response,

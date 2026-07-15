@@ -405,6 +405,29 @@ contract ViewsFacet {
         return apiKeyCanExecuteForAnyGroup(apiKeyHash, groupIds);
     }
 
+    /// @notice Whether a usage API key has off-chain spending rules the gateway
+    ///         must enforce. False for every key that never set it, so the
+    ///         gateway's hot path stays free for keys without rules.
+    function getSpendingRulesFlag(
+        uint256 apiKeyHash
+    ) public view returns (bool) {
+        return AppStorage.getStorage().usageKeyHasSpendingRules[apiKeyHash];
+    }
+
+    /// @notice Combined hot-path check: returns (canExecute, hasSpendingRules)
+    ///         in a single call so the gateway reads both in one RPC and pays no
+    ///         extra round trip for the spending-rules gate.
+    ///         See plans/chipotle-lambda-parity.md.
+    function canExecuteActionWithSpendingRules(
+        uint256 apiKeyHash,
+        uint256 cidHash
+    ) public view returns (bool canExecute, bool hasSpendingRules) {
+        canExecute = canExecuteAction(apiKeyHash, cidHash);
+        hasSpendingRules = AppStorage.getStorage().usageKeyHasSpendingRules[
+            apiKeyHash
+        ];
+    }
+
     function canUseWalletInAction(
         uint256 apiKeyHash,
         uint256 cidHash,

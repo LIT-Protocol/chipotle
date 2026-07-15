@@ -47,6 +47,11 @@ pub struct Config {
     /// admin portal and rate poller run but LITKEY browser payments stay
     /// disabled.
     pub litkey_chain: Option<chain::ChainConfig>,
+    /// Shared bearer token authenticating the gateway's internal calls to the
+    /// spending-rules endpoints (`/internal/*`). If unset, those endpoints are
+    /// disabled (503) — they are never left open. See
+    /// `crate::spending::service_auth`.
+    pub internal_service_token: Option<String>,
     /// Base URL of `lit-api-server`, used for the auto-top-up cache
     /// invalidation callback after a successful credit. e.g.,
     /// `https://api.litprotocol.com`. This is the ONLY remaining
@@ -206,6 +211,7 @@ impl Config {
             max_daily_per_operator_cents: optional_i64("MAX_DAILY_PER_OPERATOR_CENTS", 10_000)?,
             litkey_discount_basis_points: parse_discount_basis_points()?,
             litkey_chain: parse_litkey_chain_config()?,
+            internal_service_token: optional_trimmed("INTERNAL_SERVICE_TOKEN"),
             lit_api_server_base_url: required("LIT_API_SERVER_BASE_URL")?
                 .trim_end_matches('/')
                 .to_string(),
