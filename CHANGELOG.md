@@ -7,6 +7,28 @@ Release verification (image digests, attestation, governance) is covered in the
 
 ## Unreleased
 
+Docs for unreleased features are parked in `docs-reserve/` (see its README for
+restore steps) so developer.litprotocol.com — which publishes from `main` —
+doesn't describe endpoints the released server lacks.
+
+### Added
+- `GET /get_supported_languages`: unauthenticated discovery of the languages,
+  runtime versions, and execution methods a node supports (CPL-349 phase 1).
+  Docs reserved at `docs-reserve/lit-actions/languages.mdx` until release.
+- Permanently delete a PKP wallet from the dashboard.
+- Enterprise net-30 committed-use billing (invoice rail alongside Stripe
+  credits).
+- Auto-funding for API payer gas wallets with low-balance alerts
+  (operator-facing).
+- Local `lit` CLI for testing any-language actions without a node
+  (`lit-actions/local-cli`, developer tooling).
+
+### Changed
+- `max_get_keys_count` is now enforced in the key handlers; oversized
+  `get_keys` requests are rejected.
+
+## v1.1.10 — 2026-06-22
+
 ### Changed
 - **All API error responses are now JSON** (`{error, message, fix, docs_url}`)
   instead of HTML error pages. See the
@@ -35,6 +57,9 @@ Release verification (image digests, attestation, governance) is covered in the
 
 | Tag | Date |
 |--------|------------|
+| v1.1.9 | 2026-06-12 |
+| v1.1.8 | 2026-06-12 |
+| v1.1.7.1 | 2026-06-12 |
 | v1.1.7 | 2026-06-02 |
 | v1.1.6 | 2026-05-31 |
 | v1.1.4 | 2026-05-29 |

@@ -410,6 +410,58 @@
         }
       }
     },
+    "/lit_binary_action": {
+      "post": {
+        "tags": [
+          "Actions"
+        ],
+        "description": "Execute an any-language action bundle on the gVisor runner. Same billing, CPU-gating, and response shape as `/lit_action`; differs only in payload (a tar bundle instead of JS) and backend socket.",
+        "operationId": "lit_binary_action",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LitBinaryActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/LitActionResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests — the node is CPU-overloaded and shedding load. Clients receiving this response should retry the request up to five times with exponential backoff."
+          }
+        }
+      }
+    },
     "/get_lit_action_ipfs_id": {
       "post": {
         "tags": [
@@ -1538,6 +1590,34 @@
         }
       }
     },
+    "/get_supported_languages": {
+      "get": {
+        "tags": [
+          "Configuration"
+        ],
+        "description": "Advertises the node's language capability surface: which languages, runtimes, and execution methods this node admits. No guards — like `get_lit_action_client_config`, it exists so clients can discover capability before uploading anything.",
+        "operationId": "get_supported_languages",
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SupportedLanguagesResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/get_api_payers": {
       "get": {
         "tags": [
@@ -2034,6 +2114,28 @@
             "nullable": true
           },
           "js_params": {
+            "nullable": true
+          }
+        }
+      },
+      "LitBinaryActionRequest": {
+        "description": "POST /lit_binary_action\n\nExecutes an any-language action **bundle** in the gVisor runner. Provide either `bundle` (a base64-encoded tar/tar.gz containing a `lit.json` manifest at its root) or `checksum` (the content id of a bundle the runner already cached). When `bundle` is supplied the server derives the checksum from the decoded tar bytes and authorizes on that derived value — a client-supplied `checksum` is only a hint and is ignored if it disagrees.",
+        "type": "object",
+        "properties": {
+          "bundle": {
+            "description": "Base64-encoded tar or tar.gz bundle. Optional when `checksum` refers to a previously-submitted bundle the runner still has cached.",
+            "default": null,
+            "type": "string",
+            "nullable": true
+          },
+          "checksum": {
+            "description": "Content id (IPFS CID) of the bundle. Required when `bundle` is omitted; when `bundle` is present it is only a hint, validated against the value derived from the bundle bytes.",
+            "default": null,
+            "type": "string",
+            "nullable": true
+          },
+          "js_params": {
+            "description": "Parameters passed to the action (exposed to guest code via `lit params`).",
             "nullable": true
           }
         }
@@ -2732,6 +2834,123 @@
             "nullable": true
           }
         }
+      },
+      "SupportedLanguagesResponse": {
+        "description": "Returned by `/get_supported_languages` — the node's language capability surface (see `actions::languages`).",
+        "type": "object",
+        "required": [
+          "languages"
+        ],
+        "properties": {
+          "languages": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LanguageFeature"
+            }
+          }
+        }
+      },
+      "LanguageFeature": {
+        "description": "One supported language, as advertised by `GET /get_supported_languages`.",
+        "type": "object",
+        "required": [
+          "display_name",
+          "execution_model",
+          "methods",
+          "name",
+          "runtimes"
+        ],
+        "properties": {
+          "name": {
+            "description": "Stable id used in requests, e.g. \"python\", \"rust\", \"javascript\".",
+            "type": "string"
+          },
+          "display_name": {
+            "description": "Human label, e.g. \"Python\".",
+            "type": "string"
+          },
+          "execution_model": {
+            "description": "Underlying runner: \"deno\" (JS) or \"gvisor\" (everything else).",
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ExecutionModel"
+              }
+            ]
+          },
+          "runtimes": {
+            "description": "Provisionable runtime versions — each maps to an install recipe and a cache profile (NOT baked into the image). Multiple may coexist (e.g. 3.12 and 3.13). Empty for compiled/static languages.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/LanguageRuntime"
+            }
+          },
+          "methods": {
+            "description": "Which methods this language accepts on this node.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExecutionMethod"
+            }
+          }
+        }
+      },
+      "ExecutionModel": {
+        "type": "string",
+        "enum": [
+          "deno",
+          "gvisor"
+        ]
+      },
+      "LanguageRuntime": {
+        "type": "object",
+        "required": [
+          "id",
+          "is_default",
+          "prewarmed",
+          "version"
+        ],
+        "properties": {
+          "id": {
+            "description": "Value clients pass as `runtime` and the manifest's `runtime` field, e.g. \"python3.13\". Selects an install recipe + cache profile.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Full version string, e.g. \"3.13.1\".",
+            "type": "string"
+          },
+          "is_default": {
+            "description": "Chosen when the client omits `runtime`.",
+            "type": "boolean"
+          },
+          "prewarmed": {
+            "description": "True once this profile's install layers are materialized in the gVisor runner's cache. Always false until the install cache lands (CPL-349 phase 2); pre-warm status is wired in phase 5.",
+            "type": "boolean"
+          }
+        }
+      },
+      "ExecutionMethod": {
+        "oneOf": [
+          {
+            "description": "Pick language + runtime, send code; server desugars into a bundle.",
+            "type": "string",
+            "enum": [
+              "raw_script"
+            ]
+          },
+          {
+            "description": "Code-only tar over the minimal base rootfs; runtime provisioned by the startup script's cached install commands (or a static binary).",
+            "type": "string",
+            "enum": [
+              "bundle"
+            ]
+          },
+          {
+            "description": "Self-contained OCI image bringing its own runtime/interpreter. Node-gated; may be curated in prod.",
+            "type": "string",
+            "enum": [
+              "oci_bundle"
+            ]
+          }
+        ]
       },
       "StripeConfigResponse": {
         "description": "GET /billing/stripe_config — returns the Stripe publishable key for Stripe.js.",
