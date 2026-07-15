@@ -3,10 +3,12 @@
 //! Serves the exact same `Action` gRPC op-loop as the JS runner
 //! (`lit-actions/server`), but on its own Unix socket, and executes each
 //! request inside a gVisor (`runsc`) sandbox instead of a Deno isolate. The
-//! "code" is a content-addressed bundle (tarball with a `lit.json` manifest)
-//! whose entrypoint may be written in any language; a preinstalled `lit` CLI
-//! (see `src/bin/lit.rs`) exposes the op-loop ops to guest code over a
-//! per-execution host-UDS socket.
+//! "code" is a content-addressed bundle (a tarball of payload in any
+//! language); what runs is always a bash `startup.sh` — supplied with the
+//! request (so one cached bundle serves many scripts) or shipped at the
+//! bundle root. Top-level js-params are injected as environment variables,
+//! and a preinstalled `lit` CLI (see `src/bin/lit.rs`) exposes the op-loop
+//! ops to guest code over a per-execution host-UDS socket.
 //!
 //! lit-api-server talks to this runner exactly the way it talks to the JS
 //! runner — only the socket path differs.

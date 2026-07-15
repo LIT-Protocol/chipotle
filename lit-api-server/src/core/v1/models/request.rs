@@ -191,11 +191,14 @@ pub struct LitActionRequest {
 /// POST /lit_binary_action
 ///
 /// Executes an any-language action **bundle** in the gVisor runner. Provide
-/// either `bundle` (a base64-encoded tar/tar.gz containing a `lit.json`
-/// manifest at its root) or `checksum` (the content id of a bundle the runner
-/// already cached). When `bundle` is supplied the server derives the checksum
-/// from the decoded tar bytes and authorizes on that derived value — a
-/// client-supplied `checksum` is only a hint and is ignored if it disagrees.
+/// either `bundle` (a base64-encoded tar/tar.gz of payload files) or
+/// `checksum` (the content id of a bundle the runner already cached). When
+/// `bundle` is supplied the server derives the checksum from the decoded tar
+/// bytes and authorizes on that derived value — a client-supplied `checksum`
+/// is only a hint and is ignored if it disagrees.
+///
+/// The sandbox only ever executes `bash startup.sh` (CPL-355): the
+/// `startup_script` sent here, or the `startup.sh` at the bundle root.
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct LitBinaryActionRequest {
     /// Base64-encoded tar or tar.gz bundle. Optional when `checksum` refers to
@@ -207,7 +210,14 @@ pub struct LitBinaryActionRequest {
     /// derived from the bundle bytes.
     #[serde(default)]
     pub checksum: Option<String>,
-    /// Parameters passed to the action (exposed to guest code via `lit params`).
+    /// Bash script executed as the sandbox entrypoint (`bash startup.sh`).
+    /// Sent separately from `bundle` so different scripts reuse the same
+    /// cached bundle. Optional when the bundle ships a `startup.sh` at its
+    /// root; the request-supplied script wins when both exist.
+    #[serde(default)]
+    pub startup_script: Option<String>,
+    /// Parameters passed to the action: exposed to guest code via `lit params`,
+    /// and top-level values are injected into the sandbox environment.
     pub js_params: Option<serde_json::Value>,
 }
 
