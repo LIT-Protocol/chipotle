@@ -186,8 +186,13 @@ impl Client {
 
         let (outbound_tx, outbound_rx) = flume::bounded(0);
 
-        // let socket_path = self.socket_path();
-        let socket_path = PathBuf::from("/tmp/lit_actions.sock");
+        // Route to whichever runner this client was built for: the binary
+        // (gVisor) route sets `socket_path` explicitly; the JS route leaves it
+        // unset and falls back to the JS runner's socket.
+        let socket_path = self
+            .socket_path
+            .clone()
+            .unwrap_or_else(|| PathBuf::from(crate::core::v1::health::LIT_ACTIONS_SOCKET));
         tracing::debug!("execution::grpc_channel: connecting");
         let channel = self
             .client_grpc_channels
