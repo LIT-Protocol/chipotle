@@ -1,0 +1,85 @@
+# Runner image for the any-language (gVisor) Lit Action runner.
+#
+# Bundles the three things the CVM needs to run untrusted, any-language
+# bundles in per-execution runsc sandboxes:
+#   1. the lit_actions_gvisor supervisor binary (serves the op-loop)
+#   2. runsc (gVisor), which the supervisor invokes to create sandboxes
+#      (--runsc-path defaults to `runsc` on PATH)
+#   3. the base sandbox rootfs exported to /var/lib/lit/sandbox-rootfs,
+#      shared read-only by every sandbox via --rootfs (mirrors
+#      lit-actions/gvisor-server/image/Dockerfile.rootfs)
+#
+# The runtime command is supplied by docker-compose.phala.yml; the CMD here is
+# only a sensible default for `docker run`.
+
+# ---- build the supervisor + guest `lit` CLI ------------------------------
+FROM rust:1.91-bookworm AS builder
+WORKDIR /build
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        pkg-config \
+        libssl-dev \
+        clang \
+        libsqlite3-dev \
+        protobuf-compiler \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY lit-core ./lit-core/
+COPY lit-actions ./lit-actions/
+
+# Remove tests workspace member (excluded by .dockerignore; not needed for
+# release build) — same treatment as Dockerfile.lit-actions.
+RUN sed -i 's/, "tests"//; s/"tests", //' lit-actions/Cargo.toml
+
+# The guest `lit` CLI (baked into the rootfs) and the supervisor share this
+# crate so the guest wire contract and its server cannot drift apart.
+RUN cargo build --release --manifest-path lit-actions/Cargo.toml \
+        -p lit-actions-gvisor-server --bin lit_actions_gvisor --bin lit
+
+# ---- base sandbox rootfs (mirrors image/Dockerfile.rootfs) ---------------
+# Kept deliberately small: every runtime here is attack surface inside the
+# sandbox and bytes in the CVM image.
+FROM debian:bookworm-slim AS sandbox-rootfs
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        python3 \
+        python3-pip \
+        curl \
+        jq \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /build/lit-actions/target/release/lit /usr/local/bin/lit
+# Guest-contract paths (see sandbox/mod.rs): the supervisor bind-mounts the
+# bundle at /action and the op socket dir at /run/lit.
+RUN mkdir -p /action /run/lit
+ENV LIT_OP_SOCK=/run/lit/ops.sock
+
+# ---- runtime -------------------------------------------------------------
+FROM debian:bookworm-slim AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
+        libssl3 \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install runsc (gVisor). Pinned via ARG for reproducible, verifiable builds;
+# the download is integrity-checked against the release's own sha512 sums, and
+# the outer image digest (captured at deploy time) pins the exact bytes.
+# Bump GVISOR_RELEASE deliberately — it is validated inside the TDX CVM.
+ARG GVISOR_RELEASE=release/latest
+RUN set -eux; \
+    arch="$(uname -m)"; \
+    url="https://storage.googleapis.com/gvisor/releases/${GVISOR_RELEASE}/${arch}"; \
+    curl -fsSL "${url}/runsc" -o /usr/local/bin/runsc; \
+    curl -fsSL "${url}/runsc.sha512" -o /tmp/runsc.sha512; \
+    (cd /usr/local/bin && sha512sum -c /tmp/runsc.sha512); \
+    chmod 0755 /usr/local/bin/runsc; \
+    rm -f /tmp/runsc.sha512; \
+    runsc --version
+
+COPY --from=builder /build/lit-actions/target/release/lit_actions_gvisor /usr/local/bin/
+
+# Export the base rootfs into the shared --rootfs path. COPY --from of a whole
+# stage filesystem is the multi-stage equivalent of `docker export`.
+COPY --from=sandbox-rootfs / /var/lib/lit/sandbox-rootfs/
+
+CMD ["lit_actions_gvisor", "--socket", "/tmp/lit_actions_gvisor.sock", "--rootfs", "/var/lib/lit/sandbox-rootfs"]
