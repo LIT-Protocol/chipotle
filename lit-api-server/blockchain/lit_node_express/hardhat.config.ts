@@ -12,6 +12,7 @@ import "./tasks/transfer-ownership";
 import "./tasks/verify-compose-hash";
 import "./tasks/verify-diamond-facets";
 import "./tasks/backfill-pkp-owners";
+import "./tasks/pkp-backfill-safe";
 
 const config: HardhatUserConfig = {
   solidity: {
