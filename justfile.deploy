@@ -58,10 +58,10 @@ deploy name=(app_name): docker-push _check_phala
     DIGEST_LIT_ACTIONS_GVISOR=$(cat .digest-lit-actions-gvisor.txt | tr -d '\n' | sed 's/}[}]*$//')
     DIGEST_LIT_API_SERVER=$(cat .digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
     DIGEST_OTEL_COLLECTOR=$(cat .digest-otel-collector.txt | tr -d '\n' | sed 's/}[}]*$//')
-    [ -n "$DIGEST_LIT_ACTIONS" ]        || { echo "error: lit-actions digest missing; run: just docker-build"; exit 1; }
-    [ -n "$DIGEST_LIT_ACTIONS_GVISOR" ] || { echo "error: lit-actions-gvisor digest missing; run: just docker-build"; exit 1; }
-    [ -n "$DIGEST_LIT_API_SERVER" ]     || { echo "error: lit-api-server digest missing; run: just docker-build"; exit 1; }
-    [ -n "$DIGEST_OTEL_COLLECTOR" ]     || { echo "error: otel-collector digest missing; run: just docker-build"; exit 1; }
+    [ -n "$DIGEST_LIT_ACTIONS" ]        || { echo "error: lit-actions digest missing; run: just docker-push"; exit 1; }
+    [ -n "$DIGEST_LIT_ACTIONS_GVISOR" ] || { echo "error: lit-actions-gvisor digest missing; run: just docker-push"; exit 1; }
+    [ -n "$DIGEST_LIT_API_SERVER" ]     || { echo "error: lit-api-server digest missing; run: just docker-push"; exit 1; }
+    [ -n "$DIGEST_OTEL_COLLECTOR" ]     || { echo "error: otel-collector digest missing; run: just docker-push"; exit 1; }
     if [ -f .env ]; then set -a && . ./.env && set +a; fi
     sed \
         -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|{{image_base}}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \
@@ -94,10 +94,10 @@ deploy-new name=(app_name): docker-push _check_phala
     DIGEST_LIT_ACTIONS_GVISOR=$(cat .digest-lit-actions-gvisor.txt | tr -d '\n' | sed 's/}[}]*$//')
     DIGEST_LIT_API_SERVER=$(cat .digest-lit-api-server.txt | tr -d '\n' | sed 's/}[}]*$//')
     DIGEST_OTEL_COLLECTOR=$(cat .digest-otel-collector.txt | tr -d '\n' | sed 's/}[}]*$//')
-    [ -n "$DIGEST_LIT_ACTIONS" ]        || { echo "error: lit-actions digest missing; run: just docker-build"; exit 1; }
-    [ -n "$DIGEST_LIT_ACTIONS_GVISOR" ] || { echo "error: lit-actions-gvisor digest missing; run: just docker-build"; exit 1; }
-    [ -n "$DIGEST_LIT_API_SERVER" ]     || { echo "error: lit-api-server digest missing; run: just docker-build"; exit 1; }
-    [ -n "$DIGEST_OTEL_COLLECTOR" ]     || { echo "error: otel-collector digest missing; run: just docker-build"; exit 1; }
+    [ -n "$DIGEST_LIT_ACTIONS" ]        || { echo "error: lit-actions digest missing; run: just docker-push"; exit 1; }
+    [ -n "$DIGEST_LIT_ACTIONS_GVISOR" ] || { echo "error: lit-actions-gvisor digest missing; run: just docker-push"; exit 1; }
+    [ -n "$DIGEST_LIT_API_SERVER" ]     || { echo "error: lit-api-server digest missing; run: just docker-push"; exit 1; }
+    [ -n "$DIGEST_OTEL_COLLECTOR" ]     || { echo "error: otel-collector digest missing; run: just docker-push"; exit 1; }
     if [ -f .env ]; then set -a && . ./.env && set +a; fi
     sed \
         -e "s|\${DOCKER_IMAGE_LIT_ACTIONS}|{{image_base}}-lit-actions@${DIGEST_LIT_ACTIONS}|g" \

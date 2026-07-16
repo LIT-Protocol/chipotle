@@ -101,8 +101,8 @@ jobs:
           # with deploy-staging.yml's DEPLOY_PATHS (minus the staging-only entries:
           # the workflow files and k6/, which don't affect prod image content).
           IMAGE_PATHS=(lit-actions/ lit-api-server/ lit-billing-core/ lit-core/ \
-            otel-collector/ Dockerfile.lit-actions Dockerfile.lit-api-server \
-            Dockerfile.otel-collector docker-compose.phala.yml)
+            otel-collector/ Dockerfile.lit-actions Dockerfile.lit-actions-gvisor \
+            Dockerfile.lit-api-server Dockerfile.otel-collector docker-compose.phala.yml)
 
           # 1. Most recent first-parent ancestor carrying a perf-gate/soak status.
           gated=""; state=""

@@ -61,10 +61,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install runsc (gVisor). Pinned via ARG for reproducible, verifiable builds;
-# the download is integrity-checked against the release's own sha512 sums, and
-# the outer image digest (captured at deploy time) pins the exact bytes.
-# Bump GVISOR_RELEASE deliberately — it is validated inside the TDX CVM.
+# Install runsc (gVisor). The default is the mutable `release/latest`; the
+# download is integrity-checked against that release's own sha512 sums, and the
+# outer image digest (captured at deploy time) still pins the exact bytes that
+# shipped. For byte-reproducible rebuilds, override GVISOR_RELEASE with a
+# specific tag (e.g. release/20250203.0) — pin a release validated inside the
+# TDX CVM before production.
 ARG GVISOR_RELEASE=release/latest
 RUN set -eux; \
     arch="$(uname -m)"; \

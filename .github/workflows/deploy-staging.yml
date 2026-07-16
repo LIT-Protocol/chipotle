@@ -280,6 +280,7 @@ jobs:
             lit-core/
             otel-collector/
             Dockerfile.lit-actions
+            Dockerfile.lit-actions-gvisor
             Dockerfile.lit-api-server
             Dockerfile.otel-collector
             docker-compose.phala.yml
