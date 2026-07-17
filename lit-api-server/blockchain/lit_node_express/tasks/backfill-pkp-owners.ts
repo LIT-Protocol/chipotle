@@ -4,6 +4,7 @@ import {
   DIAMOND_ABI,
   buildOwnershipFromAccounts,
   chunk,
+  estimateBackfillGas,
   mapLimit,
   Pair,
 } from "./lib/pkp-owners";
@@ -128,13 +129,24 @@ task(
     const batches = chunk(toBind, batchSize);
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
+      // Pass an explicit gasLimit instead of relying on eth_estimateGas: some
+      // providers (e.g. Alchemy) cap estimateGas simulation well below the
+      // block limit (~13-20M here), so a >~500-pair batch makes estimateGas
+      // fail with "missing revert data" even though the tx itself is valid.
+      // estimateBackfillGas is ~26.5k/pair; add 25% headroom.
+      const gasLimit = BigInt(
+        Math.ceil(estimateBackfillGas(batch.length) * 1.25)
+      );
       const tx = await diamond.backfillPkpOwners(
         batch.map((r) => r.pkpId),
-        batch.map((r) => r.masterHash)
+        batch.map((r) => r.masterHash),
+        { gasLimit }
       );
-      console.log(`  batch ${i + 1}/${batches.length} (${batch.length} pkpIds): ${tx.hash}`);
+      console.log(
+        `  batch ${i + 1}/${batches.length} (${batch.length} pkpIds, gasLimit ${(Number(gasLimit) / 1e6).toFixed(1)}M): ${tx.hash}`
+      );
       const receipt = await tx.wait();
-      console.log(`    confirmed in block ${receipt.blockNumber}`);
+      console.log(`    confirmed in block ${receipt.blockNumber} (gas used ${receipt.gasUsed})`);
     }
 
     // 5. Verify.
