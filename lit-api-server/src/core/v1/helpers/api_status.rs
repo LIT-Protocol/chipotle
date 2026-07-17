@@ -6,7 +6,7 @@ use rocket_okapi::{
 };
 use rocket_responder::{
     ApiResponse, bad_request, forbidden, internal_server_error, not_found, ok, payment_required,
-    unauthorized,
+    service_unavailable, unauthorized,
 };
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
@@ -100,6 +100,7 @@ impl<T: Serialize> From<ApiResult<T>> for ApiResponse<T, ErrMessage> {
                 401 => unauthorized(ErrMessage(status.message)),
                 403 => forbidden(ErrMessage(status.message)),
                 402 => payment_required(ErrMessage(status.message)),
+                503 => service_unavailable(ErrMessage(status.message)),
                 _ => internal_server_error(ErrMessage(format!(
                     "Unhandled error code #{}: {}",
                     status.status.code,
@@ -167,6 +168,17 @@ impl ApiStatus {
         warn!("Forbidden: {:?}", message);
         Self {
             status: Status::Forbidden,
+            message,
+        }
+    }
+
+    /// 503 — a feature is disabled on this node (e.g. the gVisor runner gated
+    /// off by CPL-359) or a backend it depends on is unavailable.
+    pub fn service_unavailable(message: impl Into<String>) -> Self {
+        let message = message.into();
+        warn!("service_unavailable: {:?}", message);
+        Self {
+            status: Status::ServiceUnavailable,
             message,
         }
     }
@@ -239,6 +251,29 @@ mod tests {
         let status = ApiStatus::payment_required("pay up");
         assert_eq!(status.status, Status::PaymentRequired);
         assert_eq!(status.message, "pay up");
+    }
+
+    #[test]
+    fn service_unavailable_has_503() {
+        let status = ApiStatus::service_unavailable("feature disabled");
+        assert_eq!(status.status, Status::ServiceUnavailable);
+        assert_eq!(status.message, "feature disabled");
+    }
+
+    #[test]
+    fn service_unavailable_maps_to_503_response() {
+        // The 503 arm is a recent addition to the ApiResult match; pin that it
+        // maps to a real ServiceUnavailable response, not the 500 catch-all.
+        let result: ApiResult<()> =
+            ApiResult(Err(ApiStatus::service_unavailable("gVisor disabled")));
+        let response: ApiResponse<(), ErrMessage> = result.into();
+        match response {
+            ApiResponse::Err(status, body) => {
+                assert_eq!(status, Status::ServiceUnavailable);
+                assert_eq!(body.0.0, "gVisor disabled");
+            }
+            _ => panic!("expected an Err response"),
+        }
     }
 
     #[test]

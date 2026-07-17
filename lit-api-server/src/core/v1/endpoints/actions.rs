@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::accounts::chain_config::ChainConfig;
 use crate::actions::grpc::GrpcClientPool;
+use crate::actions::gvisor::GvisorFeature;
 use crate::core::core_features;
 use crate::core::v1::guards::billing::BilledLitActionApiKey;
 use crate::core::v1::guards::cpu_overload::CpuAvailable;
@@ -71,10 +72,14 @@ pub(super) async fn lit_binary_action(
     chain_config: &State<Arc<ChainConfig>>,
     stripe_state: &State<Option<Arc<StripeState>>>,
     gvisor_socket: &State<LitActionsGvisorSocketPath>,
+    gvisor_feature: &State<GvisorFeature>,
     request: Json<LitBinaryActionRequest>,
 ) -> OpenApiResponse<LitActionResponse, ErrMessage> {
-    OpenApiResponse {
-        response: ApiResult(
+    // gVisor is gated off by default (CPL-359): the route stays mounted so its
+    // API surface is stable, but when the runner is disabled every call returns
+    // "feature disabled" before touching the (absent) runner socket.
+    let result = match gvisor_feature.ensure_enabled() {
+        Ok(()) => {
             core_features::lit_binary_action(
                 &request_span,
                 api_key.0.as_str(),
@@ -86,8 +91,11 @@ pub(super) async fn lit_binary_action(
                 gvisor_socket.0.clone(),
                 request,
             )
-            .await,
-        )
-        .into(),
+            .await
+        }
+        Err(disabled) => Err(disabled),
+    };
+    OpenApiResponse {
+        response: ApiResult(result).into(),
     }
 }
