@@ -1,5 +1,14 @@
 # PKP owner backfill (#575)
 
+> **HISTORICAL — migration complete.** The one-time backfill was executed on
+> Base mainnet (all 14,070 pre-existing PKPs bound; verified 0 unbound, 0
+> conflicts). The on-chain `backfillPkpOwners` function and the
+> `getWalletDerivation` `owner == 0` compatibility fallback were removed in the
+> facet upgrade that accompanied this cleanup, so the `gen-safe` / EOA execution
+> tasks below will revert if run against the upgraded diamond. Kept as the
+> record of how the migration was performed. `getPkpOwnerMaster` remains for
+> ongoing audits.
+
 After the #575 facet upgrade, `registerWalletDerivation` binds each pkpId to its
 first owner (`pkpIdToOwnerMaster`) and `getWalletDerivation` refuses to serve a
 pkpId to any account that isn't the owner. Existing PKPs have an empty binding

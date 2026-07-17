@@ -40,15 +40,17 @@ describe("pkp-backfill-safe lib", () => {
     "0xaAaAA9120fE271F653cfDb6bf400dB93D2DEa7Aa"
   );
 
+  // NOTE: backfillPkpOwners was removed from the contract after the one-time
+  // #575 migration completed on-chain, so this tooling is historical. The
+  // BACKFILL_SELECTOR here is a frozen literal (0x41275609) used only to decode
+  // the migration batches that were executed; it is intentionally no longer
+  // cross-checked against the compiled WritesFacet (the function is gone).
   it("DIAMOND_ABI selectors match the compiled facets (no ABI drift)", async () => {
-    const writes = await artifacts.readArtifact("WritesFacet");
     const views = await artifacts.readArtifact("ViewsFacet");
-    const writesIface = new ethers.Interface(writes.abi);
+    const writes = await artifacts.readArtifact("WritesFacet");
     const viewsIface = new ethers.Interface(views.abi);
+    const writesIface = new ethers.Interface(writes.abi);
 
-    expect(BACKFILL_SELECTOR).to.equal(
-      writesIface.getFunction("backfillPkpOwners")!.selector
-    );
     expect(diamondIface.getFunction("getPkpOwnerMaster")!.selector).to.equal(
       viewsIface.getFunction("getPkpOwnerMaster")!.selector
     );
@@ -56,6 +58,8 @@ describe("pkp-backfill-safe lib", () => {
     expect(diamondIface.getEvent("WalletDerivationRegistered")!.topicHash).to.equal(
       writesIface.getEvent("WalletDerivationRegistered")!.topicHash
     );
+    // Frozen selector for the removed migration function.
+    expect(BACKFILL_SELECTOR).to.equal("0x41275609");
   });
 
   it("encodes and decodes a backfill call round-trip", () => {
