@@ -32,7 +32,9 @@ task(
   "Backfill pkpIdToOwnerMaster for PKPs registered before the #575 fix"
 )
   .addParam("diamond", "Diamond proxy contract address")
-  .addOptionalParam("batchSize", "pkpIds per backfill transaction", "1000")
+  // 450 pairs ≈ 15M gasLimit with headroom — under the 16,777,216 (2^24)
+  // per-transaction gas cap (EIP-7825) enforced by the Base sequencer.
+  .addOptionalParam("batchSize", "pkpIds per backfill transaction", "450")
   .addFlag("execute", "Send the backfill transactions (default is dry-run)")
   .addFlag(
     "allowConflicts",
@@ -126,27 +128,49 @@ task(
     const diamond = new ethers.Contract(diamondAddress, DIAMOND_ABI, wallet);
     console.log(`\nSending backfill as ${wallet.address}...`);
 
-    const batches = chunk(toBind, batchSize);
-    for (let i = 0; i < batches.length; i++) {
-      const batch = batches[i];
-      // Pass an explicit gasLimit instead of relying on eth_estimateGas: some
-      // providers (e.g. Alchemy) cap estimateGas simulation well below the
-      // block limit (~13-20M here), so a >~500-pair batch makes estimateGas
-      // fail with "missing revert data" even though the tx itself is valid.
-      // estimateBackfillGas is ~26.5k/pair; add 25% headroom.
+    // Work through batches with adaptive splitting. Two provider/sequencer
+    // limits bite here, so we can't rely on estimation or a fixed size:
+    //  - eth_estimateGas is capped by the RPC (~13-20M on Alchemy), so we pass
+    //    an explicit gasLimit (~26.5k/pair + 25% headroom) and never estimate;
+    //  - eth_sendRawTransaction is capped by the sequencer's per-tx gas limit
+    //    ("exceeds max transaction gas limit"), which isn't queryable, so on
+    //    that rejection we halve the batch and retry. Rejected sends are never
+    //    mined (no gas spent, no nonce consumed), so splitting is free.
+    const queue: Pair[][] = chunk(toBind, batchSize);
+    let sent = 0;
+    let bound = 0;
+    while (queue.length > 0) {
+      const batch = queue.shift()!;
       const gasLimit = BigInt(
         Math.ceil(estimateBackfillGas(batch.length) * 1.25)
       );
-      const tx = await diamond.backfillPkpOwners(
-        batch.map((r) => r.pkpId),
-        batch.map((r) => r.masterHash),
-        { gasLimit }
-      );
-      console.log(
-        `  batch ${i + 1}/${batches.length} (${batch.length} pkpIds, gasLimit ${(Number(gasLimit) / 1e6).toFixed(1)}M): ${tx.hash}`
-      );
-      const receipt = await tx.wait();
-      console.log(`    confirmed in block ${receipt.blockNumber} (gas used ${receipt.gasUsed})`);
+      try {
+        const tx = await diamond.backfillPkpOwners(
+          batch.map((r) => r.pkpId),
+          batch.map((r) => r.masterHash),
+          { gasLimit }
+        );
+        sent++;
+        console.log(
+          `  tx ${sent} (${batch.length} pkpIds, gasLimit ${(Number(gasLimit) / 1e6).toFixed(1)}M): ${tx.hash}`
+        );
+        const receipt = await tx.wait();
+        bound += batch.length;
+        console.log(
+          `    confirmed in block ${receipt.blockNumber} (gas used ${receipt.gasUsed}) — ${bound}/${toBind.length} bound`
+        );
+      } catch (e: any) {
+        const msg = (e?.info?.error?.message || e?.message || "").toLowerCase();
+        if (msg.includes("max transaction gas") && batch.length > 1) {
+          const mid = Math.ceil(batch.length / 2);
+          console.log(
+            `    sequencer rejected ${batch.length}-pair batch (per-tx gas cap) — splitting into ${mid} + ${batch.length - mid}`
+          );
+          queue.unshift(batch.slice(0, mid), batch.slice(mid));
+          continue;
+        }
+        throw e;
+      }
     }
 
     // 5. Verify.
