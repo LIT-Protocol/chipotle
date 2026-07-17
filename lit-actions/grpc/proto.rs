@@ -88,6 +88,10 @@ impl std::fmt::Debug for DebugExecutionRequest<'_> {
             .field("memory_limit", &req.memory_limit)
             .field("http_headers", &req.http_headers)
             .field("ipfs_id", &req.ipfs_id)
+            .field(
+                "startup_script",
+                &req.startup_script.as_ref().map(String::len),
+            )
             .finish()
     }
 }

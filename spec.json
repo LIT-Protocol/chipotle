@@ -441,6 +441,58 @@
         }
       }
     },
+    "/lit_binary_action": {
+      "post": {
+        "tags": [
+          "Actions"
+        ],
+        "description": "Execute an any-language action bundle on the gVisor runner. Same billing, CPU-gating, and response shape as `/lit_action`; differs only in payload (a tar bundle instead of JS) and backend socket.",
+        "operationId": "lit_binary_action",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LitBinaryActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/LitActionResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too Many Requests — the node is CPU-overloaded and shedding load. Clients receiving this response should retry the request up to five times with exponential backoff."
+          }
+        }
+      }
+    },
     "/get_lit_action_ipfs_id": {
       "post": {
         "tags": [
@@ -1530,6 +1582,45 @@
         }
       }
     },
+    "/cache_metadata": {
+      "get": {
+        "tags": [
+          "Configuration"
+        ],
+        "description": "CPL-351: metadata about the action code cached for the caller's account. Returns TTL/size/last-run metadata only — never the cached code itself.",
+        "operationId": "get_cache_metadata",
+        "parameters": [
+          {
+            "name": "X-Api-Key",
+            "in": "header",
+            "description": "Account or usage API key. Alternatively use Authorization: Bearer <key>.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CacheMetadataResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/get_supported_languages": {
       "get": {
         "tags": [
@@ -1792,6 +1883,33 @@
                   "oneOf": [
                     {
                       "$ref": "#/components/schemas/VersionResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/ErrMessage"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/get_system_stats": {
+      "get": {
+        "tags": [
+          "Configuration"
+        ],
+        "operationId": "get_system_stats",
+        "responses": {
+          "default": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SystemStatsResponse"
                     },
                     {
                       "$ref": "#/components/schemas/ErrMessage"
@@ -2071,6 +2189,28 @@
             "nullable": true
           },
           "js_params": {
+            "nullable": true
+          }
+        }
+      },
+      "LitBinaryActionRequest": {
+        "description": "POST /lit_binary_action\n\nExecutes an any-language action **bundle** in the gVisor runner. Provide either `bundle` (a base64-encoded tar/tar.gz containing a `lit.json` manifest at its root) or `checksum` (the content id of a bundle the runner already cached). When `bundle` is supplied the server derives the checksum from the decoded tar bytes and authorizes on that derived value — a client-supplied `checksum` is only a hint and is ignored if it disagrees.",
+        "type": "object",
+        "properties": {
+          "bundle": {
+            "description": "Base64-encoded tar or tar.gz bundle. Optional when `checksum` refers to a previously-submitted bundle the runner still has cached.",
+            "default": null,
+            "type": "string",
+            "nullable": true
+          },
+          "checksum": {
+            "description": "Content id (IPFS CID) of the bundle. Required when `bundle` is omitted; when `bundle` is present it is only a hint, validated against the value derived from the bundle bytes.",
+            "default": null,
+            "type": "string",
+            "nullable": true
+          },
+          "js_params": {
+            "description": "Parameters passed to the action (exposed to guest code via `lit params`).",
             "nullable": true
           }
         }
@@ -2687,6 +2827,89 @@
           }
         }
       },
+      "CacheMetadataResponse": {
+        "description": "GET /cache_metadata — metadata for the cached action code correlated to the authenticated master account. Excludes the cached binaries themselves.",
+        "type": "object",
+        "required": [
+          "account_address",
+          "entries",
+          "entry_count",
+          "total_size_bytes"
+        ],
+        "properties": {
+          "account_address": {
+            "description": "On-chain account wallet address the caller's key resolves to.",
+            "type": "string"
+          },
+          "entry_count": {
+            "description": "Number of cached entries correlated to this account.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "total_size_bytes": {
+            "description": "Sum of `size_bytes` across the returned entries.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "entries": {
+            "description": "The cached entries, sorted by most recent execution first.",
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CacheEntryMetadataItem"
+            }
+          }
+        }
+      },
+      "CacheEntryMetadataItem": {
+        "description": "One cached action-code entry in a `GET /cache_metadata` response (CPL-351).\n\nDescribes the cached data only — never the code/binary itself.",
+        "type": "object",
+        "required": [
+          "created_at_ms",
+          "ipfs_id",
+          "last_run_at_ms",
+          "run_count",
+          "size_bytes"
+        ],
+        "properties": {
+          "ipfs_id": {
+            "description": "IPFS id (cache key) of the cached action code.",
+            "type": "string"
+          },
+          "size_bytes": {
+            "description": "Size of the cached code in bytes.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "created_at_ms": {
+            "description": "Unix-epoch milliseconds when the entry was first cached.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "last_run_at_ms": {
+            "description": "Unix-epoch milliseconds of the most recent execution.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "run_count": {
+            "description": "Number of executions recorded against this entry.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "ttl_seconds": {
+            "description": "Time-to-live of the entry, in seconds. `None` for the API-server IPFS cache, which is capacity-bounded (LRU) rather than time-expired.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0,
+            "nullable": true
+          }
+        }
+      },
       "SupportedLanguagesResponse": {
         "description": "Returned by `/get_supported_languages` — the node's language capability surface (see `actions::languages`).",
         "type": "object",
@@ -2910,6 +3133,111 @@
               "maxItems": 2,
               "minItems": 2
             }
+          }
+        }
+      },
+      "SystemStatsResponse": {
+        "description": "Returned by `/get_system_stats` — CVM memory usage and in-process cache statistics powering the monitor dapp's system dashboard.",
+        "type": "object",
+        "required": [
+          "caches",
+          "memory",
+          "runners"
+        ],
+        "properties": {
+          "memory": {
+            "$ref": "#/components/schemas/MemoryStats"
+          },
+          "caches": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/CacheStats"
+            }
+          },
+          "runners": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RunnerInfo"
+            }
+          }
+        }
+      },
+      "MemoryStats": {
+        "description": "CVM-level memory figures from `/proc/meminfo` plus this process's resident set from `/proc/self/status`. Fields are `None` on platforms without procfs (e.g. local macOS development).",
+        "type": "object",
+        "properties": {
+          "total_kb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0,
+            "nullable": true
+          },
+          "available_kb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0,
+            "nullable": true
+          },
+          "used_kb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0,
+            "nullable": true
+          },
+          "process_rss_kb": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0,
+            "nullable": true
+          }
+        }
+      },
+      "CacheStats": {
+        "description": "Entry statistics for one in-process cache.",
+        "type": "object",
+        "required": [
+          "description",
+          "entry_count",
+          "name"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "entry_count": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0
+          },
+          "approx_bytes": {
+            "description": "Approximate bytes held, for caches built with a byte weigher. `None` when the cache only counts entries.",
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0.0,
+            "nullable": true
+          }
+        }
+      },
+      "RunnerInfo": {
+        "description": "Presence of a Lit Action runner's Unix socket. `socket_present` means the runner container has been deployed and created its socket — it is not a liveness probe (`/health` covers reachability).",
+        "type": "object",
+        "required": [
+          "name",
+          "socket_path",
+          "socket_present"
+        ],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "socket_path": {
+            "type": "string"
+          },
+          "socket_present": {
+            "type": "boolean"
           }
         }
       }

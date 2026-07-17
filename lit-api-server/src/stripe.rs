@@ -512,6 +512,23 @@ impl StripeState {
     pub async fn invalidate_balance_cache(&self, customer_id: &str) {
         self.balance_cache.invalidate(customer_id).await;
     }
+
+    /// Entry counts of the billing caches, for `/get_system_stats`.
+    /// With `flush`, moka's internal buffers are flushed first so the counts
+    /// reflect completed inserts/evictions rather than lagging them — the
+    /// caller throttles flushes because the endpoint is public.
+    pub async fn cache_entry_counts(&self, flush: bool) -> [(&'static str, u64); 3] {
+        if flush {
+            self.customer_cache.run_pending_tasks().await;
+            self.wallet_cache.run_pending_tasks().await;
+            self.balance_cache.run_pending_tasks().await;
+        }
+        [
+            ("billing_customer", self.customer_cache.entry_count()),
+            ("billing_wallet", self.wallet_cache.entry_count()),
+            ("billing_balance", self.balance_cache.entry_count()),
+        ]
+    }
 }
 
 /// Resolve any account identity to its billing wallet address.
