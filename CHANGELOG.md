@@ -7,6 +7,17 @@ Release verification (image digests, attestation, governance) is covered in the
 
 ## Unreleased
 
+### Security
+- `registerWalletDerivation` now enforces a global first-owner binding
+  (`pkpId → master account`): a wallet address can only ever be registered by
+  the account that first registered it, closing a cross-account PKP hijack via
+  publicly visible derivation paths (#575). `getWalletDerivation` fails closed
+  on the same binding, neutralizing hijack registrations that already happened
+  before the upgrade. Wallets registered before the upgrade have no binding yet
+  and remain resolvable (and thus still exploitable) until a one-time on-chain
+  backfill (`backfillPkpOwners`) runs — operators should run it promptly after
+  the facet upgrade to close that window.
+
 ### Changed
 - **All API error responses are now JSON** (`{error, message, fix, docs_url}`)
   instead of HTML error pages. See the
