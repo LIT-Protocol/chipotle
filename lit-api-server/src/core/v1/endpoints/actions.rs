@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::accounts::chain_config::ChainConfig;
 use crate::actions::grpc::GrpcClientPool;
 use crate::actions::gvisor::GvisorEnabled;
+use crate::core::cache_metadata::CacheMetadataIndex;
 use crate::core::core_features;
 use crate::core::v1::guards::billing::BilledLitActionApiKey;
 use crate::core::v1::guards::cpu_overload::CpuAvailable;
@@ -29,6 +30,7 @@ pub(super) async fn lit_action(
     api_key: BilledLitActionApiKey,
     grpc_client_pool: &State<GrpcClientPool<tonic::transport::Channel>>,
     ipfs_cache: &State<Cache<String, Arc<String>>>,
+    cache_metadata: &State<Arc<CacheMetadataIndex>>,
     http_client: &State<reqwest::Client>,
     chain_config: &State<Arc<ChainConfig>>,
     stripe_state: &State<Option<Arc<StripeState>>>,
@@ -41,6 +43,7 @@ pub(super) async fn lit_action(
                 api_key.0.as_str(),
                 grpc_client_pool.inner(),
                 ipfs_cache.inner(),
+                cache_metadata.inner().clone(),
                 http_client.inner(),
                 chain_config.inner().clone(),
                 stripe_state.inner().clone(),
