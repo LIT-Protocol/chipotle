@@ -5,19 +5,33 @@
 //!   * Build time — the runner binaries live behind the `gvisor` cargo feature
 //!     on `lit-actions-gvisor-server`, so a default build never compiles them.
 //!   * Run time — this flag. When gVisor is disabled the `/lit_binary_action`
-//!     endpoint stays mounted (its OpenAPI surface is unchanged) but every call
-//!     short-circuits with a "feature disabled" response before doing any work,
-//!     so an api-server built without a gVisor runner alongside it degrades
-//!     cleanly instead of dialing a socket that will never answer.
+//!     endpoint stays mounted (its OpenAPI surface is unchanged) but the
+//!     [`GvisorEnabled`] request guard rejects every call with a "feature
+//!     disabled" 503 *before* the CPU and billing guards run — so a disabled
+//!     node sheds the call without a Stripe credit check or any other work,
+//!     rather than dialing a socket that will never answer.
 //!
 //! A deploy that ships the gVisor runner opts in with `LIT_GVISOR_ENABLED`.
 
-use crate::core::v1::helpers::api_status::ApiStatus;
+use rocket::http::Status;
+use rocket::request::{FromRequest, Outcome, Request};
+use rocket_okapi::Result as RocketOkapiResult;
+use rocket_okapi::r#gen::OpenApiGenerator;
+use rocket_okapi::request::{OpenApiFromRequest, RequestHeaderInput};
+
+use crate::core::v1::catchers::set_error_detail;
 
 /// Env var enabling the gVisor runner. Unset — or any value other than a
 /// truthy token (`1`, `true`, `yes`, `on`, case-insensitive) — leaves it
 /// disabled, so the default surface is gVisor-off.
 pub const LIT_GVISOR_ENABLED_ENV: &str = "LIT_GVISOR_ENABLED";
+
+/// Message returned when a gVisor-backed endpoint is called on a node that has
+/// the runner disabled.
+const DISABLED_MESSAGE: &str = "The gVisor any-language runner is disabled on this node.";
+const DISABLED_FIX: &str = "This node runs JavaScript actions only (POST /lit_action). Send \
+     binary/any-language actions to a node that advertises gVisor languages via \
+     GET /get_supported_languages.";
 
 /// Whether the gVisor any-language runner is enabled on this node. Rocket
 /// managed state, built once at startup from [`LIT_GVISOR_ENABLED_ENV`].
@@ -41,18 +55,45 @@ impl GvisorFeature {
     pub fn enabled(self) -> bool {
         self.enabled
     }
+}
 
-    /// The guard every gVisor-backed endpoint calls first: `Ok(())` when the
-    /// runner is enabled, otherwise the 503 "feature disabled" status the
-    /// caller returns verbatim.
-    pub fn ensure_enabled(self) -> Result<(), ApiStatus> {
-        if self.enabled {
-            Ok(())
+/// Request guard for gVisor-backed endpoints. Reads [`GvisorFeature`] from
+/// managed state and rejects with `503` + a "feature disabled" detail when the
+/// runner is off. Absent state fails closed (disabled).
+///
+/// Place it as the **first** handler parameter so the gate is evaluated before
+/// the CPU-overload and billing guards — a disabled node then never reaches the
+/// Stripe credit check in `BilledLitActionApiKey`.
+pub struct GvisorEnabled;
+
+#[rocket::async_trait]
+impl<'r> FromRequest<'r> for GvisorEnabled {
+    type Error = ();
+
+    async fn from_request(req: &'r Request<'_>) -> Outcome<Self, Self::Error> {
+        let enabled = req
+            .rocket()
+            .state::<GvisorFeature>()
+            .is_some_and(|f| f.enabled());
+        if enabled {
+            Outcome::Success(GvisorEnabled)
         } else {
-            Err(ApiStatus::service_unavailable(
-                "The gVisor any-language runner is disabled on this node.",
-            ))
+            // Populate the request-local detail the 503 catcher renders as JSON.
+            set_error_detail(req, DISABLED_MESSAGE, DISABLED_FIX);
+            Outcome::Error((Status::ServiceUnavailable, ()))
         }
+    }
+}
+
+impl<'r> OpenApiFromRequest<'r> for GvisorEnabled {
+    fn from_request_input(
+        _generator: &mut OpenApiGenerator,
+        _name: String,
+        _required: bool,
+    ) -> RocketOkapiResult<RequestHeaderInput> {
+        // Internal guard — not a user-visible parameter, and it adds no
+        // response schema (keeps the generated OpenAPI/k6 client unchanged).
+        Ok(RequestHeaderInput::None)
     }
 }
 
@@ -68,7 +109,8 @@ fn parse_enabled(raw: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rocket::http::Status;
+    use rocket::local::asynchronous::Client;
+    use rocket::{get, routes};
 
     #[test]
     fn truthy_tokens_enable() {
@@ -91,12 +133,36 @@ mod tests {
         }
     }
 
-    #[test]
-    fn ensure_enabled_gates_on_the_flag() {
-        assert!(GvisorFeature::new(true).ensure_enabled().is_ok());
+    #[get("/gated")]
+    fn gated_route(_gvisor: GvisorEnabled) -> &'static str {
+        "ok"
+    }
 
-        let err = GvisorFeature::new(false).ensure_enabled().unwrap_err();
-        assert_eq!(err.status, Status::ServiceUnavailable);
-        assert!(err.message.contains("disabled"), "{}", err.message);
+    async fn status_for(feature: Option<GvisorFeature>) -> Status {
+        let mut rocket = rocket::build().mount("/", routes![gated_route]);
+        if let Some(feature) = feature {
+            rocket = rocket.manage(feature);
+        }
+        let client = Client::tracked(rocket).await.expect("valid rocket");
+        client.get("/gated").dispatch().await.status()
+    }
+
+    #[tokio::test]
+    async fn guard_passes_when_enabled() {
+        assert_eq!(status_for(Some(GvisorFeature::new(true))).await, Status::Ok);
+    }
+
+    #[tokio::test]
+    async fn guard_rejects_when_disabled() {
+        assert_eq!(
+            status_for(Some(GvisorFeature::new(false))).await,
+            Status::ServiceUnavailable
+        );
+    }
+
+    #[tokio::test]
+    async fn guard_fails_closed_when_state_absent() {
+        // No GvisorFeature managed => treat as disabled, never as enabled.
+        assert_eq!(status_for(None).await, Status::ServiceUnavailable);
     }
 }

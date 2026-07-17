@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::accounts::chain_config::ChainConfig;
 use crate::actions::grpc::GrpcClientPool;
-use crate::actions::gvisor::GvisorFeature;
+use crate::actions::gvisor::GvisorEnabled;
 use crate::core::core_features;
 use crate::core::v1::guards::billing::BilledLitActionApiKey;
 use crate::core::v1::guards::cpu_overload::CpuAvailable;
@@ -63,6 +63,10 @@ pub(super) async fn lit_action(
 #[tracing::instrument(name = "endpoint::lit_binary_action", skip_all, parent = &request_span.span)]
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn lit_binary_action(
+    // First guard: gVisor is off by default (CPL-359). When disabled this
+    // short-circuits with a "feature disabled" 503 before the CPU and billing
+    // guards run, so a disabled node never reaches the Stripe credit check.
+    _gvisor: GvisorEnabled,
     _cpu: CpuAvailable,
     request_span: RequestSpan,
     api_key: BilledLitActionApiKey,
@@ -72,14 +76,10 @@ pub(super) async fn lit_binary_action(
     chain_config: &State<Arc<ChainConfig>>,
     stripe_state: &State<Option<Arc<StripeState>>>,
     gvisor_socket: &State<LitActionsGvisorSocketPath>,
-    gvisor_feature: &State<GvisorFeature>,
     request: Json<LitBinaryActionRequest>,
 ) -> OpenApiResponse<LitActionResponse, ErrMessage> {
-    // gVisor is gated off by default (CPL-359): the route stays mounted so its
-    // API surface is stable, but when the runner is disabled every call returns
-    // "feature disabled" before touching the (absent) runner socket.
-    let result = match gvisor_feature.ensure_enabled() {
-        Ok(()) => {
+    OpenApiResponse {
+        response: ApiResult(
             core_features::lit_binary_action(
                 &request_span,
                 api_key.0.as_str(),
@@ -91,11 +91,8 @@ pub(super) async fn lit_binary_action(
                 gvisor_socket.0.clone(),
                 request,
             )
-            .await
-        }
-        Err(disabled) => Err(disabled),
-    };
-    OpenApiResponse {
-        response: ApiResult(result).into(),
+            .await,
+        )
+        .into(),
     }
 }
