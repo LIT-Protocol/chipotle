@@ -1756,6 +1756,19 @@ export class LitNodeSimpleApiClient {
   }
 
   /**
+   * GET /core/v1/get_supported_languages
+   * Advertises the node's language capability surface. Each entry carries an
+   * `execution_model` of `"deno"` (JavaScript) or `"gvisor"` (any-language
+   * runner). Unauthenticated — clients use it to discover capability before
+   * uploading. See lit-api-server `actions::languages`.
+   * @returns {Promise<{ languages: Array<{ name: string, display_name: string, execution_model: string, runtimes: object[], methods: string[] }> }>}
+   */
+  async getSupportedLanguages() {
+    const res = await fetch(`${this.baseUrl}/get_supported_languages`);
+    return parseResponse(res, 'get_supported_languages');
+  }
+
+  /**
    * GET /core/v1/get_api_payers
    * Returns all API payer addresses registered on the node.
    * @returns {Promise<string[]>}

@@ -483,6 +483,11 @@ body.has-api-key .dashboard-wrap {
   transition: color 0.15s, background 0.15s;
 }
 
+/* `.sidebar-link`'s display:flex beats the UA [hidden] rule, so enforce it. */
+.sidebar-link[hidden] {
+  display: none;
+}
+
 .sidebar-link:hover {
   color: var(--sidebar-text-hover);
   background: var(--sidebar-link-hover-bg);

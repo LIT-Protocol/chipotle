@@ -5,11 +5,44 @@
  * any-language binary path instead of inline JS.
  */
 
-import { getEffectiveApiKey, getClient, isAuthenticated } from './auth.js';
+import { getEffectiveApiKey, getClient, getBaseUrl, isAuthenticated } from './auth.js';
 import { hideStatus, formatError, logError } from './ui-utils.js';
 
 let _startupJarEditor = null;
 let _paramsJarEditor = null;
+
+/**
+ * Whether this node runs the gVisor any-language runner. gVisor is gated by
+ * `LIT_GVISOR_ENABLED` server-side (CPL-359); `/get_supported_languages` is the
+ * documented capability-discovery surface (it's what the disabled-node 503
+ * points clients to), so a node advertising any `gvisor` execution model is
+ * one where `/lit_binary_action` will actually run. Unauthenticated, cheap.
+ */
+async function detectGvisorEnabled() {
+  try {
+    const baseUrl = getBaseUrl().replace(/\/$/, '');
+    const res = await fetch(baseUrl + '/core/v1/get_supported_languages');
+    if (!res.ok) return false;
+    const data = await res.json();
+    const langs = Array.isArray(data?.languages) ? data.languages : [];
+    return langs.some((l) => l && l.execution_model === 'gvisor');
+  } catch (e) {
+    logError('gvisor-detect', e);
+    return false;
+  }
+}
+
+/**
+ * Show or hide the gVisor Runner sidebar tab based on node capability. The link
+ * ships `hidden` so nodes without the runner never flash the tab; we reveal it
+ * only once detection confirms a gVisor-backed language is advertised.
+ */
+export async function refreshGvisorTabVisibility() {
+  const link = document.getElementById('sidebar-link-gvisor-runner');
+  if (!link) return;
+  const enabled = await detectGvisorEnabled();
+  link.hidden = !enabled;
+}
 
 /** Read a File as base64 (no data: prefix), matching the tar/tar.gz bytes the runner unpacks. */
 function fileToBase64(file) {
@@ -36,6 +69,10 @@ export async function initGvisorRunner() {
   const cidPanel = document.getElementById('gvisor-cid-panel');
   const btn = document.getElementById('btn-execute-gvisor-action');
   const outputEl = document.getElementById('gvisor-runner-output');
+
+  // Reveal the tab only on nodes that actually run the gVisor runner. Runs
+  // independently of the rest of the wiring below (and of auth).
+  refreshGvisorTabVisibility();
 
   if (!btn || !outputEl) return;
 
