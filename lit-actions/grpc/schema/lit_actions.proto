@@ -30,6 +30,10 @@ message ExecuteJsRequest {
     optional uint32 memory_limit = 5;  // megabytes
     map<string, string> http_headers = 6;
     optional string ipfs_id = 7;       // IPFS CID for code cache lookup
+    // Bash script executed as the sandbox entrypoint by the gVisor runner
+    // (binary actions only; the JS runner ignores it). Sent separately from
+    // the bundle in `code` so different scripts reuse the cached bundle.
+    optional string startup_script = 8;
   }
 
   message ErrorResponse {

@@ -1,12 +1,17 @@
 use std::sync::Arc;
 
 use crate::accounts::chain_config::ChainConfig;
+use crate::actions::languages::SupportedLanguages;
 use crate::core::account_management;
+use crate::core::cache_metadata::CacheMetadataIndex;
 use crate::core::core_features;
+use crate::core::v1::guards::apikey::ApiKey;
 use crate::core::v1::helpers::api_status::ApiResult;
 use crate::core::v1::helpers::api_status::ErrMessage;
 use crate::core::v1::helpers::open_api_response::OpenApiResponse;
+use crate::core::v1::models::response::CacheMetadataResponse;
 use crate::core::v1::models::response::LitActionClientConfigResponse;
+use crate::core::v1::models::response::SupportedLanguagesResponse;
 use crate::core::v1::models::response::VersionResponse;
 use rocket::State;
 use rocket::get;
@@ -21,6 +26,23 @@ pub(super) async fn get_lit_action_client_config(
         response: ApiResult(
             core_features::get_lit_action_client_config(chain_config.inner().clone()).await,
         )
+        .into(),
+    }
+}
+
+/// Advertises the node's language capability surface: which languages,
+/// runtimes, and execution methods this node admits. No guards — like
+/// `get_lit_action_client_config`, it exists so clients can discover
+/// capability before uploading anything.
+#[openapi(tag = "Configuration")]
+#[get("/get_supported_languages")]
+pub(super) async fn get_supported_languages(
+    languages: &State<Arc<SupportedLanguages>>,
+) -> OpenApiResponse<SupportedLanguagesResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(Ok(SupportedLanguagesResponse {
+            languages: languages.languages().to_vec(),
+        }))
         .into(),
     }
 }
@@ -41,6 +63,22 @@ pub(super) async fn get_admin_api_payer() -> OpenApiResponse<String, ErrMessage>
     }
 }
 
+/// CPL-351: metadata about the action code cached for the caller's account.
+/// Returns TTL/size/last-run metadata only — never the cached code itself.
+#[openapi(tag = "Configuration")]
+#[get("/cache_metadata")]
+pub(super) async fn get_cache_metadata(
+    api_key: ApiKey,
+    cache_metadata: &State<Arc<CacheMetadataIndex>>,
+) -> OpenApiResponse<CacheMetadataResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(
+            core_features::get_cache_metadata(&api_key.0, cache_metadata.inner()).await,
+        )
+        .into(),
+    }
+}
+
 #[openapi(tag = "Configuration")]
 #[get("/version")]
 pub(super) async fn get_version() -> OpenApiResponse<VersionResponse, ErrMessage> {
@@ -55,5 +93,37 @@ pub(super) async fn get_version() -> OpenApiResponse<VersionResponse, ErrMessage
                 .collect(),
         }))
         .into(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rocket::http::{ContentType, Status};
+    use rocket::local::blocking::Client;
+    use rocket::routes;
+
+    #[test]
+    fn get_supported_languages_serves_the_managed_allowlist() {
+        let languages = SupportedLanguages::parse(
+            "javascript|raw_script; python:python3.13:python3.12|raw_script,bundle",
+        )
+        .expect("valid allowlist");
+        let rocket = rocket::build()
+            .mount("/", routes![get_supported_languages])
+            .manage(Arc::new(languages));
+        let client = Client::tracked(rocket).expect("valid rocket");
+
+        let resp = client.get("/get_supported_languages").dispatch();
+        assert_eq!(resp.status(), Status::Ok);
+        assert_eq!(resp.content_type(), Some(ContentType::JSON));
+
+        let body: SupportedLanguagesResponse =
+            serde_json::from_str(&resp.into_string().expect("body")).expect("valid response JSON");
+        assert_eq!(body.languages.len(), 2);
+        assert_eq!(body.languages[0].name, "javascript");
+        assert_eq!(body.languages[1].name, "python");
+        assert_eq!(body.languages[1].runtimes[0].id, "python3.13");
+        assert!(body.languages[1].runtimes[0].is_default);
     }
 }

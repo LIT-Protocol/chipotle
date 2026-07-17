@@ -53,14 +53,21 @@ jobs:
 
       - name: Compare with committed litApiServer.ts
         run: |
-          if ! diff -q "${{ runner.temp }}/k6-generated/litApiServer.ts" ./k6/litApiServer.ts; then
+          # openapi-to-k6 does not pin its internal prettier, so union-type
+          # formatting (e.g. `A | B` vs leading-pipe multiline) drifts between
+          # tool installs even at the same tool version. Normalize both sides
+          # through a pinned prettier before diffing so only real spec changes
+          # fail this check.
+          cp ./k6/litApiServer.ts "${{ runner.temp }}/k6-committed.ts"
+          npx --yes prettier@3.9.5 --write "${{ runner.temp }}/k6-generated/litApiServer.ts" "${{ runner.temp }}/k6-committed.ts"
+          if ! diff -q "${{ runner.temp }}/k6-generated/litApiServer.ts" "${{ runner.temp }}/k6-committed.ts"; then
             echo "::error::k6/litApiServer.ts is out of date. Run 'npx @grafana/openapi-to-k6' to regenerate it from the current OpenAPI spec."
             echo ""
             echo "To fix, run from the repo root:"
             echo "  cd lit-api-server && cargo run --bin openapi_spec > spec.json"
             echo "  npx @grafana/openapi-to-k6 spec.json ./k6"
             echo ""
-            diff "${{ runner.temp }}/k6-generated/litApiServer.ts" ./k6/litApiServer.ts || true
+            diff "${{ runner.temp }}/k6-generated/litApiServer.ts" "${{ runner.temp }}/k6-committed.ts" || true
             exit 1
           fi
           echo "k6/litApiServer.ts is up to date with sources"

@@ -24,6 +24,10 @@ pub struct ExecutionOptions {
     pub code: String,
     pub globals: Option<serde_json::Value>,
     pub action_ipfs_id: Option<String>,
+    /// Bash startup script for binary (gVisor) actions; the JS runner
+    /// ignores it. Travels separately from `code` so different scripts hit
+    /// the runner's cache for the same bundle.
+    pub startup_script: Option<String>,
 }
 
 impl From<&str> for ExecutionOptions {
@@ -63,6 +67,11 @@ pub struct ExecutionState {
     pub broadcast_and_collect_count: u32,
     #[serde(skip)]
     pub ops_count: u32,
+    /// Number of key-returning ops (GetPrivateKey, GetLitActionPrivateKey,
+    /// GetLitActionPublicKey, GetLitActionWalletAddress) performed this session.
+    /// Enforced against `Client::max_get_keys_count`.
+    #[serde(skip)]
+    pub get_keys_count: u32,
     /// Wall-clock start of execution, set before the gRPC execution request is sent.
     /// Used to derive elapsed seconds for billing instead of the unreliable gRPC `tick` field.
     #[serde(skip)]

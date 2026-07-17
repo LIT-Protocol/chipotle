@@ -119,6 +119,12 @@ library AppStorage {
         EnumerableSet.StringSet nodeConfigurationKeys;
         mapping(string => string) nodeConfigurationValues;
         uint256 serverTriggerValue;
+        // pkpId (wallet address) => master apiKeyHash that first registered it.
+        // Global first-owner binding: prevents a different account from registering
+        // an already-registered pkpId/derivationPath (key derivation is a stateless
+        // function of the public path). Deliberately NOT cleared by
+        // removeWalletDerivation — only the first owner may ever (re-)register.
+        mapping(address => uint256) pkpIdToOwnerMaster;
     }
 
     function getStorage()

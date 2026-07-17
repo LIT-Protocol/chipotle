@@ -162,6 +162,14 @@ pub struct StripeState {
     /// Avoids duplicate customer creation caused by Stripe Search API indexing lag.
     /// Uses `time_to_idle` so frequently accessed entries stay warm.
     customer_cache: Cache<String, String>,
+    /// wallet_address → recent "no customer found in Search" marker (5-sec TTL).
+    /// Rate-limits the guards' find-only lookup: without it, every guarded
+    /// request for a wallet with no (indexed) customer would issue a Stripe
+    /// Search call, so one unfunded key under load could burn through Stripe's
+    /// search rate limit. A 5-second cooldown bounds that to ~0.2 searches/sec
+    /// per wallet while only delaying post-funding recovery by ≤5s — a bounded
+    /// negative cache, unlike the permanent poisoning this replaces (#555).
+    customer_search_miss: Cache<String, ()>,
     /// api_key → billing wallet address cache.
     /// Resolves both master and usage API keys to the account's billing wallet address
     /// (the wallet used to identify the Stripe customer) via the on-chain
@@ -277,6 +285,10 @@ fn build_state(secret_key: String, publishable_key: String) -> Result<Arc<Stripe
         .max_capacity(10_000)
         .time_to_idle(Duration::from_secs(600)) // 10 minutes
         .build();
+    let customer_search_miss = Cache::builder()
+        .max_capacity(10_000)
+        .time_to_live(Duration::from_secs(5)) // short: bounds Search rate, not a poison
+        .build();
     let wallet_cache = Cache::builder()
         .max_capacity(10_000)
         .time_to_idle(Duration::from_secs(3600))
@@ -300,6 +312,7 @@ fn build_state(secret_key: String, publishable_key: String) -> Result<Arc<Stripe
         publishable_key,
         client,
         customer_cache,
+        customer_search_miss,
         wallet_cache,
         balance_cache,
         balance_refresh_in_flight,
@@ -377,6 +390,74 @@ pub fn init() -> Result<Option<Arc<StripeState>>> {
     Ok(Some(state))
 }
 
+// ─── Startup key validation ────────────────────────────────────────────────
+//
+// `init()` only checks that the keys are *present* and well-formed. A key that
+// is present but revoked, or for the wrong Stripe environment (a live key in a
+// test deployment, or vice versa), passes `init()` and then fails every real
+// billing request — a silent failure discovered only when the first customer
+// is charged. `validate_key()` closes that gap by exercising the key against
+// Stripe once at boot.
+
+/// Outcome of the startup key check ([`validate_key`]).
+///
+/// The split between [`AuthFailed`](KeyCheck::AuthFailed) and
+/// [`Unavailable`](KeyCheck::Unavailable) is the whole point: a bad *key* is a
+/// fatal misconfiguration the operator must fix, whereas a Stripe *outage* says
+/// nothing about the key and must not stop the server from booting.
+#[derive(Debug)]
+pub enum KeyCheck {
+    /// `GET /v1/balance` returned success — the key authenticates against Stripe.
+    Ok,
+    /// Stripe rejected the credentials (HTTP 401/403). The key is revoked,
+    /// malformed, or for the wrong environment. Fatal: the caller should refuse
+    /// to start rather than run with billing that can never succeed.
+    AuthFailed(String),
+    /// Stripe could not be reached (5xx, timeout, transport error) or returned an
+    /// otherwise non-auth error. Inconclusive and not the key's fault: the caller
+    /// should keep billing enabled and let the first real billing request retry.
+    Unavailable(String),
+}
+
+/// Validate the configured Stripe secret key at startup via `GET /v1/balance`.
+///
+/// `/v1/balance` is the cheapest authenticated read Stripe offers: it touches no
+/// customer data and its only precondition is a working key, which makes it a
+/// clean liveness probe for the credentials.
+///
+/// Returns a [`KeyCheck`]: callers treat [`KeyCheck::AuthFailed`] as fatal and
+/// [`KeyCheck::Unavailable`] as a soft warning (billing stays enabled). This is
+/// a free function rather than a method so the auth/availability classification
+/// in [`classify_key_check`] can be unit-tested without a live Stripe.
+pub async fn validate_key(state: &StripeState) -> KeyCheck {
+    match state.client.get("balance", &[]).await {
+        Ok(_) => KeyCheck::Ok,
+        Err(e) => classify_key_check(&e),
+    }
+}
+
+/// Map a `GET /v1/balance` error to a [`KeyCheck`].
+///
+/// Only a definitive auth rejection (HTTP 401/403) is treated as fatal. Every
+/// other error — 5xx, rate limits, timeouts, transport failures, malformed JSON
+/// — is availability, not a verdict on the key, so we degrade gracefully. Erring
+/// toward `Unavailable` means a Stripe blip can never take down our own startup.
+fn classify_key_check(e: &anyhow::Error) -> KeyCheck {
+    if let Some(se) = e
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<lit_billing_core::StripeError>())
+    {
+        let code = se.status.as_u16();
+        if code == 401 || code == 403 {
+            return KeyCheck::AuthFailed(se.to_string());
+        }
+        return KeyCheck::Unavailable(se.to_string());
+    }
+    // No StripeError on the chain → transport/timeout/JSON error from reqwest,
+    // never an authentication signal.
+    KeyCheck::Unavailable(e.to_string())
+}
+
 /// Parse `STARTER_CREDITS_CENTS`. Unset, empty, unparseable, or negative → 0 (off).
 fn read_starter_credits_env() -> i64 {
     let Ok(raw) = std::env::var("STARTER_CREDITS_CENTS") else {
@@ -431,6 +512,23 @@ impl StripeState {
     pub async fn invalidate_balance_cache(&self, customer_id: &str) {
         self.balance_cache.invalidate(customer_id).await;
     }
+
+    /// Entry counts of the billing caches, for `/get_system_stats`.
+    /// With `flush`, moka's internal buffers are flushed first so the counts
+    /// reflect completed inserts/evictions rather than lagging them — the
+    /// caller throttles flushes because the endpoint is public.
+    pub async fn cache_entry_counts(&self, flush: bool) -> [(&'static str, u64); 3] {
+        if flush {
+            self.customer_cache.run_pending_tasks().await;
+            self.wallet_cache.run_pending_tasks().await;
+            self.balance_cache.run_pending_tasks().await;
+        }
+        [
+            ("billing_customer", self.customer_cache.entry_count()),
+            ("billing_wallet", self.wallet_cache.entry_count()),
+            ("billing_balance", self.balance_cache.entry_count()),
+        ]
+    }
 }
 
 /// Resolve any account identity to its billing wallet address.
@@ -477,6 +575,12 @@ pub async fn resolve_wallet_address(api_key: &str, state: &StripeState) -> Resul
 
 /// Find the Stripe customer for this wallet address, creating one if none exists.
 ///
+/// Only for paths where creating a customer is legitimate (account creation,
+/// top-ups, email registration, balance display). The billing guards
+/// (`check_credit` / `charge`) must use [`find_customer_by_wallet`] instead:
+/// the underlying lookup is Stripe Search, which is eventually consistent, so
+/// creating on a search miss can duplicate a freshly funded customer (#555).
+///
 /// Results are cached in memory to avoid duplicate customer creation caused by
 /// Stripe Search API indexing lag (newly created customers may not appear in
 /// search results for several seconds).
@@ -498,6 +602,57 @@ pub async fn get_customer_by_wallet(wallet_address: &str, state: &StripeState) -
         })
         .await
         .map_err(|e: Arc<anyhow::Error>| anyhow::anyhow!("{e}"))
+}
+
+/// Find the Stripe customer for this wallet address WITHOUT creating one.
+///
+/// Billing-guard variant of [`get_customer_by_wallet`] (#555): Stripe Search
+/// is eventually consistent (a freshly created customer can be invisible for
+/// tens of seconds), so a guard that creates on a search miss can mint a
+/// duplicate zero-credit customer for a wallet whose funded customer just
+/// isn't indexed yet — and caching that duplicate turns a transient index lag
+/// into a permanent 402. Here a miss is simply `Ok(None)`: nothing is created
+/// and nothing is cached, so the next request re-checks Stripe and heals as
+/// soon as the index catches up.
+///
+/// Positive results go into (and come from) the same `customer_cache` that
+/// `get_customer_by_wallet` uses, so a customer created eagerly at account
+/// creation is found here without touching Search at all.
+#[instrument(name = "stripe::find_customer_by_wallet", skip_all, err)]
+pub async fn find_customer_by_wallet(
+    wallet_address: &str,
+    state: &StripeState,
+) -> Result<Option<String>> {
+    if let Some(id) = state.customer_cache.get(wallet_address).await {
+        return Ok(Some(id));
+    }
+    // Cooldown: a recent search already came back empty. Skip Stripe rather
+    // than issuing a Search per guarded request (rate-limit protection); the
+    // 5-second TTL keeps the "not found" answer bounded, not permanent.
+    if state
+        .customer_search_miss
+        .get(wallet_address)
+        .await
+        .is_some()
+    {
+        return Ok(None);
+    }
+    let found = lit_billing_core::customer::find_by_wallet(&state.client, wallet_address).await?;
+    match &found {
+        Some(id) => {
+            state
+                .customer_cache
+                .insert(wallet_address.to_string(), id.clone())
+                .await;
+        }
+        None => {
+            state
+                .customer_search_miss
+                .insert(wallet_address.to_string(), ())
+                .await;
+        }
+    }
+    Ok(found)
 }
 
 /// Return the current credit balance in cents (≤ 0 means credits available; the Stripe
@@ -605,9 +760,26 @@ pub async fn check_credit(
     state: &StripeState,
 ) -> std::result::Result<(), BillingError> {
     let wallet = resolve_wallet_classified(api_key, state).await?;
-    let customer_id = get_customer_by_wallet(&wallet, state)
+    // No customer means no credits — answer 402 without creating one. Creating
+    // here would race Stripe Search's indexing lag and could shadow a freshly
+    // funded customer with a cached zero-credit duplicate (#555). A wallet
+    // whose customer just isn't indexed yet gets a *retryable* 402 that heals
+    // by itself within Stripe's indexing window.
+    let Some(customer_id) = find_customer_by_wallet(&wallet, state)
         .await
-        .map_err(BillingError::Unavailable)?;
+        .map_err(BillingError::Unavailable)?
+    else {
+        record_billing_event(
+            reason,
+            &wallet,
+            required_cents,
+            OUTCOME_INSUFFICIENT_CREDITS,
+        );
+        return Err(BillingError::InsufficientCredits {
+            available_cents: 0,
+            required_cents,
+        });
+    };
     let balance = get_credit_balance(&customer_id, state)
         .await
         .map_err(BillingError::Unavailable)?;
@@ -645,9 +817,18 @@ async fn charge(
 ) -> std::result::Result<(), BillingError> {
     tracing::debug!(cost_cents, "stripe::charge: starting");
     let wallet = resolve_wallet_classified(api_key, state).await?;
-    let customer_id = get_customer_by_wallet(&wallet, state)
+    // Same no-create rule as check_credit (#555): a missing customer is an
+    // insufficient-credits rejection, never a trigger to create one.
+    let Some(customer_id) = find_customer_by_wallet(&wallet, state)
         .await
-        .map_err(BillingError::Unavailable)?;
+        .map_err(BillingError::Unavailable)?
+    else {
+        record_billing_event(reason, &wallet, cost_cents, OUTCOME_INSUFFICIENT_CREDITS);
+        return Err(BillingError::InsufficientCredits {
+            available_cents: 0,
+            required_cents: cost_cents,
+        });
+    };
 
     // Read the cache directly.  If missing, fall back to an inline Stripe fetch
     // using try_get_with to coalesce concurrent cache-miss requests for the same
@@ -1125,5 +1306,81 @@ mod tests {
     fn wrong_role_prefixes_are_rejected() {
         // A publishable key in the secret slot, and vice versa.
         assert!(validate_local_test_keys("pk_test_abc", "pk_test_abc").is_err());
+    }
+
+    // ── Startup key validation (validate_key) ────────────────────────────────
+
+    /// Build the `anyhow::Error` shape that `client.get()` produces for a Stripe
+    /// HTTP error: a `StripeError` carrying the status and body.
+    fn stripe_err(status: reqwest::StatusCode, error_type: &str) -> anyhow::Error {
+        anyhow::Error::new(lit_billing_core::StripeError {
+            status,
+            body: serde_json::json!({ "error": { "type": error_type } }),
+        })
+    }
+
+    #[test]
+    fn key_check_401_is_fatal_auth_failure() {
+        // A revoked / wrong-environment key — the case this whole feature exists
+        // to catch. Must be fatal so the server refuses to boot.
+        let check = classify_key_check(&stripe_err(
+            reqwest::StatusCode::UNAUTHORIZED,
+            "authentication_error",
+        ));
+        assert!(
+            matches!(check, KeyCheck::AuthFailed(_)),
+            "401 must be AuthFailed, got: {check:?}"
+        );
+    }
+
+    #[test]
+    fn key_check_403_is_fatal_auth_failure() {
+        // A restricted key lacking the required permission is also unrecoverable
+        // without operator action, so it is fatal like 401.
+        let check = classify_key_check(&stripe_err(
+            reqwest::StatusCode::FORBIDDEN,
+            "permission_error",
+        ));
+        assert!(
+            matches!(check, KeyCheck::AuthFailed(_)),
+            "403 must be AuthFailed, got: {check:?}"
+        );
+    }
+
+    #[test]
+    fn key_check_5xx_is_graceful_unavailable() {
+        // Stripe being down says nothing about the key: degrade, don't exit.
+        let check = classify_key_check(&stripe_err(
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            "api_error",
+        ));
+        assert!(
+            matches!(check, KeyCheck::Unavailable(_)),
+            "5xx must be Unavailable, got: {check:?}"
+        );
+    }
+
+    #[test]
+    fn key_check_429_rate_limit_is_graceful() {
+        // A rate-limited probe is transient, not an auth verdict.
+        let check = classify_key_check(&stripe_err(
+            reqwest::StatusCode::TOO_MANY_REQUESTS,
+            "rate_limit_error",
+        ));
+        assert!(
+            matches!(check, KeyCheck::Unavailable(_)),
+            "429 must be Unavailable, got: {check:?}"
+        );
+    }
+
+    #[test]
+    fn key_check_transport_error_is_graceful() {
+        // A timeout / connection error arrives as a plain anyhow error with no
+        // StripeError on the chain — it is availability, never auth.
+        let check = classify_key_check(&anyhow::anyhow!("connection timed out"));
+        assert!(
+            matches!(check, KeyCheck::Unavailable(_)),
+            "transport error must be Unavailable, got: {check:?}"
+        );
     }
 }
