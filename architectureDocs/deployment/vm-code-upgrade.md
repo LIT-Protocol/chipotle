@@ -77,6 +77,25 @@ If the CVM boots before the whitelist tx is finalized, the KMS will reject the k
 the CVM cannot serve traffic. The diagram shows the whitelist flowing into the key issuance check
 to reflect this dependency.
 
+## Release-line branches & hotfixes
+
+Every tagged production release (`v*` push → **Deploy Prod 1: Propose Compose Hash**) also
+lands its commit on a minor-version **release-line branch** `release/vMAJOR.MINOR` (created by the
+`create-release-branch` job). All patch releases on a line (`v1.2.0`, `v1.2.1`, …) share one
+branch, so a shipped version has a stable home that does not move as `main` advances.
+
+To ship a hotfix to a released version without dragging in unreleased work from `main`:
+
+1. Branch from the release line: `git switch release/v1.2` (or the tag: `git switch --detach v1.2.3`).
+2. Apply the fix (cherry-pick from `main` where possible so the fix also lands there).
+3. Tag the patch and push: `git tag v1.2.4 && git push origin v1.2.4` — this re-runs the prod
+   propose workflow for the hotfix commit.
+4. The `create-release-branch` job **fast-forwards** `release/v1.2` to the hotfix commit. It never
+   force-pushes: if the branch has diverged from the tagged commit it is left untouched and the run
+   logs a warning, so hotfix commits already on the branch are never discarded.
+
+Don't forget to forward-port the fix to `main` if you branched from the tag directly.
+
 ## Rollback
 
 To roll back, redeploy the previous image (whose compose-hash is already whitelisted). No

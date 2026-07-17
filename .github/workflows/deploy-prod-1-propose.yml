@@ -15,6 +15,12 @@
 #   2. Provision compose file update via Phala Cloud API → get compose hash
 #   3. Propose addComposeHash(hash) to Safe multisig on Base
 #   4. Create draft GitHub release with deployment context for Phase 2
+#   5. Create/advance the release-line branch (release/vX.Y) for hotfixes
+#
+# Release-line branches (CPL-358): each tagged prod release lands its commit on a
+# minor-version branch release/vX.Y. All patch releases on a line share one branch,
+# giving hotfixes to a shipped version a stable home that never moves as main
+# advances. See architectureDocs/deployment/vm-code-upgrade.md ("Release-line branches & hotfixes").
 #
 # Image provenance (DR-1b): Each image is signed with Sigstore (cosign keyless).
 # To verify:
@@ -549,3 +555,53 @@ jobs:
             --title "${{ github.ref_name }}" \
             --generate-notes \
             --target "${{ github.sha }}"
+
+  # Land the released commit on a minor-version release-line branch (release/vX.Y)
+  # so hotfixes to a shipped version have a stable home that never moves as main
+  # advances (CPL-358). All patch releases on a line (v1.2.0, v1.2.1, ...) share
+  # one branch. Runs only for tag pushes; workflow_dispatch re-provisions an
+  # existing release and has no tag to key a line off.
+  create-release-branch:
+    needs: [create-draft-release]
+    if: ${{ github.ref_type == 'tag' }}
+    runs-on: self-hosted
+    permissions:
+      contents: write # push the release-line branch
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0 # need history to test fast-forward against an existing branch
+
+      - name: Create or advance the release-line branch
+        env:
+          TAG: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          # Derive release/vMAJOR.MINOR from the tag. Prefix-match tolerates
+          # pre-release suffixes (v1.2.0-rc1 → release/v1.2), keeping the whole
+          # 1.2 line on one branch.
+          if [[ ! "$TAG" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+            echo "::notice::Tag '$TAG' is not vMAJOR.MINOR.PATCH — skipping release-branch creation."
+            exit 0
+          fi
+          BRANCH="release/v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+          echo "Release-line branch: $BRANCH (tag $TAG @ $SHA)"
+
+          if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
+            # Branch exists — an earlier patch release on this line, or a branch
+            # already carrying hotfix commits. Only fast-forward it to the tagged
+            # commit; never force-push, which would discard those hotfix commits.
+            git fetch origin "$BRANCH"
+            if git merge-base --is-ancestor "origin/$BRANCH" "$SHA"; then
+              echo "Fast-forwarding $BRANCH to $SHA"
+              git push origin "$SHA:refs/heads/$BRANCH"
+            else
+              echo "::warning::$BRANCH has diverged from $SHA (likely carries hotfix commits). Leaving it untouched — reconcile manually if this release should advance the line."
+            fi
+          else
+            echo "Creating $BRANCH at $SHA"
+            git push origin "$SHA:refs/heads/$BRANCH"
+          fi
