@@ -86,7 +86,9 @@ branch, so a shipped version has a stable home that does not move as `main` adva
 
 To ship a hotfix to a released version without dragging in unreleased work from `main`:
 
-1. Branch from the release line: `git switch release/v1.2` (or the tag: `git switch --detach v1.2.3`).
+1. Fetch and branch from the release line:
+   `git fetch origin && git switch -c release/v1.2 origin/release/v1.2` (or from the tag:
+   `git fetch origin --tags && git switch --detach v1.2.3`).
 2. Apply the fix (cherry-pick from `main` where possible so the fix also lands there).
 3. Tag the patch and push: `git tag v1.2.4 && git push origin v1.2.4` — this re-runs the prod
    propose workflow for the hotfix commit.

@@ -594,8 +594,11 @@ jobs:
             # Branch exists — an earlier patch release on this line, or a branch
             # already carrying hotfix commits. Only fast-forward it to the tagged
             # commit; never force-push, which would discard those hotfix commits.
+            # Compare against FETCH_HEAD: `git fetch` always writes it, whereas the
+            # origin/$BRANCH remote-tracking ref may not exist under checkout's
+            # narrow fetch refspec.
             git fetch origin "$BRANCH"
-            if git merge-base --is-ancestor "origin/$BRANCH" "$SHA"; then
+            if git merge-base --is-ancestor FETCH_HEAD "$SHA"; then
               echo "Fast-forwarding $BRANCH to $SHA"
               git push origin "$SHA:refs/heads/$BRANCH"
             else
