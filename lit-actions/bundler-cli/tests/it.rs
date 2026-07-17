@@ -32,10 +32,11 @@ fn write(dir: &Path, name: &str, contents: &str) {
 
 /// Unpack a tar/tar.gz bundle into `{path -> (mode, contents)}`.
 fn unpack(bytes: &[u8]) -> BTreeMap<String, (u32, String)> {
-    let reader: Box<dyn Read> = if bytes.starts_with(&[0x1f, 0x8b]) {
-        Box::new(flate2::read::GzDecoder::new(bytes))
+    let cursor = std::io::Cursor::new(bytes.to_vec());
+    let reader: Box<dyn Read + '_> = if bytes.starts_with(&[0x1f, 0x8b]) {
+        Box::new(flate2::read::GzDecoder::new(cursor))
     } else {
-        Box::new(bytes)
+        Box::new(cursor)
     };
     let mut archive = tar::Archive::new(reader);
     let mut out = BTreeMap::new();
@@ -118,8 +119,8 @@ fn generates_startup_from_binary_and_marks_it_executable() {
     let files = unpack(&bytes);
     let startup = &files["startup.sh"].1;
     assert!(
-        startup.contains("exec ./app"),
-        "startup runs the binary: {startup}"
+        startup.contains("exec \"./app\""),
+        "startup runs the binary (quoted): {startup}"
     );
     // The binary must carry an exec bit in the read-only sandbox mount.
     assert_eq!(files["app"].0 & 0o111, 0o111, "binary must be executable");
@@ -202,6 +203,45 @@ fn config_overrides_folder_manifest_and_must_be_valid_json() {
         cfg.path().join("bad.json").to_str().unwrap(),
     ]);
     assert!(!out.status.success());
+}
+
+#[test]
+fn type_invalid_manifest_is_rejected_matching_the_runner() {
+    // A folder lit.json whose env values are not strings would be rejected by
+    // the runner; catch it locally so we never hand out a CID for a bundle the
+    // node will refuse.
+    let d = project();
+    write(d.path(), "startup.sh", "echo hi\n");
+    write(d.path(), "lit.json", "{\"env\":{\"X\":1}}");
+
+    let out = lit_bundle(&[
+        "bundle",
+        d.path().to_str().unwrap(),
+        "-o",
+        d.path().join("out.tgz").to_str().unwrap(),
+    ]);
+    assert!(!out.status.success());
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("lit.json is invalid"), "{err}");
+}
+
+#[test]
+fn binary_with_shell_metacharacters_is_rejected() {
+    let d = project();
+    write(d.path(), "app", "echo hi\n");
+
+    let out = lit_bundle(&[
+        "bundle",
+        d.path().to_str().unwrap(),
+        "-o",
+        d.path().join("out.tgz").to_str().unwrap(),
+        "--binary",
+        "app; rm -rf /",
+    ]);
+    assert!(
+        !out.status.success(),
+        "must reject injectable --binary names"
+    );
 }
 
 #[test]

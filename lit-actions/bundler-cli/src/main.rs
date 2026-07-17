@@ -93,8 +93,8 @@ struct BuildArgs {
     #[arg(long)]
     config: Option<PathBuf>,
     /// Binary to run when the folder has no startup.sh: a startup.sh that
-    /// execs this file is generated. Required when there is neither a
-    /// startup.sh nor a config describing how to run.
+    /// execs this file is generated. Required when the folder has no
+    /// startup.sh (a lit.json is metadata only and does not substitute).
     #[arg(long)]
     binary: Option<String>,
     /// Emit a plain tar instead of tar.gz.
