@@ -881,6 +881,233 @@ async function fetchNodeConfigValues() {
   }
 }
 
+/* ═══ System dashboard — runtimes, CVM memory, caches, languages (CPL-353) ═══ */
+
+function fmtBytes(bytes) {
+  if (bytes == null || isNaN(bytes)) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let v = Number(bytes);
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? String(v) : v.toFixed(1)) + ' ' + units[i];
+}
+
+function fmtKb(kb) {
+  return kb == null ? '—' : fmtBytes(Number(kb) * 1024);
+}
+
+function fmtCount(n) {
+  return n == null ? '—' : Number(n).toLocaleString('en-US');
+}
+
+async function fetchJson(url) {
+  const res = await fetch(url);
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status} ${res.statusText}`);
+    err.status = res.status;
+    throw err;
+  }
+  return res.json();
+}
+
+// Older nodes 404 on the new endpoints — show a soft hint rather than an error.
+function setCardError(bodyId, errId, e) {
+  const body = el(bodyId);
+  const errEl = el(errId);
+  if (e?.status === 404) {
+    if (body) body.innerHTML = '<span class="sys-empty">Not supported by this node version yet.</span>';
+    if (errEl) errEl.style.display = 'none';
+    return;
+  }
+  if (body) body.innerHTML = '';
+  if (errEl) { errEl.textContent = e?.message || String(e); errEl.style.display = 'block'; }
+}
+
+function runtimeRow(name, sub, state, text, socketPath) {
+  return `<div class="sys-row"${socketPath ? ` title="${escapeHtml(socketPath)}"` : ''}>` +
+    `<span class="health-dot ${state}"></span>` +
+    `<span>${escapeHtml(name)}</span>` +
+    `<span class="badge">${escapeHtml(sub)}</span>` +
+    `<span class="sys-value">${escapeHtml(text)}</span>` +
+  `</div>`;
+}
+
+function renderRuntimes(health, stats) {
+  const body = el('runtimes-body');
+  if (!body) return;
+  const runner = name => stats?.runners?.find(r => r.name === name);
+  const js = runner('js');
+  const gv = runner('gvisor');
+  const rows = [];
+
+  // JS runner — /health probes its socket with a real gRPC connect.
+  const jsUp = health?.lit_actions_reachable;
+  rows.push(runtimeRow(
+    'JS runner', 'Deno / V8 isolate',
+    jsUp == null ? 'unknown' : jsUp ? 'healthy' : 'critical',
+    jsUp == null ? 'unknown' : jsUp ? 'reachable' : 'unreachable',
+    js?.socket_path,
+  ));
+
+  // gVisor runner — prefer the /health connect probe once nodes ship it
+  // (#558); until then fall back to socket presence from /get_system_stats.
+  let gvState = 'unknown';
+  let gvText = 'unknown';
+  if (typeof health?.lit_actions_gvisor_reachable === 'boolean') {
+    gvState = health.lit_actions_gvisor_reachable ? 'healthy' : 'critical';
+    gvText = health.lit_actions_gvisor_reachable ? 'reachable' : 'unreachable';
+  } else if (gv) {
+    gvState = gv.socket_present ? 'healthy' : 'unknown';
+    gvText = gv.socket_present ? 'socket present' : 'not deployed';
+  }
+  rows.push(runtimeRow('gVisor runner', 'any-language sandbox', gvState, gvText, gv?.socket_path));
+
+  if (health) {
+    rows.push(runtimeRow(
+      'CPU', 'request admission',
+      health.cpu_available ? 'healthy' : 'critical',
+      health.cpu_available ? 'available' : 'overloaded',
+      null,
+    ));
+    rows.push(runtimeRow(
+      'Billing keys', 'Stripe configuration',
+      health.billing_keys_present ? 'healthy' : 'unknown',
+      health.billing_keys_present ? 'present' : 'absent',
+      null,
+    ));
+  }
+  body.innerHTML = rows.join('');
+}
+
+function renderMemory(mem) {
+  const body = el('memory-body');
+  if (!body) return;
+  // Fields are independently nullable — render whatever procfs provided
+  // rather than blanking the card when only /proc/meminfo is missing.
+  if (!mem || (mem.total_kb == null && mem.process_rss_kb == null)) {
+    body.innerHTML = '<span class="sys-empty">Memory figures unavailable (no procfs on this node).</span>';
+    return;
+  }
+  const parts = [];
+  if (mem.total_kb != null) {
+    const pct = mem.used_kb != null ? (Number(mem.used_kb) / Number(mem.total_kb)) * 100 : null;
+    const cls = pct == null ? '' : pct >= 85 ? 'critical' : pct >= 70 ? 'warning' : '';
+    parts.push(
+      `<div class="sys-row" style="border-bottom:none;padding-bottom:0">` +
+        `<span class="sys-label">Used</span>` +
+        `<span class="sys-value">${fmtKb(mem.used_kb)} / ${fmtKb(mem.total_kb)}${pct != null ? ` (${pct.toFixed(1)}%)` : ''}</span>` +
+      `</div>`,
+      `<div class="gauge"><div class="gauge-fill ${cls}" style="width:${pct == null ? 0 : Math.min(100, pct).toFixed(1)}%"></div></div>`,
+      `<div class="sys-row"><span class="sys-label">Available</span><span class="sys-value">${fmtKb(mem.available_kb)}</span></div>`
+    );
+  } else {
+    parts.push('<div class="sys-empty" style="margin-bottom:0.35rem">CVM totals unavailable (no /proc/meminfo on this node).</div>');
+  }
+  if (mem.process_rss_kb != null) {
+    parts.push(`<div class="sys-row"><span class="sys-label">API server RSS</span><span class="sys-value">${fmtKb(mem.process_rss_kb)}</span></div>`);
+  }
+  body.innerHTML = parts.join('');
+}
+
+function renderCaches(caches) {
+  const body = el('caches-body');
+  if (!body) return;
+  if (!Array.isArray(caches) || caches.length === 0) {
+    body.innerHTML = '<span class="sys-empty">No cache statistics reported.</span>';
+    return;
+  }
+  const totalEntries = caches.reduce((s, c) => s + (c.entry_count ?? 0), 0);
+  const totalBytes = caches.reduce((s, c) => s + (c.approx_bytes ?? 0), 0);
+  body.innerHTML =
+    `<table><thead><tr><th>Cache</th><th class="eth">Entries</th><th class="eth">Size</th></tr></thead><tbody>` +
+    caches.map(c =>
+      `<tr title="${escapeHtml(c.description ?? '')}">` +
+        `<td>${escapeHtml(c.name)}</td>` +
+        `<td class="eth">${fmtCount(c.entry_count)}</td>` +
+        `<td class="eth">${c.approx_bytes != null ? fmtBytes(c.approx_bytes) : '—'}</td>` +
+      `</tr>`
+    ).join('') +
+    `</tbody></table>` +
+    `<div class="sys-row" style="border-bottom:none;margin-top:0.5rem">` +
+      `<span class="sys-label">Total</span>` +
+      `<span class="sys-value">${fmtCount(totalEntries)} entries &middot; ${fmtBytes(totalBytes)} tracked</span>` +
+    `</div>`;
+}
+
+function renderLanguages(languages) {
+  const body = el('languages-body');
+  if (!body) return;
+  if (!Array.isArray(languages) || languages.length === 0) {
+    body.innerHTML = '<span class="sys-empty">No languages advertised.</span>';
+    return;
+  }
+  body.innerHTML = languages.map(lang => {
+    const isGvisor = lang.execution_model === 'gvisor';
+    const runtimes = (lang.runtimes ?? []).map(rt =>
+      `<span class="badge${rt.is_default ? ' accent' : ''}" title="${escapeHtml(rt.version ?? '')}${rt.prewarmed ? ' · prewarmed' : ''}">${escapeHtml(rt.id)}${rt.is_default ? ' ★' : ''}</span>`
+    ).join(' ');
+    const methods = (lang.methods ?? []).map(m => `<span class="badge">${escapeHtml(m)}</span>`).join(' ');
+    return `<div class="sys-row" style="flex-wrap:wrap">` +
+      `<span>${escapeHtml(lang.display_name ?? lang.name)}</span>` +
+      `<span class="badge${isGvisor ? ' accent' : ''}">${isGvisor ? 'gVisor sandbox' : 'Deno / V8'}</span>` +
+      `<span class="sys-value" style="display:flex;gap:0.35rem;flex-wrap:wrap;justify-content:flex-end">${runtimes} ${methods}</span>` +
+    `</div>`;
+  }).join('');
+}
+
+// /health intentionally answers 503 with a JSON body when unhealthy, so parse
+// the body regardless of status.
+async function fetchHealth(serverUrl) {
+  const res = await fetch(`${serverUrl}/health`);
+  try {
+    return await res.json();
+  } catch {
+    const err = new Error(`HTTP ${res.status} ${res.statusText}`);
+    err.status = res.status;
+    throw err;
+  }
+}
+
+async function refreshSystemDashboard(serverUrl) {
+  const [healthResult, statsResult] = await Promise.allSettled([
+    fetchHealth(serverUrl),
+    fetchJson(`${serverUrl}/get_system_stats`),
+  ]);
+  const health = healthResult.status === 'fulfilled' ? healthResult.value : null;
+  const stats = statsResult.status === 'fulfilled' ? statsResult.value : null;
+
+  if (health == null && stats == null) {
+    setCardError('runtimes-body', 'runtimes-error', healthResult.reason ?? statsResult.reason);
+  } else {
+    const errEl = el('runtimes-error');
+    if (errEl) errEl.style.display = 'none';
+    renderRuntimes(health, stats);
+  }
+
+  if (stats) {
+    for (const id of ['memory-error', 'caches-error']) {
+      const errEl = el(id);
+      if (errEl) errEl.style.display = 'none';
+    }
+    renderMemory(stats.memory);
+    renderCaches(stats.caches);
+  } else {
+    setCardError('memory-body', 'memory-error', statsResult.reason);
+    setCardError('caches-body', 'caches-error', statsResult.reason);
+  }
+}
+
+async function fetchSupportedLanguages(serverUrl) {
+  try {
+    const data = await fetchJson(`${serverUrl}/get_supported_languages`);
+    const errEl = el('languages-error');
+    if (errEl) errEl.style.display = 'none';
+    renderLanguages(data.languages);
+  } catch (e) {
+    setCardError('languages-body', 'languages-error', e);
+  }
+}
+
 /* ═══ Auto-refresh ═══════════════════════════════════════════════════════════ */
 
 const REFRESH_INTERVAL = 30;
@@ -955,6 +1182,8 @@ async function loadNetwork() {
     fetchNodeConfigValues(),
     fetchLitActionClientConfig(serverUrl),
     fetchChainConfigKeys(serverUrl),
+    refreshSystemDashboard(serverUrl),
+    fetchSupportedLanguages(serverUrl),
   ]);
   updateHealthSummary(); // pick up admin reserve after fetchContractValues
   loadThresholdInputs();
@@ -970,6 +1199,8 @@ async function refreshBalances() {
       getApiPayers(serverUrl),
       fetchContractValues(),
       fetchNodeConfigValues(),
+      refreshSystemDashboard(serverUrl),
+      fetchSupportedLanguages(serverUrl),
     ]);
     updateHealthSummary(); // pick up admin reserve after fetchContractValues
   } finally {

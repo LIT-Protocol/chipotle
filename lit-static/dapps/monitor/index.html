@@ -323,6 +323,83 @@
         color: var(--text);
       }
 
+      /* ── System dashboard ── */
+      .sys-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+        gap: 1.5rem;
+        margin-bottom: 1.5rem;
+        align-items: start;
+      }
+      .sys-grid .card h2 {
+        font-size: 1rem;
+        font-weight: 600;
+        margin: 0 0 0.25rem;
+      }
+      .endpoint-hint {
+        color: var(--muted);
+        font-size: 0.8rem;
+        margin: 0 0 0.75rem;
+      }
+      .sys-row {
+        display: flex;
+        align-items: baseline;
+        gap: 0.6rem;
+        padding: 0.45rem 0;
+        border-bottom: 1px solid var(--border);
+        font-size: 0.85rem;
+      }
+      .sys-row:last-child {
+        border-bottom: none;
+      }
+      .sys-row .sys-label {
+        color: var(--muted);
+        min-width: 110px;
+      }
+      .sys-row .sys-value {
+        font-family: 'JetBrains Mono', monospace;
+        margin-left: auto;
+        text-align: right;
+      }
+      .gauge {
+        height: 10px;
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 5px;
+        overflow: hidden;
+        margin: 0.6rem 0 0.35rem;
+      }
+      .gauge-fill {
+        height: 100%;
+        width: 0;
+        background: var(--success);
+        transition: width 0.4s ease, background 0.4s ease;
+      }
+      .gauge-fill.warning { background: var(--warning); }
+      .gauge-fill.critical { background: var(--critical); }
+      .badge {
+        display: inline-block;
+        padding: 0.1rem 0.5rem;
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        font-size: 0.7rem;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .badge.accent {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .sys-error {
+        color: var(--critical);
+        font-size: 0.85rem;
+        margin-top: 0.5rem;
+      }
+      .sys-empty {
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+
       /* ── Accordion ── */
       .card-header {
         display: flex;
@@ -371,7 +448,7 @@
   <body>
     <h1>Lit Node Monitor</h1>
     <p class="subtitle">
-      Payer Safety Console — configuration and health monitoring for the Lit Node Express server.
+      Payer safety, runtime health, and CVM system monitoring for the Lit Node Express server.
     </p>
 
     <!-- ═══ Top bar: Network selector + refresh controls ═══ -->
@@ -403,6 +480,37 @@
       <div class="health-bar-item">
         <span class="health-bar-label">Admin Reserve</span>
         <span class="health-bar-value" id="health-admin-reserve">—</span>
+      </div>
+    </div>
+
+    <!-- ═══ CVM System dashboard ═══ -->
+    <div class="sys-grid">
+      <div class="card">
+        <h2>Runtimes</h2>
+        <p class="endpoint-hint"><code>GET /health</code> &middot; <code>GET /get_system_stats</code> — Lit Action runners inside the CVM.</p>
+        <div id="runtimes-body"><span class="sys-empty">Loading&hellip;</span></div>
+        <div id="runtimes-error" class="sys-error" style="display: none"></div>
+      </div>
+
+      <div class="card">
+        <h2>CVM Memory</h2>
+        <p class="endpoint-hint"><code>GET /get_system_stats</code> — memory of the confidential VM, from <code>/proc/meminfo</code>.</p>
+        <div id="memory-body"><span class="sys-empty">Loading&hellip;</span></div>
+        <div id="memory-error" class="sys-error" style="display: none"></div>
+      </div>
+
+      <div class="card">
+        <h2>Caches</h2>
+        <p class="endpoint-hint"><code>GET /get_system_stats</code> — in-process cache population (action code, permissions, billing).</p>
+        <div id="caches-body"><span class="sys-empty">Loading&hellip;</span></div>
+        <div id="caches-error" class="sys-error" style="display: none"></div>
+      </div>
+
+      <div class="card">
+        <h2>Supported Languages</h2>
+        <p class="endpoint-hint"><code>GET /get_supported_languages</code> — language capability surface of this node.</p>
+        <div id="languages-body"><span class="sys-empty">Loading&hellip;</span></div>
+        <div id="languages-error" class="sys-error" style="display: none"></div>
       </div>
     </div>
 

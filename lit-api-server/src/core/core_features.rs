@@ -128,6 +128,7 @@ pub async fn lit_action(
         code: code_to_run,
         globals: js_params.clone(),
         action_ipfs_id: Some(derived_ipfs_id),
+        startup_script: None,
     };
 
     let result = match client
@@ -308,6 +309,13 @@ pub async fn lit_binary_action(
         code: code_for_runner,
         globals: request.js_params.clone(),
         action_ipfs_id: Some(checksum),
+        // Rides beside the bundle so different scripts reuse the runner's
+        // cached bundle; the runner falls back to the bundle's own
+        // startup.sh when absent.
+        startup_script: request
+            .startup_script
+            .clone()
+            .filter(|s| !s.trim().is_empty()),
     };
 
     let result = match client

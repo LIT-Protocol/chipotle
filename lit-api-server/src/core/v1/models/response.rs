@@ -230,3 +230,44 @@ pub struct VersionResponse {
 pub struct SupportedLanguagesResponse {
     pub languages: Vec<crate::actions::languages::LanguageFeature>,
 }
+
+/// Returned by `/get_system_stats` — CVM memory usage and in-process cache
+/// statistics powering the monitor dapp's system dashboard.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct SystemStatsResponse {
+    pub memory: MemoryStats,
+    pub caches: Vec<CacheStats>,
+    pub runners: Vec<RunnerInfo>,
+}
+
+/// CVM-level memory figures from `/proc/meminfo` plus this process's resident
+/// set from `/proc/self/status`. Fields are `None` on platforms without
+/// procfs (e.g. local macOS development).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct MemoryStats {
+    pub total_kb: Option<u64>,
+    pub available_kb: Option<u64>,
+    pub used_kb: Option<u64>,
+    pub process_rss_kb: Option<u64>,
+}
+
+/// Entry statistics for one in-process cache.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CacheStats {
+    pub name: String,
+    pub description: String,
+    pub entry_count: u64,
+    /// Approximate bytes held, for caches built with a byte weigher. `None`
+    /// when the cache only counts entries.
+    pub approx_bytes: Option<u64>,
+}
+
+/// Presence of a Lit Action runner's Unix socket. `socket_present` means the
+/// runner container has been deployed and created its socket — it is not a
+/// liveness probe (`/health` covers reachability).
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct RunnerInfo {
+    pub name: String,
+    pub socket_path: String,
+    pub socket_present: bool,
+}

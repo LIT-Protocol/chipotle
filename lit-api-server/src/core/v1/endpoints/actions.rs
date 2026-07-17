@@ -56,7 +56,10 @@ pub(super) async fn lit_action(
 
 /// Execute an any-language action bundle on the gVisor runner. Same billing,
 /// CPU-gating, and response shape as `/lit_action`; differs only in payload
-/// (a tar bundle instead of JS) and backend socket.
+/// (a tar bundle instead of JS) and backend socket. The sandbox always runs
+/// `bash startup.sh` — the request's `startup_script`, or the bundle's root
+/// `startup.sh` — so one cached bundle serves many different scripts, and
+/// top-level `js_params` are injected as environment variables.
 #[openapi(tag = "Actions")]
 #[post("/lit_binary_action", format = "json", data = "<request>")]
 #[tracing::instrument(name = "endpoint::lit_binary_action", skip_all, parent = &request_span.span)]

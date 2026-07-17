@@ -27,6 +27,14 @@ doesn't describe endpoints the released server lacks.
 - `max_get_keys_count` is now enforced in the key handlers; oversized
   `get_keys` requests are rejected.
 
+### Security
+- `registerWalletDerivation` now enforces a global first-owner binding
+  (`pkpId → master account`): a wallet address can only ever be registered —
+  or re-registered after deletion — by the account that first registered it,
+  closing a cross-account PKP hijack via publicly visible derivation paths
+  (#575). Requires a one-time on-chain backfill for wallets registered before
+  the upgrade (`backfillPkpOwners`).
+
 ## v1.1.10 — 2026-06-22
 
 ### Changed

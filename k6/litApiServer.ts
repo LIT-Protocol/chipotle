@@ -133,7 +133,7 @@ export interface LitActionRequest {
 }
 
 /**
- * Parameters passed to the action (exposed to guest code via `lit params`).
+ * Parameters passed to the action: exposed to guest code via `lit params`, and top-level values are injected into the sandbox environment.
  * @nullable
  */
 export type LitBinaryActionRequestJsParams = unknown | null;
@@ -141,7 +141,9 @@ export type LitBinaryActionRequestJsParams = unknown | null;
 /**
  * POST /lit_binary_action
 
-Executes an any-language action **bundle** in the gVisor runner. Provide either `bundle` (a base64-encoded tar/tar.gz containing a `lit.json` manifest at its root) or `checksum` (the content id of a bundle the runner already cached). When `bundle` is supplied the server derives the checksum from the decoded tar bytes and authorizes on that derived value — a client-supplied `checksum` is only a hint and is ignored if it disagrees.
+Executes an any-language action **bundle** in the gVisor runner. Provide either `bundle` (a base64-encoded tar/tar.gz of payload files) or `checksum` (the content id of a bundle the runner already cached). When `bundle` is supplied the server derives the checksum from the decoded tar bytes and authorizes on that derived value — a client-supplied `checksum` is only a hint and is ignored if it disagrees.
+
+The sandbox only ever executes `bash startup.sh` (CPL-355): the `startup_script` sent here, or the `startup.sh` at the bundle root.
  */
 export interface LitBinaryActionRequest {
   /**
@@ -155,7 +157,12 @@ export interface LitBinaryActionRequest {
    */
   checksum?: string | null;
   /**
-   * Parameters passed to the action (exposed to guest code via `lit params`).
+   * Bash script executed as the sandbox entrypoint (`bash startup.sh`). Sent separately from `bundle` so different scripts reuse the same cached bundle. Optional when the bundle ships a `startup.sh` at its root; the request-supplied script wins when both exist.
+   * @nullable
+   */
+  startup_script?: string | null;
+  /**
+   * Parameters passed to the action: exposed to guest code via `lit params`, and top-level values are injected into the sandbox environment.
    * @nullable
    */
   js_params?: LitBinaryActionRequestJsParams;
@@ -561,6 +568,66 @@ export interface VersionResponse {
   submodule_versions: unknown[][];
 }
 
+/**
+ * Returned by `/get_system_stats` — CVM memory usage and in-process cache statistics powering the monitor dapp's system dashboard.
+ */
+export interface SystemStatsResponse {
+  memory: MemoryStats;
+  caches: CacheStats[];
+  runners: RunnerInfo[];
+}
+
+/**
+ * CVM-level memory figures from `/proc/meminfo` plus this process's resident set from `/proc/self/status`. Fields are `None` on platforms without procfs (e.g. local macOS development).
+ */
+export interface MemoryStats {
+  /**
+   * @minimum 0
+   * @nullable
+   */
+  total_kb?: number | null;
+  /**
+   * @minimum 0
+   * @nullable
+   */
+  available_kb?: number | null;
+  /**
+   * @minimum 0
+   * @nullable
+   */
+  used_kb?: number | null;
+  /**
+   * @minimum 0
+   * @nullable
+   */
+  process_rss_kb?: number | null;
+}
+
+/**
+ * Entry statistics for one in-process cache.
+ */
+export interface CacheStats {
+  name: string;
+  description: string;
+  /** @minimum 0 */
+  entry_count: number;
+  /**
+   * Approximate bytes held, for caches built with a byte weigher. `None` when the cache only counts entries.
+   * @minimum 0
+   * @nullable
+   */
+  approx_bytes?: number | null;
+}
+
+/**
+ * Presence of a Lit Action runner's Unix socket. `socket_present` means the runner container has been deployed and created its socket — it is not a liveness probe (`/health` covers reachability).
+ */
+export interface RunnerInfo {
+  name: string;
+  socket_path: string;
+  socket_present: boolean;
+}
+
 export type ListApiKeysParams = {
   /**
    * @minimum 0
@@ -929,6 +996,8 @@ export type BillingConfirmPaymentHeaders = {
 export type BillingConfirmPaymentDefault = AccountOpResponse | ErrMessage;
 
 export type GetVersionDefault = VersionResponse | ErrMessage;
+
+export type GetSystemStatsDefault = SystemStatsResponse | ErrMessage;
 
 /**
  * This is the base client to use for interacting with the API.
@@ -1345,7 +1414,7 @@ Deprecated: minting is a metered write, so it should not live on a GET — link 
   }
 
   /**
-   * Execute an any-language action bundle on the gVisor runner. Same billing, CPU-gating, and response shape as `/lit_action`; differs only in payload (a tar bundle instead of JS) and backend socket.
+   * Execute an any-language action bundle on the gVisor runner. Same billing, CPU-gating, and response shape as `/lit_action`; differs only in payload (a tar bundle instead of JS) and backend socket. The sandbox always runs `bash startup.sh` — the request's `startup_script`, or the bundle's root `startup.sh` — so one cached bundle serves many different scripts, and top-level `js_params` are injected as environment variables.
    */
   litBinaryAction(
     litBinaryActionRequest: LitBinaryActionRequest,
@@ -2741,6 +2810,36 @@ Deprecated: minting is a metered write, so it should not live on a GET — link 
       response,
       data,
       operationId: "get_version",
+    };
+  }
+
+  getSystemStats(requestParameters?: Params): {
+    response: Response;
+    data: GetSystemStatsDefault;
+    operationId: string;
+  } {
+    const k6url = new URL(this.cleanBaseUrl + `/get_system_stats`);
+    const mergedRequestParameters = this._mergeRequestParameters(
+      requestParameters || {},
+      this.commonRequestParameters,
+    );
+    const response = http.request(
+      "GET",
+      k6url.toString(),
+      undefined,
+      mergedRequestParameters,
+    );
+    let data;
+
+    try {
+      data = response.json();
+    } catch {
+      data = response.body;
+    }
+    return {
+      response,
+      data,
+      operationId: "get_system_stats",
     };
   }
 
