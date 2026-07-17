@@ -421,6 +421,32 @@ Deploy caveats: the pipeline must build + substitute
 
 ---
 
+## Feature flag — off by default (CPL-359)
+
+gVisor is opt-in on both axes:
+
+- **Build.** The `lit_actions_gvisor` supervisor and the guest `lit` CLI are
+  gated behind the `gvisor` cargo feature on `lit-actions-gvisor-server`
+  (`required-features`). A default `cargo build` — and `clippy --all-targets`
+  — skips them, so the runner binary is *not compiled* unless something opts
+  in. `Dockerfile.lit-actions-gvisor` passes `--features gvisor` (the image
+  build is the opt-in), and CI's `--all-features` keeps the binaries linted and
+  tested.
+- **Run.** lit-api-server always mounts `/lit_binary_action` (its OpenAPI
+  surface is stable), but the `GvisorEnabled` request guard (`actions::gvisor`,
+  driven by the `LIT_GVISOR_ENABLED` env var) runs *before* the CPU and billing
+  guards. Unless the var is truthy (`1`/`true`/`yes`/`on`) the guard
+  short-circuits with `503` — *"The gVisor any-language runner is disabled on
+  this node."* — so a disabled node sheds the call without a Stripe credit check
+  or dialing the runner socket. `docker-compose.phala.yml` sets
+  `LIT_GVISOR_ENABLED=true` on the api-server because that stack ships the
+  runner container.
+
+The two halves are independent: an api-server image built without a runner
+alongside it degrades cleanly to 503 rather than hanging on an absent socket.
+
+---
+
 ## Security boundaries (summary)
 
 1. **Secrets never enter the sandbox.** Key derivation and AES run *in

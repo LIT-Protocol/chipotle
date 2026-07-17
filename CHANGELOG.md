@@ -24,6 +24,11 @@ doesn't describe endpoints the released server lacks.
   (`lit-actions/local-cli`, developer tooling).
 
 ### Changed
+- The gVisor any-language runner is now **off by default** and behind a feature
+  flag (CPL-359). Its binary is compiled only when the `gvisor` cargo feature is
+  enabled (the gVisor runner image build opts in), and `POST /lit_binary_action`
+  stays mounted but returns `503` ("feature disabled") unless the api-server is
+  started with `LIT_GVISOR_ENABLED=true`.
 - `max_get_keys_count` is now enforced in the key handlers; oversized
   `get_keys` requests are rejected.
 

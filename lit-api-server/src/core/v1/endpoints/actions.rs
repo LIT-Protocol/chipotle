@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::accounts::chain_config::ChainConfig;
 use crate::actions::grpc::GrpcClientPool;
+use crate::actions::gvisor::GvisorEnabled;
 use crate::core::cache_metadata::CacheMetadataIndex;
 use crate::core::core_features;
 use crate::core::v1::guards::billing::BilledLitActionApiKey;
@@ -65,6 +66,10 @@ pub(super) async fn lit_action(
 #[tracing::instrument(name = "endpoint::lit_binary_action", skip_all, parent = &request_span.span)]
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn lit_binary_action(
+    // First guard: gVisor is off by default (CPL-359). When disabled this
+    // short-circuits with a "feature disabled" 503 before the CPU and billing
+    // guards run, so a disabled node never reaches the Stripe credit check.
+    _gvisor: GvisorEnabled,
     _cpu: CpuAvailable,
     request_span: RequestSpan,
     api_key: BilledLitActionApiKey,
