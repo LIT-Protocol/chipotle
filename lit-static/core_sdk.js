@@ -976,11 +976,14 @@ export class LitNodeSimpleApiClient {
 
   /**
    * POST /core/v1/lit_binary_action
-   * Executes an any-language action bundle on the gVisor runner. Provide
-   * either `bundle` (base64-encoded tar/tar.gz of the payload) or `checksum`
-   * (the content id of a bundle the runner already cached). The sandbox always
-   * runs `bash startup.sh`: `startupScript` here overrides the bundle's own
-   * `startup.sh`. Top-level `jsParams` values are injected as environment
+   * Executes an any-language action bundle on the gVisor runner. Supply exactly
+   * one bundle source: `bundle` (base64-encoded tar/tar.gz of the payload) or
+   * `checksum` (the content id of a bundle the runner already cached). Like
+   * {@link litAction}, this is a thin passthrough — the server is the single
+   * source of truth and returns a clean 400 if neither is supplied (and derives
+   * the authoritative checksum from the bundle bytes if both are). The sandbox
+   * always runs `bash startup.sh`: `startupScript` here overrides the bundle's
+   * own `startup.sh`. Top-level `jsParams` values are injected as environment
    * variables. Same billing, auth, and response shape as {@link litAction}.
    * @param {Object} options
    * @param {string} options.apiKey - Usage or account API key
@@ -991,6 +994,9 @@ export class LitNodeSimpleApiClient {
    * @returns {Promise<LitActionResponse>} { response, logs, has_error }
    */
   async litBinaryAction({ apiKey, bundle, checksum, startupScript, jsParams } = {}) {
+    // `js_params` is always sent (as null when absent) to mirror litAction; the
+    // server accepts a missing key too, but keeping the shape identical avoids
+    // divergence between the two execution paths.
     const body = { js_params: jsParams ?? null };
     if (bundle) body.bundle = bundle;
     if (checksum) body.checksum = checksum;
