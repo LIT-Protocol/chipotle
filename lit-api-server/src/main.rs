@@ -5,6 +5,7 @@ use lit_api_server::actions::grpc::GrpcClientPool;
 use lit_api_server::actions::languages::SupportedLanguages;
 use lit_api_server::config;
 use lit_api_server::core;
+use lit_api_server::core::cache_metadata::CacheMetadataIndex;
 use lit_api_server::core::v1::guards::cpu_overload::CpuOverloadMonitor;
 use lit_api_server::dstack;
 use lit_api_server::internal;
@@ -228,6 +229,15 @@ async fn main() -> Result<(), rocket::Error> {
     };
     tracing::info!("Supported languages: {supported_languages}");
 
+    // gVisor any-language runner gate (CPL-359). Off unless a deploy that
+    // ships the runner opts in; when off, /lit_binary_action stays mounted but
+    // answers "feature disabled". See actions::gvisor.
+    let gvisor_feature = lit_api_server::actions::gvisor::GvisorFeature::from_env();
+    tracing::info!(
+        "gVisor any-language runner enabled: {}",
+        gvisor_feature.enabled()
+    );
+
     let internal_config = internal::config::init();
     // `Arc<dyn AuthResolver>` is the auth backplane both this service and
     // lit-payments use. lit-api-server owns the on-chain plumbing, so it
@@ -244,11 +254,32 @@ async fn main() -> Result<(), rocket::Error> {
     // so on-chain changes made outside this process are reflected before TTL.
     lit_api_server::account_events::start_account_event_listener();
 
+    // CPL-351: secondary metadata index correlating cached action code with the
+    // master account that ran it. Lives outside the restart loop (like the cache
+    // it shadows) so metadata survives Rocket rebuilds.
+    let cache_metadata_index = Arc::new(CacheMetadataIndex::new());
+
     // IPFS cache lives outside the restart loop so warm entries survive restarts.
-    let ipfs_cache: Cache<String, Arc<String>> = Cache::builder()
-        .weigher(|_key, value: &Arc<String>| -> u32 { value.len().try_into().unwrap_or(u32::MAX) })
-        .max_capacity(1024 * 1024 * 1024) // 1 GB
-        .build();
+    // The eviction listener keeps the metadata index consistent: when a binary
+    // leaves the cache (capacity, expiry, or explicit invalidation) its metadata
+    // is dropped too. `RemovalCause::Replaced` is explicitly NOT a removal — the
+    // key is still cached, only its value changed — and `lit_action` re-inserts
+    // on every request, so treating Replaced as a removal would wipe live
+    // metadata (run_count/created_at) on every re-run of a cached action.
+    let ipfs_cache: Cache<String, Arc<String>> = {
+        let metadata_for_eviction = cache_metadata_index.clone();
+        Cache::builder()
+            .weigher(|_key, value: &Arc<String>| -> u32 {
+                value.len().try_into().unwrap_or(u32::MAX)
+            })
+            .max_capacity(1024 * 1024 * 1024) // 1 GB
+            .eviction_listener(move |key: Arc<String>, _value, cause| {
+                if cause != moka::notification::RemovalCause::Replaced {
+                    metadata_for_eviction.remove_entry(&key);
+                }
+            })
+            .build()
+    };
 
     // Restart metrics: total restart count for logging.
     let mut restart_count: u64 = 0;
@@ -303,7 +334,9 @@ async fn main() -> Result<(), rocket::Error> {
             internal_config.clone(),
             auth_resolver.clone(),
             ipfs_cache.clone(),
+            cache_metadata_index.clone(),
             supported_languages.clone(),
+            gvisor_feature,
         );
 
         let rocket = match r.ignite().await {
@@ -427,7 +460,9 @@ fn build_rocket(
     internal_config: Option<Arc<internal::InternalConfig>>,
     auth_resolver: Arc<dyn lit_billing_core::billing_auth::AuthResolver>,
     ipfs_cache: Cache<String, Arc<String>>,
+    cache_metadata_index: Arc<CacheMetadataIndex>,
     supported_languages: Arc<SupportedLanguages>,
+    gvisor_feature: lit_api_server::actions::gvisor::GvisorFeature,
 ) -> rocket::Rocket<rocket::Build> {
     let allowed_methods = HashSet::from([
         Method::from_str("Get").expect("Invalid method: Get"),
@@ -482,6 +517,7 @@ fn build_rocket(
             }),
         )
         .manage(ipfs_cache)
+        .manage(cache_metadata_index)
         .manage(openapi_spec)
         .manage(default_http_client())
         .manage(GrpcClientPool::<tonic::transport::Channel>::new())
@@ -492,6 +528,7 @@ fn build_rocket(
         .manage(internal_config)
         .manage(auth_resolver)
         .manage(supported_languages)
+        .manage(gvisor_feature)
         .manage(core::v1::health::LitActionsSocketPath(
             std::path::PathBuf::from(core::v1::health::LIT_ACTIONS_SOCKET),
         ))

@@ -68,6 +68,10 @@ contract WritesFacet {
         uint256 indexed apiKeyHash,
         address indexed pkpId
     );
+    event PkpOwnerBackfilled(
+        address indexed pkpId,
+        uint256 indexed masterHash
+    );
     event UsageApiKeyRemoved(
         uint256 indexed accountApiKeyHash,
         uint256 indexed usageApiKeyHash
@@ -681,6 +685,19 @@ contract WritesFacet {
         if (account.pkpData[pkpId].id != 0) {
             revert AppStorage.InvalidRequest("PKP already registered");
         }
+        // Global first-owner binding. Derivation paths are public on-chain and
+        // the key is a stateless function of the path, so without this check a
+        // different account could register an already-registered pkpId under
+        // its own account and drive the node to sign with the victim's key.
+        // The first master account to register a pkpId owns it forever; the
+        // binding survives removeWalletDerivation, so only the original owner
+        // may ever re-register a deleted address (recovery flow stays intact).
+        uint256 existingOwner = s.pkpIdToOwnerMaster[pkpId];
+        if (existingOwner == 0) {
+            s.pkpIdToOwnerMaster[pkpId] = masterHash;
+        } else if (existingOwner != masterHash) {
+            revert AppStorage.InvalidRequest("PKP owned by another account");
+        }
         account.pkpData[pkpId].id = derivationPath;
         account.pkpData[pkpId].name = name;
         account.pkpData[pkpId].description = description;
@@ -701,6 +718,11 @@ contract WritesFacet {
     ///
     ///      The global `allPkpIds` "ever generated" ledger is intentionally left untouched;
     ///      it records only the address (never the path) and serves as an append-only history.
+    ///
+    ///      The global `pkpIdToOwnerMaster` binding is also intentionally kept: even after a
+    ///      hard delete, only the original master account may ever re-register this address.
+    ///      This closes the delete/re-register race that would otherwise let another account
+    ///      claim the address (and thus the key, which is a stateless function of the path).
     function removeWalletDerivation(uint256 apiKeyHash, address pkpId) public {
         SecurityLib.revertIfNoAccountAccess(apiKeyHash, msg.sender);
         SecurityLib.revertIfNotMasterAccount(apiKeyHash);
@@ -738,6 +760,35 @@ contract WritesFacet {
         }
 
         emit WalletDerivationRemoved(apiKeyHash, pkpId);
+    }
+
+    /// @notice One-time migration helper: bind wallets registered before the global
+    ///         owner binding existed to their original master account.
+    /// @dev Pairs should be derived off-chain from the EARLIEST
+    ///      `WalletDerivationRegistered(masterHash, pkpId, ...)` event per pkpId
+    ///      (first registration wins, matching the rule `registerWalletDerivation`
+    ///      now enforces). Already-bound pkpIds are skipped, never re-assigned, so
+    ///      the call is idempotent and safe to run in batches / re-run. Restricted
+    ///      to the diamond owner or config operator.
+    function backfillPkpOwners(
+        address[] calldata pkpIds,
+        uint256[] calldata masterHashes
+    ) public {
+        SecurityLib.revertIfNotConfigOperatorOrOwner(msg.sender);
+        if (pkpIds.length != masterHashes.length) {
+            revert AppStorage.InvalidRequest("array length mismatch");
+        }
+        AppStorage.AccountConfigStorage storage s = AppStorage.getStorage();
+        for (uint256 i = 0; i < pkpIds.length; i++) {
+            if (masterHashes[i] == 0) {
+                revert AppStorage.InvalidRequest("masterHash must be non-zero");
+            }
+            if (s.pkpIdToOwnerMaster[pkpIds[i]] != 0) {
+                continue; // already bound — never re-assign ownership
+            }
+            s.pkpIdToOwnerMaster[pkpIds[i]] = masterHashes[i];
+            emit PkpOwnerBackfilled(pkpIds[i], masterHashes[i]);
+        }
     }
 
     function setNodeConfiguration(

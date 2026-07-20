@@ -182,6 +182,40 @@ pub struct NodeChainConfigResponse {
     pub contract_address: String,
 }
 
+/// One cached action-code entry in a `GET /cache_metadata` response (CPL-351).
+///
+/// Describes the cached data only — never the code/binary itself.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CacheEntryMetadataItem {
+    /// IPFS id (cache key) of the cached action code.
+    pub ipfs_id: String,
+    /// Size of the cached code in bytes.
+    pub size_bytes: u64,
+    /// Unix-epoch milliseconds when the entry was first cached.
+    pub created_at_ms: u64,
+    /// Unix-epoch milliseconds of the most recent execution.
+    pub last_run_at_ms: u64,
+    /// Number of executions recorded against this entry.
+    pub run_count: u64,
+    /// Time-to-live of the entry, in seconds. `None` for the API-server IPFS
+    /// cache, which is capacity-bounded (LRU) rather than time-expired.
+    pub ttl_seconds: Option<u64>,
+}
+
+/// GET /cache_metadata — metadata for the cached action code correlated to the
+/// authenticated master account. Excludes the cached binaries themselves.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CacheMetadataResponse {
+    /// On-chain account wallet address the caller's key resolves to.
+    pub account_address: String,
+    /// Number of cached entries correlated to this account.
+    pub entry_count: u64,
+    /// Sum of `size_bytes` across the returned entries.
+    pub total_size_bytes: u64,
+    /// The cached entries, sorted by most recent execution first.
+    pub entries: Vec<CacheEntryMetadataItem>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema)]
 pub struct VersionResponse {
     pub name: String,

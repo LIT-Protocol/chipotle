@@ -24,8 +24,21 @@ doesn't describe endpoints the released server lacks.
   (`lit-actions/local-cli`, developer tooling).
 
 ### Changed
+- The gVisor any-language runner is now **off by default** and behind a feature
+  flag (CPL-359). Its binary is compiled only when the `gvisor` cargo feature is
+  enabled (the gVisor runner image build opts in), and `POST /lit_binary_action`
+  stays mounted but returns `503` ("feature disabled") unless the api-server is
+  started with `LIT_GVISOR_ENABLED=true`.
 - `max_get_keys_count` is now enforced in the key handlers; oversized
   `get_keys` requests are rejected.
+
+### Security
+- `registerWalletDerivation` now enforces a global first-owner binding
+  (`pkpId → master account`): a wallet address can only ever be registered —
+  or re-registered after deletion — by the account that first registered it,
+  closing a cross-account PKP hijack via publicly visible derivation paths
+  (#575). Requires a one-time on-chain backfill for wallets registered before
+  the upgrade (`backfillPkpOwners`).
 
 ## v1.1.10 — 2026-06-22
 
