@@ -221,6 +221,7 @@ jobs:
           CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-warmup
         run: |
           TIMEOUT=120
+          BASE_URL="${BASE_URL:-https://test.chipotle.litprotocol.com/core/v1}"
           URL="${BASE_URL%/}/new_account"
           BODY=$(printf '{"account_name":"k6-warmup-%s","account_description":"k6 readiness probe — safe to ignore"}' "$CORRELATION_ID")
           deadline=$(( $(date +%s) + TIMEOUT ))
