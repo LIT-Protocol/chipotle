@@ -200,6 +200,54 @@ jobs:
           esac
           echo "path=$SPEC" >> "$GITHUB_OUTPUT"
 
+      # Readiness gate for the soak deploy gate. A freshly cut-over box can
+      # accept TCP and pass /health while its write path is still cold — the
+      # first new_account (which funds a wallet on-chain) can return EOF
+      # (connection closed, no response) after a few seconds. The soak setup
+      # makes exactly ONE new_account call with no retry, so a single cold-start
+      # EOF aborts the whole gate (exit 107) and trips rollback-on-failure.
+      #
+      # Warm the write path here: poll new_account until it returns 2xx, then
+      # let the hard gate run. Requiring 2xx mirrors the gate's own precondition
+      # (soak setup throws on any non-2xx new_account), so this never masks a
+      # real failure — a genuinely broken box still fails fast when this times
+      # out. new_account is unauthenticated and cheap (creates an unfunded $0
+      # account; Stripe funding happens later), matching the k6 client's request:
+      # Content-Type + X-Correlation-Id, {account_name, account_description}.
+      - name: Warm up write path (new_account)
+        if: ${{ inputs.test == 'soak' }}
+        env:
+          BASE_URL: ${{ inputs.api_root_url }}
+          CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-warmup
+        run: |
+          TIMEOUT=120
+          URL="${BASE_URL%/}/new_account"
+          BODY=$(printf '{"account_name":"k6-warmup-%s","account_description":"k6 readiness probe — safe to ignore"}' "$CORRELATION_ID")
+          deadline=$(( $(date +%s) + TIMEOUT ))
+          attempt=0
+          echo "Warming up write path at $URL (timeout ${TIMEOUT}s)..."
+          while true; do
+            attempt=$((attempt + 1))
+            CODE=$(curl -sS -o /dev/null -w '%{http_code}' \
+              --max-time 20 \
+              -X POST "$URL" \
+              -H 'Content-Type: application/json' \
+              -H "X-Correlation-Id: $CORRELATION_ID" \
+              -d "$BODY" 2>/dev/null || echo 000)
+            case "$CODE" in
+              2??)
+                echo "Write path ready after $attempt attempt(s) (HTTP $CODE)"
+                exit 0
+                ;;
+            esac
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::Write path not ready after ${TIMEOUT}s / $attempt attempt(s) (last: HTTP $CODE). The deployed box accepts connections but can't serve new_account — investigate the build before redeploying."
+              exit 1
+            fi
+            echo "Not ready (attempt $attempt, HTTP $CODE), retrying in 5s..."
+            sleep 5
+          done
+
       - name: "Run k6 load test: ${{ inputs.test }}"
         env:
           BASE_URL: ${{ inputs.api_root_url }}
