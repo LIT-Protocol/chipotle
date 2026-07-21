@@ -229,6 +229,15 @@ async fn main() -> Result<(), rocket::Error> {
     };
     tracing::info!("Supported languages: {supported_languages}");
 
+    // gVisor any-language runner gate (CPL-359). Off unless a deploy that
+    // ships the runner opts in; when off, /lit_binary_action stays mounted but
+    // answers "feature disabled". See actions::gvisor.
+    let gvisor_feature = lit_api_server::actions::gvisor::GvisorFeature::from_env();
+    tracing::info!(
+        "gVisor any-language runner enabled: {}",
+        gvisor_feature.enabled()
+    );
+
     let internal_config = internal::config::init();
     // `Arc<dyn AuthResolver>` is the auth backplane both this service and
     // lit-payments use. lit-api-server owns the on-chain plumbing, so it
@@ -327,6 +336,7 @@ async fn main() -> Result<(), rocket::Error> {
             ipfs_cache.clone(),
             cache_metadata_index.clone(),
             supported_languages.clone(),
+            gvisor_feature,
         );
 
         let rocket = match r.ignite().await {
@@ -452,6 +462,7 @@ fn build_rocket(
     ipfs_cache: Cache<String, Arc<String>>,
     cache_metadata_index: Arc<CacheMetadataIndex>,
     supported_languages: Arc<SupportedLanguages>,
+    gvisor_feature: lit_api_server::actions::gvisor::GvisorFeature,
 ) -> rocket::Rocket<rocket::Build> {
     let allowed_methods = HashSet::from([
         Method::from_str("Get").expect("Invalid method: Get"),
@@ -517,6 +528,7 @@ fn build_rocket(
         .manage(internal_config)
         .manage(auth_resolver)
         .manage(supported_languages)
+        .manage(gvisor_feature)
         .manage(core::v1::health::LitActionsSocketPath(
             std::path::PathBuf::from(core::v1::health::LIT_ACTIONS_SOCKET),
         ))

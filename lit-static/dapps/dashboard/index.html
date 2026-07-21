@@ -144,6 +144,10 @@
             <span class="sidebar-link-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/></svg></span>
             <span class="sidebar-link-text">Action Runner</span>
           </a>
+          <a href="#gvisor-runner" class="sidebar-link" data-scroll="gvisor-runner" id="sidebar-link-gvisor-runner" hidden>
+            <span class="sidebar-link-icon" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 9h6v6H9z"/><path d="M9 1v2"/><path d="M15 1v2"/><path d="M9 21v2"/><path d="M15 21v2"/><path d="M1 9h2"/><path d="M1 15h2"/><path d="M21 9h2"/><path d="M21 15h2"/></svg></span>
+            <span class="sidebar-link-text">gVisor Runner</span>
+          </a>
         </nav>
       </aside>
 
@@ -448,6 +452,64 @@
               </div>
             </div>
           </section>
+
+          <!-- gVisor Runner (CPL-360) -->
+          <section id="section-gvisor-runner" class="dashboard-section" style="display:none;">
+            <h2 class="section-title">gVisor Runner</h2>
+            <p class="section-desc">Run an action written in any language inside the gVisor sandbox. Edit the startup script (executed as <code>bash startup.sh</code>), then upload/paste a bundle or reference one already cached by its CID.</p>
+            <div id="gvisor-runner-status" class="status" style="display: none;"></div>
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Execute Binary Action</h3>
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:0.35rem;">
+                    <label for="gvisor-runner-startup" style="margin-bottom:0;">Startup script (<code>startup.sh</code>)</label>
+                    <div style="display:flex;align-items:center;gap:0.5rem;flex-shrink:0;">
+                      <label for="gvisor-runner-usage-key" style="margin-bottom:0;white-space:nowrap;font-size:0.8125rem;">Usage API Key</label>
+                      <input type="text" id="gvisor-runner-usage-key" class="input" style="width:25rem;font-family:'JetBrains Mono',monospace;font-size:0.8125rem;padding:0.35rem 0.6rem;" placeholder="Usage API Key" />
+                    </div>
+                  </div>
+                  <div id="gvisor-runner-startup" class="codejar-editor language-bash" spellcheck="false"></div>
+                  <p class="form-hint">Leave empty to use the <code>startup.sh</code> shipped at the bundle root. A script entered here overrides it.</p>
+                </div>
+
+                <div class="form-group">
+                  <label>Bundle</label>
+                  <div class="gvisor-bundle-source">
+                    <label class="radio-label"><input type="radio" name="gvisor-bundle-mode" value="bundle" checked> Upload / paste a bundle</label>
+                    <label class="radio-label"><input type="radio" name="gvisor-bundle-mode" value="cid"> Use a cached bundle CID</label>
+                  </div>
+
+                  <div id="gvisor-bundle-panel">
+                    <div class="gvisor-bundle-file-row">
+                      <input type="file" id="gvisor-runner-bundle-file" accept=".tar,.tgz,.gz,application/x-tar,application/gzip" />
+                      <button type="button" id="gvisor-runner-bundle-clear" class="btn btn-outline btn-sm">Clear</button>
+                    </div>
+                    <p class="form-hint">Select a <code>.tar</code> or <code>.tar.gz</code> bundle (it is base64-encoded in the browser), or paste base64 below.</p>
+                    <textarea id="gvisor-runner-bundle" class="input" rows="4" spellcheck="false" style="font-family:'JetBrains Mono',monospace;font-size:0.8125rem;resize:vertical;" placeholder="Base64-encoded tar or tar.gz bundle"></textarea>
+                  </div>
+
+                  <div id="gvisor-cid-panel" style="display:none;">
+                    <input type="text" id="gvisor-runner-cid" class="input" style="font-family:'JetBrains Mono',monospace;font-size:0.8125rem;" placeholder="Bundle CID (checksum), e.g. Qm…" />
+                    <p class="form-hint">The runner must already have this bundle cached from a prior upload.</p>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="gvisor-runner-params">Parameters (JSON, optional)</label>
+                  <div id="gvisor-runner-params" class="codejar-editor codejar-editor-sm language-json" spellcheck="false"></div>
+                  <p class="form-hint">Top-level values are injected into the sandbox environment.</p>
+                </div>
+
+                <div class="action-runner-buttons">
+                  <button type="button" id="btn-execute-gvisor-action" class="btn btn-primary">Execute Binary Action</button>
+                </div>
+                <div id="gvisor-runner-output" class="action-runner-output"></div>
+              </div>
+            </div>
+          </section>
         </div>
       </div>
     </div>
@@ -659,6 +721,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-javascript.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-bash.min.js"></script>
   <script type="module" src="app.js"></script>
 </body>
 </html>
