@@ -275,4 +275,52 @@ mod tests {
             Status::ServiceUnavailable
         );
     }
+
+    /// The env-disabled and contract-disabled 503s must render *distinct*
+    /// bodies so operators can tell a node-level opt-out from a network-wide
+    /// contract flip. Registers the real 503 catcher and asserts on the JSON
+    /// body, so the operator-facing distinction can't regress to identical
+    /// messages while the status stays 503.
+    #[tokio::test]
+    async fn env_and_contract_disabled_return_distinct_bodies() {
+        use crate::accounts::chain_config::from_pairs_for_test;
+        use std::sync::Arc;
+
+        async fn body_for(feature: GvisorFeature, chain_value: &str) -> String {
+            let rocket = rocket::build()
+                .mount("/", routes![gated_route])
+                .register("/", crate::core::v1::catchers::catchers())
+                .manage(feature)
+                .manage(Arc::new(from_pairs_for_test(&[(
+                    "GVISOR_RUNNER_ENABLED",
+                    chain_value,
+                )])));
+            let client = Client::tracked(rocket).await.expect("valid rocket");
+            client
+                .get("/gated")
+                .dispatch()
+                .await
+                .into_string()
+                .await
+                .expect("503 body")
+        }
+
+        // Env off short-circuits with the node-level message; env on + contract
+        // off falls through to the contract message.
+        let env_off = body_for(GvisorFeature::new(false), "true").await;
+        let contract_off = body_for(GvisorFeature::new(true), "false").await;
+
+        assert!(
+            env_off.contains(DISABLED_MESSAGE),
+            "env-off body should carry the node-level message: {env_off}"
+        );
+        assert!(
+            contract_off.contains(CONTRACT_DISABLED_MESSAGE),
+            "contract-off body should carry the contract message: {contract_off}"
+        );
+        assert_ne!(
+            env_off, contract_off,
+            "the two 503 bodies must be distinguishable"
+        );
+    }
 }
