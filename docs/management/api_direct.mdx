@@ -381,7 +381,13 @@ No API key required. `primaryType` must be `CreateWallet`.
 Pass `derivation_path` verbatim into `registerWalletDerivation(adminHash, wallet_address, derivation_path, name, description)` on the AccountConfig contract — until that lands, the PKP exists in MPC but is not registered to any account.
 
 <Note>
-If you don't need the wallet-ownership signature step, [`POST /prepare_wallet`](#post-prepare-wallet) returns the same `{ wallet_address, derivation_path }` with no signature and no API key. Because the on-chain `registerWalletDerivation` (inside your owner-signed transaction) is the real authorization boundary, the signature here authorizes nothing durable — dropping it lets you collapse the whole ceremony into a single wallet prompt.
+**Prefer [`POST /prepare_wallet`](#post-prepare-wallet) unless you specifically need the ownership signature.** It returns the same `{ wallet_address, derivation_path }` with no signature and no API key, and exists purely to streamline the ChainSecured wallet-creation ceremony:
+
+- **One wallet prompt instead of two or three.** The full signature flow is: sign the `CreateWallet` typed data → call this endpoint → sign (and wait on) the `registerWalletDerivation` transaction — plus an `AddUsageApiKey` signature if you're attaching a usage key in the same flow. With `prepare_wallet`, the user signs exactly once: the on-chain registration transaction.
+- **Faster.** No round-trip to the user's wallet before the mint, and no waiting between sequential prompts — you fetch the address, then go straight to the one transaction that matters.
+- **Same security.** The on-chain `registerWalletDerivation` (inside your owner-signed transaction) is the real authorization boundary; the `CreateWallet` signature authorizes nothing durable, so dropping it gives up nothing.
+
+This is exactly how Flows creates ChainSecured wallets today. Keep using `create_wallet_with_signature` if you want the server-side proof that the caller controls the wallet *before* a PKP is minted (e.g. to keep unauthenticated callers from minting unattached PKPs against your integration).
 </Note>
 
 ```bash
