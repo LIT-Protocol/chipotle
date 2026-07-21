@@ -258,6 +258,7 @@ jobs:
             -e "s|\${GCP_PROJECT_ID}|chipotle-prod|g" \
             -e "s|\${CERTBOT_DOMAIN}|${DOMAIN}|g" \
             -e "s|\${CERTBOT_AWS_REGION}|${{ vars.CERTBOT_AWS_REGION }}|g" \
+            -e "s|\${LIT_GVISOR_ENABLED}|false|g" \
             docker-compose.phala.yml > docker-compose.deploy.yml
 
       - name: Setup Node.js

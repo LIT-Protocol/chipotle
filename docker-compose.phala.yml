@@ -109,11 +109,14 @@ services:
       # internal cache-invalidation endpoint (/internal/invalidate_balance_cache).
       # Must match the value set on lit-payments (Railway env var of the same name).
       LIT_INTERNAL_SHARED_SECRET: ${LIT_INTERNAL_SHARED_SECRET}
-      # gVisor any-language runner is off by default (CPL-359); this stack ships
-      # the lit-actions-gvisor service above, so opt in here to route
-      # /lit_binary_action to it. Drop this to disable the runner without
-      # removing the service (the endpoint then answers 503 "feature disabled").
-      LIT_GVISOR_ENABLED: "true"
+      # gVisor any-language runner gate (CPL-359, CPL-361). Rendered per-deploy:
+      # testing/manual deploys substitute "true"; the production workflow
+      # substitutes "false" (see deploy-staging.yml / deploy-prod-1-propose.yml /
+      # justfile.deploy). Even when "true", /lit_binary_action stays gated until
+      # the on-chain GVISOR_RUNNER_ENABLED node-config value is also truthy — so
+      # this is the process-level half of the run-time gate, the contract the
+      # other. An unsubstituted/empty value fails closed (503 "feature disabled").
+      LIT_GVISOR_ENABLED: "${LIT_GVISOR_ENABLED}"
     volumes:
       - lit-socket:/tmp
       - /var/run/dstack.sock:/var/run/dstack.sock
