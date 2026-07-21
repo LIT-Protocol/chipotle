@@ -409,60 +409,6 @@ contract AccountsTest is BaseTest {
         assertEq(views_.getPkpOwnerMaster(pkpAddr), victimHash);
     }
 
-    function test_backfillPkpOwners_bindsLegacyWalletsAndBlocksHijack() public {
-        vm.prank(user);
-        writes.newChainSecuredAccount("legacy", "legacy");
-        uint256 legacyHash = apiKeyHashOf(user);
-        vm.prank(stranger);
-        writes.newChainSecuredAccount("attacker", "attacker");
-        uint256 attackerHash = apiKeyHashOf(stranger);
-
-        // Simulate a pre-migration wallet: registered in the account but with no
-        // global owner binding (as if registered before the upgrade).
-        address legacyPkp = address(0x1E9AC7);
-        assertEq(views_.getPkpOwnerMaster(legacyPkp), 0);
-
-        address[] memory pkpIds = new address[](1);
-        pkpIds[0] = legacyPkp;
-        uint256[] memory masters = new uint256[](1);
-        masters[0] = legacyHash;
-
-        // Only the diamond owner or config operator may backfill.
-        vm.prank(stranger);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                AppStorage.OnlyConfigOperatorOrOwner.selector,
-                stranger
-            )
-        );
-        writes.backfillPkpOwners(pkpIds, masters);
-
-        vm.prank(owner);
-        writes.backfillPkpOwners(pkpIds, masters);
-        assertEq(views_.getPkpOwnerMaster(legacyPkp), legacyHash);
-
-        // Backfill never re-assigns an existing binding (idempotent, skip-if-set).
-        masters[0] = attackerHash;
-        vm.prank(owner);
-        writes.backfillPkpOwners(pkpIds, masters);
-        assertEq(views_.getPkpOwnerMaster(legacyPkp), legacyHash);
-
-        // Post-backfill, the attacker cannot register the legacy wallet...
-        vm.prank(stranger);
-        vm.expectRevert(
-            abi.encodeWithSelector(
-                AppStorage.InvalidRequest.selector,
-                "PKP owned by another account"
-            )
-        );
-        writes.registerWalletDerivation(attackerHash, legacyPkp, 7, "a", "a");
-
-        // ...but the legacy owner can (e.g. #450 recovery re-registration).
-        vm.prank(user);
-        writes.registerWalletDerivation(legacyHash, legacyPkp, 7, "l", "l");
-        assertEq(views_.getWalletDerivation(legacyHash, legacyPkp), 7);
-    }
-
     /// @dev Storage slot of `pkpIdToOwnerMaster[pkpId]`. The mapping is the last
     ///      field of AccountConfigStorage (field index 18, counting the two
     ///      EnumerableSet fields as 2 slots each) at base slot
@@ -510,10 +456,12 @@ contract AccountsTest is BaseTest {
         views_.getWalletDerivation(attackerHash, pkpAddr);
     }
 
-    function test_getWalletDerivation_legacyUnboundStillReadable() public {
-        // A pre-migration wallet has a local entry but no owner binding yet
-        // (owner==0). It must keep resolving so signing doesn't break in the
-        // window between the facet upgrade and the backfill run.
+    function test_getWalletDerivation_ownerZeroFailsClosed() public {
+        // Post-migration the compatibility fallback is gone: enforcement is
+        // unconditional. A local pkpData entry whose owner binding is 0 (an
+        // unexpected/legacy state that can no longer occur via the public API,
+        // since registerWalletDerivation always sets the owner) must fail closed
+        // rather than leak the path.
         vm.prank(stranger);
         writes.newChainSecuredAccount("u", "u");
         uint256 hash = apiKeyHashOf(stranger);
@@ -521,12 +469,19 @@ contract AccountsTest is BaseTest {
         vm.prank(stranger);
         writes.registerWalletDerivation(hash, pkpAddr, 42, "a", "a");
 
-        // Clear the binding to reproduce the not-yet-backfilled legacy state.
+        // Normal case: owner is set to the account, read resolves.
+        assertEq(views_.getWalletDerivation(hash, pkpAddr), 42);
+
+        // Force the anomalous owner==0 state and confirm it now reverts.
         vm.store(address(views_), _pkpOwnerSlot(pkpAddr), bytes32(uint256(0)));
         assertEq(views_.getPkpOwnerMaster(pkpAddr), 0);
-
-        // owner==0 falls through: the wallet still resolves for its account.
-        assertEq(views_.getWalletDerivation(hash, pkpAddr), 42);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AppStorage.InvalidRequest.selector,
+                "PKP owned by another account"
+            )
+        );
+        views_.getWalletDerivation(hash, pkpAddr);
     }
 
     function test_removeWalletDerivation_unregisteredReverts() public {

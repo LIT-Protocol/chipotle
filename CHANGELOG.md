@@ -37,8 +37,11 @@ doesn't describe endpoints the released server lacks.
   (`pkpId → master account`): a wallet address can only ever be registered —
   or re-registered after deletion — by the account that first registered it,
   closing a cross-account PKP hijack via publicly visible derivation paths
-  (#575). Requires a one-time on-chain backfill for wallets registered before
-  the upgrade (`backfillPkpOwners`).
+  (#575). `getWalletDerivation` enforces the same binding at read time
+  (fail-closed), so the node never resolves a key for an account that doesn't
+  own the PKP. The one-time backfill of pre-existing PKPs is complete on-chain;
+  the migration helper (`backfillPkpOwners`) and the pre-backfill compatibility
+  fallback have been removed.
 
 ## v1.1.10 — 2026-06-22
 
