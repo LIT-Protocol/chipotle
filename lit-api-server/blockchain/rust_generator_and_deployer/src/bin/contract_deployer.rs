@@ -8,6 +8,7 @@
 //! secret:    optional; deployer private key (hex). If blank or omitted, uses default Anvil dev secret.
 //! address:   required for update and propose-update actions; the diamond contract address.
 //! output:    optional; path for the proposal JSON file (propose-update only). Defaults to diamond_cut_proposal.json.
+//! removals:  optional; path to the selector-removals manifest (update/propose-update). Defaults to diamond-removals.json; missing file = no removals.
 
 use alloy::primitives::Address;
 use lit_contracts_minimal_generator::args::{get_network_and_chain_id, parse_named_args};
@@ -41,6 +42,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         eprintln!(
             "  --output    proposal JSON output path (propose-update only, default: diamond_cut_proposal.json)"
+        );
+        eprintln!(
+            "  --removals  selector-removals manifest path (update/propose-update, default: diamond-removals.json)"
         );
         std::process::exit(1);
     };
@@ -107,10 +111,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         let diamond_address = parse_diamond_address(&named, usage);
+        let removals = removals_path(&named);
 
-        update_diamond(rpc_url, chain_id, &abis_folder, secret, diamond_address)
-            .await
-            .expect("Failed to update diamond");
+        update_diamond(
+            rpc_url,
+            chain_id,
+            &abis_folder,
+            secret,
+            diamond_address,
+            &removals,
+        )
+        .await
+        .expect("Failed to update diamond");
     }
     if action == "propose-update" {
         println!(
@@ -123,6 +135,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .get("output")
             .cloned()
             .unwrap_or_else(|| "diamond_cut_proposal.json".to_string());
+        let removals = removals_path(&named);
 
         propose_update_diamond(
             rpc_url,
@@ -131,11 +144,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             secret,
             diamond_address,
             &output,
+            &removals,
         )
         .await
         .expect("Failed to propose diamond update");
     }
     Ok(())
+}
+
+/// Path to the selector-removals manifest. Defaults to `diamond-removals.json`
+/// in the working directory (the contracts project dir when run via the
+/// Makefile). A missing file means "no removals" — the deployer keeps its prior
+/// Replace/Add-only behavior.
+fn removals_path(named: &std::collections::HashMap<String, String>) -> String {
+    named
+        .get("removals")
+        .cloned()
+        .unwrap_or_else(|| "diamond-removals.json".to_string())
 }
 
 fn parse_diamond_address(

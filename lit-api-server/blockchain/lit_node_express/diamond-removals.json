@@ -1,0 +1,10 @@
+{
+  "_comment": "Functions to Remove from the AccountConfig diamond on the next upgrade. The deployer only auto-computes Replace/Add; a selector is removed only if it is BOTH listed here AND detected as orphaned by the upgrade (absent from every new managed facet ABI). See tasks/../deployer/diamond.rs plan_removals.",
+  "removals": [
+    {
+      "signature": "backfillPkpOwners(address[],uint256[])",
+      "selector": "0x41275609",
+      "reason": "Spent one-time #575 PKP owner backfill; removed after the migration completed on Base mainnet (all PKPs bound, 0 unbound/conflicts). Requires the WritesFacet build that no longer declares it."
+    }
+  ]
+}
