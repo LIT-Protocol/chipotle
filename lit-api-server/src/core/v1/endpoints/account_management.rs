@@ -4,6 +4,7 @@ use crate::accounts::signer_pool::SignerPool;
 use crate::core::account_management;
 use crate::core::v1::guards::apikey::ApiKey;
 use crate::core::v1::guards::billing::BilledManagementApiKey;
+use crate::core::v1::guards::cpu_overload::CpuAvailable;
 use crate::core::v1::helpers::api_status::{ApiResult, ErrMessage};
 use crate::core::v1::helpers::open_api_response::OpenApiResponse;
 use crate::core::v1::models::request::{
@@ -18,7 +19,7 @@ use crate::core::v1::models::response::{
     AccountOpResponse, AddGroupResponse, AddUsageApiKeyResponse,
     AddUsageApiKeyWithSignatureResponse, ApiKeyItem, ChainConfigKeysResponse, CreateWalletResponse,
     CreateWalletWithSignatureResponse, ListMetadataItem, NewAccountResponse,
-    NodeChainConfigResponse, WalletItem,
+    NodeChainConfigResponse, PrepareWalletResponse, WalletItem,
 };
 use crate::stripe::StripeState;
 use rocket::State;
@@ -247,6 +248,31 @@ pub(super) async fn create_wallet_with_signature(
 ) -> OpenApiResponse<CreateWalletWithSignatureResponse, ErrMessage> {
     OpenApiResponse {
         response: ApiResult(account_management::create_wallet_with_signature(req).await).into(),
+    }
+}
+
+/// Return a fresh derived wallet address + derivation path — no signature, no API key.
+///
+/// The no-signature equivalent of `create_wallet_with_signature`: it collapses the
+/// ChainSecured owner ceremony into a single signed bind UserOp. Fetch the address
+/// here, then register it on-chain yourself with `registerWalletDerivation`.
+///
+/// Unauthenticated, so it carries the same `CpuAvailable` load-shedding guard as
+/// `lit_action`: each request drives a dstack KDF call, and unlike the
+/// `_with_signature` siblings there is no EIP-712 verification in front of it, so
+/// the guard bounds how hard an anonymous caller can hammer the KDF path when the
+/// box is already saturated.
+///
+/// NOT IDEMPOTENT: every call returns a brand-new wallet (a fresh random derivation
+/// path). Retrying returns a different address, and concurrent callers each get a
+/// separate wallet with no server-side dedup. See `docs/management/api_direct.mdx`.
+#[openapi(tag = "Account Management")]
+#[post("/prepare_wallet")]
+pub(super) async fn prepare_wallet(
+    _cpu: CpuAvailable,
+) -> OpenApiResponse<PrepareWalletResponse, ErrMessage> {
+    OpenApiResponse {
+        response: ApiResult(account_management::prepare_wallet().await).into(),
     }
 }
 
