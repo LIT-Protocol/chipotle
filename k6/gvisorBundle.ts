@@ -38,9 +38,11 @@ function writeOctal(
   value: number,
 ): void {
   const digits = len - 1;
-  let s = value.toString(8);
-  while (s.length < digits) s = "0" + s;
-  writeAscii(buf, offset, s);
+  const s = value.toString(8);
+  if (s.length > digits) {
+    throw new Error(`gvisorBundle: value ${value} does not fit in ${digits}-digit octal field`);
+  }
+  writeAscii(buf, offset, s.padStart(digits, "0"));
   buf[offset + digits] = 0;
 }
 
