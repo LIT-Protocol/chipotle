@@ -53,7 +53,10 @@ jobs:
           HEAD_SHA=$(git rev-parse HEAD)
           # Base = merge-base against the default branch. When reviewing the default
           # branch itself this equals HEAD, so the diff is empty (zero findings).
-          BASE_SHA=$(git merge-base HEAD FETCH_HEAD)
+          if ! BASE_SHA=$(git merge-base HEAD FETCH_HEAD); then
+            echo "::error title=Security review::Could not determine merge-base between '$BRANCH' and '$DEFAULT_BRANCH'. Ensure '$BRANCH' is based on '$DEFAULT_BRANCH'."
+            exit 1
+          fi
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
           echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
           echo "Reviewing $BRANCH ($HEAD_SHA) against $DEFAULT_BRANCH merge-base ($BASE_SHA)."
