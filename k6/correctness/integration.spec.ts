@@ -244,7 +244,10 @@ export default function (data: IntegrationSetupData) {
       }
     },
   }, "listActions");
-  const listActionsBody = JSON.parse(listActionsRes.response.body as string) as { id: string; name: string }[];
+  // Derive the action hash from the account-level list (verified above to contain
+  // the action). The in-group list depends on add_action_to_group membership
+  // propagation, which can lag the on-chain write and yield an empty hash → 0x0.
+  const listActionsBody = JSON.parse(listActionsAccountRes.response.body as string) as { id: string; name: string }[];
   const actionItem = listActionsBody.find((a) => a.name === "hello-world");
   const hashedCid = actionItem?.id ?? "";
   // ── 10. addPkpToGroup ─────────────────────────────────────────────────────
@@ -355,6 +358,11 @@ export default function (data: IntegrationSetupData) {
   }, "listApiKeys");
 
   // ── 15. updateActionMetadata ──────────────────────────────────────────────
+  const hasActionHash = checkAndLog(hashedCid, {
+    "resolved action hash for updateActionMetadata": (h) =>
+      typeof h === "string" && h.length > 0 && h !== "0x0",
+  }, "updateActionMetadata");
+  if (!hasActionHash) return;
   const updateActionRes = client.updateActionMetadata(
     {
       hashed_cid: hashedCid,
