@@ -69,7 +69,7 @@ jobs:
       # guaranteed on in the test/next staging environment, so gate the
       # gVisor smoke to non-prod deploys until it ships to prod.
       - name: gvisor-smoke.spec.ts
-        if: ${{ inputs.env != 'prod' }}
+        if: ${{ inputs.env && inputs.env != 'prod' }}
         env:
           BASE_URL: ${{ inputs.api_root_url }}
           K6_CORRELATION_ID: k6-${{ github.run_id }}-${{ github.run_attempt }}-gvisor-smoke
