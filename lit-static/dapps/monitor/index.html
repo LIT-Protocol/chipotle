@@ -46,19 +46,44 @@
         margin-bottom: 1.5rem;
       }
 
-      /* ── Top bar: network selector + refresh ── */
-      .top-bar {
+      /* ── Header row: title + network selector & refresh (upper right) ── */
+      .header-row {
         display: flex;
-        align-items: flex-end;
-        gap: 1rem;
+        align-items: center;
+        gap: 1.25rem;
         margin-bottom: 1.5rem;
         flex-wrap: wrap;
+      }
+      .header-row h1 {
+        margin: 0 0 0.15rem;
+      }
+      .header-row .subtitle {
+        margin: 0;
+      }
+      select.network-select {
+        padding: 0.5rem 2rem 0.5rem 0.75rem;
+        font-family: 'Outfit', sans-serif;
+        font-size: 0.85rem;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        color: var(--text);
+        cursor: pointer;
+        appearance: none;
+        background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2371717a' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+        background-repeat: no-repeat;
+        background-position: right 0.75rem center;
+        max-width: 260px;
+      }
+      select.network-select:focus {
+        outline: none;
+        border-color: var(--accent);
       }
       .refresh-controls {
         display: flex;
         align-items: center;
         gap: 0.5rem;
-        padding-bottom: 1px;
+        margin-left: auto;
       }
       .countdown {
         font-family: 'JetBrains Mono', monospace;
@@ -331,6 +356,11 @@
         margin-bottom: 1.5rem;
         align-items: start;
       }
+      .sys-stack {
+        display: flex;
+        flex-direction: column;
+        gap: 1.5rem;
+      }
       .sys-grid .card h2 {
         font-size: 1rem;
         font-weight: 600;
@@ -446,25 +476,45 @@
     </style>
   </head>
   <body>
-    <h1>Lit Node Monitor</h1>
-    <p class="subtitle">
-      Payer safety, runtime health, and CVM system monitoring for the Lit Node Express server.
-    </p>
-
-    <!-- ═══ Top bar: Network selector + refresh controls ═══ -->
-    <div class="top-bar">
-      <div class="form-group" style="flex: 1; max-width: 480px; margin-bottom: 0;">
-        <label for="network">Network</label>
-        <select id="network">
+    <!-- ═══ Header row: title + network selector & refresh (upper right) ═══ -->
+    <div class="header-row">
+      <div>
+        <h1>Lit Node Monitor</h1>
+        <p class="subtitle">
+          Payer safety, runtime health, and CVM system monitoring for the Lit Node Express server.
+        </p>
+      </div>
+      <div class="refresh-controls">
+        <select id="network" class="network-select" title="Network" aria-label="Network">
           <option value="http://localhost:8000/core/v1/">Local Development</option>
           <option value="https://test.chipotle.litprotocol.com/core/v1/">Next - Phala</option>
           <option value="https://api.chipotle.litprotocol.com/core/v1/">Prod - Phala</option>
         </select>
-      </div>
-      <div class="refresh-controls">
         <button type="button" id="btn-refresh-all" title="Refresh all data (R)" style="margin-top: 0; padding: 0.4rem 0.9rem; font-size: 0.85rem;">Refresh</button>
         <span id="refresh-countdown" class="countdown">30s</span>
       </div>
+    </div>
+
+    <!-- ═══ Server version bar (GET /version) ═══ -->
+    <div id="version-bar" class="health-bar">
+      <div class="health-bar-item">
+        <span class="health-bar-label">Server</span>
+        <span class="health-bar-value" id="ver-name">—</span>
+      </div>
+      <div class="health-bar-item">
+        <span class="health-bar-label">Version</span>
+        <span class="health-bar-value" id="ver-version">—</span>
+      </div>
+      <div class="health-bar-item">
+        <span class="health-bar-label">Commit</span>
+        <span class="health-bar-value" id="ver-commit-version">—</span>
+      </div>
+      <div class="health-bar-item">
+        <span class="health-bar-label">Contract</span>
+        <span class="health-bar-value copyable" id="ver-contract-address" title="Click to copy">—</span>
+      </div>
+      <div id="ver-submodules" style="display: contents"></div>
+      <span id="version-error" class="sys-error" style="display: none"></span>
     </div>
 
     <!-- ═══ Health summary bar ═══ -->
@@ -485,11 +535,20 @@
 
     <!-- ═══ CVM System dashboard ═══ -->
     <div class="sys-grid">
-      <div class="card">
-        <h2>Runtimes</h2>
-        <p class="endpoint-hint"><code>GET /health</code> &middot; <code>GET /get_system_stats</code> — Lit Action runners inside the CVM.</p>
-        <div id="runtimes-body"><span class="sys-empty">Loading&hellip;</span></div>
-        <div id="runtimes-error" class="sys-error" style="display: none"></div>
+      <div class="sys-stack">
+        <div class="card">
+          <h2>Runtimes</h2>
+          <p class="endpoint-hint"><code>GET /health</code> &middot; <code>GET /get_system_stats</code> — Lit Action runners inside the CVM.</p>
+          <div id="runtimes-body"><span class="sys-empty">Loading&hellip;</span></div>
+          <div id="runtimes-error" class="sys-error" style="display: none"></div>
+        </div>
+
+        <div class="card">
+          <h2>Supported Languages</h2>
+          <p class="endpoint-hint"><code>GET /get_supported_languages</code> — language capability surface of this node.</p>
+          <div id="languages-body"><span class="sys-empty">Loading&hellip;</span></div>
+          <div id="languages-error" class="sys-error" style="display: none"></div>
+        </div>
       </div>
 
       <div class="card">
@@ -504,13 +563,6 @@
         <p class="endpoint-hint"><code>GET /get_system_stats</code> — in-process cache population (action code, permissions, billing).</p>
         <div id="caches-body"><span class="sys-empty">Loading&hellip;</span></div>
         <div id="caches-error" class="sys-error" style="display: none"></div>
-      </div>
-
-      <div class="card">
-        <h2>Supported Languages</h2>
-        <p class="endpoint-hint"><code>GET /get_supported_languages</code> — language capability surface of this node.</p>
-        <div id="languages-body"><span class="sys-empty">Loading&hellip;</span></div>
-        <div id="languages-error" class="sys-error" style="display: none"></div>
       </div>
     </div>
 
@@ -558,36 +610,6 @@
         <div class="card" data-accordion>
           <div class="card-header" role="button" tabindex="0" aria-expanded="true">
             <div>
-              <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Server Version</h2>
-              <p style="color: var(--muted); font-size: 0.85rem; margin: 0">
-                <code>GET /version</code>
-              </p>
-            </div>
-            <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4.47 5.47a.75.75 0 011.06 0L8 7.94l2.47-2.47a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06z"/></svg>
-          </div>
-          <div class="card-body">
-            <div id="version-results" style="display: none; margin-top: 1rem">
-              <div class="result-row">
-                <span class="result-label">name</span>
-                <span class="result-value" id="ver-name">—</span>
-              </div>
-              <div class="result-row">
-                <span class="result-label">version</span>
-                <span class="result-value" id="ver-version">—</span>
-              </div>
-              <div class="result-row">
-                <span class="result-label">commit</span>
-                <span class="result-value" id="ver-commit-version">—</span>
-              </div>
-              <div style="margin-top: 0.75rem" id="ver-submodules"></div>
-            </div>
-            <div id="version-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
-          </div>
-        </div>
-
-        <div class="card" data-accordion>
-          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
-            <div>
               <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Lit Node Express - Configuration</h2>
               <p style="color: var(--muted); font-size: 0.85rem; margin: 0">
                 <code>GET /get_node_chain_config</code>
@@ -606,27 +628,6 @@
               <div class="result-row"><span class="result-label">contract_address</span><span class="result-value" id="cc-contract-address">—</span></div>
             </div>
             <div id="chain-config-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
-          </div>
-        </div>
-
-      </div>
-
-      <!-- ═══ RIGHT COLUMN — config & interactive ═══ -->
-      <div class="col">
-
-        <div class="card" data-accordion>
-          <div class="card-header" role="button" tabindex="0" aria-expanded="true">
-            <div>
-              <h2 style="font-size: 1rem; font-weight: 600; margin: 0 0 0.25rem">Supported Chain Config Keys</h2>
-              <p style="color: var(--muted); font-size: 0.85rem; margin: 0">
-                <code>GET /get_chain_config_keys</code> — all recognised <code>ConfigKeys</code> variants that the node reads from chain.
-              </p>
-            </div>
-            <svg class="chevron" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4.47 5.47a.75.75 0 011.06 0L8 7.94l2.47-2.47a.75.75 0 111.06 1.06l-3 3a.75.75 0 01-1.06 0l-3-3a.75.75 0 010-1.06z"/></svg>
-          </div>
-          <div class="card-body">
-            <div id="chain-config-keys-list"></div>
-            <div id="chain-config-keys-error" style="display: none; color: #f87171; font-size: 0.85rem; margin-top: 0.75rem;"></div>
           </div>
         </div>
 
@@ -656,6 +657,11 @@
           </div>
         </div>
 
+      </div>
+
+      <!-- ═══ RIGHT COLUMN — config & interactive ═══ -->
+      <div class="col">
+
         <div class="card" data-accordion>
           <div class="card-header" role="button" tabindex="0" aria-expanded="true">
             <div style="display:flex;align-items:center;gap:0.75rem">
@@ -669,6 +675,10 @@
 
             <div class="results" id="results" style="display: none">
               <h2>Contract values</h2>
+              <div class="result-row">
+                <span class="result-label">owner</span>
+                <span class="result-value" id="val-contract-owner">—</span>
+              </div>
               <div class="result-row">
                 <span class="result-label">pricing</span
                 ><span class="result-value" id="val-pricing-operator">—</span
@@ -725,7 +735,10 @@
 
             <div class="form-group" style="margin-top:1.5rem">
               <label for="node-config-key">Key</label>
-              <input type="text" id="node-config-key" placeholder="e.g. LIT_ACTION_DEFAULT_TIMEOUT_MS" />
+              <select id="node-config-key" style="font-family:'JetBrains Mono',monospace">
+                <option value="" disabled selected>Loading keys…</option>
+              </select>
+              <div id="node-config-keys-error" style="display:none;color:#f87171;font-size:0.85rem;margin-top:0.35rem;"></div>
             </div>
             <div class="form-group">
               <label for="node-config-value">Value</label>
