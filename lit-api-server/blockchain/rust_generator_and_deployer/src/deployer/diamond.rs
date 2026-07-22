@@ -701,7 +701,11 @@ mod removal_tests {
         man[0].selector = Some(format!("0x{}", hex::encode(derived.as_slice())));
 
         let plan = plan_removals(&s2a2, &managed, &man);
-        assert_eq!(plan.to_remove, vec![derived], "orphan in manifest is removed");
+        assert_eq!(
+            plan.to_remove,
+            vec![derived],
+            "orphan in manifest is removed"
+        );
     }
 
     #[test]
@@ -765,8 +769,15 @@ mod removal_tests {
             reason: None,
         }];
         let plan = plan_removals(&s2a, &managed, &man);
-        assert!(plan.to_remove.is_empty(), "mismatched selector guard blocks removal");
-        assert!(plan.warnings.iter().any(|w| w.contains("selector mismatch")));
+        assert!(
+            plan.to_remove.is_empty(),
+            "mismatched selector guard blocks removal"
+        );
+        assert!(
+            plan.warnings
+                .iter()
+                .any(|w| w.contains("selector mismatch"))
+        );
     }
 
     #[test]
