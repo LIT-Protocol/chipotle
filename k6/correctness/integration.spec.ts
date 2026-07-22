@@ -6,6 +6,7 @@
  *   k6 run k6/integration.spec.ts
  *   BASE_URL=https://your-instance.phala.network/core/v1 k6 run k6/integration.spec.ts
  */
+import { sleep } from "k6";
 import { checkAndLog, warnOnHttpFailures } from "../helpers.ts";
 import { LitApiServerClient } from "../litApiServer.ts";
 import { PRECREATED_ACCOUNTS } from "../setup.ts";
@@ -206,10 +207,41 @@ export default function (data: IntegrationSetupData) {
   }, "addActionToGroup");
 
   // ── 10a. listActions (account-level, no group_id) ────────────────────────
-  const listActionsAccountRes = client.listActions(
+  // The action metadata + group membership were written on-chain moments ago;
+  // list reads can briefly lag the write (the RPC can serve the read from a
+  // node that hasn't executed those blocks yet). Poll until the action is
+  // visible with a real id so propagation lag doesn't fail the deploy gate —
+  // a genuinely missing action still fails the checks after the retries, and
+  // a stale group listing would otherwise send hash 0x0 to
+  // update_action_metadata below.
+  const LIST_ACTIONS_ATTEMPTS = 5;
+  const findHelloWorld = (body: unknown): { id: string; name: string } | undefined => {
+    try {
+      const items = JSON.parse(body as string) as { id: string; name: string }[];
+      const item = Array.isArray(items) ? items.find((a) => a.name === "hello-world") : undefined;
+      // An all-zero id means the membership row landed but the metadata read
+      // is still stale — treat as not-yet-visible and keep polling.
+      return item && item.id && !/^(0x)?0*$/.test(item.id) ? item : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  let listActionsAccountRes = client.listActions(
     { page_number: 0, page_size: 10 },
     authHeaders,
   );
+  for (
+    let i = 1;
+    i < LIST_ACTIONS_ATTEMPTS && !findHelloWorld(listActionsAccountRes.response.body);
+    i++
+  ) {
+    sleep(2);
+    listActionsAccountRes = client.listActions(
+      { page_number: 0, page_size: 10 },
+      authHeaders,
+    );
+  }
   if (!assertOk("listActionsAccount", "GET /list_actions (account)", listActionsAccountRes)) return;
   checkAndLog(listActionsAccountRes.response, {
     "listActionsAccount returns array": (r) => {
@@ -229,11 +261,22 @@ export default function (data: IntegrationSetupData) {
     },
   }, "listActionsAccount");
 
-  // ── 10b. listActions (in group) ─────────────────────────────────────────
-  const listActionsRes = client.listActions(
+  // ── 10b. listActions (in group) — same propagation-lag polling as 10a ────
+  let listActionsRes = client.listActions(
     { group_id: parseInt(groupId), page_number: 0, page_size: 10 },
     authHeaders,
   );
+  for (
+    let i = 1;
+    i < LIST_ACTIONS_ATTEMPTS && !findHelloWorld(listActionsRes.response.body);
+    i++
+  ) {
+    sleep(2);
+    listActionsRes = client.listActions(
+      { group_id: parseInt(groupId), page_number: 0, page_size: 10 },
+      authHeaders,
+    );
+  }
   if (!assertOk("listActions", "GET /list_actions", listActionsRes)) return;
   checkAndLog(listActionsRes.response, {
     "listActions returns array": (r) => {
@@ -244,8 +287,14 @@ export default function (data: IntegrationSetupData) {
       }
     },
   }, "listActions");
-  const listActionsBody = JSON.parse(listActionsRes.response.body as string) as { id: string; name: string }[];
-  const actionItem = listActionsBody.find((a) => a.name === "hello-world");
+  const actionItem = findHelloWorld(listActionsRes.response.body);
+  if (
+    !checkAndLog(listActionsRes.response, {
+      "listActions group contains added action with non-zero id": () => actionItem !== undefined,
+    }, "listActions")
+  ) {
+    return;
+  }
   const hashedCid = actionItem?.id ?? "";
   // ── 10. addPkpToGroup ─────────────────────────────────────────────────────
   const addPkpRes = client.addPkpToGroup(

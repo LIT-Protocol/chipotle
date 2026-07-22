@@ -42,6 +42,11 @@ use rocket::serde::json::Json;
 /// to include the NotAllowedTo* error types. Track as follow-up.
 const PERMISSION_ERROR_PATTERNS: &[&str] = &["NotAllowedTo", "NotMasterAccount", "NoAccountAccess"];
 
+/// Attempts for the registerWalletDerivation follow-up write inside `new_account`
+/// (1 initial + 3 retries, exponential backoff from 250ms). Only the stale-read
+/// NoAccountAccess revert is retried — see the comment at the call site.
+const REGISTER_WALLET_DERIVATION_ATTEMPTS: u32 = 4;
+
 fn map_contract_error(e: anyhow::Error, context: &str) -> ApiStatus {
     let msg = format!("{}", e);
     if PERMISSION_ERROR_PATTERNS
@@ -125,15 +130,42 @@ pub async fn new_account(
     }
 
     // technically this is NOT a derivaton path at all, but it's a stand-in for now
-    accounts::register_wallet_derivation(
-        signer_pool,
-        &api_key,
-        wallet_address,
-        derivation_path,
-        "AMW",
-        "Account Master Wallet",
-    )
-    .await?;
+    //
+    // The newAccount receipt above proves the account exists on-chain, but
+    // send_transaction dry-runs this follow-up write via eth_call, and the RPC
+    // provider can serve that call from a node that hasn't executed the
+    // newAccount block yet — reverting NoAccountAccess for an account that was
+    // just mined. That stale-read window is the only way NoAccountAccess can
+    // occur here, so retry it briefly; any other error fails immediately.
+    let mut attempt = 0u32;
+    loop {
+        attempt += 1;
+        match accounts::register_wallet_derivation(
+            signer_pool.clone(),
+            &api_key,
+            wallet_address,
+            derivation_path,
+            "AMW",
+            "Account Master Wallet",
+        )
+        .await
+        {
+            Ok(_) => break,
+            Err(e)
+                if attempt < REGISTER_WALLET_DERIVATION_ATTEMPTS
+                    && e.to_string().contains("NoAccountAccess") =>
+            {
+                let backoff_ms = 250u64 << (attempt - 1);
+                tracing::warn!(
+                    "new_account: registerWalletDerivation simulation hit stale-read \
+                     NoAccountAccess (attempt {attempt}/{REGISTER_WALLET_DERIVATION_ATTEMPTS}); \
+                     retrying in {backoff_ms}ms"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+            }
+            Err(e) => return Err(e.into()),
+        }
+    }
 
     // Best-effort: eagerly create the Stripe customer (with $0 balance), set the email
     // if provided, and grant starter credits when STARTER_CREDITS_CENTS is configured.
