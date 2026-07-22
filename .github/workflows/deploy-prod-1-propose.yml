@@ -600,11 +600,15 @@ jobs:
             git fetch origin "$BRANCH"
             if git merge-base --is-ancestor FETCH_HEAD "$SHA"; then
               echo "Fast-forwarding $BRANCH to $SHA"
-              git push origin "$SHA:refs/heads/$BRANCH"
+              if ! git push origin "$SHA:refs/heads/$BRANCH"; then
+                echo "::warning::Failed to push $BRANCH to $SHA (branch may have moved). Leaving it untouched."
+              fi
             else
               echo "::warning::$BRANCH has diverged from $SHA (likely carries hotfix commits). Leaving it untouched — reconcile manually if this release should advance the line."
             fi
           else
             echo "Creating $BRANCH at $SHA"
-            git push origin "$SHA:refs/heads/$BRANCH"
+            if ! git push origin "$SHA:refs/heads/$BRANCH"; then
+              echo "::warning::Failed to create $BRANCH at $SHA."
+            fi
           fi
