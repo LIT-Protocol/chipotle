@@ -45,6 +45,16 @@ function writeOctal(
 }
 
 function header(file: BundleFile, size: number): Uint8Array {
+  if (file.name.length > 100) {
+    throw new Error(`gvisorBundle: filename too long for ustar header (${file.name.length} > 100): ${file.name}`);
+  }
+  for (let i = 0; i < file.name.length; i++) {
+    const c = file.name.charCodeAt(i);
+    if (c === 0 || c > 0x7f) {
+      throw new Error(`gvisorBundle: filename must be ASCII without NUL bytes: ${file.name}`);
+    }
+  }
+
   const h = new Uint8Array(BLOCK);
   writeAscii(h, 0, file.name); // name[100]
   writeOctal(h, 100, 8, file.mode ?? 0o644); // mode[8]
