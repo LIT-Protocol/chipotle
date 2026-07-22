@@ -358,10 +358,10 @@ export default function (data: IntegrationSetupData) {
   }, "listApiKeys");
 
   // ── 15. updateActionMetadata ──────────────────────────────────────────────
-  const hasActionHash = checkAndLog(hashedCid, {
-    "resolved action hash for updateActionMetadata": (h) =>
-      typeof h === "string" && h.length > 0 && h !== "0x0",
-  }, "updateActionMetadata");
+const hasActionHash = checkAndLog(hashedCid, {
+  "resolved action hash for updateActionMetadata": (h) =>
+    typeof h === "string" && /^0x(?!0{64}$)[0-9a-fA-F]{64}$/.test(h),
+}, "updateActionMetadata");
   if (!hasActionHash) return;
   const updateActionRes = client.updateActionMetadata(
     {
