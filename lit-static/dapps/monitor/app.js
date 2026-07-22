@@ -31,6 +31,13 @@ const ACCOUNT_CONFIG_VIEW_ABI = [
     type: 'function',
   },
   {
+    inputs: [],
+    name: 'configOperator',
+    outputs: [{ internalType: 'address', name: '', type: 'address' }],
+    stateMutability: 'view',
+    type: 'function',
+  },
+  {
     // ERC-173 owner() — served by the diamond's OwnershipFacet.
     inputs: [],
     name: 'owner',
@@ -636,6 +643,8 @@ async function fetchContractValues() {
   setValue('val-contract-owner', '…', false);
   setValue('val-pricing-operator', '…', false);
   setValue('val-pricing-operator-balance', '', false);
+  setValue('val-config-operator', '…', false);
+  setValue('val-config-operator-balance', '', false);
   setValue('val-admin-api-payer', '…', false);
   setValue('val-admin-api-payer-balance', '', false);
   setValue('val-payer-count', '…', false);
@@ -659,6 +668,23 @@ async function fetchContractValues() {
 
     setValue('val-pricing-operator', pricingOperator ?? '—', !pricingOperator);
     setValue('val-admin-api-payer', adminApiPayer ?? '—', !adminApiPayer);
+
+    // configOperator() may be absent on older diamonds — fetch separately so a
+    // missing selector doesn't blank the rest of the card.
+    contract.configOperator()
+      .then(addr => {
+        setValue('val-config-operator', addr ?? '—', !addr);
+        if (addr && addr !== ethers.ZeroAddress) {
+          provider.getBalance(addr).then(wei => {
+            const node = el('val-config-operator-balance');
+            if (node) {
+              node.textContent = parseFloat(ethers.formatEther(wei)).toFixed(6) + ' ETH';
+              node.style.color = '';
+            }
+          }).catch(() => {});
+        }
+      })
+      .catch(() => setValue('val-config-operator', '—', true));
 
     // owner() lives on the OwnershipFacet — fetch it separately so a diamond
     // deployed without that facet doesn't blank the rest of the card.
