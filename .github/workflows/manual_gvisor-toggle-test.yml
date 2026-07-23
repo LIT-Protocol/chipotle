@@ -1,0 +1,58 @@
+name: "Manual: toggle GVISOR_RUNNER_ENABLED (test diamond only)"
+
+# Flip the on-chain gVisor gate (CPL-361) for the TEST/next environment
+# without a redeploy. GVISOR_RUNNER_ENABLED is one of three fail-closed axes
+# on POST /lit_binary_action; the other two (the `gvisor` cargo feature and
+# the LIT_GVISOR_ENABLED env) are already ON for staging/test deploys, so
+# this key is the last switch. Nodes re-read the ChainConfig snapshot within
+# ~30s of the tx landing.
+#
+# Signs with PHALA_DSTACKAPP_PRIVATE_KEY — the same secret manual_contract-
+# upgrade.yml uses to sign owner-only diamondCut upgrades on Base, i.e. the
+# diamond owner, which WritesFacet.setNodeConfiguration's
+# revertIfNotApiPayerOrOwner gate accepts.
+
+on:
+  workflow_dispatch:
+    inputs:
+      value:
+        description: "Value for GVISOR_RUNNER_ENABLED"
+        type: choice
+        options: ["true", "false"]
+        default: "true"
+
+# The TEST/next AccountConfig diamond, hardcoded on purpose. This workflow
+# must never touch the prod diamond (0xaaaaa9120fe271f653cfdb6bf400db93d2dea7aa);
+# prod's gVisor gate stays off and is changed only through the governed
+# contract-upgrade path.
+env:
+  TEST_DIAMOND: "0x98e501fab2d60a5119a185e1563f10cb54bc6068"
+  CONFIG_KEY: "GVISOR_RUNNER_ENABLED"
+
+jobs:
+  set-node-config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Foundry (cast)
+        uses: foundry-rs/foundry-toolchain@v1
+
+      - name: Set GVISOR_RUNNER_ENABLED on the test diamond
+        env:
+          DEPLOYER_KEY: ${{ secrets.PHALA_DSTACKAPP_PRIVATE_KEY }}
+          RPC_URL: ${{ secrets.BASE_CHAIN_RPC }}
+          VALUE: ${{ inputs.value }}
+        run: |
+          set -euo pipefail
+          if [ -z "${DEPLOYER_KEY:-}" ] || [ -z "${RPC_URL:-}" ]; then
+            echo "::error::PHALA_DSTACKAPP_PRIVATE_KEY and BASE_CHAIN_RPC must be set"
+            exit 1
+          fi
+          SENDER="$(cast wallet address --private-key "$DEPLOYER_KEY")"
+          echo "signing as $SENDER against $TEST_DIAMOND"
+          echo "before: $(cast call "$TEST_DIAMOND" \
+            'nodeConfigurationValue(string)(string)' "$CONFIG_KEY" --rpc-url "$RPC_URL" || echo '(unset)')"
+          cast send "$TEST_DIAMOND" \
+            "setNodeConfiguration(string,string)" "$CONFIG_KEY" "$VALUE" \
+            --rpc-url "$RPC_URL" --private-key "$DEPLOYER_KEY"
+          echo "after:  $(cast call "$TEST_DIAMOND" \
+            'nodeConfigurationValue(string)(string)' "$CONFIG_KEY" --rpc-url "$RPC_URL")"
